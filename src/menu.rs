@@ -1,32 +1,37 @@
-use crate::team;
+use crate::structs::MenuFlow;
+use crate::team::{prompt_team, show_teams};
 use crate::util::clear_screen;
-use inquire::Select;
+use inquire::{InquireError, Select};
 
 pub fn run_menu() {
     clear_screen();
     loop {
-        let options = vec!["create new team", "show teams", "exit"];
+        let options = vec!["new team", "teams", "exit"];
         let ans = Select::new("choose an option:", options.clone()).prompt();
         match ans {
-            Ok(choice) => match choice {
-                "create new team" => {
-                    clear_screen();
-                    team::input_team()
+            Ok("new team") => {
+                clear_screen();
+                prompt_team();
+            }
+            Ok("teams") => {
+                clear_screen();
+                match show_teams() {
+                    Ok(MenuFlow::Continue | MenuFlow::Back) => {}
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        break;
+                    }
                 }
-                "show teams" => {
-                    clear_screen();
-                    team::show_teams()
-                }
-                "exit" => {
-                    println!("👋 bye");
-                    break;
-                }
-                _ => unreachable!(),
-            },
-            Err(_) => {
-                println!("something went wrong");
+            }
+            Ok("exit") | Err(InquireError::OperationCanceled) => {
+                println!("👋 bye");
                 break;
             }
+            Err(e) => {
+                eprintln!("something went wrong: {}", e);
+                break;
+            }
+            _ => {}
         }
     }
 }

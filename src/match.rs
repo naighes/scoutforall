@@ -1,292 +1,256 @@
+use crate::errors::{AppError, IOError};
 use crate::menu::run_menu;
 use crate::ops::{
-    append_event, compute_event, compute_snapshot, create_match, create_set, get_matches, get_mb1,
-    get_mb2, get_oh1, get_oh2, get_opposite, get_serving_player, get_set_snapshot, get_set_winner,
-    get_sets, get_setter, is_back_row_player, EvalEnum, EventTypeEnum, MatchEntry, PhaseEnum,
-    PlayerEntry, SetEntry, TeamSideEnum,
+    append_event, compute_snapshot, create_match, create_set, get_match, get_match_status,
+    get_matches, get_sets, CreateMatchError,
 };
-use crate::ops::{EventEntry, Snapshot, TeamEntry};
-use crate::util::clear_screen;
-use chrono::{NaiveDate, ParseResult, Utc};
+use crate::pdf::open_match_pdf;
+use crate::set::prompt_set_details;
+use crate::shapes::enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum};
+use crate::shapes::player::PlayerEntry;
+use crate::shapes::r#match::MatchEntry;
+use crate::shapes::set::SetEntry;
+use crate::shapes::snapshot::{EventEntry, Snapshot};
+use crate::shapes::team::TeamEntry;
+use crate::structs::{ContinueMatchResult, MenuFlow};
+use crate::substitution::prompt_substitution;
+use crate::util::{clear_screen, prompt_date};
+use chrono::Utc;
 use comfy_table::{Cell, ContentArrangement, Row, Table};
 use crossterm::event::{read, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use inquire::Select;
 use inquire::Text;
+use inquire::{InquireError, Select};
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::io;
 use std::io::{stdout, Write};
 use std::str::FromStr;
 use uuid::Uuid;
 
-fn prompt_date(label: &str) -> Result<NaiveDate, Box<dyn std::error::Error>> {
-    let date_str = Text::new(label).prompt()?;
-    let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")?;
-    Ok(date)
-}
-
-fn prompt_str(label: &str, fallback: &str) -> String {
-    Text::new(label)
-        .prompt()
-        .unwrap_or_else(|_| fallback.into())
-}
-
-fn prompt_select(label: &str, options: Vec<&str>, fallback: &str) -> String {
-    Select::new(label, options)
-        .prompt()
-        .unwrap_or(fallback)
-        .into()
-}
-
-pub fn prompt_match(team: &TeamEntry) {
-    // ask for match date
+pub fn prompt_match(team: &TeamEntry) -> Result<MenuFlow, Box<dyn std::error::Error>> {
+    clear_screen();
     let date = match prompt_date("match date (YYYY-MM-DD):") {
         Ok(d) => d,
-        Err(_) => {
-            eprintln!("invalid date format");
-            return;
+        Err(InquireError::OperationCanceled) => return Ok(MenuFlow::Back),
+        Err(e) => return Err(Box::new(e)),
+    };
+    let opponent = loop {
+        match Text::new("opponent name:").prompt() {
+            Ok(s) => break s,
+            Err(InquireError::OperationCanceled) => return Ok(MenuFlow::Back),
+            Err(e) => {
+                eprintln!("unexpected error: {}, please try again", e);
+                continue;
+            }
         }
     };
-    // ask for opponent
-    let opponent = prompt_str("opponent name:", "unknown");
-    // ask for home/away
-    let location = prompt_select("where is the match played?", vec!["home", "away"], "home");
-    let home = match location {
-        s if s == "home".to_string() => true,
-        s if s == "away".to_string() => false,
-        _ => true,
+    let home = loop {
+        match Select::new("where is the match played?", vec!["home", "away"]).prompt() {
+            Ok(selection) => match selection.as_ref() {
+                "home" => break true,
+                "away" => break false,
+                other => {
+                    eprintln!(
+                        "unexpected selection: {}, please type 'home' or 'away'",
+                        other
+                    );
+                    continue;
+                }
+            },
+            Err(InquireError::OperationCanceled) => return Ok(MenuFlow::Back),
+            Err(e) => {
+                eprintln!("unexpected error: {}, please try again", e);
+                continue;
+            }
+        }
     };
-    // create match and set
-    let m = match create_match(team, opponent, date, home) {
+    // try to create the match
+    let m = match create_match(team, opponent.clone(), date, home) {
         Ok(m) => m,
-        Err(e) => {
-            eprintln!("could not create match: {}", e);
-            return;
-        }
-    };
-    // continue match
-    let mut s = match continue_match(m.clone()) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("could not continue match: {}", e);
-            return;
-        }
-    };
-    // start events loop
-    if let Err(e) = events_loop(team, m.id, &mut s) {
-        eprintln!("error during events loop: {}", e);
-    }
-}
-
-pub fn prompt_set_lineup(
-    m: &MatchEntry,
-) -> Result<([Uuid; 6], Uuid, Uuid), Box<dyn std::error::Error>> {
-    let mut player_map: HashMap<String, Uuid> = HashMap::new();
-    let mut all_labels = Vec::new();
-    for player in &m.team.players {
-        let label = format!("{} (#{})", player.name, player.number);
-        player_map.insert(label.clone(), player.id);
-        all_labels.push(label);
-    }
-    // lineup selection
-    let mut selected_positions: Vec<Uuid> = Vec::new();
-    let mut selected_labels: Vec<String> = Vec::new();
-    let mut i = 0;
-    while i < 6 {
-        let mut available_labels: Vec<String> = all_labels
-            .iter()
-            .filter(|label| !selected_labels.contains(label))
-            .cloned()
-            .collect();
-        if i > 0 {
-            available_labels.insert(0, "UNDO (go back to previous position)".to_string());
-        }
-        let choice = Select::new(
-            &format!("select player for position {}:", i + 1),
-            available_labels,
-        )
-        .prompt()?;
-        if choice == "UNDO (go back to previous position)" {
-            i -= 1;
-            selected_positions.pop();
-            selected_labels.pop();
-            continue;
-        }
-        let id = *player_map.get(&choice).ok_or("invalid player choice")?;
-        selected_positions.push(id);
-        selected_labels.push(choice);
-        i += 1;
-    }
-    let len = selected_positions.len();
-    let positions: [Uuid; 6] = selected_positions
-        .try_into()
-        .map_err(|_| format!("expected exactly 6 players for lineup, but got {}", len))?;
-    // libero selection
-    let libero_id = loop {
-        let mut libero_options = all_labels.clone();
-        libero_options.insert(0, "UNDO (restart lineup selection)".to_string());
-        let choice = Select::new("select libero:", libero_options).prompt()?;
-        if choice == "UNDO (restart lineup selection)" {
-            return prompt_set_lineup(m);
-        }
-        if let Some(id) = player_map.get(&choice) {
-            break *id;
-        } else {
-            println!("invalid libero choice");
-        }
-    };
-    // setter selection
-    let setter_id = loop {
-        let mut setter_options = selected_labels.clone();
-        setter_options.insert(0, "UNDO (restart libero selection)".to_string());
-        let choice = Select::new("select setter:", setter_options).prompt()?;
-        if choice == "UNDO (restart libero selection)" {
-            return prompt_set_lineup(m);
-        }
-        if let Some(id) = player_map.get(&choice) {
-            break *id;
-        } else {
-            println!("invalid setter choice");
-        }
-    };
-    Ok((positions, libero_id, setter_id))
-}
-
-fn prompt_set_details(
-    m: &MatchEntry,
-    set_number: u8,
-    sets: &[SetEntry],
-) -> Result<(TeamSideEnum, Vec<Uuid>, Uuid, Uuid), Box<dyn std::error::Error>> {
-    let serving_team = if set_number == 1 || set_number == 5 {
-        let choice = Select::new("who serves first?", vec!["us", "opponent"])
-            .prompt()
-            .unwrap_or("us");
-        match choice {
-            "us" => TeamSideEnum::Us,
-            "opponent" => TeamSideEnum::Them,
-            _ => return Err("invalid serving team choice".into()),
-        }
-    } else {
-        let previous_set_number = set_number - 1;
-        let prev_team = sets
-            .iter()
-            .find(|s| s.set_number == previous_set_number)
-            .map(|s| s.serving_team);
-        match prev_team {
-            Some(TeamSideEnum::Us) => TeamSideEnum::Them,
-            Some(TeamSideEnum::Them) => TeamSideEnum::Us,
-            None => {
-                return Err(format!(
-                    "could not determine serving team for set {} (previous set missing or invalid)",
-                    previous_set_number
-                )
-                .into());
-            }
-        }
-    };
-    let (positions_array, libero_id, setter_id) = prompt_set_lineup(m)?;
-    let positions = positions_array.to_vec();
-    Ok((serving_team, positions, libero_id, setter_id))
-}
-
-pub fn continue_match(m: MatchEntry) -> Result<SetEntry, Box<dyn std::error::Error>> {
-    let sets: Vec<SetEntry> = get_sets(&m);
-    // helper set creation
-    let create_set_interactively = |set_number: u8| {
-        let (serving_team, positions, libero, setter) = prompt_set_details(&m, set_number, &sets)?;
-        let len = positions.len();
-        let positions: [Uuid; 6] = match positions.try_into() {
-            Ok(array) => array,
-            Err(_) => {
-                eprintln!("error: expected exactly 6 positions, got {}", len);
-                return Err("invalid number of positions".into());
-            }
-        };
-        create_set(&m, set_number, serving_team, positions, libero, setter)
-    };
-    for set_number in 1..=5 {
-        if let Some(set_entry) = sets.iter().find(|s| s.set_number == set_number) {
-            if let Some((snapshot, _)) = get_set_snapshot(&m, set_number) {
-                if get_set_winner(&snapshot, set_number).is_none() {
-                    return Ok(set_entry.clone()); // set is existing, but not finished yet
-                } else {
-                    continue; // set is over: jump to the next one
+        Err(CreateMatchError::MatchAlreadyExists(id)) => {
+            // TODO: may be I need to check if the match is finished before asking for continuing
+            // match already exists
+            let resume = loop {
+                match Text::new("match already exists: continue? (y/n)").prompt() {
+                    Ok(input) => {
+                        let input = input.trim().to_lowercase();
+                        if input == "y" {
+                            break true;
+                        } else {
+                            break false;
+                        }
+                    }
+                    Err(InquireError::OperationCanceled) => break false,
+                    Err(e) => {
+                        eprintln!("unexpected error: {}, please try again", e);
+                        continue;
+                    }
+                }
+            };
+            if resume {
+                match get_match(team, &id)? {
+                    Some(existing) => existing,
+                    None => {
+                        return Err(format!("match '{}' should exist but wasn't found", id).into())
+                    }
                 }
             } else {
-                // snapshot is missing: it's treated as a missing set
-                return create_set_interactively(set_number);
+                return Ok(MenuFlow::Back);
             }
-        } else {
-            // set does not exist: create
-            return create_set_interactively(set_number);
         }
-    }
-
-    Err("all 5 sets are completed: cannot continue".into())
-}
-
-pub fn show_matches(team: &TeamEntry) {
-    let entries: Vec<MatchEntry> = get_matches(&team);
-    if entries.is_empty() {
-        println!("no matches found");
-        return;
-    }
-
-    println!("matches:");
-    for MatchEntry {
-        date,
-        opponent,
-        team,
-        home,
-        ..
-    } in entries
-    {
-        let formatted_date = date.format("%d %B %Y");
-        if home {
-            println!("{} vs {} ({})", team.name, opponent, formatted_date);
-        } else {
-            println!("{} vs {} ({})", opponent, team.name, formatted_date);
+        Err(e) => return Err(Box::new(e)),
+    };
+    match continue_match(&m) {
+        Ok(ContinueMatchResult::SetToPlay(mut set)) => {
+            if let Err(e) = events_loop(team, &m.id, &mut set) {
+                eprintln!("event loop error: {}", e);
+                return Ok(MenuFlow::Back);
+            }
+            Ok(MenuFlow::Continue)
+        }
+        Ok(ContinueMatchResult::MatchFinished) => Ok(MenuFlow::Back),
+        Err(_) => {
+            open_match_pdf(&m);
+            Ok(MenuFlow::Back)
         }
     }
 }
 
-fn describe_event_type(e: &EventTypeEnum) -> &'static str {
-    match e {
-        EventTypeEnum::S => "serve",
-        EventTypeEnum::P => "pass",
-        EventTypeEnum::A => "attack",
-        EventTypeEnum::D => "dig",
-        EventTypeEnum::B => "block",
-        EventTypeEnum::F => "fault",
-        EventTypeEnum::OS => "opponent score",
-        EventTypeEnum::OE => "opponent error",
+pub fn continue_match(m: &MatchEntry) -> Result<ContinueMatchResult, MenuFlow> {
+    let status = get_match_status(m).map_err(|_| MenuFlow::Back)?;
+    // match finished
+    if status.match_finished {
+        return Ok(ContinueMatchResult::MatchFinished);
+    }
+    // set is ongoing
+    if let Some(set_entry) = status.last_incomplete_set {
+        return Ok(ContinueMatchResult::SetToPlay(set_entry));
+    }
+    // new set
+    if let Some(next_set_number) = status.next_set_number {
+        let sets = get_sets(m).map_err(|_| MenuFlow::Back)?;
+        let (serving_team, positions_vec, libero, setter) =
+            prompt_set_details(m, next_set_number, &sets)?;
+        let positions: [Uuid; 6] = positions_vec.try_into().map_err(|_| MenuFlow::Back)?;
+        return create_set(m, next_set_number, serving_team, positions, libero, setter)
+            .map(ContinueMatchResult::SetToPlay)
+            .map_err(|_| MenuFlow::Back);
+    }
+    // match finished
+    Ok(ContinueMatchResult::MatchFinished)
+}
+
+pub fn show_matches(team: &TeamEntry) -> Result<MenuFlow, Box<dyn std::error::Error>> {
+    clear_screen();
+    loop {
+        let entries = get_matches(team)
+            .map_err(|e| format!("could not retrieve the list of matches: {}", e))?;
+        if entries.is_empty() {
+            println!("no matches available");
+            return Ok(MenuFlow::Back);
+        }
+        let mut options = Vec::new();
+        for entry in &entries {
+            let status = get_match_status(entry)?;
+            let match_in_progress = !status.match_finished && status.last_incomplete_set.is_some();
+            let status_label = if status.match_finished {
+                if status.us_wins == 3 {
+                    "won"
+                } else {
+                    "lost"
+                }
+            } else if match_in_progress {
+                "in progress"
+            } else {
+                "not started"
+            };
+            let score = if entry.home {
+                format!("{}–{}", status.us_wins, status.them_wins)
+            } else {
+                format!("{}–{}", status.them_wins, status.us_wins)
+            };
+            let formatted_date = entry.date.format("%d %B %Y").to_string();
+            let title = if entry.home {
+                format!("{} vs {}", entry.team.name, entry.opponent)
+            } else {
+                format!("{} vs {}", entry.opponent, entry.team.name)
+            };
+            let label = format!(
+                "{:<35} {:<18} {:<12} {}",
+                title, score, status_label, formatted_date
+            );
+            options.push((label, Some(entry)));
+        }
+        options.push(("back".to_string(), None));
+        let labels: Vec<String> = options.iter().map(|(label, _)| label.clone()).collect();
+        let selected = Select::new("select a match:", labels).prompt();
+        match selected {
+            Ok(label) => match options.iter().find(|(l, _)| *l == label) {
+                Some((_, Some(entry))) => {
+                    clear_screen();
+                    match continue_match(entry) {
+                        Ok(ContinueMatchResult::SetToPlay(mut set)) => {
+                            if let Err(e) = events_loop(team, &entry.id, &mut set) {
+                                eprintln!("event loop error: {}", e);
+                            }
+                        }
+                        Ok(ContinueMatchResult::MatchFinished) => {
+                            open_match_pdf(&entry);
+                            let _ = read();
+                        }
+                        Err(MenuFlow::Back) => {
+                            clear_screen();
+                            continue;
+                        }
+                        Err(MenuFlow::Continue) => {
+                            continue;
+                        }
+                    }
+                    clear_screen();
+                }
+                Some((_, None)) => {
+                    clear_screen();
+                    return Ok(MenuFlow::Back);
+                }
+                None => {
+                    eprintln!("unexpected selection");
+                    clear_screen();
+                    return Ok(MenuFlow::Back);
+                }
+            },
+            Err(InquireError::OperationCanceled) => {
+                clear_screen();
+                return Ok(MenuFlow::Back);
+            }
+            Err(e) => {
+                eprintln!("unexpected error: {}", e);
+                return Err(Box::new(e));
+            }
+        }
     }
 }
 
-fn prompt_event_type(
-    available_options: &[EventTypeEnum],
-) -> Result<EventTypeEnum, Box<dyn std::error::Error>> {
+fn prompt_event_type(available_options: &[EventTypeEnum]) -> Result<EventTypeEnum, AppError> {
     println!("\navailable event types:");
     for opt in available_options {
-        println!("  {} → {}", opt.to_string(), describe_event_type(opt));
+        println!("  {} → {}", opt, opt.friendly_name());
     }
     print!("\npress the key(s) for the event code: ");
-    enable_raw_mode()?;
-    stdout().flush()?;
+    enable_raw_mode().map_err(|e| IOError::Error(e))?;
+    stdout().flush().map_err(|e| IOError::Error(e))?;
     let valid_codes: HashSet<String> = available_options
         .iter()
         .map(|e| e.to_string().to_uppercase())
         .collect();
     let mut buffer = String::new();
     let result = loop {
-        if let Event::Key(event) = read()? {
+        if let Event::Key(event) = read().map_err(|e| IOError::Error(e))? {
             match event.code {
                 KeyCode::Char(c) => {
                     let uc = c.to_ascii_uppercase();
                     buffer.push(uc);
                     print!("{}", uc);
-                    stdout().flush()?;
+                    stdout().flush().map_err(|e| IOError::Error(e))?;
                     if valid_codes.contains(&buffer) {
                         println!();
                         let parsed = EventTypeEnum::from_str(&buffer)?;
@@ -296,52 +260,80 @@ fn prompt_event_type(
                         println!("\ninvalid code: {}", buffer);
                         buffer.clear();
                         print!("try again: ");
-                        stdout().flush()?;
+                        stdout().flush().map_err(|e| IOError::Error(e))?;
                     }
                 }
                 KeyCode::Backspace => {
                     if !buffer.is_empty() {
                         buffer.pop();
                         print!(
-                            "\r{}{}",
-                            " ".repeat(50),
-                            "\rpress the key(s) for the event code: "
+                            "\r{}\rpress the key(s) for the event code: ",
+                            " ".repeat(50)
                         );
                         print!("{}", buffer);
-                        stdout().flush()?;
+                        stdout().flush().map_err(|e| IOError::Error(e))?;
                     }
                 }
                 KeyCode::Esc => {
-                    break Err("cancelled input".into());
+                    // TODO
+                    // break Err("canceled input".into());
                 }
                 _ => {}
             }
         }
     };
-
-    disable_raw_mode()?;
+    disable_raw_mode().map_err(|e| IOError::Error(e))?;
     result
 }
 
-fn prompt_player(set: &SetEntry, rotation: u8, event_type: EventTypeEnum) -> Option<Uuid> {
+fn prompt_player(
+    team: &TeamEntry,
+    snapshot: &Snapshot,
+    rotation: u8,
+    event_type: EventTypeEnum,
+    phase: PhaseEnum,
+) -> Option<Uuid> {
     let mut options = vec![
-        (1, "setter", get_setter(set)),
-        (2, "outside hitter 1", get_oh1(set)),
-        (3, "middle blocker 2", get_mb2(set)),
-        (4, "opposite", get_opposite(set)),
-        (5, "outside hitter 2", get_oh2(set)),
-        (6, "middle blocker 1", get_mb1(set)),
-        (7, "libero", set.libero),
+        (1, "setter", snapshot.current_lineup.get_setter()),
+        (2, "outside hitter 1", snapshot.current_lineup.get_oh1()),
+        (3, "middle blocker 2", snapshot.current_lineup.get_mb2()),
+        (4, "opposite", snapshot.current_lineup.get_opposite()),
+        (5, "outside hitter 2", snapshot.current_lineup.get_oh2()),
+        (6, "middle blocker 1", snapshot.current_lineup.get_mb1()),
     ];
-    if matches!(event_type, EventTypeEnum::A | EventTypeEnum::B) {
-        options.retain(|(_, _, id)| *id != set.libero);
-    }
     if event_type == EventTypeEnum::B {
-        options.retain(|(_, _, id)| !is_back_row_player(set, rotation, *id));
+        options.retain(|(_, _, id)| !snapshot.current_lineup.is_back_row_player(id));
     }
-    println!("available players:");
-    for (num, role, _) in &options {
-        println!("  {} → {}", num, role);
+    let mb1 = snapshot.current_lineup.get_mb1();
+    let mb2 = snapshot.current_lineup.get_mb2();
+    let show_mb1 = matches!(rotation, 0 | 1 | 5);
+    let show_mb2 = matches!(rotation, 2..=4);
+
+    if phase == PhaseEnum::Break && matches!(rotation, 1 | 4) {
+        // break phase with middle blocker serving
+        // do nothing and leave the middle blocker in back-row
+    } else {
+        // replace middle blocker on back row by the libero
+        options = options
+            .into_iter()
+            .map(|(num, role, id)| {
+                if (id == mb1 && show_mb1) || (id == mb2 && show_mb2) {
+                    (num, "libero", snapshot.current_lineup.get_current_libero())
+                } else {
+                    (num, role, id)
+                }
+            })
+            .collect();
+    }
+    for (num, role, id) in &options {
+        match team.players.iter().find(|x| x.id == *id) {
+            Some(x) => {
+                println!("  {}. {} ({}))", num, role, x.name);
+            }
+            None => {
+                println!("  {}. unknown ({}))", num, role);
+            }
+        }
     }
     print!("select a player by pressing a number key: ");
     if enable_raw_mode().is_err() {
@@ -349,7 +341,6 @@ fn prompt_player(set: &SetEntry, rotation: u8, event_type: EventTypeEnum) -> Opt
         return None;
     }
     io::stdout().flush().unwrap();
-
     let result = loop {
         if let Ok(Event::Key(event)) = read() {
             match event.code {
@@ -368,7 +359,7 @@ fn prompt_player(set: &SetEntry, rotation: u8, event_type: EventTypeEnum) -> Opt
                     io::stdout().flush().unwrap();
                 }
                 KeyCode::Esc => {
-                    println!("\ncancelled");
+                    println!("\ncanceled");
                     break None;
                 }
                 _ => {}
@@ -383,7 +374,7 @@ fn prompt_player(set: &SetEntry, rotation: u8, event_type: EventTypeEnum) -> Opt
     result
 }
 
-fn prompt_eval() -> Result<EvalEnum, Box<dyn std::error::Error>> {
+fn prompt_eval() -> Result<EvalEnum, AppError> {
     println!("\navailable evaluations:");
     for e in &[
         EvalEnum::Perfect,
@@ -396,10 +387,12 @@ fn prompt_eval() -> Result<EvalEnum, Box<dyn std::error::Error>> {
         println!("  {} → {}", get_eval_symbol(e), describe_eval(e));
     }
     print!("\npress the evaluation symbol: ");
-    enable_raw_mode()?;
-    stdout().flush()?;
+    enable_raw_mode().map_err(|e| AppError::IO(IOError::Error(e)))?;
+    stdout()
+        .flush()
+        .map_err(|e| AppError::IO(IOError::Error(e)))?;
     let result = loop {
-        if let Event::Key(event) = read()? {
+        if let Event::Key(event) = read().map_err(|e| AppError::IO(IOError::Error(e)))? {
             match event.code {
                 KeyCode::Char(c) => {
                     let eval = match c {
@@ -412,7 +405,9 @@ fn prompt_eval() -> Result<EvalEnum, Box<dyn std::error::Error>> {
                         _ => {
                             println!("\ninvalid symbol: '{}'", c);
                             print!("try again: ");
-                            stdout().flush()?;
+                            stdout()
+                                .flush()
+                                .map_err(|e| AppError::IO(IOError::Error(e)))?;
                             continue;
                         }
                     };
@@ -420,58 +415,129 @@ fn prompt_eval() -> Result<EvalEnum, Box<dyn std::error::Error>> {
                     break Ok(eval);
                 }
                 KeyCode::Esc => {
-                    println!("\ncancelled.");
-                    break Err("input cancelled".into());
+                    // TODO
+                    // println!("\ncanceled.");
+                    // break Err("input canceled".into());
                 }
                 _ => {}
             }
         }
     };
-    disable_raw_mode()?;
+    disable_raw_mode().map_err(|e| AppError::IO(IOError::Error(e)))?;
     result
 }
 
-fn input_event(
+fn print_ongoing_action(event_type: EventTypeEnum, player_name: Option<&str>) {
+    let mut status_table = Table::new();
+    status_table.set_content_arrangement(ContentArrangement::Dynamic);
+    let player_text = if event_type == EventTypeEnum::R {
+        "replaced player"
+    } else {
+        "player"
+    };
+    status_table.set_header(vec![Cell::new("event type"), Cell::new(player_text)]);
+    let mut row: Row = Row::new();
+    row.add_cell(Cell::new(event_type.friendly_name()));
+    row.add_cell(Cell::new(player_name.unwrap_or_default()));
+    status_table.add_row(row);
+    println!("{}", status_table);
+}
+
+fn print_prompt_event_header(
     set: &SetEntry,
+    team: &TeamEntry,
+    snapshot: &mut Snapshot,
+    event_type: Option<EventTypeEnum>,
+    player_name: Option<&str>,
+) {
+    clear_screen();
+    // TODO: add const for number of recent events to show
+    let recent_events: Vec<_> = set.events.iter().rev().take(5).collect();
+    print_last_events(team, recent_events);
+    print_set_status(set.set_number, snapshot);
+    print_court(&snapshot, &team.players);
+    if let Some(et) = event_type {
+        print_ongoing_action(et, player_name);
+    }
+}
+
+fn prompt_event(
+    set: &SetEntry,
+    team: &TeamEntry,
     snapshot: &mut Snapshot,
     available_options: Vec<EventTypeEnum>,
-) -> Result<EventEntry, Box<dyn Error>> {
-    let rotation = snapshot.rotation;
-
-    // on serve, event type is "S"
-    let event_type = if snapshot.new_serve {
-        EventTypeEnum::S
+) -> Result<EventEntry, AppError> {
+    print_prompt_event_header(set, team, snapshot, None, None);
+    // on serve, event type is "S", "F", "OE" or "R"
+    let event_type = if snapshot.get_serving_team() == Some(TeamSideEnum::Us) {
+        prompt_event_type(&[
+            EventTypeEnum::F,
+            EventTypeEnum::S,
+            EventTypeEnum::OE,
+            EventTypeEnum::R,
+        ])?
     } else {
         prompt_event_type(&available_options)?
     };
-
-    // determine the player
-    let player_id: Option<Uuid> = if snapshot.new_serve {
-        Some(get_serving_player(set, rotation))
-    } else if matches!(event_type, EventTypeEnum::OE | EventTypeEnum::OS) {
-        None
+    print_prompt_event_header(set, team, snapshot, Some(event_type.clone()), None);
+    if event_type == EventTypeEnum::R {
+        let (replaced, replacement) =
+            prompt_substitution(&snapshot, team).expect("TODO: do not panic here!");
+        Ok(EventEntry {
+            timestamp: Utc::now(),
+            event_type,
+            eval: None,
+            player: Some(replaced),
+            target_player: Some(replacement),
+        })
     } else {
-        prompt_player(set, rotation, event_type.clone())
-    };
-
-    // evaluation prompt (not available for F, OR, OS or P)
-    let eval = if event_type == EventTypeEnum::F
-        || event_type == EventTypeEnum::OE
-        || event_type == EventTypeEnum::OS
-        || event_type == EventTypeEnum::F
-    {
-        None
-    } else {
-        Some(prompt_eval()?)
-    };
-
-    Ok(EventEntry {
-        timestamp: Utc::now(),
-        rotation,
-        event_type,
-        player: player_id,
-        eval,
-    })
+        // determine the player
+        let player_id: Option<Uuid> = if snapshot.get_serving_team() == Some(TeamSideEnum::Us) {
+            // on serving
+            if event_type == EventTypeEnum::F || event_type == EventTypeEnum::OE {
+                // on serve, it could happen a rotation fault (us or them)
+                None
+            } else {
+                // otherwise, just assign the serving player
+                Some(snapshot.current_lineup.get_serving_player())
+            }
+        } else if matches!(event_type, EventTypeEnum::OE | EventTypeEnum::OS) {
+            None
+        } else {
+            prompt_player(
+                team,
+                &snapshot,
+                snapshot.current_lineup.get_current_rotation(),
+                event_type.clone(),
+                snapshot.current_lineup.get_current_phase(),
+            )
+        };
+        let player_name = match player_id {
+            Some(pid) => {
+                let p = team.players.iter().find(|p| p.id == pid);
+                p.map(|p| p.name.as_str())
+            }
+            None => None,
+        };
+        print_prompt_event_header(set, team, snapshot, Some(event_type.clone()), player_name);
+        // evaluation prompt (not available for F, OR, OS or P)
+        let eval = if event_type == EventTypeEnum::F
+            || event_type == EventTypeEnum::OE
+            || event_type == EventTypeEnum::OS
+        {
+            None
+        } else {
+            Some(prompt_eval()?)
+        };
+        print_prompt_event_header(set, team, snapshot, Some(event_type.clone()), player_name);
+        Ok(EventEntry {
+            timestamp: Utc::now(),
+            event_type,
+            player: player_id,
+            eval,
+            target_player: None,
+        })
+    }
 }
 
 fn describe_eval(e: &EvalEnum) -> &'static str {
@@ -496,21 +562,14 @@ fn get_eval_symbol(e: &EvalEnum) -> &'static str {
     }
 }
 
-pub fn print_court(set: &SetEntry, rotation: u8, players: &[PlayerEntry]) {
+pub fn print_court(snapshot: &Snapshot, players: &[PlayerEntry]) {
     let player_map: HashMap<Uuid, &PlayerEntry> = players.iter().map(|p| (p.id, p)).collect();
-    let rotated_positions: Vec<_> = (0..6)
-        .map(|i| {
-            let rotated_index = (i + 6 - (rotation + 1) as usize) % 6;
-            set.positions[rotated_index]
-        })
-        .collect();
     let get_name = |uuid: Uuid| {
         let base = player_map
             .get(&uuid)
             .map(|p| format!("{} {}", p.number, p.name))
             .unwrap_or_else(|| "?".to_string());
-
-        if uuid == set.setter {
+        if uuid == snapshot.current_lineup.get_setter() {
             format!("{} (S)", base)
         } else {
             base
@@ -520,22 +579,66 @@ pub fn print_court(set: &SetEntry, rotation: u8, players: &[PlayerEntry]) {
     table.set_content_arrangement(ContentArrangement::Dynamic);
     table.load_preset(comfy_table::presets::UTF8_FULL);
     let top_row = Row::from(vec![
-        Cell::new(get_name(rotated_positions[3])),
-        Cell::new(get_name(rotated_positions[2])),
-        Cell::new(get_name(rotated_positions[1])),
+        Cell::new(get_name(snapshot.current_lineup.get(3))),
+        Cell::new(get_name(snapshot.current_lineup.get(2))),
+        Cell::new(get_name(snapshot.current_lineup.get(1))),
     ]);
+    // TODO: centralize libero logic within snapshot computation
+    let get_player_for_position_on_pos_0 = |id: Uuid| {
+        if snapshot.current_lineup.get_current_phase() != PhaseEnum::Break {
+            if snapshot.current_lineup.get_current_rotation() == 1
+                || snapshot.current_lineup.get_current_rotation() == 4
+            {
+                // not serving: replace middle-blocker by libero
+                snapshot.current_lineup.get_current_libero()
+            } else {
+                id
+            }
+        } else {
+            // if middle-blocker is serving, then return the id of the middle-blocker
+            id
+        }
+    };
+    let get_player_for_position_on_pos_5 = |id: Uuid| {
+        if snapshot.current_lineup.get_current_rotation() == 0
+            || snapshot.current_lineup.get_current_rotation() == 3
+        {
+            // enforce libero here
+            snapshot.current_lineup.get_current_libero()
+        } else {
+            id
+        }
+    };
+    let get_player_for_position_on_pos_4 = |id: Uuid| {
+        if snapshot.current_lineup.get_current_rotation() == 2
+            || snapshot.current_lineup.get_current_rotation() == 5
+        {
+            // enforce libero here
+            snapshot.current_lineup.get_current_libero()
+        } else {
+            id
+        }
+    };
     let bottom_row = Row::from(vec![
-        Cell::new(get_name(rotated_positions[4])),
-        Cell::new(get_name(rotated_positions[5])),
-        Cell::new(get_name(rotated_positions[0])),
+        Cell::new(get_name(get_player_for_position_on_pos_4(
+            snapshot.current_lineup.get(4),
+        ))),
+        Cell::new(get_name(get_player_for_position_on_pos_5(
+            snapshot.current_lineup.get(5),
+        ))),
+        Cell::new(get_name(get_player_for_position_on_pos_0(
+            snapshot.current_lineup.get(0),
+        ))),
     ]);
     table.add_row(top_row);
     table.add_row(bottom_row);
-    println!("\ncurrent court rotation (our side):");
     println!("{}", table);
 }
 
 fn print_last_events(team: &TeamEntry, recent_events: Vec<&EventEntry>) {
+    if recent_events.is_empty() {
+        return;
+    }
     let mut table = Table::new();
     table.set_content_arrangement(ContentArrangement::Dynamic);
     table.set_header(vec![
@@ -549,7 +652,15 @@ fn print_last_events(team: &TeamEntry, recent_events: Vec<&EventEntry>) {
             Some(pl) => team.players.iter().find(|p| p.id == pl),
             None => None,
         };
-        let player_str = player.map_or("".to_string(), |u| u.name.clone());
+        let replacement = match e.target_player {
+            Some(pl) => team.players.iter().find(|p| p.id == pl),
+            None => None,
+        };
+        let player_str = match (player, replacement) {
+            (Some(p), Some(r)) => format!("{}/{}", p.name, r.name),
+            (Some(p), None) => p.name.clone(),
+            _ => "-".to_string(),
+        };
         let eval_str = match e.eval.clone() {
             Some(ev) => match ev {
                 EvalEnum::Error => "error",
@@ -567,9 +678,7 @@ fn print_last_events(team: &TeamEntry, recent_events: Vec<&EventEntry>) {
                 EvalEnum::Perfect => {
                     if e.event_type == EventTypeEnum::S {
                         "ace"
-                    } else if e.event_type == EventTypeEnum::A {
-                        "score"
-                    } else if e.event_type == EventTypeEnum::B {
+                    } else if e.event_type == EventTypeEnum::A || e.event_type == EventTypeEnum::B {
                         "score"
                     } else {
                         "perfect"
@@ -588,9 +697,9 @@ fn print_last_events(team: &TeamEntry, recent_events: Vec<&EventEntry>) {
             EventTypeEnum::OS => "opponent scored",
             EventTypeEnum::S => "serve",
             EventTypeEnum::P => "pass",
+            EventTypeEnum::R => "substitution",
         };
         let mut row: Row = Row::new();
-        row.add_cell(Cell::new(format!("S{}", e.rotation + 1)));
         row.add_cell(Cell::new(event_type_str));
         row.add_cell(Cell::new(player_str));
         row.add_cell(Cell::new(eval_str));
@@ -599,51 +708,49 @@ fn print_last_events(team: &TeamEntry, recent_events: Vec<&EventEntry>) {
     println!("{}", table);
 }
 
-fn print_set_status(snapshot: &Snapshot) {
+fn print_set_status(set_number: u8, snapshot: &Snapshot) {
     let mut status_table = Table::new();
     status_table.set_content_arrangement(ContentArrangement::Dynamic);
     status_table.set_header(vec![
+        Cell::new("set"),
         Cell::new("score us"),
         Cell::new("score them"),
         Cell::new("current phase"),
         Cell::new("current rotation"),
     ]);
-    let phase_str = if snapshot.phase == PhaseEnum::Break {
+    let phase_str = if snapshot.current_lineup.get_current_phase() == PhaseEnum::Break {
         "break"
     } else {
         "side-out"
     };
     let mut row: Row = Row::new();
+    row.add_cell(Cell::new(set_number));
     row.add_cell(Cell::new(snapshot.score_us));
     row.add_cell(Cell::new(snapshot.score_them));
     row.add_cell(Cell::new(phase_str));
-    row.add_cell(Cell::new(format!("S{}", snapshot.rotation + 1)));
+    row.add_cell(Cell::new(format!(
+        "S{}",
+        snapshot.current_lineup.get_current_rotation() + 1
+    )));
     status_table.add_row(row);
     println!("{}", status_table);
 }
 
-fn events_loop(team: &TeamEntry, match_id: Uuid, set: &mut SetEntry) -> Result<(), Box<dyn Error>> {
-    let (mut snapshot, mut available_options) = compute_snapshot(set);
-
+pub fn events_loop(team: &TeamEntry, match_id: &str, set: &mut SetEntry) -> Result<(), AppError> {
+    let (mut snapshot, mut available_options) = compute_snapshot(set)?;
     loop {
         clear_screen();
-        let recent_events: Vec<_> = set.events.iter().rev().take(5).collect();
-        print_last_events(team, recent_events);
-        print_set_status(&snapshot);
-        print_court(&set, snapshot.rotation, &team.players);
-        let event = input_event(set, &mut snapshot, available_options.clone())?;
+        let event = prompt_event(set, team, &mut snapshot, available_options.clone())?;
         append_event(team, match_id, set.set_number, &event)?;
         set.events.push(event.clone());
-        available_options = compute_event(&mut snapshot, &event);
-
-        if let Some(winner) = get_set_winner(&snapshot, set.set_number) {
+        available_options = snapshot.compute_event(&event, available_options.clone())?;
+        if let Some(winner) = snapshot.get_set_winner(set.set_number) {
             println!("\nset finished");
             println!(
                 "team {} won the set with score {}–{}",
                 match winner {
                     TeamSideEnum::Us => &team.name,
                     TeamSideEnum::Them => "opponent",
-                    _ => "unknown",
                 },
                 snapshot.score_us,
                 snapshot.score_them
@@ -654,6 +761,5 @@ fn events_loop(team: &TeamEntry, match_id: Uuid, set: &mut SetEntry) -> Result<(
             break;
         }
     }
-
     Ok(())
 }
