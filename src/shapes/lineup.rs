@@ -36,14 +36,12 @@ impl Lineup {
         current_setter: Uuid,
         current_libero: Uuid,
     ) -> Result<Lineup, AppError> {
-        let rotation = Lineup::get_rotation(players, &current_setter);
+        let rotation = Lineup::get_rotation(players, &current_setter)?;
         let libero_slot = Lineup::get_libero_slot(rotation)?;
         // libero_replacement will be the next player replacing the libero
         let libero_replacement = players[(libero_slot + 3) % 6];
-
         // idle_player is the player replaced by libero
         let idle_player = players[libero_slot];
-
         let has_libero = Lineup::has_libero(rotation, phase);
         let mut result = Lineup {
             players,
@@ -66,15 +64,19 @@ impl Lineup {
         Ok(result)
     }
 
-    pub fn get_rotation(players: [Uuid; 6], current_setter: &Uuid) -> u8 {
+    pub fn get_rotation(players: [Uuid; 6], current_setter: &Uuid) -> Result<u8, AppError> {
         players
             .iter()
             .position(|p| p == current_setter)
             .map(|x| x as u8)
-            .expect("critical error") // TODO: may be we don't want to handle the error this way
+            .ok_or_else(|| {
+                AppError::Snapshot(SnapshotError::LineupError(
+                    "could not get the current rotation".to_string(),
+                ))
+            })
     }
 
-    pub fn get_current_rotation(&self) -> u8 {
+    pub fn get_current_rotation(&self) -> Result<u8, AppError> {
         Lineup::get_rotation(self.players, &self.current_setter)
     }
 
@@ -99,16 +101,18 @@ impl Lineup {
     }
 
     fn update_libero(&mut self) -> Result<(), AppError> {
-        // TODO: test substitutions carefully
-        let libero_slot = Lineup::get_libero_slot(self.get_current_rotation())?;
+        let rotation = self.get_current_rotation()?;
+        let libero_slot = Lineup::get_libero_slot(rotation)?;
+        let player_at_libero_slot = self.get(libero_slot);
         match (
             self.phase,
-            self.get_current_rotation(),
+            rotation,
             self.idle_player,
             self.libero_replacement,
+            player_at_libero_slot,
         ) {
-            (PhaseEnum::Break, 1, Some(idle), Some(replacement))
-            | (PhaseEnum::Break, 4, Some(idle), Some(replacement)) => {
+            (PhaseEnum::Break, 1, Some(idle), Some(replacement), _)
+            | (PhaseEnum::Break, 4, Some(idle), Some(replacement), _) => {
                 // put replacement to serve
                 self.try_set(&replacement, libero_slot)?;
                 // put idle player in
@@ -118,9 +122,10 @@ impl Lineup {
                 // no idle player
                 self.idle_player = None;
             }
-            (PhaseEnum::SideOut, 1, None, _) | (PhaseEnum::SideOut, 4, None, _) => {
+            (PhaseEnum::SideOut, 1, None, _, Some(player_at_libero_slot))
+            | (PhaseEnum::SideOut, 4, None, _, Some(player_at_libero_slot)) => {
                 // player who served pulled out
-                self.idle_player = Some(self.get(libero_slot as u8));
+                self.idle_player = Some(player_at_libero_slot);
                 // ...so replace this player with the libero
                 let libero = self.current_libero;
                 self.try_set(&libero, libero_slot)?;
@@ -146,31 +151,6 @@ impl Lineup {
 
     pub fn get_current_libero(&self) -> Uuid {
         self.current_libero
-    }
-
-    pub fn add_substitution(
-        &mut self,
-        replaced: &Uuid,
-        replacement: &Uuid,
-    ) -> Result<(), AppError> {
-        if let Some(pos) = self.find_position(replaced) {
-            // TODO: handle error!
-            self.try_set(replacement, pos)?;
-            // add entry into substitutions
-            self.substitutions.push(SubstitutionRecord {
-                replaced: *replaced,
-                replacement: *replacement,
-            });
-            // refresh current_setter if needed
-            if self.current_setter == *replaced {
-                self.current_setter = *replacement;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn get_substitutions(&self) -> Vec<SubstitutionRecord> {
-        self.substitutions.clone()
     }
 
     pub fn find_position(&self, player_id: &Uuid) -> Option<usize> {
@@ -211,81 +191,97 @@ impl Lineup {
         }
     }
 
-    pub fn get_role(&self, player_id: &Uuid) -> RoleEnum {
+    pub fn get_role(&self, player_id: &Uuid) -> Result<RoleEnum, AppError> {
+        let not_found_error = || {
+            AppError::Snapshot(SnapshotError::LineupError(
+                "could not get the role: player not found".to_string(),
+            ))
+        };
         let setter_index = self
-            .players
-            .iter()
-            .position(|id| *id == self.current_setter)
-            .expect("setter not found in current lineup");
-        let player_index = self
-            .players
-            .iter()
-            .position(|id| *id == *player_id)
-            .expect("player not found in current lineup");
+            .find_position(&self.current_setter)
+            .ok_or_else(not_found_error)?;
+        let player_index = self.find_position(player_id).ok_or_else(not_found_error)?;
+        let player = self.players.get(player_index).ok_or_else(not_found_error)?;
         let offset = (player_index + 6 - setter_index) % 6;
-        match offset {
+        let rotation = self.get_current_rotation().map_err(|_| {
+            AppError::Snapshot(SnapshotError::LineupError(
+                "could not get the current rotation".to_string(),
+            ))
+        })?;
+        let role = match offset {
             0 => RoleEnum::Setter,
-            1 => RoleEnum::OutsideHitter,
-            2 => RoleEnum::MiddleBlocker,
+            1 | 4 => RoleEnum::OutsideHitter,
             3 => RoleEnum::OppositeHitter,
-            4 => RoleEnum::OutsideHitter,
-            5 => RoleEnum::MiddleBlocker,
-            _ => unreachable!(),
-        }
+            2 | 5 => {
+                if Lineup::has_libero(rotation, self.phase) && self.is_back_row_player(player) {
+                    RoleEnum::Libero
+                } else {
+                    RoleEnum::MiddleBlocker
+                }
+            }
+            _ => {
+                return Err(AppError::Snapshot(SnapshotError::LineupError(
+                    "invalid offset in rotation".to_string(),
+                )))
+            }
+        };
+        Ok(role)
     }
 
-    pub fn get_oh2(&self) -> Uuid {
+    pub fn get_oh2(&self) -> Option<Uuid> {
         self.get_role_from_offset(4)
     }
 
-    pub fn get_oh1(&self) -> Uuid {
+    pub fn get_oh1(&self) -> Option<Uuid> {
         self.get_role_from_offset(1)
     }
 
-    pub fn get_mb1(&self) -> Uuid {
-        let id = self.get_role_from_offset(5);
-        match (id == self.current_libero, self.idle_player) {
-            (true, Some(mb)) => mb,
-            (false, _) => id,
-            _ => panic!("oh my"), // TODO: ERROR!
+    pub fn get_mb1(&self) -> Option<Uuid> {
+        match self.get_role_from_offset(5) {
+            None => None,
+            Some(id) => match (id == self.current_libero, self.idle_player) {
+                (true, Some(mb)) => Some(mb),
+                (false, _) => Some(id),
+                _ => None,
+            },
         }
     }
 
-    pub fn get_mb2(&self) -> Uuid {
-        let id = self.get_role_from_offset(2);
-        match (id == self.current_libero, self.idle_player) {
-            (true, Some(mb)) => mb,
-            (false, _) => id,
-            _ => id, // TODO: ERROR!
+    pub fn get_mb2(&self) -> Option<Uuid> {
+        match self.get_role_from_offset(2) {
+            None => None,
+            Some(id) => match (id == self.current_libero, self.idle_player) {
+                (true, Some(mb)) => Some(mb),
+                (false, _) => Some(id),
+                _ => None,
+            },
         }
     }
 
-    pub fn get_opposite(&self) -> Uuid {
+    pub fn get_opposite(&self) -> Option<Uuid> {
         self.get_role_from_offset(3)
     }
 
-    pub fn get_setter(&self) -> Uuid {
+    pub fn get_setter(&self) -> Option<Uuid> {
         self.get_role_from_offset(6)
     }
 
-    fn get_role_from_offset(&self, offset_from_setter: usize) -> Uuid {
+    fn get_role_from_offset(&self, offset_from_setter: usize) -> Option<Uuid> {
         let setter_index = self
             .players
             .iter()
-            .position(|id| *id == self.current_setter)
-            .expect("setter not found in current lineup");
+            .position(|id| *id == self.current_setter)?;
         let index = (setter_index + offset_from_setter) % 6;
-        self.players[index]
+        self.get(index)
     }
 
-    pub fn get_serving_player(&self) -> Uuid {
+    pub fn get_serving_player(&self) -> Option<Uuid> {
         let serving_index = 0; // the player in position 1 (index 0) is always the server
-        self.players[serving_index]
+        self.get(serving_index)
     }
 
-    // TODO: not safe!
-    pub fn get(&self, index: u8) -> Uuid {
-        self.players[index as usize]
+    pub fn get(&self, index: usize) -> Option<Uuid> {
+        self.players.get(index).copied()
     }
 
     fn get_libero_slot(rotation: u8) -> Result<usize, AppError> {
@@ -306,18 +302,145 @@ impl Lineup {
         phase != PhaseEnum::Break || (rotation != 1 && rotation != 4)
     }
 
-    pub fn get_repleceable_lineup(&self) -> Vec<(u8, (&'static str, Uuid))> {
+    pub fn players(&self) -> &[Uuid; 6] {
+        &self.players
+    }
+
+    pub fn get_involved_players(&self) -> Vec<Uuid> {
+        let mut set: HashSet<Uuid> = self.players.iter().cloned().collect();
+        set.insert(self.current_libero);
+        if let Some(libero_replacement) = self.libero_replacement {
+            set.insert(libero_replacement);
+        }
+        if let Some(idle_player) = self.idle_player {
+            set.insert(idle_player);
+        }
+        set.extend(
+            self.substitutions
+                .iter()
+                .flat_map(|s| [s.replacement, s.replaced]),
+        );
+        set.into_iter().collect()
+    }
+
+    pub fn get_substitutions(&self) -> Vec<SubstitutionRecord> {
+        self.substitutions.clone()
+    }
+
+    /* substitutions */
+
+    fn was_player_already_replaced(&self, player_id: &Uuid) -> bool {
+        self.substitutions
+            .iter()
+            .find(|s| s.replaced == *player_id)
+            .is_some()
+    }
+
+    fn was_player_already_used(&self, player_id: &Uuid) -> bool {
+        self.substitutions
+            .iter()
+            .find(|s| s.replacement == *player_id)
+            .is_some()
+    }
+
+    fn get_enforced_replacement(&self, replaced: &Uuid) -> Option<Uuid> {
+        self.substitutions
+            .iter()
+            .find(|p| p.replacement == *replaced)
+            .map(|p| p.replaced)
+    }
+
+    pub fn add_substitution(
+        &mut self,
+        replaced: &Uuid,
+        replacement: &Uuid,
+    ) -> Result<(), AppError> {
+        if let Some(pos) = self.find_position(replaced) {
+            // check if already replaced previously
+            if self.was_player_already_replaced(replaced) {
+                return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
+                    "player {:?} was already replaced",
+                    replaced
+                ))));
+            }
+            // check if the replacement was already used
+            if self.was_player_already_used(replacement) {
+                return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
+                    "player {:?} was already a replacement",
+                    replacement
+                ))));
+            }
+            // libero cannot be replaced
+            if self.get_current_libero() == *replaced {
+                return Err(AppError::Snapshot(SnapshotError::LineupError(
+                    "cannot replace the libero player".to_string(),
+                )));
+            }
+            // closed change
+            match self.get_enforced_replacement(replaced) {
+                None => {}
+                Some(enforced) => {
+                    if enforced != *replacement {
+                        return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
+                            "player {:?} can be only replaced by player {:?}",
+                            replaced, enforced,
+                        ))));
+                    }
+                }
+            }
+
+            self.try_set(replacement, pos)?;
+            // add entry into substitutions
+            self.substitutions.push(SubstitutionRecord {
+                replaced: *replaced,
+                replacement: *replacement,
+            });
+            // refresh current_setter if needed
+            if self.current_setter == *replaced {
+                self.current_setter = *replacement;
+            }
+            Ok(())
+        } else {
+            Err(AppError::Snapshot(SnapshotError::LineupError(format!(
+                "could not find player {} in the lineup",
+                replaced
+            ))))
+        }
+    }
+
+    pub fn get_repleceable_lineup(&self) -> Vec<(u8, (String, Uuid))> {
         if self.substitutions.len() >= MAX_SUBSTITUTIONS {
             return vec![];
         }
-        let options: Vec<(u8, (&'static str, Uuid))> = vec![
-            (1, ("setter", self.get_setter())),
-            (2, ("outside hitter 1", self.get_oh1())),
-            (3, ("middle blocker 2", self.get_mb2())),
-            (4, ("opposite", self.get_opposite())),
-            (5, ("outside hitter 2", self.get_oh2())),
-            (6, ("middle blocker 1", self.get_mb1())),
+        let lineup: Vec<Option<Uuid>> = vec![
+            self.get_setter(),
+            self.get_oh1(),
+            self.get_mb2(),
+            self.get_opposite(),
+            self.get_oh2(),
+            self.get_mb1(),
         ];
+        let options: Vec<(u8, (String, Uuid))> = lineup
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, id)| {
+                id.map(|uuid| {
+                    (
+                        i as u8,
+                        match i {
+                            0 => ("setter".to_string(), uuid),
+                            1 => ("outside hitter 1".to_string(), uuid),
+                            2 => ("middle blocker 2".to_string(), uuid),
+                            3 => ("opposite".to_string(), uuid),
+                            4 => ("outside hitter 2".to_string(), uuid),
+                            5 => ("middle blocker 1".to_string(), uuid),
+                            _ => ("unknown".to_string(), uuid),
+                        },
+                    )
+                })
+            })
+            .map(|(i, (role, id))| (i + 1, (role, id)))
+            .collect();
         let already_replaced: HashSet<Uuid> =
             self.substitutions.iter().map(|s| s.replaced).collect();
         options
@@ -339,7 +462,10 @@ impl Lineup {
             self.get_opposite(),
             self.get_oh2(),
             self.get_mb1(),
-        ];
+        ]
+        .iter()
+        .filter_map(|x| *x)
+        .collect();
         // all substitutions involving replaced_id
         let subs: Vec<&SubstitutionRecord> = self
             .substitutions
@@ -382,22 +508,5 @@ impl Lineup {
             .enumerate()
             .map(|(i, p)| ((i + 1) as u8, p))
             .collect()
-    }
-
-    pub fn get_involved_players(&self) -> Vec<Uuid> {
-        let mut set: HashSet<Uuid> = self.players.iter().cloned().collect();
-        set.insert(self.current_libero);
-        if let Some(libero_replacement) = self.libero_replacement {
-            set.insert(libero_replacement);
-        }
-        if let Some(idle_player) = self.idle_player {
-            set.insert(idle_player);
-        }
-        set.extend(
-            self.substitutions
-                .iter()
-                .flat_map(|s| [s.replacement, s.replaced]),
-        );
-        set.into_iter().collect()
     }
 }

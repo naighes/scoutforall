@@ -28,7 +28,6 @@ pub struct EventEntry {
     pub target_player: Option<Uuid>,
 }
 
-// TODO: formato serializzabile CSV
 impl Display for EventEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
@@ -46,6 +45,7 @@ pub struct Snapshot {
     pub stats: Stats,
     pub current_lineup: Lineup,
     pub last_event: Option<EventEntry>,
+    pub pending_touch: Option<Uuid>,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -66,6 +66,7 @@ impl Snapshot {
             stats: Stats::new(),
             current_lineup,
             last_event: None,
+            pending_touch: None,
         })
     }
 
@@ -75,28 +76,25 @@ impl Snapshot {
         use ZoneEnum::*;
         let role = self.current_lineup.get_role(player_id);
         let back = self.current_lineup.is_back_row_player(player_id);
-        match (role, back) {
-            (Setter | MiddleBlocker, false) => Some(Three),
-            (OutsideHitter, false) => Some(
-                if self.current_lineup.get_current_rotation() == 0
-                    && self.current_lineup.get_current_phase() == SideOut
-                {
+        let rotation = self.current_lineup.get_current_rotation();
+        match (role, back, rotation) {
+            (Ok(Setter | MiddleBlocker), false, _) => Some(Three),
+            (Ok(OutsideHitter), false, Ok(rotation)) => Some(
+                if rotation == 0 && self.current_lineup.get_current_phase() == SideOut {
                     Two
                 } else {
                     Four
                 },
             ),
-            (OutsideHitter, true) => Some(Eight),
-            (OppositeHitter, false) => Some(
-                if self.current_lineup.get_current_rotation() == 0
-                    && self.current_lineup.get_current_phase() == SideOut
-                {
+            (Ok(OutsideHitter), true, _) => Some(Eight),
+            (Ok(OppositeHitter), false, Ok(rotation)) => Some(
+                if rotation == 0 && self.current_lineup.get_current_phase() == SideOut {
                     Four
                 } else {
                     Two
                 },
             ),
-            (OppositeHitter, true) => Some(Nine),
+            (Ok(OppositeHitter), true, _) => Some(Nine),
             _ => None,
         }
     }
@@ -118,54 +116,99 @@ impl Snapshot {
         }
     }
 
-    fn set_distribution_stats(&mut self, event: &EventEntry) {
+    fn set_distribution_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        if let Some(prev_eval) = self.last_event.as_ref().and_then(|e| e.eval) {
-            match (
-                event.event_type,
-                self.last_event.as_ref().map(|e| e.event_type),
+        let rotation = self.current_lineup.get_current_rotation()?;
+        let prev_event = match self.last_event.as_ref() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+        let prev_eval = match prev_event.eval {
+            Some(eval) => eval,
+            None => return Ok(()),
+        };
+        let current_eval = match event.eval {
+            Some(eval) => eval,
+            None => return Ok(()),
+        };
+        let attack_zone = match event.player.and_then(|p| self.get_attack_zone(&p)) {
+            Some(zone) => zone,
+            None => return Ok(()),
+        };
+        if match (
+            event.event_type,
+            prev_event.event_type,
+            prev_eval,
+            current_eval,
+        ) {
+            (A, D | P, Perfect | Positive | Exclamative | Negative, _) => true,
+            (A, A | B, Positive, _) => true,
+            _ => false,
+        } {
+            self.stats.distribution.add(
+                self.current_lineup.get_current_phase(),
+                rotation,
+                attack_zone,
+                current_eval,
                 prev_eval,
-                event.eval,
-                event.player.and_then(|p| self.get_attack_zone(&p)),
-            ) {
-                (
-                    A,
-                    Some(D | P),
-                    Perfect | Positive | Exclamative | Negative,
-                    Some(eval),
-                    Some(zone),
-                )
-                | (A, Some(A | B), Positive, Some(eval), Some(zone)) => {
-                    self.stats.distribution.add(
-                        self.current_lineup.get_current_phase(),
-                        self.current_lineup.get_current_rotation(),
-                        zone,
-                        eval,
-                        prev_eval,
-                    );
-                }
-                _ => {}
-            }
+            );
         }
+        Ok(())
     }
 
-    fn set_score_stats(&mut self, event: &EventEntry) {
+    fn has_scored(&mut self, event: &EventEntry) -> Option<TeamSideEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (event.event_type, event.eval) {
-            (OE, _) | (B | A | S, Some(Perfect)) => {
-                self.score_us += 1;
-            }
+            (OE, _) | (B | A | S, Some(Perfect)) => Some(TeamSideEnum::Us),
             (B | A, Some(Error | Over))
             | (D, Some(Error))
             | (P, Some(Error))
             | (S, Some(Error))
             | (F, _)
-            | (OS, _) => {
+            | (OS, _) => Some(TeamSideEnum::Them),
+            _ => None,
+        }
+    }
+
+    fn set_score_stats(&mut self, event: &EventEntry) {
+        match &self.has_scored(event) {
+            Some(TeamSideEnum::Us) => {
+                self.score_us += 1;
+            }
+            Some(TeamSideEnum::Them) => {
                 self.score_them += 1;
             }
             _ => {}
+        }
+    }
+
+    fn set_phase_count_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
+        let phase = self.current_lineup.get_current_phase();
+        let rotation = self.current_lineup.get_current_rotation()?;
+        match &self.has_scored(event) {
+            Some(TeamSideEnum::Us) => {
+                self.stats.scored_points.add(phase, rotation);
+                self.stats.phases.add(phase, rotation);
+            }
+            Some(TeamSideEnum::Them) => {
+                self.stats.phases.add(phase, rotation);
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    fn set_pending_touch(&mut self, event: &EventEntry) {
+        use EventTypeEnum::*;
+        match (event.event_type, event.player) {
+            (D | P, Some(_)) => {
+                self.pending_touch = event.player;
+            }
+            _ => {
+                self.pending_touch = None;
+            }
         }
     }
 
@@ -188,44 +231,46 @@ impl Snapshot {
         }
     }
 
-    fn set_possessions_stats(&mut self, event: &EventEntry) {
+    fn set_possessions_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         use EvalEnum::*;
         use EventTypeEnum::*;
         use TeamSideEnum::*;
         let us_was_serving = self.get_serving_team() == Some(Us);
         let them_was_serving = self.get_serving_team() == Some(Them);
-        if matches!(
-            (
-                event.event_type,
-                event.eval,
-                them_was_serving,
-                us_was_serving
-            ),
-            (P | D | S, _, _, _)
-                | (A | B, Some(Positive), _, _)
-                | (OS, _, true, _)
-                | (F, _, _, true)
+        let rotation = self.current_lineup.get_current_rotation()?;
+        match (
+            event.event_type,
+            event.eval,
+            them_was_serving,
+            us_was_serving,
         ) {
-            self.stats.possessions.add(
+            (P | D | S, _, _, _)
+            | (A | B, Some(Positive), _, _) // TODO: should perfect block and perfect attack count as possession?
+            | (OS, _, true, _)
+            | (F, _, _, true) => Ok(self.stats.possessions.add(
                 self.current_lineup.get_current_phase(),
-                self.current_lineup.get_current_rotation(),
-            );
+                rotation,
+            )),
+            _ => Ok(())
         }
     }
 
-    fn set_opponent_errors_stats(&mut self, event: &EventEntry) {
+    fn set_opponent_errors_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
+        let rotation = self.current_lineup.get_current_rotation()?;
         if event.event_type == EventTypeEnum::OE {
-            self.stats.opponent_errors.add(
-                self.current_lineup.get_current_phase(),
-                self.current_lineup.get_current_rotation(),
-            );
+            Ok(self
+                .stats
+                .opponent_errors
+                .add(self.current_lineup.get_current_phase(), rotation))
+        } else {
+            Ok(())
         }
     }
 
-    fn set_errors_stats(&mut self, event: &EventEntry) {
-        let Some(player) = event.player else { return };
+    fn set_errors_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         use EvalEnum::*;
         use EventTypeEnum::*;
+        let rotation = self.current_lineup.get_current_rotation()?;
         let error_type = match (event.event_type, event.eval) {
             (A, Some(Error)) | (S, Some(Error)) | (B, Some(Over)) | (F, _) => {
                 Some(ErrorTypeEnum::Unforced)
@@ -235,57 +280,58 @@ impl Snapshot {
             }
             _ => None,
         };
-        if let Some(err) = error_type {
-            self.stats.errors.add(
+        match (error_type, event.player) {
+            (Some(err), Some(player)) => Ok(self.stats.errors.add(
                 self.current_lineup.get_current_phase(),
-                self.current_lineup.get_current_rotation(),
+                rotation,
                 player,
                 err,
-            );
+            )),
+            _ => Ok(()),
         }
     }
 
-    fn set_points_stats(&mut self, event: &EventEntry) {
+    fn set_points_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         use EvalEnum::*;
         use EventTypeEnum::*;
         use TeamSideEnum::*;
         let them_was_serving = self.get_serving_team() == Some(Them);
+        let rotation = self.current_lineup.get_current_rotation()?;
         if matches!(
             (event.event_type, event.eval, them_was_serving,),
             (OE, _, false) | (B, Some(Perfect), _) | (A, Some(Perfect), _) | (S, Some(Perfect), _)
         ) {
-            self.stats.points.add(
-                self.current_lineup.get_current_phase(),
-                self.current_lineup.get_current_rotation(),
-            );
+            Ok(self
+                .stats
+                .earned_points
+                .add(self.current_lineup.get_current_phase(), rotation))
+        } else {
+            Ok(())
         }
     }
 
-    fn set_events_stats(&mut self, event: &EventEntry) {
+    fn set_events_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         use EventTypeEnum::*;
         let zone = event.player.and_then(|p| self.get_attack_zone(&p));
+        let rotation = self.current_lineup.get_current_rotation()?;
         match (event.event_type, event.eval, event.player, zone) {
-            (B | D | P | S, Some(ev), Some(player), _) => {
-                self.stats.events.add(
-                    event.event_type,
-                    self.current_lineup.get_current_phase(),
-                    self.current_lineup.get_current_rotation(),
-                    Some(player),
-                    None,
-                    Some(ev),
-                );
-            }
-            (A, Some(ev), Some(player), Some(z)) => {
-                self.stats.events.add(
-                    event.event_type,
-                    self.current_lineup.get_current_phase(),
-                    self.current_lineup.get_current_rotation(),
-                    Some(player),
-                    Some(z),
-                    Some(ev),
-                );
-            }
-            _ => {}
+            (B | D | P | S, Some(ev), Some(player), _) => Ok(self.stats.events.add(
+                event.event_type,
+                self.current_lineup.get_current_phase(),
+                rotation,
+                Some(player),
+                None,
+                Some(ev),
+            )),
+            (A, Some(ev), Some(player), Some(z)) => Ok(self.stats.events.add(
+                event.event_type,
+                self.current_lineup.get_current_phase(),
+                rotation,
+                Some(player),
+                Some(z),
+                Some(ev),
+            )),
+            _ => Ok(()),
         }
     }
 
@@ -296,30 +342,40 @@ impl Snapshot {
     ) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
+        let serve_them = vec![OE, OS, F, P, R];
+        let serve_us = vec![OE, F, S, R];
         let options_map: HashMap<_, _> = [
-            ((OS, None), vec![OS, OE, F, P, R]),
-            ((OE, None), vec![F, OE, R]),
-            ((B, Some(Error)), vec![OS, OE, F, P, R]),
-            ((B, Some(Over)), vec![OS, OE, F, P, R]),
-            ((B, Some(Perfect)), vec![F, OE, R]),
+            // order: OS, OE, F, A, S, P, D, B, R
+            ((OS, None), serve_them.clone()),
+            ((OE, None), serve_us.clone()),
+            ((B, Some(Error)), serve_them.clone()),
+            ((B, Some(Over)), serve_them.clone()),
+            ((B, Some(Perfect)), serve_us.clone()),
             ((B, Some(Positive)), vec![OE, F, A]),
-            ((B, Some(Negative)), vec![OE, OS, F, A, B, D]),
-            ((A, Some(Error)), vec![OS, OE, F, P, R]),
-            ((A, Some(Perfect)), vec![F, R]),
-            ((A, Some(Over)), vec![OS, OE, F, P, R]),
+            ((B, Some(Negative)), vec![OS, OE, F, A, D, B]),
+            ((A, Some(Error)), serve_them.clone()),
+            ((A, Some(Over)), serve_them.clone()),
+            ((A, Some(Negative)), vec![OS, OE, F, A, D, B]),
+            ((A, Some(Perfect)), serve_us.clone()),
             ((A, Some(Positive)), vec![OE, F, A]),
-            ((D, Some(Error)), vec![OE, OS, F, A, B, D]),
-            ((D, Some(Negative)), vec![OS, OE, F, P, R]),
-            ((D, Some(Over)), vec![OS, OE, B, D]),
-            ((D, Some(Perfect)), vec![A, F]),
-            ((F, None), vec![OS, OE, F, P, R]),
-            ((P, Some(Error)), vec![OS, OE, F, P, R]),
-            ((P, Some(Over)), vec![OS, OE, B, D]),
-            ((P, Some(Perfect)), vec![A, F]),
-            ((S, Some(Error)), vec![OS, OE, F, P, R]),
-            ((S, Some(Perfect)), vec![F, R]),
-            ((S, Some(Over)), vec![A, F]),
-            ((S, Some(Negative)), vec![B, D, OE, OS]),
+            ((D, Some(Error)), serve_them.clone()),
+            ((D, Some(Over)), vec![OS, OE, F, A, D, B]),
+            ((D, Some(Exclamative)), vec![OE, F, A]),
+            ((D, Some(Negative)), vec![OE, F, A]),
+            ((D, Some(Positive)), vec![OE, F, A]),
+            ((D, Some(Perfect)), vec![OE, F, A]),
+            ((F, None), serve_them.clone()),
+            ((P, Some(Error)), serve_them.clone()),
+            ((P, Some(Over)), vec![OS, OE, F, A, D, B]),
+            ((P, Some(Exclamative)), vec![OE, F, A]),
+            ((P, Some(Negative)), vec![OE, F, A]),
+            ((P, Some(Positive)), vec![OE, F, A]),
+            ((P, Some(Perfect)), vec![OE, F, A]),
+            ((S, Some(Error)), serve_them.clone()),
+            ((S, Some(Perfect)), serve_us.clone()),
+            ((S, Some(Positive)), vec![OS, OE, F, D, B]),
+            ((S, Some(Over)), vec![OE, A, F]),
+            ((S, Some(Negative)), vec![OS, OE, F, D, B]),
         ]
         .into_iter()
         .collect();
@@ -329,9 +385,10 @@ impl Snapshot {
         }
     }
 
-    fn set_counter_attack_stats(&mut self, event: &EventEntry) {
+    fn set_counter_attack_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         use EvalEnum::*;
         use EventTypeEnum::*;
+        let rotation = self.current_lineup.get_current_rotation()?;
         match (
             event.event_type,
             &self.last_event,
@@ -345,23 +402,24 @@ impl Snapshot {
             ) {
                 // TODO: block and attack? just dig?
                 (D, Some(Perfect | Positive | Negative | Exclamative), Some(p), Some(ev)) => {
-                    self.stats.counter_attack.add(
+                    Ok(self.stats.counter_attack.add(
                         self.current_lineup.get_current_phase(),
-                        self.current_lineup.get_current_rotation(),
+                        rotation,
                         *p,
                         zone,
                         ev,
-                    );
+                    ))
                 }
-                _ => {}
+                _ => Ok(()),
             },
-            _ => {}
+            _ => Ok(()),
         }
     }
 
-    fn set_attack_stats(&mut self, event: &EventEntry) {
+    fn set_attack_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         use EvalEnum::*;
         use EventTypeEnum::*;
+        let rotation = self.current_lineup.get_current_rotation()?;
         if let Some(prev_eval) = self.last_event.as_ref().and_then(|e| e.eval) {
             match (
                 event.event_type,
@@ -381,34 +439,38 @@ impl Snapshot {
                 )
                 | (A, Some(S), Over, Some(eval), Some(player), Some(zone))
                 | (A, Some(A | B), Positive, Some(eval), Some(player), Some(zone)) => {
-                    self.stats.attack.add(
+                    Ok(self.stats.attack.add(
                         self.current_lineup.get_current_phase(),
-                        self.current_lineup.get_current_rotation(),
+                        rotation,
                         player,
                         zone,
                         eval,
                         prev_eval,
-                    );
+                    ))
                 }
-                _ => {}
+                _ => Ok(()),
             }
+        } else {
+            Ok(())
         }
     }
 
-    pub fn compute_event(
+    pub fn add_event(
         &mut self,
         event: &EventEntry,
         current_available_options: Vec<EventTypeEnum>,
     ) -> Result<Vec<EventTypeEnum>, AppError> {
         self.set_score_stats(&event);
-        self.set_possessions_stats(&event);
-        self.set_opponent_errors_stats(&event);
-        self.set_errors_stats(&event);
-        self.set_points_stats(&event);
-        self.set_events_stats(&event);
-        self.set_counter_attack_stats(&event);
-        self.set_attack_stats(&event);
-        self.set_distribution_stats(event);
+        self.set_phase_count_stats(&event)?;
+        self.set_pending_touch(&event);
+        self.set_possessions_stats(&event)?;
+        self.set_opponent_errors_stats(&event)?;
+        self.set_errors_stats(&event)?;
+        self.set_points_stats(&event)?;
+        self.set_events_stats(&event)?;
+        self.set_counter_attack_stats(&event)?;
+        self.set_attack_stats(&event)?;
+        self.set_distribution_stats(event)?;
         let available_options = self.get_available_options(event, current_available_options);
         if event.event_type == EventTypeEnum::R {
             // replace lineup entry

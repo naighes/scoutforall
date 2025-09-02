@@ -31,7 +31,7 @@ pub enum SnapshotError {
 #[derive(Debug, Error)]
 pub enum IOError {
     #[error("IO error: {0}")]
-    Error(std::io::Error),
+    Error(String),
     #[error("serialization error")]
     SerializationError,
     #[error("encoding error: {0}")]

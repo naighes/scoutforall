@@ -3,6 +3,72 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use uuid::Uuid;
 
+pub enum Metric {
+    Positive,
+    Efficiency,
+}
+
+impl Metric {
+    fn score(&self, event: EventTypeEnum, eval: &EvalEnum) -> i32 {
+        match (event, self) {
+            // pass
+            (EventTypeEnum::P, Metric::Positive) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive => 1,
+                _ => 0,
+            },
+            (EventTypeEnum::P, Metric::Efficiency) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive => 1,
+                EvalEnum::Error | EvalEnum::Over => -1,
+                _ => 0,
+            },
+            // attack
+            (EventTypeEnum::A, Metric::Efficiency) => match eval {
+                EvalEnum::Perfect => 1,
+                EvalEnum::Error | EvalEnum::Over => -1,
+                _ => 0,
+            },
+            (EventTypeEnum::A, Metric::Positive) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive => 1,
+                _ => 0,
+            },
+            // dig
+            (EventTypeEnum::D, Metric::Positive) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive => 1,
+                _ => 0,
+            },
+            (EventTypeEnum::D, Metric::Efficiency) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive | EvalEnum::Over => 1,
+                EvalEnum::Error => -1,
+                _ => 0,
+            },
+            // serve
+            (EventTypeEnum::S, Metric::Positive) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive | EvalEnum::Over => 1,
+                _ => 0,
+            },
+            (EventTypeEnum::S, Metric::Efficiency) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive | EvalEnum::Over | EvalEnum::Exclamative => {
+                    1
+                }
+                EvalEnum::Error => -1,
+                _ => 0,
+            },
+            // block
+            (EventTypeEnum::B, Metric::Positive) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive => 1,
+                _ => 0,
+            },
+            (EventTypeEnum::B, Metric::Efficiency) => match eval {
+                EvalEnum::Perfect | EvalEnum::Positive => 1,
+                EvalEnum::Error | EvalEnum::Over => -1,
+                _ => 0,
+            },
+            // default fallback
+            _ => 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EventsStatsKey {
     pub event_type: EventTypeEnum,
@@ -410,11 +476,11 @@ pub struct PossessionsStatsKey {
 }
 
 #[derive(Debug, Clone)]
-pub struct PossessionsStats(pub HashMap<PossessionsStatsKey, u32>);
+pub struct CountStats(pub HashMap<PossessionsStatsKey, u32>);
 
-impl PossessionsStats {
+impl CountStats {
     pub fn new() -> Self {
-        PossessionsStats(HashMap::new())
+        CountStats(HashMap::new())
     }
 
     pub fn add(&mut self, phase: PhaseEnum, rotation: u8) {
@@ -422,7 +488,7 @@ impl PossessionsStats {
         *self.0.entry(key).or_insert(0) += 1;
     }
 
-    pub fn merge(&mut self, other: &PossessionsStats) {
+    pub fn merge(&mut self, other: &CountStats) {
         for (k, v) in &other.0 {
             *self.0.entry(k.clone()).or_insert(0) += v;
         }
@@ -445,10 +511,12 @@ pub struct Stats {
     pub distribution: DistributionStats,
     pub errors: ErrorsStats,
     pub opponent_errors: OpponentErrorsStats,
-    pub possessions: PossessionsStats,
+    pub possessions: CountStats,
+    pub phases: CountStats,
     pub attack: AttackStats,
     pub counter_attack: CounterAttackStats,
-    pub points: PointsStats,
+    pub earned_points: PointsStats,
+    pub scored_points: PointsStats,
 }
 
 impl Stats {
@@ -458,11 +526,12 @@ impl Stats {
             distribution: DistributionStats::new(),
             errors: ErrorsStats::new(),
             opponent_errors: OpponentErrorsStats::new(),
-            possessions: PossessionsStats::new(),
+            possessions: CountStats::new(),
+            phases: CountStats::new(),
             attack: AttackStats::new(),
             counter_attack: CounterAttackStats::new(),
-            // TODO: rename to "earned points"
-            points: PointsStats::new(),
+            earned_points: PointsStats::new(),
+            scored_points: PointsStats::new(),
         }
     }
 
@@ -473,47 +542,49 @@ impl Stats {
         self.errors.merge(&other.errors);
         self.events.merge(&other.events);
         self.opponent_errors.merge(&other.opponent_errors);
-        self.points.merge(&other.points);
+        self.earned_points.merge(&other.earned_points);
+        self.scored_points.merge(&other.scored_points);
         self.possessions.merge(&other.possessions);
+        self.phases.merge(&other.phases);
     }
 
-    pub fn sum_poss_and_points(
+    pub fn number_of_possessions_per_earned_point(
         &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
-    ) -> (u32, u32) {
-        let total_poss: u32 = self
+    ) -> Option<(f64, u32, u32)> {
+        let total: u32 = self
             .possessions
             .query(phase, rotation)
             .map(|(_, v)| *v)
             .sum();
-        let total_pts: u32 = self.points.query(phase, rotation).map(|(_, v)| *v).sum();
-        (total_poss, total_pts)
-    }
-
-    pub fn number_of_possessions_per_point(
-        &self,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        let (total_poss, total_pts) = self.sum_poss_and_points(phase, rotation);
-        if total_pts == 0 {
+        let count: u32 = self
+            .earned_points
+            .query(phase, rotation)
+            .map(|(_, v)| *v)
+            .sum();
+        if count == 0 {
             None
         } else {
-            Some(total_poss as f64 / total_pts as f64)
+            Some((total as f64 / count as f64, total, count))
         }
     }
 
-    pub fn points_per_possession(
+    pub fn number_of_phases_per_scored_point(
         &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
-    ) -> Option<f64> {
-        let (total_poss, total_pts) = self.sum_poss_and_points(phase, rotation);
-        if total_poss == 0 {
+    ) -> Option<(f64, u32, u32)> {
+        let total: u32 = self.phases.query(phase, rotation).map(|(_, v)| *v).sum();
+        let count: u32 = self
+            .scored_points
+            .query(phase, rotation)
+            .map(|(_, v)| *v)
+            .sum();
+        if count == 0 {
             None
         } else {
-            Some(total_pts as f64 / total_poss as f64)
+            Some((total as f64 / count as f64, total, count))
         }
     }
 
@@ -524,23 +595,23 @@ impl Stats {
         rotation: Option<u8>,
         zone: Option<ZoneEnum>,
         prev_eval: EvalEnum,
-    ) -> Option<f64> {
-        let mut score_sum: i32 = 0;
+    ) -> Option<(f64, u32, i32)> {
+        let mut count: i32 = 0;
         let mut total: u32 = 0;
-        for (key, count) in self
+        for (key, inc) in self
             .attack
             .query(phase, rotation, player, zone, None, Some(prev_eval))
         {
-            total += *count;
+            total += *inc;
 
             let score = match key.eval {
                 EvalEnum::Perfect => 1,
                 EvalEnum::Error | EvalEnum::Over => -1,
                 _ => 0,
             };
-            score_sum += score * (*count as i32);
+            count += score * (*inc as i32);
         }
-        (total > 0).then_some((score_sum as f64) / (total as f64) * 100.0)
+        (total > 0).then_some(((count as f64) / (total as f64) * 100.0, total, count))
     }
 
     pub fn counter_attack_conversion_rate(
@@ -552,7 +623,6 @@ impl Stats {
     ) -> Option<f64> {
         let mut total_attempts: u32 = 0;
         let mut points_from_counter: u32 = 0;
-
         for (key, count) in self
             .counter_attack
             .query(phase, rotation, player, zone, None)
@@ -565,7 +635,21 @@ impl Stats {
         (total_attempts > 0).then_some(100.0 * points_from_counter as f64 / total_attempts as f64)
     }
 
-    pub fn count_events(
+    /// Counts the number of events matching the given filters.
+    ///
+    /// # Parameters
+    /// - `event_type`: The type of event to evaluate (e.g. pass, attack, serve, ...).
+    /// - `player`: Optional filter for a specific player id.
+    /// - `phase`: Optional filter for a specific phase of play (side-out or break).
+    /// - `rotation`: Optional filter for a specific team rotation index (0–5).
+    /// - `zone`: Optional filter for the court zone where the event occurred.
+    /// - `eval`: Optional. Filters by event evaluation (perfect, positive, error, etc.).
+    ///
+    /// # Returns
+    /// - `Some(total)` containing the number of matching events, if greater than zero.
+    /// - `None` if no matching events were found.
+    /// ```
+    pub fn event_count(
         &self,
         event_type: EventTypeEnum,
         player: Option<Uuid>,
@@ -586,25 +670,42 @@ impl Stats {
             )
             .map(|(_, count)| *count)
             .sum();
-
         (total > 0).then_some(total)
     }
 
-    pub fn percentage_with_scoring<F>(
+    /// Computes the "positiveness" score of a given event type under the specified filters.
+    ///
+    /// The positiveness score is computed by summing weighted evaluation scores
+    /// (using the provided [`Metric`]) across all matching events, then normalizing
+    /// by the total number of occurrences. The result is expressed as a percentage (0-100).
+    ///
+    /// # Parameters
+    /// - `event_type`: The type of event to evaluate (e.g. pass, attack, serve, ...).
+    /// - `player`: Optional filter for a specific player id.
+    /// - `phase`: Optional filter for a specific phase of play (side-out or break).
+    /// - `rotation`: Optional filter for a specific team rotation index (0–5).
+    /// - `zone`: Optional filter for the court zone where the event occurred.
+    /// - `metric`: The scoring system used to convert evaluations into weighted scores.
+    ///
+    /// # Returns
+    /// - `Some((percentage, total, score))` if at least one event matched:
+    ///   - `percentage`: The normalized positiveness score as a percentage (`f64`).
+    ///   - `total`: The total number of matching events (`u32`).
+    ///   - `score`: The accumulated weighted score (`i32`).
+    /// - `None` if no matching events were found or if the score was zero.
+    /// ```
+    pub fn event_positiveness(
         &self,
         event_type: EventTypeEnum,
         player: Option<Uuid>,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         zone: Option<ZoneEnum>,
-        score_fn: F,
-    ) -> Option<f64>
-    where
-        F: Fn(&EvalEnum) -> i32,
-    {
-        let mut score_sum: i32 = 0;
+        metric: Metric,
+    ) -> Option<(f64, u32, i32)> {
+        let mut score: i32 = 0;
         let mut total: u32 = 0;
-        for (key, count) in self.events.query(
+        for (key, incr) in self.events.query(
             Some(event_type),
             phase,
             rotation,
@@ -613,14 +714,36 @@ impl Stats {
             None,
         ) {
             if let Some(eval) = &key.eval {
-                total += *count;
-                score_sum += score_fn(eval) * (*count as i32);
+                total += *incr;
+                score += metric.score(event_type, eval) * (*incr as i32);
             }
         }
-        (total > 0).then_some((score_sum as f64) / (total as f64) * 100.0)
+        (total > 0).then_some(((score as f64) / (total as f64) * 100.0, total, score))
     }
 
-    pub fn event_type_percentage(
+    /// Computes the percentage of a specific evaluation value within a given event type
+    /// under the specified filters.
+    ///
+    /// The percentage is calculated as the ratio of events with the requested evaluation
+    /// (`eval`) to the total number of matching events, expressed as a percentage.
+    ///
+    /// # Parameters
+    /// - `event_type`: The type of event to evaluate (e.g. pass, attack, serve, ...).
+    /// - `player`: Optional filter for a specific player id.
+    /// - `phase`: Optional filter for a specific phase of play (side-out or break).
+    /// - `rotation`: Optional filter for a specific team rotation (1–6).
+    /// - `rotation`: Optional filter for a specific team rotation index (0–5).
+    /// - `eval`: The evaluation value to measure (e.g. perfect pass, error, point, ...).
+    ///
+    /// # Returns
+    /// - `Some((percentage, total, count))` if at least one event with the requested
+    ///   evaluation was found:
+    ///   - `percentage`: The proportion of `eval` events relative to total, as a percentage (`f64`).
+    ///   - `total`: The total number of matching events (`u32`).
+    ///   - `count`: The number of events that matched the requested evaluation (`i32`).
+    /// - `None` if no events with the requested evaluation were found.
+    /// ```
+    pub fn event_percentage(
         &self,
         event_type: EventTypeEnum,
         player: Option<Uuid>,
@@ -628,10 +751,10 @@ impl Stats {
         rotation: Option<u8>,
         zone: Option<ZoneEnum>,
         eval: EvalEnum,
-    ) -> Option<f64> {
-        let mut eval_count: u64 = 0;
-        let mut total_count: u64 = 0;
-        for (key, count) in self.events.query(
+    ) -> Option<(f64, u32, i32)> {
+        let mut count: i32 = 0;
+        let mut total: u32 = 0;
+        for (key, incr) in self.events.query(
             Some(event_type),
             phase,
             rotation,
@@ -639,146 +762,11 @@ impl Stats {
             Some(zone),
             None,
         ) {
-            total_count += *count as u64;
+            total += *incr as u32;
             if key.eval.as_ref() == Some(&eval) {
-                eval_count += *count as u64;
+                count += *incr as i32;
             }
         }
-        (total_count > 0).then_some(eval_count as f64 / total_count as f64 * 100.0)
-    }
-
-    pub fn positive_pass_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::P, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect | EvalEnum::Positive => 1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn pass_efficiency_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::P, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect | EvalEnum::Positive => 1,
-                EvalEnum::Error | EvalEnum::Over => -1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn attack_efficiency_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-        zone: Option<ZoneEnum>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::A, player, phase, rotation, zone, |eval| {
-            match eval {
-                EvalEnum::Perfect => 1,
-                EvalEnum::Error | EvalEnum::Over => -1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn positive_dig_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::D, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect | EvalEnum::Positive => 1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn dig_efficiency_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::D, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect | EvalEnum::Positive | EvalEnum::Over => 1,
-                EvalEnum::Error => -1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn positive_serve_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::S, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect | EvalEnum::Positive | &EvalEnum::Over => 1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn serve_efficiency_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::S, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect
-                | EvalEnum::Positive
-                | &EvalEnum::Over
-                | &EvalEnum::Exclamative => 1,
-                EvalEnum::Error => -1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn positive_block_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::B, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect | EvalEnum::Positive => 1,
-                _ => 0,
-            }
-        })
-    }
-
-    pub fn block_efficiency_percentage(
-        &self,
-        player: Option<Uuid>,
-        phase: Option<PhaseEnum>,
-        rotation: Option<u8>,
-    ) -> Option<f64> {
-        self.percentage_with_scoring(EventTypeEnum::B, player, phase, rotation, None, |eval| {
-            match eval {
-                EvalEnum::Perfect | EvalEnum::Positive => 1,
-                EvalEnum::Error | EvalEnum::Over => -1,
-                _ => 0,
-            }
-        })
+        (count > 0).then_some(((count as f64) / (total as f64) * 100.0, total, count))
     }
 }

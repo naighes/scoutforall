@@ -32,36 +32,47 @@ mod tests {
         ];
         let libero = Uuid::new_v4();
         let snapshot = make_empty_snapshot(1, TeamSideEnum::Them, lineup, setter, libero);
-        assert_eq!(snapshot.current_lineup.get_role(&setter), RoleEnum::Setter);
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(1)),
+                .get_role(&setter)
+                .expect("expected a role"),
+            RoleEnum::Setter
+        );
+        assert_eq!(
+            snapshot
+                .current_lineup
+                .get_role(&snapshot.current_lineup.get(1).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::OutsideHitter
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(2)),
+                .get_role(&snapshot.current_lineup.get(2).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::MiddleBlocker
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(3)),
+                .get_role(&snapshot.current_lineup.get(3).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::OppositeHitter
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(4)),
+                .get_role(&snapshot.current_lineup.get(4).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::OutsideHitter
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(5)),
-            RoleEnum::MiddleBlocker
+                .get_role(&snapshot.current_lineup.get(5).expect("expected a player"))
+                .expect("expected a role"),
+            RoleEnum::Libero
         );
     }
 
@@ -79,36 +90,47 @@ mod tests {
         let setter = lineup[5];
         let libero = Uuid::new_v4();
         let snapshot = make_empty_snapshot(1, TeamSideEnum::Them, lineup, setter, libero);
-        assert_eq!(snapshot.current_lineup.get_role(&setter), RoleEnum::Setter);
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(0)),
+                .get_role(&setter)
+                .expect("expected a role"),
+            RoleEnum::Setter
+        );
+        assert_eq!(
+            snapshot
+                .current_lineup
+                .get_role(&snapshot.current_lineup.get(0).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::OutsideHitter
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(1)),
+                .get_role(&snapshot.current_lineup.get(1).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::MiddleBlocker
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(2)),
+                .get_role(&snapshot.current_lineup.get(2).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::OppositeHitter
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(3)),
+                .get_role(&snapshot.current_lineup.get(3).expect("expected a player"))
+                .expect("expected a role"),
             RoleEnum::OutsideHitter
         );
         assert_eq!(
             snapshot
                 .current_lineup
-                .get_role(&snapshot.current_lineup.get(4)),
-            RoleEnum::MiddleBlocker
+                .get_role(&snapshot.current_lineup.get(4).expect("expected a player"))
+                .expect("expected a role"),
+            RoleEnum::Libero
         );
     }
 

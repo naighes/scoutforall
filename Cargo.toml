@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ratatui = "0.29.0"
 thiserror = "1.0"
 typst = "0.13"
 typst-pdf = "0.13"
@@ -19,3 +20,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 regex = "1"
 csv = "1"
 comfy-table = "7.0"
+color-eyre = "0.6"

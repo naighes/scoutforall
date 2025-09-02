@@ -1,6 +1,6 @@
 mod tests {
     use crate::{
-        ops::compute_snapshot,
+        errors::{AppError, SnapshotError},
         shapes::{
             enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
             set::SetEntry,
@@ -29,7 +29,10 @@ mod tests {
         F: FnOnce(),
     {
         assert_eq!(
-            snapshot.current_lineup.get_current_rotation(),
+            snapshot
+                .current_lineup
+                .get_current_rotation()
+                .expect("expected a rotation"),
             rotation,
             "wrong rotation"
         );
@@ -47,19 +50,27 @@ mod tests {
         );
         if let Some(libero) = libero_position {
             assert_eq!(
-                snapshot.current_lineup.get(libero),
+                snapshot
+                    .current_lineup
+                    .get(libero as usize)
+                    .expect("expected a player"),
                 snapshot.current_lineup.get_current_libero(),
                 "wrong libero"
             );
             assert_eq!(
                 snapshot
                     .current_lineup
-                    .get_role(&snapshot.current_lineup.get((libero + 3) % 6)),
+                    .get_role(
+                        &snapshot
+                            .current_lineup
+                            .get(((libero + 3) % 6) as usize)
+                            .expect("expected a player")
+                    )
+                    .expect("expected a role"),
                 RoleEnum::MiddleBlocker,
                 "wrong middle-blocker"
             );
         }
-        // TODO: test scenario with no libero
         assert_eq!(
             snapshot.stats.possessions.0.values().sum::<u32>(),
             possessions,
@@ -100,15 +111,27 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_computing() {
-        let setter: Uuid = Uuid::new_v4();
-        let oh1: Uuid = Uuid::new_v4();
-        let mb2: Uuid = Uuid::new_v4();
-        let opposite: Uuid = Uuid::new_v4();
-        let oh2: Uuid = Uuid::new_v4();
-        let mb1: Uuid = Uuid::new_v4();
-        let libero: Uuid = Uuid::new_v4();
-        let setter_replacement: Uuid = Uuid::new_v4();
+    fn snapshot_1_computing() {
+        let setter: Uuid =
+            Uuid::parse_str("00cece40-cdc0-4c54-a624-52556a3f9131").expect("should not throw");
+        let oh1: Uuid =
+            Uuid::parse_str("015f2daa-693e-4820-9708-9027b65f29d7").expect("should not throw");
+        let mb2: Uuid =
+            Uuid::parse_str("02eb5e86-cf5e-4a6d-ac53-29beff182dd8").expect("should not throw");
+        let opposite: Uuid =
+            Uuid::parse_str("03ee29ec-f62c-406a-9670-e2791d84f5b3").expect("should not throw");
+        let oh2: Uuid =
+            Uuid::parse_str("0462a0e7-d7d7-4fa7-bd7d-8b5144506d50").expect("should not throw");
+        let mb1: Uuid =
+            Uuid::parse_str("05887877-d823-4270-a8c8-42f901541d5c").expect("should not throw");
+        let libero: Uuid =
+            Uuid::parse_str("0686d9e5-ed37-4758-8b11-52df14406008").expect("should not throw");
+        let setter_replacement: Uuid =
+            Uuid::parse_str("079a79c8-ab17-401e-bc34-9ea68dd578b4").expect("should not throw");
+        let some_other_replacement: Uuid =
+            Uuid::parse_str("e1f518fd-a730-4d5e-bb78-e97daefdf929").expect("should not throw");
+        let some_other_player: Uuid =
+            Uuid::parse_str("9dac1242-72a5-48f6-bb61-680d2be65dcb").expect("should not throw");
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
 
         let set = SetEntry {
@@ -125,8 +148,9 @@ mod tests {
                 timestamp: Utc::now(),
             }],
         };
-        let (mut snapshot, mut availeble_options) =
-            compute_snapshot(&set).expect("expected successful computation");
+        let (mut snapshot, mut availeble_options) = set
+            .compute_snapshot()
+            .expect("expected successful computation");
         assert_eq!(snapshot.score_us, 1);
         assert_eq!(snapshot.score_them, 0);
         assert_eq!(snapshot.get_serving_team(), Some(TeamSideEnum::Us));
@@ -134,13 +158,40 @@ mod tests {
             snapshot.current_lineup.get_current_phase(),
             PhaseEnum::Break
         );
-        assert_eq!(snapshot.current_lineup.get_current_rotation(), 0);
-        assert_eq!(snapshot.current_lineup.get(0), setter);
-        assert_eq!(snapshot.current_lineup.get(3), opposite);
+        assert_eq!(
+            snapshot
+                .current_lineup
+                .get_current_rotation()
+                .expect("expected a rotation"),
+            0
+        );
+        assert_eq!(
+            snapshot.current_lineup.get(0).expect("expected a player"),
+            setter
+        );
+        assert_eq!(
+            snapshot.current_lineup.get(3).expect("expected a player"),
+            opposite
+        );
 
-        assert_eq!(snapshot.current_lineup.get(5), libero);
-        assert_eq!(snapshot.current_lineup.get_mb1(), mb1);
-        assert_eq!(snapshot.current_lineup.get_mb2(), mb2);
+        assert_eq!(
+            snapshot.current_lineup.get(5).expect("expected a player"),
+            libero
+        );
+        assert_eq!(
+            snapshot
+                .current_lineup
+                .get_mb1()
+                .expect("expected a player"),
+            mb1
+        );
+        assert_eq!(
+            snapshot
+                .current_lineup
+                .get_mb2()
+                .expect("expected a player"),
+            mb2
+        );
         assert_eq!(
             &snapshot.last_event.clone().expect("error").event_type,
             &EventTypeEnum::S
@@ -305,7 +356,12 @@ mod tests {
                         1,                      // unforced_errors
                         0,                      // counter_attacks
                         1,                      // opponent_errors
-                        || {},
+                        || {
+                            assert_eq!(
+                                snapshot.current_lineup.get_setter(),
+                                Some(setter_replacement)
+                            );
+                        },
                     );
                 }),
             ),
@@ -496,15 +552,21 @@ mod tests {
                         2,    // opponent_errors
                         || {
                             assert_eq!(
-                                snapshot
-                                    .current_lineup
-                                    .find_position(&snapshot.current_lineup.get_mb2()),
+                                snapshot.current_lineup.find_position(
+                                    &snapshot
+                                        .current_lineup
+                                        .get_mb2()
+                                        .expect("expected a player")
+                                ),
                                 Some(0)
                             );
                             assert_eq!(
-                                snapshot
-                                    .current_lineup
-                                    .find_position(&snapshot.current_lineup.get_mb1()),
+                                snapshot.current_lineup.find_position(
+                                    &snapshot
+                                        .current_lineup
+                                        .get_mb1()
+                                        .expect("expected a player")
+                                ),
                                 Some(3)
                             );
                         },
@@ -943,14 +1005,141 @@ mod tests {
                     );
                 }),
             ),
+            (
+                EventEntry {
+                    event_type: EventTypeEnum::R,
+                    eval: None,
+                    target_player: Some(setter),
+                    player: Some(setter_replacement),
+                    timestamp: Utc::now(),
+                },
+                Box::new(|snapshot: &Snapshot| {
+                    assert_snapshot(
+                        snapshot,
+                        1, // rotation
+                        PhaseEnum::SideOut,
+                        8,                        // score_us
+                        8,                        // score_them
+                        Some(TeamSideEnum::Them), // serving_team
+                        Some(0),                  // libero_position
+                        15,                       // possessions
+                        6,                        // attacks
+                        7,                        // errors
+                        5,                        // unforced_errors
+                        2,                        // counter_attacks
+                        4,                        // opponent_errors
+                        || {
+                            assert_eq!(snapshot.current_lineup.get_setter(), Some(setter));
+                        },
+                    );
+                }),
+            ),
         ];
 
         for (event, assert) in list {
             availeble_options = snapshot
-                .compute_event(&event, availeble_options)
+                .add_event(&event, availeble_options)
                 .expect("expected a successful computation");
             assert(&snapshot);
         }
+
+        let setter_already_replaced = snapshot.add_event(
+            &EventEntry {
+                event_type: EventTypeEnum::R,
+                eval: None,
+                player: Some(setter),                    // out
+                target_player: Some(setter_replacement), // in
+                timestamp: Utc::now(),
+            },
+            vec![EventTypeEnum::R],
+        );
+        assert!(match setter_already_replaced {
+            Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
+                error == format!("player {:?} was already replaced", setter)
+            }
+            _ => false,
+        });
+
+        let setter_replacement_already_used = snapshot.add_event(
+            &EventEntry {
+                event_type: EventTypeEnum::R,
+                eval: None,
+                player: Some(oh1),                       // out
+                target_player: Some(setter_replacement), // in
+                timestamp: Utc::now(),
+            },
+            vec![EventTypeEnum::R],
+        );
+        assert!(match setter_replacement_already_used {
+            Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
+                error == format!("player {:?} was already a replacement", setter_replacement)
+            }
+            _ => false,
+        });
+
+        let libero_cannot_be_replaced = snapshot.add_event(
+            &EventEntry {
+                event_type: EventTypeEnum::R,
+                eval: None,
+                player: Some(libero),                        // out
+                target_player: Some(some_other_replacement), // in
+                timestamp: Utc::now(),
+            },
+            vec![EventTypeEnum::R],
+        );
+        assert!(match libero_cannot_be_replaced {
+            Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
+                error == "cannot replace the libero player"
+            }
+            _ => false,
+        });
+
+        snapshot
+            .add_event(
+                &EventEntry {
+                    event_type: EventTypeEnum::R,
+                    eval: None,
+                    player: Some(oh1),                           // out
+                    target_player: Some(some_other_replacement), // in
+                    timestamp: Utc::now(),
+                },
+                vec![EventTypeEnum::R],
+            )
+            .expect("should not throw");
+
+        let unclosed_change_error = snapshot.add_event(
+            &EventEntry {
+                event_type: EventTypeEnum::R,
+                eval: None,
+                player: Some(some_other_replacement),   // out
+                target_player: Some(some_other_player), // in
+                timestamp: Utc::now(),
+            },
+            vec![EventTypeEnum::R],
+        );
+        assert!(match unclosed_change_error {
+            Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
+                error
+                    == format!(
+                        "player {:?} can be only replaced by player {:?}",
+                        some_other_replacement, oh1,
+                    )
+            }
+            _ => false,
+        });
+
+        snapshot
+            .add_event(
+                &EventEntry {
+                    event_type: EventTypeEnum::R,
+                    eval: None,
+                    player: Some(some_other_replacement), // out
+                    target_player: Some(oh1),             // in
+                    timestamp: Utc::now(),
+                },
+                vec![EventTypeEnum::R],
+            )
+            .expect("should not throw");
 
         // TODO: final assertion for snapshot stats
     }
