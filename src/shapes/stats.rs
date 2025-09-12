@@ -277,14 +277,14 @@ impl DistributionStats {
         phase: PhaseEnum,
         rotation: u8,
         zone: ZoneEnum,
-        eval: EvalEnum,
+        prev_eval: EvalEnum,
         attack_eval: EvalEnum,
     ) {
         let key = DistributionsStatsKey {
             phase,
             rotation,
             zone,
-            eval,
+            eval: prev_eval,
             attack_eval,
         };
         *self.0.entry(key).or_insert(0) += 1;
@@ -319,12 +319,12 @@ impl DistributionStats {
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         prev_eval_filter: Option<EvalEnum>,
-    ) -> (f64, f64) {
+    ) -> Option<(f64, f64)> {
         let mut total_balls = 0u32;
         let mut balls_in_zone = 0u32;
         let mut attacks_total = 0u32;
         let mut attacks_won = 0u32;
-        for (key, count) in self.query(phase, rotation, Some(zone), prev_eval_filter, None) {
+        for (key, count) in self.query(phase, rotation, None, prev_eval_filter, None) {
             total_balls += count;
             if key.zone == zone {
                 balls_in_zone += count;
@@ -345,7 +345,11 @@ impl DistributionStats {
         } else {
             attacks_won as f64 / attacks_total as f64 * 100.0
         };
-        (zone_percentage, attack_success_percentage)
+        if balls_in_zone > 0 {
+            Some((zone_percentage, attack_success_percentage))
+        } else {
+            None
+        }
     }
 }
 

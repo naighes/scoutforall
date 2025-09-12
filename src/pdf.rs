@@ -1730,7 +1730,10 @@ fn distribution_stats(stats: &Stats) -> String {
                         .distribution
                         .zone_stats(z.clone(), phase, None, prev_eval)
                 })
-                .map(|(v1, v2)| (Some(v1), Some(v2)))
+                .map(|v| match v {
+                    None => (None, None),
+                    Some((v1, v2)) => (Some(v1), Some(v2)),
+                })
                 .collect::<Vec<_>>();
             court.add_row(CourtRow::new(
                 Some(values),

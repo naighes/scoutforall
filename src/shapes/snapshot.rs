@@ -143,6 +143,7 @@ impl Snapshot {
             current_eval,
         ) {
             (A, D | P, Perfect | Positive | Exclamative | Negative, _) => true,
+            (A, S, Over, _) => true,
             (A, A | B, Positive, _) => true,
             _ => false,
         } {
@@ -150,8 +151,8 @@ impl Snapshot {
                 self.current_lineup.get_current_phase(),
                 rotation,
                 attack_zone,
-                current_eval,
                 prev_eval,
+                current_eval,
             );
         }
         Ok(())

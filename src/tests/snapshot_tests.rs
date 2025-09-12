@@ -2,7 +2,9 @@ mod tests {
     use crate::{
         errors::{AppError, SnapshotError},
         shapes::{
-            enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
+            enums::{
+                ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
+            },
             set::SetEntry,
             snapshot::{EventEntry, Snapshot},
         },
@@ -236,12 +238,12 @@ mod tests {
                 Box::new(|snapshot: &Snapshot| {
                     assert_snapshot(
                         snapshot,
-                        0,
+                        0, // rotation
                         PhaseEnum::SideOut,
-                        1,
-                        1,
-                        None,
-                        Some(5),
+                        1,       // score_us
+                        1,       // score_them
+                        None,    // serving_team
+                        Some(5), // libero_position
                         3,
                         0,
                         1,
@@ -275,7 +277,23 @@ mod tests {
                         1,
                         0,
                         0,
-                        || {},
+                        || {
+                            assert_eq!(
+                                1,
+                                snapshot
+                                    .stats
+                                    .distribution
+                                    .query(
+                                        Some(PhaseEnum::SideOut),
+                                        Some(0),
+                                        Some(ZoneEnum::Four),
+                                        Some(EvalEnum::Perfect),
+                                        Some(EvalEnum::Perfect)
+                                    )
+                                    .map(|(_, v)| *v)
+                                    .sum::<u32>()
+                            );
+                        },
                     );
                 }),
             ),
@@ -596,7 +614,23 @@ mod tests {
                         2,                      // unforced_errors
                         0,                      // counter_attacks
                         2,                      // opponent_errors
-                        || {},
+                        || {
+                            assert_eq!(
+                                1,
+                                snapshot
+                                    .stats
+                                    .distribution
+                                    .query(
+                                        Some(PhaseEnum::Break),
+                                        Some(4),
+                                        Some(ZoneEnum::Four),
+                                        Some(EvalEnum::Over),
+                                        Some(EvalEnum::Perfect)
+                                    )
+                                    .map(|(_, v)| *v)
+                                    .sum::<u32>()
+                            );
+                        },
                     );
                 }),
             ),
@@ -677,7 +711,23 @@ mod tests {
                         3,       // unforced_errors
                         0,       // counter_attacks
                         2,       // opponent_errors
-                        || {},
+                        || {
+                            assert_eq!(
+                                1,
+                                snapshot
+                                    .stats
+                                    .distribution
+                                    .query(
+                                        Some(PhaseEnum::SideOut),
+                                        Some(4),
+                                        Some(ZoneEnum::Eight),
+                                        Some(EvalEnum::Positive),
+                                        Some(EvalEnum::Negative)
+                                    )
+                                    .map(|(_, v)| *v)
+                                    .sum::<u32>()
+                            );
+                        },
                     );
                 }),
             ),
