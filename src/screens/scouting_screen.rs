@@ -25,7 +25,7 @@ pub struct ScoutingScreen {
     set: SetEntry,
     snapshot: Snapshot,
     currently_available_options: Vec<EventTypeEnum>,
-    last_event: EventTypeInput,
+    current_event: EventTypeInput,
     player: Option<Uuid>,
     state: ScoutingScreenState,
     error: Option<String>,
@@ -53,11 +53,15 @@ enum ScoutingScreenState {
     Event,
     Player,
     Eval,
+    Replacement,
 }
 
 impl Screen for ScoutingScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        self.error = None;
+        if self.error.is_some() {
+            self.error = None;
+            return AppAction::None;
+        }
         if let KeyCode::Esc = key.code {
             return AppAction::Back(true, self.back_stack_count);
         };
@@ -65,6 +69,7 @@ impl Screen for ScoutingScreen {
             ScoutingScreenState::Event => self.handle_event_screen(key),
             ScoutingScreenState::Player => self.handle_player_screen(key),
             ScoutingScreenState::Eval => self.handle_eval_screen(key),
+            ScoutingScreenState::Replacement => self.handle_replacement_screen(key),
         }
     }
 
@@ -97,7 +102,10 @@ impl Screen for ScoutingScreen {
                 self.render_eval_table(f, left_chunks[0]);
             }
             ScoutingScreenState::Player => {
-                self.render_lineup_choice_table(f, left_chunks[0]);
+                self.render_lineup_choices(f, left_chunks[0]);
+            }
+            ScoutingScreenState::Replacement => {
+                self.render_replacement_choices(f, left_chunks[0]);
             }
         }
         self.render_recent_events(f, left_chunks[1]);
@@ -120,7 +128,7 @@ impl ScoutingScreen {
             set,
             snapshot,
             currently_available_options: available_options,
-            last_event: EventTypeInput::None,
+            current_event: EventTypeInput::None,
             player: None,
             state: ScoutingScreenState::Event,
             error: None,
@@ -128,80 +136,100 @@ impl ScoutingScreen {
         }
     }
 
-    fn get_lineup_choice(&self) -> Vec<LineupChoiceEntry> {
-        vec![
-            (0, "setter", self.snapshot.current_lineup.get_setter()),
-            (
-                1,
-                "outside hitter 1",
-                self.snapshot.current_lineup.get_oh1(),
-            ),
-            (
-                2,
-                "middle blocker 2",
-                self.snapshot.current_lineup.get_mb2(),
-            ),
-            (3, "opposite", self.snapshot.current_lineup.get_opposite()),
-            (
-                4,
-                "outside hitter 2",
-                self.snapshot.current_lineup.get_oh2(),
-            ),
-            (
-                5,
-                "middle blocker 1",
-                self.snapshot.current_lineup.get_mb1(),
-            ),
-            (
-                6,
-                "libero",
-                Some(self.snapshot.current_lineup.get_current_libero()),
-            ),
-        ]
-        .into_iter()
-        .filter_map(|(i, role, player_id)| {
-            let id = player_id?;
-            // ensure is within the lineup
-            if self.snapshot.current_lineup.find_position(&id).is_none() {
+    fn filter_lineup_choices(
+        &self,
+        i: u8,
+        (role, player_id): (String, Option<Uuid>),
+    ) -> Option<LineupChoiceEntry> {
+        let id = player_id?;
+        // ensure is within the lineup
+        if self.snapshot.current_lineup.find_position(&id).is_none() {
+            return None;
+        }
+        // ensure this action is allowed for liibero
+        let is_libero_allowed_event = match self.current_event {
+            EventTypeInput::Some(EventTypeEnum::A)
+            | EventTypeInput::Some(EventTypeEnum::B)
+            | EventTypeInput::Some(EventTypeEnum::S) => false,
+            _ => true,
+        };
+        if self.snapshot.current_lineup.get_current_libero() == id && !is_libero_allowed_event {
+            return None;
+        }
+        // on block, do not allow back players
+        if self.snapshot.current_lineup.is_back_row_player(&id)
+            && self.current_event == EventTypeInput::Some(EventTypeEnum::B)
+        {
+            return None;
+        }
+        if let Some(pending_touch) = self.snapshot.pending_touch {
+            if pending_touch == id {
                 return None;
             }
-            // ensure this action is allowed for liibero
-            let is_libero_allowed_event = match self.last_event {
-                EventTypeInput::Some(EventTypeEnum::A)
-                | EventTypeInput::Some(EventTypeEnum::B)
-                | EventTypeInput::Some(EventTypeEnum::S) => false,
-                _ => true,
-            };
-            if self.snapshot.current_lineup.get_current_libero() == id && !is_libero_allowed_event {
-                return None;
-            }
-            // on block, do not allow back players
-            if self.snapshot.current_lineup.is_back_row_player(&id)
-                && self.last_event == EventTypeInput::Some(EventTypeEnum::B)
-            {
-                return None;
-            }
-            if let Some(pending_touch) = self.snapshot.pending_touch {
-                if pending_touch == id {
-                    return None;
-                }
-            }
-            // search for the player
-            let player = self
-                .current_match
-                .team
-                .players
-                .iter()
-                .find(|p| p.id == id)?;
-            Some(LineupChoiceEntry {
-                index: (i + 1) as u8,
-                id,
-                name: player.name.clone(),
-                number: player.number,
-                role: role.to_string(),
-            })
+        }
+        // search for the player
+        let player = self
+            .current_match
+            .team
+            .players
+            .iter()
+            .find(|p| p.id == id)?;
+        Some(LineupChoiceEntry {
+            index: i as u8,
+            id,
+            name: player.name.clone(),
+            number: player.number,
+            role,
         })
-        .collect()
+    }
+
+    fn filter_replaceable_choices(
+        &self,
+        i: u8,
+        (role, player_id): (String, Option<Uuid>),
+    ) -> Option<LineupChoiceEntry> {
+        let id = player_id?;
+        // ensure is within the lineup
+        if self.snapshot.current_lineup.find_position(&id).is_none() {
+            return None;
+        }
+        // search for the player
+        let player = self
+            .current_match
+            .team
+            .players
+            .iter()
+            .find(|p| p.id == id)?;
+        Some(LineupChoiceEntry {
+            index: i as u8,
+            id,
+            name: player.name.clone(),
+            number: player.number,
+            role,
+        })
+    }
+
+    fn get_lineup_choices(&self) -> Vec<LineupChoiceEntry> {
+        match self.current_event {
+            EventTypeInput::Some(EventTypeEnum::R) => self
+                .snapshot
+                .current_lineup
+                .get_replaceable_lineup_choices()
+                .into_iter()
+                .filter_map(|(i, (role, player_id))| {
+                    self.filter_replaceable_choices(i, (role.clone(), player_id))
+                })
+                .collect(),
+            _ => self
+                .snapshot
+                .current_lineup
+                .get_lineup_choices()
+                .into_iter()
+                .filter_map(|(i, (role, player_id))| {
+                    self.filter_lineup_choices(i, (role.clone(), player_id))
+                })
+                .collect(),
+        }
     }
 
     fn undo_last_event(&mut self) -> AppAction {
@@ -219,19 +247,23 @@ impl ScoutingScreen {
         // set the previous (removed) event player
         self.player = removed_event.player;
         match (removed_event.event_type, removed_event.player) {
-            (A | B | D | P | S, _) => {
+            (A | B | D | P | S, Some(_)) => {
                 // (A)ttack, (B) block, (D)ig, (P)ass and (S)erve require evaluation
-                self.last_event = EventTypeInput::Some(removed_event.event_type);
+                self.current_event = EventTypeInput::Some(removed_event.event_type);
                 // set the prompt eval state
                 self.state = ScoutingScreenState::Eval;
             }
+            (R, Some(_)) => {
+                self.current_event = EventTypeInput::Some(removed_event.event_type);
+                self.state = ScoutingScreenState::Replacement;
+            }
             (_, Some(_)) => {
                 // the removed event involved a player => set the prompt player state
-                self.last_event = EventTypeInput::Some(removed_event.event_type);
+                self.current_event = EventTypeInput::Some(removed_event.event_type);
                 self.state = ScoutingScreenState::Player;
             }
             _ => {
-                self.last_event = EventTypeInput::None;
+                self.current_event = EventTypeInput::None;
                 // set the prompt event selection state
                 self.state = ScoutingScreenState::Event;
             }
@@ -289,7 +321,7 @@ impl ScoutingScreen {
                 self.set.events.push(event.clone());
                 // reset state
                 self.currently_available_options = options;
-                self.last_event = EventTypeInput::None;
+                self.current_event = EventTypeInput::None;
                 self.player = None;
                 self.state = ScoutingScreenState::Event;
                 match self.snapshot.get_set_winner(self.set.set_number) {
@@ -313,9 +345,10 @@ impl ScoutingScreen {
         if key.code == Char('u') {
             // undo operation
             self.undo_last_event();
+            return AppAction::None;
         }
         // parse and set last event
-        let last_event = self.map_key_to_event(key.code, &self.last_event);
+        let last_event = self.map_key_to_event(key.code, &self.current_event);
         match last_event {
             EventTypeInput::Some(event_type) => {
                 let is_option_available = self
@@ -324,12 +357,13 @@ impl ScoutingScreen {
                     .any(|o| *o == event_type);
                 match (is_option_available, event_type) {
                     (false, _) => {
-                        self.last_event = EventTypeInput::None;
+                        // the selected option is not available => error
+                        self.current_event = EventTypeInput::None;
                         self.error = Some(format!("event {} is not available", event_type));
                     }
                     // these events require player selection
                     (true, A | B | P | EventTypeEnum::F | D | R) => {
-                        self.last_event = last_event;
+                        self.current_event = last_event;
                         self.state = ScoutingScreenState::Player;
                     }
                     // these events do not require player nor evaluation selection
@@ -347,15 +381,66 @@ impl ScoutingScreen {
                     (true, S) => {
                         self.player = self.snapshot.current_lineup.get_serving_player();
                         self.state = ScoutingScreenState::Eval;
-                        self.last_event = last_event;
+                        self.current_event = last_event;
                     }
                 }
             }
             EventTypeInput::Partial => {
-                self.last_event = EventTypeInput::Partial;
+                self.current_event = EventTypeInput::Partial;
             }
             _ => {
-                self.last_event = EventTypeInput::None;
+                self.current_event = EventTypeInput::None;
+            }
+        };
+        AppAction::None
+    }
+
+    fn handle_replacement_screen(&mut self, key: KeyEvent) -> AppAction {
+        use KeyCode::*;
+        if key.code == Char('u') {
+            // undo
+            self.player = None;
+            self.state = ScoutingScreenState::Player;
+            return AppAction::None;
+        }
+        // valid char and ongoing event
+        let (Char(c), EventTypeInput::Some(event_type)) = (key.code, &self.current_event) else {
+            return AppAction::None;
+        };
+        match self.player {
+            None => {
+                self.error = Some("no player selected".to_string());
+                return AppAction::None;
+            }
+            Some(replaced_id) => {
+                // find available replacements for the selected player
+                let available_replacements = self
+                    .snapshot
+                    .current_lineup
+                    .get_available_replacements(&self.current_match.team, replaced_id);
+                // expected 1..=available_replacements.len() digits
+                let Some(digit) = c.to_digit(10) else {
+                    return AppAction::None;
+                };
+                let digit_usize = digit as usize;
+                if !(1..=available_replacements.len()).contains(&digit_usize) {
+                    return AppAction::None;
+                }
+                // lookup selected index in available replacements
+                if let Some((_, player)) = available_replacements
+                    .iter()
+                    .find(|(i, p)| *i == digit as u8)
+                {
+                    // attempt of collecting the event
+                    let entry = EventEntry {
+                        timestamp: Utc::now(),
+                        event_type: *event_type,
+                        eval: None,
+                        player: Some(replaced_id),
+                        target_player: Some(player.id),
+                    };
+                    return self.add_event(&entry);
+                }
             }
         };
         AppAction::None
@@ -365,12 +450,12 @@ impl ScoutingScreen {
         use KeyCode::*;
         if key.code == Char('u') {
             // undo
-            self.last_event = EventTypeInput::None;
+            self.current_event = EventTypeInput::None;
             self.state = ScoutingScreenState::Event;
             return AppAction::None;
         }
         // valid char and ongoing event
-        let (Char(c), EventTypeInput::Some(event_type)) = (key.code, &self.last_event) else {
+        let (Char(c), EventTypeInput::Some(event_type)) = (key.code, &self.current_event) else {
             return AppAction::None;
         };
         // expected 1..=7 digits
@@ -381,7 +466,7 @@ impl ScoutingScreen {
             return AppAction::None;
         }
         // lookup player in lineup
-        let available_lineup_players = self.get_lineup_choice();
+        let available_lineup_players = self.get_lineup_choices();
         let Some(player) = available_lineup_players
             .iter()
             .find(|p| p.index == digit as u8)
@@ -398,6 +483,10 @@ impl ScoutingScreen {
                 self.player = Some(player.id);
                 self.state = ScoutingScreenState::Eval;
             }
+            EventTypeEnum::R => {
+                self.player = Some(player.id);
+                self.state = ScoutingScreenState::Replacement;
+            }
             _ => {
                 let entry = EventEntry {
                     timestamp: Utc::now(),
@@ -409,7 +498,6 @@ impl ScoutingScreen {
                 return self.add_event(&entry);
             }
         }
-
         AppAction::None
     }
 
@@ -420,8 +508,8 @@ impl ScoutingScreen {
             // * the ScoutingScreenState::Player screen if it's not serving
             // * otherwise, so it's serving, go to the ScoutingScreenState::Event
             self.player = None;
-            if self.last_event == EventTypeInput::Some(S) {
-                self.last_event = EventTypeInput::None;
+            if self.current_event == EventTypeInput::Some(S) {
+                self.current_event = EventTypeInput::None;
                 self.state = ScoutingScreenState::Event;
             } else {
                 self.state = ScoutingScreenState::Player;
@@ -430,7 +518,7 @@ impl ScoutingScreen {
         }
         use EventTypeEnum::*;
         use KeyCode::*;
-        let eval = match (key.code, &self.last_event) {
+        let eval = match (key.code, &self.current_event) {
             (Char('#'), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Perfect),
             (Char('+'), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Positive),
             (Char('!'), EventTypeInput::Some(P | D)) => Some(EvalEnum::Exclamative),
@@ -439,7 +527,7 @@ impl ScoutingScreen {
             (Char('='), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Error),
             _ => None,
         };
-        match (eval, &self.last_event) {
+        match (eval, &self.current_event) {
             (Some(eval), EventTypeInput::Some(event_type)) => {
                 match event_type {
                     // ensure event type allows evaluation
@@ -549,7 +637,7 @@ impl ScoutingScreen {
     fn render_eval_table(&mut self, f: &mut Frame, area: Rect) {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        let available_evals = match self.last_event {
+        let available_evals = match self.current_event {
             EventTypeInput::Some(S | A | B) => {
                 vec![Perfect, Positive, Over, Negative, Error]
             }
@@ -564,7 +652,7 @@ impl ScoutingScreen {
                 Row::new(vec![format!(
                     "{} => {}",
                     ev.to_string(),
-                    if let EventTypeInput::Some(last_event) = self.last_event {
+                    if let EventTypeInput::Some(last_event) = self.current_event {
                         if let Some(desc) = ev.friendly_description(last_event) {
                             format!("{} ({})", ev.friendly_name(last_event), desc)
                         } else {
@@ -724,9 +812,9 @@ impl ScoutingScreen {
         f.render_widget(table, area);
     }
 
-    fn render_lineup_choice_table(&self, f: &mut Frame, area: Rect) {
+    fn render_lineup_choices(&self, f: &mut Frame, area: Rect) {
         let rows: Vec<Row> = self
-            .get_lineup_choice()
+            .get_lineup_choices()
             .iter()
             .map(|e| {
                 Row::new(vec![
@@ -752,8 +840,47 @@ impl ScoutingScreen {
                 .title("player selection")
                 .style(Style::default().add_modifier(Modifier::REVERSED)),
         );
-
         f.render_widget(table, area);
+    }
+
+    fn render_replacement_choices(&mut self, f: &mut Frame, area: Rect) {
+        match self.player {
+            None => {
+                self.error = Some("no player selected".to_string());
+            }
+            Some(replaced_id) => {
+                let rows: Vec<Row> = self
+                    .snapshot
+                    .current_lineup
+                    .get_available_replacements(&self.current_match.team, replaced_id)
+                    .iter()
+                    .map(|(i, e)| {
+                        Row::new(vec![
+                            format!(" {:<12}", i),
+                            format!(" #{:<12}", e.number),
+                            format!(" {:<12}", e.name),
+                            format!(" {:<20}", e.role),
+                        ])
+                    })
+                    .collect();
+                let table = Table::new(
+                    rows,
+                    [
+                        Constraint::Percentage(8),
+                        Constraint::Percentage(8),
+                        Constraint::Percentage(56),
+                        Constraint::Percentage(28),
+                    ],
+                )
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("select replacement")
+                        .style(Style::default().add_modifier(Modifier::REVERSED)),
+                );
+                f.render_widget(table, area);
+            }
+        }
     }
 
     fn render_footer(&mut self, f: &mut Frame, area: Rect) {
@@ -764,7 +891,11 @@ impl ScoutingScreen {
             f.render_widget(Paragraph::new("Esc = back | Q = quit").block(block), area);
         } else {
             f.render_widget(
-                Paragraph::new("U = undo | Esc = back | Q = quit").block(block),
+                Paragraph::new(format!(
+                    "U = undo | Esc = back | Q = quit CE:{:?}",
+                    self.current_event
+                ))
+                .block(block),
                 area,
             );
         }
@@ -806,7 +937,7 @@ impl ScoutingScreen {
                 .wrap(Wrap { trim: true });
             f.render_widget(rotation_container, chunks[1]);
         }
-        if let EventTypeInput::Some(ev) = &self.last_event {
+        if let EventTypeInput::Some(ev) = &self.current_event {
             let event_container = Paragraph::new(format!("\n{}\n", ev.to_string()))
                 .style(
                     Style::default()

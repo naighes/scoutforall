@@ -302,10 +302,6 @@ impl Lineup {
         phase != PhaseEnum::Break || (rotation != 1 && rotation != 4)
     }
 
-    pub fn players(&self) -> &[Uuid; 6] {
-        &self.players
-    }
-
     pub fn get_involved_players(&self) -> Vec<Uuid> {
         let mut set: HashSet<Uuid> = self.players.iter().cloned().collect();
         set.insert(self.current_libero);
@@ -323,11 +319,11 @@ impl Lineup {
         set.into_iter().collect()
     }
 
+    /* substitutions */
+
     pub fn get_substitutions(&self) -> Vec<SubstitutionRecord> {
         self.substitutions.clone()
     }
-
-    /* substitutions */
 
     fn was_player_already_replaced(&self, player_id: &Uuid) -> bool {
         self.substitutions
@@ -348,6 +344,10 @@ impl Lineup {
             .iter()
             .find(|p| p.replacement == *replaced)
             .map(|p| p.replaced)
+    }
+
+    fn was_max_number_of_substitutions_reached(&self) -> bool {
+        self.substitutions.len() == MAX_SUBSTITUTIONS
     }
 
     pub fn add_substitution(
@@ -374,6 +374,12 @@ impl Lineup {
             if self.get_current_libero() == *replaced {
                 return Err(AppError::Snapshot(SnapshotError::LineupError(
                     "cannot replace the libero player".to_string(),
+                )));
+            }
+            // check if max substitutions count was reached
+            if self.was_max_number_of_substitutions_reached() {
+                return Err(AppError::Snapshot(SnapshotError::LineupError(
+                    "max number of substitutions was reached".to_string(),
                 )));
             }
             // closed change
@@ -408,10 +414,7 @@ impl Lineup {
         }
     }
 
-    pub fn get_repleceable_lineup(&self) -> Vec<(u8, (String, Uuid))> {
-        if self.substitutions.len() >= MAX_SUBSTITUTIONS {
-            return vec![];
-        }
+    pub fn get_lineup_choices(&self) -> Vec<(u8, (String, Option<Uuid>))> {
         let lineup: Vec<Option<Uuid>> = vec![
             self.get_setter(),
             self.get_oh1(),
@@ -419,8 +422,9 @@ impl Lineup {
             self.get_opposite(),
             self.get_oh2(),
             self.get_mb1(),
+            Some(self.get_current_libero()),
         ];
-        let options: Vec<(u8, (String, Uuid))> = lineup
+        lineup
             .into_iter()
             .enumerate()
             .filter_map(|(i, id)| {
@@ -428,24 +432,51 @@ impl Lineup {
                     (
                         i as u8,
                         match i {
-                            0 => ("setter".to_string(), uuid),
-                            1 => ("outside hitter 1".to_string(), uuid),
-                            2 => ("middle blocker 2".to_string(), uuid),
-                            3 => ("opposite".to_string(), uuid),
-                            4 => ("outside hitter 2".to_string(), uuid),
-                            5 => ("middle blocker 1".to_string(), uuid),
-                            _ => ("unknown".to_string(), uuid),
+                            0 => ("setter".to_string(), Some(uuid)),
+                            1 => ("outside hitter 1".to_string(), Some(uuid)),
+                            2 => ("middle blocker 2".to_string(), Some(uuid)),
+                            3 => ("opposite".to_string(), Some(uuid)),
+                            4 => ("outside hitter 2".to_string(), Some(uuid)),
+                            5 => ("middle blocker 1".to_string(), Some(uuid)),
+                            6 => ("libero".to_string(), Some(uuid)),
+                            _ => ("unknown".to_string(), None),
                         },
                     )
                 })
             })
             .map(|(i, (role, id))| (i + 1, (role, id)))
-            .collect();
+            .collect()
+    }
+
+    pub fn get_replaceable_lineup_choices(&self) -> Vec<(u8, (String, Option<Uuid>))> {
+        if self.substitutions.len() >= MAX_SUBSTITUTIONS {
+            return vec![];
+        }
         let already_replaced: HashSet<Uuid> =
             self.substitutions.iter().map(|s| s.replaced).collect();
+        let options: Vec<(u8, (String, Option<Uuid>))> = self
+            .get_lineup_choices()
+            .iter()
+            // libero is not replaceable
+            .filter(|(_, (_, id))| {
+                if let Some(id) = id {
+                    *id != self.current_libero
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect();
         options
             .into_iter()
-            .filter(|(_, (_, id))| !already_replaced.contains(id))
+            // pull out already replaced players
+            .filter(|(_, (_, id))| {
+                if let Some(id) = id {
+                    !already_replaced.contains(id)
+                } else {
+                    false
+                }
+            })
             .collect()
     }
 

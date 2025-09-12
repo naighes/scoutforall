@@ -33,7 +33,10 @@ pub struct MatchListScreen {
 
 impl Screen for MatchListScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        self.error = None;
+        if self.error.is_some() {
+            self.error = None;
+            return AppAction::None;
+        }
         match key.code {
             KeyCode::Down => self.next_match(),
             KeyCode::Up => self.previous_match(),

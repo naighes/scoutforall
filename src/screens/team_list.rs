@@ -25,7 +25,10 @@ pub struct TeamListScreen {
 
 impl Screen for TeamListScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        self.error = None;
+        if self.error.is_some() {
+            self.error = None;
+            return AppAction::None;
+        }
         match key.code {
             KeyCode::Down => {
                 self.next_team();

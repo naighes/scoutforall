@@ -37,7 +37,10 @@ pub enum StartSetScreenState {
 
 impl Screen for StartSetScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        self.error = None;
+        if self.error.is_some() {
+            self.error = None;
+            return AppAction::None;
+        }
         match self.state {
             StartSetScreenState::SelectServingTeam => self.handle_serving_team_selection(key),
             StartSetScreenState::SelectLineupPlayers(player_position, setter) => {

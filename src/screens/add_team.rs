@@ -21,7 +21,10 @@ pub struct AddTeamScreen {
 
 impl Screen for AddTeamScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        self.error = None;
+        if self.error.is_some() {
+            self.error = None;
+            return AppAction::None;
+        }
         match key.code {
             KeyCode::Char(c) => match self.field {
                 0 => {
