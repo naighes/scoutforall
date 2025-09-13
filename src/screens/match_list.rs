@@ -33,16 +33,16 @@ pub struct MatchListScreen {
 
 impl Screen for MatchListScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if self.error.is_some() {
-            self.error = None;
-            return AppAction::None;
-        }
-        match key.code {
-            KeyCode::Down => self.next_match(),
-            KeyCode::Up => self.previous_match(),
-            KeyCode::Enter => self.handle_enter_key(),
-            KeyCode::Esc => AppAction::Back(true, Some(1)),
-            KeyCode::Char('n') => {
+        match (key.code, &self.error) {
+            (_, Some(_)) => {
+                self.error = None;
+                AppAction::None
+            }
+            (KeyCode::Down, _) => self.next_match(),
+            (KeyCode::Up, _) => self.previous_match(),
+            (KeyCode::Enter, _) => self.handle_enter_key(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Char('n'), _) => {
                 if self.team.players.len() >= 6 {
                     AppAction::SwitchScreen(Box::new(AddMatchScreen::new(self.team.clone())))
                 } else {
@@ -64,18 +64,10 @@ impl Screen for MatchListScreen {
                 }
             }
         }
-        self.render_error(f, footer_right);
         let container = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(5), Constraint::Min(1)])
             .split(body);
-        let header_text = format!(
-            "{}\nleague: {}\nyear: {}",
-            self.team.name, self.team.league, self.team.year
-        );
-        let header =
-            Paragraph::new(header_text).block(Block::default().borders(Borders::ALL).title("team"));
-        f.render_widget(header, container[0]);
         let match_index = match self.list_state.selected() {
             None => {
                 self.list_state.select(Some(0));
@@ -116,6 +108,8 @@ impl Screen for MatchListScreen {
         } else {
             self.error = Some("could not render the match list".to_string());
         }
+        self.render_header(f, container[0]);
+        self.render_error(f, footer_right);
         self.render_footer(f, footer_left);
     }
 
@@ -195,13 +189,8 @@ impl MatchListScreen {
             match (next_set_number, last_serving_team) {
                 (_, None) => None,
                 (1 | 5, _) => None,
-                (_, Some(side)) => {
-                    if side == TeamSideEnum::Them {
-                        Some(TeamSideEnum::Us)
-                    } else {
-                        Some(TeamSideEnum::Them)
-                    }
-                }
+                (_, Some(TeamSideEnum::Them)) => Some(TeamSideEnum::Us),
+                (_, Some(TeamSideEnum::Us)) => Some(TeamSideEnum::Them),
             },
             Some(1),
         )))
@@ -239,6 +228,16 @@ impl MatchListScreen {
             self.list_state.select(Some(new_selected));
         };
         AppAction::None
+    }
+
+    fn render_header(&self, f: &mut Frame, area: Rect) {
+        let header_text = format!(
+            "{}\nleague: {}\nyear: {}",
+            self.team.name, self.team.league, self.team.year
+        );
+        let header =
+            Paragraph::new(header_text).block(Block::default().borders(Borders::ALL).title("team"));
+        f.render_widget(header, area);
     }
 
     fn render_footer(&mut self, f: &mut Frame, area: Rect) {

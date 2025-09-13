@@ -36,13 +36,11 @@ impl fmt::Display for PhaseEnum {
 impl FromStr for PhaseEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use PhaseEnum::*;
         match s.to_uppercase().as_str() {
-            "break" => Ok(PhaseEnum::Break),
-            "side-out" => Ok(PhaseEnum::SideOut),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
-                "invalid phase: {}",
-                s
-            )))),
+            "break" => Ok(Break),
+            "side-out" => Ok(SideOut),
+            _ => Err(AppError::IO(IOError::Msg(format!("invalid phase: {}", s)))),
         }
     }
 }
@@ -64,9 +62,10 @@ pub enum TeamSideEnum {
 
 impl fmt::Display for TeamSideEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use TeamSideEnum::*;
         let label = match self {
-            TeamSideEnum::Us => "us",
-            TeamSideEnum::Them => "them",
+            Us => "us",
+            Them => "them",
         };
         write!(f, "{}", label)
     }
@@ -75,10 +74,11 @@ impl fmt::Display for TeamSideEnum {
 impl FromStr for TeamSideEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use TeamSideEnum::*;
         match s.to_uppercase().as_str() {
-            "us" => Ok(TeamSideEnum::Us),
-            "them" => Ok(TeamSideEnum::Them),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
+            "us" => Ok(Us),
+            "them" => Ok(Them),
+            _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid team side: {}",
                 s
             )))),
@@ -137,16 +137,17 @@ pub enum EventTypeEnum {
 
 impl fmt::Display for EventTypeEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use EventTypeEnum::*;
         let label = match self {
-            EventTypeEnum::S => "S",
-            EventTypeEnum::P => "P",
-            EventTypeEnum::A => "A",
-            EventTypeEnum::D => "D",
-            EventTypeEnum::B => "B",
-            EventTypeEnum::F => "F",
-            EventTypeEnum::OS => "OS",
-            EventTypeEnum::OE => "OE",
-            EventTypeEnum::R => "R",
+            S => "S",
+            P => "P",
+            A => "A",
+            D => "D",
+            B => "B",
+            F => "F",
+            OS => "OS",
+            OE => "OE",
+            R => "R",
         };
         write!(f, "{}", label)
     }
@@ -154,16 +155,37 @@ impl fmt::Display for EventTypeEnum {
 
 impl EventTypeEnum {
     pub fn friendly_name(&self) -> &'static str {
+        use EventTypeEnum::*;
         match self {
-            EventTypeEnum::S => "serve",
-            EventTypeEnum::P => "pass",
-            EventTypeEnum::A => "attack",
-            EventTypeEnum::D => "dig",
-            EventTypeEnum::B => "block",
-            EventTypeEnum::F => "fault",
-            EventTypeEnum::OS => "opponent score",
-            EventTypeEnum::OE => "opponent error",
-            EventTypeEnum::R => "substitution",
+            S => "serve",
+            P => "pass",
+            A => "attack",
+            D => "dig",
+            B => "block",
+            F => "fault",
+            OS => "opponent score",
+            OE => "opponent error",
+            R => "substitution",
+        }
+    }
+
+    pub fn requires_evaluation(&self) -> bool {
+        use EventTypeEnum::*;
+        matches!(self, S | P | A | D | B)
+    }
+
+    pub fn requires_player(&self) -> bool {
+        use EventTypeEnum::*;
+        matches!(self, A | B | P | F | D | R | S)
+    }
+
+    pub fn available_evals(&self) -> Vec<EvalEnum> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        match self {
+            S | A | B => vec![Perfect, Positive, Over, Negative, Error],
+            D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
+            _ => vec![],
         }
     }
 }
@@ -171,17 +193,18 @@ impl EventTypeEnum {
 impl FromStr for EventTypeEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use EventTypeEnum::*;
         match s.to_uppercase().as_str() {
-            "S" => Ok(EventTypeEnum::S),
-            "P" => Ok(EventTypeEnum::P),
-            "A" => Ok(EventTypeEnum::A),
-            "D" => Ok(EventTypeEnum::D),
-            "B" => Ok(EventTypeEnum::B),
-            "F" => Ok(EventTypeEnum::F),
-            "OS" => Ok(EventTypeEnum::OS),
-            "OE" => Ok(EventTypeEnum::OE),
-            "R" => Ok(EventTypeEnum::R),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
+            "S" => Ok(S),
+            "P" => Ok(P),
+            "A" => Ok(A),
+            "D" => Ok(D),
+            "B" => Ok(B),
+            "F" => Ok(F),
+            "OS" => Ok(OS),
+            "OE" => Ok(OE),
+            "R" => Ok(R),
+            _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",
                 s
             )))),
@@ -271,13 +294,14 @@ pub enum EvalEnum {
 
 impl fmt::Display for EvalEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use EvalEnum::*;
         let label = match self {
-            EvalEnum::Perfect => "#",
-            EvalEnum::Positive => "+",
-            EvalEnum::Exclamative => "!",
-            EvalEnum::Over => "/",
-            EvalEnum::Error => "=",
-            EvalEnum::Negative => "-",
+            Perfect => "#",
+            Positive => "+",
+            Exclamative => "!",
+            Over => "/",
+            Error => "=",
+            Negative => "-",
         };
         write!(f, "{}", label)
     }
@@ -286,107 +310,85 @@ impl fmt::Display for EvalEnum {
 impl FromStr for EvalEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use EvalEnum::*;
         match s.to_uppercase().as_str() {
-            "#" => Ok(EvalEnum::Perfect),
-            "+" => Ok(EvalEnum::Positive),
-            "!" => Ok(EvalEnum::Exclamative),
-            "/" => Ok(EvalEnum::Over),
-            "=" => Ok(EvalEnum::Error),
-            "-" => Ok(EvalEnum::Negative),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
-                "invalid eval: {}",
-                s
-            )))),
+            "#" => Ok(Perfect),
+            "+" => Ok(Positive),
+            "!" => Ok(Exclamative),
+            "/" => Ok(Over),
+            "=" => Ok(Error),
+            "-" => Ok(Negative),
+            _ => Err(AppError::IO(IOError::Msg(format!("invalid eval: {}", s)))),
         }
     }
 }
 
 impl EvalEnum {
     pub fn friendly_description(&self, event: EventTypeEnum) -> Option<String> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
         match (self, event) {
-            (EvalEnum::Perfect, EventTypeEnum::A) => Some("winning attack".to_string()),
-            (EvalEnum::Positive, EventTypeEnum::A) => Some("attack continuation".to_string()),
-            (EvalEnum::Negative, EventTypeEnum::A) => {
-                Some("opponent counter-attack opportunity".to_string())
-            }
+            (Perfect, A) => Some("winning attack".to_string()),
+            (Positive, A) => Some("attack continuation".to_string()),
+            (Negative, A) => Some("opponent counter-attack opportunity".to_string()),
 
-            (EvalEnum::Perfect, EventTypeEnum::B) => Some("winning block".to_string()),
-            (EvalEnum::Positive, EventTypeEnum::B) => {
-                Some("counter-attack opportunity".to_string())
-            }
-            (EvalEnum::Negative, EventTypeEnum::B) => {
-                Some("opponent counter-attack opportunity".to_string())
-            }
+            (Perfect, B) => Some("winning block".to_string()),
+            (Positive, B) => Some("counter-attack opportunity".to_string()),
+            (Negative, B) => Some("opponent counter-attack opportunity".to_string()),
 
-            (EvalEnum::Positive, EventTypeEnum::D) => {
-                Some("first-tempo still available".to_string())
-            }
-            (EvalEnum::Exclamative, EventTypeEnum::D) => {
-                Some("few attack options available".to_string())
-            }
-            (EvalEnum::Negative, EventTypeEnum::D) => Some("limited attack options".to_string()),
-            (EvalEnum::Over, EventTypeEnum::D) => {
-                Some("ball goes straight over the net".to_string())
-            }
+            (Positive, D) => Some("first-tempo still available".to_string()),
+            (Exclamative, D) => Some("few attack options available".to_string()),
+            (Negative, D) => Some("limited attack options".to_string()),
+            (Over, D) => Some("ball goes straight over the net".to_string()),
 
-            (EvalEnum::Positive, EventTypeEnum::P) => {
-                Some("first-tempo still available".to_string())
-            }
-            (EvalEnum::Exclamative, EventTypeEnum::P) => {
-                Some("few attack options available".to_string())
-            }
-            (EvalEnum::Negative, EventTypeEnum::P) => Some("limited attack options".to_string()),
-            (EvalEnum::Over, EventTypeEnum::P) => {
-                Some("ball goes straight over the net".to_string())
-            }
+            (Positive, P) => Some("first-tempo still available".to_string()),
+            (Exclamative, P) => Some("few attack options available".to_string()),
+            (Negative, P) => Some("limited attack options".to_string()),
+            (Over, P) => Some("ball goes straight over the net".to_string()),
 
-            (EvalEnum::Perfect, EventTypeEnum::S) => None,
-            (EvalEnum::Positive, EventTypeEnum::S) => {
-                Some("opponent with limited attack options".to_string())
-            }
-            (EvalEnum::Negative, EventTypeEnum::S) => {
-                Some("opponent with full attack options".to_string())
-            }
-            (EvalEnum::Over, EventTypeEnum::S) => {
-                Some("ball goes straight back to our court".to_string())
-            }
+            (Perfect, S) => None,
+            (Positive, S) => Some("opponent with limited attack options".to_string()),
+            (Negative, S) => Some("opponent with full attack options".to_string()),
+            (Over, S) => Some("ball goes straight back to our court".to_string()),
             _ => None,
         }
     }
 
     pub fn friendly_name(&self, event: EventTypeEnum) -> String {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
         match (self, event) {
-            (EvalEnum::Perfect, EventTypeEnum::A) => "score".to_string(),
-            (EvalEnum::Positive, EventTypeEnum::A) => "positive".to_string(),
-            (EvalEnum::Negative, EventTypeEnum::A) => "negative".to_string(),
-            (EvalEnum::Error, EventTypeEnum::A) => "error".to_string(),
-            (EvalEnum::Over, EventTypeEnum::A) => "blocked".to_string(),
+            (Perfect, A) => "score".to_string(),
+            (Positive, A) => "positive".to_string(),
+            (Negative, A) => "negative".to_string(),
+            (Error, A) => "error".to_string(),
+            (Over, A) => "blocked".to_string(),
 
-            (EvalEnum::Perfect, EventTypeEnum::B) => "winning block".to_string(),
-            (EvalEnum::Positive, EventTypeEnum::B) => "positive".to_string(),
-            (EvalEnum::Negative, EventTypeEnum::B) => "negative".to_string(),
-            (EvalEnum::Error, EventTypeEnum::B) => "error".to_string(),
-            (EvalEnum::Over, EventTypeEnum::B) => "net fault".to_string(),
+            (Perfect, B) => "winning block".to_string(),
+            (Positive, B) => "positive".to_string(),
+            (Negative, B) => "negative".to_string(),
+            (Error, B) => "error".to_string(),
+            (Over, B) => "net fault".to_string(),
 
-            (EvalEnum::Perfect, EventTypeEnum::D) => "perfect".to_string(),
-            (EvalEnum::Positive, EventTypeEnum::D) => "positive".to_string(),
-            (EvalEnum::Exclamative, EventTypeEnum::D) => "subpositive".to_string(),
-            (EvalEnum::Negative, EventTypeEnum::D) => "negative".to_string(),
-            (EvalEnum::Error, EventTypeEnum::D) => "error".to_string(),
-            (EvalEnum::Over, EventTypeEnum::D) => "overpass".to_string(),
+            (Perfect, D) => "perfect".to_string(),
+            (Positive, D) => "positive".to_string(),
+            (Exclamative, D) => "subpositive".to_string(),
+            (Negative, D) => "negative".to_string(),
+            (Error, D) => "error".to_string(),
+            (Over, D) => "overpass".to_string(),
 
-            (EvalEnum::Perfect, EventTypeEnum::P) => "perfect".to_string(),
-            (EvalEnum::Positive, EventTypeEnum::P) => "positive".to_string(),
-            (EvalEnum::Exclamative, EventTypeEnum::P) => "subpositive".to_string(),
-            (EvalEnum::Negative, EventTypeEnum::P) => "negative".to_string(),
-            (EvalEnum::Error, EventTypeEnum::P) => "error".to_string(),
-            (EvalEnum::Over, EventTypeEnum::P) => "overpass".to_string(),
+            (Perfect, P) => "perfect".to_string(),
+            (Positive, P) => "positive".to_string(),
+            (Exclamative, P) => "subpositive".to_string(),
+            (Negative, P) => "negative".to_string(),
+            (Error, P) => "error".to_string(),
+            (Over, P) => "overpass".to_string(),
 
-            (EvalEnum::Perfect, EventTypeEnum::S) => "ace".to_string(),
-            (EvalEnum::Positive, EventTypeEnum::S) => "positive".to_string(),
-            (EvalEnum::Negative, EventTypeEnum::S) => "negative".to_string(),
-            (EvalEnum::Error, EventTypeEnum::S) => "error".to_string(),
-            (EvalEnum::Over, EventTypeEnum::S) => "overpass".to_string(),
+            (Perfect, S) => "ace".to_string(),
+            (Positive, S) => "positive".to_string(),
+            (Negative, S) => "negative".to_string(),
+            (Error, S) => "error".to_string(),
+            (Over, S) => "overpass".to_string(),
 
             _ => event.to_string(),
         }
@@ -421,16 +423,17 @@ pub enum ZoneEnum {
 
 impl fmt::Display for ZoneEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ZoneEnum::*;
         let label = match self {
-            ZoneEnum::One => "1",
-            ZoneEnum::Two => "2",
-            ZoneEnum::Three => "3",
-            ZoneEnum::Four => "4",
-            ZoneEnum::Five => "5",
-            ZoneEnum::Six => "6",
-            ZoneEnum::Seven => "7",
-            ZoneEnum::Eight => "8",
-            ZoneEnum::Nine => "9",
+            One => "1",
+            Two => "2",
+            Three => "3",
+            Four => "4",
+            Five => "5",
+            Six => "6",
+            Seven => "7",
+            Eight => "8",
+            Nine => "9",
         };
         write!(f, "{}", label)
     }
@@ -439,20 +442,18 @@ impl fmt::Display for ZoneEnum {
 impl FromStr for ZoneEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use ZoneEnum::*;
         match s.to_uppercase().as_str() {
-            "1" => Ok(ZoneEnum::One),
-            "2" => Ok(ZoneEnum::Two),
-            "3" => Ok(ZoneEnum::Three),
-            "4" => Ok(ZoneEnum::Four),
-            "5" => Ok(ZoneEnum::Five),
-            "6" => Ok(ZoneEnum::Six),
-            "7" => Ok(ZoneEnum::Seven),
-            "8" => Ok(ZoneEnum::Eight),
-            "9" => Ok(ZoneEnum::Nine),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
-                "invalid zone: {}",
-                s
-            )))),
+            "1" => Ok(One),
+            "2" => Ok(Two),
+            "3" => Ok(Three),
+            "4" => Ok(Four),
+            "5" => Ok(Five),
+            "6" => Ok(Six),
+            "7" => Ok(Seven),
+            "8" => Ok(Eight),
+            "9" => Ok(Nine),
+            _ => Err(AppError::IO(IOError::Msg(format!("invalid zone: {}", s)))),
         }
     }
 }
@@ -460,16 +461,17 @@ impl FromStr for ZoneEnum {
 impl TryFrom<u8> for ZoneEnum {
     type Error = String;
     fn try_from(value: u8) -> Result<Self, Self::Error> {
+        use ZoneEnum::*;
         match value {
-            1 => Ok(ZoneEnum::One),
-            2 => Ok(ZoneEnum::Two),
-            3 => Ok(ZoneEnum::Three),
-            4 => Ok(ZoneEnum::Four),
-            5 => Ok(ZoneEnum::Five),
-            6 => Ok(ZoneEnum::Six),
-            7 => Ok(ZoneEnum::Seven),
-            8 => Ok(ZoneEnum::Eight),
-            9 => Ok(ZoneEnum::Nine),
+            1 => Ok(One),
+            2 => Ok(Two),
+            3 => Ok(Three),
+            4 => Ok(Four),
+            5 => Ok(Five),
+            6 => Ok(Six),
+            7 => Ok(Seven),
+            8 => Ok(Eight),
+            9 => Ok(Nine),
             _ => Err(format!("invalid zone: {}", value)),
         }
     }
@@ -483,9 +485,10 @@ pub enum ErrorTypeEnum {
 
 impl fmt::Display for ErrorTypeEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ErrorTypeEnum::*;
         let label = match self {
-            ErrorTypeEnum::Forced => "forced",
-            ErrorTypeEnum::Unforced => "unforced",
+            Forced => "forced",
+            Unforced => "unforced",
         };
         write!(f, "{}", label)
     }
@@ -494,10 +497,11 @@ impl fmt::Display for ErrorTypeEnum {
 impl FromStr for ErrorTypeEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use ErrorTypeEnum::*;
         match s.to_uppercase().as_str() {
-            "forced" => Ok(ErrorTypeEnum::Forced),
-            "unforced" => Ok(ErrorTypeEnum::Unforced),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
+            "forced" => Ok(Forced),
+            "unforced" => Ok(Unforced),
+            _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid error type: {}",
                 s
             )))),
@@ -538,13 +542,14 @@ pub enum RotationEnum {
 
 impl fmt::Display for RotationEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use RotationEnum::*;
         let label = match self {
-            RotationEnum::One => "1",
-            RotationEnum::Two => "2",
-            RotationEnum::Three => "3",
-            RotationEnum::Four => "4",
-            RotationEnum::Five => "5",
-            RotationEnum::Six => "6",
+            One => "1",
+            Two => "2",
+            Three => "3",
+            Four => "4",
+            Five => "5",
+            Six => "6",
         };
         write!(f, "{}", label)
     }
@@ -553,14 +558,15 @@ impl fmt::Display for RotationEnum {
 impl FromStr for RotationEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use RotationEnum::*;
         match s.to_uppercase().as_str() {
-            "1" => Ok(RotationEnum::One),
-            "2" => Ok(RotationEnum::Two),
-            "3" => Ok(RotationEnum::Three),
-            "4" => Ok(RotationEnum::Four),
-            "5" => Ok(RotationEnum::Five),
-            "6" => Ok(RotationEnum::Six),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
+            "1" => Ok(One),
+            "2" => Ok(Two),
+            "3" => Ok(Three),
+            "4" => Ok(Four),
+            "5" => Ok(Five),
+            "6" => Ok(Six),
+            _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid rotation: {}",
                 s
             )))),
@@ -571,13 +577,14 @@ impl FromStr for RotationEnum {
 impl TryFrom<u8> for RotationEnum {
     type Error = String;
     fn try_from(value: u8) -> Result<Self, Self::Error> {
+        use RotationEnum::*;
         match value {
-            1 => Ok(RotationEnum::One),
-            2 => Ok(RotationEnum::Two),
-            3 => Ok(RotationEnum::Three),
-            4 => Ok(RotationEnum::Four),
-            5 => Ok(RotationEnum::Five),
-            6 => Ok(RotationEnum::Six),
+            1 => Ok(One),
+            2 => Ok(Two),
+            3 => Ok(Three),
+            4 => Ok(Four),
+            5 => Ok(Five),
+            6 => Ok(Six),
             _ => Err(format!("invalid rotation: {}", value)),
         }
     }
@@ -613,12 +620,13 @@ impl RoleEnum {
 
 impl fmt::Display for RoleEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use RoleEnum::*;
         let label = match self {
-            RoleEnum::Libero => "libero",
-            RoleEnum::MiddleBlocker => "middle-blocker",
-            RoleEnum::OppositeHitter => "opposite-hitter",
-            RoleEnum::OutsideHitter => "outside-hitter",
-            RoleEnum::Setter => "setter",
+            Libero => "libero",
+            MiddleBlocker => "middle-blocker",
+            OppositeHitter => "opposite-hitter",
+            OutsideHitter => "outside-hitter",
+            Setter => "setter",
         };
         write!(f, "{}", label)
     }
@@ -627,16 +635,14 @@ impl fmt::Display for RoleEnum {
 impl FromStr for RoleEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use RoleEnum::*;
         match s.to_uppercase().as_str() {
-            "libero" => Ok(RoleEnum::Libero),
-            "middle-blocker" => Ok(RoleEnum::MiddleBlocker),
-            "opposite-hitter" => Ok(RoleEnum::OppositeHitter),
-            "outside-hitter" => Ok(RoleEnum::OutsideHitter),
-            "setter" => Ok(RoleEnum::Setter),
-            _ => Err(AppError::IO(IOError::EncodingError(format!(
-                "invalid role: {}",
-                s
-            )))),
+            "libero" => Ok(Libero),
+            "middle-blocker" => Ok(MiddleBlocker),
+            "opposite-hitter" => Ok(OppositeHitter),
+            "outside-hitter" => Ok(OutsideHitter),
+            "setter" => Ok(Setter),
+            _ => Err(AppError::IO(IOError::Msg(format!("invalid role: {}", s)))),
         }
     }
 }

@@ -32,24 +32,28 @@ pub struct TeamDetailsScreen {
 
 impl Screen for TeamDetailsScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match key.code {
-            KeyCode::Down => {
+        match (key.code, &self.error) {
+            (_, Some(_)) => {
+                self.error = None;
+                AppAction::None
+            }
+            (KeyCode::Down, _) => {
                 self.next_player();
                 AppAction::None
             }
-            KeyCode::Up => {
+            (KeyCode::Up, _) => {
                 self.previous_player();
                 AppAction::None
             }
-            KeyCode::Char('n') => match self.teams.iter().find(|t| t.id == self.team_id) {
+            (KeyCode::Char('n'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
                 Some(t) => AppAction::SwitchScreen(Box::new(AddPlayerScreen::new(t.clone()))),
                 None => AppAction::None,
             },
-            KeyCode::Char('m') => match self.teams.iter().find(|t| t.id == self.team_id) {
+            (KeyCode::Char('m'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
                 Some(t) => AppAction::SwitchScreen(Box::new(MatchListScreen::new(t.clone()))),
                 None => AppAction::None,
             },
-            KeyCode::Esc => AppAction::Back(true, Some(1)),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
             _ => AppAction::None,
         }
     }

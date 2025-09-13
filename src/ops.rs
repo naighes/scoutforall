@@ -14,11 +14,23 @@ use crate::util::sanitize_filename;
 use chrono::DateTime;
 use chrono::FixedOffset;
 use csv::{ReaderBuilder, WriterBuilder};
-use std::error::Error;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::{fs::File, path::PathBuf};
 use uuid::Uuid;
+
+trait ResultOptionExt<T, E> {
+    fn and_then_option<U>(self, f: impl FnOnce(T) -> Result<Option<U>, E>) -> Result<Option<U>, E>;
+}
+
+impl<T, E> ResultOptionExt<T, E> for Result<Option<T>, E> {
+    fn and_then_option<U>(self, f: impl FnOnce(T) -> Result<Option<U>, E>) -> Result<Option<U>, E> {
+        match self? {
+            Some(v) => f(v),
+            None => Ok(None),
+        }
+    }
+}
 
 pub fn get_matches(team: &TeamEntry) -> Result<Vec<MatchEntry>, Box<dyn std::error::Error>> {
     let team_path: PathBuf = get_team_folder_path(&team.id);
@@ -113,47 +125,50 @@ pub fn create_set(
     positions: [Uuid; 6],
     libero: Uuid,
     setter: Uuid,
-) -> Result<SetEntry, Box<dyn Error>> {
+) -> Result<SetEntry, AppError> {
     let match_path: PathBuf = get_match_folder_path(&m.team.id, &m.id);
     if !match_path.exists() {
-        return Err(format!("match not found: {}", m.id).into());
+        return Err(AppError::IO(IOError::Msg(format!(
+            "could not create set: match folder does not exist at path {}",
+            match_path.display()
+        ))));
     }
     let file_path = get_set_descriptor_file_path(&m.team.id, &m.id, set_number);
     let s = SetEntry::new(set_number, serving_team, positions, libero, setter)?;
-    let json_file = File::create(&file_path)?;
-    serde_json::to_writer_pretty(json_file, &s)?;
-    File::create(get_set_events_file_path(&m.team.id, &m.id, set_number))?;
-    Ok(s)
+    File::create(&file_path)
+        .and_then(|json_file| serde_json::to_writer_pretty(json_file, &s).map_err(|e| e.into()))
+        .and_then(|_| File::create(get_set_events_file_path(&m.team.id, &m.id, set_number)))
+        .map(|_| s)
+        .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
 pub fn load_teams() -> Result<Vec<TeamEntry>, AppError> {
     let path = get_base_path();
     let entries = fs::read_dir(&path).map_err(|_| {
-        IOError::Error(format!(
+        IOError::Msg(format!(
             "could not load teams: directory error at path {:?}",
             path
         ))
     })?;
     let mut teams = Vec::new();
     for entry in entries {
-        let entry = entry
-            .map_err(|_| IOError::Error("could not load teams: directory error".to_string()))?;
+        let entry =
+            entry.map_err(|_| IOError::Msg("could not load teams: directory error".to_string()))?;
         let path = entry.path();
         if !path.is_dir() {
             continue;
         }
         let descriptor_path = path.join(TEAM_DESCRIPTOR_FILE_NAME);
-        let json_str =
-            fs::read_to_string(&descriptor_path).map_err(|_| IOError::SerializationError)?;
-        let mut team: TeamEntry =
-            serde_json::from_str(&json_str).map_err(|_| IOError::SerializationError)?;
-        let name = path
-            .file_name()
-            .and_then(|os| os.to_str())
-            .ok_or_else(|| IOError::Error("could not load teamd: invalid file name".to_string()))?;
-        let uuid = Uuid::parse_str(name)
-            .map_err(|_| IOError::Error("could not load teamd: invalid uuid".to_string()))?;
-        team.id = uuid;
+        let team = fs::read_to_string(&descriptor_path)
+            .map_err(IOError::from)
+            .and_then(|s| serde_json::from_str::<TeamEntry>(&s).map_err(IOError::from))
+            .and_then(|team| {
+                path.file_name()
+                    .and_then(|os| os.to_str())
+                    .and_then(|name| Uuid::parse_str(name).ok())
+                    .map(|uuid| TeamEntry { id: uuid, ..team })
+                    .ok_or_else(|| IOError::Msg("invalid file name for uuid".to_string()))
+            })?;
         teams.push(team);
     }
     Ok(teams)
@@ -208,19 +223,22 @@ pub fn append_event(
     event: &EventEntry,
 ) -> Result<(), AppError> {
     let path = get_set_events_file_path(&team.id, match_id, set_number);
-    let file = OpenOptions::new()
+    OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .map_err(|_| IOError::Error("could not open file".to_string()))?;
-    let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
-    writer
-        .serialize(event)
-        .map_err(|_| IOError::SerializationError)?;
-    writer
-        .flush()
-        .map_err(|_| IOError::Error("could not flush content".to_string()))?;
-    Ok(())
+        .map_err(|_| AppError::IO(IOError::Msg("could not open file".to_string())))
+        .map(|file| WriterBuilder::new().has_headers(false).from_writer(file))
+        .and_then(|mut writer| {
+            writer
+                .serialize(event)
+                .map_err(|e| AppError::IO(IOError::Msg(format!("could not serialize event: {e}"))))
+                .and_then(|_| {
+                    writer.flush().map_err(|_| {
+                        AppError::IO(IOError::Msg("could not flush content".to_string()))
+                    })
+                })
+        })
 }
 
 pub fn remove_last_event(
@@ -229,32 +247,26 @@ pub fn remove_last_event(
     set_number: u8,
 ) -> Result<Option<EventEntry>, AppError> {
     let path = get_set_events_file_path(&team.id, match_id, set_number);
-    let mut reader = ReaderBuilder::new()
+    ReaderBuilder::new()
         .has_headers(false)
-        .from_path(path)
-        .map_err(|_| IOError::Error("could not open file".to_string()))?;
-    let mut records: Vec<EventEntry> = reader
-        .deserialize()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| IOError::Error("could not parse csv".to_string()))?;
-    let removed = records.pop();
-    if removed.is_none() {
-        return Ok(None);
-    }
-    let path = get_set_events_file_path(&team.id, match_id, set_number);
-    let file = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .map_err(|_| IOError::Error("could not open file for writing".to_string()))?;
-    let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
-    for rec in records {
-        writer
-            .serialize(rec)
-            .map_err(|_| IOError::Error("could not serialize csv".to_string()))?;
-    }
-    writer
-        .flush()
-        .map_err(|_| IOError::Error("could not flush csv".to_string()))?;
-    Ok(removed)
+        .from_path(&path)
+        .and_then(|mut reader| reader.deserialize().collect::<Result<Vec<EventEntry>, _>>())
+        .and_then(|records| match records.split_first() {
+            Some((first, rest)) => Ok(Some((first.clone(), rest.to_vec()))),
+            None => Ok(None),
+        })
+        .and_then_option(|(first, rest)| {
+            let path = get_set_events_file_path(&team.id, match_id, set_number);
+            let mut writer = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(path)
+                .map(|file| WriterBuilder::new().has_headers(false).from_writer(file))?;
+            for rec in rest {
+                writer.serialize(rec)?;
+            }
+            writer.flush()?;
+            Ok(Some(first))
+        })
+        .map_err(|e| AppError::IO(IOError::from(e)))
 }

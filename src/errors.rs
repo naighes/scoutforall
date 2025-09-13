@@ -31,9 +31,11 @@ pub enum SnapshotError {
 #[derive(Debug, Error)]
 pub enum IOError {
     #[error("IO error: {0}")]
-    Error(String),
-    #[error("serialization error")]
-    SerializationError,
-    #[error("encoding error: {0}")]
-    EncodingError(String),
+    Io(#[from] std::io::Error),
+    #[error("Serde JSON error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+    #[error("{0}")]
+    Msg(String),
+    #[error("CSV error: {0}")]
+    Csv(#[from] csv::Error),
 }

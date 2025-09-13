@@ -24,113 +24,16 @@ pub struct AddPlayerScreen {
 
 impl Screen for AddPlayerScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if self.error.is_some() {
-            self.error = None;
-            return AppAction::None;
-        }
-        match key.code {
-            KeyCode::Char(c) => match self.field {
-                0 => {
-                    self.name.push(c);
-                    AppAction::None
-                }
-                2 => {
-                    if c.is_ascii_digit() {
-                        if self.number.len() < 2 {
-                            if !(self.number.is_empty() && c == '0') {
-                                self.number.push(c);
-                            }
-                        }
-                    }
-                    AppAction::None
-                }
-                _ => AppAction::None,
-            },
-            KeyCode::Backspace => match self.field {
-                0 => {
-                    self.name.pop();
-                    AppAction::None
-                }
-                2 => {
-                    self.number.pop();
-                    AppAction::None
-                }
-                _ => AppAction::None,
-            },
-            KeyCode::Up => match self.field {
-                1 => {
-                    if let Some(selected) = self.role_selection.selected() {
-                        let new_selected = if selected == 0 {
-                            RoleEnum::ALL.len() - 1
-                        } else {
-                            selected - 1
-                        };
-                        self.role = Some(RoleEnum::ALL[new_selected]);
-                        self.role_selection.select(Some(new_selected));
-                    } else {
-                        self.role_selection.select(Some(0));
-                        self.role = Some(RoleEnum::ALL[0]);
-                    }
-                    AppAction::None
-                }
-                _ => AppAction::None,
-            },
-            KeyCode::Down => match self.field {
-                1 => {
-                    if let Some(selected) = self.role_selection.selected() {
-                        let new_selected = (selected + 1) % RoleEnum::ALL.len();
-                        self.role_selection.select(Some(new_selected));
-                        self.role = Some(RoleEnum::ALL[new_selected]);
-                    } else {
-                        self.role_selection.select(Some(0));
-                        self.role = Some(RoleEnum::ALL[0]);
-                    }
-                    AppAction::None
-                }
-                _ => AppAction::None,
-            },
-            KeyCode::Tab => {
-                self.field = (self.field + 1) % 3;
-                AppAction::None
-            }
-            KeyCode::BackTab => {
-                if self.field == 0 {
-                    self.field = 2;
-                } else {
-                    self.field -= 1;
-                }
-                AppAction::None
-            }
-            KeyCode::Esc => AppAction::Back(true, Some(1)),
-            KeyCode::Enter => {
-                if self.name.is_empty() {
-                    self.error = Some("name cannot be empty".to_string());
-                    AppAction::None
-                } else if self.role.is_none() {
-                    self.error = Some("role cannot be empty".to_string());
-                    AppAction::None
-                } else {
-                    match (self.number.parse::<u8>(), self.role) {
-                        (Ok(number), Some(role)) => {
-                            match create_player(self.name.clone(), role, number, &mut self.team) {
-                                Ok(_) => AppAction::Back(true, Some(1)),
-                                Err(_) => {
-                                    self.error = Some("could not create player".to_string());
-                                    AppAction::None
-                                }
-                            }
-                        }
-                        (Err(_), _) => {
-                            self.error = Some("number must be a 4-digit number".into());
-                            AppAction::None
-                        }
-                        (_, None) => {
-                            self.error = Some("invalid role".into());
-                            AppAction::None
-                        }
-                    }
-                }
-            }
+        match (key.code, &self.error) {
+            (_, Some(_)) => self.handle_error_reset(),
+            (KeyCode::Char(c), _) => self.handle_char(c),
+            (KeyCode::Backspace, _) => self.handle_backspace(),
+            (KeyCode::Up, _) => self.handle_up(),
+            (KeyCode::Down, _) => self.handle_down(),
+            (KeyCode::Tab, _) => self.handle_tab(),
+            (KeyCode::BackTab, _) => self.handle_backtab(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => self.handle_enter(),
             _ => AppAction::None,
         }
     }
@@ -184,6 +87,113 @@ impl AddPlayerScreen {
             role_selection: ListState::default(),
             error: None,
         }
+    }
+
+    fn handle_error_reset(&mut self) -> AppAction {
+        self.error = None;
+        AppAction::None
+    }
+
+    fn handle_char(&mut self, c: char) -> AppAction {
+        match (self.field, c.is_ascii_digit()) {
+            (2, true) if self.number.len() < 2 && !(self.number.is_empty() && c == '0') => {
+                self.number.push(c);
+            }
+            (0, _) => {
+                self.name.push(c);
+            }
+            _ => {}
+        };
+        AppAction::None
+    }
+
+    fn handle_enter(&mut self) -> AppAction {
+        match (self.name.is_empty(), self.role, self.number.parse::<u8>()) {
+            (true, _, _) => {
+                self.error = Some("name cannot be empty".to_string());
+                AppAction::None
+            }
+            (_, None, _) => {
+                self.error = Some("role cannot be empty".to_string());
+                AppAction::None
+            }
+            (_, Some(role), Ok(number)) => {
+                match create_player(self.name.clone(), role, number, &mut self.team) {
+                    Ok(_) => AppAction::Back(true, Some(1)),
+                    Err(_) => {
+                        self.error = Some("could not create player".to_string());
+                        AppAction::None
+                    }
+                }
+            }
+            (_, _, Err(_)) => {
+                self.error = Some("number must be a 4-digit number".into());
+                AppAction::None
+            }
+        }
+    }
+
+    fn handle_backtab(&mut self) -> AppAction {
+        if self.field == 0 {
+            self.field = 2;
+        } else {
+            self.field -= 1;
+        }
+        AppAction::None
+    }
+
+    fn handle_tab(&mut self) -> AppAction {
+        self.field = (self.field + 1) % 3;
+        AppAction::None
+    }
+
+    fn handle_up(&mut self) -> AppAction {
+        match (self.field, &self.role_selection.selected()) {
+            (1, Some(selected)) => {
+                let new_selected = if *selected == 0 {
+                    RoleEnum::ALL.len() - 1
+                } else {
+                    selected - 1
+                };
+                self.role = Some(RoleEnum::ALL[new_selected]);
+                self.role_selection.select(Some(new_selected));
+            }
+            (1, None) => {
+                self.role_selection.select(Some(0));
+                self.role = Some(RoleEnum::ALL[0]);
+            }
+            _ => {}
+        };
+        AppAction::None
+    }
+
+    fn handle_down(&mut self) -> AppAction {
+        match (self.field, self.role_selection.selected()) {
+            (1, Some(selected)) => {
+                let new_selected = (selected + 1) % RoleEnum::ALL.len();
+                self.role_selection.select(Some(new_selected));
+                self.role = Some(RoleEnum::ALL[new_selected]);
+            }
+            (1, None) => {
+                self.role_selection.select(Some(0));
+                self.role = Some(RoleEnum::ALL[0]);
+            }
+            _ => {}
+        };
+        AppAction::None
+    }
+
+    fn handle_backspace(&mut self) -> AppAction {
+        match self.field {
+            0 => {
+                self.name.pop();
+            }
+            2 => {
+                self.number.pop();
+            }
+            _ => {}
+        };
+        AppAction::None
     }
 
     fn render_role_widget(&mut self, f: &mut Frame, area: Rect) {

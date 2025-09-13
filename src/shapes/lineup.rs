@@ -319,6 +319,22 @@ impl Lineup {
         set.into_iter().collect()
     }
 
+    pub fn has_setter_at_pos(&self, position: usize) -> bool {
+        if let Some(player) = self.players.get(position) {
+            *player == self.current_setter
+        } else {
+            false
+        }
+    }
+
+    pub fn has_libero_at_pos(&self, position: usize) -> bool {
+        if let Some(player) = self.players.get(position) {
+            *player == self.current_libero
+        } else {
+            false
+        }
+    }
+
     /* substitutions */
 
     pub fn get_substitutions(&self) -> Vec<SubstitutionRecord> {

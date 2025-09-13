@@ -29,12 +29,12 @@ pub struct AddMatchScreen {
 
 impl Screen for AddMatchScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if self.error.is_some() {
-            self.error = None;
-            return AppAction::None;
-        }
-        match key.code {
-            KeyCode::Char(c) => match self.field {
+        match (key.code, &self.error) {
+            (_, Some(_)) => {
+                self.error = None;
+                AppAction::None
+            }
+            (KeyCode::Char(c), _) => match self.field {
                 0 => {
                     self.opponent.push(c);
                     AppAction::None
@@ -43,7 +43,7 @@ impl Screen for AddMatchScreen {
                 2 => self.handle_home_input(c),
                 _ => AppAction::None,
             },
-            KeyCode::Backspace => match self.field {
+            (KeyCode::Backspace, _) => match self.field {
                 0 => {
                     self.opponent.pop();
                     AppAction::None
@@ -51,12 +51,12 @@ impl Screen for AddMatchScreen {
                 1 => self.handle_date_backspace(),
                 _ => AppAction::None,
             },
-            KeyCode::Tab => {
+            (KeyCode::Tab, _) => {
                 self.on_date_input_leave();
                 self.field = (self.field + 1) % 3;
                 AppAction::None
             }
-            KeyCode::BackTab => {
+            (KeyCode::BackTab, _) => {
                 self.on_date_input_leave();
                 if self.field == 0 {
                     self.field = 2;
@@ -65,8 +65,8 @@ impl Screen for AddMatchScreen {
                 }
                 AppAction::None
             }
-            KeyCode::Esc => AppAction::Back(true, Some(1)),
-            KeyCode::Enter => self.handle_submit(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => self.handle_submit(),
             _ => AppAction::None,
         }
     }
@@ -326,34 +326,31 @@ impl AddMatchScreen {
     }
 
     fn handle_submit(&mut self) -> AppAction {
-        if self.opponent.is_empty() {
-            self.error = Some("opponent cannot be empty".to_string());
-            AppAction::None
-        } else {
-            match (
-                self.year.len(),
-                self.month.len(),
-                self.day.len(),
-                self.parse_date(&format!("{}-{}-{}", self.year, self.month, self.day).to_string()),
-            ) {
-                (4, 2, 2, Ok(date)) => {
-                    match create_match(&self.team, self.opponent.clone(), date, self.home) {
-                        Ok(m) => AppAction::SwitchScreen(Box::new(StartSetScreen::new(
-                            m,
-                            1,
-                            None,
-                            Some(2),
-                        ))),
-                        Err(_) => {
-                            self.error = Some("could not create match".to_string());
-                            AppAction::None
-                        }
+        match (
+            self.year.len(),
+            self.month.len(),
+            self.day.len(),
+            self.parse_date(&format!("{}-{}-{}", self.year, self.month, self.day).to_string()),
+            self.opponent.is_empty(),
+        ) {
+            (_, __, _, _, true) => {
+                self.error = Some("opponent cannot be empty".to_string());
+                AppAction::None
+            }
+            (4, 2, 2, Ok(date), _) => {
+                match create_match(&self.team, self.opponent.clone(), date, self.home) {
+                    Ok(m) => {
+                        AppAction::SwitchScreen(Box::new(StartSetScreen::new(m, 1, None, Some(2))))
+                    }
+                    Err(_) => {
+                        self.error = Some("could not create match".to_string());
+                        AppAction::None
                     }
                 }
-                _ => {
-                    self.error = Some("invalid date".into());
-                    AppAction::None
-                }
+            }
+            _ => {
+                self.error = Some("invalid date".into());
+                AppAction::None
             }
         }
     }

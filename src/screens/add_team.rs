@@ -21,76 +21,14 @@ pub struct AddTeamScreen {
 
 impl Screen for AddTeamScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if self.error.is_some() {
-            self.error = None;
-            return AppAction::None;
-        }
-        match key.code {
-            KeyCode::Char(c) => match self.field {
-                0 => {
-                    self.name.push(c);
-                    AppAction::None
-                }
-                1 => {
-                    self.league.push(c);
-                    AppAction::None
-                }
-                2 => {
-                    if c.is_ascii_digit() && self.year.len() < 4 {
-                        self.year.push(c);
-                    }
-                    AppAction::None
-                }
-                _ => AppAction::None,
-            },
-            KeyCode::Backspace => match self.field {
-                0 => {
-                    self.name.pop();
-                    AppAction::None
-                }
-                1 => {
-                    self.league.pop();
-                    AppAction::None
-                }
-                2 => {
-                    self.year.pop();
-                    AppAction::None
-                }
-                _ => AppAction::None,
-            },
-            KeyCode::Tab => {
-                self.field = (self.field + 1) % 3;
-                AppAction::None
-            }
-            KeyCode::BackTab => {
-                if self.field == 0 {
-                    self.field = 2;
-                } else {
-                    self.field -= 1;
-                }
-                AppAction::None
-            }
-            KeyCode::Esc => AppAction::Back(true, Some(1)),
-            KeyCode::Enter => {
-                if self.name.is_empty() {
-                    self.error = Some("name cannot be empty".to_string());
-                    AppAction::None
-                } else if self.league.is_empty() {
-                    self.error = Some("league cannot be empty".to_string());
-                    AppAction::None
-                } else if let Ok(year) = self.year.parse::<u16>() {
-                    match create_team(self.name.clone(), self.league.clone(), year) {
-                        Ok(_) => AppAction::Back(true, Some(1)),
-                        Err(_) => {
-                            self.error = Some("could not create team".to_string());
-                            AppAction::None
-                        }
-                    }
-                } else {
-                    self.error = Some("year must be a 4-digit number".to_string());
-                    AppAction::None
-                }
-            }
+        match (key.code, &self.error) {
+            (_, Some(_)) => self.handle_error_reset(),
+            (KeyCode::Char(c), _) => self.handle_char(c),
+            (KeyCode::Backspace, _) => self.handle_backspace(),
+            (KeyCode::Tab, _) => self.handle_tab(),
+            (KeyCode::BackTab, _) => self.handle_backtab(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => self.handle_enter(),
             _ => AppAction::None,
         }
     }
@@ -145,6 +83,87 @@ impl AddTeamScreen {
             field: 0,
             error: None,
         }
+    }
+
+    fn handle_error_reset(&mut self) -> AppAction {
+        self.error = None;
+        AppAction::None
+    }
+
+    fn handle_tab(&mut self) -> AppAction {
+        self.field = (self.field + 1) % 3;
+        AppAction::None
+    }
+
+    fn handle_backtab(&mut self) -> AppAction {
+        if self.field == 0 {
+            self.field = 2;
+        } else {
+            self.field -= 1;
+        }
+        AppAction::None
+    }
+
+    fn handle_backspace(&mut self) -> AppAction {
+        match self.field {
+            0 => {
+                self.name.pop();
+            }
+            1 => {
+                self.league.pop();
+            }
+            2 => {
+                self.year.pop();
+            }
+            _ => {}
+        };
+        AppAction::None
+    }
+
+    fn handle_enter(&mut self) -> AppAction {
+        match (
+            self.name.is_empty(),
+            self.league.is_empty(),
+            self.year.parse::<u16>(),
+        ) {
+            (true, _, _) => {
+                self.error = Some("name cannot be empty".to_string());
+                AppAction::None
+            }
+            (_, true, _) => {
+                self.error = Some("league cannot be empty".to_string());
+                AppAction::None
+            }
+            (_, _, Ok(year)) => match create_team(self.name.clone(), self.league.clone(), year) {
+                Ok(_) => AppAction::Back(true, Some(1)),
+                Err(_) => {
+                    self.error = Some("could not create team".to_string());
+                    AppAction::None
+                }
+            },
+            (_, _, Err(_)) => {
+                self.error = Some("year must be a 4-digit number".to_string());
+                AppAction::None
+            }
+        }
+    }
+
+    fn handle_char(&mut self, c: char) -> AppAction {
+        match (self.field, c.is_ascii_digit()) {
+            (0, _) => {
+                self.name.push(c);
+            }
+            (1, _) => {
+                self.league.push(c);
+            }
+            (2, true) => {
+                if self.year.len() < 4 {
+                    self.year.push(c);
+                }
+            }
+            _ => {}
+        };
+        AppAction::None
     }
 
     fn render_error(&self, f: &mut Frame, area: Rect) {

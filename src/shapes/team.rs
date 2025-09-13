@@ -11,3 +11,9 @@ pub struct TeamEntry {
     #[serde(skip_serializing, skip_deserializing)]
     pub id: Uuid,
 }
+
+impl TeamEntry {
+    pub fn find_player(&self, player_id: Uuid) -> Option<&PlayerEntry> {
+        self.players.iter().find(|p| p.id == player_id)
+    }
+}

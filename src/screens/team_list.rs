@@ -29,24 +29,29 @@ impl Screen for TeamListScreen {
             self.error = None;
             return AppAction::None;
         }
-        match key.code {
-            KeyCode::Down => {
+        match (key.code, &self.error) {
+            (_, Some(_)) => {
+                self.error = None;
+                AppAction::None
+            }
+            (KeyCode::Down, _) => {
                 self.next_team();
                 AppAction::None
             }
-            KeyCode::Up => {
+            (KeyCode::Up, _) => {
                 self.previous_team();
                 AppAction::None
             }
-            KeyCode::Enter => match self.list_state.selected().and_then(|x| self.teams.get(x)) {
+            (KeyCode::Enter, _) => match self.list_state.selected().and_then(|x| self.teams.get(x))
+            {
                 None => AppAction::None,
                 Some(team) => AppAction::SwitchScreen(Box::new(TeamDetailsScreen::new(
                     self.teams.clone(),
                     team.id,
                 ))),
             },
-            KeyCode::Esc => AppAction::Back(true, Some(1)),
-            KeyCode::Char('n') => AppAction::SwitchScreen(Box::new(AddTeamScreen::new())),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Char('n'), _) => AppAction::SwitchScreen(Box::new(AddTeamScreen::new())),
             _ => AppAction::None,
         }
     }
