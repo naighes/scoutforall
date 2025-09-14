@@ -4,6 +4,7 @@ pub mod add_team;
 pub mod match_list;
 pub mod scouting_screen;
 pub mod screen;
+pub mod settings;
 pub mod start_set_screen;
 pub mod team_details;
 pub mod team_list;

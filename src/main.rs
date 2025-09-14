@@ -5,15 +5,22 @@ mod util;
 
 mod errors;
 mod io;
+mod localization;
 mod screens;
 mod shapes;
 
 #[cfg(test)]
 mod tests;
 
-use crate::screens::{
-    screen::{AppAction, Screen},
-    team_list::TeamListScreen,
+use crate::{
+    constants::DEFAULT_LANGUAGE,
+    localization::init_language,
+    ops::load_settings,
+    screens::{
+        screen::{AppAction, Screen},
+        team_list::TeamListScreen,
+    },
+    shapes::enums::LanguageEnum,
 };
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -27,7 +34,7 @@ use ratatui::{
     widgets::Paragraph,
     Terminal,
 };
-use std::error::Error;
+use std::{error::Error, str::FromStr};
 
 struct App {
     screens: Vec<Box<dyn Screen>>,
@@ -63,6 +70,16 @@ impl App {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let language = load_settings()
+        .ok()
+        .map(|s| s.language)
+        .and_then(|l| LanguageEnum::from_str(&l).ok())
+        .unwrap_or(
+            LanguageEnum::from_str(DEFAULT_LANGUAGE)
+                .ok()
+                .unwrap_or(LanguageEnum::En),
+        );
+    init_language(language);
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -111,8 +128,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Res
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(container[2]);
-            let header = Paragraph::new("🏐 scountforall")
-                .style(Style::default().add_modifier(Modifier::BOLD));
+            let header =
+                Paragraph::new("🏐 scout4all").style(Style::default().add_modifier(Modifier::BOLD));
             f.render_widget(header, container[0]);
             if let Some(screen) = app.current_screen() {
                 screen.render(f, container[1], footer[0], footer[1]);

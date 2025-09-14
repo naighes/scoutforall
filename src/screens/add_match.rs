@@ -1,4 +1,5 @@
 use crate::{
+    localization::current_labels,
     ops::create_match,
     screens::{
         screen::{AppAction, Screen},
@@ -108,7 +109,9 @@ impl AddMatchScreen {
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title("new match");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(current_labels().new_match);
         f.render_widget(block, area);
     }
 
@@ -116,31 +119,40 @@ impl AddMatchScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph =
-            Paragraph::new("Tab / Shift+Tab = navigate | Enter = confirm | Esc = back | Q = quit")
-                .block(block);
+        let paragraph = Paragraph::new(format!(
+            "Tab / Shift+Tab = {} | Enter = {} | Esc = {} | Q = {}",
+            current_labels().navigate,
+            current_labels().confirm,
+            current_labels().back,
+            current_labels().quit,
+        ))
+        .block(block);
         f.render_widget(paragraph, area);
     }
 
     fn render_home_widget(&self, f: &mut Frame, area: Rect) {
-        let home_widget =
-            Paragraph::new(format!("home: {}", if self.home { "[X]" } else { "[ ]" },)).style(
-                if self.field == 2 {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default()
-                },
-            );
+        let home_widget = Paragraph::new(format!(
+            "{}: {}",
+            current_labels().home,
+            if self.home { "[X]" } else { "[ ]" },
+        ))
+        .style(if self.field == 2 {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        });
         f.render_widget(home_widget, area);
     }
 
     fn render_opponent_widget(&self, f: &mut Frame, area: Rect) {
         let name_widget =
-            Paragraph::new(format!("opponent: {}", self.opponent)).style(if self.field == 0 {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            });
+            Paragraph::new(format!("{}: {}", current_labels().opponent, self.opponent)).style(
+                if self.field == 0 {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                },
+            );
         f.render_widget(name_widget, area);
     }
 
@@ -148,14 +160,16 @@ impl AddMatchScreen {
         let date_text = if self.year.len() < 4 {
             let spaces = 4 - self.year.len();
             format!(
-                "date (yyyy-mm-dd): {}{}-__-__",
+                "{} (yyyy-mm-dd): {}{}-__-__",
+                current_labels().date,
                 self.year,
                 "_".repeat(spaces)
             )
         } else if self.month.len() < 2 {
             let spaces = 2 - self.month.len();
             format!(
-                "date (yyyy-mm-dd): {}-{}{}-__",
+                "{} (yyyy-mm-dd): {}-{}{}-__",
+                current_labels().date,
                 self.year,
                 self.month,
                 "_".repeat(spaces)
@@ -163,7 +177,8 @@ impl AddMatchScreen {
         } else {
             let spaces = 2 - self.day.len();
             format!(
-                "date (yyyy-mm-dd): {}-{}-{}{}",
+                "{} (yyyy-mm-dd): {}-{}-{}{}",
+                current_labels().date,
                 self.year,
                 self.month,
                 self.day,
@@ -334,7 +349,7 @@ impl AddMatchScreen {
             self.opponent.is_empty(),
         ) {
             (_, __, _, _, true) => {
-                self.error = Some("opponent cannot be empty".to_string());
+                self.error = Some(current_labels().opponent_cannot_be_empty.to_string());
                 AppAction::None
             }
             (4, 2, 2, Ok(date), _) => {
@@ -343,13 +358,13 @@ impl AddMatchScreen {
                         AppAction::SwitchScreen(Box::new(StartSetScreen::new(m, 1, None, Some(2))))
                     }
                     Err(_) => {
-                        self.error = Some("could not create match".to_string());
+                        self.error = Some(current_labels().could_not_create_match.to_string());
                         AppAction::None
                     }
                 }
             }
             _ => {
-                self.error = Some("invalid date".into());
+                self.error = Some(current_labels().invalid_date.into());
                 AppAction::None
             }
         }

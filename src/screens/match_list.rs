@@ -1,5 +1,6 @@
 use crate::{
     errors::AppError,
+    localization::current_labels,
     ops::get_matches,
     pdf::open_match_pdf,
     screens::{
@@ -59,7 +60,7 @@ impl Screen for MatchListScreen {
             self.matches = match get_matches(&self.team) {
                 Ok(matches) => matches,
                 Err(_) => {
-                    self.error = Some("could not load matches".to_string());
+                    self.error = Some(current_labels().could_not_load_matches.to_string());
                     vec![]
                 }
             }
@@ -92,7 +93,11 @@ impl Screen for MatchListScreen {
                     Constraint::Length(20),
                 ],
             )
-            .block(Block::default().borders(Borders::ALL).title("match list"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(current_labels().match_list),
+            )
             .widths(&[
                 Constraint::Length(14),
                 Constraint::Length(30),
@@ -106,7 +111,7 @@ impl Screen for MatchListScreen {
                 self.render_no_matches_yet(f, container[1]);
             }
         } else {
-            self.error = Some("could not render the match list".to_string());
+            self.error = Some(current_labels().could_not_render_match_list.to_string());
         }
         self.render_header(f, container[0]);
         self.render_error(f, footer_right);
@@ -161,7 +166,7 @@ impl MatchListScreen {
             (if status.match_finished {
                 ""
             } else {
-                "in progress"
+                current_labels().in_progress
             })
             .into(),
         ]);
@@ -208,7 +213,7 @@ impl MatchListScreen {
                 )))
             }
             Err(_) => {
-                self.error = Some("could not compute the snapshot".to_string());
+                self.error = Some(current_labels().could_not_compute_snapshot.to_string());
                 AppAction::None
             }
         }
@@ -232,11 +237,18 @@ impl MatchListScreen {
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
         let header_text = format!(
-            "{}\nleague: {}\nyear: {}",
-            self.team.name, self.team.league, self.team.year
+            "{}\n{}: {}\n{}: {}",
+            current_labels().league,
+            current_labels().year,
+            self.team.name,
+            self.team.league,
+            self.team.year
         );
-        let header =
-            Paragraph::new(header_text).block(Block::default().borders(Borders::ALL).title("team"));
+        let header = Paragraph::new(header_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(current_labels().team),
+        );
         f.render_widget(header, area);
     }
 
@@ -245,15 +257,24 @@ impl MatchListScreen {
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
         let new_match_text = if self.team.players.len() >= 6 {
-            "N = new match | "
+            format!("N = {} | ", current_labels().new_match)
         } else {
-            ""
+            "".to_string()
         };
         let paragraph = match self.matches.len() {
-            0 => Paragraph::new(format!("{}Esc = back | Q = quit", new_match_text)).block(block),
+            0 => Paragraph::new(format!(
+                "{}Esc = {} | Q = {}",
+                new_match_text,
+                current_labels().back,
+                current_labels().quit
+            ))
+            .block(block),
             _ => Paragraph::new(format!(
-                "↑↓ = move | Enter = select | {}Esc = back | Q = quit",
-                new_match_text
+                "↑↓ = move | Enter = {} | {}Esc = {} | Q = {}",
+                current_labels().select,
+                new_match_text,
+                current_labels().back,
+                current_labels().quit
             ))
             .block(block),
         };
@@ -269,7 +290,11 @@ impl MatchListScreen {
                         .bg(Color::Red)
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title("error"));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().error),
+                );
             f.render_widget(error_widget, area);
         }
     }
@@ -283,7 +308,7 @@ impl MatchListScreen {
                 Constraint::Percentage(40),
             ])
             .split(area);
-        let paragraph = Paragraph::new("no matches yet")
+        let paragraph = Paragraph::new(current_labels().no_matches_yet)
             .block(Block::default().borders(Borders::NONE))
             .alignment(Alignment::Center);
         f.render_widget(paragraph, chunks[1]);
@@ -297,14 +322,14 @@ impl MatchListScreen {
         {
             Some(m) => m,
             None => {
-                self.error = Some("no match selected".to_string());
+                self.error = Some(current_labels().no_match_selected.to_string());
                 return AppAction::None;
             }
         };
         let status = match selected_match.get_status() {
             Ok(s) => s,
             Err(_) => {
-                self.error = Some("could not get match status".to_string());
+                self.error = Some(current_labels().could_not_get_match_status.to_string());
                 return AppAction::None;
             }
         };
@@ -314,7 +339,7 @@ impl MatchListScreen {
             status.next_set_number,
         ) {
             (true, _, _) => {
-                open_match_pdf(&selected_match).expect("OH MY!");
+                open_match_pdf(&selected_match).expect("TODO");
                 AppAction::None
             }
             (false, None, Some(next_set_number)) => {

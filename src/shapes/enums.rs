@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-use crate::errors::{AppError, IOError};
+use crate::{
+    errors::{AppError, IOError},
+    localization::Labels,
+};
 
 /// Represents the two possible phases of play in volleyball.
 ///
@@ -154,18 +157,18 @@ impl fmt::Display for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub fn friendly_name(&self) -> &'static str {
+    pub fn friendly_name(&self, labels: &Labels) -> &'static str {
         use EventTypeEnum::*;
         match self {
-            S => "serve",
-            P => "pass",
-            A => "attack",
-            D => "dig",
-            B => "block",
-            F => "fault",
-            OS => "opponent score",
-            OE => "opponent error",
-            R => "substitution",
+            S => labels.serve,
+            P => labels.reception,
+            A => labels.attack,
+            D => labels.defense,
+            B => labels.block,
+            F => labels.fault,
+            OS => labels.opponent_score,
+            OE => labels.opponent_error,
+            R => labels.substitution,
         }
     }
 
@@ -324,71 +327,71 @@ impl FromStr for EvalEnum {
 }
 
 impl EvalEnum {
-    pub fn friendly_description(&self, event: EventTypeEnum) -> Option<String> {
+    pub fn friendly_description(&self, event: EventTypeEnum, labels: &Labels) -> Option<String> {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self, event) {
-            (Perfect, A) => Some("winning attack".to_string()),
-            (Positive, A) => Some("attack continuation".to_string()),
-            (Negative, A) => Some("opponent counter-attack opportunity".to_string()),
+            (Perfect, A) => Some(labels.winning_attack.to_string()),
+            (Positive, A) => Some(labels.attack_continuation.to_string()),
+            (Negative, A) => Some(labels.opponent_counter_attack_opportunity.to_string()),
 
-            (Perfect, B) => Some("winning block".to_string()),
-            (Positive, B) => Some("counter-attack opportunity".to_string()),
-            (Negative, B) => Some("opponent counter-attack opportunity".to_string()),
+            (Perfect, B) => Some(labels.winning_block.to_string()),
+            (Positive, B) => Some(labels.counter_attack_opportunity.to_string()),
+            (Negative, B) => Some(labels.opponent_counter_attack_opportunity.to_string()),
 
-            (Positive, D) => Some("first-tempo still available".to_string()),
-            (Exclamative, D) => Some("few attack options available".to_string()),
-            (Negative, D) => Some("limited attack options".to_string()),
-            (Over, D) => Some("ball goes straight over the net".to_string()),
+            (Positive, D) => Some(labels.first_tempo_still_available.to_string()),
+            (Exclamative, D) => Some(labels.few_attack_options_available.to_string()),
+            (Negative, D) => Some(labels.limited_attack_options.to_string()),
+            (Over, D) => Some(labels.ball_goes_straight_over_the_net.to_string()),
 
-            (Positive, P) => Some("first-tempo still available".to_string()),
-            (Exclamative, P) => Some("few attack options available".to_string()),
-            (Negative, P) => Some("limited attack options".to_string()),
-            (Over, P) => Some("ball goes straight over the net".to_string()),
+            (Positive, P) => Some(labels.first_tempo_still_available.to_string()),
+            (Exclamative, P) => Some(labels.few_attack_options_available.to_string()),
+            (Negative, P) => Some(labels.limited_attack_options.to_string()),
+            (Over, P) => Some(labels.ball_goes_straight_over_the_net.to_string()),
 
             (Perfect, S) => None,
-            (Positive, S) => Some("opponent with limited attack options".to_string()),
-            (Negative, S) => Some("opponent with full attack options".to_string()),
-            (Over, S) => Some("ball goes straight back to our court".to_string()),
+            (Positive, S) => Some(labels.opponent_with_limited_attack_options.to_string()),
+            (Negative, S) => Some(labels.opponent_with_full_attack_options.to_string()),
+            (Over, S) => Some(labels.ball_goes_straight_back_to_our_court.to_string()),
             _ => None,
         }
     }
 
-    pub fn friendly_name(&self, event: EventTypeEnum) -> String {
+    pub fn friendly_name(&self, event: EventTypeEnum, labels: &Labels) -> String {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self, event) {
-            (Perfect, A) => "score".to_string(),
-            (Positive, A) => "positive".to_string(),
-            (Negative, A) => "negative".to_string(),
-            (Error, A) => "error".to_string(),
-            (Over, A) => "blocked".to_string(),
+            (Perfect, A) => labels.score.to_string(),
+            (Positive, A) => labels.positive.to_string(),
+            (Negative, A) => labels.negative.to_string(),
+            (Error, A) => labels.error.to_string(),
+            (Over, A) => labels.blocked.to_string(),
 
-            (Perfect, B) => "winning block".to_string(),
-            (Positive, B) => "positive".to_string(),
-            (Negative, B) => "negative".to_string(),
-            (Error, B) => "error".to_string(),
-            (Over, B) => "net fault".to_string(),
+            (Perfect, B) => labels.winning_block.to_string(),
+            (Positive, B) => labels.positive.to_string(),
+            (Negative, B) => labels.negative.to_string(),
+            (Error, B) => labels.error.to_string(),
+            (Over, B) => labels.net_fault.to_string(),
 
-            (Perfect, D) => "perfect".to_string(),
-            (Positive, D) => "positive".to_string(),
-            (Exclamative, D) => "subpositive".to_string(),
-            (Negative, D) => "negative".to_string(),
-            (Error, D) => "error".to_string(),
-            (Over, D) => "overpass".to_string(),
+            (Perfect, D) => labels.perfect.to_string(),
+            (Positive, D) => labels.positive.to_string(),
+            (Exclamative, D) => labels.subpositive.to_string(),
+            (Negative, D) => labels.negative.to_string(),
+            (Error, D) => labels.error.to_string(),
+            (Over, D) => labels.overpass.to_string(),
 
-            (Perfect, P) => "perfect".to_string(),
-            (Positive, P) => "positive".to_string(),
-            (Exclamative, P) => "subpositive".to_string(),
-            (Negative, P) => "negative".to_string(),
-            (Error, P) => "error".to_string(),
-            (Over, P) => "overpass".to_string(),
+            (Perfect, P) => labels.perfect.to_string(),
+            (Positive, P) => labels.positive.to_string(),
+            (Exclamative, P) => labels.subpositive.to_string(),
+            (Negative, P) => labels.negative.to_string(),
+            (Error, P) => labels.error.to_string(),
+            (Over, P) => labels.overpass.to_string(),
 
-            (Perfect, S) => "ace".to_string(),
-            (Positive, S) => "positive".to_string(),
-            (Negative, S) => "negative".to_string(),
-            (Error, S) => "error".to_string(),
-            (Over, S) => "overpass".to_string(),
+            (Perfect, S) => labels.ace.to_string(),
+            (Positive, S) => labels.positive.to_string(),
+            (Negative, S) => labels.negative.to_string(),
+            (Error, S) => labels.error.to_string(),
+            (Over, S) => labels.overpass.to_string(),
 
             _ => event.to_string(),
         }
@@ -643,6 +646,51 @@ impl FromStr for RoleEnum {
             "outside-hitter" => Ok(OutsideHitter),
             "setter" => Ok(Setter),
             _ => Err(AppError::IO(IOError::Msg(format!("invalid role: {}", s)))),
+        }
+    }
+}
+
+/// Supported languages.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum LanguageEnum {
+    En,
+    It,
+}
+
+impl LanguageEnum {
+    pub const ALL: [LanguageEnum; 2] = [LanguageEnum::En, LanguageEnum::It];
+
+    pub fn iso_code(&self) -> &'static str {
+        use LanguageEnum::*;
+        match self {
+            En => "en",
+            It => "it",
+        }
+    }
+}
+
+impl fmt::Display for LanguageEnum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use LanguageEnum::*;
+        let label = match self {
+            En => "english",
+            It => "italiano",
+        };
+        write!(f, "{}", label)
+    }
+}
+
+impl FromStr for LanguageEnum {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use LanguageEnum::*;
+        match s.to_uppercase().as_str() {
+            "EN" | "ENGLISH" => Ok(En),
+            "IT" | "ITALIANO" | "ITALIAN" => Ok(It),
+            _ => Err(AppError::IO(IOError::Msg(format!(
+                "invalid language: {}",
+                s
+            )))),
         }
     }
 }

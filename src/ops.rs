@@ -1,13 +1,14 @@
-use crate::constants::{MATCH_DESCRIPTOR_FILE_NAME, TEAM_DESCRIPTOR_FILE_NAME};
+use crate::constants::{DEFAULT_LANGUAGE, MATCH_DESCRIPTOR_FILE_NAME, TEAM_DESCRIPTOR_FILE_NAME};
 use crate::errors::{AppError, IOError};
 use crate::io::path::{
-    get_base_path, get_match_descriptor_file_path, get_match_folder_path,
+    get_base_path, get_config_file_path, get_match_descriptor_file_path, get_match_folder_path,
     get_set_descriptor_file_path, get_set_events_file_path, get_team_folder_path,
 };
 use crate::shapes::enums::{RoleEnum, TeamSideEnum};
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::r#match::MatchEntry;
 use crate::shapes::set::SetEntry;
+use crate::shapes::settings::Settings;
 use crate::shapes::snapshot::EventEntry;
 use crate::shapes::team::TeamEntry;
 use crate::util::sanitize_filename;
@@ -269,4 +270,26 @@ pub fn remove_last_event(
             Ok(Some(first))
         })
         .map_err(|e| AppError::IO(IOError::from(e)))
+}
+
+pub fn save_settings(language: String) -> Result<Settings, Box<dyn std::error::Error>> {
+    let config_file_path: PathBuf = get_config_file_path();
+    let config = Settings { language };
+    let file = File::create(&config_file_path)?;
+    serde_json::to_writer_pretty(file, &config)?;
+    Ok(config)
+}
+
+pub fn load_settings() -> Result<Settings, Box<dyn std::error::Error>> {
+    let config_file_path: PathBuf = get_config_file_path();
+    match fs::read_to_string(&config_file_path) {
+        Ok(content) => {
+            let settings: Settings = serde_json::from_str(&content)?;
+            Ok(settings)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            save_settings(DEFAULT_LANGUAGE.to_string())
+        }
+        Err(e) => Err(Box::new(e)),
+    }
 }

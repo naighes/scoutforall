@@ -1,4 +1,5 @@
 use crate::{
+    localization::current_labels,
     ops::create_player,
     screens::screen::{AppAction, Screen},
     shapes::{enums::RoleEnum, team::TeamEntry},
@@ -53,8 +54,8 @@ impl Screen for AddPlayerScreen {
                 Constraint::Min(1),
             ])
             .split(body);
-        let name_widget =
-            Paragraph::new(format!("name: {}", self.name)).style(if self.field == 0 {
+        let name_widget = Paragraph::new(format!("{}: {}", current_labels().name, self.name))
+            .style(if self.field == 0 {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {
                 Style::default()
@@ -65,8 +66,8 @@ impl Screen for AddPlayerScreen {
         } else {
             self.render_role_widget(f, inner[1]);
         }
-        let number_widget =
-            Paragraph::new(format!("number: {}", self.number)).style(if self.field == 2 {
+        let number_widget = Paragraph::new(format!("{}: {}", current_labels().number, self.number))
+            .style(if self.field == 2 {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {
                 Style::default()
@@ -110,24 +111,24 @@ impl AddPlayerScreen {
     fn handle_enter(&mut self) -> AppAction {
         match (self.name.is_empty(), self.role, self.number.parse::<u8>()) {
             (true, _, _) => {
-                self.error = Some("name cannot be empty".to_string());
+                self.error = Some(current_labels().name_cannot_be_empty.to_string());
                 AppAction::None
             }
             (_, None, _) => {
-                self.error = Some("role cannot be empty".to_string());
+                self.error = Some(current_labels().role_is_required.to_string());
                 AppAction::None
             }
             (_, Some(role), Ok(number)) => {
                 match create_player(self.name.clone(), role, number, &mut self.team) {
                     Ok(_) => AppAction::Back(true, Some(1)),
                     Err(_) => {
-                        self.error = Some("could not create player".to_string());
+                        self.error = Some(current_labels().could_not_create_player.to_string());
                         AppAction::None
                     }
                 }
             }
             (_, _, Err(_)) => {
-                self.error = Some("number must be a 4-digit number".into());
+                self.error = Some(current_labels().number_must_be_between_0_and_99.into());
                 AppAction::None
             }
         }
@@ -198,9 +199,9 @@ impl AddPlayerScreen {
 
     fn render_role_widget(&mut self, f: &mut Frame, area: Rect) {
         let role_widget = Paragraph::new(if let Some(role) = self.role {
-            format!("role: {}", role)
+            format!("{}: {}", current_labels().role, role)
         } else {
-            "role:".into()
+            format!("{}:", current_labels().role)
         })
         .style(Style::default());
         f.render_widget(role_widget, area);
@@ -212,7 +213,11 @@ impl AddPlayerScreen {
             .map(|r| ListItem::new(r.to_string()))
             .collect();
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("role"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(current_labels().role),
+            )
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)
@@ -223,7 +228,9 @@ impl AddPlayerScreen {
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title("new player");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(current_labels().new_player);
         f.render_widget(block, area);
     }
 
@@ -231,9 +238,14 @@ impl AddPlayerScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph =
-            Paragraph::new("Tab / Shift+Tab = navigate | Enter = confirm | Esc = back | Q = quit")
-                .block(block);
+        let paragraph = Paragraph::new(format!(
+            "Tab / Shift+Tab = {} | Enter = {} | Esc = {} | Q = {}",
+            current_labels().navigate,
+            current_labels().confirm,
+            current_labels().back,
+            current_labels().quit
+        ))
+        .block(block);
         f.render_widget(paragraph, area);
     }
 
@@ -246,7 +258,11 @@ impl AddPlayerScreen {
                         .bg(Color::Red)
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title("error"));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().error),
+                );
             f.render_widget(error_widget, area);
         }
     }

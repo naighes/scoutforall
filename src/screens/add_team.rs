@@ -1,4 +1,5 @@
 use crate::{
+    localization::current_labels,
     ops::create_team,
     screens::screen::{AppAction, Screen},
 };
@@ -36,8 +37,9 @@ impl Screen for AddTeamScreen {
     fn on_resume(&mut self, _: bool) {}
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        self.render_error(f, footer_right);
-        let block = Block::default().borders(Borders::ALL).title("new team");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(current_labels().new_team);
         f.render_widget(block, body);
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -47,9 +49,9 @@ impl Screen for AddTeamScreen {
         let field_height = 3;
         let mut y_offset = container[0].y;
         for (_, (label, value, idx)) in vec![
-            ("name", &self.name, 0),
-            ("league", &self.league, 1),
-            ("year", &self.year, 2),
+            (current_labels().name, &self.name, 0),
+            (current_labels().league, &self.league, 1),
+            (current_labels().year, &self.year, 2),
         ]
         .into_iter()
         .enumerate()
@@ -70,6 +72,7 @@ impl Screen for AddTeamScreen {
                 rect,
             );
         }
+        self.render_error(f, footer_right);
         self.render_footer(f, footer_left);
     }
 }
@@ -127,22 +130,26 @@ impl AddTeamScreen {
             self.year.parse::<u16>(),
         ) {
             (true, _, _) => {
-                self.error = Some("name cannot be empty".to_string());
+                self.error = Some(current_labels().name_cannot_be_empty.to_string());
                 AppAction::None
             }
             (_, true, _) => {
-                self.error = Some("league cannot be empty".to_string());
+                self.error = Some(current_labels().league_cannot_be_empty.to_string());
                 AppAction::None
             }
             (_, _, Ok(year)) => match create_team(self.name.clone(), self.league.clone(), year) {
                 Ok(_) => AppAction::Back(true, Some(1)),
                 Err(_) => {
-                    self.error = Some("could not create team".to_string());
+                    self.error = Some(current_labels().could_not_create_team.to_string());
                     AppAction::None
                 }
             },
             (_, _, Err(_)) => {
-                self.error = Some("year must be a 4-digit number".to_string());
+                self.error = Some(
+                    current_labels()
+                        .year_must_be_a_four_digit_number
+                        .to_string(),
+                );
                 AppAction::None
             }
         }
@@ -175,7 +182,11 @@ impl AddTeamScreen {
                         .bg(Color::Red)
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title("error"));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().error),
+                );
             f.render_widget(error_widget, area);
         }
     }
@@ -184,9 +195,13 @@ impl AddTeamScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph =
-            Paragraph::new("Tab / Shift+Tab | Enter = confirm | Esc = cancel | Q = quit")
-                .block(block);
+        let paragraph = Paragraph::new(format!(
+            "Tab / Shift+Tab | Enter = {} | Esc = {} | Q = {}",
+            current_labels().confirm,
+            current_labels().back,
+            current_labels().quit
+        ))
+        .block(block);
         f.render_widget(paragraph, area);
     }
 }

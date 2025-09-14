@@ -9,6 +9,7 @@ use ratatui::{
 use uuid::Uuid;
 
 use crate::{
+    localization::current_labels,
     ops::{append_event, remove_last_event},
     screens::screen::{AppAction, Screen},
     shapes::{
@@ -282,7 +283,7 @@ impl ScoutingScreen {
                 AppAction::None
             }
             Err(_) => {
-                self.error = Some("could not re-compute snapshot".to_string());
+                self.error = Some(current_labels().could_not_compute_snapshot.to_string());
                 AppAction::None
             }
         }
@@ -335,7 +336,7 @@ impl ScoutingScreen {
                 }
             }
             Err(_) => {
-                self.error = Some("could not add event".to_string());
+                self.error = Some(current_labels().could_not_add_event.to_string());
                 AppAction::None
             }
         }
@@ -384,7 +385,11 @@ impl ScoutingScreen {
                     // the selected option is not available => error
                     _ => {
                         self.current_event = EventTypeInput::None;
-                        self.error = Some(format!("event {} is not available", event_type));
+                        let template = current_labels().event_is_not_available;
+                        self.error = Some(format!(
+                            "{}",
+                            template.replace("{}", &event_type.to_string())
+                        ));
                         AppAction::None
                     }
                 }
@@ -411,7 +416,7 @@ impl ScoutingScreen {
             }
             (Char(_), EventTypeInput::Some(_), None) => {
                 // replaced player is required
-                self.error = Some("no player selected".to_string());
+                self.error = Some(current_labels().no_player_selected.to_string());
                 AppAction::None
             }
             (Char(c), EventTypeInput::Some(event_type), Some(replaced_id)) => {
@@ -476,7 +481,7 @@ impl ScoutingScreen {
                 target_player: None,
             }),
             _ => {
-                self.error = Some("invalid player selection".to_string());
+                self.error = Some(current_labels().invalid_player_selection.to_string());
                 AppAction::None
             }
         }
@@ -523,8 +528,11 @@ impl ScoutingScreen {
                         return self.add_event(&entry);
                     }
                     _ => {
-                        self.error =
-                            Some(format!("evaluation not allowed for event {}", event_type));
+                        let template = current_labels().evaluation_not_allowed_for_event;
+                        self.error = Some(format!(
+                            "{}",
+                            template.replace("{}", &event_type.to_string())
+                        ));
                     }
                 }
             }
@@ -602,12 +610,18 @@ impl ScoutingScreen {
         let rows: Vec<Row> = self
             .currently_available_options
             .iter()
-            .map(|ev| Row::new(vec![format!("{} ({})", ev, ev.friendly_name())]))
+            .map(|ev| {
+                Row::new(vec![format!(
+                    "{} ({})",
+                    ev,
+                    ev.friendly_name(current_labels())
+                )])
+            })
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(100)]).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("choose the event")
+                .title(current_labels().choose_the_event)
                 .style(Style::default().add_modifier(Modifier::REVERSED)),
         );
         f.render_widget(table, area);
@@ -625,13 +639,17 @@ impl ScoutingScreen {
                     "{} => {}",
                     ev.to_string(),
                     if let EventTypeInput::Some(last_event) = self.current_event {
-                        if let Some(desc) = ev.friendly_description(last_event) {
-                            format!("{} ({})", ev.friendly_name(last_event), desc)
+                        if let Some(desc) = ev.friendly_description(last_event, current_labels()) {
+                            format!(
+                                "{} ({})",
+                                ev.friendly_name(last_event, current_labels()),
+                                desc
+                            )
                         } else {
-                            format!("{}", ev.friendly_name(last_event))
+                            format!("{}", ev.friendly_name(last_event, current_labels()))
                         }
                     } else {
-                        "unknown".to_string()
+                        current_labels().unknown.to_string()
                     }
                 )])
             })
@@ -639,7 +657,7 @@ impl ScoutingScreen {
         let table = Table::new(rows, [Constraint::Percentage(100)]).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("choose the evaluation")
+                .title(current_labels().choose_the_evaluation)
                 .style(Style::default().add_modifier(Modifier::REVERSED)),
         );
         f.render_widget(table, area);
@@ -662,7 +680,13 @@ impl ScoutingScreen {
                 })
                 .to_string();
                 if is_setter {
-                    format!("{}\n{}\n(S){}", player.number, player.name, arrow)
+                    format!(
+                        "{}\n{}\n({}){}",
+                        player.number,
+                        current_labels().setter_prefix,
+                        player.name,
+                        arrow
+                    )
                 } else if is_libero {
                     format!("{}\n{}\n(L){}", player.number, player.name, arrow)
                 } else {
@@ -734,7 +758,7 @@ impl ScoutingScreen {
 
     fn recent_event_row(&'_ self, i: usize, e: &EventEntry) -> Row<'_> {
         Row::new(vec![
-            format!(" {:<12}", e.event_type.friendly_name()),
+            format!(" {:<12}", e.event_type.friendly_name(current_labels())),
             format!(
                 " {:<20}",
                 e.player
@@ -745,7 +769,7 @@ impl ScoutingScreen {
             format!(
                 " {:<10}",
                 e.eval
-                    .map(|e1| e1.friendly_name(e.event_type))
+                    .map(|e1| e1.friendly_name(e.event_type, current_labels()))
                     .unwrap_or("".to_string())
             ),
         ])
@@ -781,7 +805,7 @@ impl ScoutingScreen {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("latest events"),
+                .title(current_labels().latest_events),
         );
         f.render_widget(table, area);
     }
@@ -792,13 +816,13 @@ impl ScoutingScreen {
             .iter()
             .map(|entry| Self::format_player_choice_row(entry))
             .collect();
-        self.render_player_choices_table(f, area, rows, "player selection");
+        self.render_player_choices_table(f, area, rows, current_labels().player_selection);
     }
 
     fn render_replacement_choices(&mut self, f: &mut Frame, area: Rect) {
         match self.player {
             None => {
-                self.error = Some("no player selected".to_string());
+                self.error = Some(current_labels().no_player_selected.to_string());
             }
             Some(replaced_id) => {
                 let rows: Vec<Row> = self
@@ -815,7 +839,12 @@ impl ScoutingScreen {
                     })
                     .map(|e| Self::format_player_choice_row(&e))
                     .collect();
-                self.render_player_choices_table(f, area, rows, "select replacement");
+                self.render_player_choices_table(
+                    f,
+                    area,
+                    rows,
+                    current_labels().select_replacement,
+                );
             }
         }
     }
@@ -853,10 +882,16 @@ impl ScoutingScreen {
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
         let paragraph = match (self.set.events.len(), &self.state) {
-            (0, ScoutingScreenState::Event) => Paragraph::new("Esc = back | Q = quit"),
+            (0, ScoutingScreenState::Event) => Paragraph::new(format!(
+                "Esc = {} | Q = {}",
+                current_labels().back,
+                current_labels().quit
+            )),
             _ => Paragraph::new(format!(
-                "U = undo | Esc = back | Q = quit CE:{:?}",
-                self.current_event
+                "U = {} | Esc = {} | Q = {}",
+                current_labels().undo,
+                current_labels().back,
+                current_labels().quit
             )),
         }
         .block(block);
@@ -887,7 +922,7 @@ impl ScoutingScreen {
                     .current_lineup
                     .get_current_rotation()
                     .ok()
-                    .map(|r| format!("S{}", r + 1)),
+                    .map(|r| format!("{}{}", current_labels().setter_prefix, r + 1)),
                 Color::Cyan,
                 Color::Black,
             ),
@@ -928,7 +963,11 @@ impl ScoutingScreen {
                         .bg(Color::Red)
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title("error"));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().error),
+                );
             f.render_widget(error_widget, area);
         }
     }

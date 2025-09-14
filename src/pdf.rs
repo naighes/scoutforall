@@ -1,4 +1,5 @@
 use crate::errors::AppError;
+use crate::localization::current_labels;
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::r#match::MatchEntry;
@@ -215,8 +216,8 @@ pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
     let document = typst::compile(&world)
         .output
         .expect("error compiling typst");
-    let pdf = typst_pdf::pdf(&document, &PdfOptions::default()).expect("Error exporting PDF");
-    fs::write(&path, pdf).expect("Error writing PDF");
+    let pdf = typst_pdf::pdf(&document, &PdfOptions::default()).expect("error exporting PDF");
+    fs::write(&path, pdf).expect("error writing PDF");
     open_with_system_viewer(&path);
     Ok(())
 }
@@ -1004,7 +1005,7 @@ fn event_stats(
     phases: Vec<Option<PhaseEnum>>,
     player: Option<Uuid>,
 ) -> String {
-    let title = event_type.friendly_name();
+    let title = event_type.friendly_name(&current_labels());
     let rotations = [0, 1, 2, 3, 4, 5];
     let mut header_cells: Vec<Cell> = vec![
         Cell {
@@ -1044,7 +1045,7 @@ fn event_stats(
             Cell {
                 content: match phase {
                     Some(phase) => phase.to_string(),
-                    None => "global".to_string(),
+                    None => current_labels().global.to_string(),
                 },
                 background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
                 ..Default::default()
@@ -1092,7 +1093,7 @@ fn event_stats(
             .map(|(perc, _total, _count)| perc);
         let mut cells: Vec<Cell> = vec![
             Cell {
-                content: format!("S{}", rotation + 1),
+                content: format!("{}{}", current_labels().setter_prefix, rotation + 1),
                 background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
                 ..Default::default()
             },
@@ -1185,7 +1186,7 @@ fn attack_stats(
     player: Option<Uuid>,
 ) -> String {
     let event_type = EventTypeEnum::A;
-    let title = event_type.friendly_name();
+    let title = event_type.friendly_name(current_labels());
     let rotations = [0, 1, 2, 3, 4, 5];
     let mut header_cells: Vec<Cell> = vec![
         Cell {
@@ -1204,7 +1205,7 @@ fn attack_stats(
     header_cells.extend(evals.iter().map(|eval| Cell {
         content: match eval {
             EvalEnum::Perfect | EvalEnum::Positive | EvalEnum::Negative => {
-                format!("eff. on {}", eval.to_string())
+                format!("eff. {}", eval.to_string())
             }
             _ => eval.to_string(),
         },
@@ -1237,7 +1238,7 @@ fn attack_stats(
             Cell {
                 content: match phase {
                     Some(phase) => phase.to_string(),
-                    None => "global".to_string(),
+                    None => current_labels().global.to_string(),
                 },
                 background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
                 ..Default::default()
@@ -1292,7 +1293,7 @@ fn attack_stats(
     for rotation in rotations {
         let mut cells: Vec<Cell> = vec![
             Cell {
-                content: format!("S{}", rotation + 1),
+                content: format!("{}{}", current_labels().setter_prefix, rotation + 1),
                 background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
                 ..Default::default()
             },
@@ -1425,12 +1426,12 @@ where
         ..Default::default()
     }];
     header_cells.extend(rotations.iter().map(|rotation| Cell {
-        content: format!("S{}", (*rotation + 1)),
+        content: format!("{}{}", current_labels().setter_prefix, (*rotation + 1)),
         background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
         ..Default::default()
     }));
     header_cells.push(Cell {
-        content: "global".to_string(),
+        content: current_labels().global.to_string(),
         background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
         ..Default::default()
     });
@@ -1445,7 +1446,7 @@ where
             content: phase
                 .as_ref()
                 .map(|p| p.to_string())
-                .unwrap_or_else(|| "global".to_string()),
+                .unwrap_or_else(|| current_labels().global.to_string()),
             background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
             ..Default::default()
         }];
@@ -1496,17 +1497,17 @@ fn resume_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>, player: Option<Uu
             ..Default::default()
         },
         Cell {
-            content: "aces".to_string(),
+            content: "ace".to_string(),
             background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
             ..Default::default()
         },
         Cell {
-            content: "faults".to_string(),
+            content: current_labels().faults.to_string(),
             background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
             ..Default::default()
         },
         Cell {
-            content: "err. (unf.)".to_string(),
+            content: current_labels().errors_report_label.to_string(),
             background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
             ..Default::default()
         },
@@ -1514,7 +1515,7 @@ fn resume_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>, player: Option<Uu
             content: if let Some(_) = player {
                 "".to_string()
             } else {
-                "opp. err.".to_string()
+                current_labels().opponent_errors_report_label.to_string()
             },
             background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
             ..Default::default()
@@ -1580,7 +1581,7 @@ fn resume_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>, player: Option<Uu
             Cell {
                 content: match phase {
                     Some(phase) => phase.to_string(),
-                    None => "global".to_string(),
+                    None => current_labels().global.to_string(),
                 },
                 background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
                 ..Default::default()
@@ -1657,7 +1658,7 @@ fn counter_attack_stats(stats: &Stats, player: Option<Uuid>) -> String {
         .map(|v| (v, None))
         .to_vec();
     let mut court = Courts::new(
-        "COUNTER ATTACK".to_string(),
+        current_labels().counter_attack.to_string(),
         COURT_TITLE_FONT_SIZE,
         COURT_ZONE_SIZE,
         COURT_VALUE_BOTTOM_FONT_SIZE,
@@ -1669,7 +1670,7 @@ fn counter_attack_stats(stats: &Stats, player: Option<Uuid>) -> String {
         Some(values),
         COURT_ZONE_SIZE,
         Some(COURT_ZONE_SPACING),
-        "global".to_string(),
+        current_labels().global.to_string(),
     ));
     let rows = [0, 1, 2, 3, 4, 5].map(|rotation| {
         let values: Vec<(Option<f64>, Option<f64>)> = zones
@@ -1687,7 +1688,7 @@ fn counter_attack_stats(stats: &Stats, player: Option<Uuid>) -> String {
             Some(values),
             COURT_ZONE_SIZE,
             Some(COURT_ZONE_SPACING),
-            format!("S{}", rotation + 1),
+            format!("{}{}", current_labels().setter_prefix, rotation + 1),
         )
     });
     for row in rows {
@@ -1706,7 +1707,7 @@ fn distribution_stats(stats: &Stats) -> String {
         ZoneEnum::Nine,
     ];
     let mut court = Courts::new(
-        "DISTRIBUTION".to_string(),
+        current_labels().distribution.to_string(),
         COURT_TITLE_FONT_SIZE,
         COURT_ZONE_SIZE,
         COURT_VALUE_BOTTOM_FONT_SIZE,
@@ -1740,9 +1741,11 @@ fn distribution_stats(stats: &Stats) -> String {
                 COURT_ZONE_SIZE,
                 Some(COURT_ZONE_SPACING),
                 match (phase, prev_eval) {
-                    (None, None) => "global".to_string(),
+                    (None, None) => current_labels().global.to_string(),
                     (Some(phase), None) => phase.to_string(),
-                    (None, Some(prev_eval)) => format!("global (on {})", prev_eval.to_string()),
+                    (None, Some(prev_eval)) => {
+                        format!("{} ({})", current_labels().global, prev_eval.to_string())
+                    }
                     (Some(phase), Some(prev_eval)) => {
                         format!("{} ({})", phase.to_string(), prev_eval.to_string())
                     }

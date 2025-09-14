@@ -1,4 +1,5 @@
 use crate::{
+    localization::current_labels,
     ops::load_teams,
     screens::{
         add_player::AddPlayerScreen,
@@ -64,7 +65,7 @@ impl Screen for TeamDetailsScreen {
             self.teams = match load_teams() {
                 Ok(teams) => teams,
                 Err(_) => {
-                    self.error = Some("could not load teams".to_string());
+                    self.error = Some(current_labels().could_not_load_teams.to_string());
                     vec![]
                 }
             }
@@ -92,10 +93,14 @@ impl Screen for TeamDetailsScreen {
             ],
         )
         .header(
-            Row::new(vec!["nr.", "full name", "role"])
+            Row::new(vec!["#", current_labels().name, current_labels().role])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
-        .block(Block::default().borders(Borders::ALL).title("players"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(current_labels().players),
+        )
         .widths(&[
             Constraint::Length(7),
             Constraint::Length(30),
@@ -151,11 +156,30 @@ impl TeamDetailsScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = match self.teams.iter().find(|t| t.id == self.team_id).map(|t| t.players.len()) {
-            Some(0) | None => Paragraph::new("N = new player | M = match list | Esc = back | Q = quit").block(block),
-            _ => {
-                Paragraph::new("↑↓ = move | Enter = select | N = new player | M = match list | Esc = back | Q = quit").block(block)
-            }
+        let paragraph = match self
+            .teams
+            .iter()
+            .find(|t| t.id == self.team_id)
+            .map(|t| t.players.len())
+        {
+            Some(0) | None => Paragraph::new(format!(
+                "N = {} | M = {} | Esc = {} | Q = {}",
+                current_labels().new_player,
+                current_labels().match_list,
+                current_labels().back,
+                current_labels().quit
+            ))
+            .block(block),
+            _ => Paragraph::new(format!(
+                "↑↓ = {} | Enter = {} | N = {} | M = {} | Esc = {} | Q = {}",
+                current_labels().navigate,
+                current_labels().select,
+                current_labels().new_player,
+                current_labels().match_list,
+                current_labels().back,
+                current_labels().quit
+            ))
+            .block(block),
         };
         f.render_widget(paragraph, area);
     }
@@ -163,14 +187,23 @@ impl TeamDetailsScreen {
     fn render_header(&self, f: &mut Frame, area: Rect, team: Option<&TeamEntry>) {
         let header_text = if let Some(team) = team {
             format!(
-                "{}\nleague: {}\nyear: {}",
-                team.name, team.league, team.year
+                "{}\n{}: {}\n{}: {}",
+                team.name,
+                current_labels().league,
+                team.league,
+                current_labels().year,
+                team.year
             )
         } else {
-            "team not found".into()
+            current_labels().team_not_found.into()
         };
-        let header =
-            Paragraph::new(header_text).block(Block::default().borders(Borders::ALL).title("team"));
+        let header = Paragraph::new(header_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(current_labels().team),
+            )
+            .alignment(Alignment::Center);
         f.render_widget(header, area);
     }
 
@@ -183,7 +216,7 @@ impl TeamDetailsScreen {
                 Constraint::Percentage(40),
             ])
             .split(area);
-        let paragraph = Paragraph::new("no players yet")
+        let paragraph = Paragraph::new(current_labels().no_players_yet)
             .block(Block::default().borders(Borders::NONE))
             .alignment(Alignment::Center);
         f.render_widget(paragraph, chunks[1]);
@@ -198,7 +231,11 @@ impl TeamDetailsScreen {
                         .bg(Color::Red)
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title("error"));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().error),
+                );
             f.render_widget(error_widget, area);
         }
     }

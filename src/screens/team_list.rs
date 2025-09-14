@@ -1,8 +1,10 @@
 use crate::{
-    ops::load_teams,
+    localization::current_labels,
+    ops::{load_settings, load_teams},
     screens::{
         add_team::AddTeamScreen,
         screen::{AppAction, Screen},
+        settings::SettingsScreen,
         team_details::TeamDetailsScreen,
     },
     shapes::team::TeamEntry,
@@ -25,10 +27,6 @@ pub struct TeamListScreen {
 
 impl Screen for TeamListScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if self.error.is_some() {
-            self.error = None;
-            return AppAction::None;
-        }
         match (key.code, &self.error) {
             (_, Some(_)) => {
                 self.error = None;
@@ -52,6 +50,13 @@ impl Screen for TeamListScreen {
             },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
             (KeyCode::Char('n'), _) => AppAction::SwitchScreen(Box::new(AddTeamScreen::new())),
+            (KeyCode::Char('s'), _) => match load_settings() {
+                Ok(settings) => AppAction::SwitchScreen(Box::new(SettingsScreen::new(settings))),
+                Err(_) => {
+                    self.error = Some(current_labels().could_not_load_settings.to_string());
+                    AppAction::None
+                }
+            },
             _ => AppAction::None,
         }
     }
@@ -62,7 +67,7 @@ impl Screen for TeamListScreen {
             self.teams = match load_teams() {
                 Ok(teams) => teams,
                 Err(_) => {
-                    self.error = Some("could not load teams".to_string());
+                    self.error = Some(current_labels().could_not_load_teams.to_string());
                     vec![]
                 }
             }
@@ -117,10 +122,22 @@ impl TeamListScreen {
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
         let paragraph = match self.teams.len() {
-            0 => Paragraph::new("N = new team | Q = quit").block(block),
-            _ => {
-                Paragraph::new("↑↓ = move | Enter = select | N = new team | Q = quit").block(block)
-            }
+            0 => Paragraph::new(format!(
+                "N = {} | S = {} | Q = {}",
+                current_labels().new_team,
+                current_labels().settings,
+                current_labels().quit
+            ))
+            .block(block),
+            _ => Paragraph::new(format!(
+                "↑↓ = {} | Enter = {} | S = {} | N = {} | Q = {}",
+                current_labels().navigate,
+                current_labels().select,
+                current_labels().settings,
+                current_labels().new_team,
+                current_labels().quit
+            ))
+            .block(block),
         };
         f.render_widget(paragraph, area);
     }
@@ -134,7 +151,7 @@ impl TeamListScreen {
                 Constraint::Percentage(40),
             ])
             .split(area);
-        let paragraph = Paragraph::new("no teams yet")
+        let paragraph = Paragraph::new(current_labels().no_teams_yet)
             .block(Block::default().borders(Borders::NONE))
             .alignment(Alignment::Center);
         f.render_widget(paragraph, chunks[1]);
@@ -145,7 +162,11 @@ impl TeamListScreen {
             self.list_state.select(Some(0));
         }
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("teams"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(current_labels().teams),
+            )
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)
@@ -165,7 +186,11 @@ impl TeamListScreen {
                         .bg(Color::Red)
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title("error"));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().error),
+                );
             f.render_widget(error_widget, area);
         }
     }

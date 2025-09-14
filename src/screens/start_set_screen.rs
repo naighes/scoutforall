@@ -1,4 +1,5 @@
 use crate::{
+    localization::current_labels,
     ops::create_set,
     screens::{
         scouting_screen::ScoutingScreen,
@@ -210,10 +211,7 @@ impl StartSetScreen {
                         )))
                     }
                     Err(_) => {
-                        self.error = Some(format!(
-                            "could not compute snapshot for set {}",
-                            self.set_number
-                        ));
+                        self.error = Some(current_labels().could_not_compute_snapshot.to_string());
                         AppAction::None
                     }
                 }
@@ -263,7 +261,7 @@ impl StartSetScreen {
         let available_players: Vec<PlayerEntry> =
             self.get_available_players(player_position, setter);
         if available_players.is_empty() {
-            self.error = Some("no available players to choose from".into());
+            self.error = Some(current_labels().no_available_players.to_string());
             return AppAction::None;
         }
         // ensure selected index is not out of bounds
@@ -357,12 +355,14 @@ impl StartSetScreen {
     }
 
     fn lineup_selection_title(position_index: usize, setter: Option<Uuid>) -> Block<'static> {
-        let title: String = match (position_index, setter) {
-            (6, None) => "lineup selection - setter".into(),
-            (_, Some(_)) => "lineup selection - libero".into(),
-            (_, None) => format!("pos {}", position_index + 1).into(),
+        let title = match (position_index, setter) {
+            (6, None) => current_labels().lineup_selection_setter,
+            (_, Some(_)) => current_labels().lineup_selection_libero,
+            (_, None) => &format!("pos {}", position_index + 1),
         };
-        Block::default().borders(Borders::ALL).title(title)
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title.to_string())
     }
 
     fn render_lineup_selection_row(p: &PlayerEntry) -> Row<'static> {
@@ -380,7 +380,7 @@ impl StartSetScreen {
         setter: Option<Uuid>,
         area: Rect,
     ) {
-        let header = Row::new(vec!["#", "name", "role"]).style(
+        let header = Row::new(vec!["#", current_labels().name, current_labels().role]).style(
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -434,8 +434,14 @@ impl StartSetScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph =
-            Paragraph::new("↑↓ = move | Enter = select | Esc = back | Q = quit").block(block);
+        let paragraph = Paragraph::new(format!(
+            "↑↓ = {} | Enter = {} | Esc = {} | Q = {}",
+            current_labels().navigate,
+            current_labels().select,
+            current_labels().back,
+            current_labels().quit
+        ))
+        .block(block);
         f.render_widget(paragraph, area);
     }
 
@@ -478,7 +484,12 @@ impl StartSetScreen {
     fn lineup_selection_court_cell_content(&self, index: usize) -> String {
         if let Some(player) = self.lineup.get(index) {
             if let Some(true) = self.initial_setter.as_ref().map(|s| s.id == player.id) {
-                format!("{}\n{}\n(S)", player.number, player.name)
+                format!(
+                    "{}\n{}\n({})",
+                    player.number,
+                    player.name,
+                    current_labels().setter_prefix
+                )
             } else {
                 format!("{}\n{}", player.number, player.name)
             }
@@ -551,7 +562,11 @@ impl StartSetScreen {
                         .bg(Color::Red)
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title("error"));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().error),
+                );
             f.render_widget(error_widget, area);
         }
     }
@@ -577,7 +592,9 @@ impl StartSetScreen {
     }
 
     fn render_serving_team(&mut self, f: &mut Frame, area: Rect, footer_area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title("serving team");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(current_labels().serving_team);
         f.render_widget(block, area);
         let v = Layout::default()
             .direction(Direction::Vertical)
@@ -602,13 +619,13 @@ impl StartSetScreen {
         let them_area = row[3];
         StartSetScreen::render_serving_team_button(
             f,
-            "us",
+            current_labels().us,
             us_area,
             self.serving_team == Some(TeamSideEnum::Us),
         );
         StartSetScreen::render_serving_team_button(
             f,
-            "them",
+            current_labels().them,
             them_area,
             self.serving_team == Some(TeamSideEnum::Them),
         );
@@ -619,8 +636,14 @@ impl StartSetScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph =
-            Paragraph::new("← → = choose | Enter = confirm | Esc = back | Q = quit").block(block);
+        let paragraph = Paragraph::new(format!(
+            "← → = {} | Enter = {} | Esc = {} | Q = {}",
+            current_labels().choose,
+            current_labels().confirm,
+            current_labels().back,
+            current_labels().quit,
+        ))
+        .block(block);
         f.render_widget(paragraph, area);
     }
 }
