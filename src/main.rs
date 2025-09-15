@@ -69,6 +69,42 @@ impl App {
     }
 }
 
+#[cfg(feature = "self-update")]
+fn maybe_check_update() {
+    use crate::localization::current_labels;
+    use self_update::backends::github::Update;
+    use self_update::cargo_crate_version;
+    let repo_url = env!("CARGO_PKG_REPOSITORY");
+    let pkg_name = env!("CARGO_PKG_NAME");
+    let (repo_owner, repo_name) = repo_url
+        .trim_start_matches("https://github.com/")
+        .split_once('/')
+        .unwrap_or(("naighes", "scoutforall"));
+    let status = Update::configure()
+        .repo_owner(repo_owner)
+        .repo_name(repo_name)
+        .bin_name(pkg_name)
+        .show_download_progress(true)
+        .current_version(cargo_crate_version!())
+        .build()
+        .and_then(|u| u.update());
+    match status {
+        Ok(status) => {
+            if status.updated() {
+                println!(
+                    "{} {}",
+                    current_labels().updated_to_version,
+                    status.version(),
+                );
+            }
+        }
+        Err(_) => println!("{}", current_labels().update_check_failed),
+    }
+}
+
+#[cfg(not(feature = "self-update"))]
+fn maybe_check_update() {}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
@@ -85,6 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .unwrap_or(LanguageEnum::En),
         );
     init_language(language);
+    maybe_check_update();
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;

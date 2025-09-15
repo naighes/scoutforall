@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_call:
 
 jobs:
@@ -46,7 +46,7 @@ jobs:
         with:
           persist-credentials: false
       - name: create github release
-        run: gh release create "${VERSION}" --generate-notes
+        run: gh release create "v${VERSION}" --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -60,14 +60,19 @@ jobs:
         platforms:
           - os: macos-14
             target: aarch64-apple-darwin
+            features: "--features self-update"
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            features: "--features self-update"
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            features: "--features self-update"
           - os: windows-latest
             target: x86_64-pc-windows-gnu
+            features: "--features self-update"
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            features: "--features self-update"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -75,7 +80,7 @@ jobs:
       - uses: houseabsolute/actions-rust-cross@v1
         with:
           target: ${{ matrix.platforms.target }}
-          args: "--verbose --locked --release"
+          args: "--verbose --locked --release ${{ matrix.platforms.features }}"
           strip: true
       - name: setup variables
         id: variables
@@ -138,13 +143,13 @@ jobs:
         run: cargo install --locked cargo-cyclonedx
       - name: generate SBOM
         run: |
-          cargo cyclonedx --describe binaries --format json --target ${{ matrix.platforms.target }}
+          cargo cyclonedx --describe binaries --format json ${{ matrix.platforms.features }} --target ${{ matrix.platforms.target }}
       - name: rename SBOM
         shell: bash
         run: |
           mv ${{ steps.variables.outputs.name }}_bin.cdx.json "dist/${{ steps.variables.outputs.archive }}.cdx.json"
       - name: upload binary
         shell: bash
-        run: gh release upload "${{ needs.version.outputs.version }}" dist/* --clobber
+        run: gh release upload "v${{ needs.version.outputs.version }}" dist/* --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
