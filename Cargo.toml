@@ -1,7 +1,24 @@
 [package]
-name = "scoutforall"
-version = "0.1.0"
+name = "scout4all"
+description = "scout4all is a CLI tool for collecting, managing and reporting volleyball match data. It helps coaches and analysts track match events and generate useful reports for post-game analysis."
+keywords = ["volley", "volleyball", "tui", "ratatui"]
+version = "0.0.1"
 edition = "2021"
+authors = ["Nicola @naighes Baldi <nic.baldi@gmail.com>"]
+readme = "README.md"
+homepage = "https://github.com/naighes/scoutforall"
+repository = "https://github.com/naighes/scoutforall"
+license = "CC-BY-NC-4.0"
+rust-version = "1.89.0"
+
+[profile.release]
+opt-level = 3
+debug = "none"
+debug-assertions = false
+overflow-checks = true
+strip = true
+panic = "abort"
+incremental = false
 
 [dependencies]
 ratatui = "0.29.0"
@@ -18,3 +35,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 regex = "1"
 csv = "1"
 once_cell = "1.21.3"
+
+[lints.clippy]
+type_complexity = "allow"
+too_many_arguments = "allow"
+match_str_case_mismatch = "allow"

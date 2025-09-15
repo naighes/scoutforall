@@ -101,12 +101,15 @@ impl Screen for TeamDetailsScreen {
                 .borders(Borders::ALL)
                 .title(current_labels().players),
         )
-        .widths(&[
+        .widths([
             Constraint::Length(7),
             Constraint::Length(30),
             Constraint::Length(20),
         ]);
-        if let Some(_) = team.and_then(|t| if t.players.len() > 0 { Some(t) } else { None }) {
+        if team
+            .and_then(|t| if t.players.is_empty() { None } else { Some(t) })
+            .is_some()
+        {
             f.render_widget(table, container[1]);
         } else {
             self.render_no_players_yet(f, container[1]);
@@ -133,15 +136,12 @@ impl TeamDetailsScreen {
     }
 
     fn next_player(&mut self) {
-        match (
+        if let (Some(selected), Some(team)) = (
             self.list_state.selected(),
             self.teams.iter().find(|t| t.id == self.team_id),
         ) {
-            (Some(selected), Some(team)) => {
-                let new_selected = (selected + 1).min(team.players.len() - 1);
-                self.list_state.select(Some(new_selected));
-            }
-            _ => {}
+            let new_selected = (selected + 1).min(team.players.len() - 1);
+            self.list_state.select(Some(new_selected));
         }
     }
 

@@ -265,10 +265,11 @@ impl StartSetScreen {
             return AppAction::None;
         }
         // ensure selected index is not out of bounds
-        if let Some(_) = self
+        if self
             .list_state
             .selected()
             .filter(|&i| i >= available_players.len())
+            .is_some()
         {
             self.list_state
                 .select(Some(available_players.len().saturating_sub(1)));
@@ -515,7 +516,7 @@ impl StartSetScreen {
             .block(Block::default().borders(Borders::ALL))
             .style(match (position_index, setter) {
                 (i, None) => {
-                    if index == i as usize {
+                    if index == i {
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else {
                         Style::default()

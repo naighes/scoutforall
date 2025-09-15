@@ -98,17 +98,17 @@ impl Screen for MatchListScreen {
                     .borders(Borders::ALL)
                     .title(current_labels().match_list),
             )
-            .widths(&[
+            .widths([
                 Constraint::Length(14),
                 Constraint::Length(30),
                 Constraint::Length(30),
                 Constraint::Length(17),
                 Constraint::Length(20),
             ]);
-            if self.matches.len() > 0 {
-                f.render_widget(table, container[1]);
-            } else {
+            if self.matches.is_empty() {
                 self.render_no_matches_yet(f, container[1]);
+            } else {
+                f.render_widget(table, container[1]);
             }
         } else {
             self.error = Some(current_labels().could_not_render_match_list.to_string());

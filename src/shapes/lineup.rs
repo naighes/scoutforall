@@ -8,7 +8,7 @@ use crate::{
         team::TeamEntry,
     },
 };
-use std::{collections::HashSet, usize};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -136,7 +136,7 @@ impl Lineup {
     }
 
     fn update_phase(&mut self, event: &EventEntry) {
-        if let Some(next_phase) = self.get_next_phase(&event) {
+        if let Some(next_phase) = self.get_next_phase(event) {
             if self.phase == PhaseEnum::SideOut && next_phase == PhaseEnum::Break {
                 self.rotate_clockwise();
             }
@@ -337,22 +337,19 @@ impl Lineup {
 
     /* substitutions */
 
+    #[cfg(test)]
     pub fn get_substitutions(&self) -> Vec<SubstitutionRecord> {
         self.substitutions.clone()
     }
 
     fn was_player_already_replaced(&self, player_id: &Uuid) -> bool {
-        self.substitutions
-            .iter()
-            .find(|s| s.replaced == *player_id)
-            .is_some()
+        self.substitutions.iter().any(|s| s.replaced == *player_id)
     }
 
     fn was_player_already_used(&self, player_id: &Uuid) -> bool {
         self.substitutions
             .iter()
-            .find(|s| s.replacement == *player_id)
-            .is_some()
+            .any(|s| s.replacement == *player_id)
     }
 
     fn get_enforced_replacement(&self, replaced: &Uuid) -> Option<Uuid> {
@@ -502,7 +499,7 @@ impl Lineup {
         replaced_id: Uuid,
     ) -> Vec<(u8, &'a PlayerEntry)> {
         // current lineup
-        let options: Vec<Uuid> = vec![
+        let options: Vec<Uuid> = [
             self.get_setter(),
             self.get_oh1(),
             self.get_mb2(),

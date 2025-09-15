@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Padding, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Padding, Paragraph, Row, Table},
     Frame,
 };
 use uuid::Uuid;
@@ -54,12 +54,10 @@ impl EventTypeInput {
     pub fn is_allowed_for(&self, role: RoleEnum) -> bool {
         use EventTypeEnum::*;
         use EventTypeInput::*;
-        match (self, role) {
-            (Some(A), RoleEnum::Libero) => false,
-            (Some(B), RoleEnum::Libero) => false,
-            (Some(S), RoleEnum::Libero) => false,
-            _ => true,
-        }
+        !matches!(
+            (self, role),
+            (Some(A), RoleEnum::Libero) | (Some(B), RoleEnum::Libero) | (Some(S), RoleEnum::Libero)
+        )
     }
 }
 
@@ -156,15 +154,12 @@ impl ScoutingScreen {
     /// Filters and validates a potential lineup choice for a given event.
     fn filter_lineup_choices(
         &self,
-        i: u8,
+        index: u8,
         (role, player_id): (String, Option<Uuid>),
     ) -> Option<LineupChoiceEntry> {
         player_id
             // ensure is within the lineup
-            .and_then(|id| match self.snapshot.current_lineup.find_position(&id) {
-                None => None,
-                Some(_) => Some(id),
-            })
+            .and_then(|id| self.snapshot.current_lineup.find_position(&id).map(|_| id))
             // ensure this action is allowed for libero
             .take_if(|id| {
                 self.snapshot.current_lineup.get_current_libero() != *id
@@ -172,14 +167,14 @@ impl ScoutingScreen {
             })
             // on block, do not allow back players
             .take_if(|id| {
-                !self.snapshot.current_lineup.is_back_row_player(&id)
+                !self.snapshot.current_lineup.is_back_row_player(id)
                     || self.current_event != EventTypeInput::Some(EventTypeEnum::B)
             })
             // check for a pending touch
             .take_if(|id| !matches!(self.snapshot.pending_touch, Some(p) if p == *id))
             .and_then(|id| self.current_match.team.find_player(id))
             .map(|player| LineupChoiceEntry {
-                index: i as u8,
+                index,
                 id: player.id,
                 name: player.name.clone(),
                 number: player.number,
@@ -190,7 +185,7 @@ impl ScoutingScreen {
     /// Filters and validates the players that can be replaced in the current lineup.
     fn filter_replaceable_choices(
         &self,
-        i: u8,
+        index: u8,
         (role, player_id): (String, Option<Uuid>),
     ) -> Option<LineupChoiceEntry> {
         player_id.and_then(|id| {
@@ -199,7 +194,7 @@ impl ScoutingScreen {
                 .find_position(&id)
                 .and_then(|_| self.current_match.team.find_player(id))
                 .map(|p| LineupChoiceEntry {
-                    index: i as u8,
+                    index,
                     id,
                     name: p.name.clone(),
                     number: p.number,
@@ -353,10 +348,7 @@ impl ScoutingScreen {
             // undo
             (Char('u'), _) => self.undo_last_event(),
             (_, EventTypeInput::Some(event_type)) => {
-                let is_option_available = self
-                    .currently_available_options
-                    .iter()
-                    .any(|o| *o == event_type);
+                let is_option_available = self.currently_available_options.contains(&event_type);
                 match (is_option_available, event_type) {
                     // player is inferred when serving
                     (true, S) => {
@@ -367,7 +359,7 @@ impl ScoutingScreen {
                     }
                     // these events require player selection
                     (true, e) if e.requires_player() => {
-                        self.current_event = last_event.clone();
+                        self.current_event = last_event;
                         self.state = ScoutingScreenState::Player;
                         AppAction::None
                     }
@@ -386,10 +378,7 @@ impl ScoutingScreen {
                     _ => {
                         self.current_event = EventTypeInput::None;
                         let template = current_labels().event_is_not_available;
-                        self.error = Some(format!(
-                            "{}",
-                            template.replace("{}", &event_type.to_string())
-                        ));
+                        self.error = Some(template.replace("{}", &event_type.to_string()));
                         AppAction::None
                     }
                 }
@@ -513,31 +502,25 @@ impl ScoutingScreen {
             (Char('='), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Error),
             _ => None,
         };
-        match (eval, &self.current_event) {
-            (Some(eval), EventTypeInput::Some(event_type)) => {
-                match event_type {
-                    // ensure event type allows evaluation
-                    A | B | P | D | S => {
-                        let entry = EventEntry {
-                            timestamp: Utc::now(),
-                            event_type: *event_type,
-                            eval: Some(eval),
-                            player: self.player,
-                            target_player: None,
-                        };
-                        return self.add_event(&entry);
-                    }
-                    _ => {
-                        let template = current_labels().evaluation_not_allowed_for_event;
-                        self.error = Some(format!(
-                            "{}",
-                            template.replace("{}", &event_type.to_string())
-                        ));
-                    }
+        if let (Some(eval), EventTypeInput::Some(event_type)) = (eval, &self.current_event) {
+            match event_type {
+                // ensure event type allows evaluation
+                A | B | P | D | S => {
+                    let entry = EventEntry {
+                        timestamp: Utc::now(),
+                        event_type: *event_type,
+                        eval: Some(eval),
+                        player: self.player,
+                        target_player: None,
+                    };
+                    return self.add_event(&entry);
+                }
+                _ => {
+                    let template = current_labels().evaluation_not_allowed_for_event;
+                    self.error = Some(template.replace("{}", &event_type.to_string()));
                 }
             }
-            _ => {}
-        };
+        }
         AppAction::None
     }
 
@@ -646,7 +629,7 @@ impl ScoutingScreen {
                                 desc
                             )
                         } else {
-                            format!("{}", ev.friendly_name(last_event, current_labels()))
+                            ev.friendly_name(last_event, current_labels())
                         }
                     } else {
                         current_labels().unknown.to_string()
@@ -814,7 +797,7 @@ impl ScoutingScreen {
         let lineup_choices = self.get_lineup_choices();
         let rows: Vec<Row> = lineup_choices
             .iter()
-            .map(|entry| Self::format_player_choice_row(entry))
+            .map(Self::format_player_choice_row)
             .collect();
         self.render_player_choices_table(f, area, rows, current_labels().player_selection);
     }

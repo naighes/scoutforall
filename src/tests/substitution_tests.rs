@@ -290,9 +290,6 @@ mod tests {
         let options = snapshot
             .current_lineup
             .get_available_replacements(&team, setter);
-        assert!(options
-            .iter()
-            .find(|p| p.1.id == setter_replacement)
-            .is_none());
+        assert!(!options.iter().any(|p| p.1.id == setter_replacement));
     }
 }

@@ -140,7 +140,7 @@ mod tests {
             set_number: 1,
             serving_team: TeamSideEnum::Us,
             initial_positions: positions,
-            libero: libero,
+            libero,
             setter,
             events: vec![EventEntry {
                 event_type: EventTypeEnum::S,

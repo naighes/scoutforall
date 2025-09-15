@@ -1,0 +1,150 @@
+name: release
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTDOCFLAGS: '--deny warnings'
+  MINIMUM_SUPPORTED_RUST_VERSION: 1.85.0
+  DOCKER_REGISTRY: ghcr.io
+
+permissions:
+  id-token: write
+  packages: write
+  contents: write
+  attestations: write
+  pull-requests: write
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_call:
+
+jobs:
+  version:
+    name: determine version to publish
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - id: release
+        run: echo "version=$(cargo pkgid --manifest-path Cargo.toml | cut -d '@' -f2)" >> "$GITHUB_OUTPUT"
+
+  create-release:
+    runs-on: ubuntu-latest
+    name: create release
+    needs: version
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: create github release
+        run: gh release create "${VERSION}" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+
+  build-and-publish:
+    needs: [version, create-release]
+    name: build and publish
+    runs-on: ${{ matrix.platforms.os }}
+    strategy:
+      matrix:
+        platforms:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: houseabsolute/actions-rust-cross@v1
+        with:
+          target: ${{ matrix.platforms.target }}
+          args: "--verbose --locked --release"
+          strip: true
+      - name: setup variables
+        id: variables
+        shell: bash
+        run: |
+          name="$(cargo metadata --manifest-path Cargo.toml --no-deps --format-version=1 | jq -r '.packages[] | select(.name=="scout4all").targets[0].name')"
+          source=target/${{ matrix.platforms.target }}/release/${name}
+          archive="scout4all-${{matrix.platforms.target }}"
+          subjectName="${name}-${{matrix.platforms.target }}-${VERSION}"
+          binaryName="${subjectName}"
+          destination="dist/${binaryName}"
+          if [ "${{ matrix.platforms.os }}" = "windows-latest" ]; then
+             source=${source}.exe
+             binaryName=${binaryName}.exe
+             destination="dist/${binaryName}"
+          fi
+          {
+            echo "name=${name}"
+            echo "source=${source}"
+            echo "archive=${archive}"
+            echo "subjectName=${subjectName}"
+            echo "destination=${destination}"
+            echo "binaryName=${binaryName}"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+      - name: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "${{ steps.variables.outputs.source }}"
+          subject-name: "${{ steps.variables.outputs.archive }}-${{ needs.version.outputs.version }}"
+      - name: create temp dir
+        run: mkdir -p dist
+      - name: rename binary
+        shell: bash
+        run: |
+          mv "${SOURCE}" "${DEST}"
+        env:
+          SOURCE: ${{ steps.variables.outputs.source }}
+          DEST: ${{ steps.variables.outputs.destination }}
+      - name: build archive for Windows
+        shell: bash
+        working-directory: ./dist
+        if: matrix.platforms.os == 'windows-latest'
+        run: 7z a "${ARCHIVE}.zip" "${BINARY}"
+        env:
+          ARCHIVE: ${{ steps.variables.outputs.archive }}
+          BINARY: ${{ steps.variables.outputs.binaryName }}
+      - name: build archive for unix systems
+        if: matrix.platforms.os != 'windows-latest'
+        shell: bash
+        working-directory: ./dist
+        run: |
+          tar cvzf "${{ steps.variables.outputs.archive }}.tar.gz" "${{ steps.variables.outputs.binaryName}}"
+      - name: clean release directory
+        shell: bash
+        run: |
+          rm -f "dist/${{ steps.variables.outputs.binaryName }}"
+      - name: cargo install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx
+      - name: generate SBOM
+        run: |
+          cargo cyclonedx --describe binaries --format json --target ${{ matrix.platforms.target }}
+      - name: rename SBOM
+        shell: bash
+        run: |
+          mv ${{ steps.variables.outputs.name }}_bin.cdx.json "dist/${{ steps.variables.outputs.archive }}.cdx.json"
+      - name: upload binary
+        shell: bash
+        run: gh release upload "${{ needs.version.outputs.version }}" dist/* --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

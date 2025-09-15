@@ -8,7 +8,7 @@ use crate::shapes::snapshot::Snapshot;
 use crate::shapes::stats::{Metric, Stats};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fmt, fs};
 use typst_as_library::TypstWrapperWorld;
@@ -70,7 +70,7 @@ pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
             &snapshot.stats,
             vec![None, Some(PhaseEnum::Break), Some(PhaseEnum::SideOut)],
         ));
-        content.push_str(&&phases_conversion_rate_stats(
+        content.push_str(&phases_conversion_rate_stats(
             &snapshot.stats,
             vec![None, Some(PhaseEnum::Break), Some(PhaseEnum::SideOut)],
         ));
@@ -119,7 +119,7 @@ pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
         &aggregated_stats,
         vec![None, Some(PhaseEnum::Break), Some(PhaseEnum::SideOut)],
     ));
-    content.push_str(&&phases_conversion_rate_stats(
+    content.push_str(&phases_conversion_rate_stats(
         &aggregated_stats,
         vec![None, Some(PhaseEnum::Break), Some(PhaseEnum::SideOut)],
     ));
@@ -338,11 +338,12 @@ fn player_header(player: PlayerEntry) -> String {
     )
 }
 
-fn open_with_system_viewer(file: &PathBuf) {
-    let path = file.as_path();
+fn open_with_system_viewer(file: &Path) {
+    let path = file;
 
     #[cfg(target_os = "windows")]
     {
+        #[allow(clippy::zombie_processes)]
         Command::new("cmd")
             .args(&["/C", "start", path.to_str().unwrap()])
             .spawn()
@@ -351,6 +352,7 @@ fn open_with_system_viewer(file: &PathBuf) {
 
     #[cfg(target_os = "macos")]
     {
+        #[allow(clippy::zombie_processes)]
         Command::new("open")
             .arg(path)
             .spawn()
@@ -359,6 +361,7 @@ fn open_with_system_viewer(file: &PathBuf) {
 
     #[cfg(target_os = "linux")]
     {
+        #[allow(clippy::zombie_processes)]
         Command::new("xdg-open")
             .arg(path)
             .spawn()
@@ -388,7 +391,7 @@ fn fmt_rate(value: Option<f64>) -> String {
 }
 
 fn escape_text(input: &str) -> String {
-    input.replace('"', "\"")
+    input.replace('"', "\\\"")
 }
 
 fn color_interpolation(percent: f64, inverse: bool) -> String {
@@ -419,18 +422,16 @@ fn color_interpolation(percent: f64, inverse: bool) -> String {
     format!("#{:02x}{:02x}{:02x}", r, g, b)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum Alignment {
+    #[allow(dead_code)]
     Left,
+    #[allow(dead_code)]
     Center,
+    #[allow(dead_code)]
     Right,
+    #[default]
     Auto,
-}
-
-impl Default for Alignment {
-    fn default() -> Self {
-        Alignment::Auto
-    }
 }
 
 impl Display for Alignment {
@@ -445,16 +446,11 @@ impl Display for Alignment {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum FontWeight {
+    #[default]
     Regular,
     Bold,
-}
-
-impl Default for FontWeight {
-    fn default() -> Self {
-        FontWeight::Regular
-    }
 }
 
 impl Display for FontWeight {
@@ -467,16 +463,12 @@ impl Display for FontWeight {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum FontStyle {
+    #[default]
     Normal,
+    #[allow(dead_code)]
     Italic,
-}
-
-impl Default for FontStyle {
-    fn default() -> Self {
-        FontStyle::Normal
-    }
 }
 
 impl Display for FontStyle {
@@ -489,7 +481,7 @@ impl Display for FontStyle {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct Cell {
     pub content: String,
     pub background_color: Option<String>,
@@ -498,20 +490,6 @@ pub struct Cell {
     pub font_style: Option<FontStyle>,
     pub text_color: Option<String>,
     pub font_size: Option<u8>,
-}
-
-impl Default for Cell {
-    fn default() -> Self {
-        Self {
-            content: String::new(),
-            background_color: None,
-            alignment: None,
-            font_weight: None,
-            font_style: None,
-            text_color: None,
-            font_size: None,
-        }
-    }
 }
 
 impl Cell {
@@ -644,10 +622,9 @@ table.header(
             .collect::<Vec<_>>()
             .join(",\n");
         content.push_str(&header);
-        content.push_str("\n");
+        content.push('\n');
         content.push_str(&cells);
-        let cols = std::iter::repeat("1fr")
-            .take(self.headers.cells.len())
+        let cols = std::iter::repeat_n("1fr", self.headers.cells.len())
             .collect::<Vec<_>>()
             .join(", ");
         let alignment = match &self.alignment {
@@ -717,7 +694,7 @@ impl Courts {
         gutter: u8,
         padding: u8,
     ) -> Self {
-        return Courts {
+        Courts {
             title,
             title_font_size,
             rows: vec![],
@@ -726,7 +703,7 @@ impl Courts {
             value_top_font_size,
             gutter,
             padding,
-        };
+        }
     }
 
     fn add_row(&mut self, row: CourtRow) {
@@ -880,8 +857,8 @@ impl CourtRow {
   )
 "#,
                     escape_text(&self.label),
-                    size.to_string(),
-                    size.to_string(),
+                    size,
+                    size,
                     zones
                         .iter()
                         .map(|z| z.render())
@@ -902,9 +879,7 @@ impl CourtRow {
 ],
 
 "#,
-            rect_size.to_string(),
-            rect_size.to_string(),
-            grid,
+            rect_size, rect_size, grid,
         )
     }
 }
@@ -1005,7 +980,7 @@ fn event_stats(
     phases: Vec<Option<PhaseEnum>>,
     player: Option<Uuid>,
 ) -> String {
-    let title = event_type.friendly_name(&current_labels());
+    let title = event_type.friendly_name(current_labels());
     let rotations = [0, 1, 2, 3, 4, 5];
     let mut header_cells: Vec<Cell> = vec![
         Cell {
@@ -1205,7 +1180,7 @@ fn attack_stats(
     header_cells.extend(evals.iter().map(|eval| Cell {
         content: match eval {
             EvalEnum::Perfect | EvalEnum::Positive | EvalEnum::Negative => {
-                format!("eff. {}", eval.to_string())
+                format!("eff. {}", eval)
             }
             _ => eval.to_string(),
         },
@@ -1479,13 +1454,13 @@ where
 
 fn possessions_conversion_rate_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>) -> String {
     conversion_rate_stats(stats, phases, "pos. cnv. rt.", |s, p, r| {
-        s.number_of_possessions_per_earned_point(p.clone(), r)
+        s.number_of_possessions_per_earned_point(*p, r)
     })
 }
 
 fn phases_conversion_rate_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>) -> String {
     conversion_rate_stats(stats, phases, "ph. cnv. rt.", |s, p, r| {
-        s.number_of_phases_per_scored_point(p.clone(), r)
+        s.number_of_phases_per_scored_point(*p, r)
     })
 }
 
@@ -1512,10 +1487,9 @@ fn resume_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>, player: Option<Uu
             ..Default::default()
         },
         Cell {
-            content: if let Some(_) = player {
-                "".to_string()
-            } else {
-                current_labels().opponent_errors_report_label.to_string()
+            content: match player {
+                Some(_) => "".to_string(),
+                None => current_labels().opponent_errors_report_label.to_string(),
             },
             background_color: Some(TABLE_HEADER_BACKGROUND_COLOR.to_string()),
             ..Default::default()
@@ -1575,7 +1549,7 @@ fn resume_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>, player: Option<Uu
         let opp_err_gbl = fmt_usize(opp_err_gbl_count);
         let opp_err_gbl_str = match opp_err_gbl_count {
             None => "-".to_string(),
-            Some(_) => format!("{}", opp_err_gbl),
+            Some(_) => opp_err_gbl,
         };
         let cells: Vec<Cell> = vec![
             Cell {
@@ -1613,10 +1587,9 @@ fn resume_stats(stats: &Stats, phases: Vec<Option<PhaseEnum>>, player: Option<Uu
                 ..Default::default()
             },
             Cell {
-                content: if let Some(_) = player {
-                    "".to_string()
-                } else {
-                    opp_err_gbl_str
+                content: match player {
+                    Some(_) => "".to_string(),
+                    None => opp_err_gbl_str,
                 },
                 ..Default::default()
             },
@@ -1726,11 +1699,7 @@ fn distribution_stats(stats: &Stats) -> String {
         for phase in phases {
             let values = zones
                 .iter()
-                .map(|z| {
-                    stats
-                        .distribution
-                        .zone_stats(z.clone(), phase, None, prev_eval)
-                })
+                .map(|z| stats.distribution.zone_stats(*z, phase, None, prev_eval))
                 .map(|v| match v {
                     None => (None, None),
                     Some((v1, v2)) => (Some(v1), Some(v2)),
@@ -1744,10 +1713,10 @@ fn distribution_stats(stats: &Stats) -> String {
                     (None, None) => current_labels().global.to_string(),
                     (Some(phase), None) => phase.to_string(),
                     (None, Some(prev_eval)) => {
-                        format!("{} ({})", current_labels().global, prev_eval.to_string())
+                        format!("{} ({})", current_labels().global, prev_eval)
                     }
                     (Some(phase), Some(prev_eval)) => {
-                        format!("{} ({})", phase.to_string(), prev_eval.to_string())
+                        format!("{} ({})", phase, prev_eval)
                     }
                 },
             ));

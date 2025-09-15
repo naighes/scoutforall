@@ -48,13 +48,12 @@ impl Screen for AddTeamScreen {
             .split(body);
         let field_height = 3;
         let mut y_offset = container[0].y;
-        for (_, (label, value, idx)) in vec![
+        for (label, value, idx) in vec![
             (current_labels().name, &self.name, 0),
             (current_labels().league, &self.league, 1),
             (current_labels().year, &self.year, 2),
         ]
         .into_iter()
-        .enumerate()
         {
             let rect = Rect {
                 x: container[0].x,

@@ -28,7 +28,7 @@ impl SetEntry {
         libero: Uuid,
         setter: Uuid,
     ) -> Result<Self, AppError> {
-        if set_number < 1 || set_number > 5 {
+        if !(1..=5).contains(&set_number) {
             Err(AppError::Match(MatchError::SetEntryError(format!(
                 "{} is not a valid set number",
                 set_number
@@ -52,12 +52,12 @@ impl SetEntry {
     }
 
     pub fn has_events(&self) -> bool {
-        self.events.len() > 0
+        !self.events.is_empty()
     }
 
     pub fn compute_snapshot(&self) -> Result<(Snapshot, Vec<EventTypeEnum>), AppError> {
         // prepare the initial snapshot
-        let mut snapshot = Snapshot::new(&self)?;
+        let mut snapshot = Snapshot::new(self)?;
         // prepare initial available options
         let mut available_options: Vec<EventTypeEnum> = vec![];
         if self.has_events() {

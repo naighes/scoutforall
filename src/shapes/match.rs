@@ -155,31 +155,28 @@ impl MatchEntry {
                 let mut reader = csv::ReaderBuilder::new()
                     .has_headers(false)
                     .from_reader(file);
-                let events: Vec<EventEntry> = reader
-                    .deserialize()
-                    .filter_map(|r| match r {
-                        Ok(ev) => Some(ev),
-                        Err(_) => None,
-                    })
-                    .collect();
+                let events: Vec<EventEntry> = reader.deserialize().filter_map(|r| r.ok()).collect();
                 set.events = events;
             }
             sets.push(set);
         }
         // no more than 5 sets
         if sets.len() > 5 {
-            return Err(MatchError::LoadSetError(
-                format!("found more than 5 sets in match {}", &self.id).into(),
-            ));
+            return Err(MatchError::LoadSetError(format!(
+                "found more than 5 sets in match {}",
+                &self.id
+            )));
         }
         // order by set numbet
         sets.sort_by_key(|s| s.set_number);
         // check continuity
         for (i, set) in sets.iter().enumerate() {
             if set.set_number as usize != i + 1 {
-                return Err(MatchError::LoadSetError(
-                    format!("expected set {} but found set {}", i + 1, set.set_number).into(),
-                ));
+                return Err(MatchError::LoadSetError(format!(
+                    "expected set {} but found set {}",
+                    i + 1,
+                    set.set_number
+                )));
             }
         }
         Ok(sets)

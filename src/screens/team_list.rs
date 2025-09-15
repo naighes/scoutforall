@@ -78,10 +78,10 @@ impl Screen for TeamListScreen {
             .iter()
             .map(|t| ListItem::new(format!("{} ({}, {})", t.name, t.league, t.year)))
             .collect();
-        if items.len() > 0 {
-            self.render_list(f, body, items);
-        } else {
+        if items.is_empty() {
             self.render_no_teams_yet(f, body);
+        } else {
+            self.render_list(f, body, items);
         }
         self.render_footer(f, footer_left);
     }
@@ -158,7 +158,7 @@ impl TeamListScreen {
     }
 
     fn render_list(&mut self, f: &mut Frame, area: Rect, items: Vec<ListItem>) {
-        if let None = self.list_state.selected() {
+        if self.list_state.selected().is_none() {
             self.list_state.select(Some(0));
         }
         let list = List::new(items)

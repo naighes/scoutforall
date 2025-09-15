@@ -1,6 +1,6 @@
 # scout4all
 
-**scout4all** is a CLI application for collecting, managing and **reporting** volleyball match data.  
+**scout4all** is a CLI tool for collecting, managing and reporting volleyball match data.  
 It helps coaches and analysts track match events and generate useful reports for post-game analysis.
 
 ![Demo](assets/demo.gif)

@@ -65,16 +65,6 @@ pub fn get_matches(team: &TeamEntry) -> Result<Vec<MatchEntry>, Box<dyn std::err
     Ok(result)
 }
 
-// TODO: load single match from the file system (do not depend on `get_matches`)
-pub fn get_match(
-    team: &TeamEntry,
-    match_id: &str,
-) -> Result<Option<MatchEntry>, Box<dyn std::error::Error>> {
-    let matches = get_matches(team)?;
-    let m = matches.iter().find(|entry| entry.id == match_id).cloned();
-    Ok(m)
-}
-
 #[derive(Debug)]
 pub enum CreateMatchError {
     MatchAlreadyExists(String),
@@ -252,9 +242,10 @@ pub fn remove_last_event(
         .has_headers(false)
         .from_path(&path)
         .and_then(|mut reader| reader.deserialize().collect::<Result<Vec<EventEntry>, _>>())
-        .and_then(|records| match records.split_first() {
-            Some((first, rest)) => Ok(Some((first.clone(), rest.to_vec()))),
-            None => Ok(None),
+        .map(|records| {
+            records
+                .split_first()
+                .map(|(first, rest)| (first.clone(), rest.to_vec()))
         })
         .and_then_option(|(first, rest)| {
             let path = get_set_events_file_path(&team.id, match_id, set_number);

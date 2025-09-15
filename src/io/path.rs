@@ -20,7 +20,7 @@ pub fn get_team_folder_path(team_id: &Uuid) -> PathBuf {
 }
 
 pub fn get_match_folder_path(team_id: &Uuid, match_id: &str) -> PathBuf {
-    let mut path: PathBuf = get_team_folder_path(&team_id);
+    let mut path: PathBuf = get_team_folder_path(team_id);
     path.push(match_id);
     path
 }

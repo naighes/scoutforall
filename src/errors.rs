@@ -23,8 +23,6 @@ pub enum MatchError {
 #[derive(Debug, Error)]
 pub enum SnapshotError {
     #[error("missing initial rotation: {0}")]
-    MissingInitialRotation(String),
-    #[error("missing initial rotation: {0}")]
     LineupError(String),
 }
 

@@ -1,0 +1,184 @@
+name: build
+
+on:
+  schedule:
+    - cron: "0 0 1 * *" # first day of every month
+  push:
+    branches-ignore:
+      - master
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTDOCFLAGS: "--deny warnings"
+  MINIMUM_SUPPORTED_RUST_VERSION: 1.89.0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check ${{ matrix.package.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        package:
+          - name: scout4all
+            command: cargo check --locked --package scout4all
+          - name: scout4all-cli
+            command: cargo run --locked -- --version
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+      - name: run cargo check
+        run: ${{ matrix.package.command }}
+
+  build:
+    name: build
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - name: run cargo build
+        run: cargo build
+
+  build-for-targets:
+    name: build for targets
+    needs: check
+    runs-on: ${{ matrix.platforms.os }}
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        platforms:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: houseabsolute/actions-rust-cross@v1
+        with:
+          target: ${{ matrix.platforms.target }}
+          args: "--locked"
+          strip: true
+
+  lockfile:
+    name: lockfile
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: check lockfile is updated
+        run: cargo update --locked
+
+  clippy:
+    needs: check
+    name: clippy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: run cargo clippy
+        run: cargo clippy --all-targets -- --deny warnings
+
+  format:
+    needs: check
+    name: format
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: run cargo fmt
+        run: cargo fmt --all -- --check
+
+  unused-dependencies:
+    needs: check
+    name: unused dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+      - uses: bnjbvr/cargo-machete@main
+
+  tests:
+    needs: check
+    name: tests
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-nextest --locked
+      - run: cargo nextest run --locked
+        env:
+          RUST_BACKTRACE: full
+          CI: "true"

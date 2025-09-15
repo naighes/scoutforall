@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fmt::{self, Display, Formatter},
-    usize,
 };
 use uuid::Uuid;
 
@@ -52,13 +51,13 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn new(set_entry: &SetEntry) -> Result<Self, AppError> {
         let current_lineup = Lineup::new(
-            set_entry.initial_positions.clone(),
+            set_entry.initial_positions,
             match set_entry.serving_team {
                 TeamSideEnum::Us => PhaseEnum::Break,
                 TeamSideEnum::Them => PhaseEnum::SideOut,
             },
-            set_entry.setter.clone(),
-            set_entry.libero.clone(),
+            set_entry.setter,
+            set_entry.libero,
         )?;
         Ok(Snapshot {
             score_us: 0,
@@ -136,17 +135,17 @@ impl Snapshot {
             Some(zone) => zone,
             None => return Ok(()),
         };
-        if match (
-            event.event_type,
-            prev_event.event_type,
-            prev_eval,
-            current_eval,
+        if matches!(
+            (
+                event.event_type,
+                prev_event.event_type,
+                prev_eval,
+                current_eval,
+            ),
+            (A, D | P, Perfect | Positive | Exclamative | Negative, _)
+                | (A, S, Over, _)
+                | (A, A | B, Positive, _)
         ) {
-            (A, D | P, Perfect | Positive | Exclamative | Negative, _) => true,
-            (A, S, Over, _) => true,
-            (A, A | B, Positive, _) => true,
-            _ => false,
-        } {
             self.stats.distribution.add(
                 self.current_lineup.get_current_phase(),
                 rotation,
@@ -248,10 +247,10 @@ impl Snapshot {
             (P | D | S, _, _, _)
             | (A | B, Some(Positive), _, _) // TODO: should perfect block and perfect attack count as possession?
             | (OS, _, true, _)
-            | (F, _, _, true) => Ok(self.stats.possessions.add(
+            | (F, _, _, true) => {self.stats.possessions.add(
                 self.current_lineup.get_current_phase(),
                 rotation,
-            )),
+            ); Ok(())},
             _ => Ok(())
         }
     }
@@ -259,10 +258,10 @@ impl Snapshot {
     fn set_opponent_errors_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
         let rotation = self.current_lineup.get_current_rotation()?;
         if event.event_type == EventTypeEnum::OE {
-            Ok(self
-                .stats
+            self.stats
                 .opponent_errors
-                .add(self.current_lineup.get_current_phase(), rotation))
+                .add(self.current_lineup.get_current_phase(), rotation);
+            Ok(())
         } else {
             Ok(())
         }
@@ -282,12 +281,15 @@ impl Snapshot {
             _ => None,
         };
         match (error_type, event.player) {
-            (Some(err), Some(player)) => Ok(self.stats.errors.add(
-                self.current_lineup.get_current_phase(),
-                rotation,
-                player,
-                err,
-            )),
+            (Some(err), Some(player)) => {
+                self.stats.errors.add(
+                    self.current_lineup.get_current_phase(),
+                    rotation,
+                    player,
+                    err,
+                );
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -302,10 +304,10 @@ impl Snapshot {
             (event.event_type, event.eval, them_was_serving,),
             (OE, _, false) | (B, Some(Perfect), _) | (A, Some(Perfect), _) | (S, Some(Perfect), _)
         ) {
-            Ok(self
-                .stats
+            self.stats
                 .earned_points
-                .add(self.current_lineup.get_current_phase(), rotation))
+                .add(self.current_lineup.get_current_phase(), rotation);
+            Ok(())
         } else {
             Ok(())
         }
@@ -316,22 +318,28 @@ impl Snapshot {
         let zone = event.player.and_then(|p| self.get_attack_zone(&p));
         let rotation = self.current_lineup.get_current_rotation()?;
         match (event.event_type, event.eval, event.player, zone) {
-            (B | D | P | S, Some(ev), Some(player), _) => Ok(self.stats.events.add(
-                event.event_type,
-                self.current_lineup.get_current_phase(),
-                rotation,
-                Some(player),
-                None,
-                Some(ev),
-            )),
-            (A, Some(ev), Some(player), Some(z)) => Ok(self.stats.events.add(
-                event.event_type,
-                self.current_lineup.get_current_phase(),
-                rotation,
-                Some(player),
-                Some(z),
-                Some(ev),
-            )),
+            (B | D | P | S, Some(ev), Some(player), _) => {
+                self.stats.events.add(
+                    event.event_type,
+                    self.current_lineup.get_current_phase(),
+                    rotation,
+                    Some(player),
+                    None,
+                    Some(ev),
+                );
+                Ok(())
+            }
+            (A, Some(ev), Some(player), Some(z)) => {
+                self.stats.events.add(
+                    event.event_type,
+                    self.current_lineup.get_current_phase(),
+                    rotation,
+                    Some(player),
+                    Some(z),
+                    Some(ev),
+                );
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -403,13 +411,14 @@ impl Snapshot {
             ) {
                 // TODO: block and attack? just dig?
                 (D, Some(Perfect | Positive | Negative | Exclamative), Some(p), Some(ev)) => {
-                    Ok(self.stats.counter_attack.add(
+                    self.stats.counter_attack.add(
                         self.current_lineup.get_current_phase(),
                         rotation,
                         *p,
                         zone,
                         ev,
-                    ))
+                    );
+                    Ok(())
                 }
                 _ => Ok(()),
             },
@@ -440,14 +449,15 @@ impl Snapshot {
                 )
                 | (A, Some(S), Over, Some(eval), Some(player), Some(zone))
                 | (A, Some(A | B), Positive, Some(eval), Some(player), Some(zone)) => {
-                    Ok(self.stats.attack.add(
+                    self.stats.attack.add(
                         self.current_lineup.get_current_phase(),
                         rotation,
                         player,
                         zone,
                         eval,
                         prev_eval,
-                    ))
+                    );
+                    Ok(())
                 }
                 _ => Ok(()),
             }
@@ -461,16 +471,16 @@ impl Snapshot {
         event: &EventEntry,
         current_available_options: Vec<EventTypeEnum>,
     ) -> Result<Vec<EventTypeEnum>, AppError> {
-        self.set_score_stats(&event);
-        self.set_phase_count_stats(&event)?;
-        self.set_pending_touch(&event);
-        self.set_possessions_stats(&event)?;
-        self.set_opponent_errors_stats(&event)?;
-        self.set_errors_stats(&event)?;
-        self.set_points_stats(&event)?;
-        self.set_events_stats(&event)?;
-        self.set_counter_attack_stats(&event)?;
-        self.set_attack_stats(&event)?;
+        self.set_score_stats(event);
+        self.set_phase_count_stats(event)?;
+        self.set_pending_touch(event);
+        self.set_possessions_stats(event)?;
+        self.set_opponent_errors_stats(event)?;
+        self.set_errors_stats(event)?;
+        self.set_points_stats(event)?;
+        self.set_events_stats(event)?;
+        self.set_counter_attack_stats(event)?;
+        self.set_attack_stats(event)?;
         self.set_distribution_stats(event)?;
         let available_options = self.get_available_options(event, current_available_options);
         if event.event_type == EventTypeEnum::R {
@@ -480,7 +490,7 @@ impl Snapshot {
                     .add_substitution(&replaced, &replacement)?;
             }
         }
-        self.current_lineup.update(&event)?;
+        self.current_lineup.update(event)?;
         if event.event_type != EventTypeEnum::R {
             self.last_event = Some(event.clone());
         }

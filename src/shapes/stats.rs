@@ -112,22 +112,22 @@ impl EventsStats {
             *self.0.entry(k.clone()).or_insert(0) += v;
         }
     }
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         event_type: Option<EventTypeEnum>,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         player: Option<Option<Uuid>>,
         zone: Option<Option<ZoneEnum>>,
         eval: Option<Option<EvalEnum>>,
-    ) -> impl Iterator<Item = (&'a EventsStatsKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&EventsStatsKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            event_type.map_or(true, |et| k.event_type == et)
-                && phase.map_or(true, |ph| k.phase == ph)
-                && rotation.map_or(true, |r| k.rotation == r)
-                && player.map_or(true, |p| p.is_none() || k.player == p)
-                && zone.map_or(true, |z| z.is_none() || k.zone == z)
-                && eval.map_or(true, |e| e.is_none() || k.eval == e)
+            event_type.is_none_or(|et| k.event_type == et)
+                && phase.is_none_or(|ph| k.phase == ph)
+                && rotation.is_none_or(|r| k.rotation == r)
+                && player.is_none_or(|p| p.is_none() || k.player == p)
+                && zone.is_none_or(|z| z.is_none() || k.zone == z)
+                && eval.is_none_or(|e| e.is_none() || k.eval == e)
         })
     }
 }
@@ -173,20 +173,20 @@ impl CounterAttackStats {
         }
     }
 
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         player: Option<Uuid>,
         zone: Option<ZoneEnum>,
         eval: Option<EvalEnum>,
-    ) -> impl Iterator<Item = (&'a CounterAttackStatsKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&CounterAttackStatsKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            phase.map_or(true, |p| k.phase == p)
-                && rotation.map_or(true, |r| k.rotation == r)
-                && player.map_or(true, |pl| k.player == pl)
-                && zone.map_or(true, |et| k.zone == et)
-                && eval.map_or(true, |et| k.eval == et)
+            phase.is_none_or(|p| k.phase == p)
+                && rotation.is_none_or(|r| k.rotation == r)
+                && player.is_none_or(|pl| k.player == pl)
+                && zone.is_none_or(|et| k.zone == et)
+                && eval.is_none_or(|et| k.eval == et)
         })
     }
 }
@@ -235,22 +235,22 @@ impl AttackStats {
         }
     }
 
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         player: Option<Uuid>,
         zone: Option<ZoneEnum>,
         eval: Option<EvalEnum>,
         prev_eval: Option<EvalEnum>,
-    ) -> impl Iterator<Item = (&'a AttackStatsKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&AttackStatsKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            phase.map_or(true, |p| k.phase == p)
-                && rotation.map_or(true, |r| k.rotation == r)
-                && player.map_or(true, |pl| k.player == pl)
-                && zone.map_or(true, |et| k.zone == et)
-                && eval.map_or(true, |et| k.eval == et)
-                && prev_eval.map_or(true, |et| k.prev_eval == et)
+            phase.is_none_or(|p| k.phase == p)
+                && rotation.is_none_or(|r| k.rotation == r)
+                && player.is_none_or(|pl| k.player == pl)
+                && zone.is_none_or(|et| k.zone == et)
+                && eval.is_none_or(|et| k.eval == et)
+                && prev_eval.is_none_or(|et| k.prev_eval == et)
         })
     }
 }
@@ -296,20 +296,20 @@ impl DistributionStats {
         }
     }
 
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         zone: Option<ZoneEnum>,
         eval: Option<EvalEnum>,
         attack_eval: Option<EvalEnum>,
-    ) -> impl Iterator<Item = (&'a DistributionsStatsKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&DistributionsStatsKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            phase.map_or(true, |p| k.phase == p)
-                && rotation.map_or(true, |r| k.rotation == r)
-                && zone.map_or(true, |pl| k.zone == pl)
-                && eval.map_or(true, |et| k.eval == et)
-                && attack_eval.map_or(true, |et| k.attack_eval == et)
+            phase.is_none_or(|p| k.phase == p)
+                && rotation.is_none_or(|r| k.rotation == r)
+                && zone.is_none_or(|pl| k.zone == pl)
+                && eval.is_none_or(|et| k.eval == et)
+                && attack_eval.is_none_or(|et| k.attack_eval == et)
         })
     }
 
@@ -385,18 +385,18 @@ impl ErrorsStats {
         }
     }
 
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         player: Option<Uuid>,
         error_type: Option<ErrorTypeEnum>,
-    ) -> impl Iterator<Item = (&'a ErrorsStatsKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&ErrorsStatsKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            phase.map_or(true, |p| k.phase == p)
-                && rotation.map_or(true, |r| k.rotation == r)
-                && player.map_or(true, |pl| k.player == pl)
-                && error_type.map_or(true, |et| k.error_type == et)
+            phase.is_none_or(|p| k.phase == p)
+                && rotation.is_none_or(|r| k.rotation == r)
+                && player.is_none_or(|pl| k.player == pl)
+                && error_type.is_none_or(|et| k.error_type == et)
         })
     }
 }
@@ -426,13 +426,13 @@ impl OpponentErrorsStats {
         }
     }
 
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
-    ) -> impl Iterator<Item = (&'a OpponentsErrorKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&OpponentsErrorKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            phase.map_or(true, |p| k.phase == p) && rotation.map_or(true, |r| k.rotation == r)
+            phase.is_none_or(|p| k.phase == p) && rotation.is_none_or(|r| k.rotation == r)
         })
     }
 }
@@ -462,13 +462,13 @@ impl PointsStats {
         }
     }
 
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
-    ) -> impl Iterator<Item = (&'a PointsStatsKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&PointsStatsKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            phase.map_or(true, |p| k.phase == p) && rotation.map_or(true, |r| k.rotation == r)
+            phase.is_none_or(|p| k.phase == p) && rotation.is_none_or(|r| k.rotation == r)
         })
     }
 }
@@ -498,13 +498,13 @@ impl CountStats {
         }
     }
 
-    pub fn query<'a>(
-        &'a self,
+    pub fn query(
+        &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
-    ) -> impl Iterator<Item = (&'a PossessionsStatsKey, &'a u32)> {
+    ) -> impl Iterator<Item = (&PossessionsStatsKey, &u32)> {
         self.0.iter().filter(move |(k, _)| {
-            phase.map_or(true, |p| k.phase == p) && rotation.map_or(true, |r| k.rotation == r)
+            phase.is_none_or(|p| k.phase == p) && rotation.is_none_or(|r| k.rotation == r)
         })
     }
 }
@@ -766,7 +766,7 @@ impl Stats {
             Some(zone),
             None,
         ) {
-            total += *incr as u32;
+            total += *incr;
             if key.eval.as_ref() == Some(&eval) {
                 count += *incr as i32;
             }

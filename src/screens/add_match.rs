@@ -278,7 +278,7 @@ impl AddMatchScreen {
                     let value = format!("{}{}", self.day, c);
                     if value
                         .parse::<u32>()
-                        .map_or(false, |val| (1..=max_days).contains(&val))
+                        .is_ok_and(|val| (1..=max_days).contains(&val))
                     {
                         self.day.push(c);
                     }
@@ -308,9 +308,9 @@ impl AddMatchScreen {
     }
 
     fn handle_date_backspace(&mut self) -> AppAction {
-        if self.day.len() > 0 {
+        if !self.day.is_empty() {
             self.day.pop();
-        } else if self.month.len() > 0 {
+        } else if !self.month.is_empty() {
             self.month.pop();
         } else {
             self.year.pop();
@@ -348,7 +348,7 @@ impl AddMatchScreen {
             self.parse_date(&format!("{}-{}-{}", self.year, self.month, self.day).to_string()),
             self.opponent.is_empty(),
         ) {
-            (_, __, _, _, true) => {
+            (_, _, _, _, true) => {
                 self.error = Some(current_labels().opponent_cannot_be_empty.to_string());
                 AppAction::None
             }
