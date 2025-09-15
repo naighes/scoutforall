@@ -110,6 +110,10 @@ pub struct Labels {
     pub could_not_load_settings: &'static str,
     pub could_not_save_settings: &'static str,
     pub language: &'static str,
+    #[cfg(feature = "self-update")]
+    pub updated_to_version: &'static str,
+    #[cfg(feature = "self-update")]
+    pub update_check_failed: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -219,6 +223,10 @@ const EN: Labels = Labels {
     could_not_load_settings: "could not load settings",
     could_not_save_settings: "could not save settings",
     language: "language",
+    #[cfg(feature = "self-update")]
+    updated_to_version: "updated to version",
+    #[cfg(feature = "self-update")]
+    update_check_failed: "update check failed",
 };
 
 const IT: Labels = Labels {
@@ -328,6 +336,10 @@ const IT: Labels = Labels {
     could_not_load_settings: "impossibile caricare le impostazioni",
     could_not_save_settings: "impossibile salvare le impostazioni",
     language: "lingua",
+    #[cfg(feature = "self-update")]
+    updated_to_version: "aggiornato alla versione",
+    #[cfg(feature = "self-update")]
+    update_check_failed: "impossibile controllare la presenza di aggiornamenti",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {
