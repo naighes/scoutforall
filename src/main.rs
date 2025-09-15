@@ -177,18 +177,17 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Res
                 screen.render(f, container[1], footer[0], footer[1]);
             }
         })?;
-
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                if key.code == KeyCode::Char('q') {
-                    return Ok(());
-                }
-                if let Some(screen) = app.current_screen() {
-                    match screen.handle_key(key) {
+        if event::poll(std::time::Duration::from_millis(200))? {
+            if let Event::Key(key) = event::read()? {
+                match (key.code, key.kind, app.current_screen()) {
+                    (_, KeyEventKind::Release, _) => continue,
+                    (KeyCode::Char('q'), _, _) => return Ok(()),
+                    (_, _, Some(screen)) => match screen.handle_key(key) {
                         AppAction::None => {}
                         AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
                         AppAction::Back(refresh, count) => app.pop_screen(refresh, count),
-                    }
+                    },
+                    _ => {}
                 }
             }
         }
