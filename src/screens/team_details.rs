@@ -2,13 +2,16 @@ use crate::{
     localization::current_labels,
     ops::load_teams,
     screens::{
-        add_player::AddPlayerScreen,
+        components::team_header::TeamHeader,
+        edit_player::EditPlayerScreen,
+        edit_team::EditTeamScreen,
         match_list::MatchListScreen,
         screen::{AppAction, Screen},
     },
     shapes::team::TeamEntry,
 };
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::widgets::*;
 use ratatui::{
     layout::Alignment,
     style::Color,
@@ -17,7 +20,6 @@ use ratatui::{
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, ListState, Paragraph, Row},
     Frame,
 };
 use uuid::Uuid;
@@ -29,6 +31,7 @@ pub struct TeamDetailsScreen {
     team_id: Uuid,
     refresh: bool,
     error: Option<String>,
+    header: TeamHeader,
 }
 
 impl Screen for TeamDetailsScreen {
@@ -47,14 +50,35 @@ impl Screen for TeamDetailsScreen {
                 AppAction::None
             }
             (KeyCode::Char('n'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
-                Some(t) => AppAction::SwitchScreen(Box::new(AddPlayerScreen::new(t.clone()))),
+                Some(t) => AppAction::SwitchScreen(Box::new(EditPlayerScreen::new(t.clone()))),
                 None => AppAction::None,
             },
             (KeyCode::Char('m'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
                 Some(t) => AppAction::SwitchScreen(Box::new(MatchListScreen::new(t.clone()))),
                 None => AppAction::None,
             },
+            (KeyCode::Char('e'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
+                Some(t) => AppAction::SwitchScreen(Box::new(EditTeamScreen::edit(t))),
+                None => AppAction::None,
+            },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => {
+                self.teams
+                    .iter()
+                    .find(|t| t.id == self.team_id)
+                    .and_then(|team| {
+                        self.list_state.selected().map(|selected| {
+                            let player = team.players.get(selected).cloned();
+                            match player {
+                                Some(p) => AppAction::SwitchScreen(Box::new(
+                                    EditPlayerScreen::edit(team.clone(), p),
+                                )),
+                                None => AppAction::None,
+                            }
+                        })
+                    })
+                    .unwrap_or(AppAction::None)
+            }
             _ => AppAction::None,
         }
     }
@@ -76,7 +100,7 @@ impl Screen for TeamDetailsScreen {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(5), Constraint::Min(1)])
             .split(body);
-        self.render_header(f, container[0], team);
+        self.header.render(f, container[0], team);
         let selected_player = match self.list_state.selected() {
             None => {
                 self.list_state.select(Some(0));
@@ -126,12 +150,14 @@ impl Screen for TeamDetailsScreen {
 
 impl TeamDetailsScreen {
     pub fn new(teams: Vec<TeamEntry>, team_id: Uuid) -> Self {
+        let header = TeamHeader::default();
         TeamDetailsScreen {
             teams,
             team_id,
             list_state: ListState::default(),
             refresh: false,
             error: None,
+            header,
         }
     }
 
@@ -163,7 +189,8 @@ impl TeamDetailsScreen {
             .map(|t| t.players.len())
         {
             Some(0) | None => Paragraph::new(format!(
-                "N = {} | M = {} | Esc = {} | Q = {}",
+                "E = {} | N = {} | M = {} | Esc = {} | Q = {}",
+                current_labels().edit_team,
                 current_labels().new_player,
                 current_labels().match_list,
                 current_labels().back,
@@ -171,9 +198,10 @@ impl TeamDetailsScreen {
             ))
             .block(block),
             _ => Paragraph::new(format!(
-                "↑↓ = {} | Enter = {} | N = {} | M = {} | Esc = {} | Q = {}",
+                "↑↓ = {} | Enter = {} | E = {} | N = {} | M = {} | Esc = {} | Q = {}",
                 current_labels().navigate,
-                current_labels().select,
+                current_labels().edit_player,
+                current_labels().edit_team,
                 current_labels().new_player,
                 current_labels().match_list,
                 current_labels().back,
@@ -182,29 +210,6 @@ impl TeamDetailsScreen {
             .block(block),
         };
         f.render_widget(paragraph, area);
-    }
-
-    fn render_header(&self, f: &mut Frame, area: Rect, team: Option<&TeamEntry>) {
-        let header_text = if let Some(team) = team {
-            format!(
-                "{}\n{}: {}\n{}: {}",
-                team.name,
-                current_labels().league,
-                team.league,
-                current_labels().year,
-                team.year
-            )
-        } else {
-            current_labels().team_not_found.into()
-        };
-        let header = Paragraph::new(header_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().team),
-            )
-            .alignment(Alignment::Center);
-        f.render_widget(header, area);
     }
 
     fn render_no_players_yet(&self, f: &mut Frame, area: Rect) {

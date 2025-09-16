@@ -1,6 +1,6 @@
 mod tests {
     use crate::shapes::{
-        enums::{RoleEnum, TeamSideEnum},
+        enums::{GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
         player::PlayerEntry,
         set::SetEntry,
         snapshot::Snapshot,
@@ -124,7 +124,8 @@ mod tests {
         let team: TeamEntry = TeamEntry {
             id: Uuid::new_v4(),
             name: "My Team".to_owned(),
-            league: "My League".to_owned(),
+            classification: Some(TeamClassificationEnum::HighNational),
+            gender: Some(GenderEnum::Men),
             players: vec![
                 PlayerEntry {
                     id: setter,

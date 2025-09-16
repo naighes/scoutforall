@@ -5,6 +5,7 @@ use crate::{
     pdf::open_match_pdf,
     screens::{
         add_match::AddMatchScreen,
+        components::team_header::TeamHeader,
         scouting_screen::ScoutingScreen,
         screen::{AppAction, Screen},
         start_set_screen::StartSetScreen,
@@ -30,6 +31,7 @@ pub struct MatchListScreen {
     matches: Vec<MatchEntry>,
     error: Option<String>,
     refresh: bool,
+    header: TeamHeader,
 }
 
 impl Screen for MatchListScreen {
@@ -113,7 +115,7 @@ impl Screen for MatchListScreen {
         } else {
             self.error = Some(current_labels().could_not_render_match_list.to_string());
         }
-        self.render_header(f, container[0]);
+        self.header.render(f, container[0], Some(&self.team));
         self.render_error(f, footer_right);
         self.render_footer(f, footer_left);
     }
@@ -133,6 +135,7 @@ impl MatchListScreen {
             list_state: ListState::default(),
             refresh: true,
             error: None,
+            header: TeamHeader::default(),
         }
     }
 
@@ -233,23 +236,6 @@ impl MatchListScreen {
             self.list_state.select(Some(new_selected));
         };
         AppAction::None
-    }
-
-    fn render_header(&self, f: &mut Frame, area: Rect) {
-        let header_text = format!(
-            "{}\n{}: {}\n{}: {}",
-            current_labels().league,
-            current_labels().year,
-            self.team.name,
-            self.team.league,
-            self.team.year
-        );
-        let header = Paragraph::new(header_text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().team),
-        );
-        f.render_widget(header, area);
     }
 
     fn render_footer(&mut self, f: &mut Frame, area: Rect) {
