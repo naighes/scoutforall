@@ -1,25 +1,27 @@
 use crate::{
     localization::current_labels,
     ops::create_player,
-    screens::screen::{AppAction, Screen},
+    screens::{
+        components::{select::Select, text_box::TextBox},
+        screen::{AppAction, Screen},
+    },
     shapes::{enums::RoleEnum, team::TeamEntry},
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, Borders, Padding, Paragraph},
     Frame,
 };
 
 #[derive(Debug)]
 pub struct AddPlayerScreen {
     team: TeamEntry,
-    name: String,
-    role: Option<RoleEnum>,
-    number: String,
+    name: TextBox,
+    number: TextBox,
+    role: Select<RoleEnum>,
     field: usize,
-    role_selection: ListState,
     error: Option<String>,
 }
 
@@ -42,50 +44,46 @@ impl Screen for AddPlayerScreen {
     fn on_resume(&mut self, _: bool) {}
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        self.render_error(f, footer_right);
-        self.render_header(f, body);
-        let inner = Layout::default()
+        let area = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(3),
+                Constraint::Length(3), // name
+                Constraint::Length(3), // role
+                Constraint::Length(3), // number
                 Constraint::Min(1),
             ])
             .split(body);
-        let name_widget = Paragraph::new(format!("{}: {}", current_labels().name, self.name))
-            .style(if self.field == 0 {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            });
-        f.render_widget(name_widget, inner[0]);
-        if self.field == 1 {
-            self.render_role_list(f, inner[1]);
-        } else {
-            self.render_role_widget(f, inner[1]);
-        }
-        let number_widget = Paragraph::new(format!("{}: {}", current_labels().number, self.number))
-            .style(if self.field == 2 {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            });
-        f.render_widget(number_widget, inner[2]);
+        self.render_error(f, footer_right);
+        self.render_header(f, body);
+        self.name.render(f, area[0]);
+        self.role.render(f, area[1]);
+        self.number.render(f, area[2]);
         self.render_footer(f, footer_left);
     }
 }
 
 impl AddPlayerScreen {
     pub fn new(team: TeamEntry) -> Self {
+        let role = Select::new(
+            current_labels().role.to_owned(),
+            RoleEnum::ALL.to_vec(),
+            false,
+        );
+        let name = TextBox::new(current_labels().name.to_owned(), true);
+        let number = TextBox::with_validator(
+            current_labels().number.to_owned(),
+            false,
+            |current: &str, c: char| {
+                c.is_ascii_digit() && current.len() < 2 && !(current.is_empty() && c == '0')
+            },
+        );
         AddPlayerScreen {
             team,
-            name: String::new(),
-            role: None,
-            number: String::new(),
+            name,
+            number,
+            role,
             field: 0,
-            role_selection: ListState::default(),
             error: None,
         }
     }
@@ -96,21 +94,18 @@ impl AddPlayerScreen {
     }
 
     fn handle_char(&mut self, c: char) -> AppAction {
-        match (self.field, c.is_ascii_digit()) {
-            (2, true) if self.number.len() < 2 && !(self.number.is_empty() && c == '0') => {
-                self.number.push(c);
-            }
-            (0, _) => {
-                self.name.push(c);
-            }
-            _ => {}
-        };
+        self.name.handle_char(c);
+        self.number.handle_char(c);
         AppAction::None
     }
 
     fn handle_enter(&mut self) -> AppAction {
-        match (self.name.is_empty(), self.role, self.number.parse::<u8>()) {
-            (true, _, _) => {
+        match (
+            self.name.get_selected_value(),
+            self.role.get_selected_value(),
+            self.number.get_selected_value().map(|v| v.parse::<u8>()),
+        ) {
+            (None, _, _) => {
                 self.error = Some(current_labels().name_cannot_be_empty.to_string());
                 AppAction::None
             }
@@ -118,8 +113,8 @@ impl AddPlayerScreen {
                 self.error = Some(current_labels().role_is_required.to_string());
                 AppAction::None
             }
-            (_, Some(role), Ok(number)) => {
-                match create_player(self.name.clone(), role, number, &mut self.team) {
+            (Some(name), Some(role), Some(Ok(number))) => {
+                match create_player(name, role, number, &mut self.team) {
                     Ok(_) => AppAction::Back(true, Some(1)),
                     Err(_) => {
                         self.error = Some(current_labels().could_not_create_player.to_string());
@@ -127,104 +122,45 @@ impl AddPlayerScreen {
                     }
                 }
             }
-            (_, _, Err(_)) => {
+            (_, _, None | Some(Err(_))) => {
                 self.error = Some(current_labels().number_must_be_between_0_and_99.into());
                 AppAction::None
             }
         }
     }
 
-    fn handle_backtab(&mut self) -> AppAction {
-        if self.field == 0 {
-            self.field = 2;
-        } else {
-            self.field -= 1;
-        }
+    fn handle_tab(&mut self) -> AppAction {
+        self.field = (self.field + 1) % 3;
+        self.update_writing_modes();
         AppAction::None
     }
 
-    fn handle_tab(&mut self) -> AppAction {
-        self.field = (self.field + 1) % 3;
+    fn handle_backtab(&mut self) -> AppAction {
+        self.field = (self.field + 2) % 3;
+        self.update_writing_modes();
         AppAction::None
+    }
+
+    fn update_writing_modes(&mut self) {
+        self.name.writing_mode = self.field == 0;
+        self.role.writing_mode = self.field == 1;
+        self.number.writing_mode = self.field == 2;
     }
 
     fn handle_up(&mut self) -> AppAction {
-        match (self.field, &self.role_selection.selected()) {
-            (1, Some(selected)) => {
-                let new_selected = if *selected == 0 {
-                    RoleEnum::ALL.len() - 1
-                } else {
-                    selected - 1
-                };
-                self.role = Some(RoleEnum::ALL[new_selected]);
-                self.role_selection.select(Some(new_selected));
-            }
-            (1, None) => {
-                self.role_selection.select(Some(0));
-                self.role = Some(RoleEnum::ALL[0]);
-            }
-            _ => {}
-        };
+        self.role.handle_up();
         AppAction::None
     }
 
     fn handle_down(&mut self) -> AppAction {
-        match (self.field, self.role_selection.selected()) {
-            (1, Some(selected)) => {
-                let new_selected = (selected + 1) % RoleEnum::ALL.len();
-                self.role_selection.select(Some(new_selected));
-                self.role = Some(RoleEnum::ALL[new_selected]);
-            }
-            (1, None) => {
-                self.role_selection.select(Some(0));
-                self.role = Some(RoleEnum::ALL[0]);
-            }
-            _ => {}
-        };
+        self.role.handle_down();
         AppAction::None
     }
 
     fn handle_backspace(&mut self) -> AppAction {
-        match self.field {
-            0 => {
-                self.name.pop();
-            }
-            2 => {
-                self.number.pop();
-            }
-            _ => {}
-        };
+        self.name.handle_backspace();
+        self.number.handle_backspace();
         AppAction::None
-    }
-
-    fn render_role_widget(&mut self, f: &mut Frame, area: Rect) {
-        let role_widget = Paragraph::new(if let Some(role) = self.role {
-            format!("{}: {}", current_labels().role, role)
-        } else {
-            format!("{}:", current_labels().role)
-        })
-        .style(Style::default());
-        f.render_widget(role_widget, area);
-    }
-
-    fn render_role_list(&mut self, f: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = RoleEnum::ALL
-            .iter()
-            .map(|r| ListItem::new(r.to_string()))
-            .collect();
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().role),
-            )
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::REVERSED),
-            )
-            .highlight_symbol(">> ");
-        f.render_stateful_widget(list, area, &mut self.role_selection);
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {

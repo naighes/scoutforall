@@ -7,6 +7,10 @@ use crate::{
     localization::Labels,
 };
 
+pub trait FriendlyName {
+    fn friendly_name(&self, labels: &Labels) -> &'static str;
+}
+
 /// Represents the two possible phases of play in volleyball.
 ///
 /// In volleyball, the game alternates between two fundamental phases:
@@ -157,21 +161,6 @@ impl fmt::Display for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub fn friendly_name(&self, labels: &Labels) -> &'static str {
-        use EventTypeEnum::*;
-        match self {
-            S => labels.serve,
-            P => labels.reception,
-            A => labels.attack,
-            D => labels.defense,
-            B => labels.block,
-            F => labels.fault,
-            OS => labels.opponent_score,
-            OE => labels.opponent_error,
-            R => labels.substitution,
-        }
-    }
-
     pub fn requires_evaluation(&self) -> bool {
         use EventTypeEnum::*;
         matches!(self, S | P | A | D | B)
@@ -189,6 +178,23 @@ impl EventTypeEnum {
             S | A | B => vec![Perfect, Positive, Over, Negative, Error],
             D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
             _ => vec![],
+        }
+    }
+}
+
+impl FriendlyName for EventTypeEnum {
+    fn friendly_name(&self, labels: &Labels) -> &'static str {
+        use EventTypeEnum::*;
+        match self {
+            S => labels.serve,
+            P => labels.reception,
+            A => labels.attack,
+            D => labels.defense,
+            B => labels.block,
+            F => labels.fault,
+            OS => labels.opponent_score,
+            OE => labels.opponent_error,
+            R => labels.substitution,
         }
     }
 }
@@ -635,6 +641,19 @@ impl fmt::Display for RoleEnum {
     }
 }
 
+impl FriendlyName for RoleEnum {
+    fn friendly_name(&self, labels: &Labels) -> &'static str {
+        use RoleEnum::*;
+        match self {
+            Libero => labels.libero,
+            MiddleBlocker => labels.middle_blocker,
+            OppositeHitter => labels.opposite_hitter,
+            OutsideHitter => labels.outside_hitter,
+            Setter => labels.setter,
+        }
+    }
+}
+
 impl FromStr for RoleEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -693,4 +712,129 @@ impl FromStr for LanguageEnum {
             )))),
         }
     }
+}
+
+/// Global classification system that categorizes teams by their performance model, competitive context and level of professionalism.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum TeamClassificationEnum {
+    TopInternational,
+    HighNational,
+    NationalMidLevel,
+    NationalLowLevel,
+    Regional,
+    LocalDivision,
+}
+
+impl fmt::Display for TeamClassificationEnum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use TeamClassificationEnum::*;
+        let label = match self {
+            TopInternational => "top-international",
+            HighNational => "high-national",
+            NationalMidLevel => "national-mid-level",
+            NationalLowLevel => "national-low-level",
+            Regional => "regional",
+            LocalDivision => "local-division",
+        };
+        write!(f, "{}", label)
+    }
+}
+
+impl FromStr for TeamClassificationEnum {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use TeamClassificationEnum::*;
+        match s.to_uppercase().as_str() {
+            "TOP-INTERNATIONAL" => Ok(TopInternational),
+            "HIGH-NATIONAL" => Ok(HighNational),
+            "NATIONAL-MID-LEVEL" => Ok(NationalMidLevel),
+            "NATIONAL-LOW-LEVEL" => Ok(NationalLowLevel),
+            "REGIONAL" => Ok(Regional),
+            "LOCAL-DIVISION" => Ok(LocalDivision),
+            _ => Err(AppError::IO(IOError::Msg(format!(
+                "invalid team classification: {}",
+                s
+            )))),
+        }
+    }
+}
+
+impl TeamClassificationEnum {
+    pub fn friendly_description(&self, labels: &Labels) -> &'static str {
+        use TeamClassificationEnum::*;
+        match self {
+            TopInternational => labels.top_international_description,
+            HighNational => labels.high_national_description,
+            NationalMidLevel => labels.national_mid_level_description,
+            NationalLowLevel => labels.national_low_level_description,
+            Regional => labels.regional_description,
+            LocalDivision => labels.local_division_description,
+        }
+    }
+
+    pub const ALL: [TeamClassificationEnum; 6] = [
+        TeamClassificationEnum::TopInternational,
+        TeamClassificationEnum::HighNational,
+        TeamClassificationEnum::NationalMidLevel,
+        TeamClassificationEnum::NationalLowLevel,
+        TeamClassificationEnum::Regional,
+        TeamClassificationEnum::LocalDivision,
+    ];
+}
+
+impl FriendlyName for TeamClassificationEnum {
+    fn friendly_name(&self, labels: &Labels) -> &'static str {
+        use TeamClassificationEnum::*;
+        match self {
+            TopInternational => labels.top_international,
+            HighNational => labels.high_national,
+            NationalMidLevel => labels.national_mid_level,
+            NationalLowLevel => labels.national_low_level,
+            Regional => labels.regional,
+            LocalDivision => labels.local_division,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum GenderEnum {
+    Men,
+    Women,
+}
+
+impl fmt::Display for GenderEnum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use GenderEnum::*;
+        let label = match self {
+            Men => "men",
+            Women => "women",
+        };
+        write!(f, "{}", label)
+    }
+}
+
+impl FromStr for GenderEnum {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use GenderEnum::*;
+        match s.to_uppercase().as_str() {
+            "MEN" => Ok(Men),
+            "WOMEN" => Ok(Women),
+            _ => Err(AppError::IO(IOError::Msg(format!("invalid gender: {}", s)))),
+        }
+    }
+}
+
+impl FriendlyName for GenderEnum {
+    fn friendly_name(&self, labels: &Labels) -> &'static str {
+        use GenderEnum::*;
+        match self {
+            Men => labels.men,
+            Women => labels.women,
+        }
+    }
+}
+
+impl GenderEnum {
+    pub const ALL: [GenderEnum; 2] = [GenderEnum::Men, GenderEnum::Women];
 }

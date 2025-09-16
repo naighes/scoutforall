@@ -4,7 +4,7 @@ use crate::io::path::{
     get_base_path, get_config_file_path, get_match_descriptor_file_path, get_match_folder_path,
     get_set_descriptor_file_path, get_set_events_file_path, get_team_folder_path,
 };
-use crate::shapes::enums::{RoleEnum, TeamSideEnum};
+use crate::shapes::enums::{GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum};
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::r#match::MatchEntry;
 use crate::shapes::set::SetEntry;
@@ -167,22 +167,24 @@ pub fn load_teams() -> Result<Vec<TeamEntry>, AppError> {
 
 pub fn create_team(
     name: String,
-    league: String,
+    classification: TeamClassificationEnum,
+    gender: GenderEnum,
     year: u16,
 ) -> Result<TeamEntry, Box<dyn std::error::Error>> {
     let team_id = Uuid::new_v4();
     let team_path: PathBuf = get_team_folder_path(&team_id);
     let team_descriptor_file_path = team_path.join(TEAM_DESCRIPTOR_FILE_NAME);
     let file = File::create(&team_descriptor_file_path)?;
-    let t = TeamEntry {
+    let team = TeamEntry {
         name,
-        league,
+        classification: Some(classification),
+        gender: Some(gender),
         id: team_id,
         year,
         players: Vec::new(),
     };
-    serde_json::to_writer_pretty(file, &t)?;
-    Ok(t)
+    serde_json::to_writer_pretty(file, &team)?;
+    Ok(team)
 }
 
 pub fn create_player(

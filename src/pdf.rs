@@ -1,6 +1,8 @@
 use crate::errors::AppError;
 use crate::localization::current_labels;
-use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
+use crate::shapes::enums::{
+    ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, ZoneEnum,
+};
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::r#match::MatchEntry;
 use crate::shapes::set::SetEntry;

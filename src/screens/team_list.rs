@@ -7,7 +7,7 @@ use crate::{
         settings::SettingsScreen,
         team_details::TeamDetailsScreen,
     },
-    shapes::team::TeamEntry,
+    shapes::{enums::FriendlyName, team::TeamEntry},
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -76,7 +76,19 @@ impl Screen for TeamListScreen {
         let items: Vec<ListItem> = self
             .teams
             .iter()
-            .map(|t| ListItem::new(format!("{} ({}, {})", t.name, t.league, t.year)))
+            .map(|t| {
+                ListItem::new(format!(
+                    "{} ({}/{}, {})",
+                    t.name,
+                    t.classification
+                        .map(|c| c.friendly_name(current_labels()))
+                        .unwrap_or_default(),
+                    t.gender
+                        .map(|g| g.friendly_name(current_labels()))
+                        .unwrap_or_default(),
+                    t.year,
+                ))
+            })
             .collect();
         if items.is_empty() {
             self.render_no_teams_yet(f, body);

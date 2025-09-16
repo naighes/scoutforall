@@ -13,7 +13,7 @@ use crate::{
     ops::{append_event, remove_last_event},
     screens::screen::{AppAction, Screen},
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, RoleEnum},
+        enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         player::PlayerEntry,
         r#match::MatchEntry,
         set::SetEntry,

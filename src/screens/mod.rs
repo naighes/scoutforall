@@ -1,6 +1,7 @@
 pub mod add_match;
 pub mod add_player;
 pub mod add_team;
+pub mod components;
 pub mod match_list;
 pub mod scouting_screen;
 pub mod screen;
