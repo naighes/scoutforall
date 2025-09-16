@@ -128,6 +128,9 @@ impl FromStr for TeamSideEnum {
 ///
 /// - **R**: Substitution  
 ///   A player change performed by either team.
+///
+/// - **CL**: Change Libero  
+///   A libero change performed by either team.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum EventTypeEnum {
@@ -140,6 +143,7 @@ pub enum EventTypeEnum {
     OS,
     OE,
     R,
+    CL,
 }
 
 impl fmt::Display for EventTypeEnum {
@@ -155,6 +159,7 @@ impl fmt::Display for EventTypeEnum {
             OS => "OS",
             OE => "OE",
             R => "R",
+            CL => "CL",
         };
         write!(f, "{}", label)
     }
@@ -195,6 +200,7 @@ impl FriendlyName for EventTypeEnum {
             OS => labels.opponent_score,
             OE => labels.opponent_error,
             R => labels.substitution,
+            CL => labels.change_libero,
         }
     }
 }
@@ -213,6 +219,7 @@ impl FromStr for EventTypeEnum {
             "OS" => Ok(OS),
             "OE" => Ok(OE),
             "R" => Ok(R),
+            "CL" => Ok(CL),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",
                 s

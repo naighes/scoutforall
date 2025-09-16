@@ -14,7 +14,7 @@ mod tests {
         setter: Uuid,
         libero: Uuid,
     ) -> Snapshot {
-        let set = SetEntry::new(set_number, serving_team, lineup, libero, setter)
+        let set = SetEntry::new(set_number, serving_team, lineup, libero, None, setter)
             .expect("expected a valid set");
         Snapshot::new(&set).expect("expected a valid snapshot")
     }

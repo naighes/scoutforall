@@ -11,7 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Padding, Paragraph},
+    widgets::{Block, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -225,7 +225,8 @@ impl EditPlayerScreen {
             current_labels().back,
             current_labels().quit
         ))
-        .block(block);
+        .block(block)
+        .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
     }
 

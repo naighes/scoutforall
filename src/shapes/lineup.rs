@@ -24,6 +24,7 @@ pub struct Lineup {
     previous_phase: Option<PhaseEnum>,
     current_setter: Uuid,
     current_libero: Uuid,
+    fallback_libero: Option<Uuid>,
     substitutions: Vec<SubstitutionRecord>,
     libero_replacement: Option<Uuid>,
     idle_player: Option<Uuid>,
@@ -35,6 +36,7 @@ impl Lineup {
         phase: PhaseEnum,
         current_setter: Uuid,
         current_libero: Uuid,
+        fallback_libero: Option<Uuid>,
     ) -> Result<Lineup, AppError> {
         let rotation = Lineup::get_rotation(players, &current_setter)?;
         let libero_slot = Lineup::get_libero_slot(rotation)?;
@@ -50,6 +52,7 @@ impl Lineup {
             substitutions: vec![],
             current_setter,
             current_libero,
+            fallback_libero,
             libero_replacement: if has_libero {
                 Some(libero_replacement)
             } else {
@@ -132,6 +135,25 @@ impl Lineup {
             }
             _ => {}
         };
+        Ok(())
+    }
+
+    pub fn swap_libero(&mut self) -> Result<(), AppError> {
+        if let Some(fallback) = self.fallback_libero {
+            let old_current = self.current_libero;
+            self.current_libero = fallback;
+            self.fallback_libero = Some(old_current);
+            let has_libero = self
+                .get_current_rotation()
+                .map(|r| Lineup::has_libero(r, self.get_current_phase()));
+            let libero_slot = self
+                .get_current_rotation()
+                .and_then(Lineup::get_libero_slot);
+            let libero = self.current_libero;
+            if let (Ok(true), Ok(slot)) = (has_libero, libero_slot) {
+                self.try_set(&libero, slot)?;
+            }
+        }
         Ok(())
     }
 

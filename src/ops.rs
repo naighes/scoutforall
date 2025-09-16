@@ -115,6 +115,7 @@ pub fn create_set(
     serving_team: TeamSideEnum,
     positions: [Uuid; 6],
     libero: Uuid,
+    fallback_libero: Option<Uuid>,
     setter: Uuid,
 ) -> Result<SetEntry, AppError> {
     let match_path: PathBuf = get_match_folder_path(&m.team.id, &m.id);
@@ -125,7 +126,14 @@ pub fn create_set(
         ))));
     }
     let file_path = get_set_descriptor_file_path(&m.team.id, &m.id, set_number);
-    let s = SetEntry::new(set_number, serving_team, positions, libero, setter)?;
+    let s = SetEntry::new(
+        set_number,
+        serving_team,
+        positions,
+        libero,
+        fallback_libero,
+        setter,
+    )?;
     File::create(&file_path)
         .and_then(|json_file| serde_json::to_writer_pretty(json_file, &s).map_err(|e| e.into()))
         .and_then(|_| File::create(get_set_events_file_path(&m.team.id, &m.id, set_number)))
@@ -273,8 +281,8 @@ pub fn remove_last_event(
         .and_then(|mut reader| reader.deserialize().collect::<Result<Vec<EventEntry>, _>>())
         .map(|records| {
             records
-                .split_first()
-                .map(|(first, rest)| (first.clone(), rest.to_vec()))
+                .split_last()
+                .map(|(last, rest)| (last.clone(), rest.to_vec()))
         })
         .and_then_option(|(first, rest)| {
             let path = get_set_events_file_path(&team.id, match_id, set_number);

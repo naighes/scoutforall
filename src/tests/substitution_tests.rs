@@ -18,7 +18,7 @@ mod tests {
         let mb1: Uuid = Uuid::new_v4();
         let libero: Uuid = Uuid::new_v4();
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
-        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, setter)
+        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
         let snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         let options = snapshot.current_lineup.get_replaceable_lineup_choices();
@@ -50,7 +50,7 @@ mod tests {
         let libero: Uuid = Uuid::new_v4();
         let setter_replacement: Uuid = Uuid::new_v4();
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
-        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, setter)
+        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
         let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         snapshot
@@ -85,7 +85,7 @@ mod tests {
         let libero: Uuid = Uuid::new_v4();
         let setter_replacement: Uuid = Uuid::new_v4();
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
-        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, setter)
+        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
         let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         snapshot
@@ -200,7 +200,7 @@ mod tests {
             team.players[4].id,
             team.players[5].id,
         ];
-        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, setter)
+        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
         let snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         let options = snapshot
@@ -222,7 +222,7 @@ mod tests {
             team.players[4].id,
             team.players[5].id,
         ];
-        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, setter)
+        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
         let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         snapshot
@@ -248,7 +248,7 @@ mod tests {
             team.players[4].id,
             team.players[5].id,
         ];
-        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, setter)
+        let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
         let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         snapshot
@@ -277,8 +277,15 @@ mod tests {
             team.players[4].id,
             team.players[5].id,
         ];
-        let set = SetEntry::new(1, TeamSideEnum::Us, positions, team.players[6].id, setter)
-            .expect("expected a valid set");
+        let set = SetEntry::new(
+            1,
+            TeamSideEnum::Us,
+            positions,
+            team.players[6].id,
+            None,
+            setter,
+        )
+        .expect("expected a valid set");
         let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         snapshot
             .current_lineup

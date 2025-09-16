@@ -2,7 +2,7 @@
 name = "scout4all"
 description = "scout4all is a CLI tool for collecting, managing and reporting volleyball match data. It helps coaches and analysts track match events and generate useful reports for post-game analysis."
 keywords = ["volley", "volleyball", "tui", "ratatui"]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["Nicola @naighes Baldi <nic.baldi@gmail.com>"]
 readme = "README.md"

@@ -13,7 +13,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -133,14 +133,13 @@ impl TeamListScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = match self.teams.len() {
+        let paragraph = (match self.teams.len() {
             0 => Paragraph::new(format!(
                 "N = {} | S = {} | Q = {}",
                 current_labels().new_team,
                 current_labels().settings,
                 current_labels().quit
-            ))
-            .block(block),
+            )),
             _ => Paragraph::new(format!(
                 "↑↓ = {} | Enter = {} | S = {} | N = {} | Q = {}",
                 current_labels().navigate,
@@ -148,9 +147,10 @@ impl TeamListScreen {
                 current_labels().settings,
                 current_labels().new_team,
                 current_labels().quit
-            ))
-            .block(block),
-        };
+            )),
+        })
+        .block(block)
+        .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
     }
 
