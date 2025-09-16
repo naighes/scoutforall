@@ -23,7 +23,7 @@ use crate::{
     shapes::enums::LanguageEnum,
 };
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -178,8 +178,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Res
             }
         })?;
 
-        if event::poll(std::time::Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()? {
+        if let Event::Key(key) = event::read()? {
+            if key.kind == KeyEventKind::Press {
                 if key.code == KeyCode::Char('q') {
                     return Ok(());
                 }
