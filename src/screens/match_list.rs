@@ -15,7 +15,7 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::Alignment,
-    widgets::{Padding, Row, Table},
+    widgets::{Padding, Row, Table, Wrap},
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -247,23 +247,23 @@ impl MatchListScreen {
         } else {
             "".to_string()
         };
-        let paragraph = match self.matches.len() {
+        let paragraph = (match self.matches.len() {
             0 => Paragraph::new(format!(
                 "{}Esc = {} | Q = {}",
                 new_match_text,
                 current_labels().back,
                 current_labels().quit
-            ))
-            .block(block),
+            )),
             _ => Paragraph::new(format!(
                 "↑↓ = move | Enter = {} | {}Esc = {} | Q = {}",
                 current_labels().select,
                 new_match_text,
                 current_labels().back,
                 current_labels().quit
-            ))
-            .block(block),
-        };
+            )),
+        })
+        .block(block)
+        .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
     }
 

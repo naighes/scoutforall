@@ -58,6 +58,7 @@ impl Snapshot {
             },
             set_entry.setter,
             set_entry.libero,
+            set_entry.fallback_libero,
         )?;
         Ok(Snapshot {
             score_us: 0,
@@ -351,10 +352,10 @@ impl Snapshot {
     ) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        let serve_them = vec![OE, OS, F, P, R];
-        let serve_us = vec![OE, F, S, R];
+        let serve_them = vec![OE, OS, F, P, R, CL];
+        let serve_us = vec![OE, F, S, R, CL];
         let options_map: HashMap<_, _> = [
-            // order: OS, OE, F, A, S, P, D, B, R
+            // order: OS, OE, F, A, S, P, D, B, R, CL
             ((OS, None), serve_them.clone()),
             ((OE, None), serve_us.clone()),
             ((B, Some(Error)), serve_them.clone()),
@@ -389,7 +390,7 @@ impl Snapshot {
         .into_iter()
         .collect();
         match (event.event_type, event.eval) {
-            (R, _) => current_available_options,
+            (R | CL, _) => current_available_options,
             key => options_map.get(&key).cloned().unwrap_or_default(),
         }
     }
@@ -490,8 +491,12 @@ impl Snapshot {
                     .add_substitution(&replaced, &replacement)?;
             }
         }
+        if event.event_type == EventTypeEnum::CL {
+            // change libero
+            self.current_lineup.swap_libero()?;
+        }
         self.current_lineup.update(event)?;
-        if event.event_type != EventTypeEnum::R {
+        if event.event_type != EventTypeEnum::R && event.event_type != EventTypeEnum::CL {
             self.last_event = Some(event.clone());
         }
         Ok(available_options)

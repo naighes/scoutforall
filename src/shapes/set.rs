@@ -15,6 +15,7 @@ pub struct SetEntry {
     pub serving_team: TeamSideEnum,
     pub initial_positions: [Uuid; 6],
     pub libero: Uuid,
+    pub fallback_libero: Option<Uuid>,
     pub setter: Uuid,
     #[serde(skip_serializing, skip_deserializing)]
     pub events: Vec<EventEntry>,
@@ -26,6 +27,7 @@ impl SetEntry {
         serving_team: TeamSideEnum,
         initial_positions: [Uuid; 6],
         libero: Uuid,
+        fallback_libero: Option<Uuid>,
         setter: Uuid,
     ) -> Result<Self, AppError> {
         if !(1..=5).contains(&set_number) {
@@ -44,6 +46,7 @@ impl SetEntry {
                     serving_team,
                     initial_positions,
                     libero,
+                    fallback_libero,
                     setter: *s,
                     events: vec![],
                 }),

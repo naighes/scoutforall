@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Padding, Paragraph, Row, Table},
+    widgets::{Block, Borders, Padding, Paragraph, Row, Table, Wrap},
     Frame,
 };
 use uuid::Uuid;
@@ -297,8 +297,10 @@ impl ScoutingScreen {
             (Char('f'), None) => Some(EventTypeEnum::F),
             (Char('r'), None) => Some(R),
             (Char('o'), None) => Partial,
+            (Char('c'), None) => Partial,
             (Char('e'), Partial) => Some(OE),
             (Char('s'), Partial) => Some(OS),
+            (Char('l'), Partial) => Some(CL),
             _ => None,
         }
     }
@@ -364,7 +366,7 @@ impl ScoutingScreen {
                         AppAction::None
                     }
                     // these events do not require player nor evaluation selection
-                    (true, OE | OS) => {
+                    (true, OE | OS | CL) => {
                         let entry = EventEntry {
                             timestamp: Utc::now(),
                             event_type,
@@ -435,13 +437,13 @@ impl ScoutingScreen {
     fn handle_player_screen(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         let available_lineup_players = self.get_lineup_choices();
+        // undo
+        if key.code == Char('u') {
+            self.current_event = EventTypeInput::None;
+            self.state = ScoutingScreenState::Event;
+            return AppAction::None;
+        }
         let player = match key.code {
-            // undo
-            Char('u') => {
-                self.current_event = EventTypeInput::None;
-                self.state = ScoutingScreenState::Event;
-                None
-            }
             Char(c) => c
                 .to_digit(10)
                 .take_if(|d| (1..=7).contains(d))
@@ -720,7 +722,7 @@ impl ScoutingScreen {
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
-        let position_map = [3, 2, 1, 4, 5, 0];
+        let position_map: [usize; 6] = [3, 2, 1, 4, 5, 0];
         for (row_index, row_area) in court_rows.iter().enumerate() {
             let columns = Layout::default()
                 .direction(Direction::Horizontal)
@@ -731,9 +733,9 @@ impl ScoutingScreen {
                 ])
                 .split(*row_area);
             for (column_index, cell_area) in columns.iter().enumerate() {
-                let position_index = row_index * 3 + column_index;
+                let position_index = position_map[row_index * 3 + column_index];
                 if let Some(player_id) = self.snapshot.current_lineup.get(position_index) {
-                    self.render_court_cell(f, cell_area, player_id, position_map[position_index]);
+                    self.render_court_cell(f, cell_area, player_id, position_index);
                 }
             }
         }
@@ -877,7 +879,8 @@ impl ScoutingScreen {
                 current_labels().quit
             )),
         }
-        .block(block);
+        .block(block)
+        .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
     }
 
@@ -889,6 +892,7 @@ impl ScoutingScreen {
                 Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(3),
+                Constraint::Length(5),
                 Constraint::Min(0),
             ])
             .split(area);

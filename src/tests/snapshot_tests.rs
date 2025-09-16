@@ -134,6 +134,8 @@ mod tests {
             Uuid::parse_str("e1f518fd-a730-4d5e-bb78-e97daefdf929").expect("should not throw");
         let some_other_player: Uuid =
             Uuid::parse_str("9dac1242-72a5-48f6-bb61-680d2be65dcb").expect("should not throw");
+        let fallback_libero: Uuid =
+            Uuid::parse_str("ab4bded1-c5a4-416d-82d0-66324e2dc2cd").expect("should not throw");
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
 
         let set = SetEntry {
@@ -141,6 +143,7 @@ mod tests {
             serving_team: TeamSideEnum::Us,
             initial_positions: positions,
             libero,
+            fallback_libero: Some(fallback_libero),
             setter,
             events: vec![EventEntry {
                 event_type: EventTypeEnum::S,
@@ -1084,6 +1087,38 @@ mod tests {
                     );
                 }),
             ),
+            (
+                EventEntry {
+                    event_type: EventTypeEnum::CL,
+                    eval: None,
+                    target_player: None,
+                    player: None,
+                    timestamp: Utc::now(),
+                },
+                Box::new(|snapshot: &Snapshot| {
+                    assert_snapshot(
+                        snapshot,
+                        1, // rotation
+                        PhaseEnum::SideOut,
+                        8,                        // score_us
+                        8,                        // score_them
+                        Some(TeamSideEnum::Them), // serving_team
+                        Some(0),                  // libero_position
+                        15,                       // possessions
+                        6,                        // attacks
+                        7,                        // errors
+                        5,                        // unforced_errors
+                        2,                        // counter_attacks
+                        4,                        // opponent_errors
+                        || {
+                            assert_eq!(
+                                snapshot.current_lineup.get_current_libero(),
+                                fallback_libero
+                            );
+                        },
+                    );
+                }),
+            ),
         ];
 
         for (event, assert) in list {
@@ -1131,7 +1166,7 @@ mod tests {
             &EventEntry {
                 event_type: EventTypeEnum::R,
                 eval: None,
-                player: Some(libero),                        // out
+                player: Some(fallback_libero),               // out
                 target_player: Some(some_other_replacement), // in
                 timestamp: Utc::now(),
             },

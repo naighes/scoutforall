@@ -137,6 +137,10 @@ pub struct Labels {
     pub gender_is_required: &'static str,
     pub edit_team: &'static str,
     pub edit_player: &'static str,
+    pub change_libero: &'static str,
+    pub lineup_selection_fallback_libero: &'static str,
+    pub skip_fallback_libero_hint: &'static str,
+    pub hint: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -273,6 +277,10 @@ const EN: Labels = Labels {
     gender_is_required: "gender is required",
     edit_team: "edit team",
     edit_player: "edit player",
+    change_libero: "change libero",
+    lineup_selection_fallback_libero: "lineup selection - fallback libero",
+    skip_fallback_libero_hint: "press Tab to skip fallback libero",
+    hint: "hint",
 };
 
 const IT: Labels = Labels {
@@ -409,6 +417,10 @@ const IT: Labels = Labels {
     gender_is_required: "il genere è obbligatorio",
     edit_team: "modifica squadra",
     edit_player: "modifica giocatore",
+    change_libero: "cambia libero",
+    lineup_selection_fallback_libero: "selezione formazione - libero di riserva",
+    skip_fallback_libero_hint: "premi Tab per saltare il libero di riserva",
+    hint: "suggerimento",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {

@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -172,7 +172,8 @@ impl SettingsScreen {
             current_labels().back,
             current_labels().quit
         ))
-        .block(block);
+        .block(block)
+        .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
     }
 

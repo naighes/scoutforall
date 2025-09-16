@@ -182,7 +182,7 @@ impl TeamDetailsScreen {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = match self
+        let paragraph = (match self
             .teams
             .iter()
             .find(|t| t.id == self.team_id)
@@ -195,8 +195,7 @@ impl TeamDetailsScreen {
                 current_labels().match_list,
                 current_labels().back,
                 current_labels().quit
-            ))
-            .block(block),
+            )),
             _ => Paragraph::new(format!(
                 "↑↓ = {} | Enter = {} | E = {} | N = {} | M = {} | Esc = {} | Q = {}",
                 current_labels().navigate,
@@ -206,9 +205,10 @@ impl TeamDetailsScreen {
                 current_labels().match_list,
                 current_labels().back,
                 current_labels().quit
-            ))
-            .block(block),
-        };
+            )),
+        })
+        .block(block)
+        .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
     }
 
