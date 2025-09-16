@@ -25,21 +25,32 @@ impl Debug for TextBox {
 }
 
 impl TextBox {
-    pub fn new(label: String, writing_mode: bool) -> Self {
+    pub fn new(label: String, writing_mode: bool, value: Option<&str>) -> Self {
         Self {
-            value: String::new(),
+            value: match value {
+                Some(v) => v.to_string(),
+                None => String::new(),
+            },
             writing_mode,
             label,
             validator: Box::new(|_, _| true),
         }
     }
 
-    pub fn with_validator<F>(label: String, writing_mode: bool, validator: F) -> Self
+    pub fn with_validator<F>(
+        label: String,
+        writing_mode: bool,
+        value: Option<&str>,
+        validator: F,
+    ) -> Self
     where
         F: Fn(&str, char) -> bool + 'static,
     {
         Self {
-            value: String::new(),
+            value: match value {
+                Some(v) => v.to_string(),
+                None => String::new(),
+            },
             writing_mode,
             label,
             validator: Box::new(validator),

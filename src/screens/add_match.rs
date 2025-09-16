@@ -67,7 +67,7 @@ impl Screen for AddMatchScreen {
 
 impl AddMatchScreen {
     pub fn new(team: TeamEntry) -> Self {
-        let opponent = TextBox::new(current_labels().opponent.to_owned(), true);
+        let opponent = TextBox::new(current_labels().opponent.to_owned(), true, None);
         let home = CheckBox::new(current_labels().home.to_owned(), false);
         let date = DatePicker::new(current_labels().date.to_owned(), false);
         AddMatchScreen {

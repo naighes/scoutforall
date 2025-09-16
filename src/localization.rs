@@ -135,6 +135,8 @@ pub struct Labels {
     pub team_classification: &'static str,
     pub gender: &'static str,
     pub gender_is_required: &'static str,
+    pub edit_team: &'static str,
+    pub edit_player: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -269,6 +271,8 @@ const EN: Labels = Labels {
     team_classification: "team classification",
     gender: "gender",
     gender_is_required: "gender is required",
+    edit_team: "edit team",
+    edit_player: "edit player",
 };
 
 const IT: Labels = Labels {
@@ -403,6 +407,8 @@ const IT: Labels = Labels {
     team_classification: "classificazione della squadra",
     gender: "genere",
     gender_is_required: "il genere è obbligatorio",
+    edit_team: "modifica squadra",
+    edit_player: "modifica giocatore",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {

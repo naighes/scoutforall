@@ -1,11 +1,11 @@
 use crate::{
     localization::current_labels,
-    ops::create_player,
+    ops::{save_player, PlayerInput},
     screens::{
         components::{select::Select, text_box::TextBox},
         screen::{AppAction, Screen},
     },
-    shapes::{enums::RoleEnum, team::TeamEntry},
+    shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -16,16 +16,17 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct AddPlayerScreen {
+pub struct EditPlayerScreen {
     team: TeamEntry,
     name: TextBox,
     number: TextBox,
     role: Select<RoleEnum>,
     field: usize,
     error: Option<String>,
+    existing_player: Option<PlayerEntry>,
 }
 
-impl Screen for AddPlayerScreen {
+impl Screen for EditPlayerScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (key.code, &self.error) {
             (_, Some(_)) => self.handle_error_reset(),
@@ -63,29 +64,59 @@ impl Screen for AddPlayerScreen {
     }
 }
 
-impl AddPlayerScreen {
+impl EditPlayerScreen {
     pub fn new(team: TeamEntry) -> Self {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
+            None,
             false,
         );
-        let name = TextBox::new(current_labels().name.to_owned(), true);
+        let name = TextBox::new(current_labels().name.to_owned(), true, None);
         let number = TextBox::with_validator(
             current_labels().number.to_owned(),
             false,
-            |current: &str, c: char| {
-                c.is_ascii_digit() && current.len() < 2 && !(current.is_empty() && c == '0')
-            },
+            None,
+            EditPlayerScreen::validate_player_number,
         );
-        AddPlayerScreen {
+        EditPlayerScreen {
             team,
             name,
             number,
             role,
             field: 0,
             error: None,
+            existing_player: None,
         }
+    }
+
+    pub fn edit(team: TeamEntry, player: PlayerEntry) -> Self {
+        let role = Select::new(
+            current_labels().role.to_owned(),
+            RoleEnum::ALL.to_vec(),
+            Some(player.role),
+            false,
+        );
+        let name = TextBox::new(current_labels().name.to_owned(), true, Some(&player.name));
+        let number = TextBox::with_validator(
+            current_labels().number.to_owned(),
+            false,
+            Some(&player.number.to_string()),
+            EditPlayerScreen::validate_player_number,
+        );
+        EditPlayerScreen {
+            team,
+            name,
+            number,
+            role,
+            field: 0,
+            error: None,
+            existing_player: Some(player),
+        }
+    }
+
+    fn validate_player_number(current: &str, c: char) -> bool {
+        c.is_ascii_digit() && current.len() < 2 && !(current.is_empty() && c == '0')
     }
 
     fn handle_error_reset(&mut self) -> AppAction {
@@ -114,7 +145,17 @@ impl AddPlayerScreen {
                 AppAction::None
             }
             (Some(name), Some(role), Some(Ok(number))) => {
-                match create_player(name, role, number, &mut self.team) {
+                let input = match &self.existing_player {
+                    Some(player) => {
+                        let mut updated = player.clone();
+                        updated.name = name;
+                        updated.role = role;
+                        updated.number = number;
+                        PlayerInput::Existing(updated)
+                    }
+                    None => PlayerInput::New { name, role, number },
+                };
+                match save_player(input, &mut self.team) {
                     Ok(_) => AppAction::Back(true, Some(1)),
                     Err(_) => {
                         self.error = Some(current_labels().could_not_create_player.to_string());
@@ -166,7 +207,10 @@ impl AddPlayerScreen {
     fn render_header(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(current_labels().new_player);
+            .title(match self.existing_player {
+                Some(_) => current_labels().edit_player,
+                None => current_labels().new_player,
+            });
         f.render_widget(block, area);
     }
 

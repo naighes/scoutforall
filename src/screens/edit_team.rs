@@ -1,11 +1,14 @@
 use crate::{
     localization::current_labels,
-    ops::create_team,
+    ops::{save_team, TeamInput},
     screens::{
         components::{select::Select, text_box::TextBox},
         screen::{AppAction, Screen},
     },
-    shapes::enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
+    shapes::{
+        enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
+        team::TeamEntry,
+    },
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -17,16 +20,17 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct AddTeamScreen {
+pub struct EditTeamScreen {
     name: TextBox,
     gender: Select<GenderEnum>,
     classification: Select<TeamClassificationEnum>,
     year: TextBox,
     field: usize,
     error: Option<String>,
+    existing_team: Option<TeamEntry>,
 }
 
-impl Screen for AddTeamScreen {
+impl Screen for EditTeamScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (key.code, &self.error) {
             (_, Some(_)) => self.handle_error_reset(),
@@ -68,31 +72,66 @@ impl Screen for AddTeamScreen {
     }
 }
 
-impl AddTeamScreen {
+impl EditTeamScreen {
     pub fn new() -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
+            None,
             false,
         );
         let gender = Select::new(
             current_labels().gender.to_owned(),
             GenderEnum::ALL.to_vec(),
+            None,
             false,
         );
-        let name = TextBox::new(current_labels().name.to_owned(), true);
+        let name = TextBox::new(current_labels().name.to_owned(), true, None);
         let year = TextBox::with_validator(
             current_labels().year.to_owned(),
             false,
+            None,
             |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
         );
-        AddTeamScreen {
+        EditTeamScreen {
             name,
             gender,
             classification,
             year,
             field: 0,
             error: None,
+            existing_team: None,
+        }
+    }
+
+    pub fn edit(team: &TeamEntry) -> Self {
+        let classification = Select::new(
+            current_labels().team_classification.to_owned(),
+            TeamClassificationEnum::ALL.to_vec(),
+            team.classification,
+            false,
+        );
+        let gender = Select::new(
+            current_labels().gender.to_owned(),
+            GenderEnum::ALL.to_vec(),
+            team.gender,
+            false,
+        );
+        let name = TextBox::new(current_labels().name.to_owned(), true, Some(&team.name));
+        let year = TextBox::with_validator(
+            current_labels().year.to_owned(),
+            false,
+            Some(&team.year.to_string()),
+            |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
+        );
+        EditTeamScreen {
+            name,
+            gender,
+            classification,
+            year,
+            field: 0,
+            error: None,
+            existing_team: Some(team.clone()),
         }
     }
 
@@ -158,7 +197,23 @@ impl AddTeamScreen {
                 AppAction::None
             }
             (Some(name), Some(classification), Some(gender), Some(Ok(year))) => {
-                match create_team(name, classification, gender, year) {
+                let input = match &self.existing_team {
+                    Some(team) => {
+                        let mut updated = team.clone();
+                        updated.name = name;
+                        updated.year = year;
+                        updated.classification = Some(classification);
+                        updated.gender = Some(gender);
+                        TeamInput::Existing(updated)
+                    }
+                    None => TeamInput::New {
+                        name,
+                        year,
+                        classification: Some(classification),
+                        gender: Some(gender),
+                    },
+                };
+                match save_team(input) {
                     Ok(_) => AppAction::Back(true, Some(1)),
                     Err(_) => {
                         self.error = Some(current_labels().could_not_create_team.to_string());
@@ -218,7 +273,10 @@ impl AddTeamScreen {
     fn render_header(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(current_labels().new_team);
+            .title(match self.existing_team {
+                Some(_) => current_labels().edit_team,
+                None => current_labels().new_team,
+            });
         f.render_widget(block, area);
     }
 

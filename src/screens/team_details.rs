@@ -2,8 +2,9 @@ use crate::{
     localization::current_labels,
     ops::load_teams,
     screens::{
-        add_player::AddPlayerScreen,
         components::team_header::TeamHeader,
+        edit_player::EditPlayerScreen,
+        edit_team::EditTeamScreen,
         match_list::MatchListScreen,
         screen::{AppAction, Screen},
     },
@@ -49,14 +50,35 @@ impl Screen for TeamDetailsScreen {
                 AppAction::None
             }
             (KeyCode::Char('n'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
-                Some(t) => AppAction::SwitchScreen(Box::new(AddPlayerScreen::new(t.clone()))),
+                Some(t) => AppAction::SwitchScreen(Box::new(EditPlayerScreen::new(t.clone()))),
                 None => AppAction::None,
             },
             (KeyCode::Char('m'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
                 Some(t) => AppAction::SwitchScreen(Box::new(MatchListScreen::new(t.clone()))),
                 None => AppAction::None,
             },
+            (KeyCode::Char('e'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
+                Some(t) => AppAction::SwitchScreen(Box::new(EditTeamScreen::edit(t))),
+                None => AppAction::None,
+            },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => {
+                self.teams
+                    .iter()
+                    .find(|t| t.id == self.team_id)
+                    .and_then(|team| {
+                        self.list_state.selected().map(|selected| {
+                            let player = team.players.get(selected).cloned();
+                            match player {
+                                Some(p) => AppAction::SwitchScreen(Box::new(
+                                    EditPlayerScreen::edit(team.clone(), p),
+                                )),
+                                None => AppAction::None,
+                            }
+                        })
+                    })
+                    .unwrap_or(AppAction::None)
+            }
             _ => AppAction::None,
         }
     }
@@ -167,7 +189,8 @@ impl TeamDetailsScreen {
             .map(|t| t.players.len())
         {
             Some(0) | None => Paragraph::new(format!(
-                "N = {} | M = {} | Esc = {} | Q = {}",
+                "E = {} | N = {} | M = {} | Esc = {} | Q = {}",
+                current_labels().edit_team,
                 current_labels().new_player,
                 current_labels().match_list,
                 current_labels().back,
@@ -175,9 +198,10 @@ impl TeamDetailsScreen {
             ))
             .block(block),
             _ => Paragraph::new(format!(
-                "↑↓ = {} | Enter = {} | N = {} | M = {} | Esc = {} | Q = {}",
+                "↑↓ = {} | Enter = {} | E = {} | N = {} | M = {} | Esc = {} | Q = {}",
                 current_labels().navigate,
-                current_labels().select,
+                current_labels().edit_player,
+                current_labels().edit_team,
                 current_labels().new_player,
                 current_labels().match_list,
                 current_labels().back,

@@ -165,48 +165,75 @@ pub fn load_teams() -> Result<Vec<TeamEntry>, AppError> {
     Ok(teams)
 }
 
-pub fn create_team(
-    name: String,
-    classification: TeamClassificationEnum,
-    gender: GenderEnum,
-    year: u16,
-) -> Result<TeamEntry, Box<dyn std::error::Error>> {
-    let team_id = Uuid::new_v4();
-    let team_path: PathBuf = get_team_folder_path(&team_id);
+pub enum TeamInput {
+    New {
+        name: String,
+        year: u16,
+        classification: Option<TeamClassificationEnum>,
+        gender: Option<GenderEnum>,
+    },
+    Existing(TeamEntry),
+}
+
+pub fn save_team(input: TeamInput) -> Result<TeamEntry, Box<dyn std::error::Error>> {
+    let team = match input {
+        TeamInput::New {
+            name,
+            classification,
+            gender,
+            year,
+        } => TeamEntry {
+            id: Uuid::new_v4(),
+            name,
+            classification,
+            gender,
+            year,
+            players: Vec::new(),
+        },
+        TeamInput::Existing(team) => team,
+    };
+    let team_path = get_team_folder_path(&team.id);
+    std::fs::create_dir_all(&team_path)?;
     let team_descriptor_file_path = team_path.join(TEAM_DESCRIPTOR_FILE_NAME);
     let file = File::create(&team_descriptor_file_path)?;
-    let team = TeamEntry {
-        name,
-        classification: Some(classification),
-        gender: Some(gender),
-        id: team_id,
-        year,
-        players: Vec::new(),
-    };
     serde_json::to_writer_pretty(file, &team)?;
     Ok(team)
 }
 
-pub fn create_player(
-    name: String,
-    role: RoleEnum,
-    number: u8,
+pub enum PlayerInput {
+    New {
+        name: String,
+        role: RoleEnum,
+        number: u8,
+    },
+    Existing(PlayerEntry),
+}
+
+pub fn save_player(
+    input: PlayerInput,
     team: &mut TeamEntry,
 ) -> Result<PlayerEntry, Box<dyn std::error::Error>> {
-    let player_id = Uuid::new_v4();
-    let player = PlayerEntry {
-        id: player_id,
-        name,
-        role,
-        number,
+    let player = match input {
+        PlayerInput::New { name, role, number } => PlayerEntry {
+            id: Uuid::new_v4(),
+            name,
+            role,
+            number,
+        },
+        PlayerInput::Existing(existing) => existing,
     };
-    let result = player.clone();
-    team.players.push(player);
+    if let Some(existing) = team.players.iter_mut().find(|p| p.id == player.id) {
+        *existing = player.clone();
+    } else {
+        team.players.push(player.clone());
+    }
     let team_path: PathBuf = get_team_folder_path(&team.id);
+    std::fs::create_dir_all(&team_path)?;
     let team_descriptor_file_path = team_path.join(TEAM_DESCRIPTOR_FILE_NAME);
     let file = File::create(&team_descriptor_file_path)?;
     serde_json::to_writer_pretty(file, &team)?;
-    Ok(result)
+
+    Ok(player)
 }
 
 pub fn append_event(

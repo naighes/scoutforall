@@ -2,7 +2,7 @@ use crate::{
     localization::current_labels,
     ops::{load_settings, load_teams},
     screens::{
-        add_team::AddTeamScreen,
+        edit_team::EditTeamScreen,
         screen::{AppAction, Screen},
         settings::SettingsScreen,
         team_details::TeamDetailsScreen,
@@ -49,7 +49,7 @@ impl Screen for TeamListScreen {
                 ))),
             },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Char('n'), _) => AppAction::SwitchScreen(Box::new(AddTeamScreen::new())),
+            (KeyCode::Char('n'), _) => AppAction::SwitchScreen(Box::new(EditTeamScreen::new())),
             (KeyCode::Char('s'), _) => match load_settings() {
                 Ok(settings) => AppAction::SwitchScreen(Box::new(SettingsScreen::new(settings))),
                 Err(_) => {

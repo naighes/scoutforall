@@ -10,7 +10,7 @@ use ratatui::{
 #[derive(Debug)]
 pub struct Select<T>
 where
-    T: FriendlyName + Clone,
+    T: FriendlyName + Clone + PartialEq,
 {
     selection: ListState,
     value: Option<T>,
@@ -19,15 +19,22 @@ where
     values: Vec<T>,
 }
 
-impl<T: FriendlyName + Clone> Select<T> {
-    pub fn new(label: String, values: Vec<T>, writing_mode: bool) -> Self {
+impl<T: FriendlyName + Clone + PartialEq> Select<T> {
+    pub fn new(label: String, values: Vec<T>, value: Option<T>, writing_mode: bool) -> Self {
         let mut selection = ListState::default();
-        if !values.is_empty() {
-            selection.select(Some(0));
-        }
+        let value_clone = value.clone();
+        let selected_value = match value_clone {
+            None => values.first().cloned(),
+            Some(ref v) => values.iter().find(|&x| *x == *v).cloned(),
+        };
+        selection.select(match (values.is_empty(), &value) {
+            (true, _) => None,
+            (false, None) => Some(0),
+            (false, Some(v)) => values.iter().position(|x| x == v),
+        });
         Self {
             selection,
-            value: values.first().cloned(),
+            value: selected_value,
             writing_mode,
             label,
             values,
