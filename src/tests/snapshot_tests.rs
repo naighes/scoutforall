@@ -1119,6 +1119,36 @@ mod tests {
                     );
                 }),
             ),
+            (
+                EventEntry {
+                    event_type: EventTypeEnum::CS,
+                    eval: None,
+                    target_player: None,
+                    player: Some(opposite),
+                    timestamp: Utc::now(),
+                },
+                Box::new(|snapshot: &Snapshot| {
+                    assert_snapshot(
+                        snapshot,
+                        4, // rotation
+                        PhaseEnum::SideOut,
+                        8,                        // score_us
+                        8,                        // score_them
+                        Some(TeamSideEnum::Them), // serving_team
+                        Some(0),                  // libero_position
+                        15,                       // possessions
+                        6,                        // attacks
+                        7,                        // errors
+                        5,                        // unforced_errors
+                        2,                        // counter_attacks
+                        4,                        // opponent_errors
+                        || {
+                            assert_eq!(snapshot.current_lineup.get_setter(), Some(opposite));
+                            assert_eq!(snapshot.current_lineup.get_opposite(), Some(setter));
+                        },
+                    );
+                }),
+            ),
         ];
 
         for (event, assert) in list {

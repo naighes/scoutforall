@@ -44,7 +44,6 @@ pub struct Snapshot {
     pub stats: Stats,
     pub current_lineup: Lineup,
     pub last_event: Option<EventEntry>,
-    pub pending_touch: Option<Uuid>,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -66,7 +65,6 @@ impl Snapshot {
             stats: Stats::new(),
             current_lineup,
             last_event: None,
-            pending_touch: None,
         })
     }
 
@@ -199,18 +197,6 @@ impl Snapshot {
             _ => {}
         };
         Ok(())
-    }
-
-    fn set_pending_touch(&mut self, event: &EventEntry) {
-        use EventTypeEnum::*;
-        match (event.event_type, event.player) {
-            (D | P, Some(_)) => {
-                self.pending_touch = event.player;
-            }
-            _ => {
-                self.pending_touch = None;
-            }
-        }
     }
 
     pub fn get_serving_team(&self) -> Option<TeamSideEnum> {
@@ -352,10 +338,10 @@ impl Snapshot {
     ) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        let serve_them = vec![OE, OS, F, P, R, CL];
-        let serve_us = vec![OE, F, S, R, CL];
+        let serve_them = vec![OE, OS, F, P, R, CL, CS];
+        let serve_us = vec![OE, F, S, R, CL, CS];
         let options_map: HashMap<_, _> = [
-            // order: OS, OE, F, A, S, P, D, B, R, CL
+            // order: OS, OE, F, A, S, P, D, B, R, CL, CS
             ((OS, None), serve_them.clone()),
             ((OE, None), serve_us.clone()),
             ((B, Some(Error)), serve_them.clone()),
@@ -390,7 +376,7 @@ impl Snapshot {
         .into_iter()
         .collect();
         match (event.event_type, event.eval) {
-            (R | CL, _) => current_available_options,
+            (R | CL | CS, _) => current_available_options,
             key => options_map.get(&key).cloned().unwrap_or_default(),
         }
     }
@@ -474,7 +460,6 @@ impl Snapshot {
     ) -> Result<Vec<EventTypeEnum>, AppError> {
         self.set_score_stats(event);
         self.set_phase_count_stats(event)?;
-        self.set_pending_touch(event);
         self.set_possessions_stats(event)?;
         self.set_opponent_errors_stats(event)?;
         self.set_errors_stats(event)?;
@@ -495,8 +480,17 @@ impl Snapshot {
             // change libero
             self.current_lineup.swap_libero()?;
         }
+        if event.event_type == EventTypeEnum::CS {
+            // change setter
+            if let Some(new_setter) = event.player {
+                self.current_lineup.set_current_setter(&new_setter)?;
+            }
+        }
         self.current_lineup.update(event)?;
-        if event.event_type != EventTypeEnum::R && event.event_type != EventTypeEnum::CL {
+        if event.event_type != EventTypeEnum::R
+            && event.event_type != EventTypeEnum::CL
+            && event.event_type != EventTypeEnum::CS
+        {
             self.last_event = Some(event.clone());
         }
         Ok(available_options)

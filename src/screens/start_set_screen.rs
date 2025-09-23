@@ -2,6 +2,7 @@ use crate::{
     localization::current_labels,
     ops::create_set,
     screens::{
+        components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
         screen::{AppAction, Screen},
     },
@@ -28,7 +29,7 @@ pub struct StartSetScreen {
     lineup: Vec<PlayerEntry>,
     initial_setter: Option<PlayerEntry>,
     initial_libero: Option<PlayerEntry>,
-    error: Option<String>,
+    notify_message: NotifyBanner,
     state: StartSetScreenState,
     serving_team: Option<TeamSideEnum>,
     list_state: TableState,
@@ -45,9 +46,9 @@ pub enum StartSetScreenState {
 impl Screen for StartSetScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use StartSetScreenState::*;
-        match (&self.state, &self.error) {
-            (_, Some(_)) => {
-                self.error = None;
+        match (&self.state, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
                 AppAction::None
             }
             (SelectServingTeam, _) => self.handle_serving_team_selection(key),
@@ -65,7 +66,7 @@ impl Screen for StartSetScreen {
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(body);
         self.render_header(f, rows[0]);
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
         match self.state {
             SelectServingTeam => {
                 self.render_serving_team(f, rows[1], footer_left);
@@ -235,7 +236,8 @@ impl StartSetScreen {
                         )))
                     }
                     Err(_) => {
-                        self.error = Some(current_labels().could_not_compute_snapshot.to_string());
+                        self.notify_message
+                            .set_error(current_labels().could_not_compute_snapshot.to_string());
                         AppAction::None
                     }
                 }
@@ -308,7 +310,8 @@ impl StartSetScreen {
         let available_players: Vec<PlayerEntry> =
             self.get_available_players(current_player_position, setter, libero);
         if available_players.is_empty() {
-            self.error = Some(current_labels().no_available_players.to_string());
+            self.notify_message
+                .set_error(current_labels().no_available_players.to_string());
             return AppAction::None;
         }
         // ensure selected index is not out of bounds
@@ -395,7 +398,7 @@ impl StartSetScreen {
             lineup: vec![],
             initial_setter: None,
             initial_libero: None,
-            error: None,
+            notify_message: NotifyBanner::new(),
             list_state: TableState::default(),
             state: if set_number == 1 || set_number == 5 {
                 StartSetScreenState::SelectServingTeam
@@ -661,24 +664,6 @@ impl StartSetScreen {
                     .title(format!("set {:?}", self.set_number)),
             );
         f.render_widget(content, area);
-    }
-
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
-        }
     }
 
     fn render_serving_team_button(f: &mut Frame, label: &str, area: Rect, selected: bool) {

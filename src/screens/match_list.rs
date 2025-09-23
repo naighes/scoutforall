@@ -5,7 +5,10 @@ use crate::{
     pdf::open_match_pdf,
     screens::{
         add_match::AddMatchScreen,
-        components::team_header::TeamHeader,
+        components::{notify_banner::NotifyBanner, team_header::TeamHeader},
+        export_match::ExportMatchAction,
+        file_system_screen::FileSystemScreen,
+        import_match::ImportMatchAction,
         scouting_screen::ScoutingScreen,
         screen::{AppAction, Screen},
         start_set_screen::StartSetScreen,
@@ -13,6 +16,7 @@ use crate::{
     shapes::{enums::TeamSideEnum, r#match::MatchEntry, set::SetEntry, team::TeamEntry},
 };
 use crossterm::event::{KeyCode, KeyEvent};
+use dirs::home_dir;
 use ratatui::{
     layout::Alignment,
     widgets::{Padding, Row, Table, Wrap},
@@ -29,16 +33,16 @@ pub struct MatchListScreen {
     list_state: ListState,
     team: TeamEntry,
     matches: Vec<MatchEntry>,
-    error: Option<String>,
+    notify_message: NotifyBanner,
     refresh: bool,
     header: TeamHeader,
 }
 
 impl Screen for MatchListScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.error) {
-            (_, Some(_)) => {
-                self.error = None;
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
                 AppAction::None
             }
             (KeyCode::Down, _) => self.next_match(),
@@ -52,6 +56,48 @@ impl Screen for MatchListScreen {
                     AppAction::None
                 }
             }
+            (KeyCode::Char('i'), _) => match home_dir() {
+                Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                    path,
+                    current_labels().import_match,
+                    ImportMatchAction::new(self.team.clone()),
+                ))),
+                None => {
+                    self.notify_message.set_error(
+                        current_labels()
+                            .could_not_recognize_home_directory
+                            .to_string(),
+                    );
+                    AppAction::None
+                }
+            },
+            (KeyCode::Char('s'), _) => match (
+                home_dir(),
+                self.list_state
+                    .selected()
+                    .and_then(|i| self.matches.get(i).cloned()),
+            ) {
+                (Some(path), Some(match_entry)) => {
+                    AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                        path,
+                        current_labels().export,
+                        ExportMatchAction::new(self.team.clone(), match_entry.id),
+                    )))
+                }
+                (None, _) => {
+                    self.notify_message.set_error(
+                        current_labels()
+                            .could_not_recognize_home_directory
+                            .to_string(),
+                    );
+                    AppAction::None
+                }
+                (_, None) => {
+                    self.notify_message
+                        .set_error(current_labels().no_match_selected.to_string());
+                    AppAction::None
+                }
+            },
             _ => AppAction::None,
         }
     }
@@ -62,7 +108,8 @@ impl Screen for MatchListScreen {
             self.matches = match get_matches(&self.team) {
                 Ok(matches) => matches,
                 Err(_) => {
-                    self.error = Some(current_labels().could_not_load_matches.to_string());
+                    self.notify_message
+                        .set_error(current_labels().could_not_load_matches.to_string());
                     vec![]
                 }
             }
@@ -113,10 +160,11 @@ impl Screen for MatchListScreen {
                 f.render_widget(table, container[1]);
             }
         } else {
-            self.error = Some(current_labels().could_not_render_match_list.to_string());
+            self.notify_message
+                .set_error(current_labels().could_not_render_match_list.to_string());
         }
         self.header.render(f, container[0], Some(&self.team));
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
         self.render_footer(f, footer_left);
     }
 
@@ -134,7 +182,7 @@ impl MatchListScreen {
             team,
             list_state: ListState::default(),
             refresh: true,
-            error: None,
+            notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
         }
     }
@@ -216,7 +264,8 @@ impl MatchListScreen {
                 )))
             }
             Err(_) => {
-                self.error = Some(current_labels().could_not_compute_snapshot.to_string());
+                self.notify_message
+                    .set_error(current_labels().could_not_compute_snapshot.to_string());
                 AppAction::None
             }
         }
@@ -247,6 +296,16 @@ impl MatchListScreen {
         } else {
             "".to_string()
         };
+        let export_match_text = if self
+            .list_state
+            .selected()
+            .and_then(|i| self.matches.get(i).cloned())
+            .is_some()
+        {
+            format!("S = {} | ", current_labels().export)
+        } else {
+            "".to_string()
+        };
         let paragraph = (match self.matches.len() {
             0 => Paragraph::new(format!(
                 "{}Esc = {} | Q = {}",
@@ -255,9 +314,11 @@ impl MatchListScreen {
                 current_labels().quit
             )),
             _ => Paragraph::new(format!(
-                "↑↓ = move | Enter = {} | {}Esc = {} | Q = {}",
+                "↑↓ = move | Enter = {} | I = {} | {}{}Esc = {} | Q = {}",
                 current_labels().select,
+                current_labels().import_match,
                 new_match_text,
+                export_match_text,
                 current_labels().back,
                 current_labels().quit
             )),
@@ -265,24 +326,6 @@ impl MatchListScreen {
         .block(block)
         .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
-    }
-
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
-        }
     }
 
     fn render_no_matches_yet(&self, f: &mut Frame, area: Rect) {
@@ -308,14 +351,16 @@ impl MatchListScreen {
         {
             Some(m) => m,
             None => {
-                self.error = Some(current_labels().no_match_selected.to_string());
+                self.notify_message
+                    .set_error(current_labels().no_match_selected.to_string());
                 return AppAction::None;
             }
         };
         let status = match selected_match.get_status() {
             Ok(s) => s,
             Err(_) => {
-                self.error = Some(current_labels().could_not_get_match_status.to_string());
+                self.notify_message
+                    .set_error(current_labels().could_not_get_match_status.to_string());
                 return AppAction::None;
             }
         };

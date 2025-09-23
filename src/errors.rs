@@ -1,4 +1,5 @@
 use thiserror::Error;
+use zip::result::ZipError;
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -18,6 +19,8 @@ pub enum MatchError {
     LoadSetError(String),
     #[error("set entry error: {0}")]
     SetEntryError(String),
+    #[error("match already exists: {0}")]
+    MatchAlreadyExists(String),
 }
 
 #[derive(Debug, Error)]
@@ -30,10 +33,14 @@ pub enum SnapshotError {
 pub enum IOError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Serde JSON error: {0}")]
+    #[error("serde JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("{0}")]
     Msg(String),
     #[error("CSV error: {0}")]
     Csv(#[from] csv::Error),
+    #[error("std error: {0}")]
+    Std(#[from] Box<dyn std::error::Error>),
+    #[error("zip error: {0}")]
+    Zip(#[from] ZipError),
 }

@@ -94,13 +94,19 @@ impl MatchEntry {
         })
     }
 
-    pub fn load_sets(&self) -> Result<Vec<SetEntry>, MatchError> {
-        let match_path: PathBuf = get_match_folder_path(&self.team.id, &self.id);
+    pub fn load_sets(&self) -> Result<Vec<SetEntry>, AppError> {
+        let match_path: PathBuf = get_match_folder_path(&self.team.id, &self.id)?;
         let entries = fs::read_dir(&match_path).map_err(|e| {
-            MatchError::LoadSetError(format!("could not read folder {:?}: {}", match_path, e))
+            AppError::Match(MatchError::LoadSetError(format!(
+                "could not read folder {:?}: {}",
+                match_path, e
+            )))
         })?;
         let set_file_regex = Regex::new(r"^set_(\d+)\.json$").map_err(|e| {
-            MatchError::LoadSetError(format!("could not compile regex {:?}: {}", match_path, e))
+            AppError::Match(MatchError::LoadSetError(format!(
+                "could not compile regex {:?}: {}",
+                match_path, e
+            )))
         })?;
         let mut sets: Vec<SetEntry> = Vec::new();
         for entry in entries.flatten() {
@@ -162,21 +168,21 @@ impl MatchEntry {
         }
         // no more than 5 sets
         if sets.len() > 5 {
-            return Err(MatchError::LoadSetError(format!(
+            return Err(AppError::Match(MatchError::LoadSetError(format!(
                 "found more than 5 sets in match {}",
                 &self.id
-            )));
+            ))));
         }
-        // order by set numbet
+        // order by set number
         sets.sort_by_key(|s| s.set_number);
         // check continuity
         for (i, set) in sets.iter().enumerate() {
             if set.set_number as usize != i + 1 {
-                return Err(MatchError::LoadSetError(format!(
+                return Err(AppError::Match(MatchError::LoadSetError(format!(
                     "expected set {} but found set {}",
                     i + 1,
                     set.set_number
-                )));
+                ))));
             }
         }
         Ok(sets)
