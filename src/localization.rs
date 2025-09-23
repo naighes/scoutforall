@@ -153,6 +153,7 @@ pub struct Labels {
     pub match_already_exists: &'static str,
     pub import_match_error: &'static str,
     pub import_match: &'static str,
+    pub number_already_in_use: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -305,6 +306,7 @@ const EN: Labels = Labels {
     match_already_exists: "match already exists",
     import_match_error: "could not import match",
     import_match: "import match",
+    number_already_in_use: "number already in use",
 };
 
 const IT: Labels = Labels {
@@ -457,6 +459,7 @@ const IT: Labels = Labels {
     match_already_exists: "partita già esistente",
     import_match_error: "impossibile importare la partita",
     import_match: "importa partita",
+    number_already_in_use: "numero già in uso",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {

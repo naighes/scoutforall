@@ -2,7 +2,9 @@ use crate::{
     localization::current_labels,
     ops::{save_player, PlayerInput},
     screens::{
-        components::{notify_banner::NotifyBanner, select::Select, text_box::TextBox},
+        components::{
+            notify_banner::NotifyBanner, select::Select, team_header::TeamHeader, text_box::TextBox,
+        },
         screen::{AppAction, Screen},
     },
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
@@ -24,6 +26,7 @@ pub struct EditPlayerScreen {
     notify_message: NotifyBanner,
     existing_player: Option<PlayerEntry>,
     back: bool,
+    header: TeamHeader,
 }
 
 impl Screen for EditPlayerScreen {
@@ -45,6 +48,10 @@ impl Screen for EditPlayerScreen {
     fn on_resume(&mut self, _: bool) {}
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
+        let container = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(5), Constraint::Min(1)])
+            .split(body);
         let area = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
@@ -54,12 +61,13 @@ impl Screen for EditPlayerScreen {
                 Constraint::Length(3), // number
                 Constraint::Min(1),
             ])
-            .split(body);
+            .split(container[1]);
         self.notify_message.render(f, footer_right);
-        self.render_header(f, body);
+        self.render_header(f, container[1]);
         self.name.render(f, area[0]);
         self.role.render(f, area[1]);
         self.number.render(f, area[2]);
+        self.header.render(f, container[0], Some(&self.team));
         self.render_footer(f, footer_left);
     }
 }
@@ -88,6 +96,7 @@ impl EditPlayerScreen {
             notify_message: NotifyBanner::new(),
             existing_player: None,
             back: false,
+            header: TeamHeader::default(),
         }
     }
 
@@ -114,6 +123,7 @@ impl EditPlayerScreen {
             notify_message: NotifyBanner::new(),
             existing_player: Some(player),
             back: false,
+            header: TeamHeader::default(),
         }
     }
 
@@ -136,11 +146,22 @@ impl EditPlayerScreen {
         AppAction::None
     }
 
+    fn is_player_number_available(&self, number: u8) -> bool {
+        let existing_id = self.existing_player.as_ref().map(|ep| ep.id);
+        !self
+            .team
+            .players
+            .iter()
+            .any(|p| p.number == number && Some(p.id) != existing_id)
+    }
+
     fn handle_enter(&mut self) -> AppAction {
         match (
             self.name.get_selected_value(),
             self.role.get_selected_value(),
-            self.number.get_selected_value().map(|v| v.parse::<u8>()),
+            self.number
+                .get_selected_value()
+                .and_then(|v| v.parse::<u8>().ok()),
         ) {
             (None, _, _) => {
                 self.notify_message
@@ -152,32 +173,38 @@ impl EditPlayerScreen {
                     .set_error(current_labels().role_is_required.to_string());
                 AppAction::None
             }
-            (Some(name), Some(role), Some(Ok(number))) => {
-                let input = match &self.existing_player {
-                    Some(player) => {
-                        let mut updated = player.clone();
-                        updated.name = name;
-                        updated.role = role;
-                        updated.number = number;
-                        PlayerInput::Existing(updated)
+            (Some(name), Some(role), Some(number)) => {
+                if self.is_player_number_available(number) {
+                    let input = match &self.existing_player {
+                        Some(player) => {
+                            let mut updated = player.clone();
+                            updated.name = name;
+                            updated.role = role;
+                            updated.number = number;
+                            PlayerInput::Existing(updated)
+                        }
+                        None => PlayerInput::New { name, role, number },
+                    };
+                    match save_player(input, &mut self.team) {
+                        Ok(_) => {
+                            self.back = true;
+                            self.notify_message
+                                .set_info(current_labels().operation_successful.to_string());
+                            AppAction::None
+                        }
+                        Err(_) => {
+                            self.notify_message
+                                .set_error(current_labels().could_not_create_player.to_string());
+                            AppAction::None
+                        }
                     }
-                    None => PlayerInput::New { name, role, number },
-                };
-                match save_player(input, &mut self.team) {
-                    Ok(_) => {
-                        self.back = true;
-                        self.notify_message
-                            .set_info(current_labels().operation_successful.to_string());
-                        AppAction::None
-                    }
-                    Err(_) => {
-                        self.notify_message
-                            .set_error(current_labels().could_not_create_player.to_string());
-                        AppAction::None
-                    }
+                } else {
+                    self.notify_message
+                        .set_error(current_labels().number_already_in_use.to_string());
+                    AppAction::None
                 }
             }
-            (_, _, None | Some(Err(_))) => {
+            (_, _, None) => {
                 self.notify_message
                     .set_error(current_labels().number_must_be_between_0_and_99.to_string());
                 AppAction::None

@@ -4,7 +4,7 @@ use crate::{
     screens::{
         components::{
             checkbox::CheckBox, date_picker::DatePicker, notify_banner::NotifyBanner,
-            text_box::TextBox,
+            team_header::TeamHeader, text_box::TextBox,
         },
         screen::{AppAction, Screen},
         start_set_screen::StartSetScreen,
@@ -26,6 +26,7 @@ pub struct AddMatchScreen {
     home: CheckBox,    // field 2
     field: usize,
     notify_message: NotifyBanner,
+    header: TeamHeader,
 }
 
 impl Screen for AddMatchScreen {
@@ -48,6 +49,11 @@ impl Screen for AddMatchScreen {
     fn on_resume(&mut self, _: bool) {}
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
+        let container = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(5), Constraint::Min(1)])
+            .split(body);
+
         let area = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
@@ -57,12 +63,13 @@ impl Screen for AddMatchScreen {
                 Constraint::Length(3), // home
                 Constraint::Min(1),
             ])
-            .split(body);
+            .split(container[1]);
         self.notify_message.render(f, footer_right);
-        self.render_header(f, body);
+        self.render_header(f, container[1]);
         self.opponent.render(f, area[0]);
         self.date.render(f, area[1]);
         self.home.render(f, area[2]);
+        self.header.render(f, container[0], Some(&self.team));
         self.render_footer(f, footer_left);
     }
 }
@@ -79,6 +86,7 @@ impl AddMatchScreen {
             home,
             field: 0,
             notify_message: NotifyBanner::new(),
+            header: TeamHeader::default(),
         }
     }
 
