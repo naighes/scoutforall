@@ -131,6 +131,9 @@ impl FromStr for TeamSideEnum {
 ///
 /// - **CL**: Change Libero  
 ///   A libero change performed by either team.
+///
+/// - **CS**: Change Setter
+///   A setter change performed by either team.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum EventTypeEnum {
@@ -144,6 +147,7 @@ pub enum EventTypeEnum {
     OE,
     R,
     CL,
+    CS,
 }
 
 impl fmt::Display for EventTypeEnum {
@@ -160,6 +164,7 @@ impl fmt::Display for EventTypeEnum {
             OE => "OE",
             R => "R",
             CL => "CL",
+            CS => "CS",
         };
         write!(f, "{}", label)
     }
@@ -173,7 +178,7 @@ impl EventTypeEnum {
 
     pub fn requires_player(&self) -> bool {
         use EventTypeEnum::*;
-        matches!(self, A | B | P | F | D | R | S)
+        matches!(self, A | B | P | F | D | R | S | CS)
     }
 
     pub fn available_evals(&self) -> Vec<EvalEnum> {
@@ -201,6 +206,7 @@ impl FriendlyName for EventTypeEnum {
             OE => labels.opponent_error,
             R => labels.substitution,
             CL => labels.change_libero,
+            CS => labels.change_setter,
         }
     }
 }
@@ -220,6 +226,7 @@ impl FromStr for EventTypeEnum {
             "OE" => Ok(OE),
             "R" => Ok(R),
             "CL" => Ok(CL),
+            "CS" => Ok(CS),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",
                 s
@@ -546,6 +553,7 @@ impl FromStr for ErrorTypeEnum {
 /// |                                                          |
 /// -----------------------------------------------------------|
 /// ```
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RotationEnum {
     One,

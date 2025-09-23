@@ -1,5 +1,5 @@
 use crate::constants::{DEFAULT_LANGUAGE, MATCH_DESCRIPTOR_FILE_NAME, TEAM_DESCRIPTOR_FILE_NAME};
-use crate::errors::{AppError, IOError};
+use crate::errors::{AppError, IOError, MatchError};
 use crate::io::path::{
     get_base_path, get_config_file_path, get_match_descriptor_file_path, get_match_folder_path,
     get_set_descriptor_file_path, get_set_events_file_path, get_team_folder_path,
@@ -15,8 +15,7 @@ use crate::util::sanitize_filename;
 use chrono::DateTime;
 use chrono::FixedOffset;
 use csv::{ReaderBuilder, WriterBuilder};
-use std::fmt;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, create_dir_all, OpenOptions};
 use std::{fs::File, path::PathBuf};
 use uuid::Uuid;
 
@@ -34,7 +33,7 @@ impl<T, E> ResultOptionExt<T, E> for Result<Option<T>, E> {
 }
 
 pub fn get_matches(team: &TeamEntry) -> Result<Vec<MatchEntry>, Box<dyn std::error::Error>> {
-    let team_path: PathBuf = get_team_folder_path(&team.id);
+    let team_path: PathBuf = get_team_folder_path(&team.id)?;
     let entries = fs::read_dir(&team_path)?;
     let mut result: Vec<MatchEntry> = entries
         .filter_map(Result::ok)
@@ -65,37 +64,20 @@ pub fn get_matches(team: &TeamEntry) -> Result<Vec<MatchEntry>, Box<dyn std::err
     Ok(result)
 }
 
-#[derive(Debug)]
-pub enum CreateMatchError {
-    MatchAlreadyExists(String),
-    Other(Box<dyn std::error::Error>),
-}
-
-impl fmt::Display for CreateMatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CreateMatchError::MatchAlreadyExists(msg) => write!(f, "match already exists: {}", msg),
-            CreateMatchError::Other(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-impl std::error::Error for CreateMatchError {}
-
 pub fn create_match(
     team: &TeamEntry,
     opponent: String,
     date: DateTime<FixedOffset>,
     home: bool,
-) -> Result<MatchEntry, CreateMatchError> {
+) -> Result<MatchEntry, AppError> {
     let opponent_clean = sanitize_filename(&opponent);
     let date_str = date.format("%Y-%m-%d").to_string();
     let match_id = format!("{}_{}", date_str, opponent_clean);
-    let match_path: PathBuf = get_match_folder_path(&team.id, &match_id);
+    let match_path: PathBuf = get_match_folder_path(&team.id, &match_id)?;
     if match_path.exists() {
-        return Err(CreateMatchError::MatchAlreadyExists(match_id));
+        return Err(AppError::Match(MatchError::MatchAlreadyExists(match_id)));
     }
-    fs::create_dir_all(&match_path).map_err(|e| CreateMatchError::Other(Box::new(e)))?;
+    fs::create_dir_all(&match_path).map_err(|e| AppError::IO(IOError::from(e)))?;
     let m = MatchEntry {
         opponent,
         date,
@@ -103,9 +85,9 @@ pub fn create_match(
         team: team.clone(),
         home,
     };
-    let file_path = get_match_descriptor_file_path(&team.id, &match_id);
-    let file = File::create(&file_path).map_err(|e| CreateMatchError::Other(Box::new(e)))?;
-    serde_json::to_writer_pretty(file, &m).map_err(|e| CreateMatchError::Other(Box::new(e)))?;
+    let file_path = get_match_descriptor_file_path(&team.id, &match_id)?;
+    let file = File::create(&file_path).map_err(|e| AppError::IO(IOError::from(e)))?;
+    serde_json::to_writer_pretty(file, &m).map_err(|e| AppError::IO(IOError::from(e)))?;
     Ok(m)
 }
 
@@ -118,14 +100,14 @@ pub fn create_set(
     fallback_libero: Option<Uuid>,
     setter: Uuid,
 ) -> Result<SetEntry, AppError> {
-    let match_path: PathBuf = get_match_folder_path(&m.team.id, &m.id);
+    let match_path: PathBuf = get_match_folder_path(&m.team.id, &m.id)?;
     if !match_path.exists() {
         return Err(AppError::IO(IOError::Msg(format!(
             "could not create set: match folder does not exist at path {}",
             match_path.display()
         ))));
     }
-    let file_path = get_set_descriptor_file_path(&m.team.id, &m.id, set_number);
+    let file_path = get_set_descriptor_file_path(&m.team.id, &m.id, set_number)?;
     let s = SetEntry::new(
         set_number,
         serving_team,
@@ -135,14 +117,17 @@ pub fn create_set(
         setter,
     )?;
     File::create(&file_path)
-        .and_then(|json_file| serde_json::to_writer_pretty(json_file, &s).map_err(|e| e.into()))
-        .and_then(|_| File::create(get_set_events_file_path(&m.team.id, &m.id, set_number)))
-        .map(|_| s)
         .map_err(|e| AppError::IO(IOError::from(e)))
+        .and_then(|json_file| {
+            serde_json::to_writer_pretty(json_file, &s).map_err(|e| AppError::IO(IOError::from(e)))
+        })
+        .and_then(|_| get_set_events_file_path(&m.team.id, &m.id, set_number))
+        .and_then(|x| File::create(x).map_err(|e| AppError::IO(IOError::from(e))))
+        .map(|_| s)
 }
 
 pub fn load_teams() -> Result<Vec<TeamEntry>, AppError> {
-    let path = get_base_path();
+    let path = get_base_path()?;
     let entries = fs::read_dir(&path).map_err(|_| {
         IOError::Msg(format!(
             "could not load teams: directory error at path {:?}",
@@ -200,8 +185,8 @@ pub fn save_team(input: TeamInput) -> Result<TeamEntry, Box<dyn std::error::Erro
         },
         TeamInput::Existing(team) => team,
     };
-    let team_path = get_team_folder_path(&team.id);
-    std::fs::create_dir_all(&team_path)?;
+    let team_path = get_team_folder_path(&team.id)?;
+    create_dir_all(&team_path)?;
     let team_descriptor_file_path = team_path.join(TEAM_DESCRIPTOR_FILE_NAME);
     let file = File::create(&team_descriptor_file_path)?;
     serde_json::to_writer_pretty(file, &team)?;
@@ -235,7 +220,7 @@ pub fn save_player(
     } else {
         team.players.push(player.clone());
     }
-    let team_path: PathBuf = get_team_folder_path(&team.id);
+    let team_path: PathBuf = get_team_folder_path(&team.id)?;
     std::fs::create_dir_all(&team_path)?;
     let team_descriptor_file_path = team_path.join(TEAM_DESCRIPTOR_FILE_NAME);
     let file = File::create(&team_descriptor_file_path)?;
@@ -250,7 +235,7 @@ pub fn append_event(
     set_number: u8,
     event: &EventEntry,
 ) -> Result<(), AppError> {
-    let path = get_set_events_file_path(&team.id, match_id, set_number);
+    let path = get_set_events_file_path(&team.id, match_id, set_number)?;
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -274,34 +259,41 @@ pub fn remove_last_event(
     match_id: &str,
     set_number: u8,
 ) -> Result<Option<EventEntry>, AppError> {
-    let path = get_set_events_file_path(&team.id, match_id, set_number);
+    let path = get_set_events_file_path(&team.id, match_id, set_number)?;
     ReaderBuilder::new()
         .has_headers(false)
         .from_path(&path)
-        .and_then(|mut reader| reader.deserialize().collect::<Result<Vec<EventEntry>, _>>())
+        .map_err(|e| AppError::IO(IOError::from(e)))
+        .and_then(|mut reader| {
+            reader
+                .deserialize()
+                .collect::<Result<Vec<EventEntry>, _>>()
+                .map_err(|e| AppError::IO(IOError::from(e)))
+        })
         .map(|records| {
             records
                 .split_last()
                 .map(|(last, rest)| (last.clone(), rest.to_vec()))
         })
-        .and_then_option(|(first, rest)| {
-            let path = get_set_events_file_path(&team.id, match_id, set_number);
-            let mut writer = OpenOptions::new()
+        .and_then_option(|(last, rest)| {
+            let file = OpenOptions::new()
                 .write(true)
                 .truncate(true)
-                .open(path)
-                .map(|file| WriterBuilder::new().has_headers(false).from_writer(file))?;
+                .open(&path)
+                .map_err(|e| AppError::IO(IOError::from(e)))?;
+            let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
             for rec in rest {
-                writer.serialize(rec)?;
+                writer
+                    .serialize(rec)
+                    .map_err(|e| AppError::IO(IOError::from(e)))?;
             }
-            writer.flush()?;
-            Ok(Some(first))
+            writer.flush().map_err(|e| AppError::IO(IOError::from(e)))?;
+            Ok(Some(last))
         })
-        .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
 pub fn save_settings(language: String) -> Result<Settings, Box<dyn std::error::Error>> {
-    let config_file_path: PathBuf = get_config_file_path();
+    let config_file_path: PathBuf = get_config_file_path()?;
     let config = Settings { language };
     let file = File::create(&config_file_path)?;
     serde_json::to_writer_pretty(file, &config)?;
@@ -309,7 +301,7 @@ pub fn save_settings(language: String) -> Result<Settings, Box<dyn std::error::E
 }
 
 pub fn load_settings() -> Result<Settings, Box<dyn std::error::Error>> {
-    let config_file_path: PathBuf = get_config_file_path();
+    let config_file_path: PathBuf = get_config_file_path()?;
     match fs::read_to_string(&config_file_path) {
         Ok(content) => {
             let settings: Settings = serde_json::from_str(&content)?;

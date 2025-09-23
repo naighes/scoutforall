@@ -2,7 +2,7 @@ use crate::{
     localization::current_labels,
     ops::{save_team, TeamInput},
     screens::{
-        components::{select::Select, text_box::TextBox},
+        components::{notify_banner::NotifyBanner, select::Select, text_box::TextBox},
         screen::{AppAction, Screen},
     },
     shapes::{
@@ -26,14 +26,15 @@ pub struct EditTeamScreen {
     classification: Select<TeamClassificationEnum>,
     year: TextBox,
     field: usize,
-    error: Option<String>,
+    notify_message: NotifyBanner,
     existing_team: Option<TeamEntry>,
+    back: bool,
 }
 
 impl Screen for EditTeamScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.error) {
-            (_, Some(_)) => self.handle_error_reset(),
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => self.handle_error_reset(),
             (KeyCode::Char(c), _) => self.handle_char(c),
             (KeyCode::Backspace, _) => self.handle_backspace(),
             (KeyCode::Up, _) => self.handle_up(),
@@ -61,7 +62,7 @@ impl Screen for EditTeamScreen {
                 Constraint::Min(1),
             ])
             .split(body);
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
         self.render_header(f, body);
         self.name.render(f, area[0]);
         self.classification.render(f, area[1]);
@@ -99,8 +100,9 @@ impl EditTeamScreen {
             classification,
             year,
             field: 0,
-            error: None,
+            notify_message: NotifyBanner::new(),
             existing_team: None,
+            back: false,
         }
     }
 
@@ -130,14 +132,19 @@ impl EditTeamScreen {
             classification,
             year,
             field: 0,
-            error: None,
+            notify_message: NotifyBanner::new(),
             existing_team: Some(team.clone()),
+            back: false,
         }
     }
 
     fn handle_error_reset(&mut self) -> AppAction {
-        self.error = None;
-        AppAction::None
+        self.notify_message.reset();
+        if self.back {
+            AppAction::Back(true, Some(1))
+        } else {
+            AppAction::None
+        }
     }
 
     fn handle_tab(&mut self) -> AppAction {
@@ -185,15 +192,18 @@ impl EditTeamScreen {
             self.year.get_selected_value().map(|y| y.parse::<u16>()),
         ) {
             (None, _, _, _) => {
-                self.error = Some(current_labels().name_cannot_be_empty.to_string());
+                self.notify_message
+                    .set_error(current_labels().name_cannot_be_empty.to_string());
                 AppAction::None
             }
             (_, None, _, _) => {
-                self.error = Some(current_labels().classification_is_required.to_string());
+                self.notify_message
+                    .set_error(current_labels().classification_is_required.to_string());
                 AppAction::None
             }
             (_, _, None, _) => {
-                self.error = Some(current_labels().gender_is_required.to_string());
+                self.notify_message
+                    .set_error(current_labels().gender_is_required.to_string());
                 AppAction::None
             }
             (Some(name), Some(classification), Some(gender), Some(Ok(year))) => {
@@ -214,15 +224,21 @@ impl EditTeamScreen {
                     },
                 };
                 match save_team(input) {
-                    Ok(_) => AppAction::Back(true, Some(1)),
+                    Ok(_) => {
+                        self.notify_message
+                            .set_info(current_labels().operation_successful.to_string());
+                        self.back = true;
+                        AppAction::None
+                    }
                     Err(_) => {
-                        self.error = Some(current_labels().could_not_create_team.to_string());
+                        self.notify_message
+                            .set_error(current_labels().could_not_create_team.to_string());
                         AppAction::None
                     }
                 }
             }
             (_, _, _, None | Some(Err(_))) => {
-                self.error = Some(
+                self.notify_message.set_error(
                     current_labels()
                         .year_must_be_a_four_digit_number
                         .to_string(),
@@ -236,24 +252,6 @@ impl EditTeamScreen {
         self.name.handle_char(c);
         self.year.handle_char(c);
         AppAction::None
-    }
-
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
-        }
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect) {

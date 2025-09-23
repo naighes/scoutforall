@@ -2,7 +2,10 @@ use crate::{
     localization::current_labels,
     ops::create_match,
     screens::{
-        components::{checkbox::CheckBox, date_picker::DatePicker, text_box::TextBox},
+        components::{
+            checkbox::CheckBox, date_picker::DatePicker, notify_banner::NotifyBanner,
+            text_box::TextBox,
+        },
         screen::{AppAction, Screen},
         start_set_screen::StartSetScreen,
     },
@@ -11,7 +14,6 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
@@ -23,14 +25,14 @@ pub struct AddMatchScreen {
     date: DatePicker,  // field 1
     home: CheckBox,    // field 2
     field: usize,
-    error: Option<String>,
+    notify_message: NotifyBanner,
 }
 
 impl Screen for AddMatchScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.error) {
-            (_, Some(_)) => {
-                self.error = None;
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
                 AppAction::None
             }
             (KeyCode::Char(c), _) => self.handle_char(c),
@@ -56,7 +58,7 @@ impl Screen for AddMatchScreen {
                 Constraint::Min(1),
             ])
             .split(body);
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
         self.render_header(f, body);
         self.opponent.render(f, area[0]);
         self.date.render(f, area[1]);
@@ -76,7 +78,7 @@ impl AddMatchScreen {
             date,
             home,
             field: 0,
-            error: None,
+            notify_message: NotifyBanner::new(),
         }
     }
 
@@ -103,27 +105,14 @@ impl AddMatchScreen {
         f.render_widget(paragraph, area);
     }
 
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(Block::default().borders(Borders::ALL).title("error"));
-            f.render_widget(error_widget, area);
-        }
-    }
-
     fn handle_submit(&mut self) -> AppAction {
         match (
             self.date.get_selected_value(),
             self.opponent.get_selected_value(),
         ) {
             (_, None) => {
-                self.error = Some(current_labels().opponent_cannot_be_empty.to_string());
+                self.notify_message
+                    .set_error(current_labels().opponent_cannot_be_empty.to_string());
                 AppAction::None
             }
             (Ok(date), Some(opponent)) => {
@@ -132,13 +121,15 @@ impl AddMatchScreen {
                         AppAction::SwitchScreen(Box::new(StartSetScreen::new(m, 1, None, Some(2))))
                     }
                     Err(_) => {
-                        self.error = Some(current_labels().could_not_create_match.to_string());
+                        self.notify_message
+                            .set_error(current_labels().could_not_create_match.to_string());
                         AppAction::None
                     }
                 }
             }
             _ => {
-                self.error = Some(current_labels().invalid_date.into());
+                self.notify_message
+                    .set_error(current_labels().invalid_date.to_string());
                 AppAction::None
             }
         }

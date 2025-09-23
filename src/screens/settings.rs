@@ -3,13 +3,16 @@ use std::str::FromStr;
 use crate::{
     localization::{current_labels, set_language},
     ops::save_settings,
-    screens::screen::{AppAction, Screen},
+    screens::{
+        components::notify_banner::NotifyBanner,
+        screen::{AppAction, Screen},
+    },
     shapes::{enums::LanguageEnum, settings::Settings},
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
     Frame,
 };
@@ -19,13 +22,21 @@ pub struct SettingsScreen {
     language: Option<LanguageEnum>,
     field: usize,
     language_selection: ListState,
-    error: Option<String>,
+    notify_message: NotifyBanner,
+    back: bool,
 }
 
 impl Screen for SettingsScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.error) {
-            (_, Some(_)) => self.handle_error_reset(),
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
+                if self.back {
+                    AppAction::Back(true, Some(1))
+                } else {
+                    AppAction::None
+                }
+            }
             (KeyCode::Up, _) => self.handle_up(),
             (KeyCode::Down, _) => self.handle_down(),
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
@@ -47,7 +58,7 @@ impl Screen for SettingsScreen {
         } else {
             self.render_language_widget(f, inner[0]);
         }
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
         self.render_footer(f, footer_left);
     }
 }
@@ -68,13 +79,9 @@ impl SettingsScreen {
             language: None,
             field: 0,
             language_selection,
-            error: None,
+            notify_message: NotifyBanner::new(),
+            back: false,
         }
-    }
-
-    fn handle_error_reset(&mut self) -> AppAction {
-        self.error = None;
-        AppAction::None
     }
 
     fn handle_enter(&mut self) -> AppAction {
@@ -82,15 +89,20 @@ impl SettingsScreen {
             Some(language) => match save_settings(language.iso_code().to_string()) {
                 Ok(_) => {
                     set_language(language);
-                    AppAction::Back(true, Some(1))
+                    self.notify_message
+                        .set_info(current_labels().operation_successful.to_string());
+                    self.back = true;
+                    AppAction::None
                 }
                 Err(_) => {
-                    self.error = Some(current_labels().could_not_save_settings.to_string());
+                    self.notify_message
+                        .set_error(current_labels().could_not_save_settings.to_string());
                     AppAction::None
                 }
             },
             _ => {
-                self.error = Some(current_labels().language_is_required.to_string());
+                self.notify_message
+                    .set_error(current_labels().language_is_required.to_string());
                 AppAction::None
             }
         }
@@ -175,23 +187,5 @@ impl SettingsScreen {
         .block(block)
         .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
-    }
-
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
-        }
     }
 }

@@ -2,19 +2,21 @@ use crate::{
     localization::current_labels,
     ops::load_teams,
     screens::{
-        components::team_header::TeamHeader,
+        components::{notify_banner::NotifyBanner, team_header::TeamHeader},
         edit_player::EditPlayerScreen,
         edit_team::EditTeamScreen,
+        export_team::ExportTeamAction,
+        file_system_screen::FileSystemScreen,
         match_list::MatchListScreen,
         screen::{AppAction, Screen},
     },
     shapes::team::TeamEntry,
 };
 use crossterm::event::{KeyCode, KeyEvent};
+use dirs::home_dir;
 use ratatui::widgets::*;
 use ratatui::{
     layout::Alignment,
-    style::Color,
     widgets::{Padding, Table},
 };
 use ratatui::{
@@ -30,15 +32,15 @@ pub struct TeamDetailsScreen {
     teams: Vec<TeamEntry>,
     team_id: Uuid,
     refresh: bool,
-    error: Option<String>,
+    notify_message: NotifyBanner,
     header: TeamHeader,
 }
 
 impl Screen for TeamDetailsScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.error) {
-            (_, Some(_)) => {
-                self.error = None;
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
                 AppAction::None
             }
             (KeyCode::Down, _) => {
@@ -59,6 +61,24 @@ impl Screen for TeamDetailsScreen {
             },
             (KeyCode::Char('e'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
                 Some(t) => AppAction::SwitchScreen(Box::new(EditTeamScreen::edit(t))),
+                None => AppAction::None,
+            },
+            (KeyCode::Char('s'), _) => match self.teams.iter().find(|t| t.id == self.team_id) {
+                Some(t) => match home_dir() {
+                    Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                        path,
+                        current_labels().export,
+                        ExportTeamAction::new(t.id),
+                    ))),
+                    None => {
+                        self.notify_message.set_error(
+                            current_labels()
+                                .could_not_recognize_home_directory
+                                .to_string(),
+                        );
+                        AppAction::None
+                    }
+                },
                 None => AppAction::None,
             },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
@@ -89,12 +109,13 @@ impl Screen for TeamDetailsScreen {
             self.teams = match load_teams() {
                 Ok(teams) => teams,
                 Err(_) => {
-                    self.error = Some(current_labels().could_not_load_teams.to_string());
+                    self.notify_message
+                        .set_error(current_labels().could_not_load_teams.to_string());
                     vec![]
                 }
             }
         }
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
         let team = self.teams.iter().find(|t| t.id == self.team_id);
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -156,7 +177,7 @@ impl TeamDetailsScreen {
             team_id,
             list_state: ListState::default(),
             refresh: false,
-            error: None,
+            notify_message: NotifyBanner::new(),
             header,
         }
     }
@@ -197,14 +218,15 @@ impl TeamDetailsScreen {
                 current_labels().quit
             )),
             _ => Paragraph::new(format!(
-                "↑↓ = {} | Enter = {} | E = {} | N = {} | M = {} | Esc = {} | Q = {}",
+                "↑↓ = {} | Enter = {} | E = {} | N = {} | M = {} | S = {} | Esc = {} | Q = {}",
                 current_labels().navigate,
                 current_labels().edit_player,
                 current_labels().edit_team,
                 current_labels().new_player,
                 current_labels().match_list,
+                current_labels().export,
                 current_labels().back,
-                current_labels().quit
+                current_labels().quit,
             )),
         })
         .block(block)
@@ -225,24 +247,6 @@ impl TeamDetailsScreen {
             .block(Block::default().borders(Borders::NONE))
             .alignment(Alignment::Center);
         f.render_widget(paragraph, chunks[1]);
-    }
-
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
-        }
     }
 
     fn get_rows(&self, team: Option<&TeamEntry>, selected_player: usize) -> Vec<Row<'_>> {

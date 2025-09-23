@@ -157,6 +157,17 @@ impl Lineup {
         Ok(())
     }
 
+    pub fn set_current_setter(&mut self, new_setter: &Uuid) -> Result<(), AppError> {
+        if self.find_position(new_setter).is_some() {
+            self.current_setter = *new_setter;
+            Ok(())
+        } else {
+            Err(AppError::Snapshot(SnapshotError::LineupError(
+                "could not find the new setter in the lineup".to_string(),
+            )))
+        }
+    }
+
     fn update_phase(&mut self, event: &EventEntry) {
         if let Some(next_phase) = self.get_next_phase(event) {
             if self.phase == PhaseEnum::SideOut && next_phase == PhaseEnum::Break {

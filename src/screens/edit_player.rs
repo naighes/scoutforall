@@ -2,7 +2,7 @@ use crate::{
     localization::current_labels,
     ops::{save_player, PlayerInput},
     screens::{
-        components::{select::Select, text_box::TextBox},
+        components::{notify_banner::NotifyBanner, select::Select, text_box::TextBox},
         screen::{AppAction, Screen},
     },
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
@@ -10,7 +10,6 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
@@ -22,14 +21,15 @@ pub struct EditPlayerScreen {
     number: TextBox,
     role: Select<RoleEnum>,
     field: usize,
-    error: Option<String>,
+    notify_message: NotifyBanner,
     existing_player: Option<PlayerEntry>,
+    back: bool,
 }
 
 impl Screen for EditPlayerScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.error) {
-            (_, Some(_)) => self.handle_error_reset(),
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => self.handle_error_reset(),
             (KeyCode::Char(c), _) => self.handle_char(c),
             (KeyCode::Backspace, _) => self.handle_backspace(),
             (KeyCode::Up, _) => self.handle_up(),
@@ -55,7 +55,7 @@ impl Screen for EditPlayerScreen {
                 Constraint::Min(1),
             ])
             .split(body);
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
         self.render_header(f, body);
         self.name.render(f, area[0]);
         self.role.render(f, area[1]);
@@ -85,8 +85,9 @@ impl EditPlayerScreen {
             number,
             role,
             field: 0,
-            error: None,
+            notify_message: NotifyBanner::new(),
             existing_player: None,
+            back: false,
         }
     }
 
@@ -110,8 +111,9 @@ impl EditPlayerScreen {
             number,
             role,
             field: 0,
-            error: None,
+            notify_message: NotifyBanner::new(),
             existing_player: Some(player),
+            back: false,
         }
     }
 
@@ -120,8 +122,12 @@ impl EditPlayerScreen {
     }
 
     fn handle_error_reset(&mut self) -> AppAction {
-        self.error = None;
-        AppAction::None
+        self.notify_message.reset();
+        if self.back {
+            AppAction::Back(true, Some(1))
+        } else {
+            AppAction::None
+        }
     }
 
     fn handle_char(&mut self, c: char) -> AppAction {
@@ -137,11 +143,13 @@ impl EditPlayerScreen {
             self.number.get_selected_value().map(|v| v.parse::<u8>()),
         ) {
             (None, _, _) => {
-                self.error = Some(current_labels().name_cannot_be_empty.to_string());
+                self.notify_message
+                    .set_error(current_labels().name_cannot_be_empty.to_string());
                 AppAction::None
             }
             (_, None, _) => {
-                self.error = Some(current_labels().role_is_required.to_string());
+                self.notify_message
+                    .set_error(current_labels().role_is_required.to_string());
                 AppAction::None
             }
             (Some(name), Some(role), Some(Ok(number))) => {
@@ -156,15 +164,22 @@ impl EditPlayerScreen {
                     None => PlayerInput::New { name, role, number },
                 };
                 match save_player(input, &mut self.team) {
-                    Ok(_) => AppAction::Back(true, Some(1)),
+                    Ok(_) => {
+                        self.back = true;
+                        self.notify_message
+                            .set_info(current_labels().operation_successful.to_string());
+                        AppAction::None
+                    }
                     Err(_) => {
-                        self.error = Some(current_labels().could_not_create_player.to_string());
+                        self.notify_message
+                            .set_error(current_labels().could_not_create_player.to_string());
                         AppAction::None
                     }
                 }
             }
             (_, _, None | Some(Err(_))) => {
-                self.error = Some(current_labels().number_must_be_between_0_and_99.into());
+                self.notify_message
+                    .set_error(current_labels().number_must_be_between_0_and_99.to_string());
                 AppAction::None
             }
         }
@@ -228,23 +243,5 @@ impl EditPlayerScreen {
         .block(block)
         .wrap(Wrap { trim: true });
         f.render_widget(paragraph, area);
-    }
-
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
-        }
     }
 }

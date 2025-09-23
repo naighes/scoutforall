@@ -11,7 +11,10 @@ use uuid::Uuid;
 use crate::{
     localization::current_labels,
     ops::{append_event, remove_last_event},
-    screens::screen::{AppAction, Screen},
+    screens::{
+        components::notify_banner::NotifyBanner,
+        screen::{AppAction, Screen},
+    },
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         player::PlayerEntry,
@@ -30,8 +33,9 @@ pub struct ScoutingScreen {
     current_event: EventTypeInput,
     player: Option<Uuid>,
     state: ScoutingScreenState,
-    error: Option<String>,
+    notify_message: NotifyBanner,
     back_stack_count: Option<u8>,
+    back: bool,
 }
 
 #[derive(Debug)]
@@ -46,7 +50,7 @@ pub struct LineupChoiceEntry {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum EventTypeInput {
     Some(EventTypeEnum),
-    Partial,
+    Partial(char),
     None,
 }
 
@@ -56,7 +60,10 @@ impl EventTypeInput {
         use EventTypeInput::*;
         !matches!(
             (self, role),
-            (Some(A), RoleEnum::Libero) | (Some(B), RoleEnum::Libero) | (Some(S), RoleEnum::Libero)
+            (Some(A), RoleEnum::Libero)
+                | (Some(B), RoleEnum::Libero)
+                | (Some(S), RoleEnum::Libero)
+                | (Some(CS), RoleEnum::Libero)
         )
     }
 }
@@ -73,16 +80,20 @@ impl Screen for ScoutingScreen {
     fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         use ScoutingScreenState::*;
-        match (&self.error, key.code, &self.state) {
-            (Some(_), _, _) => {
-                self.error = None;
-                AppAction::None
+        match (&self.notify_message.has_value(), key.code, &self.state) {
+            (true, _, _) => {
+                self.notify_message.reset();
+                if self.back {
+                    AppAction::Back(true, self.back_stack_count)
+                } else {
+                    AppAction::None
+                }
             }
-            (None, Esc, _) => AppAction::Back(true, self.back_stack_count),
-            (None, _, Event) => self.handle_event_screen(key),
-            (None, _, Player) => self.handle_player_screen(key),
-            (None, _, Eval) => self.handle_eval_screen(key),
-            (None, _, Replacement) => self.handle_replacement_screen(key),
+            (false, Esc, _) => AppAction::Back(true, self.back_stack_count),
+            (false, _, Event) => self.handle_event_screen(key),
+            (false, _, Player) => self.handle_player_screen(key),
+            (false, _, Eval) => self.handle_eval_screen(key),
+            (false, _, Replacement) => self.handle_replacement_screen(key),
         }
     }
 
@@ -126,7 +137,7 @@ impl Screen for ScoutingScreen {
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
         self.render_court(f, right);
-        self.render_error(f, footer_right);
+        self.notify_message.render(f, footer_right);
     }
 }
 
@@ -146,8 +157,9 @@ impl ScoutingScreen {
             current_event: EventTypeInput::None,
             player: None,
             state: ScoutingScreenState::Event,
-            error: None,
+            notify_message: NotifyBanner::new(),
             back_stack_count,
+            back: false,
         }
     }
 
@@ -170,8 +182,6 @@ impl ScoutingScreen {
                 !self.snapshot.current_lineup.is_back_row_player(id)
                     || self.current_event != EventTypeInput::Some(EventTypeEnum::B)
             })
-            // check for a pending touch
-            .take_if(|id| !matches!(self.snapshot.pending_touch, Some(p) if p == *id))
             .and_then(|id| self.current_match.team.find_player(id))
             .map(|player| LineupChoiceEntry {
                 index,
@@ -278,7 +288,8 @@ impl ScoutingScreen {
                 AppAction::None
             }
             Err(_) => {
-                self.error = Some(current_labels().could_not_compute_snapshot.to_string());
+                self.notify_message
+                    .set_error(current_labels().could_not_compute_snapshot.to_string());
                 AppAction::None
             }
         }
@@ -296,11 +307,12 @@ impl ScoutingScreen {
             (Char('b'), None) => Some(B),
             (Char('f'), None) => Some(EventTypeEnum::F),
             (Char('r'), None) => Some(R),
-            (Char('o'), None) => Partial,
-            (Char('c'), None) => Partial,
-            (Char('e'), Partial) => Some(OE),
-            (Char('s'), Partial) => Some(OS),
-            (Char('l'), Partial) => Some(CL),
+            (Char('o'), None) => Partial('o'),
+            (Char('c'), None) => Partial('c'),
+            (Char('e'), Partial('o')) => Some(OE),
+            (Char('s'), Partial('o')) => Some(OS),
+            (Char('l'), Partial('c')) => Some(CL),
+            (Char('s'), Partial('c')) => Some(CS),
             _ => None,
         }
     }
@@ -329,11 +341,17 @@ impl ScoutingScreen {
                 self.state = ScoutingScreenState::Event;
                 match self.snapshot.get_set_winner(self.set.set_number) {
                     None => AppAction::None,
-                    Some(_) => AppAction::Back(true, self.back_stack_count),
+                    Some(_) => {
+                        self.notify_message
+                            .set_info(current_labels().set_over.to_string());
+                        self.back = true;
+                        AppAction::None
+                    }
                 }
             }
             Err(_) => {
-                self.error = Some(current_labels().could_not_add_event.to_string());
+                self.notify_message
+                    .set_error(current_labels().could_not_add_event.to_string());
                 AppAction::None
             }
         }
@@ -380,13 +398,14 @@ impl ScoutingScreen {
                     _ => {
                         self.current_event = EventTypeInput::None;
                         let template = current_labels().event_is_not_available;
-                        self.error = Some(template.replace("{}", &event_type.to_string()));
+                        self.notify_message
+                            .set_error(template.replace("{}", &event_type.to_string()));
                         AppAction::None
                     }
                 }
             }
-            (_, EventTypeInput::Partial) => {
-                self.current_event = EventTypeInput::Partial;
+            (_, EventTypeInput::Partial(c)) => {
+                self.current_event = EventTypeInput::Partial(c);
                 AppAction::None
             }
             _ => {
@@ -407,7 +426,8 @@ impl ScoutingScreen {
             }
             (Char(_), EventTypeInput::Some(_), None) => {
                 // replaced player is required
-                self.error = Some(current_labels().no_player_selected.to_string());
+                self.notify_message
+                    .set_error(current_labels().no_player_selected.to_string());
                 AppAction::None
             }
             (Char(c), EventTypeInput::Some(event_type), Some(replaced_id)) => {
@@ -472,7 +492,8 @@ impl ScoutingScreen {
                 target_player: None,
             }),
             _ => {
-                self.error = Some(current_labels().invalid_player_selection.to_string());
+                self.notify_message
+                    .set_error(current_labels().invalid_player_selection.to_string());
                 AppAction::None
             }
         }
@@ -519,7 +540,8 @@ impl ScoutingScreen {
                 }
                 _ => {
                     let template = current_labels().evaluation_not_allowed_for_event;
-                    self.error = Some(template.replace("{}", &event_type.to_string()));
+                    self.notify_message
+                        .set_error(template.replace("{}", &event_type.to_string()));
                 }
             }
         }
@@ -763,7 +785,7 @@ impl ScoutingScreen {
                 .bg(Color::Blue)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD)
-        } else if i % 2 == 0 {
+        } else if i.is_multiple_of(2) {
             Style::default().bg(Color::DarkGray)
         } else {
             Style::default()
@@ -807,7 +829,8 @@ impl ScoutingScreen {
     fn render_replacement_choices(&mut self, f: &mut Frame, area: Rect) {
         match self.player {
             None => {
-                self.error = Some(current_labels().no_player_selected.to_string());
+                self.notify_message
+                    .set_error(current_labels().no_player_selected.to_string());
             }
             Some(replaced_id) => {
                 let rows: Vec<Row> = self
@@ -938,24 +961,6 @@ impl ScoutingScreen {
                     .alignment(Alignment::Center);
                 f.render_widget(paragraph, area);
             }
-        }
-    }
-
-    fn render_error(&self, f: &mut Frame, area: Rect) {
-        if let Some(err) = &self.error {
-            let error_widget = Paragraph::new(err.clone())
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
         }
     }
 }
