@@ -112,6 +112,7 @@ impl EventsStats {
             *self.0.entry(k.clone()).or_insert(0) += v;
         }
     }
+
     pub fn query(
         &self,
         event_type: Option<EventTypeEnum>,
@@ -259,6 +260,7 @@ impl AttackStats {
 pub struct DistributionsStatsKey {
     pub phase: PhaseEnum,
     pub rotation: u8,
+    pub player: Uuid,
     pub zone: ZoneEnum,
     pub eval: EvalEnum,
     pub attack_eval: EvalEnum,
@@ -276,6 +278,7 @@ impl DistributionStats {
         &mut self,
         phase: PhaseEnum,
         rotation: u8,
+        player: Uuid,
         zone: ZoneEnum,
         prev_eval: EvalEnum,
         attack_eval: EvalEnum,
@@ -283,6 +286,7 @@ impl DistributionStats {
         let key = DistributionsStatsKey {
             phase,
             rotation,
+            player,
             zone,
             eval: prev_eval,
             attack_eval,
@@ -300,6 +304,7 @@ impl DistributionStats {
         &self,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
+        player: Option<Uuid>,
         zone: Option<ZoneEnum>,
         eval: Option<EvalEnum>,
         attack_eval: Option<EvalEnum>,
@@ -307,6 +312,7 @@ impl DistributionStats {
         self.0.iter().filter(move |(k, _)| {
             phase.is_none_or(|p| k.phase == p)
                 && rotation.is_none_or(|r| k.rotation == r)
+                && player.is_none_or(|p| k.player == p)
                 && zone.is_none_or(|pl| k.zone == pl)
                 && eval.is_none_or(|et| k.eval == et)
                 && attack_eval.is_none_or(|et| k.attack_eval == et)
@@ -318,13 +324,14 @@ impl DistributionStats {
         zone: ZoneEnum,
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
+        player: Option<Uuid>,
         prev_eval_filter: Option<EvalEnum>,
     ) -> Option<(f64, f64)> {
         let mut total_balls = 0u32;
         let mut balls_in_zone = 0u32;
         let mut attacks_total = 0u32;
         let mut attacks_won = 0u32;
-        for (key, count) in self.query(phase, rotation, None, prev_eval_filter, None) {
+        for (key, count) in self.query(phase, rotation, player, None, prev_eval_filter, None) {
             total_balls += count;
             if key.zone == zone {
                 balls_in_zone += count;
@@ -637,6 +644,56 @@ impl Stats {
             }
         }
         (total_attempts > 0).then_some(100.0 * points_from_counter as f64 / total_attempts as f64)
+    }
+
+    pub fn scored_points(
+        &self,
+        event_type: EventTypeEnum,
+        player: Option<Uuid>,
+        phase: Option<PhaseEnum>,
+        rotation: Option<u8>,
+        zone: Option<ZoneEnum>,
+    ) -> Option<u32> {
+        if event_type.provides_direct_points() {
+            self.event_count(
+                event_type,
+                player,
+                phase,
+                rotation,
+                zone,
+                Some(EvalEnum::Perfect),
+            )
+        } else {
+            None
+        }
+    }
+
+    pub fn errors(
+        &self,
+        event_type: EventTypeEnum,
+        error_type: Option<ErrorTypeEnum>,
+        player: Option<Uuid>,
+        phase: Option<PhaseEnum>,
+        rotation: Option<u8>,
+        zone: Option<ZoneEnum>,
+    ) -> Option<u32> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        let evals = match event_type {
+            A | B => vec![Error, Over],
+            P | D | S => vec![Error],
+            _ => vec![],
+        };
+        evals
+            .into_iter()
+            .filter(|eval| match error_type {
+                None => true,
+                Some(et) => event_type.error_type(Some(*eval)) == Some(et),
+            })
+            .filter_map(|eval| {
+                self.event_count(event_type, player, phase, rotation, zone, Some(eval))
+            })
+            .reduce(|a, b| a + b)
     }
 
     /// Counts the number of events matching the given filters.

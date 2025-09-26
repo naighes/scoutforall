@@ -30,6 +30,10 @@ pub enum PhaseEnum {
     SideOut,
 }
 
+impl PhaseEnum {
+    pub const ALL: [PhaseEnum; 2] = [PhaseEnum::Break, PhaseEnum::SideOut];
+}
+
 impl fmt::Display for PhaseEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let label = match self {
@@ -190,6 +194,25 @@ impl EventTypeEnum {
             _ => vec![],
         }
     }
+
+    pub fn provides_direct_points(&self) -> bool {
+        use EventTypeEnum::*;
+        matches!(self, S | A | B)
+    }
+
+    pub fn error_type(&self, eval: Option<EvalEnum>) -> Option<ErrorTypeEnum> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        match (&self, eval) {
+            (A, Some(Error)) | (S, Some(Error)) | (B, Some(Over)) | (F, _) => {
+                Some(ErrorTypeEnum::Unforced)
+            }
+            (A, Some(Over)) | (B, Some(Error)) | (P, Some(Error)) | (D, Some(Error)) => {
+                Some(ErrorTypeEnum::Forced)
+            }
+            _ => None,
+        }
+    }
 }
 
 impl FriendlyName for EventTypeEnum {
@@ -313,6 +336,18 @@ pub enum EvalEnum {
     Error,
     #[serde(rename = "-")]
     Negative,
+}
+
+impl EvalEnum {
+    #[allow(dead_code)]
+    pub const ALL: [EvalEnum; 6] = [
+        EvalEnum::Perfect,
+        EvalEnum::Positive,
+        EvalEnum::Exclamative,
+        EvalEnum::Over,
+        EvalEnum::Error,
+        EvalEnum::Negative,
+    ];
 }
 
 impl fmt::Display for EvalEnum {
@@ -562,6 +597,17 @@ pub enum RotationEnum {
     Four,
     Five,
     Six,
+}
+
+impl RotationEnum {
+    pub const ALL: [RotationEnum; 6] = [
+        RotationEnum::One,
+        RotationEnum::Two,
+        RotationEnum::Three,
+        RotationEnum::Four,
+        RotationEnum::Five,
+        RotationEnum::Six,
+    ];
 }
 
 impl fmt::Display for RotationEnum {

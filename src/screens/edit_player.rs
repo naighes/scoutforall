@@ -3,7 +3,8 @@ use crate::{
     ops::{save_player, PlayerInput},
     screens::{
         components::{
-            notify_banner::NotifyBanner, select::Select, team_header::TeamHeader, text_box::TextBox,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
+            team_header::TeamHeader, text_box::TextBox,
         },
         screen::{AppAction, Screen},
     },
@@ -12,7 +13,7 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders},
     Frame,
 };
 
@@ -27,6 +28,8 @@ pub struct EditPlayerScreen {
     existing_player: Option<PlayerEntry>,
     back: bool,
     header: TeamHeader,
+    footer: NavigationFooter,
+    footer_entries: Vec<(String, String)>,
 }
 
 impl Screen for EditPlayerScreen {
@@ -68,7 +71,8 @@ impl Screen for EditPlayerScreen {
         self.role.render(f, area[1]);
         self.number.render(f, area[2]);
         self.header.render(f, container[0], Some(&self.team));
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.footer_entries.clone());
     }
 }
 
@@ -97,6 +101,19 @@ impl EditPlayerScreen {
             existing_player: None,
             back: false,
             header: TeamHeader::default(),
+            footer: NavigationFooter::new(),
+            footer_entries: vec![
+                (
+                    "Tab / Shift+Tab".to_string(),
+                    current_labels().navigate.to_string(),
+                ),
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().confirm.to_string(),
+                ),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
         }
     }
 
@@ -124,6 +141,19 @@ impl EditPlayerScreen {
             existing_player: Some(player),
             back: false,
             header: TeamHeader::default(),
+            footer: NavigationFooter::new(),
+            footer_entries: vec![
+                (
+                    "Tab / Shift+Tab".to_string(),
+                    current_labels().navigate.to_string(),
+                ),
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().confirm.to_string(),
+                ),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
         }
     }
 
@@ -254,21 +284,5 @@ impl EditPlayerScreen {
                 None => current_labels().new_player,
             });
         f.render_widget(block, area);
-    }
-
-    fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = Paragraph::new(format!(
-            "Tab / Shift+Tab = {} | Enter = {} | Esc = {} | Q = {}",
-            current_labels().navigate,
-            current_labels().confirm,
-            current_labels().back,
-            current_labels().quit
-        ))
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
     }
 }

@@ -2,7 +2,10 @@ use crate::{
     localization::current_labels,
     ops::load_teams,
     screens::{
-        components::{notify_banner::NotifyBanner, team_header::TeamHeader},
+        components::{
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            team_header::TeamHeader,
+        },
         edit_player::EditPlayerScreen,
         edit_team::EditTeamScreen,
         export_team::ExportTeamAction,
@@ -15,10 +18,7 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent};
 use dirs::home_dir;
 use ratatui::widgets::*;
-use ratatui::{
-    layout::Alignment,
-    widgets::{Padding, Table},
-};
+use ratatui::{layout::Alignment, widgets::Table};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -34,6 +34,7 @@ pub struct TeamDetailsScreen {
     refresh: bool,
     notify_message: NotifyBanner,
     header: TeamHeader,
+    footer: NavigationFooter,
 }
 
 impl Screen for TeamDetailsScreen {
@@ -159,7 +160,8 @@ impl Screen for TeamDetailsScreen {
         } else {
             self.render_no_players_yet(f, container[1]);
         }
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.get_footer_entries());
     }
 
     fn on_resume(&mut self, refresh: bool) {
@@ -179,6 +181,7 @@ impl TeamDetailsScreen {
             refresh: false,
             notify_message: NotifyBanner::new(),
             header,
+            footer: NavigationFooter::new(),
         }
     }
 
@@ -199,39 +202,34 @@ impl TeamDetailsScreen {
         }
     }
 
-    fn render_footer(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = (match self
+    fn get_footer_entries(&self) -> Vec<(String, String)> {
+        match self
             .teams
             .iter()
             .find(|t| t.id == self.team_id)
             .map(|t| t.players.len())
         {
-            Some(0) | None => Paragraph::new(format!(
-                "E = {} | N = {} | M = {} | Esc = {} | Q = {}",
-                current_labels().edit_team,
-                current_labels().new_player,
-                current_labels().match_list,
-                current_labels().back,
-                current_labels().quit
-            )),
-            _ => Paragraph::new(format!(
-                "↑↓ = {} | Enter = {} | E = {} | N = {} | M = {} | S = {} | Esc = {} | Q = {}",
-                current_labels().navigate,
-                current_labels().edit_player,
-                current_labels().edit_team,
-                current_labels().new_player,
-                current_labels().match_list,
-                current_labels().export,
-                current_labels().back,
-                current_labels().quit,
-            )),
-        })
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
+            Some(0) | None => vec![
+                ("E".to_string(), current_labels().edit_team.to_string()),
+                ("N".to_string(), current_labels().new_player.to_string()),
+                ("M".to_string(), current_labels().match_list.to_string()),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
+            _ => vec![
+                ("↑↓".to_string(), current_labels().navigate.to_string()),
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().edit_player.to_string(),
+                ),
+                ("E".to_string(), current_labels().edit_team.to_string()),
+                ("N".to_string(), current_labels().new_player.to_string()),
+                ("M".to_string(), current_labels().match_list.to_string()),
+                ("S".to_string(), current_labels().export.to_string()),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
+        }
     }
 
     fn render_no_players_yet(&self, f: &mut Frame, area: Rect) {

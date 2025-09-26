@@ -16,6 +16,7 @@ use std::{
     path::PathBuf,
 };
 
+#[derive(Debug)]
 pub struct MatchStatus {
     pub us_wins: u8,
     pub them_wins: u8,

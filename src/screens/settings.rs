@@ -4,7 +4,7 @@ use crate::{
     localization::{current_labels, set_language},
     ops::save_settings,
     screens::{
-        components::notify_banner::NotifyBanner,
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Screen},
     },
     shapes::{enums::LanguageEnum, settings::Settings},
@@ -13,7 +13,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -24,6 +24,8 @@ pub struct SettingsScreen {
     language_selection: ListState,
     notify_message: NotifyBanner,
     back: bool,
+    footer: NavigationFooter,
+    footer_entries: Vec<(String, String)>,
 }
 
 impl Screen for SettingsScreen {
@@ -59,7 +61,8 @@ impl Screen for SettingsScreen {
             self.render_language_widget(f, inner[0]);
         }
         self.notify_message.render(f, footer_right);
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.footer_entries.clone());
     }
 }
 
@@ -81,6 +84,15 @@ impl SettingsScreen {
             language_selection,
             notify_message: NotifyBanner::new(),
             back: false,
+            footer: NavigationFooter::new(),
+            footer_entries: vec![
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().confirm.to_string(),
+                ),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
         }
     }
 
@@ -172,20 +184,5 @@ impl SettingsScreen {
             )
             .highlight_symbol(">> ");
         f.render_stateful_widget(list, area, &mut self.language_selection);
-    }
-
-    fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = Paragraph::new(format!(
-            "Enter = {} | Esc = {} | Q = {}",
-            current_labels().confirm,
-            current_labels().back,
-            current_labels().quit
-        ))
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
     }
 }

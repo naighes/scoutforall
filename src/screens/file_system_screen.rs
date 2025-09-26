@@ -2,7 +2,7 @@ use crate::{
     errors::AppError,
     localization::current_labels,
     screens::{
-        components::notify_banner::NotifyBanner,
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Screen},
     },
 };
@@ -11,7 +11,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 use std::{
@@ -36,6 +36,7 @@ where
     title: String,
     action: A,
     back: bool,
+    footer: NavigationFooter,
 }
 
 impl<A> FileSystemScreen<A>
@@ -54,6 +55,7 @@ where
             title: title_label.to_string(),
             action,
             back: false,
+            footer: NavigationFooter::new(),
         }
     }
 
@@ -135,26 +137,26 @@ where
         f.render_widget(paragraph, chunks[1]);
     }
 
-    fn render_footer(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let mut menu: Vec<String> = vec![];
+    fn get_footer_entries(&self) -> Vec<(String, String)> {
+        let mut entries: Vec<(String, String)> = vec![];
         if !self.entries.is_empty() {
-            menu.push(format!("↑↓ = {}", current_labels().navigate));
+            entries.push(("↑↓".to_string(), current_labels().navigate.to_string()));
         }
         if !self.is_root() {
-            menu.push(format!("Backspace = {}", current_labels().up_one_level));
+            entries.push((
+                "Backspace".to_string(),
+                current_labels().up_one_level.to_string(),
+            ));
         }
         if self.list_state.selected().is_some() {
-            menu.push(format!("Enter = {}", current_labels().select));
+            entries.push((
+                current_labels().enter.to_string(),
+                current_labels().select.to_string(),
+            ));
         }
-        menu.push(format!("Esc = {}", current_labels().back));
-        menu.push(format!("Q = {}", current_labels().quit));
-        let paragraph = Paragraph::new(menu.join(" | "))
-            .block(block)
-            .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
+        entries.push(("Esc".to_string(), current_labels().back.to_string()));
+        entries.push(("Q".to_string(), current_labels().quit.to_string()));
+        entries
     }
 
     fn render_directory_content(
@@ -256,7 +258,8 @@ where
             self.render_directory_content(f, body, items, &self.title.clone());
         }
         self.notify_message.render(f, footer_right);
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.get_footer_entries().clone());
     }
 
     fn on_resume(&mut self, _: bool) {}

@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Padding, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Paragraph, Row, Table},
     Frame,
 };
 use uuid::Uuid;
@@ -12,7 +12,7 @@ use crate::{
     localization::current_labels,
     ops::{append_event, remove_last_event},
     screens::{
-        components::notify_banner::NotifyBanner,
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Screen},
     },
     shapes::{
@@ -36,6 +36,7 @@ pub struct ScoutingScreen {
     notify_message: NotifyBanner,
     back_stack_count: Option<u8>,
     back: bool,
+    footer: NavigationFooter,
 }
 
 #[derive(Debug)]
@@ -133,7 +134,8 @@ impl Screen for ScoutingScreen {
             }
         }
         self.render_header(f, header);
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.get_footer_entries());
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
         self.render_court(f, right);
@@ -160,6 +162,7 @@ impl ScoutingScreen {
             notify_message: NotifyBanner::new(),
             back_stack_count,
             back: false,
+            footer: NavigationFooter::new(),
         }
     }
 
@@ -885,26 +888,18 @@ impl ScoutingScreen {
         f.render_widget(table, area);
     }
 
-    fn render_footer(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = match (self.set.events.len(), &self.state) {
-            (0, ScoutingScreenState::Event) => Paragraph::new(format!(
-                "Esc = {} | Q = {}",
-                current_labels().back,
-                current_labels().quit
-            )),
-            _ => Paragraph::new(format!(
-                "U = {} | Esc = {} | Q = {}",
-                current_labels().undo,
-                current_labels().back,
-                current_labels().quit
-            )),
+    fn get_footer_entries(&self) -> Vec<(String, String)> {
+        match (self.set.events.len(), &self.state) {
+            (0, ScoutingScreenState::Event) => vec![
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
+            _ => vec![
+                ("U".to_string(), current_labels().undo.to_string()),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
         }
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
     }
 
     fn render_set_status(&self, f: &mut Frame, area: Rect) {

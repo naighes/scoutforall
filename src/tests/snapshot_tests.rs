@@ -289,6 +289,7 @@ mod tests {
                                     .query(
                                         Some(PhaseEnum::SideOut),
                                         Some(0),
+                                        None,
                                         Some(ZoneEnum::Four),
                                         Some(EvalEnum::Perfect),
                                         Some(EvalEnum::Perfect)
@@ -517,7 +518,19 @@ mod tests {
                         2,                        // unforced_errors
                         0,                        // counter_attacks
                         1,                        // opponent_errors
-                        || {},
+                        || {
+                            assert_eq!(
+                                snapshot.stats.event_count(
+                                    EventTypeEnum::F,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None
+                                ),
+                                Some(1)
+                            );
+                        },
                     );
                 }),
             ),
@@ -626,6 +639,7 @@ mod tests {
                                     .query(
                                         Some(PhaseEnum::Break),
                                         Some(4),
+                                        None,
                                         Some(ZoneEnum::Four),
                                         Some(EvalEnum::Over),
                                         Some(EvalEnum::Perfect)
@@ -723,6 +737,7 @@ mod tests {
                                     .query(
                                         Some(PhaseEnum::SideOut),
                                         Some(4),
+                                        None,
                                         Some(ZoneEnum::Eight),
                                         Some(EvalEnum::Positive),
                                         Some(EvalEnum::Negative)
@@ -1054,7 +1069,19 @@ mod tests {
                         5,                        // unforced_errors
                         2,                        // counter_attacks
                         4,                        // opponent_errors
-                        || {},
+                        || {
+                            assert_eq!(
+                                snapshot.stats.event_count(
+                                    EventTypeEnum::S,
+                                    None,
+                                    None,
+                                    Some(4),
+                                    None,
+                                    None
+                                ),
+                                Some(2)
+                            );
+                        },
                     );
                 }),
             ),
@@ -1145,6 +1172,149 @@ mod tests {
                         || {
                             assert_eq!(snapshot.current_lineup.get_setter(), Some(opposite));
                             assert_eq!(snapshot.current_lineup.get_opposite(), Some(setter));
+                        },
+                    );
+                }),
+            ),
+            (
+                EventEntry {
+                    event_type: EventTypeEnum::P,
+                    eval: Some(EvalEnum::Positive),
+                    target_player: None,
+                    player: Some(oh1),
+                    timestamp: Utc::now(),
+                },
+                Box::new(|snapshot: &Snapshot| {
+                    assert_snapshot(
+                        snapshot,
+                        4, // rotation
+                        PhaseEnum::SideOut,
+                        8,       // score_us
+                        8,       // score_them
+                        None,    // serving_team
+                        Some(0), // libero_position
+                        16,      // possessions
+                        6,       // attacks
+                        7,       // errors
+                        5,       // unforced_errors
+                        2,       // counter_attacks
+                        4,       // opponent_errors
+                        || {},
+                    );
+                }),
+            ),
+            (
+                EventEntry {
+                    event_type: EventTypeEnum::F,
+                    eval: None,
+                    target_player: None,
+                    player: Some(opposite),
+                    timestamp: Utc::now(),
+                },
+                Box::new(|snapshot: &Snapshot| {
+                    assert_snapshot(
+                        snapshot,
+                        4, // rotation
+                        PhaseEnum::SideOut,
+                        8,                        // score_us
+                        9,                        // score_them
+                        Some(TeamSideEnum::Them), // serving_team
+                        Some(0),                  // libero_position
+                        16,                       // possessions
+                        6,                        // attacks
+                        8,                        // errors
+                        6,                        // unforced_errors
+                        2,                        // counter_attacks
+                        4,                        // opponent_errors
+                        || {
+                            assert_eq!(
+                                snapshot.stats.event_count(
+                                    EventTypeEnum::F,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None
+                                ),
+                                Some(2)
+                            );
+                        },
+                    );
+                }),
+            ),
+            (
+                EventEntry {
+                    event_type: EventTypeEnum::OE,
+                    eval: None,
+                    target_player: None,
+                    player: None,
+                    timestamp: Utc::now(),
+                },
+                Box::new(|snapshot: &Snapshot| {
+                    assert_snapshot(
+                        snapshot,
+                        3, // rotation
+                        PhaseEnum::Break,
+                        9,                      // score_us
+                        9,                      // score_them
+                        Some(TeamSideEnum::Us), // serving_team
+                        None,                   // libero_position
+                        16,                     // possessions
+                        6,                      // attacks
+                        8,                      // errors
+                        6,                      // unforced_errors
+                        2,                      // counter_attacks
+                        5,                      // opponent_errors
+                        || {},
+                    );
+                }),
+            ),
+            (
+                EventEntry {
+                    event_type: EventTypeEnum::S,
+                    eval: Some(EvalEnum::Positive),
+                    target_player: None,
+                    player: Some(opposite),
+                    timestamp: Utc::now(),
+                },
+                Box::new(|snapshot: &Snapshot| {
+                    assert_snapshot(
+                        snapshot,
+                        3, // rotation
+                        PhaseEnum::Break,
+                        9,    // score_us
+                        9,    // score_them
+                        None, // serving_team
+                        None, // libero_position
+                        17,   // possessions
+                        6,    // attacks
+                        8,    // errors
+                        6,    // unforced_errors
+                        2,    // counter_attacks
+                        5,    // opponent_errors
+                        || {
+                            assert_eq!(
+                                snapshot.stats.event_count(
+                                    EventTypeEnum::S,
+                                    None,
+                                    None,
+                                    Some(3),
+                                    None,
+                                    None
+                                ),
+                                Some(2)
+                            );
+                            assert_eq!(
+                                snapshot.stats.event_count(
+                                    EventTypeEnum::S,
+                                    None,
+                                    None,
+                                    None,
+                                    None,
+                                    None
+                                ),
+                                Some(10)
+                            );
                         },
                     );
                 }),
