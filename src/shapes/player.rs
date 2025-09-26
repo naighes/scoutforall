@@ -9,3 +9,9 @@ pub struct PlayerEntry {
     pub role: RoleEnum,
     pub number: u8,
 }
+
+impl std::fmt::Display for PlayerEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.name, self.number)
+    }
+}

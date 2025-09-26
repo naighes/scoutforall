@@ -2,7 +2,7 @@ use crate::{
     localization::current_labels,
     ops::{load_settings, load_teams},
     screens::{
-        components::notify_banner::NotifyBanner,
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         edit_team::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team::ImportTeamAction,
@@ -17,7 +17,7 @@ use dirs::home_dir;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -27,6 +27,7 @@ pub struct TeamListScreen {
     teams: Vec<TeamEntry>,
     refresh: bool,
     notify_message: NotifyBanner,
+    footer: NavigationFooter,
 }
 
 impl Screen for TeamListScreen {
@@ -116,7 +117,8 @@ impl Screen for TeamListScreen {
         } else {
             self.render_list(f, body, items);
         }
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.get_footer_entries());
     }
 
     fn on_resume(&mut self, refresh: bool) {
@@ -133,6 +135,7 @@ impl TeamListScreen {
             refresh: true,
             list_state: ListState::default(),
             notify_message: NotifyBanner::new(),
+            footer: NavigationFooter::new(),
         }
     }
 
@@ -150,31 +153,27 @@ impl TeamListScreen {
         }
     }
 
-    fn render_footer(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = (match self.teams.len() {
-            0 => Paragraph::new(format!(
-                "N = {} | S = {} | I = {} | Q = {}",
-                current_labels().new_team,
-                current_labels().settings,
-                current_labels().import_team,
-                current_labels().quit
-            )),
-            _ => Paragraph::new(format!(
-                "↑↓ = {} | Enter = {} | S = {} | N = {} | I = {} | Q = {}",
-                current_labels().navigate,
-                current_labels().select,
-                current_labels().settings,
-                current_labels().new_team,
-                current_labels().import_team,
-                current_labels().quit
-            )),
-        })
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
+    fn get_footer_entries(&self) -> Vec<(String, String)> {
+        if self.teams.is_empty() {
+            vec![
+                ("N".to_string(), current_labels().new_team.to_string()),
+                ("S".to_string(), current_labels().settings.to_string()),
+                ("I".to_string(), current_labels().import_team.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ]
+        } else {
+            vec![
+                ("↑↓".to_string(), current_labels().navigate.to_string()),
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().select.to_string(),
+                ),
+                ("S".to_string(), current_labels().settings.to_string()),
+                ("N".to_string(), current_labels().new_team.to_string()),
+                ("I".to_string(), current_labels().import_team.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ]
+        }
     }
 
     fn render_no_teams_yet(&self, f: &mut Frame, area: Rect) {

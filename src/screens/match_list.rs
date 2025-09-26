@@ -5,21 +5,30 @@ use crate::{
     pdf::open_match_pdf,
     screens::{
         add_match::AddMatchScreen,
-        components::{notify_banner::NotifyBanner, team_header::TeamHeader},
+        components::{
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            team_header::TeamHeader,
+        },
         export_match::ExportMatchAction,
         file_system_screen::FileSystemScreen,
         import_match::ImportMatchAction,
+        match_stats_screen::MatchStatsScreen,
         scouting_screen::ScoutingScreen,
         screen::{AppAction, Screen},
         start_set_screen::StartSetScreen,
     },
-    shapes::{enums::TeamSideEnum, r#match::MatchEntry, set::SetEntry, team::TeamEntry},
+    shapes::{
+        enums::TeamSideEnum,
+        r#match::{MatchEntry, MatchStatus},
+        set::SetEntry,
+        team::TeamEntry,
+    },
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use dirs::home_dir;
 use ratatui::{
     layout::Alignment,
-    widgets::{Padding, Row, Table, Wrap},
+    widgets::{Row, Table},
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -32,10 +41,11 @@ use ratatui::{
 pub struct MatchListScreen {
     list_state: ListState,
     team: TeamEntry,
-    matches: Vec<MatchEntry>,
+    matches: Vec<(MatchEntry, MatchStatus)>,
     notify_message: NotifyBanner,
     refresh: bool,
     header: TeamHeader,
+    footer: NavigationFooter,
 }
 
 impl Screen for MatchListScreen {
@@ -48,6 +58,7 @@ impl Screen for MatchListScreen {
             (KeyCode::Down, _) => self.next_match(),
             (KeyCode::Up, _) => self.previous_match(),
             (KeyCode::Enter, _) => self.handle_enter_key(),
+            (KeyCode::Char(' '), _) => self.handle_space_key(),
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
             (KeyCode::Char('n'), _) => {
                 if self.team.players.len() >= 6 {
@@ -75,7 +86,7 @@ impl Screen for MatchListScreen {
                 home_dir(),
                 self.list_state
                     .selected()
-                    .and_then(|i| self.matches.get(i).cloned()),
+                    .and_then(|i| self.matches.get(i).map(|(m, _)| m).cloned()),
             ) {
                 (Some(path), Some(match_entry)) => {
                     AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
@@ -106,7 +117,17 @@ impl Screen for MatchListScreen {
         if self.refresh {
             self.refresh = false;
             self.matches = match get_matches(&self.team) {
-                Ok(matches) => matches,
+                Ok(matches) => matches.iter().fold(vec![], |acc, m| {
+                    let status = m.get_status();
+                    match status {
+                        Ok(s) => {
+                            let mut new_acc = acc;
+                            new_acc.push((m.clone(), s));
+                            new_acc
+                        }
+                        Err(_) => acc,
+                    }
+                }),
                 Err(_) => {
                     self.notify_message
                         .set_error(current_labels().could_not_load_matches.to_string());
@@ -165,7 +186,8 @@ impl Screen for MatchListScreen {
         }
         self.header.render(f, container[0], Some(&self.team));
         self.notify_message.render(f, footer_right);
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.get_footer_entries().clone());
     }
 
     fn on_resume(&mut self, refresh: bool) {
@@ -184,16 +206,17 @@ impl MatchListScreen {
             refresh: true,
             notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
+            footer: NavigationFooter::new(),
         }
     }
 
     fn get_match_row(
         &self,
-        m: &MatchEntry,
+        m: &(MatchEntry, MatchStatus),
         row_index: usize,
         match_index: usize,
     ) -> Result<Row<'_>, AppError> {
-        let status = m.get_status()?;
+        let (m, status) = m;
         let (name_left, name_right, score_left, score_right) = if m.home {
             (
                 m.team.name.clone(),
@@ -287,45 +310,31 @@ impl MatchListScreen {
         AppAction::None
     }
 
-    fn render_footer(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let new_match_text = if self.team.players.len() >= 6 {
-            format!("N = {} | ", current_labels().new_match)
-        } else {
-            "".to_string()
-        };
-        let export_match_text = if self
-            .list_state
-            .selected()
-            .and_then(|i| self.matches.get(i).cloned())
-            .is_some()
-        {
-            format!("S = {} | ", current_labels().export)
-        } else {
-            "".to_string()
-        };
-        let paragraph = (match self.matches.len() {
-            0 => Paragraph::new(format!(
-                "{}Esc = {} | Q = {}",
-                new_match_text,
-                current_labels().back,
-                current_labels().quit
-            )),
-            _ => Paragraph::new(format!(
-                "↑↓ = move | Enter = {} | I = {} | {}{}Esc = {} | Q = {}",
-                current_labels().select,
-                current_labels().import_match,
-                new_match_text,
-                export_match_text,
-                current_labels().back,
-                current_labels().quit
-            )),
-        })
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
+    fn get_footer_entries(&self) -> Vec<(String, String)> {
+        let mut entries: Vec<(String, String)> = vec![];
+        if !self.matches.is_empty() {
+            entries.push(("↑↓".to_string(), current_labels().navigate.to_string()));
+        }
+        if self.list_state.selected().is_some() {
+            entries.push((
+                current_labels().enter.to_string(),
+                current_labels().select.to_string(),
+            ));
+        }
+        if self.team.players.len() >= 6 {
+            entries.push(("N".to_string(), current_labels().new_match.to_string()));
+        }
+        if self.list_state.selected().is_some() {
+            entries.push(("S".to_string(), current_labels().export.to_string()));
+            entries.push((
+                current_labels().space.to_string(),
+                current_labels().match_stats.to_string(),
+            ));
+        }
+        entries.push(("I".to_string(), current_labels().import_match.to_string()));
+        entries.push(("Esc".to_string(), current_labels().back.to_string()));
+        entries.push(("Q".to_string(), current_labels().quit.to_string()));
+        entries
     }
 
     fn render_no_matches_yet(&self, f: &mut Frame, area: Rect) {
@@ -343,11 +352,33 @@ impl MatchListScreen {
         f.render_widget(paragraph, chunks[1]);
     }
 
+    fn handle_space_key(&mut self) -> AppAction {
+        match self
+            .list_state
+            .selected()
+            .and_then(|i| self.matches.get(i).map(|(m, _)| m).cloned())
+        {
+            Some(m) => match MatchStatsScreen::new(m.clone()) {
+                Ok(screen) => AppAction::SwitchScreen(Box::new(screen)),
+                Err(_) => {
+                    self.notify_message
+                        .set_error(current_labels().could_not_open_match_stats.to_string());
+                    AppAction::None
+                }
+            },
+            None => {
+                self.notify_message
+                    .set_error(current_labels().no_match_selected.to_string());
+                AppAction::None
+            }
+        }
+    }
+
     fn handle_enter_key(&mut self) -> AppAction {
         let selected_match = match self
             .list_state
             .selected()
-            .and_then(|i| self.matches.get(i).cloned())
+            .and_then(|i| self.matches.get(i).map(|(m, _)| m).cloned())
         {
             Some(m) => m,
             None => {

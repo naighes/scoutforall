@@ -1701,7 +1701,11 @@ fn distribution_stats(stats: &Stats) -> String {
         for phase in phases {
             let values = zones
                 .iter()
-                .map(|z| stats.distribution.zone_stats(*z, phase, None, prev_eval))
+                .map(|z| {
+                    stats
+                        .distribution
+                        .zone_stats(*z, phase, None, None, prev_eval)
+                })
                 .map(|v| match v {
                     None => (None, None),
                     Some((v1, v2)) => (Some(v1), Some(v2)),

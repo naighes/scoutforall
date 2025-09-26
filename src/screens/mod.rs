@@ -8,6 +8,7 @@ pub mod file_system_screen;
 pub mod import_match;
 pub mod import_team;
 pub mod match_list;
+pub mod match_stats_screen;
 pub mod scouting_screen;
 pub mod screen;
 pub mod settings;

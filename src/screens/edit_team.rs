@@ -2,7 +2,10 @@ use crate::{
     localization::current_labels,
     ops::{save_team, TeamInput},
     screens::{
-        components::{notify_banner::NotifyBanner, select::Select, text_box::TextBox},
+        components::{
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
+            text_box::TextBox,
+        },
         screen::{AppAction, Screen},
     },
     shapes::{
@@ -15,7 +18,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -29,6 +32,8 @@ pub struct EditTeamScreen {
     notify_message: NotifyBanner,
     existing_team: Option<TeamEntry>,
     back: bool,
+    footer: NavigationFooter,
+    footer_entries: Vec<(String, String)>,
 }
 
 impl Screen for EditTeamScreen {
@@ -69,7 +74,8 @@ impl Screen for EditTeamScreen {
         self.render_classification_description(f, area[2]);
         self.gender.render(f, area[3]);
         self.year.render(f, area[4]);
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.footer_entries.clone());
     }
 }
 
@@ -103,6 +109,19 @@ impl EditTeamScreen {
             notify_message: NotifyBanner::new(),
             existing_team: None,
             back: false,
+            footer: NavigationFooter::new(),
+            footer_entries: vec![
+                (
+                    "Tab / Shift+Tab".to_string(),
+                    current_labels().switch_field.to_string(),
+                ),
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().confirm.to_string(),
+                ),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
         }
     }
 
@@ -135,6 +154,19 @@ impl EditTeamScreen {
             notify_message: NotifyBanner::new(),
             existing_team: Some(team.clone()),
             back: false,
+            footer: NavigationFooter::new(),
+            footer_entries: vec![
+                (
+                    "Tab / Shift+Tab".to_string(),
+                    current_labels().switch_field.to_string(),
+                ),
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().confirm.to_string(),
+                ),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
         }
     }
 
@@ -252,21 +284,6 @@ impl EditTeamScreen {
         self.name.handle_char(c);
         self.year.handle_char(c);
         AppAction::None
-    }
-
-    fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = Paragraph::new(format!(
-            "Tab / Shift+Tab | Enter = {} | Esc = {} | Q = {}",
-            current_labels().confirm,
-            current_labels().back,
-            current_labels().quit
-        ))
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {

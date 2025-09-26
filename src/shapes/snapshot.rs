@@ -2,9 +2,7 @@ use crate::{
     constants::{DEFAULT_SET_TARGET_SCORE, TIE_BREAK_SET_TARGET_SCORE},
     errors::AppError,
     shapes::{
-        enums::{
-            ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
-        },
+        enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum},
         lineup::Lineup,
         set::SetEntry,
         stats::Stats,
@@ -134,6 +132,10 @@ impl Snapshot {
             Some(zone) => zone,
             None => return Ok(()),
         };
+        let player = match event.player {
+            Some(player) => player,
+            None => return Ok(()),
+        };
         if matches!(
             (
                 event.event_type,
@@ -148,6 +150,7 @@ impl Snapshot {
             self.stats.distribution.add(
                 self.current_lineup.get_current_phase(),
                 rotation,
+                player,
                 attack_zone,
                 prev_eval,
                 current_eval,
@@ -255,18 +258,8 @@ impl Snapshot {
     }
 
     fn set_errors_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
         let rotation = self.current_lineup.get_current_rotation()?;
-        let error_type = match (event.event_type, event.eval) {
-            (A, Some(Error)) | (S, Some(Error)) | (B, Some(Over)) | (F, _) => {
-                Some(ErrorTypeEnum::Unforced)
-            }
-            (A, Some(Over)) | (B, Some(Error)) | (P, Some(Error)) | (D, Some(Error)) => {
-                Some(ErrorTypeEnum::Forced)
-            }
-            _ => None,
-        };
+        let error_type = event.event_type.error_type(event.eval);
         match (error_type, event.player) {
             (Some(err), Some(player)) => {
                 self.stats.errors.add(
@@ -324,6 +317,17 @@ impl Snapshot {
                     Some(player),
                     Some(z),
                     Some(ev),
+                );
+                Ok(())
+            }
+            (F, _, Some(player), _) => {
+                self.stats.events.add(
+                    event.event_type,
+                    self.current_lineup.get_current_phase(),
+                    rotation,
+                    Some(player),
+                    None,
+                    None,
                 );
                 Ok(())
             }

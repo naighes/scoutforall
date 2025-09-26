@@ -3,8 +3,8 @@ use crate::{
     ops::create_match,
     screens::{
         components::{
-            checkbox::CheckBox, date_picker::DatePicker, notify_banner::NotifyBanner,
-            team_header::TeamHeader, text_box::TextBox,
+            checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
+            notify_banner::NotifyBanner, team_header::TeamHeader, text_box::TextBox,
         },
         screen::{AppAction, Screen},
         start_set_screen::StartSetScreen,
@@ -14,7 +14,7 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders},
     Frame,
 };
 
@@ -27,6 +27,8 @@ pub struct AddMatchScreen {
     field: usize,
     notify_message: NotifyBanner,
     header: TeamHeader,
+    footer: NavigationFooter,
+    footer_entries: Vec<(String, String)>,
 }
 
 impl Screen for AddMatchScreen {
@@ -70,7 +72,8 @@ impl Screen for AddMatchScreen {
         self.date.render(f, area[1]);
         self.home.render(f, area[2]);
         self.header.render(f, container[0], Some(&self.team));
-        self.render_footer(f, footer_left);
+        self.footer
+            .render(f, footer_left, self.footer_entries.clone());
     }
 }
 
@@ -87,6 +90,19 @@ impl AddMatchScreen {
             field: 0,
             notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
+            footer: NavigationFooter::new(),
+            footer_entries: vec![
+                (
+                    "Tab / Shift+Tab".to_string(),
+                    current_labels().switch_field.to_string(),
+                ),
+                (
+                    current_labels().enter.to_string(),
+                    current_labels().confirm.to_string(),
+                ),
+                ("Esc".to_string(), current_labels().back.to_string()),
+                ("Q".to_string(), current_labels().quit.to_string()),
+            ],
         }
     }
 
@@ -95,22 +111,6 @@ impl AddMatchScreen {
             .borders(Borders::ALL)
             .title(current_labels().new_match);
         f.render_widget(block, area);
-    }
-
-    fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = Paragraph::new(format!(
-            "Tab / Shift+Tab = {} | Enter = {} | Esc = {} | Q = {}",
-            current_labels().navigate,
-            current_labels().confirm,
-            current_labels().back,
-            current_labels().quit,
-        ))
-        .block(block)
-        .wrap(Wrap { trim: true });
-        f.render_widget(paragraph, area);
     }
 
     fn handle_submit(&mut self) -> AppAction {
