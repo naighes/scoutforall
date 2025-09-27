@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Scouting Made Simple",
+    "content": "<strong>Quick, validated actions let you capture every volleyball event effortlessly</strong>, making match scouting fast, accurate and intuitive",
+    "image": "/content-images/scouting-anim.gif",
+    "image_alt": ""
+  },
+  {
+    "title": "Insightful Analytics",
+    "content": "<strong>Analyze efficiency, positivity, and play distribution.</strong> everything you need to understand the game at a glance and make smarter tactical decisions",
+    "image": "/content-images/stats_blur.png",
+    "image_alt": ""
+  },
+  {
+    "title": "Community Driven",
+    "content": "<strong>Open Source and built together.</strong> scout4all grows with the contributions of coaches, analysts and developers who share the same passion for volleyball.",
+    "image": "/content-images/community.png",
+    "image_alt": ""
+  }
+]

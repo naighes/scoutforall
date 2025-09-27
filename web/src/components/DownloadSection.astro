@@ -1,0 +1,39 @@
+---
+
+const { title, download } = Astro.props
+
+---
+
+<section class="bs-container bs-mt-lg" id="download">
+
+  <!-- Header -->
+  { title && <h2 class="bs-h2 text-center">{ title }</h2>}
+
+  <!-- download -->
+  <div class="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-0">
+
+    <!-- Item -->
+
+    { download.map( (item, index) => 
+      <a
+        href={item.href}
+        class="@container p-6 xl:p-16 flex flex-col gap-6 h-full w-full rounded-xl overflow-hidden
+              lg:scale-90 @xl:justify-end
+              bg-gray-100 text-black/90
+              cursor-pointer transition-colors duration-300
+              hover:bg-gray-300
+              no-underline">
+        
+        <div class="relative">
+          <h2 class="bs-h3 flex flex-col gap-4 items-center text-center">
+            <img height="64" width="64" src={ item.image } />
+            <span>{ item.title }</span>
+          </h2>
+        </div>
+      </a>
+    )}
+
+  </div>
+
+</section>
+
