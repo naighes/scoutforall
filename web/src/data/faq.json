@@ -1,0 +1,22 @@
+[
+  {
+    "question": "Can I scout attack or serve directions or specify reception zones with the program?",
+    "answer": "Not at the moment. The program follows an outcome-based approach: you can define the type of action (attack, reception, serve, etc.) and provide an evaluation (positive, negative, error, etc.), but you cannot currently indicate ball landing points, serve directions or reception zones. In case of significant demand for this feature, it may be considered for future updates."
+  },
+  {
+    "question": "Is the software free to use?",
+    "answer": "Yes! The program is completely free and open source. We welcome contributions from the community, so anyone can help improve the software, suggest features or report issues."
+  },
+  {
+    "question": "Why is this a terminal-based application instead of a graphical one?",
+    "answer": "The focus of the software is on productivity and efficiency. Entering input via the keyboard allows faster data entry compared to tapping on a tablet or smartphone screen. This design helps users log actions quickly and systematically, which is especially useful in scouting or analytics scenarios where speed matters."
+  },
+  {
+    "question": "Are all player positions and attack zones fully customizable?",
+    "answer": "No, the application makes certain arbitrary but consistent choices to simplify data entry and maintain analytical consistency. For example, the middle blocker is always replaced by the libero in the back row (except when the libero is serving). This means you cannot simulate a side-out phase without the libero in the back row. Moreover, attack zones are automatically determined based on player roles and the setter's position. For instance, if the current rotation places the setter in zone 1, the opposite will attack from zone 4. Schemes such as an inverted setter-1 rotation are not supported."
+  },
+  {
+    "question": "How often is the software updated and do I need to install updates manually?",
+    "answer": "The software is under active development and constantly evolving. New features, improvements and bug fixes are released on a regular basis. You don't need to worry about manual updates: the application updates itself automatically, so you're always running the latest version without extra effort. This ensures you benefit right away from community contributions and the continuous improvement of the project."
+  }
+]

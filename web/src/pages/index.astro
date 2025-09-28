@@ -1,0 +1,42 @@
+---
+
+import Layout from "../layouts/Layout.astro"
+
+import FaqSection from "../components/FaqSection.astro"
+import OverviewCarousel from "../components/OverviewCarousel.astro"
+import HeroSection from "../components/HeroSection.astro"
+import DownloadSection from "../components/DownloadSection.astro"
+
+import faq from "../data/faq.json"
+import overview from "../data/overview.json"
+import home from "../data/home.json"
+import download from "../data/download.json"
+import global_settings from "../data/global_settings.json"
+import testimonials from "../data/testimonials.json"
+
+---
+
+<Layout title={ global_settings.title }>
+
+  <HeroSection
+    content={ home.hero_content }
+    settings={ global_settings }
+    title={ home.hero_title }
+  />
+
+  <OverviewCarousel
+    overview={ overview }
+    title={ home.overview_title }
+  />
+
+  <DownloadSection
+    download={ download }
+    title={ home.download_title }
+  />
+
+  <FaqSection
+    faq={ faq }
+    title={ home.faq_title }
+  />
+
+</Layout>

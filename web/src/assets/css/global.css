@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+
+  --font-display: var(--font-inter-display), "ui-sans-serif", "system-ui", "sans-serif";
+  --font-body: var(--font-inter), "ui-sans-serif", "system-ui", "sans-serif";
+
+  --color-bs-surface-0: #121212;
+  --color-bs-surface-1: #18181B;
+  --color-bs-surface-2: rgba(255, 255, 255, 0.03);
+  --color-bs-surface-3: #2F2F31;
+
+  --color-bs-foreground-light: #eee;
+  --color-bs-foreground-dark: #9f9f9f;
+
+  --color-current: currentColor;
+
+  --ease-bs-bounce: linear(0,.01,.04 1.6%,.161 3.3%,.816 9.4%,1.046,1.189 14.4%,1.231,1.254 17%,1.259,1.257 18.6%,1.236,1.194 22.3%,1.057 27%,.999 29.4%,.955 32.1%,.942,.935 34.9%,.933,.939 38.4%,1 47.3%,1.011,1.017 52.6%,1.016 56.4%,1 65.2%,.996 70.2%,1.001 87.2%,1);
+
+  --ease-bs-spring: linear(
+    0, 0.009, 0.035 2.1%, 0.141, 0.281 6.7%, 0.723 12.9%, 0.938 16.7%, 1.017,
+    1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%,
+    1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%,
+    0.997 69.8%, 1.003 76.9%, 1.004 83.8%, 1);
+}

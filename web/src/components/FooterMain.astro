@@ -1,0 +1,80 @@
+---
+
+import Logo from '../assets/theme-images/logo.svg'
+
+const { settings } = Astro.props
+const currentYear = new Date().getFullYear()
+const copyright =
+  currentYear === 2025 ? '2025' : `2025-${currentYear}`
+
+---
+
+<footer class="@container bs-container my-24 font-semibold text-bs-foreground-dark [&_a]:hover:text-bs-foreground-light [&_a]:transition-color [&_a]:duration-150" id="contact">
+
+  <!-- Wrapper -->
+  <div class="bg-bs-surface-2 p-6 md:p-16 rounded-xl grid md:grid-cols-2 gap-8">
+
+      <!-- Left col -->
+      <div class="w-max flex flex-col gap-8 md:gap-0 justify-between text-bs-foreground-light">
+
+        <!-- Logo -->
+        <a class="flex items-center gap-4 group" href="#top" aria-label="Back to top">
+          <Logo class="group-hover:-rotate-180 group-hover:scale-80 transition-transform ease-bs-spring duration-1000" height="48" width="48" />
+          <span class="text-2xl font-bold text-white leading-none">
+            scout4all
+          </span>
+        </a>
+
+      </div>
+
+      <!-- Right col -->
+      <div class="flex gap-10 md:gap-2 lg:gap-20 md:justify-end [&_a]:block md:[&_a]:px-5 [&_a]:py-2">
+
+        <!-- Nav -->
+        <nav class="flex flex-col">
+
+          { settings.nav.sort((a,b) => a.title.localeCompare(b.title)).map( item =>
+
+            <a href={ item.link }>
+              { item.title }
+            </a>
+
+          )}
+
+        </nav>
+
+        <!-- Social links -->
+        <nav class="flex flex-col">
+
+          { settings.social_links.sort((a,b) => a.title.localeCompare(b.title)).map( item =>
+
+            <a href={ item.link }>
+              { item.title }
+            </a>
+
+          )}
+
+        </nav>
+
+      </div>
+
+  </div>
+
+
+  <!-- Colophon -->
+  <aside class="bs-container">
+    <nav class="flex flex-col md:flex-row gap-2 md:gap-4 justify-center items-center pt-16 md:pt-24 text-xs text-white/70">
+      <span>© {copyright} scout4all</span>
+      <span>•</span>
+      <a href="https://github.com/naighes/scoutforall" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">
+        GitHub
+      </a>
+      <span>•</span>
+      <span><a href="https://github.com/naighes/scoutforall/blob/master/LICENSE">License</a></span>
+      <span>•</span>
+      <span>Made with ❤️ by <a href="https://github.com/naighes">n@ighes</a></span>
+    </nav>
+  </aside>
+
+</footer>
+

@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@reference "./global.css";
+
+:root {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+  scroll-padding-top: 2em;
+}
+
+body {
+  @apply bg-bs-surface-1 text-bs-foreground-light font-body selection:text-black selection:bg-amber-300;
+}
