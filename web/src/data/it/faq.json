@@ -1,0 +1,22 @@
+[
+  {
+    "question": "Posso registrare direzioni di attacco o di battuta, o specificare zone di ricezione con il programma?",
+    "answer": "Al momento no. Il programma segue un approccio basato sull'esito: puoi definire il tipo di azione (attacco, ricezione, battuta, ecc.) e fornire una valutazione (positiva, negativa, errore, ecc.), ma attualmente non è possibile indicare i punti di caduta della palla, le direzioni di battuta o le zone di ricezione. In caso di richiesta significativa per questa funzionalità, potrebbe essere considerata per aggiornamenti futuri."
+  },
+  {
+    "question": "Il software è gratuito?",
+    "answer": "Sì! Il programma è completamente gratuito e open source. Accogliamo con piacere i contributi della community, quindi chiunque può aiutare a migliorare il software, suggerire funzionalità o segnalare problemi."
+  },
+  {
+    "question": "Perché è un'applicazione da terminale invece che grafica?",
+    "answer": "Il focus del software è su produttività ed efficienza. Inserire i dati tramite tastiera permette di registrare le azioni più velocemente rispetto all'uso di tablet o smartphone. Questo design aiuta gli utenti a registrare le azioni in modo rapido e sistematico, particolarmente utile in scenari di scouting o analisi dove la velocità è importante."
+  },
+  {
+    "question": "Tutte le posizioni dei giocatori e le zone di attacco sono completamente personalizzabili?",
+    "answer": "No, l'applicazione compie alcune scelte arbitrarie ma coerenti per semplificare l'inserimento dei dati e mantenere la consistenza analitica. Ad esempio, il centrale è sempre sostituito dal libero nella seconda linea (tranne quando il centrale è in battuta). Questo significa che non è possibile simulare una fase di side-out senza il libero in seconda linea. Inoltre, le zone di attacco sono determinate automaticamente in base ai ruoli dei giocatori e alla posizione del palleggiatore. Ad esempio, se la rotazione corrente mette il palleggiatore in zona 1, l'opposto attaccherà dalla zona 4. Schemi quali una rotazione P1 invertita non sono supportati."
+  },
+  {
+    "question": "Quanto spesso viene aggiornato il software? Devo installare gli aggiornamenti manualmente?",
+    "answer": "Il software è in sviluppo attivo e in costante evoluzione. Nuove funzionalità, miglioramenti e correzioni di bug vengono rilasciati regolarmente. Non è necessario preoccuparsi di aggiornamenti manuali: l'applicazione si aggiorna automaticamente, così avrai sempre l'ultima versione senza alcuno sforzo. Questo assicura che tu possa beneficiare immediatamente dei contributi della community e del continuo miglioramento del progetto."
+  }
+]

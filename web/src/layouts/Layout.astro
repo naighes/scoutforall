@@ -1,5 +1,6 @@
 ---
 
+const lang = Astro.params.lang || 'en';
 import '../assets/css/global.css'
 import "../assets/css/base.css"
 import "../assets/css/typography.css"
@@ -11,7 +12,9 @@ import { Font } from 'astro:assets';
 import Image from "astro/components/Image.astro"
 import bg_image from "../assets/theme-images/hero-image.jpg"
 
-import global_settings from "../data/global_settings.json"
+import global_settings_en from '../data/en/global_settings.json';
+import global_settings_it from '../data/it/global_settings.json';
+const global_settings = lang === 'it' ? global_settings_it : global_settings_en;
 
 import FooterMain from "../components/FooterMain.astro"
 import HeaderMain from "../components/HeaderMain.astro"
@@ -29,8 +32,8 @@ const { title, description } = Astro.props
 
     <title>{ title ?? global_settings.title }</title>
 
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+    <link rel="manifest" href="../manifest.json" />
 
     <meta name="description" content={ description ?? global_settings.description } />
     <meta name="theme-color" content={ global_settings.theme_color } />

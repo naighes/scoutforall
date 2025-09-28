@@ -5,6 +5,8 @@ import hero_screens from "../assets/theme-images/hero-screens.png"
 
 const { settings, title, content } = Astro.props
 
+const lang = Astro.params.lang || 'en';
+
 ---
 
 <section class="bs-container py-6 flex flex-col lg:flex-row items-center">

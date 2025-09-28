@@ -13,7 +13,7 @@
   },
   {
     "question": "Are all player positions and attack zones fully customizable?",
-    "answer": "No, the application makes certain arbitrary but consistent choices to simplify data entry and maintain analytical consistency. For example, the middle blocker is always replaced by the libero in the back row (except when the libero is serving). This means you cannot simulate a side-out phase without the libero in the back row. Moreover, attack zones are automatically determined based on player roles and the setter's position. For instance, if the current rotation places the setter in zone 1, the opposite will attack from zone 4. Schemes such as an inverted setter-1 rotation are not supported."
+    "answer": "No, the application makes certain arbitrary but consistent choices to simplify data entry and maintain analytical consistency. For example, the middle blocker is always replaced by the libero in the back row (except when the middle-blocker is serving). This means you cannot simulate a side-out phase without the libero in the back row. Moreover, attack zones are automatically determined based on player roles and the setter's position. For instance, if the current rotation places the setter in zone 1, the opposite will attack from zone 4. Schemes such as an inverted setter-1 rotation are not supported."
   },
   {
     "question": "How often is the software updated and do I need to install updates manually?",

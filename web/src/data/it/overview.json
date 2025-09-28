@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Scouting Semplificato",
+    "content": "<strong>Azioni rapide e validate ti permettono di registrare ogni evento della partita senza sforzo</strong>, rendendo lo scouting veloce, preciso e intuitivo",
+    "image": "../content-images/scouting-anim.gif",
+    "image_alt": ""
+  },
+  {
+    "title": "Analisi Approfondite",
+    "content": "<strong>Analizza efficienza, positività e distribuzione.</strong> Tutto ciò che ti serve per comprendere la partita a colpo d'occhio e prendere dunque le migliori decisioni tattiche",
+    "image": "../content-images/stats_blur.png",
+    "image_alt": ""
+  },
+  {
+    "title": "Community Collaborativa",
+    "content": "<strong>Open Source e costruito assieme.</strong> scout4all cresce grazie ai contributi di allenatori, analisti e sviluppatori che condividono la stessa passione per la pallavolo.",
+    "image": "../content-images/community.png",
+    "image_alt": ""
+  }
+]
