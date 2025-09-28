@@ -1,0 +1,60 @@
+---
+export async function getStaticPaths() {
+  return [
+    { params: { lang: 'en' } },
+    { params: { lang: 'it' } },
+  ];
+}
+
+const lang = Astro.params.lang || 'en';
+import Layout from "../../layouts/Layout.astro"
+
+import FaqSection from "../../components/FaqSection.astro"
+import OverviewCarousel from "../../components/OverviewCarousel.astro"
+import HeroSection from "../../components/HeroSection.astro"
+import DownloadSection from "../../components/DownloadSection.astro"
+
+import faq_en from '../../data/en/faq.json';
+import faq_it from '../../data/it/faq.json';
+const faq = lang === 'it' ? faq_it : faq_en;
+
+import overview_en from '../../data/en/overview.json';
+import overview_it from '../../data/it/overview.json';
+const overview = lang === 'it' ? overview_it : overview_en;
+
+import home_en from '../../data/en/home.json';
+import home_it from '../../data/it/home.json';
+const home = lang === 'it' ? home_it : home_en;
+
+import download from "../../data/download.json"
+
+import global_settings_en from '../../data/en/global_settings.json';
+import global_settings_it from '../../data/it/global_settings.json';
+const global_settings = lang === 'it' ? global_settings_it : global_settings_en;
+
+---
+
+<Layout title={ global_settings.title }>
+
+  <HeroSection
+    content={ home.hero_content }
+    settings={ global_settings }
+    title={ home.hero_title }
+  />
+
+  <OverviewCarousel
+    overview={ overview }
+    title={ home.overview_title }
+  />
+
+  <DownloadSection
+    download={ download }
+    title={ home.download_title }
+  />
+
+  <FaqSection
+    faq={ faq }
+    title={ home.faq_title }
+  />
+
+</Layout>
