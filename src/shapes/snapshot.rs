@@ -342,8 +342,16 @@ impl Snapshot {
     ) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        let serve_them = vec![OE, OS, F, P, R, CL, CS];
-        let serve_us = vec![OE, F, S, R, CL, CS];
+        let serve_them = if self.current_lineup.get_fallback_libero().is_some() {
+            vec![OS, OE, F, A, S, P, D, B, R, CL, CS]
+        } else {
+            vec![OS, OE, F, A, S, P, D, B, R, CS]
+        };
+        let serve_us = if self.current_lineup.get_fallback_libero().is_some() {
+            vec![OS, OE, F, A, S, P, D, B, R, CL, CS]
+        } else {
+            vec![OS, OE, F, A, S, P, D, B, R, CS]
+        };
         let options_map: HashMap<_, _> = [
             // order: OS, OE, F, A, S, P, D, B, R, CL, CS
             ((OS, None), serve_them.clone()),
@@ -480,7 +488,9 @@ impl Snapshot {
                     .add_substitution(&replaced, &replacement)?;
             }
         }
-        if event.event_type == EventTypeEnum::CL {
+        if event.event_type == EventTypeEnum::CL
+            && self.current_lineup.get_fallback_libero().is_some()
+        {
             // change libero
             self.current_lineup.swap_libero()?;
         }

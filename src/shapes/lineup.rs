@@ -157,6 +157,10 @@ impl Lineup {
         Ok(())
     }
 
+    pub fn get_fallback_libero(&self) -> Option<Uuid> {
+        self.fallback_libero
+    }
+
     pub fn set_current_setter(&mut self, new_setter: &Uuid) -> Result<(), AppError> {
         if self.find_position(new_setter).is_some() {
             self.current_setter = *new_setter;
