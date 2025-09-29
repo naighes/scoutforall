@@ -174,6 +174,9 @@ pub struct Labels {
     pub points: &'static str,
     pub summary: &'static str,
     pub phase_efficiency: &'static str,
+    pub invalid_selection: &'static str,
+    pub current_directory: &'static str,
+    pub enter_directory: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -347,6 +350,9 @@ const EN: Labels = Labels {
     points: "points",
     summary: "summary",
     phase_efficiency: "phase efficiency",
+    invalid_selection: "invalid selection",
+    current_directory: "current directory",
+    enter_directory: "enter directory",
 };
 
 const IT: Labels = Labels {
@@ -520,6 +526,9 @@ const IT: Labels = Labels {
     points: "punti",
     summary: "riepilogo",
     phase_efficiency: "efficienza di fase",
+    invalid_selection: "selezione non valida",
+    current_directory: "directory corrente",
+    enter_directory: "entra nella directory",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {
