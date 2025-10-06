@@ -20,3 +20,9 @@ It helps coaches and analysts track match events and generate useful reports for
 ## contributing
 
 Pull requests and bug reports are welcome!
+
+## license
+
+This project is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0).  
+You are free to use, modify and distribute this software under the same license.
+See the [LICENSE](./LICENSE) file for details.
