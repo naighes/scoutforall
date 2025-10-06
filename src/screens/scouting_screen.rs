@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
 use chrono::Utc;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -10,10 +13,10 @@ use uuid::Uuid;
 
 use crate::{
     localization::current_labels,
-    ops::{append_event, remove_last_event},
+    providers::set_writer::SetWriter,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Screen},
+        screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
@@ -25,7 +28,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct ScoutingScreen {
+pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
     current_match: MatchEntry,
     set: SetEntry,
     snapshot: Snapshot,
@@ -37,6 +40,7 @@ pub struct ScoutingScreen {
     back_stack_count: Option<u8>,
     back: bool,
     footer: NavigationFooter,
+    set_writer: Arc<SSW>,
 }
 
 #[derive(Debug)]
@@ -77,29 +81,7 @@ enum ScoutingScreenState {
     Replacement,
 }
 
-impl Screen for ScoutingScreen {
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        use KeyCode::*;
-        use ScoutingScreenState::*;
-        match (&self.notify_message.has_value(), key.code, &self.state) {
-            (true, _, _) => {
-                self.notify_message.reset();
-                if self.back {
-                    AppAction::Back(true, self.back_stack_count)
-                } else {
-                    AppAction::None
-                }
-            }
-            (false, Esc, _) => AppAction::Back(true, self.back_stack_count),
-            (false, _, Event) => self.handle_event_screen(key),
-            (false, _, Player) => self.handle_player_screen(key),
-            (false, _, Eval) => self.handle_eval_screen(key),
-            (false, _, Replacement) => self.handle_replacement_screen(key),
-        }
-    }
-
-    fn on_resume(&mut self, _: bool) {}
-
+impl<SSW: SetWriter + Send + Sync> Renderable for ScoutingScreen<SSW> {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -143,13 +125,39 @@ impl Screen for ScoutingScreen {
     }
 }
 
-impl ScoutingScreen {
+#[async_trait]
+impl<SSW: SetWriter + Send + Sync> ScreenAsync for ScoutingScreen<SSW> {
+    async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        use KeyCode::*;
+        use ScoutingScreenState::*;
+        match (&self.notify_message.has_value(), key.code, &self.state) {
+            (true, _, _) => {
+                self.notify_message.reset();
+                if self.back {
+                    AppAction::Back(true, self.back_stack_count)
+                } else {
+                    AppAction::None
+                }
+            }
+            (false, Esc, _) => AppAction::Back(true, self.back_stack_count),
+            (false, _, Event) => self.handle_event_screen(key).await,
+            (false, _, Player) => self.handle_player_screen(key).await,
+            (false, _, Eval) => self.handle_eval_screen(key).await,
+            (false, _, Replacement) => self.handle_replacement_screen(key).await,
+        }
+    }
+
+    async fn refresh_data(&mut self) {}
+}
+
+impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
     pub fn new(
         current_match: MatchEntry,
         set: SetEntry,
         snapshot: Snapshot,
         available_options: Vec<EventTypeEnum>,
         back_stack_count: Option<u8>,
+        set_writer: Arc<SSW>,
     ) -> Self {
         ScoutingScreen {
             current_match,
@@ -163,6 +171,7 @@ impl ScoutingScreen {
             back_stack_count,
             back: false,
             footer: NavigationFooter::new(),
+            set_writer,
         }
     }
 
@@ -244,15 +253,15 @@ impl ScoutingScreen {
             .collect()
     }
 
-    fn undo_last_event(&mut self) -> AppAction {
+    async fn undo_last_event(&mut self) -> AppAction {
         use EventTypeEnum::*;
         use ScoutingScreenState::*;
         // it's the event selection screen => remove the entry from the csv file
-        let Ok(Some(removed_event)) = remove_last_event(
-            &self.current_match.team,
-            &self.current_match.id,
-            self.set.set_number,
-        ) else {
+        let Ok(Some(removed_event)) = self
+            .set_writer
+            .remove_last_event(&self.current_match, self.set.set_number)
+            .await
+        else {
             // TODO: handle error?
             return AppAction::None;
         };
@@ -320,19 +329,17 @@ impl ScoutingScreen {
         }
     }
 
-    fn add_event(&mut self, event: &EventEntry) -> AppAction {
+    async fn add_event(&mut self, event: &EventEntry) -> AppAction {
         // append event to the file
-        let currently_available_options = append_event(
-            &self.current_match.team,
-            &self.current_match.id,
-            self.set.set_number,
-            event,
-        )
-        // update snapshot and get new available options
-        .and_then(|_| {
-            self.snapshot
-                .add_event(event, self.currently_available_options.clone())
-        });
+        let currently_available_options = self
+            .set_writer
+            .append_event(&self.current_match, self.set.set_number, event)
+            .await
+            // update snapshot and get new available options
+            .and_then(|_| {
+                self.snapshot
+                    .add_event(event, self.currently_available_options.clone())
+            });
         match currently_available_options {
             Ok(options) => {
                 // append event to the set
@@ -363,13 +370,13 @@ impl ScoutingScreen {
     /* event handling */
 
     // sequence is event type => player => eval
-    fn handle_event_screen(&mut self, key: KeyEvent) -> AppAction {
+    async fn handle_event_screen(&mut self, key: KeyEvent) -> AppAction {
         use EventTypeEnum::*;
         use KeyCode::*;
         let last_event = self.map_key_to_event(key.code, &self.current_event);
         match (key.code, last_event) {
             // undo
-            (Char('u'), _) => self.undo_last_event(),
+            (Char('u'), _) => self.undo_last_event().await,
             (_, EventTypeInput::Some(event_type)) => {
                 let is_option_available = self.currently_available_options.contains(&event_type);
                 match (is_option_available, event_type) {
@@ -395,7 +402,7 @@ impl ScoutingScreen {
                             player: None,
                             target_player: None,
                         };
-                        self.add_event(&entry)
+                        self.add_event(&entry).await
                     }
                     // the selected option is not available => error
                     _ => {
@@ -418,7 +425,7 @@ impl ScoutingScreen {
         }
     }
 
-    fn handle_replacement_screen(&mut self, key: KeyEvent) -> AppAction {
+    async fn handle_replacement_screen(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         match (key.code, &self.current_event, self.player) {
             (Char('u'), _, _) => {
@@ -439,25 +446,27 @@ impl ScoutingScreen {
                     .snapshot
                     .current_lineup
                     .get_available_replacements(&self.current_match.team, replaced_id);
-                c.to_digit(10)
-                    .and_then(|d| u8::try_from(d).ok())
-                    .take_if(|d| (1..=available_replacements.len() as u8).contains(d))
-                    .and_then(|d| available_replacements.iter().find(|(i, _)| *i == d))
-                    .map(|(_, p)| EventEntry {
-                        timestamp: Utc::now(),
-                        event_type: *event_type,
-                        eval: None,
-                        player: Some(replaced_id),
-                        target_player: Some(p.id),
-                    })
-                    .map(|entry| self.add_event(&entry))
-                    .unwrap_or(AppAction::None)
+                if let Some(d) = c.to_digit(10).and_then(|d| u8::try_from(d).ok()) {
+                    if (1..=available_replacements.len() as u8).contains(&d) {
+                        if let Some((_, p)) = available_replacements.iter().find(|(i, _)| *i == d) {
+                            let entry = EventEntry {
+                                timestamp: Utc::now(),
+                                event_type: *event_type,
+                                eval: None,
+                                player: Some(replaced_id),
+                                target_player: Some(p.id),
+                            };
+                            return self.add_event(&entry).await;
+                        }
+                    }
+                }
+                AppAction::None
             }
             _ => AppAction::None,
         }
     }
 
-    fn handle_player_screen(&mut self, key: KeyEvent) -> AppAction {
+    async fn handle_player_screen(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         let available_lineup_players = self.get_lineup_choices();
         // undo
@@ -487,13 +496,16 @@ impl ScoutingScreen {
                 self.state = ScoutingScreenState::Replacement;
                 AppAction::None
             }
-            (Some(player), EventTypeInput::Some(event_type)) => self.add_event(&EventEntry {
-                timestamp: Utc::now(),
-                event_type: *event_type,
-                eval: None,
-                player: Some(player.id),
-                target_player: None,
-            }),
+            (Some(player), EventTypeInput::Some(event_type)) => {
+                self.add_event(&EventEntry {
+                    timestamp: Utc::now(),
+                    event_type: *event_type,
+                    eval: None,
+                    player: Some(player.id),
+                    target_player: None,
+                })
+                .await
+            }
             _ => {
                 self.notify_message
                     .set_error(current_labels().invalid_player_selection.to_string());
@@ -502,7 +514,7 @@ impl ScoutingScreen {
         }
     }
 
-    fn handle_eval_screen(&mut self, key: KeyEvent) -> AppAction {
+    async fn handle_eval_screen(&mut self, key: KeyEvent) -> AppAction {
         // undo
         if key.code == Char('u') {
             // it's an eval screen, so go to
@@ -539,7 +551,7 @@ impl ScoutingScreen {
                         player: self.player,
                         target_player: None,
                     };
-                    return self.add_event(&entry);
+                    return self.add_event(&entry).await;
                 }
                 _ => {
                     let template = current_labels().evaluation_not_allowed_for_event;

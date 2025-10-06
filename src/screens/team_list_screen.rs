@@ -1,17 +1,23 @@
+use std::{path::PathBuf, sync::Arc};
+
 use crate::{
     localization::current_labels,
-    ops::{load_settings, load_teams},
+    providers::{
+        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
+        settings_writer::SettingsWriter, team_reader::TeamReader, team_writer::TeamWriter,
+    },
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        edit_team::EditTeamScreen,
+        edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
-        import_team::ImportTeamAction,
-        screen::{AppAction, Screen},
-        settings::SettingsScreen,
-        team_details::TeamDetailsScreen,
+        import_team_screen::ImportTeamAction,
+        screen::{AppAction, Renderable, ScreenAsync},
+        settings_screen::SettingsScreen,
+        team_details_screen::TeamDetailsScreen,
     },
-    shapes::{enums::FriendlyName, team::TeamEntry},
+    shapes::{enums::FriendlyName, settings::Settings, team::TeamEntry},
 };
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use dirs::home_dir;
 use ratatui::{
@@ -22,16 +28,61 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct TeamListScreen {
+pub struct TeamListScreen<
+    TR: TeamReader + Send + Sync,
+    TW: TeamWriter + Send + Sync,
+    SW: SettingsWriter + Send + Sync,
+    MR: MatchReader + Send + Sync,
+    MW: MatchWriter + Send + Sync,
+    SSW: SetWriter + Send + Sync,
+> {
     list_state: ListState,
     teams: Vec<TeamEntry>,
-    refresh: bool,
+    settings: Settings,
     notify_message: NotifyBanner,
     footer: NavigationFooter,
+    base_path: PathBuf,
+    team_reader: Arc<TR>,
+    team_writer: Arc<TW>,
+    settings_writer: Arc<SW>,
+    match_reader: Arc<MR>,
+    match_writer: Arc<MW>,
+    set_writer: Arc<SSW>,
 }
 
-impl Screen for TeamListScreen {
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+#[async_trait]
+impl<
+        TR: TeamReader + Send + Sync + 'static,
+        TW: TeamWriter + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        MR: MatchReader + Send + Sync + 'static,
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+    > ScreenAsync for TeamListScreen<TR, TW, SW, MR, MW, SSW>
+{
+    async fn refresh_data(&mut self) {
+        match self.team_reader.read_all().await {
+            Ok(teams) => {
+                self.teams = teams;
+                if self.teams.is_empty() {
+                    self.list_state.select(None);
+                } else if let Some(selected) = self.list_state.selected() {
+                    if selected >= self.teams.len() {
+                        self.list_state.select(Some(self.teams.len() - 1));
+                    }
+                } else {
+                    self.list_state.select(Some(0));
+                }
+            }
+            Err(_) => {
+                self.notify_message
+                    .set_error(current_labels().could_not_load_teams.to_string());
+                self.teams = vec![];
+            }
+        }
+    }
+
+    async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (key.code, &self.notify_message.has_value()) {
             (_, true) => {
                 self.notify_message.reset();
@@ -49,17 +100,24 @@ impl Screen for TeamListScreen {
             {
                 None => AppAction::None,
                 Some(team) => AppAction::SwitchScreen(Box::new(TeamDetailsScreen::new(
-                    self.teams.clone(),
-                    team.id,
+                    team,
+                    self.base_path.clone(),
+                    self.team_reader.clone(),
+                    self.team_writer.clone(),
+                    self.match_reader.clone(),
+                    self.match_writer.clone(),
+                    self.set_writer.clone(),
                 ))),
             },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Char('n'), _) => AppAction::SwitchScreen(Box::new(EditTeamScreen::new())),
+            (KeyCode::Char('n'), _) => {
+                AppAction::SwitchScreen(Box::new(EditTeamScreen::new(self.team_writer.clone())))
+            }
             (KeyCode::Char('i'), _) => match home_dir() {
                 Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
                     path,
                     current_labels().import_team,
-                    ImportTeamAction,
+                    ImportTeamAction::new(self.team_reader.clone(), self.team_writer.clone()),
                 ))),
                 None => {
                     self.notify_message.set_error(
@@ -70,30 +128,25 @@ impl Screen for TeamListScreen {
                     AppAction::None
                 }
             },
-            (KeyCode::Char('s'), _) => match load_settings() {
-                Ok(settings) => AppAction::SwitchScreen(Box::new(SettingsScreen::new(settings))),
-                Err(_) => {
-                    self.notify_message
-                        .set_error(current_labels().could_not_load_settings.to_string());
-                    AppAction::None
-                }
-            },
+            (KeyCode::Char('s'), _) => AppAction::SwitchScreen(Box::new(SettingsScreen::new(
+                self.settings.clone(),
+                self.settings_writer.clone(),
+            ))),
             _ => AppAction::None,
         }
     }
+}
 
+impl<
+        TR: TeamReader + Send + Sync + 'static,
+        TW: TeamWriter + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        MR: MatchReader + Send + Sync + 'static,
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+    > Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW>
+{
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        if self.refresh {
-            self.refresh = false;
-            self.teams = match load_teams() {
-                Ok(teams) => teams,
-                Err(_) => {
-                    self.notify_message
-                        .set_error(current_labels().could_not_load_teams.to_string());
-                    vec![]
-                }
-            }
-        }
         self.notify_message.render(f, footer_right);
         let items: Vec<ListItem> = self
             .teams
@@ -120,22 +173,41 @@ impl Screen for TeamListScreen {
         self.footer
             .render(f, footer_left, self.get_footer_entries());
     }
-
-    fn on_resume(&mut self, refresh: bool) {
-        if refresh {
-            self.refresh = true;
-        }
-    }
 }
 
-impl TeamListScreen {
-    pub fn new() -> Self {
+impl<
+        TR: TeamReader + Send + Sync,
+        TW: TeamWriter + Send + Sync,
+        SW: SettingsWriter + Send + Sync,
+        MR: MatchReader + Send + Sync,
+        MW: MatchWriter + Send + Sync,
+        SSW: SetWriter + Send + Sync,
+    > TeamListScreen<TR, TW, SW, MR, MW, SSW>
+{
+    pub fn new(
+        settings: Settings,
+        teams: Vec<TeamEntry>,
+        base_path: PathBuf,
+        team_reader: Arc<TR>,
+        team_writer: Arc<TW>,
+        settings_writer: Arc<SW>,
+        match_reader: Arc<MR>,
+        match_writer: Arc<MW>,
+        set_writer: Arc<SSW>,
+    ) -> Self {
         TeamListScreen {
-            teams: vec![],
-            refresh: true,
+            teams,
             list_state: ListState::default(),
             notify_message: NotifyBanner::new(),
+            settings: settings.clone(),
             footer: NavigationFooter::new(),
+            base_path,
+            team_reader,
+            team_writer,
+            settings_writer,
+            match_reader,
+            match_writer,
+            set_writer,
         }
     }
 

@@ -1,11 +1,12 @@
 use crate::{
     errors::{AppError, IOError},
-    io::path::get_match_folder_path,
+    providers::fs::path::get_match_folder_path,
     screens::{file_system_screen::FileSystemAction, screen::AppAction},
     shapes::team::TeamEntry,
 };
+use async_trait::async_trait;
 use hf::is_hidden;
-use std::{fs, io::Write};
+use std::{fs, io::Write, path::PathBuf};
 use std::{fs::File, path::Path};
 use zip::write::FileOptions;
 use zip::ZipWriter;
@@ -13,14 +14,20 @@ use zip::ZipWriter;
 pub struct ExportMatchAction {
     team: TeamEntry,
     match_id: String,
+    base_path: PathBuf,
 }
 
 impl ExportMatchAction {
-    pub fn new(team: TeamEntry, match_id: String) -> Self {
-        Self { team, match_id }
+    pub fn new(team: TeamEntry, match_id: String, base_path: PathBuf) -> Self {
+        Self {
+            team,
+            match_id,
+            base_path,
+        }
     }
 }
 
+#[async_trait]
 impl FileSystemAction for ExportMatchAction {
     fn is_selectable(&self, path: &Path) -> bool {
         !is_hidden(path).unwrap_or_default() && path.is_dir()
@@ -36,8 +43,9 @@ impl FileSystemAction for ExportMatchAction {
                     .unwrap_or(false))
     }
 
-    fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
-        let match_folder_path = get_match_folder_path(&self.team.id, &self.match_id)?;
+    async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
+        let match_folder_path =
+            get_match_folder_path(&self.base_path, &self.team.id, &self.match_id)?;
         let zip_file_path = path.join(format!("{}.zip", self.match_id));
         let file = File::create(&zip_file_path).map_err(|e| AppError::IO(IOError::from(e)))?;
         let mut zip = ZipWriter::new(file);

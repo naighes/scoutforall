@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::errors::{AppError, IOError};
+
 #[derive(Debug)]
 pub struct DatePicker {
     year: String,
@@ -185,14 +187,32 @@ impl DatePicker {
         }
     }
 
-    pub fn get_selected_value(&self) -> Result<DateTime<FixedOffset>, Box<dyn std::error::Error>> {
+    pub fn get_selected_value(&self) -> Result<DateTime<FixedOffset>, AppError> {
         let str = format!("{}-{}-{}", self.year, self.month, self.day);
-        let date = NaiveDate::parse_from_str(&str, "%Y-%m-%d")?;
-        let naive_datetime = date.and_hms_opt(0, 0, 0).ok_or("invalid time")?;
-        let offset = FixedOffset::east_opt(0).ok_or("invalid offset")?;
+        let date = NaiveDate::parse_from_str(&str, "%Y-%m-%d")
+            .map_err(|e| AppError::IO(IOError::Msg(format!("failed to parse date: {}", e))))?;
+        let naive_datetime = date
+            .and_hms_opt(0, 0, 0)
+            .ok_or("invalid time")
+            .map_err(|e| {
+                AppError::IO(IOError::Msg(format!(
+                    "failed to create naive datetime: {}",
+                    e
+                )))
+            })?;
+        let offset = FixedOffset::east_opt(0)
+            .ok_or("invalid offset")
+            .map_err(|e| {
+                AppError::IO(IOError::Msg(format!(
+                    "failed to create fixed offset: {}",
+                    e
+                )))
+            })?;
         match naive_datetime.and_local_timezone(offset) {
             chrono::LocalResult::Single(dt) => Ok(dt),
-            _ => Err("ambiguous or impossible datetime".into()),
+            _ => Err(AppError::IO(IOError::Msg(
+                "ambiguous or impossible datetime".to_string(),
+            ))),
         }
     }
 }

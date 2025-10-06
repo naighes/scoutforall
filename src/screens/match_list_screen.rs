@@ -1,29 +1,27 @@
+use std::{path::PathBuf, sync::Arc};
+
 use crate::{
     errors::AppError,
     localization::current_labels,
-    ops::get_matches,
     pdf::open_match_pdf,
+    providers::{match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter},
     screens::{
-        add_match::AddMatchScreen,
+        add_match_screen::AddMatchScreen,
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
             team_header::TeamHeader,
         },
-        export_match::ExportMatchAction,
+        export_match_screen::ExportMatchAction,
         file_system_screen::FileSystemScreen,
-        import_match::ImportMatchAction,
+        import_match_screen::ImportMatchAction,
         match_stats_screen::MatchStatsScreen,
         scouting_screen::ScoutingScreen,
-        screen::{AppAction, Screen},
+        screen::{AppAction, Renderable, ScreenAsync},
         start_set_screen::StartSetScreen,
     },
-    shapes::{
-        enums::TeamSideEnum,
-        r#match::{MatchEntry, MatchStatus},
-        set::SetEntry,
-        team::TeamEntry,
-    },
+    shapes::{enums::TeamSideEnum, r#match::MatchEntry, set::SetEntry, team::TeamEntry},
 };
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use dirs::home_dir;
 use ratatui::{
@@ -38,103 +36,30 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct MatchListScreen {
+pub struct MatchListScreen<
+    MR: MatchReader + Send + Sync,
+    MW: MatchWriter + Send + Sync,
+    SSW: SetWriter + Send + Sync,
+> {
     list_state: ListState,
     team: TeamEntry,
-    matches: Vec<(MatchEntry, MatchStatus)>,
+    matches: Vec<MatchEntry>,
     notify_message: NotifyBanner,
-    refresh: bool,
     header: TeamHeader,
     footer: NavigationFooter,
+    base_path: PathBuf,
+    match_reader: Arc<MR>,
+    match_writer: Arc<MW>,
+    set_writer: Arc<SSW>,
 }
 
-impl Screen for MatchListScreen {
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                AppAction::None
-            }
-            (KeyCode::Down, _) => self.next_match(),
-            (KeyCode::Up, _) => self.previous_match(),
-            (KeyCode::Enter, _) => self.handle_enter_key(),
-            (KeyCode::Char(' '), _) => self.handle_space_key(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Char('n'), _) => {
-                if self.team.players.len() >= 6 {
-                    AppAction::SwitchScreen(Box::new(AddMatchScreen::new(self.team.clone())))
-                } else {
-                    AppAction::None
-                }
-            }
-            (KeyCode::Char('i'), _) => match home_dir() {
-                Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                    path,
-                    current_labels().import_match,
-                    ImportMatchAction::new(self.team.clone()),
-                ))),
-                None => {
-                    self.notify_message.set_error(
-                        current_labels()
-                            .could_not_recognize_home_directory
-                            .to_string(),
-                    );
-                    AppAction::None
-                }
-            },
-            (KeyCode::Char('s'), _) => match (
-                home_dir(),
-                self.list_state
-                    .selected()
-                    .and_then(|i| self.matches.get(i).map(|(m, _)| m).cloned()),
-            ) {
-                (Some(path), Some(match_entry)) => {
-                    AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                        path,
-                        current_labels().export,
-                        ExportMatchAction::new(self.team.clone(), match_entry.id),
-                    )))
-                }
-                (None, _) => {
-                    self.notify_message.set_error(
-                        current_labels()
-                            .could_not_recognize_home_directory
-                            .to_string(),
-                    );
-                    AppAction::None
-                }
-                (_, None) => {
-                    self.notify_message
-                        .set_error(current_labels().no_match_selected.to_string());
-                    AppAction::None
-                }
-            },
-            _ => AppAction::None,
-        }
-    }
-
+impl<
+        MR: MatchReader + Send + Sync + 'static,
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+    > Renderable for MatchListScreen<MR, MW, SSW>
+{
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        if self.refresh {
-            self.refresh = false;
-            self.matches = match get_matches(&self.team) {
-                Ok(matches) => matches.iter().fold(vec![], |acc, m| {
-                    let status = m.get_status();
-                    match status {
-                        Ok(s) => {
-                            let mut new_acc = acc;
-                            new_acc.push((m.clone(), s));
-                            new_acc
-                        }
-                        Err(_) => acc,
-                    }
-                }),
-                Err(_) => {
-                    self.notify_message
-                        .set_error(current_labels().could_not_load_matches.to_string());
-                    vec![]
-                }
-            }
-        }
         let container = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(5), Constraint::Min(1)])
@@ -189,34 +114,149 @@ impl Screen for MatchListScreen {
         self.footer
             .render(f, footer_left, self.get_footer_entries().clone());
     }
+}
 
-    fn on_resume(&mut self, refresh: bool) {
-        if refresh {
-            self.refresh = true;
+#[async_trait]
+impl<
+        MR: MatchReader + Send + Sync + 'static,
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+    > ScreenAsync for MatchListScreen<MR, MW, SSW>
+{
+    async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
+                AppAction::None
+            }
+            (KeyCode::Down, _) => self.next_match(),
+            (KeyCode::Up, _) => self.previous_match(),
+            (KeyCode::Enter, _) => self.handle_enter_key(),
+            (KeyCode::Char(' '), _) => self.handle_space_key(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Char('n'), _) => {
+                if self.team.players.len() >= 6 {
+                    AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
+                        self.team.clone(),
+                        self.match_writer.clone(),
+                        self.set_writer.clone(),
+                    )))
+                } else {
+                    AppAction::None
+                }
+            }
+            (KeyCode::Char('i'), _) => match home_dir() {
+                Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                    path,
+                    current_labels().import_match,
+                    ImportMatchAction::new(
+                        self.team.clone(),
+                        self.match_reader.clone(),
+                        self.match_writer.clone(),
+                        self.set_writer.clone(),
+                    ),
+                ))),
+                None => {
+                    self.notify_message.set_error(
+                        current_labels()
+                            .could_not_recognize_home_directory
+                            .to_string(),
+                    );
+                    AppAction::None
+                }
+            },
+            (KeyCode::Char('s'), _) => match (
+                home_dir(),
+                self.list_state
+                    .selected()
+                    .and_then(|i| self.matches.get(i).cloned()),
+            ) {
+                (Some(path), Some(match_entry)) => {
+                    AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                        path,
+                        current_labels().export,
+                        ExportMatchAction::new(
+                            self.team.clone(),
+                            match_entry.id,
+                            self.base_path.clone(),
+                        ),
+                    )))
+                }
+                (None, _) => {
+                    self.notify_message.set_error(
+                        current_labels()
+                            .could_not_recognize_home_directory
+                            .to_string(),
+                    );
+                    AppAction::None
+                }
+                (_, None) => {
+                    self.notify_message
+                        .set_error(current_labels().no_match_selected.to_string());
+                    AppAction::None
+                }
+            },
+            _ => AppAction::None,
+        }
+    }
+
+    async fn refresh_data(&mut self) {
+        match self.match_reader.read_all(&self.team).await {
+            Ok(matches) => {
+                self.matches = matches;
+                if self.matches.is_empty() {
+                    self.list_state.select(None);
+                } else if let Some(selected) = self.list_state.selected() {
+                    if selected >= self.matches.len() {
+                        self.list_state.select(Some(self.matches.len() - 1));
+                    }
+                } else {
+                    self.list_state.select(Some(0));
+                }
+            }
+            Err(_) => {
+                self.notify_message
+                    .set_error(current_labels().could_not_load_matches.to_string());
+            }
         }
     }
 }
 
-impl MatchListScreen {
-    pub fn new(team: TeamEntry) -> Self {
+impl<
+        MR: MatchReader + Send + Sync + 'static,
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+    > MatchListScreen<MR, MW, SSW>
+{
+    pub fn new(
+        team: TeamEntry,
+        matches: Vec<MatchEntry>,
+        base_path: PathBuf,
+        match_reader: Arc<MR>,
+        match_writer: Arc<MW>,
+        set_writer: Arc<SSW>,
+    ) -> Self {
         MatchListScreen {
-            matches: vec![],
+            matches,
             team,
             list_state: ListState::default(),
-            refresh: true,
+            base_path,
             notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
             footer: NavigationFooter::new(),
+            match_reader,
+            match_writer,
+            set_writer,
         }
     }
 
     fn get_match_row(
         &self,
-        m: &(MatchEntry, MatchStatus),
+        m: &MatchEntry,
         row_index: usize,
         match_index: usize,
     ) -> Result<Row<'_>, AppError> {
-        let (m, status) = m;
+        let status = m.get_status()?;
         let (name_left, name_right, score_left, score_right) = if m.home {
             (
                 m.team.name.clone(),
@@ -272,6 +312,7 @@ impl MatchListScreen {
                 (_, Some(TeamSideEnum::Us)) => Some(TeamSideEnum::Them),
             },
             Some(1),
+            self.set_writer.clone(),
         )))
     }
 
@@ -284,6 +325,7 @@ impl MatchListScreen {
                     snapshot,
                     available_options,
                     Some(1),
+                    self.set_writer.clone(),
                 )))
             }
             Err(_) => {
@@ -356,7 +398,7 @@ impl MatchListScreen {
         match self
             .list_state
             .selected()
-            .and_then(|i| self.matches.get(i).map(|(m, _)| m).cloned())
+            .and_then(|i| self.matches.get(i).cloned())
         {
             Some(m) => match MatchStatsScreen::new(m.clone()) {
                 Ok(screen) => AppAction::SwitchScreen(Box::new(screen)),
@@ -378,7 +420,7 @@ impl MatchListScreen {
         let selected_match = match self
             .list_state
             .selected()
-            .and_then(|i| self.matches.get(i).map(|(m, _)| m).cloned())
+            .and_then(|i| self.matches.get(i).cloned())
         {
             Some(m) => m,
             None => {

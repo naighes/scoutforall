@@ -7,6 +7,7 @@ pub struct Labels {
     pub could_not_recognize_home_directory: &'static str,
     pub could_not_create_app_directory: &'static str,
     pub could_not_create_team_directory: &'static str,
+    pub could_not_create_match_directory: &'static str,
     pub new_match: &'static str,
     pub navigate: &'static str,
     pub confirm: &'static str,
@@ -106,7 +107,6 @@ pub struct Labels {
     pub net_fault: &'static str,
     pub language_is_required: &'static str,
     pub settings: &'static str,
-    pub could_not_load_settings: &'static str,
     pub could_not_save_settings: &'static str,
     pub language: &'static str,
     #[cfg(feature = "self-update")]
@@ -183,6 +183,7 @@ const EN: Labels = Labels {
     could_not_recognize_home_directory: "could not recognize home directory",
     could_not_create_app_directory: "could not create app directory",
     could_not_create_team_directory: "could not create team directory",
+    could_not_create_match_directory: "could not create match directory",
     new_match: "new match",
     navigate: "navigate",
     confirm: "confirm",
@@ -282,7 +283,6 @@ const EN: Labels = Labels {
     net_fault: "net fault",
     language_is_required: "language is required",
     settings: "settings",
-    could_not_load_settings: "could not load settings",
     could_not_save_settings: "could not save settings",
     language: "language",
     #[cfg(feature = "self-update")]
@@ -359,6 +359,7 @@ const IT: Labels = Labels {
     could_not_recognize_home_directory: "impossibile riconoscere la directory home",
     could_not_create_app_directory: "impossibile creare la directory dell'applicazione",
     could_not_create_team_directory: "impossibile creare la directory della squadra",
+    could_not_create_match_directory: "impossibile creare la directory della partita",
     new_match: "nuova partita",
     navigate: "naviga",
     confirm: "conferma",
@@ -458,7 +459,6 @@ const IT: Labels = Labels {
     net_fault: "fallo di rete",
     language_is_required: "la lingua è obbligatoria",
     settings: "impostazioni",
-    could_not_load_settings: "impossibile caricare le impostazioni",
     could_not_save_settings: "impossibile salvare le impostazioni",
     language: "lingua",
     #[cfg(feature = "self-update")]

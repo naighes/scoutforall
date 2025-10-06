@@ -202,7 +202,7 @@ mod tests {
             &EventTypeEnum::S
         );
 
-        let list: Vec<(EventEntry, Box<dyn Fn(&Snapshot)>)> = vec![
+        let list: Vec<(EventEntry, Box<dyn Fn(&Snapshot, &Vec<EventTypeEnum>)>)> = vec![
             (
                 EventEntry {
                     event_type: EventTypeEnum::S,
@@ -211,7 +211,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         0,
@@ -238,7 +238,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         0, // rotation
@@ -265,7 +265,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5,
@@ -309,7 +309,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5,
@@ -336,7 +336,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5,
@@ -363,7 +363,7 @@ mod tests {
                     player: Some(setter),
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5, // rotation
@@ -395,7 +395,7 @@ mod tests {
                     eval: Some(EvalEnum::Negative),
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5, // rotation
@@ -422,7 +422,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5, // rotation
@@ -449,7 +449,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5, // rotation
@@ -476,7 +476,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5, // rotation
@@ -503,7 +503,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         5, // rotation
@@ -542,7 +542,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -569,7 +569,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -615,41 +615,45 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
-                    assert_snapshot(
-                        snapshot,
-                        4, // rotation
-                        PhaseEnum::Break,
-                        5,                      // score_us
-                        3,                      // score_them
-                        Some(TeamSideEnum::Us), // serving_team
-                        None,                   // libero_position
-                        7,                      // possessions
-                        2,                      // attacks
-                        2,                      // errors
-                        2,                      // unforced_errors
-                        0,                      // counter_attacks
-                        2,                      // opponent_errors
-                        || {
-                            assert_eq!(
-                                1,
-                                snapshot
-                                    .stats
-                                    .distribution
-                                    .query(
-                                        Some(PhaseEnum::Break),
-                                        Some(4),
-                                        None,
-                                        Some(ZoneEnum::Four),
-                                        Some(EvalEnum::Over),
-                                        Some(EvalEnum::Perfect)
-                                    )
-                                    .map(|(_, v)| *v)
-                                    .sum::<u32>()
-                            );
-                        },
-                    );
-                }),
+                Box::new(
+                    |snapshot: &Snapshot, available_options: &Vec<EventTypeEnum>| {
+                        assert_snapshot(
+                            snapshot,
+                            4, // rotation
+                            PhaseEnum::Break,
+                            5,                      // score_us
+                            3,                      // score_them
+                            Some(TeamSideEnum::Us), // serving_team
+                            None,                   // libero_position
+                            7,                      // possessions
+                            2,                      // attacks
+                            2,                      // errors
+                            2,                      // unforced_errors
+                            0,                      // counter_attacks
+                            2,                      // opponent_errors
+                            || {
+                                assert_eq!(
+                                    1,
+                                    snapshot
+                                        .stats
+                                        .distribution
+                                        .query(
+                                            Some(PhaseEnum::Break),
+                                            Some(4),
+                                            None,
+                                            Some(ZoneEnum::Four),
+                                            Some(EvalEnum::Over),
+                                            Some(EvalEnum::Perfect)
+                                        )
+                                        .map(|(_, v)| *v)
+                                        .sum::<u32>()
+                                );
+                                // next phase is serve, so a pass is not expected
+                                assert!(!available_options.contains(&EventTypeEnum::P));
+                            },
+                        );
+                    },
+                ),
             ),
             (
                 EventEntry {
@@ -659,7 +663,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -686,7 +690,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -713,7 +717,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -757,7 +761,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -784,7 +788,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         3, // rotation
@@ -811,7 +815,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         3, // rotation
@@ -838,7 +842,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         3, // rotation
@@ -865,7 +869,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         3, // rotation
@@ -892,7 +896,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         3, // rotation
@@ -919,7 +923,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         2, // rotation
@@ -946,7 +950,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         2, // rotation
@@ -973,7 +977,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         2, // rotation
@@ -1000,7 +1004,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         2, // rotation
@@ -1027,7 +1031,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         1, // rotation
@@ -1054,7 +1058,7 @@ mod tests {
                     target_player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         1, // rotation
@@ -1093,7 +1097,7 @@ mod tests {
                     player: Some(setter_replacement),
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         1, // rotation
@@ -1122,7 +1126,7 @@ mod tests {
                     player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         1, // rotation
@@ -1154,7 +1158,7 @@ mod tests {
                     player: Some(opposite),
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -1184,7 +1188,7 @@ mod tests {
                     player: Some(oh1),
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -1211,7 +1215,7 @@ mod tests {
                     player: Some(opposite),
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         4, // rotation
@@ -1250,7 +1254,7 @@ mod tests {
                     player: None,
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         3, // rotation
@@ -1277,7 +1281,7 @@ mod tests {
                     player: Some(opposite),
                     timestamp: Utc::now(),
                 },
-                Box::new(|snapshot: &Snapshot| {
+                Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
                         snapshot,
                         3, // rotation
@@ -1325,7 +1329,7 @@ mod tests {
             availeble_options = snapshot
                 .add_event(&event, availeble_options)
                 .expect("expected a successful computation");
-            assert(&snapshot);
+            assert(&snapshot, &availeble_options);
         }
 
         let setter_already_replaced = snapshot.add_event(

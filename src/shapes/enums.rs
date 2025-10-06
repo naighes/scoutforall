@@ -731,7 +731,8 @@ impl FromStr for RoleEnum {
 }
 
 /// Supported languages.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LanguageEnum {
     En,
     It,
@@ -739,14 +740,6 @@ pub enum LanguageEnum {
 
 impl LanguageEnum {
     pub const ALL: [LanguageEnum; 2] = [LanguageEnum::En, LanguageEnum::It];
-
-    pub fn iso_code(&self) -> &'static str {
-        use LanguageEnum::*;
-        match self {
-            En => "en",
-            It => "it",
-        }
-    }
 }
 
 impl fmt::Display for LanguageEnum {

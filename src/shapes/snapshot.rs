@@ -343,14 +343,14 @@ impl Snapshot {
         use EvalEnum::*;
         use EventTypeEnum::*;
         let serve_them = if self.current_lineup.get_fallback_libero().is_some() {
-            vec![OS, OE, F, A, S, P, D, B, R, CL, CS]
+            vec![OS, OE, F, P, R, CL, CS]
         } else {
-            vec![OS, OE, F, A, S, P, D, B, R, CS]
+            vec![OS, OE, F, P, R, CS]
         };
         let serve_us = if self.current_lineup.get_fallback_libero().is_some() {
-            vec![OS, OE, F, A, S, P, D, B, R, CL, CS]
+            vec![OE, F, S, R, CL, CS]
         } else {
-            vec![OS, OE, F, A, S, P, D, B, R, CS]
+            vec![OE, F, S, R, CS]
         };
         let options_map: HashMap<_, _> = [
             // order: OS, OE, F, A, S, P, D, B, R, CL, CS

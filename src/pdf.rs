@@ -49,10 +49,9 @@ pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
 )
 "#
     ));
-    let sets = m.load_sets()?;
     let mut aggregated_stats = Stats::new();
     let mut players: HashSet<Uuid> = HashSet::new();
-    for set in sets {
+    for set in &m.sets {
         let (snapshot, _) = set.compute_snapshot()?;
         aggregated_stats.merge(&snapshot.stats);
         players.extend(
@@ -62,7 +61,7 @@ pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
                 .iter()
                 .cloned(),
         );
-        content.push_str(&header(Some(&set), Some(&snapshot), m));
+        content.push_str(&header(Some(set), Some(&snapshot), m));
         content.push_str(&resume_stats(
             &snapshot.stats,
             vec![None, Some(PhaseEnum::Break), Some(PhaseEnum::SideOut)],

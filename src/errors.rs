@@ -40,7 +40,7 @@ pub enum IOError {
     #[error("CSV error: {0}")]
     Csv(#[from] csv::Error),
     #[error("std error: {0}")]
-    Std(#[from] Box<dyn std::error::Error>),
+    Std(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error("zip error: {0}")]
     Zip(#[from] ZipError),
 }
