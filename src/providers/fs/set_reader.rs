@@ -1,5 +1,6 @@
 use crate::{
     errors::{AppError, IOError, MatchError},
+    localization::current_labels,
     providers::{fs::path::get_match_folder_path, set_reader::SetReader},
     shapes::{r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
 };
@@ -64,16 +65,16 @@ impl FileSystemSetReader {
 impl SetReader for FileSystemSetReader {
     async fn read_all(&self, m: &MatchEntry) -> Result<Vec<SetEntry>, AppError> {
         let match_path = get_match_folder_path(&self.0, &m.team.id, &m.id)?;
-        let mut dir = read_dir(&match_path).await.map_err(|e| {
-            AppError::Match(MatchError::LoadSetError(format!(
-                "could not read folder {:?}: {}",
-                match_path, e
-            )))
+        let mut dir = read_dir(&match_path).await.map_err(|_| {
+            let template = current_labels().could_not_read_folder;
+            AppError::Match(MatchError::LoadSetError(
+                template.replace("{}", match_path.to_str().unwrap_or("")),
+            ))
         })?;
-        let regex = Regex::new(r"^set_(\d+)\.json$").map_err(|e| {
+        let regex = Regex::new(r"^set_(\d+)\.json$").map_err(|_| {
             AppError::Match(MatchError::LoadSetError(format!(
-                "could not compile regex {:?}: {}",
-                match_path, e
+                "could not compile regex {:?}",
+                match_path,
             )))
         })?;
         let mut tasks = Vec::new();
@@ -95,25 +96,25 @@ impl SetReader for FileSystemSetReader {
                 if let Some(result) = Self::parse_set(&entry, r).await {
                     result
                 } else {
-                    Err(AppError::IO(IOError::Msg("invalid set".into())))
+                    Err(AppError::IO(IOError::Msg(
+                        current_labels().invalid_set.into(),
+                    )))
                 }
             });
         }
         let mut sets: Vec<SetEntry> = try_join_all(tasks).await?;
         if sets.len() > 5 {
-            return Err(AppError::Match(MatchError::LoadSetError(format!(
-                "found more than 5 sets in match {}",
-                &m.id
-            ))));
+            let template = current_labels().found_more_than_5_sets_in_match;
+            return Err(AppError::Match(MatchError::LoadSetError(
+                template.replace("{}", &m.id),
+            )));
         }
         sets.sort_by_key(|s| s.set_number);
         for (i, set) in sets.iter().enumerate() {
             if set.set_number as usize != i + 1 {
-                return Err(AppError::Match(MatchError::LoadSetError(format!(
-                    "expected set {} but found set {}",
-                    i + 1,
-                    set.set_number
-                ))));
+                return Err(AppError::Match(MatchError::LoadSetError(
+                    current_labels().wrong_set_numbering.into(),
+                )));
             }
         }
         Ok(sets)

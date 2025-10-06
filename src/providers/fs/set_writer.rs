@@ -1,5 +1,6 @@
 use crate::{
     errors::{AppError, IOError},
+    localization::current_labels,
     providers::{
         fs::path::{get_match_folder_path, get_set_descriptor_file_path, get_set_events_file_path},
         set_writer::SetWriter,
@@ -57,10 +58,9 @@ impl SetWriter for FileSystemSetWriter {
         )?;
         let descriptor_path = get_set_descriptor_file_path(&self.0, &m.team.id, &m.id, set_number)?;
         if descriptor_path.exists() {
-            return Err(AppError::IO(IOError::Msg(format!(
-                "match already exists at {}",
-                descriptor_path.display()
-            ))));
+            return Err(AppError::IO(IOError::Msg(
+                current_labels().match_already_exists.to_string(),
+            )));
         }
         create_dir_all(descriptor_path.parent().unwrap())
             .await

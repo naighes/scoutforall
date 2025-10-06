@@ -1,6 +1,7 @@
 use crate::{
     constants::MATCH_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
+    localization::current_labels,
     providers::{fs::path::get_team_folder_path, match_reader::MatchReader, set_reader::SetReader},
     shapes::{r#match::MatchEntry, team::TeamEntry},
 };
@@ -65,10 +66,9 @@ impl FileSystemMatchReader {
     async fn map_entry(&self, path: &Path, team: &TeamEntry) -> Result<MatchEntry, AppError> {
         let descriptor_path = path.join(MATCH_DESCRIPTOR_FILE_NAME);
         if !descriptor_path.exists() {
-            return Err(AppError::IO(IOError::Msg(format!(
-                "descriptor file '{}' does not exist",
-                descriptor_path.display()
-            ))));
+            return Err(AppError::IO(IOError::Msg(
+                current_labels().match_descriptor_file_not_found.to_string(),
+            )));
         }
         let content = read_to_string(&descriptor_path)
             .await
@@ -78,7 +78,11 @@ impl FileSystemMatchReader {
         entry.id = path
             .file_name()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| AppError::IO(IOError::Msg("invalid match folder name".into())))?
+            .ok_or_else(|| {
+                AppError::IO(IOError::Msg(
+                    current_labels().invalid_match_folder_name.to_string(),
+                ))
+            })?
             .into();
         entry.team = team.clone();
         entry.sets = self.set_reader.read_all(&entry).await?;

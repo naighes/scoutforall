@@ -177,6 +177,13 @@ pub struct Labels {
     pub invalid_selection: &'static str,
     pub current_directory: &'static str,
     pub enter_directory: &'static str,
+    pub match_descriptor_file_not_found: &'static str,
+    pub invalid_match_folder_name: &'static str,
+    pub could_not_read_folder: &'static str,
+    pub invalid_set: &'static str,
+    pub found_more_than_5_sets_in_match: &'static str,
+    pub wrong_set_numbering: &'static str,
+    pub invalid_team_folder_name: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -353,6 +360,13 @@ const EN: Labels = Labels {
     invalid_selection: "invalid selection",
     current_directory: "current directory",
     enter_directory: "enter directory",
+    match_descriptor_file_not_found: "match descriptor file not found",
+    invalid_match_folder_name: "invalid match folder name",
+    could_not_read_folder: "could not read folder {}",
+    invalid_set: "invalid set",
+    found_more_than_5_sets_in_match: "found more than 5 sets in match {}",
+    wrong_set_numbering: "wrong set numbering",
+    invalid_team_folder_name: "invalid team folder name",
 };
 
 const IT: Labels = Labels {
@@ -529,6 +543,13 @@ const IT: Labels = Labels {
     invalid_selection: "selezione non valida",
     current_directory: "directory corrente",
     enter_directory: "entra nella directory",
+    match_descriptor_file_not_found: "file di descrizione della partita non trovato",
+    invalid_match_folder_name: "nome della cartella della partita non valido",
+    could_not_read_folder: "impossibile leggere la cartella {}",
+    invalid_set: "set non valido",
+    found_more_than_5_sets_in_match: "trovati più di 5 set nella partita {}",
+    wrong_set_numbering: "numerazione dei set errata",
+    invalid_team_folder_name: "nome della cartella della squadra non valido",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {

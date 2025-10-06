@@ -1,6 +1,7 @@
 use crate::{
     constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
+    localization::current_labels,
     providers::team_reader::TeamReader,
     shapes::team::TeamEntry,
 };
@@ -30,10 +31,9 @@ impl FileSystemTeamReader {
             .and_then(|os| os.to_str())
             .and_then(|name| Uuid::parse_str(name).ok())
             .ok_or_else(|| {
-                AppError::IO(IOError::Msg(format!(
-                    "invalid team folder name '{}'",
-                    path.display()
-                )))
+                AppError::IO(IOError::Msg(
+                    current_labels().invalid_team_folder_name.to_string(),
+                ))
             })?;
 
         Ok(TeamEntry { id: uuid, ..team })
