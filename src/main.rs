@@ -1,11 +1,11 @@
 mod constants;
-mod pdf;
 mod util;
 
 mod app;
 mod errors;
 mod localization;
 mod providers;
+mod reporting;
 mod screens;
 mod shapes;
 

@@ -56,6 +56,16 @@ impl FromStr for PhaseEnum {
     }
 }
 
+impl FriendlyName for PhaseEnum {
+    fn friendly_name(&self, labels: &Labels) -> &'static str {
+        use PhaseEnum::*;
+        match self {
+            Break => "break",
+            SideOut => labels.sideout,
+        }
+    }
+}
+
 /// Identifies which team an event or action refers to.
 ///
 /// This enum distinguishes between:

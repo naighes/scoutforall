@@ -1430,6 +1430,57 @@ mod tests {
             )
             .expect("should not throw");
 
-        // TODO: final assertion for snapshot stats
+        let (_, total, count) = snapshot
+            .stats
+            .sideout_first_rally_positiveness(
+                None,
+                None,
+                None,
+                crate::shapes::stats::Metric::Positive,
+            )
+            .unwrap();
+        assert_eq!(total, 9);
+        assert_eq!(count, 5);
+        let (_, _, count) = snapshot
+            .stats
+            .sideout_first_rally_positiveness(
+                None,
+                None,
+                None,
+                crate::shapes::stats::Metric::Efficiency,
+            )
+            .unwrap();
+        assert_eq!(total, 9);
+        assert_eq!(count, 2);
+        let blocker_sideout_attacks = snapshot
+            .stats
+            .event_count(
+                EventTypeEnum::A,
+                None,
+                Some(PhaseEnum::SideOut),
+                None,
+                None,
+                Some(EvalEnum::Over),
+            )
+            .unwrap();
+        assert_eq!(blocker_sideout_attacks, 1);
+        let errors_total = snapshot
+            .stats
+            .sideout_first_rally_errors(None, None, None, None, None)
+            .unwrap();
+        assert_eq!(errors_total, 3);
+        let errors_total_unforced = snapshot
+            .stats
+            .sideout_first_rally_errors(None, None, None, None, Some(ErrorTypeEnum::Unforced))
+            .unwrap();
+        assert_eq!(errors_total_unforced, 2);
+        let (counter_attacks_conversion_rate, total_counter_attacks, successful_counter_attacks) =
+            snapshot
+                .stats
+                .counter_attack_conversion_rate(None, None, None, None)
+                .unwrap();
+        assert_eq!(counter_attacks_conversion_rate, 50.0);
+        assert_eq!(total_counter_attacks, 2);
+        assert_eq!(successful_counter_attacks, 1);
     }
 }

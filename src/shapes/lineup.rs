@@ -374,7 +374,6 @@ impl Lineup {
 
     /* substitutions */
 
-    #[cfg(test)]
     pub fn get_substitutions(&self) -> Vec<SubstitutionRecord> {
         self.substitutions.clone()
     }
@@ -383,7 +382,7 @@ impl Lineup {
         self.substitutions.iter().any(|s| s.replaced == *player_id)
     }
 
-    fn was_player_already_used(&self, player_id: &Uuid) -> bool {
+    pub fn was_player_already_used(&self, player_id: &Uuid) -> bool {
         self.substitutions
             .iter()
             .any(|s| s.replacement == *player_id)

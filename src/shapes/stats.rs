@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Metric {
     Positive,
     Efficiency,
@@ -193,6 +194,60 @@ impl CounterAttackStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FirstRallyStatsKey {
+    pub rotation: u8,
+    pub reception_eval: Option<EvalEnum>,
+    pub finalizing_event_type: Option<EventTypeEnum>,
+    pub finalizing_event_eval: Option<EvalEnum>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FirstRallyStats(pub HashMap<FirstRallyStatsKey, u32>);
+
+impl FirstRallyStats {
+    pub fn new() -> Self {
+        FirstRallyStats(HashMap::new())
+    }
+
+    pub fn add(
+        &mut self,
+        rotation: u8,
+        reception_eval: Option<EvalEnum>,
+        finalizing_event_type: Option<EventTypeEnum>,
+        finalizing_event_eval: Option<EvalEnum>,
+    ) {
+        let key = FirstRallyStatsKey {
+            rotation,
+            reception_eval,
+            finalizing_event_type,
+            finalizing_event_eval,
+        };
+        *self.0.entry(key).or_insert(0) += 1;
+    }
+
+    pub fn merge(&mut self, other: &FirstRallyStats) {
+        for (k, v) in &other.0 {
+            *self.0.entry(k.clone()).or_insert(0) += v;
+        }
+    }
+
+    pub fn query(
+        &self,
+        rotation: Option<u8>,
+        reception_eval: Option<EvalEnum>,
+        finalizing_event_type: Option<EventTypeEnum>,
+        finalizing_event_eval: Option<EvalEnum>,
+    ) -> impl Iterator<Item = (&FirstRallyStatsKey, &u32)> {
+        self.0.iter().filter(move |(k, _)| {
+            rotation.is_none_or(|r| k.rotation == r)
+                && reception_eval.is_none_or(|re| k.reception_eval == Some(re))
+                && finalizing_event_type.is_none_or(|ft| k.finalizing_event_type == Some(ft))
+                && finalizing_event_eval.is_none_or(|fe| k.finalizing_event_eval == Some(fe))
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AttackStatsKey {
     pub phase: PhaseEnum,
     pub rotation: u8,
@@ -236,6 +291,7 @@ impl AttackStats {
         }
     }
 
+    #[allow(dead_code)]
     pub fn query(
         &self,
         phase: Option<PhaseEnum>,
@@ -392,6 +448,7 @@ impl ErrorsStats {
         }
     }
 
+    #[allow(dead_code)]
     pub fn query(
         &self,
         phase: Option<PhaseEnum>,
@@ -433,6 +490,7 @@ impl OpponentErrorsStats {
         }
     }
 
+    #[allow(dead_code)]
     pub fn query(
         &self,
         phase: Option<PhaseEnum>,
@@ -528,6 +586,7 @@ pub struct Stats {
     pub counter_attack: CounterAttackStats,
     pub earned_points: PointsStats,
     pub scored_points: PointsStats,
+    pub first_rally: FirstRallyStats,
 }
 
 impl Stats {
@@ -543,6 +602,7 @@ impl Stats {
             counter_attack: CounterAttackStats::new(),
             earned_points: PointsStats::new(),
             scored_points: PointsStats::new(),
+            first_rally: FirstRallyStats::new(),
         }
     }
 
@@ -557,8 +617,10 @@ impl Stats {
         self.scored_points.merge(&other.scored_points);
         self.possessions.merge(&other.possessions);
         self.phases.merge(&other.phases);
+        self.first_rally.merge(&other.first_rally);
     }
 
+    #[allow(dead_code)]
     pub fn number_of_possessions_per_earned_point(
         &self,
         phase: Option<PhaseEnum>,
@@ -599,6 +661,7 @@ impl Stats {
         }
     }
 
+    #[allow(dead_code)]
     pub fn attack_efficiency(
         &self,
         player: Option<Uuid>,
@@ -631,19 +694,23 @@ impl Stats {
         phase: Option<PhaseEnum>,
         rotation: Option<u8>,
         zone: Option<ZoneEnum>,
-    ) -> Option<f64> {
-        let mut total_attempts: u32 = 0;
-        let mut points_from_counter: u32 = 0;
-        for (key, count) in self
+    ) -> Option<(f64, u32, u32)> {
+        let mut total: u32 = 0;
+        let mut count: u32 = 0;
+        for (key, incr) in self
             .counter_attack
             .query(phase, rotation, player, zone, None)
         {
-            total_attempts += *count;
+            total += *incr;
             if key.eval == EvalEnum::Perfect {
-                points_from_counter += *count;
+                count += *incr;
             }
         }
-        (total_attempts > 0).then_some(100.0 * points_from_counter as f64 / total_attempts as f64)
+        if total == 0 {
+            None
+        } else {
+            Some((100.0 * count as f64 / total as f64, total, count))
+        }
     }
 
     pub fn scored_points(
@@ -666,6 +733,21 @@ impl Stats {
         } else {
             None
         }
+    }
+
+    pub fn total_scored_points(
+        &self,
+        player: Option<Uuid>,
+        phase: Option<PhaseEnum>,
+        rotation: Option<u8>,
+        zone: Option<ZoneEnum>,
+    ) -> Option<u32> {
+        let serve_points = self.scored_points(EventTypeEnum::S, player, phase, rotation, zone);
+        let attack_points = self.scored_points(EventTypeEnum::A, player, phase, rotation, zone);
+        let block_points = self.scored_points(EventTypeEnum::B, player, phase, rotation, zone);
+        let total =
+            serve_points.unwrap_or(0) + attack_points.unwrap_or(0) + block_points.unwrap_or(0);
+        (total > 0).then_some(total)
     }
 
     pub fn errors(
@@ -694,6 +776,34 @@ impl Stats {
                 self.event_count(event_type, player, phase, rotation, zone, Some(eval))
             })
             .reduce(|a, b| a + b)
+    }
+
+    pub fn total_errors(
+        &self,
+        error_type: Option<ErrorTypeEnum>,
+        player: Option<Uuid>,
+        phase: Option<PhaseEnum>,
+        rotation: Option<u8>,
+        zone: Option<ZoneEnum>,
+    ) -> Option<u32> {
+        let pass_errors = self.errors(EventTypeEnum::P, error_type, player, phase, rotation, zone);
+        let attack_errors =
+            self.errors(EventTypeEnum::A, error_type, player, phase, rotation, zone);
+        let dig_errors = self.errors(EventTypeEnum::D, error_type, player, phase, rotation, zone);
+        let serve_errors = self.errors(EventTypeEnum::S, error_type, player, phase, rotation, zone);
+        let block_errors = self.errors(EventTypeEnum::B, error_type, player, phase, rotation, zone);
+        let faults = self.event_count(EventTypeEnum::F, player, phase, rotation, zone, None);
+        let total = pass_errors.unwrap_or(0)
+            + attack_errors.unwrap_or(0)
+            + dig_errors.unwrap_or(0)
+            + serve_errors.unwrap_or(0)
+            + block_errors.unwrap_or(0);
+        let total = if error_type != Some(ErrorTypeEnum::Forced) {
+            total
+        } else {
+            total + faults.unwrap_or(0)
+        };
+        (total > 0).then_some(total)
     }
 
     /// Counts the number of events matching the given filters.
@@ -780,6 +890,110 @@ impl Stats {
             }
         }
         (total > 0).then_some(((score as f64) / (total as f64) * 100.0, total, score))
+    }
+
+    pub fn sideout_first_rally_positiveness(
+        &self,
+        rotation: Option<u8>,
+        reception_eval: Option<EvalEnum>,
+        finalizing_event_type: Option<EventTypeEnum>,
+        metric: Metric,
+    ) -> Option<(f64, u32, i32)> {
+        let mut count: i32 = 0;
+        let mut total: u32 = 0;
+        for (key, incr) in
+            self.first_rally
+                .query(rotation, reception_eval, finalizing_event_type, None)
+        {
+            total += *incr;
+            let contrib = if let (Some(final_type), Some(final_eval)) = (
+                key.finalizing_event_type,
+                key.finalizing_event_eval.as_ref(),
+            ) {
+                // we have an attack
+                metric.score(final_type, final_eval)
+            } else if let Some(final_type) = key.finalizing_event_type {
+                // no evaluation (e.g. OE, OS, F, etc)
+                match final_type {
+                    // direct point us
+                    EventTypeEnum::OE => 1,
+                    // direct point them
+                    EventTypeEnum::OS | EventTypeEnum::F => {
+                        if metric == Metric::Efficiency {
+                            -1
+                        } else {
+                            0
+                        }
+                    }
+                    // other neutral events
+                    _ => 0,
+                }
+            } else if let Some(re_eval) = key.reception_eval.as_ref() {
+                // fallback: use reception
+                metric.score(EventTypeEnum::P, re_eval)
+            } else {
+                0
+            };
+            count += contrib * (*incr as i32);
+        }
+        if total > 0 {
+            Some(((count as f64) / (total as f64) * 100.0, total, count))
+        } else {
+            None
+        }
+    }
+
+    pub fn sideout_first_rally_count(
+        &self,
+        rotation: Option<u8>,
+        reception_eval: Option<EvalEnum>,
+        finalizing_event_type: Option<EventTypeEnum>,
+        finalizing_event_eval: Option<EvalEnum>,
+    ) -> Option<u32> {
+        let mut total = 0;
+        for (_key, incr) in self.first_rally.query(
+            rotation,
+            reception_eval,
+            finalizing_event_type,
+            finalizing_event_eval,
+        ) {
+            total += *incr;
+        }
+        if total > 0 {
+            Some(total)
+        } else {
+            None
+        }
+    }
+
+    pub fn sideout_first_rally_errors(
+        &self,
+        rotation: Option<u8>,
+        reception_eval: Option<EvalEnum>,
+        finalizing_event_type: Option<EventTypeEnum>,
+        finalizing_event_eval: Option<EvalEnum>,
+        error_type: Option<ErrorTypeEnum>,
+    ) -> Option<u32> {
+        let mut total_errors: u32 = 0;
+        for (key, incr) in self.first_rally.query(
+            rotation,
+            reception_eval,
+            finalizing_event_type,
+            finalizing_event_eval,
+        ) {
+            if let Some(final_type) = key.finalizing_event_type {
+                if let Some(err) = final_type.error_type(key.finalizing_event_eval) {
+                    if error_type.is_none() || error_type == Some(err) {
+                        total_errors += *incr;
+                    }
+                }
+            }
+        }
+        if total_errors > 0 {
+            Some(total_errors)
+        } else {
+            None
+        }
     }
 
     /// Computes the percentage of a specific evaluation value within a given event type
