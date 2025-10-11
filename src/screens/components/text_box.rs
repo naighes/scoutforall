@@ -11,7 +11,7 @@ pub struct TextBox {
     value: String,
     pub writing_mode: bool,
     label: String,
-    pub validator: Box<dyn Fn(&str, char) -> bool>,
+    pub validator: Box<dyn Fn(&str, char) -> bool + Send + Sync + 'static>,
 }
 
 impl Debug for TextBox {
@@ -44,7 +44,7 @@ impl TextBox {
         validator: F,
     ) -> Self
     where
-        F: Fn(&str, char) -> bool + 'static,
+        F: Fn(&str, char) -> bool + Send + Sync + 'static,
     {
         Self {
             value: match value {

@@ -3,9 +3,10 @@ use crate::{
     localization::current_labels,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Screen},
+        screen::{AppAction, Renderable, ScreenAsync},
     },
 };
+use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -19,13 +20,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[async_trait]
 pub trait FileSystemAction {
-    fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError>;
+    async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError>;
     fn is_selectable(&self, path: &Path) -> bool;
     fn is_visible(&self, path: &Path) -> bool;
 }
 
-pub struct FileSystemScreen<A>
+pub struct FileSystemScreen<A: Send + Sync>
 where
     A: FileSystemAction,
 {
@@ -39,7 +41,7 @@ where
     footer: NavigationFooter,
 }
 
-impl<A> FileSystemScreen<A>
+impl<A: Send + Sync> FileSystemScreen<A>
 where
     A: FileSystemAction,
 {
@@ -142,6 +144,17 @@ where
         if !self.entries.is_empty() {
             entries.push(("↑↓".to_string(), current_labels().navigate.to_string()));
         }
+        if let Some(true) = self
+            .list_state
+            .selected()
+            .and_then(|s| self.entries.get(s))
+            .map(|s| s.is_dir())
+        {
+            entries.push((
+                current_labels().space.to_string(),
+                current_labels().enter_directory.to_string(),
+            ));
+        }
         if !self.is_root() {
             entries.push((
                 "Backspace".to_string(),
@@ -178,11 +191,54 @@ where
     }
 }
 
-impl<A> Screen for FileSystemScreen<A>
+impl<A: Send + Sync> Renderable for FileSystemScreen<A>
 where
     A: FileSystemAction,
 {
-    fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> super::screen::AppAction {
+    fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(body);
+        let header = Paragraph::new(self.current_folder.to_string_lossy().to_string())
+            .block(
+                Block::default()
+                    .borders(Borders::BOTTOM)
+                    .title(current_labels().current_directory.to_string()),
+            )
+            .style(Style::default().fg(Color::Cyan));
+        f.render_widget(header, chunks[0]);
+        let items: Vec<ListItem> = self
+            .entries
+            .iter()
+            .map(|t| {
+                let name = t.file_name().unwrap_or_default().to_string_lossy();
+                let (content, style) = if t.is_dir() {
+                    (name.to_string(), Style::default().fg(Color::Yellow))
+                } else {
+                    (name.to_string(), Style::default().fg(Color::White))
+                };
+                ListItem::new(Span::styled(content, style))
+            })
+            .collect();
+
+        if items.is_empty() {
+            self.render_empty_directory(f, chunks[1]);
+        } else {
+            self.render_directory_content(f, chunks[1], items, &self.title.clone());
+        }
+        self.notify_message.render(f, footer_right);
+        self.footer
+            .render(f, footer_left, self.get_footer_entries().clone());
+    }
+}
+
+#[async_trait]
+impl<A: Send + Sync> ScreenAsync for FileSystemScreen<A>
+where
+    A: FileSystemAction,
+{
+    async fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> super::screen::AppAction {
         match (key.code, &self.notify_message.has_value()) {
             (_, true) => {
                 self.notify_message.reset();
@@ -201,14 +257,14 @@ where
                 AppAction::None
             }
             (KeyCode::Enter, _) => {
-                let child = self
+                let selected = self
                     .list_state
                     .selected()
                     .and_then(|s| self.entries.get(s))
                     .cloned();
-                match child {
+                match selected {
                     Some(child) => match self.action.is_selectable(&child) {
-                        true => match self.action.on_selected(&child) {
+                        true => match self.action.on_selected(&child).await {
                             Ok(_) => {
                                 self.notify_message
                                     .set_info(current_labels().operation_successful.to_string());
@@ -220,12 +276,33 @@ where
                                 AppAction::None
                             }
                         },
-                        _ => self.enter_directory(&child),
+                        _ => {
+                            self.notify_message
+                                .set_error(current_labels().invalid_selection.to_string());
+                            AppAction::None
+                        }
                     },
                     None => AppAction::None,
                 }
             }
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Char(' '), _) => {
+                let child = self
+                    .list_state
+                    .selected()
+                    .and_then(|s| self.entries.get(s))
+                    .cloned();
+                match child {
+                    Some(child) => match child.is_dir() {
+                        true => {
+                            self.enter_directory(&child);
+                            AppAction::None
+                        }
+                        _ => AppAction::None,
+                    },
+                    None => AppAction::None,
+                }
+            }
             (KeyCode::Backspace, _) => {
                 let parent = self.current_folder.parent().map(|p| p.to_path_buf());
                 if let Some(parent) = parent {
@@ -237,30 +314,5 @@ where
         }
     }
 
-    fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        let items: Vec<ListItem> = self
-            .entries
-            .iter()
-            .map(|t| {
-                let name = t.file_name().unwrap_or_default().to_string_lossy();
-                let (content, style) = if t.is_dir() {
-                    (name.to_string(), Style::default().fg(Color::Yellow))
-                } else {
-                    (name.to_string(), Style::default().fg(Color::White))
-                };
-                ListItem::new(Span::styled(content, style))
-            })
-            .collect();
-
-        if items.is_empty() {
-            self.render_empty_directory(f, body);
-        } else {
-            self.render_directory_content(f, body, items, &self.title.clone());
-        }
-        self.notify_message.render(f, footer_right);
-        self.footer
-            .render(f, footer_left, self.get_footer_entries().clone());
-    }
-
-    fn on_resume(&mut self, _: bool) {}
+    async fn refresh_data(&mut self) {}
 }

@@ -56,6 +56,16 @@ impl FromStr for PhaseEnum {
     }
 }
 
+impl FriendlyName for PhaseEnum {
+    fn friendly_name(&self, labels: &Labels) -> &'static str {
+        use PhaseEnum::*;
+        match self {
+            Break => "break",
+            SideOut => labels.sideout,
+        }
+    }
+}
+
 /// Identifies which team an event or action refers to.
 ///
 /// This enum distinguishes between:
@@ -731,7 +741,8 @@ impl FromStr for RoleEnum {
 }
 
 /// Supported languages.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LanguageEnum {
     En,
     It,
@@ -739,14 +750,6 @@ pub enum LanguageEnum {
 
 impl LanguageEnum {
     pub const ALL: [LanguageEnum; 2] = [LanguageEnum::En, LanguageEnum::It];
-
-    pub fn iso_code(&self) -> &'static str {
-        use LanguageEnum::*;
-        match self {
-            En => "en",
-            It => "it",
-        }
-    }
 }
 
 impl fmt::Display for LanguageEnum {

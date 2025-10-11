@@ -1,15 +1,18 @@
+use std::sync::Arc;
+
 use crate::{
     localization::current_labels,
-    ops::{save_player, PlayerInput},
+    providers::team_writer::{PlayerInput, TeamWriter},
     screens::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             team_header::TeamHeader, text_box::TextBox,
         },
-        screen::{AppAction, Screen},
+        screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
 };
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -17,8 +20,12 @@ use ratatui::{
     Frame,
 };
 
+fn validate_player_number(current: &str, c: char) -> bool {
+    c.is_ascii_digit() && current.len() < 2 && !(current.is_empty() && c == '0')
+}
+
 #[derive(Debug)]
-pub struct EditPlayerScreen {
+pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
     team: TeamEntry,
     name: TextBox,
     number: TextBox,
@@ -30,26 +37,10 @@ pub struct EditPlayerScreen {
     header: TeamHeader,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
+    team_writer: Arc<TW>,
 }
 
-impl Screen for EditPlayerScreen {
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => self.handle_error_reset(),
-            (KeyCode::Char(c), _) => self.handle_char(c),
-            (KeyCode::Backspace, _) => self.handle_backspace(),
-            (KeyCode::Up, _) => self.handle_up(),
-            (KeyCode::Down, _) => self.handle_down(),
-            (KeyCode::Tab, _) => self.handle_tab(),
-            (KeyCode::BackTab, _) => self.handle_backtab(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => self.handle_enter(),
-            _ => AppAction::None,
-        }
-    }
-
-    fn on_resume(&mut self, _: bool) {}
-
+impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -76,8 +67,28 @@ impl Screen for EditPlayerScreen {
     }
 }
 
-impl EditPlayerScreen {
-    pub fn new(team: TeamEntry) -> Self {
+#[async_trait]
+impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditPlayerScreen<TW> {
+    async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => self.handle_error_reset(),
+            (KeyCode::Char(c), _) => self.handle_char(c),
+            (KeyCode::Backspace, _) => self.handle_backspace(),
+            (KeyCode::Up, _) => self.handle_up(),
+            (KeyCode::Down, _) => self.handle_down(),
+            (KeyCode::Tab, _) => self.handle_tab(),
+            (KeyCode::BackTab, _) => self.handle_backtab(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => self.handle_enter().await,
+            _ => AppAction::None,
+        }
+    }
+
+    async fn refresh_data(&mut self) {}
+}
+
+impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
+    pub fn new(team: TeamEntry, team_writer: Arc<TW>) -> Self {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
@@ -89,7 +100,7 @@ impl EditPlayerScreen {
             current_labels().number.to_owned(),
             false,
             None,
-            EditPlayerScreen::validate_player_number,
+            validate_player_number,
         );
         EditPlayerScreen {
             team,
@@ -114,10 +125,11 @@ impl EditPlayerScreen {
                 ("Esc".to_string(), current_labels().back.to_string()),
                 ("Q".to_string(), current_labels().quit.to_string()),
             ],
+            team_writer,
         }
     }
 
-    pub fn edit(team: TeamEntry, player: PlayerEntry) -> Self {
+    pub fn edit(team: TeamEntry, player: PlayerEntry, team_writer: Arc<TW>) -> Self {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
@@ -129,7 +141,7 @@ impl EditPlayerScreen {
             current_labels().number.to_owned(),
             false,
             Some(&player.number.to_string()),
-            EditPlayerScreen::validate_player_number,
+            validate_player_number,
         );
         EditPlayerScreen {
             team,
@@ -154,11 +166,8 @@ impl EditPlayerScreen {
                 ("Esc".to_string(), current_labels().back.to_string()),
                 ("Q".to_string(), current_labels().quit.to_string()),
             ],
+            team_writer,
         }
-    }
-
-    fn validate_player_number(current: &str, c: char) -> bool {
-        c.is_ascii_digit() && current.len() < 2 && !(current.is_empty() && c == '0')
     }
 
     fn handle_error_reset(&mut self) -> AppAction {
@@ -185,7 +194,7 @@ impl EditPlayerScreen {
             .any(|p| p.number == number && Some(p.id) != existing_id)
     }
 
-    fn handle_enter(&mut self) -> AppAction {
+    async fn handle_enter(&mut self) -> AppAction {
         match (
             self.name.get_selected_value(),
             self.role.get_selected_value(),
@@ -215,7 +224,7 @@ impl EditPlayerScreen {
                         }
                         None => PlayerInput::New { name, role, number },
                     };
-                    match save_player(input, &mut self.team) {
+                    match self.team_writer.save_player(input, &mut self.team).await {
                         Ok(_) => {
                             self.back = true;
                             self.notify_message

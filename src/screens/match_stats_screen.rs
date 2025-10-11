@@ -3,7 +3,7 @@ use crate::{
     localization::current_labels,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Screen},
+        screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{
         enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RotationEnum, ZoneEnum},
@@ -14,6 +14,7 @@ use crate::{
         stats::{Metric, Stats},
     },
 };
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -153,12 +154,115 @@ pub struct MatchStatsScreen {
     footer_entries: Vec<(String, String)>,
 }
 
+#[async_trait]
+impl ScreenAsync for MatchStatsScreen {
+    async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
+                AppAction::None
+            }
+            (KeyCode::Up, _) => {
+                self.set_filter.previous();
+                self.rotation_filter.previous();
+                self.phase_filter.previous();
+                self.event_filter.previous();
+                self.player_filter.previous();
+                AppAction::None
+            }
+            (KeyCode::Down, _) => {
+                self.set_filter.next();
+                self.rotation_filter.next();
+                self.phase_filter.next();
+                self.event_filter.next();
+                self.player_filter.next();
+                AppAction::None
+            }
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Tab, _) => {
+                match self.state.selected() {
+                    Some(i) => {
+                        let next_index = if i >= 4 { 0 } else { i + 1 };
+                        self.state.select(Some(next_index));
+                        self.set_filter.disable_writing_mode();
+                        self.rotation_filter.disable_writing_mode();
+                        self.phase_filter.disable_writing_mode();
+                        self.event_filter.disable_writing_mode();
+                        self.player_filter.disable_writing_mode();
+                        match next_index {
+                            0 => self.set_filter.enable_writing_mode(),
+                            1 => self.rotation_filter.enable_writing_mode(),
+                            2 => self.phase_filter.enable_writing_mode(),
+                            3 => self.event_filter.enable_writing_mode(),
+                            4 => self.player_filter.enable_writing_mode(),
+                            _ => {}
+                        }
+                    }
+                    None => {
+                        self.state.select(Some(0));
+                    }
+                }
+                AppAction::None
+            }
+            (KeyCode::BackTab, _) => {
+                match self.state.selected() {
+                    Some(i) => {
+                        let prev_index = if i == 0 { 4 } else { i - 1 };
+                        self.state.select(Some(prev_index));
+                        self.set_filter.disable_writing_mode();
+                        self.rotation_filter.disable_writing_mode();
+                        self.phase_filter.disable_writing_mode();
+                        self.event_filter.disable_writing_mode();
+                        self.player_filter.disable_writing_mode();
+                        match prev_index {
+                            0 => self.set_filter.enable_writing_mode(),
+                            1 => self.rotation_filter.enable_writing_mode(),
+                            2 => self.phase_filter.enable_writing_mode(),
+                            3 => self.event_filter.enable_writing_mode(),
+                            4 => self.player_filter.enable_writing_mode(),
+                            _ => {}
+                        }
+                    }
+                    None => {
+                        self.state.select(Some(0));
+                    }
+                }
+                AppAction::None
+            }
+            _ => AppAction::None,
+        }
+    }
+
+    async fn refresh_data(&mut self) {}
+}
+
+impl Renderable for MatchStatsScreen {
+    fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, _: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(33),
+                Constraint::Percentage(33),
+                Constraint::Percentage(34),
+            ])
+            .split(body);
+        let left_col = chunks[0];
+        let center_col = chunks[1];
+        let right_col = chunks[2];
+        self.render_left(f, left_col);
+        self.render_center(f, center_col);
+        self.render_right(f, right_col);
+        self.footer
+            .render(f, footer_left, self.footer_entries.clone());
+    }
+}
+
 impl MatchStatsScreen {
     pub fn new(current_match: MatchEntry) -> Result<Self, AppError> {
         let mut state = ListState::default();
         state.select(Some(0));
         let mut sets: Vec<(SetEntry, Snapshot)> = Vec::new();
-        for set in &current_match.load_sets()? {
+        for set in &current_match.sets {
             let (snapshot, _) = set.compute_snapshot()?;
             sets.push((set.clone(), snapshot));
         }
@@ -589,12 +693,6 @@ impl MatchStatsScreen {
                 _ => { /* TODO: other stats */ }
             }
         }
-        // self.event_filter.selected().map(|s| s.as_str()).map(|t| {
-        //     match EventTypeEnum::from_str(t) {
-        //         Ok(event_type) => self.render_event_stats(f, event_type, area),
-        //         _ => { /* TODO: other stats */ }
-        //     }
-        // });
     }
 
     fn render_left(&mut self, f: &mut Frame, area: Rect) {
@@ -615,104 +713,4 @@ impl MatchStatsScreen {
         self.event_filter.render(f, chunks[3]);
         self.player_filter.render(f, chunks[4]);
     }
-}
-
-impl Screen for MatchStatsScreen {
-    fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, _: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(33),
-                Constraint::Percentage(33),
-                Constraint::Percentage(34),
-            ])
-            .split(body);
-        let left_col = chunks[0];
-        let center_col = chunks[1];
-        let right_col = chunks[2];
-        self.render_left(f, left_col);
-        self.render_center(f, center_col);
-        self.render_right(f, right_col);
-        self.footer
-            .render(f, footer_left, self.footer_entries.clone());
-    }
-
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                AppAction::None
-            }
-            (KeyCode::Up, _) => {
-                self.set_filter.previous();
-                self.rotation_filter.previous();
-                self.phase_filter.previous();
-                self.event_filter.previous();
-                self.player_filter.previous();
-                AppAction::None
-            }
-            (KeyCode::Down, _) => {
-                self.set_filter.next();
-                self.rotation_filter.next();
-                self.phase_filter.next();
-                self.event_filter.next();
-                self.player_filter.next();
-                AppAction::None
-            }
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Tab, _) => {
-                match self.state.selected() {
-                    Some(i) => {
-                        let next_index = if i >= 4 { 0 } else { i + 1 };
-                        self.state.select(Some(next_index));
-                        self.set_filter.disable_writing_mode();
-                        self.rotation_filter.disable_writing_mode();
-                        self.phase_filter.disable_writing_mode();
-                        self.event_filter.disable_writing_mode();
-                        self.player_filter.disable_writing_mode();
-                        match next_index {
-                            0 => self.set_filter.enable_writing_mode(),
-                            1 => self.rotation_filter.enable_writing_mode(),
-                            2 => self.phase_filter.enable_writing_mode(),
-                            3 => self.event_filter.enable_writing_mode(),
-                            4 => self.player_filter.enable_writing_mode(),
-                            _ => {}
-                        }
-                    }
-                    None => {
-                        self.state.select(Some(0));
-                    }
-                }
-                AppAction::None
-            }
-            (KeyCode::BackTab, _) => {
-                match self.state.selected() {
-                    Some(i) => {
-                        let prev_index = if i == 0 { 4 } else { i - 1 };
-                        self.state.select(Some(prev_index));
-                        self.set_filter.disable_writing_mode();
-                        self.rotation_filter.disable_writing_mode();
-                        self.phase_filter.disable_writing_mode();
-                        self.event_filter.disable_writing_mode();
-                        self.player_filter.disable_writing_mode();
-                        match prev_index {
-                            0 => self.set_filter.enable_writing_mode(),
-                            1 => self.rotation_filter.enable_writing_mode(),
-                            2 => self.phase_filter.enable_writing_mode(),
-                            3 => self.event_filter.enable_writing_mode(),
-                            4 => self.player_filter.enable_writing_mode(),
-                            _ => {}
-                        }
-                    }
-                    None => {
-                        self.state.select(Some(0));
-                    }
-                }
-                AppAction::None
-            }
-            _ => AppAction::None,
-        }
-    }
-
-    fn on_resume(&mut self, _: bool) {}
 }

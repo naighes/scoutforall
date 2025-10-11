@@ -1,11 +1,11 @@
 mod constants;
-mod ops;
-mod pdf;
 mod util;
 
+mod app;
 mod errors;
-mod io;
 mod localization;
+mod providers;
+mod reporting;
 mod screens;
 mod shapes;
 
@@ -13,14 +13,20 @@ mod shapes;
 mod tests;
 
 use crate::{
-    constants::DEFAULT_LANGUAGE,
+    app::App,
     localization::init_language,
-    ops::load_settings,
-    screens::{
-        screen::{AppAction, Screen},
-        team_list::TeamListScreen,
+    providers::{
+        fs::{
+            match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
+            path::get_base_path, set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
+            settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
+            team_reader::FileSystemTeamReader, team_writer::FileSystemTeamWriter,
+        },
+        settings_reader::SettingsReader,
+        team_reader::TeamReader,
     },
-    shapes::enums::LanguageEnum,
+    screens::screen::AppAction,
+    shapes::settings::Settings,
 };
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -34,40 +40,7 @@ use ratatui::{
     widgets::Paragraph,
     Terminal,
 };
-use std::{error::Error, str::FromStr};
-
-struct App {
-    screens: Vec<Box<dyn Screen>>,
-}
-
-impl App {
-    fn new() -> Self {
-        App {
-            screens: vec![Box::new(TeamListScreen::new())],
-        }
-    }
-
-    fn current_screen(&mut self) -> Option<&mut Box<dyn Screen>> {
-        self.screens.last_mut()
-    }
-
-    fn push_screen(&mut self, screen: Box<dyn Screen>) {
-        self.screens.push(screen);
-    }
-
-    fn pop_screen(&mut self, refresh: bool, count: Option<u8>) {
-        let count = count.unwrap_or(0) as usize;
-        if count > 0 {
-            let to_pop = count.min(self.screens.len().saturating_sub(1));
-            for _ in 0..to_pop {
-                self.screens.pop();
-            }
-            if let Some(prev) = self.screens.last_mut() {
-                prev.on_resume(refresh);
-            }
-        }
-    }
-}
+use std::{error::Error, sync::Arc};
 
 #[cfg(feature = "self-update")]
 fn maybe_check_update() {
@@ -105,22 +78,29 @@ fn maybe_check_update() {
 #[cfg(not(feature = "self-update"))]
 fn maybe_check_update() {}
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    let language = load_settings()
+    let dir = get_base_path().expect("cannot get home directory");
+    let settings_reader = FileSystemSettingsReader::new(&dir);
+    let team_reader = FileSystemTeamReader::new(&dir);
+    let team_writer = FileSystemTeamWriter::new(&dir);
+    let settings_writer = FileSystemSettingsWriter::new(&dir);
+    let set_reader = FileSystemSetReader::new(&dir);
+    let match_reader = FileSystemMatchReader::new(&dir, Arc::new(set_reader));
+    let match_writer = FileSystemMatchWriter::new(&dir);
+    let set_writer = FileSystemSetWriter::new(&dir);
+    let teams = team_reader.read_all().await.unwrap_or_else(|_| vec![]);
+    let settings = settings_reader
+        .read()
+        .await
         .ok()
-        .map(|s| s.language)
-        .and_then(|l| LanguageEnum::from_str(&l).ok())
-        .unwrap_or(
-            LanguageEnum::from_str(DEFAULT_LANGUAGE)
-                .ok()
-                .unwrap_or(LanguageEnum::En),
-        );
-    init_language(language);
+        .unwrap_or_else(Settings::default);
+    init_language(settings.language);
     maybe_check_update();
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -128,7 +108,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let res = run_app(&mut terminal, App::new());
+    let res = run_app(
+        &mut terminal,
+        App::new(
+            settings,
+            teams,
+            dir,
+            Arc::new(team_reader),
+            Arc::new(team_writer),
+            Arc::new(settings_writer),
+            Arc::new(set_writer),
+            Arc::new(match_reader),
+            Arc::new(match_writer),
+        ),
+    )
+    .await;
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -153,7 +147,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// |----------------------------|
 /// | footer_left | footer_right |
 /// |----------------------------|
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Result<()> {
+async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Result<()> {
     loop {
         terminal.draw(|f| {
             let size = f.area();
@@ -182,10 +176,17 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Res
                 match (key.code, key.kind, app.current_screen()) {
                     (_, KeyEventKind::Release, _) => continue,
                     (KeyCode::Char('q'), _, _) => return Ok(()),
-                    (_, _, Some(screen)) => match screen.handle_key(key) {
+                    (_, _, Some(screen)) => match screen.handle_key(key).await {
                         AppAction::None => {}
                         AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
-                        AppAction::Back(refresh, count) => app.pop_screen(refresh, count),
+                        AppAction::Back(refresh, count) => {
+                            app.pop_screen(refresh, count).await;
+                            if refresh {
+                                if let Some(screen) = app.current_screen() {
+                                    screen.refresh_data().await;
+                                }
+                            }
+                        }
                     },
                     _ => {}
                 }

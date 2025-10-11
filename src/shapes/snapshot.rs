@@ -42,6 +42,7 @@ pub struct Snapshot {
     pub stats: Stats,
     pub current_lineup: Lineup,
     pub last_event: Option<EventEntry>,
+    pub partials: Vec<(u8, u8)>, // (us, them)
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -63,6 +64,7 @@ impl Snapshot {
             stats: Stats::new(),
             current_lineup,
             last_event: None,
+            partials: vec![],
         })
     }
 
@@ -175,14 +177,16 @@ impl Snapshot {
     }
 
     fn set_score_stats(&mut self, event: &EventEntry) {
-        match &self.has_scored(event) {
-            Some(TeamSideEnum::Us) => {
-                self.score_us += 1;
+        if let Some(side) = self.has_scored(event) {
+            let (score, opponent_score) = match side {
+                TeamSideEnum::Us => (&mut self.score_us, self.score_them),
+                TeamSideEnum::Them => (&mut self.score_them, self.score_us),
+            };
+            *score += 1;
+            // keep track of partials at 8, 16, 21
+            if [8, 16, 21].contains(score) && *score > opponent_score {
+                self.partials.push((self.score_us, self.score_them));
             }
-            Some(TeamSideEnum::Them) => {
-                self.score_them += 1;
-            }
-            _ => {}
         }
     }
 
@@ -342,8 +346,16 @@ impl Snapshot {
     ) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        let serve_them = vec![OE, OS, F, P, R, CL, CS];
-        let serve_us = vec![OE, F, S, R, CL, CS];
+        let serve_them = if self.current_lineup.get_fallback_libero().is_some() {
+            vec![OS, OE, F, P, R, CL, CS]
+        } else {
+            vec![OS, OE, F, P, R, CS]
+        };
+        let serve_us = if self.current_lineup.get_fallback_libero().is_some() {
+            vec![OE, F, S, R, CL, CS]
+        } else {
+            vec![OE, F, S, R, CS]
+        };
         let options_map: HashMap<_, _> = [
             // order: OS, OE, F, A, S, P, D, B, R, CL, CS
             ((OS, None), serve_them.clone()),
@@ -389,32 +401,103 @@ impl Snapshot {
         use EvalEnum::*;
         use EventTypeEnum::*;
         let rotation = self.current_lineup.get_current_rotation()?;
-        match (
+        if let (A, Some(last_event), Some(player), Some(zone), Some(eval)) = (
             event.event_type,
             &self.last_event,
+            event.player,
             event.player.and_then(|p| self.get_attack_zone(&p)),
+            event.eval,
         ) {
-            (A, Some(last_event), Some(zone)) => match (
-                last_event.event_type,
-                last_event.eval,
-                &event.player,
-                event.eval,
-            ) {
-                // TODO: block and attack? just dig?
-                (D, Some(Perfect | Positive | Negative | Exclamative), Some(p), Some(ev)) => {
-                    self.stats.counter_attack.add(
-                        self.current_lineup.get_current_phase(),
-                        rotation,
-                        *p,
-                        zone,
-                        ev,
-                    );
-                    Ok(())
-                }
-                _ => Ok(()),
-            },
-            _ => Ok(()),
+            let is_counter_attack = match (last_event.event_type, last_event.eval) {
+                // defense that keeps the ball alive
+                (D, Some(Perfect | Positive | Negative | Exclamative)) => true,
+                // positive block or attack that keeps play going
+                (B | A, Some(Positive)) => true,
+                _ => false,
+            };
+            if is_counter_attack {
+                self.stats.counter_attack.add(
+                    self.current_lineup.get_current_phase(),
+                    rotation,
+                    player,
+                    zone,
+                    eval,
+                );
+            }
         }
+        Ok(())
+    }
+
+    fn set_first_rally_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        let rotation = self.current_lineup.get_current_rotation()?;
+        let last_event_type = self.last_event.as_ref().map(|e| e.event_type);
+        let last_event_eval = self.last_event.as_ref().and_then(|e| e.eval);
+        match (
+            event.event_type,
+            event.eval,
+            last_event_type,
+            last_event_eval,
+            self.get_serving_team(),
+        ) {
+            (OE, _, _, _, Some(TeamSideEnum::Them)) => {
+                // our ace
+                self.stats.first_rally.add(
+                    rotation,
+                    None,                   // reception eval
+                    Some(event.event_type), // finalizing event type
+                    None,                   // finalizing event eval
+                );
+            }
+            (OS | F, _, _, _, Some(TeamSideEnum::Them)) => {
+                // opponent ace
+                self.stats.first_rally.add(
+                    rotation,
+                    None,                   // reception eval
+                    Some(event.event_type), // finalizing event type
+                    None,                   // finalizing event eval
+                );
+            }
+            (P, Some(Error | Over), _, _, _) => {
+                // reception error or slash
+                self.stats.first_rally.add(
+                    rotation,
+                    event.eval,             // reception eval
+                    Some(event.event_type), // finalizing event type
+                    None,                   // finalizing event eval
+                );
+            }
+            (A, _, Some(P), Some(Perfect | Positive | Exclamative | Negative), _) => {
+                // attack (previous is a non error reception)
+                self.stats.first_rally.add(
+                    rotation,
+                    last_event_eval,        // reception eval
+                    Some(event.event_type), // finalizing event type
+                    event.eval,             // finalizing event eval
+                );
+            }
+            (OE, _, Some(P), Some(Perfect | Positive | Exclamative | Negative), _) => {
+                // opponent error (previous is a non error pass)
+                self.stats.first_rally.add(
+                    rotation,
+                    last_event_eval,        // reception eval
+                    Some(event.event_type), // finalizing event type
+                    None,                   // finalizing event eval
+                );
+            }
+            (F, _, Some(P), Some(Perfect | Positive | Exclamative | Negative), _) => {
+                // fault after reception
+                self.stats.first_rally.add(
+                    rotation,
+                    last_event_eval,        // reception eval
+                    Some(event.event_type), // finalizing event type
+                    None,                   // finalizing event eval
+                );
+            }
+            _ => {}
+        };
+        Ok(())
     }
 
     fn set_attack_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
@@ -472,6 +555,7 @@ impl Snapshot {
         self.set_counter_attack_stats(event)?;
         self.set_attack_stats(event)?;
         self.set_distribution_stats(event)?;
+        self.set_first_rally_stats(event)?;
         let available_options = self.get_available_options(event, current_available_options);
         if event.event_type == EventTypeEnum::R {
             // replace lineup entry
@@ -480,7 +564,9 @@ impl Snapshot {
                     .add_substitution(&replaced, &replacement)?;
             }
         }
-        if event.event_type == EventTypeEnum::CL {
+        if event.event_type == EventTypeEnum::CL
+            && self.current_lineup.get_fallback_libero().is_some()
+        {
             // change libero
             self.current_lineup.swap_libero()?;
         }

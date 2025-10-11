@@ -157,6 +157,10 @@ impl Lineup {
         Ok(())
     }
 
+    pub fn get_fallback_libero(&self) -> Option<Uuid> {
+        self.fallback_libero
+    }
+
     pub fn set_current_setter(&mut self, new_setter: &Uuid) -> Result<(), AppError> {
         if self.find_position(new_setter).is_some() {
             self.current_setter = *new_setter;
@@ -370,7 +374,6 @@ impl Lineup {
 
     /* substitutions */
 
-    #[cfg(test)]
     pub fn get_substitutions(&self) -> Vec<SubstitutionRecord> {
         self.substitutions.clone()
     }
@@ -379,7 +382,7 @@ impl Lineup {
         self.substitutions.iter().any(|s| s.replaced == *player_id)
     }
 
-    fn was_player_already_used(&self, player_id: &Uuid) -> bool {
+    pub fn was_player_already_used(&self, player_id: &Uuid) -> bool {
         self.substitutions
             .iter()
             .any(|s| s.replacement == *player_id)

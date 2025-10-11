@@ -1,12 +1,13 @@
 use crate::{
     constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
-    io::path::get_team_folder_path,
+    providers::fs::path::get_team_folder_path,
     screens::{file_system_screen::FileSystemAction, screen::AppAction},
 };
+use async_trait::async_trait;
 use hf::is_hidden;
-use std::io::Write;
 use std::{fs::File, io::Read, path::Path};
+use std::{io::Write, path::PathBuf};
 use uuid::Uuid;
 use zip::write::FileOptions;
 use zip::CompressionMethod::*;
@@ -14,14 +15,16 @@ use zip::ZipWriter;
 
 pub struct ExportTeamAction {
     team_id: Uuid,
+    base_path: PathBuf,
 }
 
 impl ExportTeamAction {
-    pub fn new(team_id: Uuid) -> Self {
-        Self { team_id }
+    pub fn new(team_id: Uuid, base_path: PathBuf) -> Self {
+        Self { team_id, base_path }
     }
 }
 
+#[async_trait]
 impl FileSystemAction for ExportTeamAction {
     fn is_selectable(&self, path: &Path) -> bool {
         !is_hidden(path).unwrap_or_default() && path.is_dir()
@@ -37,9 +40,9 @@ impl FileSystemAction for ExportTeamAction {
                     .unwrap_or(false))
     }
 
-    fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
+    async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
         let team_descriptor_file_path =
-            get_team_folder_path(&self.team_id)?.join(TEAM_DESCRIPTOR_FILE_NAME);
+            get_team_folder_path(&self.base_path, &self.team_id)?.join(TEAM_DESCRIPTOR_FILE_NAME);
         let file = File::create(path.join(format!("{}.zip", &self.team_id)))
             .map_err(|e| AppError::IO(IOError::from(e)))?;
         let mut zip = ZipWriter::new(file);

@@ -1,18 +1,21 @@
+use std::sync::Arc;
+
 use crate::{
     localization::current_labels,
-    ops::{save_team, TeamInput},
+    providers::team_writer::{TeamInput, TeamWriter},
     screens::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             text_box::TextBox,
         },
-        screen::{AppAction, Screen},
+        screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{
         enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
         team::TeamEntry,
     },
 };
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -23,7 +26,7 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct EditTeamScreen {
+pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
     name: TextBox,
     gender: Select<GenderEnum>,
     classification: Select<TeamClassificationEnum>,
@@ -34,26 +37,10 @@ pub struct EditTeamScreen {
     back: bool,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
+    team_writer: Arc<TW>,
 }
 
-impl Screen for EditTeamScreen {
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => self.handle_error_reset(),
-            (KeyCode::Char(c), _) => self.handle_char(c),
-            (KeyCode::Backspace, _) => self.handle_backspace(),
-            (KeyCode::Up, _) => self.handle_up(),
-            (KeyCode::Down, _) => self.handle_down(),
-            (KeyCode::Tab, _) => self.handle_tab(),
-            (KeyCode::BackTab, _) => self.handle_backtab(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => self.handle_enter(),
-            _ => AppAction::None,
-        }
-    }
-
-    fn on_resume(&mut self, _: bool) {}
-
+impl<TW: TeamWriter + Send + Sync> Renderable for EditTeamScreen<TW> {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let area = Layout::default()
             .direction(Direction::Vertical)
@@ -79,8 +66,28 @@ impl Screen for EditTeamScreen {
     }
 }
 
-impl EditTeamScreen {
-    pub fn new() -> Self {
+#[async_trait]
+impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditTeamScreen<TW> {
+    async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => self.handle_error_reset(),
+            (KeyCode::Char(c), _) => self.handle_char(c),
+            (KeyCode::Backspace, _) => self.handle_backspace(),
+            (KeyCode::Up, _) => self.handle_up(),
+            (KeyCode::Down, _) => self.handle_down(),
+            (KeyCode::Tab, _) => self.handle_tab(),
+            (KeyCode::BackTab, _) => self.handle_backtab(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => self.handle_enter().await,
+            _ => AppAction::None,
+        }
+    }
+
+    async fn refresh_data(&mut self) {}
+}
+
+impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
+    pub fn new(team_writer: Arc<TW>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -122,10 +129,11 @@ impl EditTeamScreen {
                 ("Esc".to_string(), current_labels().back.to_string()),
                 ("Q".to_string(), current_labels().quit.to_string()),
             ],
+            team_writer,
         }
     }
 
-    pub fn edit(team: &TeamEntry) -> Self {
+    pub fn edit(team: &TeamEntry, team_writer: Arc<TW>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -167,6 +175,7 @@ impl EditTeamScreen {
                 ("Esc".to_string(), current_labels().back.to_string()),
                 ("Q".to_string(), current_labels().quit.to_string()),
             ],
+            team_writer,
         }
     }
 
@@ -216,7 +225,7 @@ impl EditTeamScreen {
         AppAction::None
     }
 
-    fn handle_enter(&mut self) -> AppAction {
+    async fn handle_enter(&mut self) -> AppAction {
         match (
             self.name.get_selected_value(),
             self.classification.get_selected_value(),
@@ -249,13 +258,15 @@ impl EditTeamScreen {
                         TeamInput::Existing(updated)
                     }
                     None => TeamInput::New {
+                        id: None,
                         name,
                         year,
                         classification: Some(classification),
                         gender: Some(gender),
+                        players: vec![],
                     },
                 };
-                match save_team(input) {
+                match self.team_writer.save(input).await {
                     Ok(_) => {
                         self.notify_message
                             .set_info(current_labels().operation_successful.to_string());

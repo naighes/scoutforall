@@ -1,14 +1,15 @@
-use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::{
     localization::{current_labels, set_language},
-    ops::save_settings,
+    providers::settings_writer::SettingsWriter,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Screen},
+        screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{enums::LanguageEnum, settings::Settings},
 };
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -18,7 +19,7 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct SettingsScreen {
+pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
     language: Option<LanguageEnum>,
     field: usize,
     language_selection: ListState,
@@ -26,29 +27,10 @@ pub struct SettingsScreen {
     back: bool,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
+    settings_writer: Arc<SW>,
 }
 
-impl Screen for SettingsScreen {
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                if self.back {
-                    AppAction::Back(true, Some(1))
-                } else {
-                    AppAction::None
-                }
-            }
-            (KeyCode::Up, _) => self.handle_up(),
-            (KeyCode::Down, _) => self.handle_down(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => self.handle_enter(),
-            _ => AppAction::None,
-        }
-    }
-
-    fn on_resume(&mut self, _: bool) {}
-
+impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let inner = Layout::default()
             .direction(Direction::Vertical)
@@ -66,20 +48,38 @@ impl Screen for SettingsScreen {
     }
 }
 
-impl SettingsScreen {
-    pub fn new(settings: Settings) -> Self {
-        let language = LanguageEnum::from_str(&settings.language).ok();
-        let language_selection = match language {
-            Some(language) => {
-                let mut state = ListState::default();
-                let index = LanguageEnum::ALL.iter().position(|&r| r == language);
-                state.select(index);
-                state
+#[async_trait]
+impl<SW: SettingsWriter + Send + Sync> ScreenAsync for SettingsScreen<SW> {
+    async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        match (key.code, &self.notify_message.has_value()) {
+            (_, true) => {
+                self.notify_message.reset();
+                if self.back {
+                    AppAction::Back(true, Some(1))
+                } else {
+                    AppAction::None
+                }
             }
-            None => ListState::default(),
-        };
+            (KeyCode::Up, _) => self.handle_up(),
+            (KeyCode::Down, _) => self.handle_down(),
+            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _) => self.handle_enter().await,
+            _ => AppAction::None,
+        }
+    }
+
+    async fn refresh_data(&mut self) {}
+}
+
+impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
+    pub fn new(settings: Settings, settings_writer: Arc<SW>) -> Self {
+        let mut language_selection = ListState::default();
+        let index = LanguageEnum::ALL
+            .iter()
+            .position(|&r| r == settings.language);
+        language_selection.select(index);
         SettingsScreen {
-            language: None,
+            language: Some(settings.language),
             field: 0,
             language_selection,
             notify_message: NotifyBanner::new(),
@@ -93,12 +93,13 @@ impl SettingsScreen {
                 ("Esc".to_string(), current_labels().back.to_string()),
                 ("Q".to_string(), current_labels().quit.to_string()),
             ],
+            settings_writer,
         }
     }
 
-    fn handle_enter(&mut self) -> AppAction {
+    async fn handle_enter(&mut self) -> AppAction {
         match self.language {
-            Some(language) => match save_settings(language.iso_code().to_string()) {
+            Some(language) => match self.settings_writer.save(language).await {
                 Ok(_) => {
                     set_language(language);
                     self.notify_message
