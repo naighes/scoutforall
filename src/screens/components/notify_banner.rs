@@ -45,7 +45,7 @@ impl NotifyBanner {
                 NotifyMessage::Info(m) => m,
                 NotifyMessage::Error(m) => m,
             };
-            let error_widget = Paragraph::new(msg.clone())
+            let widget = Paragraph::new(msg.clone())
                 .style(
                     Style::default()
                         .fg(Color::White)
@@ -55,12 +55,11 @@ impl NotifyBanner {
                         })
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().error),
-                );
-            f.render_widget(error_widget, area);
+                .block(Block::default().borders(Borders::ALL).title(match message {
+                    NotifyMessage::Info(_) => current_labels().info,
+                    NotifyMessage::Error(_) => current_labels().error,
+                }));
+            f.render_widget(widget, area);
         }
     }
 }
