@@ -23,17 +23,16 @@ const { title, description } = Astro.props
 
 ---
 
-<html lang="en">
+<html lang={lang}>
 
   <head>
-
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
 
     <title>{ title ?? global_settings.title }</title>
 
-    <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
-    <link rel="manifest" href="../manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/scoutforall/favicon.svg" />
+    <link rel="manifest" href="/scoutforall/manifest.json" />
 
     <meta name="description" content={ description ?? global_settings.description } />
     <meta name="theme-color" content={ global_settings.theme_color } />
@@ -44,6 +43,55 @@ const { title, description } = Astro.props
     <Font cssVariable="--font-inter" preload />
     <Font cssVariable="--font-inter-display" preload />
 
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://naighes.github.io/scoutforall/"
+    />
+    <link
+      rel="alternate"
+      hreflang="it"
+      href="https://naighes.github.io/scoutforall/it/"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://naighes.github.io/scoutforall/"
+    />
+    <link
+      rel="canonical"
+      href={`https://naighes.github.io/scoutforall/${lang === 'en' ? '' : lang + '/'}`}
+    />
+    <link rel="sitemap" href="/scoutforall/sitemap-index.xml" />
+
+    <script type="application/ld+json">
+      {JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "scout4all",
+        "applicationCategory": "Sports Analytics",
+        "url": "https://naighes.github.io/scoutforall/",
+        "inLanguage": lang,
+        "description": description ?? global_settings.description,
+        "creator": {
+          "@type": "Person",
+          "name": "Nicola Baldi",
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "scout4all project",
+          "url": "https://naighes.github.io/scoutforall/",
+        },
+      })}
+    </script>
+    <script>
+      if (location.pathname === '/' && !location.search && !location.hash) {
+        const userLang = navigator.language || navigator.userLanguage;
+        if (userLang.startsWith('it')) {
+          window.location.replace('/scoutforall/it/');
+        }
+      }
+    </script>
   </head>
 
   <body id="top">
@@ -67,4 +115,3 @@ const { title, description } = Astro.props
 
   </body>
 </html>
-

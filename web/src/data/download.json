@@ -1,17 +1,17 @@
 [
   {
     "title": "Windows",
-    "image": "../content-images/windows.svg",
+    "image": "/scoutforall/content-images/windows.svg",
     "href": "https://github.com/naighes/scoutforall/releases/latest/download/scout4all-x86_64-pc-windows-gnu.zip"
   },
   {
     "title": "macOS",
-    "image": "../content-images/macos.svg",
+    "image": "/scoutforall/content-images/macos.svg",
     "href": "https://github.com/naighes/scoutforall/releases/latest/download/scout4all-aarch64-apple-darwin.tar.gz"
   },
   {
     "title": "Linux",
-    "image": "../content-images/linux.svg",
+    "image": "/scoutforall/content-images/linux.svg",
     "href": "https://github.com/naighes/scoutforall/releases/latest/download/scout4all-aarch64-unknown-linux-gnu.tar.gz"
   }
 ]

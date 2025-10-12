@@ -1,8 +1,12 @@
 import { defineConfig } from 'astro/config'
 import tailwindcss from '@tailwindcss/vite'
+import sitemap from '@astrojs/sitemap'
 
 export default defineConfig({
   base: '/scoutforall/',
+  trailingSlash: 'always',
+  site: 'https://naighes.github.io/scoutforall/',
+  integrations: [sitemap()],
   vite: {
     plugins: [tailwindcss()]
   },
