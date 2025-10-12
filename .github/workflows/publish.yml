@@ -121,7 +121,7 @@ jobs:
         env:
           SOURCE: ${{ steps.variables.outputs.source }}
           DEST: ${{ steps.variables.outputs.destination }}
-      - name: build archive for Windows
+      - name: build archive for windows
         shell: bash
         working-directory: ./dist
         if: matrix.platforms.os == 'windows-latest'
