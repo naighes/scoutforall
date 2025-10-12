@@ -1,5 +1,5 @@
 {
-  "title": "scout4all",
+  "title": "scout4all | volleyball match analysis tool",
   "description": "A CLI tool for collecting, managing and reporting volleyball match data. It helps coaches and analysts track match events and generate useful reports for post-game analysis.",
   "base_url": "https://naighes.github.io/scoutforall/",
   "github_url": "https://github.com/naighes/scoutforall",

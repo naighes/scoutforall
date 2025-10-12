@@ -43,6 +43,9 @@ tokio = { version = "1.47.1", features = ["fs", "macros", "rt-multi-thread", "io
 tokio-stream = { version = "0.1.17", features = ["fs"] }
 futures = "0.3.31"
 
+[target.'cfg(windows)'.dependencies]
+winres = "0.1.12"
+
 [lints.clippy]
 type_complexity = "allow"
 too_many_arguments = "allow"
@@ -51,3 +54,9 @@ match_str_case_mismatch = "allow"
 [features]
 default = []
 self-update = ["self_update"]
+
+[build-dependencies]
+winres = { version = "0.1.12" }
+
+[package.metadata.cargo-machete]
+ignored = ["winres"]
