@@ -1,18 +1,34 @@
 ---
-export const prerender = true;
+import Layout from "../layouts/Layout.astro";
+
+import FaqSection from "../components/FaqSection.astro";
+import OverviewCarousel from "../components/OverviewCarousel.astro";
+import HeroSection from "../components/HeroSection.astro";
+import DownloadSection from "../components/DownloadSection.astro";
+
+import faq_en from '../data/en/faq.json';
+import overview_en from '../data/en/overview.json';
+import home_en from '../data/en/home.json';
+import download from "../data/download.json";
+import global_settings_en from '../data/en/global_settings.json';
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>scout4all</title>
-    <script>
-      const userLang = navigator.language || navigator.userLanguage;
-      const langCode = userLang.startsWith('it') ? 'it' : 'en';
-      window.location.href = `/scoutforall/${langCode}/`;
-    </script>
-  </head>
-  <body>
-    <p>redirecting...</p>
-  </body>
-</html>
+<Layout title={global_settings_en.title}>
+  <HeroSection
+    content={home_en.hero_content}
+    settings={global_settings_en}
+    title={home_en.hero_title}
+  />
+  <OverviewCarousel
+    overview={overview_en}
+    title={home_en.overview_title}
+  />
+  <DownloadSection
+    download={download}
+    title={home_en.download_title}
+  />
+  <FaqSection
+    faq={faq_en}
+    title={home_en.faq_title}
+  />
+</Layout>
