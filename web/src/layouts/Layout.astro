@@ -66,24 +66,26 @@ const { title, description } = Astro.props
     <link rel="sitemap" href="/scoutforall/sitemap-index.xml" />
 
     <script type="application/ld+json">
-      {JSON.stringify({
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "scout4all",
-        "applicationCategory": "Sports Analytics",
-        "url": "https://naighes.github.io/scoutforall/",
-        "inLanguage": lang,
-        "description": description ?? global_settings.description,
-        "creator": {
-          "@type": "Person",
-          "name": "Nicola Baldi",
-        },
-        "publisher": {
-          "@type": "Organization",
-          "name": "scout4all project",
+      {
+        JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "SoftwareApplication",
+          "name": "scout4all",
+          "applicationCategory": "Sports Analytics",
           "url": "https://naighes.github.io/scoutforall/",
-        },
-      })}
+          "inLanguage": lang,
+          "description": description ?? global_settings.description,
+          "creator": {
+            "@type": "Person",
+            "name": "Nicola Baldi"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "scout4all project",
+            "url": "https://naighes.github.io/scoutforall/"
+          }
+        })
+      }
     </script>
     <script>
       if (location.pathname === '/' && !location.search && !location.hash) {
