@@ -6,7 +6,9 @@ use crate::{
         screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{
-        enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RotationEnum, ZoneEnum},
+        enums::{
+            ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum,
+        },
         player::PlayerEntry,
         r#match::MatchEntry,
         set::SetEntry,
@@ -26,7 +28,7 @@ use ratatui::{
     },
     Frame,
 };
-use std::{collections::HashSet, fmt::Display, iter::once, str::FromStr};
+use std::{collections::HashSet, fmt::Display, iter::once};
 use uuid::Uuid;
 
 struct Selection<T>
@@ -141,13 +143,24 @@ where
     }
 }
 
+pub struct EventSelection {
+    event_type: EventTypeEnum,
+    label: String,
+}
+
+impl Display for EventSelection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
+    }
+}
+
 pub struct MatchStatsScreen {
     notify_message: NotifyBanner,
     state: ListState,
     set_filter: Selection<u8>,
     rotation_filter: Selection<RotationEnum>,
     phase_filter: Selection<PhaseEnum>,
-    event_filter: Selection<String>,
+    event_filter: Selection<EventSelection>,
     player_filter: Selection<PlayerEntry>,
     sets: Vec<(SetEntry, Snapshot)>,
     footer: NavigationFooter,
@@ -259,6 +272,7 @@ impl Renderable for MatchStatsScreen {
 
 impl MatchStatsScreen {
     pub fn new(current_match: MatchEntry) -> Result<Self, AppError> {
+        use EventTypeEnum::*;
         let mut state = ListState::default();
         state.select(Some(0));
         let mut sets: Vec<(SetEntry, Snapshot)> = Vec::new();
@@ -287,14 +301,29 @@ impl MatchStatsScreen {
         let event_filter = Selection::new(
             "stat".to_string(),
             vec![
-                EventTypeEnum::S.to_string(),
-                EventTypeEnum::P.to_string(),
-                EventTypeEnum::D.to_string(),
-                EventTypeEnum::B.to_string(),
-                EventTypeEnum::A.to_string(),
+                EventSelection {
+                    event_type: S,
+                    label: S.friendly_name(current_labels()).to_string(),
+                },
+                EventSelection {
+                    event_type: P,
+                    label: P.friendly_name(current_labels()).to_string(),
+                },
+                EventSelection {
+                    event_type: D,
+                    label: D.friendly_name(current_labels()).to_string(),
+                },
+                EventSelection {
+                    event_type: B,
+                    label: B.friendly_name(current_labels()).to_string(),
+                },
+                EventSelection {
+                    event_type: A,
+                    label: A.friendly_name(current_labels()).to_string(),
+                },
             ]
             .into_iter()
-            .map(|e| Some(e.to_string()))
+            .map(Some)
             .collect(),
         );
         let mut players: HashSet<Uuid> = HashSet::new();
@@ -355,7 +384,7 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_event_stats(&self, f: &mut Frame, event_type: EventTypeEnum, area: Rect) {
+    fn render_event_stats(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -365,10 +394,10 @@ impl MatchStatsScreen {
                 Constraint::Length(3),
             ])
             .split(area);
-        self.render_evals_bars(f, event_type, chunks[0]);
-        self.render_summary_table(f, event_type, chunks[1]);
-        self.render_efficiency_bars(f, event_type, chunks[2]);
-        self.render_positiveness_bars(f, event_type, chunks[3]);
+        self.render_evals_bars(f, selection, chunks[0]);
+        self.render_summary_table(f, selection, chunks[1]);
+        self.render_efficiency_bars(f, selection, chunks[2]);
+        self.render_positiveness_bars(f, selection, chunks[3]);
     }
 
     fn render_right(&mut self, f: &mut Frame, area: Rect) {
@@ -376,10 +405,10 @@ impl MatchStatsScreen {
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
-        if let Some(Ok(EventTypeEnum::A)) = self
+        if let Some(EventTypeEnum::A) = self
             .event_filter
             .selected()
-            .map(|e| EventTypeEnum::from_str(e))
+            .map(|selection| selection.event_type)
         {
             self.render_court_canvas(f, chunks[0], current_labels().distribution, |(p, _)| p);
             self.render_court_canvas(f, chunks[1], current_labels().conversion_rate, |(_, s)| s);
@@ -440,7 +469,8 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_evals_bars(&self, f: &mut Frame, event_type: EventTypeEnum, area: Rect) {
+    fn render_evals_bars(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
+        let event_type = selection.event_type;
         let set = self.set_filter.selected().copied();
         let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
         let phase = self.phase_filter.selected().cloned();
@@ -518,7 +548,8 @@ impl MatchStatsScreen {
         f.render_widget(evals_barchart, area);
     }
 
-    fn render_efficiency_bars(&self, f: &mut Frame, event_type: EventTypeEnum, area: Rect) {
+    fn render_efficiency_bars(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
+        let event_type = selection.event_type;
         let set = self.set_filter.selected().copied();
         let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
         let phase = self.phase_filter.selected().cloned();
@@ -564,7 +595,8 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_positiveness_bars(&self, f: &mut Frame, event_type: EventTypeEnum, area: Rect) {
+    fn render_positiveness_bars(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
+        let event_type = selection.event_type;
         let set = self.set_filter.selected().copied();
         let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
         let phase = self.phase_filter.selected().cloned();
@@ -610,7 +642,8 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_summary_table(&self, f: &mut Frame, event_type: EventTypeEnum, area: Rect) {
+    fn render_summary_table(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
+        let event_type = selection.event_type;
         let set = self.set_filter.selected().copied();
         let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
         let phase = self.phase_filter.selected().cloned();
@@ -687,11 +720,8 @@ impl MatchStatsScreen {
     }
 
     fn render_center(&mut self, f: &mut Frame, area: Rect) {
-        if let Some(t) = self.event_filter.selected().map(|s| s.as_str()) {
-            match EventTypeEnum::from_str(t) {
-                Ok(event_type) => self.render_event_stats(f, event_type, area),
-                _ => { /* TODO: other stats */ }
-            }
+        if let Some(selection) = self.event_filter.selected() {
+            self.render_event_stats(f, selection, area)
         }
     }
 

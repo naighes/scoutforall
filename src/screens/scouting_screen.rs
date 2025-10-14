@@ -338,7 +338,7 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             // update snapshot and get new available options
             .and_then(|_| {
                 self.snapshot
-                    .add_event(event, self.currently_available_options.clone())
+                    .add_event(event, &self.currently_available_options)
             });
         match currently_available_options {
             Ok(options) => {
@@ -785,8 +785,8 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
                 " {:<20}",
                 e.player
                     .and_then(|p1| self.current_match.team.find_player(p1))
-                    .map(|p| p.name.clone())
-                    .unwrap_or("-".to_string())
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("-")
             ),
             format!(
                 " {:<10}",
@@ -808,14 +808,14 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
     }
 
     fn render_recent_events(&self, f: &mut Frame, area: Rect) {
-        let mut sorted: Vec<EventEntry> = self.set.events.clone();
-        sorted.sort_by_key(|e| e.timestamp);
-        let recent_events: Vec<_> = sorted.into_iter().rev().take(16).collect();
-        let rows: Vec<Row> = recent_events
-            .iter()
+        let mut events: Vec<_> = self.set.events.iter().collect();
+        events.sort_by_key(|e| e.timestamp);
+        let rows = events
+            .into_iter()
+            .rev()
+            .take(16)
             .enumerate()
-            .map(|(i, e)| self.recent_event_row(i, e))
-            .collect();
+            .map(|(i, e)| self.recent_event_row(i, e));
         let table = Table::new(
             rows,
             [
@@ -946,7 +946,9 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             (
                 chunks[2],
                 match &self.current_event {
-                    EventTypeInput::Some(ev) => Some(ev.to_string()),
+                    EventTypeInput::Some(ev) => {
+                        Some(ev.friendly_name(current_labels()).to_string())
+                    }
                     _ => None,
                 },
                 Color::LightGreen,

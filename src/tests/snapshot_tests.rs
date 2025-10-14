@@ -1327,7 +1327,7 @@ mod tests {
 
         for (event, assert) in list {
             availeble_options = snapshot
-                .add_event(&event, availeble_options)
+                .add_event(&event, &availeble_options)
                 .expect("expected a successful computation");
             assert(&snapshot, &availeble_options);
         }
@@ -1340,7 +1340,7 @@ mod tests {
                 target_player: Some(setter_replacement), // in
                 timestamp: Utc::now(),
             },
-            vec![EventTypeEnum::R],
+            &[EventTypeEnum::R],
         );
         assert!(match setter_already_replaced {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1357,7 +1357,7 @@ mod tests {
                 target_player: Some(setter_replacement), // in
                 timestamp: Utc::now(),
             },
-            vec![EventTypeEnum::R],
+            &[EventTypeEnum::R],
         );
         assert!(match setter_replacement_already_used {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1374,7 +1374,7 @@ mod tests {
                 target_player: Some(some_other_replacement), // in
                 timestamp: Utc::now(),
             },
-            vec![EventTypeEnum::R],
+            &[EventTypeEnum::R],
         );
         assert!(match libero_cannot_be_replaced {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1392,7 +1392,7 @@ mod tests {
                     target_player: Some(some_other_replacement), // in
                     timestamp: Utc::now(),
                 },
-                vec![EventTypeEnum::R],
+                &[EventTypeEnum::R],
             )
             .expect("should not throw");
 
@@ -1404,7 +1404,7 @@ mod tests {
                 target_player: Some(some_other_player), // in
                 timestamp: Utc::now(),
             },
-            vec![EventTypeEnum::R],
+            &[EventTypeEnum::R],
         );
         assert!(match unclosed_change_error {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1426,7 +1426,7 @@ mod tests {
                     target_player: Some(oh1),             // in
                     timestamp: Utc::now(),
                 },
-                vec![EventTypeEnum::R],
+                &[EventTypeEnum::R],
             )
             .expect("should not throw");
 

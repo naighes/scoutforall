@@ -65,7 +65,7 @@ impl SetEntry {
         let mut available_options: Vec<EventTypeEnum> = vec![];
         if self.has_events() {
             for event in &self.events {
-                available_options = snapshot.add_event(event, available_options.clone())?;
+                available_options = snapshot.add_event(event, &available_options)?;
             }
         } else {
             // there are no events: set is just started

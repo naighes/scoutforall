@@ -342,7 +342,7 @@ impl Snapshot {
     fn get_available_options(
         &self,
         event: &EventEntry,
-        current_available_options: Vec<EventTypeEnum>,
+        current_available_options: &[EventTypeEnum],
     ) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -392,7 +392,7 @@ impl Snapshot {
         .into_iter()
         .collect();
         match (event.event_type, event.eval) {
-            (R | CL | CS, _) => current_available_options,
+            (R | CL | CS, _) => current_available_options.to_vec(),
             key => options_map.get(&key).cloned().unwrap_or_default(),
         }
     }
@@ -543,7 +543,7 @@ impl Snapshot {
     pub fn add_event(
         &mut self,
         event: &EventEntry,
-        current_available_options: Vec<EventTypeEnum>,
+        current_available_options: &[EventTypeEnum],
     ) -> Result<Vec<EventTypeEnum>, AppError> {
         self.set_score_stats(event);
         self.set_phase_count_stats(event)?;
