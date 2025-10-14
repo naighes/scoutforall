@@ -858,7 +858,9 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
                         id: player.id,
                         name: player.name.clone(),
                         number: player.number,
-                        role: player.role.to_string(),
+                        role: player
+                            .role
+                            .map_or_else(|| "-".to_string(), |r| r.to_string()),
                     })
                     .map(|e| Self::format_player_choice_row(&e))
                     .collect();

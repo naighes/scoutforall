@@ -6,8 +6,22 @@ use uuid::Uuid;
 pub struct PlayerEntry {
     pub id: Uuid,
     pub name: String,
-    pub role: RoleEnum,
+    pub role: Option<RoleEnum>,
     pub number: u8,
+    #[serde(default)]
+    pub deleted: bool,
+}
+
+impl Default for PlayerEntry {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            role: None,
+            number: 0,
+            deleted: false,
+        }
+    }
 }
 
 impl std::fmt::Display for PlayerEntry {

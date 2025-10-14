@@ -143,12 +143,12 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             // on setter selection, grab the first setter from available players as default
             (false, 6, None, _) => available_players
                 .iter()
-                .position(|p| p.role == RoleEnum::Setter)
+                .position(|p| p.role == Some(RoleEnum::Setter))
                 .or(Some(0)),
             // on libero/fallbacklibero selection, grab the first libero from available players as default
             (false, 6, Some(_), None | Some(_)) => available_players
                 .iter()
-                .position(|p| p.role == RoleEnum::Libero)
+                .position(|p| p.role == Some(RoleEnum::Libero))
                 .or(Some(0)),
             _ => Some(0),
         }
@@ -481,7 +481,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
         Row::new(vec![
             p.number.to_string(),
             p.name.clone(),
-            p.role.to_string(),
+            p.role.map_or_else(|| "-".to_string(), |r| r.to_string()),
         ])
     }
 

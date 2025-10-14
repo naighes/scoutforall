@@ -25,11 +25,13 @@ pub struct Labels {
     pub description_cannot_be_empty: &'static str,
     pub role_is_required: &'static str,
     pub could_not_create_player: &'static str,
+    pub could_not_remove_player: &'static str,
     pub number_must_be_between_0_and_99: &'static str,
     pub role: &'static str,
     pub new_player: &'static str,
     pub error: &'static str,
     pub info: &'static str,
+    pub warning: &'static str,
     pub new_team: &'static str,
     pub year: &'static str,
     pub classification_is_required: &'static str,
@@ -135,6 +137,8 @@ pub struct Labels {
     pub gender_is_required: &'static str,
     pub edit_team: &'static str,
     pub edit_player: &'static str,
+    pub remove_player: &'static str,
+    pub remove_player_confirmation: &'static str,
     pub change_libero: &'static str,
     pub change_setter: &'static str,
     pub lineup_selection_fallback_libero: &'static str,
@@ -211,6 +215,7 @@ pub struct Labels {
     pub issue_reported_successfully: &'static str,
     pub failed_to_report_issue: &'static str,
     pub invalid_email_address: &'static str,
+    pub y: &'static char,
 }
 
 const EN: Labels = Labels {
@@ -235,11 +240,13 @@ const EN: Labels = Labels {
     description_cannot_be_empty: "description cannot be empty",
     role_is_required: "role is required",
     could_not_create_player: "could not create player",
+    could_not_remove_player: "could not remove player",
     number_must_be_between_0_and_99: "number must be between 0 and 99",
     role: "role",
     new_player: "new player",
     error: "error",
     info: "info",
+    warning: "warning",
     new_team: "new team",
     year: "year",
     classification_is_required: "classification is required",
@@ -345,6 +352,8 @@ const EN: Labels = Labels {
     gender_is_required: "gender is required",
     edit_team: "edit team",
     edit_player: "edit player",
+    remove_player: "remove player",
+    remove_player_confirmation: "removing player '{}': irreversible operation. Are you sure? (y/n)",
     change_libero: "change libero",
     change_setter: "change setter",
     lineup_selection_fallback_libero: "lineup selection - fallback libero",
@@ -421,6 +430,7 @@ const EN: Labels = Labels {
     issue_reported_successfully: "issue reported successfully",
     failed_to_report_issue: "failed to report issue (check your internet connection)",
     invalid_email_address: "invalid email address",
+    y: &'y'
 };
 
 const IT: Labels = Labels {
@@ -445,11 +455,13 @@ const IT: Labels = Labels {
     description_cannot_be_empty: "la descrizione è obbligatoria",
     role_is_required: "il ruolo è obbligatorio",
     could_not_create_player: "impossibile creare il giocatore",
+    could_not_remove_player: "impossibile rimuovere il giocatore",
     number_must_be_between_0_and_99: "il numero deve essere compreso tra 0 e 99",
     role: "ruolo",
     new_player: "nuovo giocatore",
     error: "errore",
     info: "info",
+    warning: "avviso",
     new_team: "nuova squadra",
     year: "anno",
     classification_is_required: "la classificazione è obbligatoria",
@@ -555,6 +567,8 @@ const IT: Labels = Labels {
     gender_is_required: "il genere è obbligatorio",
     edit_team: "modifica squadra",
     edit_player: "modifica giocatore",
+    remove_player: "elimina giocatore",
+    remove_player_confirmation: "eliminazione giocatore '{}':operazione irreversibile. Confermi? (s/n)",
     change_libero: "cambia libero",
     change_setter: "cambia palleggiatore",
     lineup_selection_fallback_libero: "selezione formazione - libero di riserva",
@@ -631,6 +645,7 @@ const IT: Labels = Labels {
     issue_reported_successfully: "problema segnalato con successo",
     failed_to_report_issue: "segnalazione del problema non riuscita (controlla la tua connessione a internet)",
     invalid_email_address: "indirizzo email non valido",
+    y: &'s'
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {

@@ -22,4 +22,7 @@ impl TeamEntry {
     pub fn find_player(&self, player_id: Uuid) -> Option<&PlayerEntry> {
         self.players.iter().find(|p| p.id == player_id)
     }
+    pub fn active_players(&self) -> Vec<&PlayerEntry> {
+        self.players.iter().filter(|p| !p.deleted).collect()
+    }
 }

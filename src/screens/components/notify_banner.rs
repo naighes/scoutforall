@@ -10,6 +10,7 @@ use crate::localization::current_labels;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotifyMessage {
     Error(String),
+    Warning(String),
     Info(String),
 }
 
@@ -31,6 +32,10 @@ impl NotifyBanner {
         self.message = Some(NotifyMessage::Info(msg));
     }
 
+    pub fn set_warning(&mut self, msg: String) {
+        self.message = Some(NotifyMessage::Warning(msg));
+    }
+
     pub fn reset(&mut self) {
         self.message = None;
     }
@@ -44,6 +49,7 @@ impl NotifyBanner {
             let msg = match message {
                 NotifyMessage::Info(m) => m,
                 NotifyMessage::Error(m) => m,
+                NotifyMessage::Warning(m) => m,
             };
             let widget = Paragraph::new(msg.clone())
                 .style(
@@ -52,12 +58,14 @@ impl NotifyBanner {
                         .bg(match message {
                             NotifyMessage::Info(_) => Color::Blue,
                             NotifyMessage::Error(_) => Color::Red,
+                            NotifyMessage::Warning(_) => Color::Yellow,
                         })
                         .add_modifier(Modifier::BOLD),
                 )
                 .block(Block::default().borders(Borders::ALL).title(match message {
                     NotifyMessage::Info(_) => current_labels().info,
                     NotifyMessage::Error(_) => current_labels().error,
+                    NotifyMessage::Warning(_) => current_labels().warning,
                 }));
             f.render_widget(widget, area);
         }

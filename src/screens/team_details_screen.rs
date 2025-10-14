@@ -3,12 +3,15 @@ use std::{path::PathBuf, sync::Arc};
 use crate::{
     localization::current_labels,
     providers::{
-        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
-        team_reader::TeamReader, team_writer::TeamWriter,
+        match_reader::MatchReader,
+        match_writer::MatchWriter,
+        set_writer::SetWriter,
+        team_reader::TeamReader,
+        team_writer::{PlayerInput, TeamWriter},
     },
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue,
             team_header::TeamHeader,
         },
         edit_player_screen::EditPlayerScreen,
@@ -18,7 +21,7 @@ use crate::{
         match_list_screen::MatchListScreen,
         screen::{AppAction, Renderable, ScreenAsync},
     },
-    shapes::team::TeamEntry,
+    shapes::{player::PlayerEntry, team::TeamEntry},
 };
 use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -33,15 +36,15 @@ use ratatui::{
 
 #[derive(Debug)]
 pub struct TeamDetailsScreen<
-    TR: TeamReader + Send + Sync,
-    TW: TeamWriter + Send + Sync,
-    MR: MatchReader + Send + Sync,
-    MW: MatchWriter + Send + Sync,
-    SSW: SetWriter + Send + Sync,
+    TR: TeamReader + Send + Sync + 'static,
+    TW: TeamWriter + Send + Sync + 'static,
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
 > {
     list_state: ListState,
     team: TeamEntry,
-    notify_message: NotifyBanner,
+    notifier: NotifyDialogue<PlayerEntry>,
     header: TeamHeader,
     footer: NavigationFooter,
     base_path: PathBuf,
@@ -62,28 +65,48 @@ impl<
     > ScreenAsync for TeamDetailsScreen<TR, TW, MR, MW, SSW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
+        match (
+            key.code,
+            &self.notifier.banner.has_value(),
+            &self.notifier.has_value(),
+        ) {
+            (_, true, false) => {
+                self.notifier.banner.reset();
                 AppAction::None
             }
-            (KeyCode::Down, _) => {
+            (KeyCode::Down, _, _) => {
                 self.next_player();
                 AppAction::None
             }
-            (KeyCode::Up, _) => {
+            (KeyCode::Up, _, _) => {
                 self.previous_player();
                 AppAction::None
             }
-            (KeyCode::Char('n'), _) => AppAction::SwitchScreen(Box::new(EditPlayerScreen::new(
+            (KeyCode::Char(x), _, true) => {
+                let selected_player = self.notifier.entry.to_owned();
+                self.notifier.reset();
+                if x == *current_labels().y {
+                    match selected_player {
+                        Some(player) => {
+                            self.remove(&mut self.team.clone(), player, self.team_writer.clone())
+                                .await
+                        }
+
+                        None => return AppAction::None,
+                    }
+                } else {
+                    AppAction::None
+                }
+            }
+            (KeyCode::Char('n'), _, _) => AppAction::SwitchScreen(Box::new(EditPlayerScreen::new(
                 self.team.clone(),
                 self.team_writer.clone(),
             ))),
-            (KeyCode::Char('m'), _) => {
+            (KeyCode::Char('m'), _, _) => {
                 let match_list = self.match_reader.read_all(&self.team).await;
                 match match_list {
                     Err(e) => {
-                        self.notify_message.set_error(format!(
+                        self.notifier.banner.set_error(format!(
                             "{}: {}",
                             current_labels().could_not_load_matches,
                             e
@@ -100,18 +123,18 @@ impl<
                     ))),
                 }
             }
-            (KeyCode::Char('e'), _) => AppAction::SwitchScreen(Box::new(EditTeamScreen::edit(
+            (KeyCode::Char('e'), _, _) => AppAction::SwitchScreen(Box::new(EditTeamScreen::edit(
                 &self.team,
                 self.team_writer.clone(),
             ))),
-            (KeyCode::Char('s'), _) => match home_dir() {
+            (KeyCode::Char('s'), _, _) => match home_dir() {
                 Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
                     path,
                     current_labels().export,
                     ExportTeamAction::new(self.team.id, self.base_path.clone()),
                 ))),
                 None => {
-                    self.notify_message.set_error(
+                    self.notifier.banner.set_error(
                         current_labels()
                             .could_not_recognize_home_directory
                             .to_string(),
@@ -119,20 +142,41 @@ impl<
                     AppAction::None
                 }
             },
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => {
+            (KeyCode::Esc, _, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Enter, _, _) => {
                 match self.list_state.selected().map(|selected| {
-                    let player = self.team.players.get(selected).cloned();
+                    let player = self.team.active_players().get(selected).cloned();
                     match player {
                         Some(p) => AppAction::SwitchScreen(Box::new(EditPlayerScreen::edit(
                             self.team.clone(),
-                            p,
+                            p.clone(),
                             self.team_writer.clone(),
                         ))),
                         None => AppAction::None,
                     }
                 }) {
                     Some(action) => action,
+                    None => AppAction::None,
+                }
+            }
+            (KeyCode::Char('r'), _, _) => {
+                match self.list_state.selected().map(async |selected: usize| {
+                    let u = self.team.active_players().get(selected).cloned();
+                    let player = async move { u };
+                    match player.await {
+                        Some(p) => {
+                            self.notifier.set(p.to_owned()).banner.set_warning(
+                                current_labels()
+                                    .remove_player_confirmation
+                                    .to_string()
+                                    .replace("{}", p.name.as_str()),
+                            );
+                            AppAction::None
+                        }
+                        None => AppAction::None,
+                    }
+                }) {
+                    Some(action) => action.await,
                     None => AppAction::None,
                 }
             }
@@ -146,7 +190,7 @@ impl<
                 self.team = team;
             }
             Err(e) => {
-                self.notify_message.set_error(format!(
+                self.notifier.banner.set_error(format!(
                     "{}: {}",
                     current_labels().could_not_load_teams,
                     e
@@ -165,7 +209,7 @@ impl<
     > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        self.notify_message.render(f, footer_right);
+        self.notifier.render(f, footer_right);
         let container = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(5), Constraint::Min(1)])
@@ -200,7 +244,7 @@ impl<
             Constraint::Length(30),
             Constraint::Length(20),
         ]);
-        if self.team.players.is_empty() {
+        if self.team.active_players().is_empty() {
             self.render_no_players_yet(f, container[1]);
         } else {
             f.render_widget(table, container[1]);
@@ -231,7 +275,6 @@ impl<
         TeamDetailsScreen {
             team: team.clone(),
             list_state: ListState::default(),
-            notify_message: NotifyBanner::new(),
             header,
             footer: NavigationFooter::new(),
             base_path,
@@ -240,12 +283,13 @@ impl<
             match_reader,
             match_writer,
             set_writer,
+            notifier: NotifyDialogue::new(),
         }
     }
 
     fn next_player(&mut self) {
         if let Some(selected) = self.list_state.selected() {
-            let new_selected = (selected + 1).min(self.team.players.len() - 1);
+            let new_selected = (selected + 1).min(self.team.active_players().len() - 1);
             self.list_state.select(Some(new_selected));
         }
     }
@@ -258,7 +302,7 @@ impl<
     }
 
     fn get_footer_entries(&self) -> Vec<(String, String)> {
-        if self.team.players.is_empty() {
+        if self.team.active_players().is_empty() {
             vec![
                 ("E".to_string(), current_labels().edit_team.to_string()),
                 ("N".to_string(), current_labels().new_player.to_string()),
@@ -273,6 +317,7 @@ impl<
                     current_labels().enter.to_string(),
                     current_labels().edit_player.to_string(),
                 ),
+                ("R".to_string(), current_labels().remove_player.to_string()),
                 ("E".to_string(), current_labels().edit_team.to_string()),
                 ("N".to_string(), current_labels().new_player.to_string()),
                 ("M".to_string(), current_labels().match_list.to_string()),
@@ -280,6 +325,33 @@ impl<
                 ("Esc".to_string(), current_labels().back.to_string()),
                 ("Q".to_string(), current_labels().quit.to_string()),
             ]
+        }
+    }
+
+    async fn remove(
+        &mut self,
+        team: &mut TeamEntry,
+        player: PlayerEntry,
+        team_writer: Arc<TW>,
+    ) -> AppAction {
+        let mut input = player.clone();
+        input.deleted = true;
+        let input = PlayerInput::Existing(input);
+        let player = team_writer.save_player(input, team).await;
+        self.refresh_data().await;
+        match player {
+            Ok(_) => {
+                self.notifier
+                    .banner
+                    .set_info(current_labels().operation_successful.to_string());
+                AppAction::None
+            }
+            Err(_) => {
+                self.notifier
+                    .banner
+                    .set_error(current_labels().could_not_remove_player.to_string());
+                AppAction::None
+            }
         }
     }
 
@@ -300,14 +372,14 @@ impl<
 
     fn get_rows(&self, selected_player: usize) -> Vec<Row<'_>> {
         self.team
-            .players
+            .active_players()
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let mut row = Row::new(vec![
                     p.number.to_string(),
                     p.name.clone(),
-                    p.role.to_string().clone(),
+                    p.role.map_or_else(|| "-".to_string(), |r| r.to_string()),
                 ]);
                 if i == selected_player {
                     row = row.style(

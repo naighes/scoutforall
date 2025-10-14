@@ -133,7 +133,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
-            Some(player.role),
+            player.role,
             false,
         );
         let name = TextBox::new(current_labels().name.to_owned(), true, Some(&player.name));
@@ -189,7 +189,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         let existing_id = self.existing_player.as_ref().map(|ep| ep.id);
         !self
             .team
-            .players
+            .active_players()
             .iter()
             .any(|p| p.number == number && Some(p.id) != existing_id)
     }
@@ -218,7 +218,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
                         Some(player) => {
                             let mut updated = player.clone();
                             updated.name = name;
-                            updated.role = role;
+                            updated.role = Some(role);
                             updated.number = number;
                             PlayerInput::Existing(updated)
                         }

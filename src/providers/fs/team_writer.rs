@@ -72,10 +72,10 @@ impl TeamWriter for FileSystemTeamWriter {
     ) -> Result<PlayerEntry, AppError> {
         let player = match input {
             PlayerInput::New { name, role, number } => PlayerEntry {
-                id: Uuid::new_v4(),
                 name,
-                role,
+                role: Some(role),
                 number,
+                ..Default::default()
             },
             PlayerInput::Existing(existing) => existing,
         };
