@@ -21,6 +21,12 @@ It helps coaches and analysts track match events and generate useful reports for
 
 Pull requests and bug reports are welcome!
 
+## contributors
+
+- [Nicola Baldi](https://github.com/naighes)
+- [Luca Giordano](https://github.com/lsfera)
+- [Tyler Widdison](https://github.com/tyler-widdison)
+
 ## license
 
 This project is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0).  
