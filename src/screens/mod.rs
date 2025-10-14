@@ -9,6 +9,7 @@ pub mod import_match_screen;
 pub mod import_team_screen;
 pub mod match_list_screen;
 pub mod match_stats_screen;
+pub mod report_an_issue_screen;
 pub mod scouting_screen;
 pub mod screen;
 pub mod settings_screen;
