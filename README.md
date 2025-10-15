@@ -21,6 +21,14 @@ It helps coaches and analysts track match events and generate useful reports for
 
 Pull requests and bug reports are welcome!
 
+## community & support
+
+💬 **join our discord community**:
+[![discord](https://img.shields.io/discord/1427988776055083008?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/EMv79fdWFf)
+
+Connect with other coaches, analysts and developers using **scout4all**.  
+Get help, share insights and stay updated on the latest releases!
+
 ## contributors
 
 - [Nicola Baldi](https://github.com/naighes)
