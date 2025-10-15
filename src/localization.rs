@@ -22,6 +22,7 @@ pub struct Labels {
     pub name: &'static str,
     pub number: &'static str,
     pub name_cannot_be_empty: &'static str,
+    pub description_cannot_be_empty: &'static str,
     pub role_is_required: &'static str,
     pub could_not_create_player: &'static str,
     pub number_must_be_between_0_and_99: &'static str,
@@ -203,6 +204,13 @@ pub struct Labels {
     pub created_with: &'static str,
     pub print_report: &'static str,
     pub could_not_open_pdf: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+    pub email: &'static str,
+    pub report_an_issue: &'static str,
+    pub issue_reported_successfully: &'static str,
+    pub failed_to_report_issue: &'static str,
+    pub invalid_email_address: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -224,6 +232,7 @@ const EN: Labels = Labels {
     name: "name",
     number: "number",
     name_cannot_be_empty: "name cannot be empty",
+    description_cannot_be_empty: "description cannot be empty",
     role_is_required: "role is required",
     could_not_create_player: "could not create player",
     number_must_be_between_0_and_99: "number must be between 0 and 99",
@@ -405,6 +414,13 @@ const EN: Labels = Labels {
     created_with: "created with",
     print_report: "print report",
     could_not_open_pdf: "could not open PDF file",
+    title: "title",
+    description: "description",
+    email: "email",
+    report_an_issue: "report an issue",
+    issue_reported_successfully: "issue reported successfully",
+    failed_to_report_issue: "failed to report issue (check your internet connection)",
+    invalid_email_address: "invalid email address",
 };
 
 const IT: Labels = Labels {
@@ -426,6 +442,7 @@ const IT: Labels = Labels {
     name: "nome",
     number: "numero",
     name_cannot_be_empty: "il nome è obbligatorio",
+    description_cannot_be_empty: "la descrizione è obbligatoria",
     role_is_required: "il ruolo è obbligatorio",
     could_not_create_player: "impossibile creare il giocatore",
     number_must_be_between_0_and_99: "il numero deve essere compreso tra 0 e 99",
@@ -607,6 +624,13 @@ const IT: Labels = Labels {
     created_with: "creato con",
     print_report: "stampa tabellino",
     could_not_open_pdf: "impossibile aprire il file PDF",
+    title: "titolo",
+    description: "descrizione",
+    email: "email",
+    report_an_issue: "segnala un problema",
+    issue_reported_successfully: "problema segnalato con successo",
+    failed_to_report_issue: "segnalazione del problema non riuscita (controlla la tua connessione a internet)",
+    invalid_email_address: "indirizzo email non valido",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {

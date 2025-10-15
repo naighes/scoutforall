@@ -82,6 +82,9 @@ jobs:
           target: ${{ matrix.platforms.target }}
           args: "--verbose --locked --release ${{ matrix.platforms.features }}"
           strip: true
+        env:
+          LINEAR_TOKEN: ${{ secrets.LINEAR_TOKEN }}
+          LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
       - name: setup variables
         id: variables
         shell: bash

@@ -5,6 +5,7 @@ use crate::{
     providers::settings_writer::SettingsWriter,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+        report_an_issue_screen::ReportAnIssueScreen,
         screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{enums::LanguageEnum, settings::Settings},
@@ -63,6 +64,9 @@ impl<SW: SettingsWriter + Send + Sync> ScreenAsync for SettingsScreen<SW> {
             (KeyCode::Up, _) => self.handle_up(),
             (KeyCode::Down, _) => self.handle_down(),
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+            (KeyCode::Char('i'), _) => {
+                AppAction::SwitchScreen(Box::new(ReportAnIssueScreen::new()))
+            }
             (KeyCode::Enter, _) => self.handle_enter().await,
             _ => AppAction::None,
         }
@@ -89,6 +93,10 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
                 (
                     current_labels().enter.to_string(),
                     current_labels().confirm.to_string(),
+                ),
+                (
+                    "I".to_string(),
+                    current_labels().report_an_issue.to_string(),
                 ),
                 ("Esc".to_string(), current_labels().back.to_string()),
                 ("Q".to_string(), current_labels().quit.to_string()),
