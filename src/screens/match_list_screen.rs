@@ -23,14 +23,17 @@ use crate::{
         start_set_screen::StartSetScreen,
     },
     shapes::{
-        enums::TeamSideEnum,
+        enums::{ScreenActionEnum, TeamSideEnum},
+        keybinding::KeyBindings,
         r#match::{MatchEntry, MatchStatus},
         set::SetEntry,
+        settings::Settings,
         team::TeamEntry,
     },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::{crossterm::event::KeyEvent, Combiner, KeyCombinationFormat};
+use dirs::home_dir;
 use ratatui::{
     layout::Alignment,
     widgets::{Row, Table},
@@ -50,6 +53,7 @@ pub struct MatchListScreen<
     SR: SettingsReader + Send + Sync,
     SW: SettingsWriter + Send + Sync,
 > {
+    settings: Settings,
     list_state: ListState,
     team: TeamEntry,
     matches: Vec<(MatchEntry, MatchStatus)>,
@@ -62,6 +66,8 @@ pub struct MatchListScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
+    combiner: Combiner,
+    screen_key_bindings: KeyBindings,
 }
 
 impl<
@@ -124,8 +130,18 @@ impl<
         }
         self.header.render(f, container[0], Some(&self.team));
         self.notify_message.render(f, footer_right);
-        self.footer
-            .render(f, footer_left, self.get_footer_entries().clone());
+        let screen_actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> =
+            self.screen_actions();
+
+        self.footer.render(
+            f,
+            footer_left,
+            self.get_footer_entries(screen_actions.clone()),
+        );
+        self.screen_key_bindings = self
+            .settings
+            .keybindings
+            .slice(screen_actions.iter().map(|a| a.0).collect());
     }
 }
 
@@ -139,33 +155,37 @@ impl<
     > ScreenAsync for MatchListScreen<MR, MW, SSW, SR, SW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                AppAction::None
-            }
-            (KeyCode::Down, _) => self.next_match(),
-            (KeyCode::Up, _) => self.previous_match(),
-            (KeyCode::Enter, _) => self.handle_enter_key(),
-            (KeyCode::Char('p'), _) => self.handle_print(),
-            (KeyCode::Char(' '), _) => self.handle_space_key(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Char('n'), _) => {
-                if self.team.players.len() >= 6 {
-                    AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
-                        self.team.clone(),
-                        self.match_writer.clone(),
-                        self.set_writer.clone(),
-                        self.settings_reader.clone(),
-                    )))
-                } else {
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => {
+                    self.notify_message.reset();
                     AppAction::None
                 }
-            }
-            (KeyCode::Char('i'), _) => {
-                let default_path = self.get_default_path().await;
-                match default_path {
+                (Some(ScreenActionEnum::Next), _, _) => self.next_match(),
+                (Some(ScreenActionEnum::Previous), _, _) => self.previous_match(),
+                (Some(ScreenActionEnum::Select), _, _) => self.handle_enter_key(),
+                (Some(ScreenActionEnum::PrintReport), _, _) => self.handle_print(),
+                (Some(ScreenActionEnum::MatchStats), _, _) => self.handle_space_key(),
+                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::New), _, _) => {
+                    if self.team.players.len() >= 6 {
+                        AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
+                            self.settings.clone(),
+                            self.team.clone(),
+                            self.match_writer.clone(),
+                            self.set_writer.clone(),
+                        )))
+                    } else {
+                        AppAction::None
+                    }
+                }
+                (Some(ScreenActionEnum::Import), _, _) => match home_dir() {
                     Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                        self.settings.clone(),
                         path,
                         current_labels().import_match,
                         ImportMatchAction::new(
@@ -185,17 +205,13 @@ impl<
                         );
                         AppAction::None
                     }
-                }
-            }
-            (KeyCode::Char('s'), _) => {
-                let selected_match = self.get_selected_match();
-                let default_path = self.get_default_path().await;
-                match (default_path, selected_match) {
-                    (Some(path), Some((match_entry, status))) => {
-                        if !status.match_finished {
-                            AppAction::None
-                        } else {
+                },
+                (Some(ScreenActionEnum::Export), _, _) => {
+                    let selected_match = self.get_selected_match();
+                    match (home_dir(), selected_match) {
+                        (Some(path), Some((match_entry, _))) => {
                             AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                                self.settings.clone(),
                                 path,
                                 current_labels().export,
                                 ExportMatchAction::new(
@@ -207,26 +223,27 @@ impl<
                                 self.settings_writer.clone(),
                             )))
                         }
-                    }
-                    (None, _) => {
-                        self.notify_message.set_error(
-                            current_labels()
-                                .could_not_recognize_home_directory
-                                .to_string(),
-                        );
-                        AppAction::None
-                    }
-                    (_, None) => {
-                        self.notify_message
-                            .set_error(current_labels().no_match_selected.to_string());
-                        AppAction::None
+                        (None, _) => {
+                            self.notify_message.set_error(
+                                current_labels()
+                                    .could_not_recognize_home_directory
+                                    .to_string(),
+                            );
+                            AppAction::None
+                        }
+                        (_, None) => {
+                            self.notify_message
+                                .set_error(current_labels().no_match_selected.to_string());
+                            AppAction::None
+                        }
                     }
                 }
+                _ => AppAction::None,
             }
-            _ => AppAction::None,
+        } else {
+            AppAction::None
         }
     }
-
     async fn refresh_data(&mut self) {
         match self.match_reader.read_all(&self.team).await {
             Ok(matches) => {
@@ -262,6 +279,7 @@ impl<
     > MatchListScreen<MR, MW, SSW, SR, SW>
 {
     pub fn new(
+        settings: Settings,
         team: TeamEntry,
         matches: Vec<MatchEntry>,
         base_path: PathBuf,
@@ -276,6 +294,8 @@ impl<
             .filter_map(|m| m.get_status().ok().map(|s| (m, s)))
             .collect::<Vec<_>>();
         MatchListScreen {
+            settings,
+            combiner: Combiner::default(),
             matches,
             team,
             list_state: ListState::default(),
@@ -288,22 +308,14 @@ impl<
             set_writer,
             settings_reader,
             settings_writer,
+            screen_key_bindings: KeyBindings::empty(),
         }
     }
-
     fn get_selected_match(&self) -> Option<(&MatchEntry, &MatchStatus)> {
         self.list_state
             .selected()
             .and_then(|i| self.matches.get(i))
             .map(|(m, s)| (m, s))
-    }
-
-    async fn get_default_path(&self) -> Option<PathBuf> {
-        self.settings_reader
-            .read()
-            .await
-            .ok()
-            .and_then(|s| s.get_default_path())
     }
 
     fn get_match_row(
@@ -359,6 +371,7 @@ impl<
         last_serving_team: Option<TeamSideEnum>,
     ) -> AppAction {
         AppAction::SwitchScreen(Box::new(StartSetScreen::new(
+            self.settings.clone(),
             m.clone(),
             next_set_number,
             match (next_set_number, last_serving_team) {
@@ -369,7 +382,6 @@ impl<
             },
             Some(1),
             self.set_writer.clone(),
-            self.settings_reader.clone(),
         )))
     }
 
@@ -377,13 +389,13 @@ impl<
         match last_incomplete_set.compute_snapshot() {
             Ok((snapshot, available_options)) => {
                 AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                    self.settings.clone(),
                     m.clone(),
                     last_incomplete_set,
                     snapshot,
                     available_options,
                     Some(1),
                     self.set_writer.clone(),
-                    self.settings_reader.clone(),
                 )))
             }
             Err(_) => {
@@ -410,34 +422,61 @@ impl<
         AppAction::None
     }
 
-    fn get_footer_entries(&self) -> Vec<(String, String)> {
-        let mut entries: Vec<(String, String)> = vec![];
+    fn get_footer_entries(
+        &self,
+        actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)>,
+    ) -> Vec<(String, String)> {
+        let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
+        let kb = &self.settings.keybindings;
+        fn map_screen_action(
+            kb: &KeyBindings,
+            action: &(&ScreenActionEnum, Option<fn(String) -> String>),
+            fmt: KeyCombinationFormat,
+        ) -> Option<(String, String)> {
+            let screen_action = kb.shortest_key_for(action.0);
+            let description_fn = action.1;
+            if let Some(found) = screen_action {
+                if let Some(description_fn) = description_fn {
+                    Some((fmt.to_string(found.0), description_fn(found.1)))
+                } else {
+                    Some((fmt.to_string(found.0), found.1))
+                }
+            } else {
+                None
+            }
+        }
+
+        actions
+            .iter()
+            .map_while(|action| map_screen_action(kb, action, fmt.clone()))
+            .collect()
+    }
+
+    fn screen_actions(&self) -> Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> {
+        let mut actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> = Vec::new();
+        actions.push((
+            &ScreenActionEnum::Import,
+            Some(|lbl| -> String { lbl.replace("{}", current_labels().match_word) }),
+        ));
+
         if !self.matches.is_empty() {
-            entries.push(("↑↓".to_string(), current_labels().navigate.to_string()));
+            actions.push((&ScreenActionEnum::Next, None));
+            actions.push((&ScreenActionEnum::Previous, None));
         }
         if let Some((_, status)) = self.get_selected_match() {
             if !status.match_finished {
-                entries.push((
-                    current_labels().enter.to_string(),
-                    current_labels().select.to_string(),
-                ));
+                actions.push((&ScreenActionEnum::Select, None));
             }
-            if status.match_finished {
-                entries.push(("S".to_string(), current_labels().export.to_string()));
-            }
-            entries.push((
-                current_labels().space.to_string(),
-                current_labels().match_stats.to_string(),
-            ));
-            entries.push(("P".to_string(), current_labels().print_report.to_string()));
+            actions.push((&ScreenActionEnum::Export, None));
+            actions.push((&ScreenActionEnum::MatchStats, None));
+            actions.push((&ScreenActionEnum::PrintReport, None));
         }
         if self.team.players.len() >= 6 {
-            entries.push(("N".to_string(), current_labels().new_match.to_string()));
-        }
-        entries.push(("I".to_string(), current_labels().import_match.to_string()));
-        entries.push(("Esc".to_string(), current_labels().back.to_string()));
-        entries.push(("Q".to_string(), current_labels().quit.to_string()));
-        entries
+            actions.push((&ScreenActionEnum::New, None));
+        };
+        actions.push((&ScreenActionEnum::Back, None));
+        actions.push((&ScreenActionEnum::Quit, None));
+        actions
     }
 
     fn render_no_matches_yet(&self, f: &mut Frame, area: Rect) {
@@ -457,7 +496,7 @@ impl<
 
     fn handle_space_key(&mut self) -> AppAction {
         match self.get_selected_match() {
-            Some((m, _)) => match MatchStatsScreen::new(m.clone()) {
+            Some((m, _)) => match MatchStatsScreen::new(self.settings.clone(), m.clone()) {
                 Ok(screen) => AppAction::SwitchScreen(Box::new(screen)),
                 Err(_) => {
                     self.notify_message

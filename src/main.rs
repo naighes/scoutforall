@@ -16,7 +16,6 @@ mod tests;
 use crate::{
     analytics::{global::init_global_queue_manager, upload::AnalyticsUploadWorker},
     app::App,
-    localization::init_language,
     logging::logger::init_logger,
     providers::{
         fs::{
@@ -31,10 +30,10 @@ use crate::{
         team_reader::TeamReader,
     },
     screens::screen::AppAction,
-    shapes::settings::Settings,
+    shapes::settings::{init_settings, Settings},
 };
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+use crokey::crossterm::{
+    event::{self, Event, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -113,7 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await
         .ok()
         .unwrap_or_else(Settings::default);
-    init_language(settings.language);
+    init_settings(settings.clone());
     maybe_check_update();
     let team_reader_arc = Arc::new(team_reader);
     let team_writer_arc = Arc::new(team_writer);
@@ -214,7 +213,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::i
             if let Event::Key(key) = event::read()? {
                 match (key.code, key.kind, app.current_screen()) {
                     (_, KeyEventKind::Release, _) => continue,
-                    (KeyCode::Char('q'), _, _) => return Ok(()),
                     (_, _, Some(screen)) => match screen.handle_key(key).await {
                         AppAction::None => {}
                         AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
@@ -226,6 +224,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::i
                                 }
                             }
                         }
+                        AppAction::Quit(result) => return result,
                     },
                     _ => {}
                 }

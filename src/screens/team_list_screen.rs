@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
 use crate::{
     localization::current_labels,
@@ -12,14 +12,20 @@ use crate::{
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
+        keybindings_screen::KeybindingScreen,
         screen::{AppAction, Renderable, ScreenAsync},
         settings_screen::SettingsScreen,
         team_details_screen::TeamDetailsScreen,
     },
-    shapes::{enums::FriendlyName, settings::Settings, team::TeamEntry},
+    shapes::{
+        enums::{FriendlyName, ScreenActionEnum},
+        keybinding::KeyBindings,
+        settings::Settings,
+        team::TeamEntry,
+    },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::{crossterm::event::KeyEvent, Combiner, KeyCombinationFormat};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -50,6 +56,8 @@ pub struct TeamListScreen<
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
+    screen_key_bindings: KeyBindings,
+    combiner: crokey::Combiner,
 }
 
 #[async_trait]
@@ -64,6 +72,9 @@ impl<
     > ScreenAsync for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     async fn refresh_data(&mut self) {
+        self.settings_reader.read().await.ok().map(|s| {
+            self.settings = s;
+        });
         match self.team_reader.read_all().await {
             Ok(teams) => {
                 self.teams = teams;
@@ -86,63 +97,87 @@ impl<
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                AppAction::None
-            }
-            (KeyCode::Down, _) => {
-                self.next_team();
-                AppAction::None
-            }
-            (KeyCode::Up, _) => {
-                self.previous_team();
-                AppAction::None
-            }
-            (KeyCode::Enter, _) => match self.list_state.selected().and_then(|x| self.teams.get(x))
-            {
-                None => AppAction::None,
-                Some(team) => AppAction::SwitchScreen(Box::new(TeamDetailsScreen::new(
-                    team,
-                    self.base_path.clone(),
-                    self.team_reader.clone(),
-                    self.team_writer.clone(),
-                    self.match_reader.clone(),
-                    self.match_writer.clone(),
-                    self.set_writer.clone(),
-                    self.settings_reader.clone(),
-                    self.settings_writer.clone(),
-                ))),
-            },
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Char('n'), _) => {
-                AppAction::SwitchScreen(Box::new(EditTeamScreen::new(self.team_writer.clone())))
-            }
-            (KeyCode::Char('i'), _) => {
-                let default_path = self.settings.get_default_path();
-                match default_path {
-                    Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                        path,
-                        current_labels().import_team,
-                        ImportTeamAction::new(self.team_reader.clone(), self.team_writer.clone()),
-                        self.settings_reader.clone(),
-                        self.settings_writer.clone(),
-                    ))),
-                    None => {
-                        self.notify_message.set_error(
-                            current_labels()
-                                .could_not_recognize_home_directory
-                                .to_string(),
-                        );
-                        AppAction::None
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => {
+                    self.notify_message.reset();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::Next), _, _) => {
+                    self.next_team();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::Previous), _, _) => {
+                    self.previous_team();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::Select), _, _) => {
+                    match self.list_state.selected().and_then(|x| self.teams.get(x)) {
+                        None => AppAction::None,
+                        Some(team) => AppAction::SwitchScreen(Box::new(TeamDetailsScreen::new(
+                            self.settings.clone(),
+                            team,
+                            self.base_path.clone(),
+                            self.team_reader.clone(),
+                            self.team_writer.clone(),
+                            self.match_reader.clone(),
+                            self.match_writer.clone(),
+                            self.set_writer.clone(),
+                            self.settings_reader.clone(),
+                            self.settings_writer.clone(),
+                        ))),
                     }
                 }
+                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::New), _, _) => AppAction::SwitchScreen(Box::new(
+                    EditTeamScreen::new(self.settings.clone(), self.team_writer.clone()),
+                )),
+                (Some(ScreenActionEnum::Import), _, _) => {
+                    let default_path = self.settings.get_default_path();
+                    match default_path {
+                        Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                            self.settings.clone(),
+                            path,
+                            current_labels().import_team,
+                            ImportTeamAction::new(
+                                self.team_reader.clone(),
+                                self.team_writer.clone(),
+                            ),
+                            self.settings_reader.clone(),
+                            self.settings_writer.clone(),
+                        ))),
+                        None => {
+                            self.notify_message.set_error(
+                                current_labels()
+                                    .could_not_recognize_home_directory
+                                    .to_string(),
+                            );
+                            AppAction::None
+                        }
+                    }
+                }
+                (Some(ScreenActionEnum::LanguageSettings), _, _) => {
+                    AppAction::SwitchScreen(Box::new(SettingsScreen::new(
+                        self.settings.clone(),
+                        self.settings_writer.clone(),
+                    )))
+                }
+                (Some(ScreenActionEnum::KeybindingSettings), _, _) => {
+                    AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
+                        self.settings.clone(),
+                        self.settings_writer.clone(),
+                        self.settings_reader.clone(),
+                    )))
+                }
+                (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
+                _ => AppAction::None,
             }
-            (KeyCode::Char('s'), _) => AppAction::SwitchScreen(Box::new(SettingsScreen::new(
-                self.settings.clone(),
-                self.settings_writer.clone(),
-            ))),
-            _ => AppAction::None,
+        } else {
+            AppAction::None
         }
     }
 }
@@ -181,8 +216,19 @@ impl<
         } else {
             self.render_list(f, body, items);
         }
-        self.footer
-            .render(f, footer_left, self.get_footer_entries());
+        let screen_actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> =
+            self.screen_actions();
+
+        self.footer.render(
+            f,
+            footer_left,
+            self.get_footer_entries(screen_actions.clone()),
+        );
+
+        self.screen_key_bindings = self
+            .settings
+            .keybindings
+            .slice(screen_actions.iter().map(|a| a.0).collect());
     }
 }
 
@@ -222,6 +268,8 @@ impl<
             match_writer,
             set_writer,
             settings_reader,
+            screen_key_bindings: KeyBindings::empty(),
+            combiner: Combiner::default(),
         }
     }
 
@@ -239,25 +287,62 @@ impl<
         }
     }
 
-    fn get_footer_entries(&self) -> Vec<(String, String)> {
+    fn get_footer_entries(
+        &self,
+        actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)>,
+    ) -> Vec<(String, String)> {
+        let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
+
+        fn map_screen_action(
+            kb: &KeyBindings,
+            action: &(&ScreenActionEnum, Option<fn(String) -> String>),
+            fmt: KeyCombinationFormat,
+        ) -> Option<(String, String)> {
+            let screen_action = kb.shortest_key_for(action.0);
+            let description_fn = action.1;
+            if let Some(found) = screen_action {
+                if let Some(description_fn) = description_fn {
+                    return Some((fmt.to_string(found.0), description_fn(found.1)));
+                } else {
+                    return Some((fmt.to_string(found.0), found.1));
+                }
+            } else {
+                None
+            }
+        }
+
+        let kb = &self.settings.keybindings.clone();
+        actions
+            .iter()
+            .map_while(|sa| map_screen_action(kb, sa, fmt.clone()))
+            .collect()
+    }
+
+    fn screen_actions(&self) -> Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> {
         if self.teams.is_empty() {
             vec![
-                ("N".to_string(), current_labels().new_team.to_string()),
-                ("S".to_string(), current_labels().settings.to_string()),
-                ("I".to_string(), current_labels().import_team.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
+                (&ScreenActionEnum::New, None),
+                (&ScreenActionEnum::LanguageSettings, None),
+                (&ScreenActionEnum::KeybindingSettings, None),
+                (
+                    &ScreenActionEnum::Import,
+                    Some(|lbl| -> String { lbl.replace("{}", current_labels().team) }),
+                ),
+                (&ScreenActionEnum::Quit, None),
             ]
         } else {
             vec![
-                ("↑↓".to_string(), current_labels().navigate.to_string()),
+                (&ScreenActionEnum::Previous, None),
+                (&ScreenActionEnum::Next, None),
+                (&ScreenActionEnum::New, None),
+                (&ScreenActionEnum::Select, None),
+                (&ScreenActionEnum::LanguageSettings, None),
+                (&ScreenActionEnum::KeybindingSettings, None),
                 (
-                    current_labels().enter.to_string(),
-                    current_labels().select.to_string(),
+                    &ScreenActionEnum::Import,
+                    Some(|lbl| -> String { lbl.replace("{}", current_labels().team) }),
                 ),
-                ("S".to_string(), current_labels().settings.to_string()),
-                ("N".to_string(), current_labels().new_team.to_string()),
-                ("I".to_string(), current_labels().import_team.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
+                (&ScreenActionEnum::Quit, None),
             ]
         }
     }

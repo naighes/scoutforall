@@ -1,7 +1,7 @@
 use crate::shapes::enums::LanguageEnum;
-use once_cell::sync::{Lazy, OnceCell};
+use crate::shapes::settings::current_settings;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::sync::RwLock;
 
 pub struct Labels {
     pub could_not_recognize_home_directory: &'static str,
@@ -10,6 +10,8 @@ pub struct Labels {
     pub could_not_create_match_directory: &'static str,
     pub new_match: &'static str,
     pub navigate: &'static str,
+    pub previous: &'static str,
+    pub next: &'static str,
     pub confirm: &'static str,
     pub back: &'static str,
     pub quit: &'static str,
@@ -19,6 +21,7 @@ pub struct Labels {
     pub opponent_cannot_be_empty: &'static str,
     pub could_not_create_match: &'static str,
     pub invalid_date: &'static str,
+    pub invalid_shortcut: &'static str,
     pub name: &'static str,
     pub number: &'static str,
     pub name_cannot_be_empty: &'static str,
@@ -28,6 +31,8 @@ pub struct Labels {
     pub could_not_remove_player: &'static str,
     pub number_must_be_between_0_and_99: &'static str,
     pub role: &'static str,
+    pub edit: &'static str,
+    pub new: &'static str,
     pub new_player: &'static str,
     pub error: &'static str,
     pub info: &'static str,
@@ -106,7 +111,8 @@ pub struct Labels {
     pub perfect: &'static str,
     pub net_fault: &'static str,
     pub language_is_required: &'static str,
-    pub settings: &'static str,
+    pub language_settings: &'static str,
+    pub keybinding_settings: &'static str,
     pub could_not_save_settings: &'static str,
     pub language: &'static str,
     #[cfg(feature = "self-update")]
@@ -139,6 +145,7 @@ pub struct Labels {
     pub edit_player: &'static str,
     pub remove_player: &'static str,
     pub remove_player_confirmation: &'static str,
+    pub remove_keybinding_confirmation: &'static str,
     pub change_libero: &'static str,
     pub change_setter: &'static str,
     pub lineup_selection_fallback_libero: &'static str,
@@ -155,16 +162,15 @@ pub struct Labels {
     pub match_already_exists: &'static str,
     pub import_match_error: &'static str,
     pub import_match: &'static str,
+    pub match_word: &'static str,
+    pub import: &'static str,
     pub number_already_in_use: &'static str,
     pub phase: &'static str,
     pub match_stats: &'static str,
     pub rotation: &'static str,
     pub could_not_open_match_stats: &'static str,
-    pub change_filter_value: &'static str,
-    pub switch_filter: &'static str,
     pub enter: &'static str,
     pub switch_field: &'static str,
-    pub space: &'static str,
     pub player: &'static str,
     pub conversion_rate: &'static str,
     pub evaluations: &'static str,
@@ -218,6 +224,10 @@ pub struct Labels {
     pub y: &'static char,
     pub enable_send_analytics: &'static str,
     pub file_already_exists: &'static str,
+    pub unassigned: &'static str,
+    pub scroll_up: &'static str,
+    pub scroll_down: &'static str,
+    pub delete: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -227,6 +237,8 @@ const EN: Labels = Labels {
     could_not_create_match_directory: "could not create match directory",
     new_match: "new match",
     navigate: "navigate",
+    previous: "previous",
+    next: "next",
     confirm: "confirm",
     back: "back",
     quit: "quit",
@@ -236,6 +248,7 @@ const EN: Labels = Labels {
     opponent_cannot_be_empty: "opponent cannot be empty",
     could_not_create_match: "could not create match",
     invalid_date: "invalid date",
+    invalid_shortcut: "invalid shortcut",
     name: "name",
     number: "number",
     name_cannot_be_empty: "name cannot be empty",
@@ -245,6 +258,8 @@ const EN: Labels = Labels {
     could_not_remove_player: "could not remove player",
     number_must_be_between_0_and_99: "number must be between 0 and 99",
     role: "role",
+    edit: "edit",
+    new: "new",
     new_player: "new player",
     error: "error",
     info: "info",
@@ -323,13 +338,10 @@ const EN: Labels = Labels {
     perfect: "perfect",
     net_fault: "net fault",
     language_is_required: "language is required",
-    settings: "settings",
+    language_settings: "language settings",
+    keybinding_settings: "keybinding settings",
     could_not_save_settings: "could not save settings",
     language: "language",
-    #[cfg(feature = "self-update")]
-    updated_to_version: "updated to version",
-    #[cfg(feature = "self-update")]
-    update_check_failed: "update check failed",
     top_international: "top international",
     high_national: "high national",
     national_mid_level: "national mid-level",
@@ -356,6 +368,7 @@ const EN: Labels = Labels {
     edit_player: "edit player",
     remove_player: "remove player",
     remove_player_confirmation: "removing player '{}': irreversible operation. Are you sure? (y/n)",
+    remove_keybinding_confirmation: "removing keybinding '{}': irreversible operation. Are you sure? (y/n)",
     change_libero: "change libero",
     change_setter: "change setter",
     lineup_selection_fallback_libero: "lineup selection - fallback libero",
@@ -372,16 +385,15 @@ const EN: Labels = Labels {
     match_already_exists: "match already exists",
     import_match_error: "could not import match",
     import_match: "import match",
+    match_word: "match",
+    import: "import {}",
     number_already_in_use: "number already in use",
     phase: "phase",
     match_stats: "match stats",
     rotation: "rotation",
     could_not_open_match_stats: "could not open match stats",
-    change_filter_value: "change filter value",
-    switch_filter: "switch filter",
     enter: "Enter",
     switch_field: "switch field",
-    space: "Space",
     player: "player",
     conversion_rate: "conversion rate",
     evaluations: "evaluations",
@@ -415,13 +427,13 @@ const EN: Labels = Labels {
     eff_perc: "eff%",
     pt_perc: "pt%",
     blk: "blk",
+    unf: "unf",
     flt: "flt",
     breaks_per_point: "br per pt",
     sideouts_per_point: "so per pt",
     counter_attack_conversion_rate: "counter attack conv. rate",
     sideout: "side-out",
     sideout_on_first_rally: "side-out on first rally",
-    unf: "unf",
     created_with: "created with",
     print_report: "print report",
     could_not_open_pdf: "could not open PDF file",
@@ -435,6 +447,14 @@ const EN: Labels = Labels {
     y: &'y',
     enable_send_analytics: "enable sending anonymous analytics data",
     file_already_exists: "file already exists",
+    unassigned: "Unassigned",
+    scroll_up: "scroll up",
+    scroll_down: "scroll down",
+    #[cfg(feature = "self-update")]
+    updated_to_version: "updated to version",
+    #[cfg(feature = "self-update")]
+    update_check_failed: "update check failed",
+    delete: "delete",
 };
 
 const IT: Labels = Labels {
@@ -444,8 +464,10 @@ const IT: Labels = Labels {
     could_not_create_match_directory: "impossibile creare la directory della partita",
     new_match: "nuova partita",
     navigate: "naviga",
+    previous: "precedente",
+    next: "successivo",
     confirm: "conferma",
-    back: "indietro",
+    back: "indietro", 
     quit: "esci",
     home: "in casa",
     opponent: "avversario",
@@ -453,6 +475,7 @@ const IT: Labels = Labels {
     opponent_cannot_be_empty: "l'avversario è obbligatorio",
     could_not_create_match: "impossibile creare la partita",
     invalid_date: "data non valida",
+    invalid_shortcut: "scorciatoia non valida",
     name: "nome",
     number: "numero",
     name_cannot_be_empty: "il nome è obbligatorio",
@@ -462,6 +485,8 @@ const IT: Labels = Labels {
     could_not_remove_player: "impossibile rimuovere il giocatore",
     number_must_be_between_0_and_99: "il numero deve essere compreso tra 0 e 99",
     role: "ruolo",
+    edit: "modifica",
+    new: "nuovo",
     new_player: "nuovo giocatore",
     error: "errore",
     info: "info",
@@ -540,13 +565,10 @@ const IT: Labels = Labels {
     perfect: "perfetto",
     net_fault: "fallo di rete",
     language_is_required: "la lingua è obbligatoria",
-    settings: "impostazioni",
+    language_settings: "impostazioni lingua",
+    keybinding_settings: "impostazioni scorciatoie da tastiera",
     could_not_save_settings: "impossibile salvare le impostazioni",
     language: "lingua",
-    #[cfg(feature = "self-update")]
-    updated_to_version: "aggiornato alla versione",
-    #[cfg(feature = "self-update")]
-    update_check_failed: "impossibile controllare la presenza di aggiornamenti",
     top_international: "top internazionale",
     high_national: "alto nazionale",
     national_mid_level: "nazionale medio",
@@ -573,6 +595,7 @@ const IT: Labels = Labels {
     edit_player: "modifica giocatore",
     remove_player: "elimina giocatore",
     remove_player_confirmation: "eliminazione giocatore '{}':operazione irreversibile. Confermi? (s/n)",
+    remove_keybinding_confirmation: "rimozione della scorciatoia '{}': operazione irreversibile. Confermi? (s/n)",
     change_libero: "cambia libero",
     change_setter: "cambia palleggiatore",
     lineup_selection_fallback_libero: "selezione formazione - libero di riserva",
@@ -588,17 +611,16 @@ const IT: Labels = Labels {
     set_over: "set terminato",
     match_already_exists: "partita già esistente",
     import_match_error: "impossibile importare la partita",
-    import_match: "importa partita",
+    import_match: "importazione partita",
+    match_word: "partita",
+    import: "importazione {}",
     number_already_in_use: "numero già in uso",
     phase: "fase",
     match_stats: "statistiche partita",
     rotation: "rotazione",
     could_not_open_match_stats: "impossibile aprire le statistiche della partita",
-    change_filter_value: "cambia valore del filtro",
-    switch_filter: "cambia filtro",
     enter: "Invio",
     switch_field: "cambia campo",
-    space: "Spazio",
     player: "giocatore",
     conversion_rate: "percentuale di realizzazione",
     evaluations: "valutazioni",
@@ -632,13 +654,13 @@ const IT: Labels = Labels {
     eff_perc: "eff%",
     pt_perc: "pt%",
     blk: "mur",
+    unf: "dir",
     flt: "fal",
     breaks_per_point: "br per pt",
     sideouts_per_point: "cp per pt",
     counter_attack_conversion_rate: "tasso conv. contrattacco",
     sideout: "cambio palla",
     sideout_on_first_rally: "cambio palla al primo attacco",
-    unf: "dir",
     created_with: "creato con",
     print_report: "stampa tabellino",
     could_not_open_pdf: "impossibile aprire il file PDF",
@@ -652,6 +674,14 @@ const IT: Labels = Labels {
     y: &'s',
     enable_send_analytics: "abilita l'invio di dati analitici anonimi",
     file_already_exists: "il file esiste già",
+    unassigned: "Non assegnato",
+    scroll_up: "scorri su",
+    scroll_down: "scorri giù",
+    #[cfg(feature = "self-update")]
+    updated_to_version: "aggiornato alla versione",
+    #[cfg(feature = "self-update")]
+    update_check_failed: "impossibile controllare la presenza di aggiornamenti",
+    delete: "elimina",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {
@@ -661,26 +691,7 @@ static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {
     m
 });
 
-static CURRENT_LANGUAGE: OnceCell<RwLock<LanguageEnum>> = OnceCell::new();
-
-/// Default language initialization (should be called once at startup).
-pub fn init_language(default: LanguageEnum) {
-    CURRENT_LANGUAGE.set(RwLock::new(default)).ok().unwrap();
-}
-
-/// Change the current language.
-pub fn set_language(lang: LanguageEnum) {
-    if let Some(lock) = CURRENT_LANGUAGE.get() {
-        *lock.write().unwrap() = lang;
-    }
-}
-
 /// Returns the labels for the current language.
 pub fn current_labels() -> &'static Labels {
-    if let Some(lock) = CURRENT_LANGUAGE.get() {
-        let lang = *lock.read().unwrap();
-        DICTIONARY.get(&lang).unwrap()
-    } else {
-        &EN
-    }
+    DICTIONARY.get(&current_settings().language).unwrap()
 }

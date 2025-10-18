@@ -10,10 +10,19 @@ use crate::{
         },
         screen::{AppAction, Renderable, ScreenAsync},
     },
-    shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
+    shapes::{
+        enums::{RoleEnum, ScreenActionEnum},
+        keybinding::KeyBindings,
+        player::PlayerEntry,
+        settings::Settings,
+        team::TeamEntry,
+    },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::{
+    crossterm::event::{KeyCode, KeyEvent},
+    Combiner, KeyCombinationFormat,
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
@@ -24,7 +33,6 @@ fn validate_player_number(current: &str, c: char) -> bool {
     c.is_ascii_digit() && current.len() < 2 && !(current.is_empty() && c == '0')
 }
 
-#[derive(Debug)]
 pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
     team: TeamEntry,
     name: TextBox,
@@ -38,6 +46,8 @@ pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     team_writer: Arc<TW>,
+    combiner: Combiner,
+    screen_key_bindings: KeyBindings,
 }
 
 impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {
@@ -70,17 +80,25 @@ impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {
 #[async_trait]
 impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditPlayerScreen<TW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => self.handle_error_reset(),
-            (KeyCode::Char(c), _) => self.handle_char(c),
-            (KeyCode::Backspace, _) => self.handle_backspace(),
-            (KeyCode::Up, _) => self.handle_up(),
-            (KeyCode::Down, _) => self.handle_down(),
-            (KeyCode::Tab, _) => self.handle_tab(),
-            (KeyCode::BackTab, _) => self.handle_backtab(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => self.handle_enter().await,
-            _ => AppAction::None,
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => self.handle_error_reset(),
+                (None, KeyCode::Char(c), _) => self.handle_char(c),
+                (None, KeyCode::Backspace, _) => self.handle_backspace(),
+                (Some(ScreenActionEnum::Up), _, _) => self.handle_up(),
+                (Some(ScreenActionEnum::Down), _, _) => self.handle_down(),
+                (Some(ScreenActionEnum::Next), _, _) => self.handle_next(),
+                (Some(ScreenActionEnum::Previous), _, _) => self.handle_previous(),
+                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Confirm), _, _) => self.handle_confirm().await,
+                _ => AppAction::None,
+            }
+        } else {
+            AppAction::None
         }
     }
 
@@ -88,7 +106,7 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditPlayerScreen<TW> {
 }
 
 impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
-    pub fn new(team: TeamEntry, team_writer: Arc<TW>) -> Self {
+    pub fn new(settings: Settings, team: TeamEntry, team_writer: Arc<TW>) -> Self {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
@@ -102,6 +120,27 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             None,
             validate_player_number,
         );
+        fn get_keybinding_actions(
+            kb: &KeyBindings,
+            actions: &[&ScreenActionEnum],
+        ) -> Vec<(String, String)> {
+            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
+            actions
+                .iter()
+                .flat_map(|action| kb.shortest_key_for(action))
+                .map(|x| (fmt.to_string(x.0), x.1))
+                .collect()
+        }
+        let actions = &[
+            &ScreenActionEnum::Next,
+            &ScreenActionEnum::Previous,
+            &ScreenActionEnum::Confirm,
+            &ScreenActionEnum::Back,
+        ];
+        let kb = &settings.keybindings.clone();
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(actions.to_vec());
+
         EditPlayerScreen {
             team,
             name,
@@ -113,23 +152,19 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             back: false,
             header: TeamHeader::default(),
             footer: NavigationFooter::new(),
-            footer_entries: vec![
-                (
-                    "Tab / Shift+Tab".to_string(),
-                    current_labels().navigate.to_string(),
-                ),
-                (
-                    current_labels().enter.to_string(),
-                    current_labels().confirm.to_string(),
-                ),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
-            ],
+            footer_entries,
             team_writer,
+            combiner: Combiner::default(),
+            screen_key_bindings,
         }
     }
 
-    pub fn edit(team: TeamEntry, player: PlayerEntry, team_writer: Arc<TW>) -> Self {
+    pub fn edit(
+        settings: Settings,
+        team: TeamEntry,
+        player: PlayerEntry,
+        team_writer: Arc<TW>,
+    ) -> Self {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
@@ -143,6 +178,27 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             Some(&player.number.to_string()),
             validate_player_number,
         );
+        fn get_keybinding_actions(
+            kb: &KeyBindings,
+            actions: &[&ScreenActionEnum],
+        ) -> Vec<(String, String)> {
+            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
+            actions
+                .iter()
+                .flat_map(|action| kb.shortest_key_for(action))
+                .map(|x| (fmt.to_string(x.0), x.1))
+                .collect()
+        }
+        let actions = &[
+            &ScreenActionEnum::Next,
+            &ScreenActionEnum::Previous,
+            &ScreenActionEnum::Confirm,
+            &ScreenActionEnum::Back,
+        ];
+        let kb = &settings.keybindings.clone();
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(actions.to_vec());
+
         EditPlayerScreen {
             team,
             name,
@@ -154,19 +210,10 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             back: false,
             header: TeamHeader::default(),
             footer: NavigationFooter::new(),
-            footer_entries: vec![
-                (
-                    "Tab / Shift+Tab".to_string(),
-                    current_labels().navigate.to_string(),
-                ),
-                (
-                    current_labels().enter.to_string(),
-                    current_labels().confirm.to_string(),
-                ),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
-            ],
+            footer_entries,
             team_writer,
+            combiner: Combiner::default(),
+            screen_key_bindings,
         }
     }
 
@@ -194,7 +241,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             .any(|p| p.number == number && Some(p.id) != existing_id)
     }
 
-    async fn handle_enter(&mut self) -> AppAction {
+    async fn handle_confirm(&mut self) -> AppAction {
         match (
             self.name.get_selected_value(),
             self.role.get_selected_value(),
@@ -251,13 +298,13 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         }
     }
 
-    fn handle_tab(&mut self) -> AppAction {
+    fn handle_next(&mut self) -> AppAction {
         self.field = (self.field + 1) % 3;
         self.update_writing_modes();
         AppAction::None
     }
 
-    fn handle_backtab(&mut self) -> AppAction {
+    fn handle_previous(&mut self) -> AppAction {
         self.field = (self.field + 2) % 3;
         self.update_writing_modes();
         AppAction::None
