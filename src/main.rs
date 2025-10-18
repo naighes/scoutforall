@@ -28,7 +28,7 @@ use crate::{
     screens::screen::AppAction,
     shapes::settings::Settings,
 };
-use crossterm::{
+use crokey::crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},

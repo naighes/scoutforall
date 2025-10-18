@@ -7,7 +7,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crossterm::event::KeyCode;
+use crokey::crossterm::event::KeyCode;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -238,7 +238,10 @@ impl<A: Send + Sync> ScreenAsync for FileSystemScreen<A>
 where
     A: FileSystemAction,
 {
-    async fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> super::screen::AppAction {
+    async fn handle_key(
+        &mut self,
+        key: crokey::crossterm::event::KeyEvent,
+    ) -> super::screen::AppAction {
         match (key.code, &self.notify_message.has_value()) {
             (_, true) => {
                 self.notify_message.reset();

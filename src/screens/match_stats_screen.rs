@@ -17,7 +17,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},

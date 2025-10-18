@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use crossterm::event::KeyEvent;
+use crokey::crossterm::event::KeyEvent;
 use ratatui::{layout::Rect, Frame};
 
 pub enum AppAction {

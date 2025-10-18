@@ -14,7 +14,7 @@ use crate::{
     shapes::team::TeamEntry,
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
