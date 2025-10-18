@@ -1,6 +1,6 @@
 use crate::{
     localization::current_labels,
-    providers::{set_writer::SetWriter, settings_reader::SettingsReader},
+    providers::set_writer::SetWriter,
     screens::{
         components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
@@ -10,10 +10,11 @@ use crate::{
         enums::{RoleEnum, TeamSideEnum},
         player::PlayerEntry,
         r#match::MatchEntry,
+        settings::Settings,
     },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -24,7 +25,8 @@ use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct StartSetScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> {
+pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
+    settings: Settings,
     current_match: MatchEntry,
     set_number: u8,
     lineup: Vec<PlayerEntry>,
@@ -36,7 +38,6 @@ pub struct StartSetScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Sen
     list_state: TableState,
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
-    settings_reader: Arc<SR>,
 }
 
 #[derive(Debug)]
@@ -46,9 +47,7 @@ pub enum StartSetScreenState {
     SelectLineupPlayers(usize, Option<Uuid>, Option<Uuid>),
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static> Renderable
-    for StartSetScreen<SSW, SR>
-{
+impl<SSW: SetWriter + Send + Sync + 'static> Renderable for StartSetScreen<SSW> {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         use StartSetScreenState::*;
         let rows = Layout::default()
@@ -80,9 +79,7 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
 }
 
 #[async_trait]
-impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static> ScreenAsync
-    for StartSetScreen<SSW, SR>
-{
+impl<SSW: SetWriter + Send + Sync + 'static> ScreenAsync for StartSetScreen<SSW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use StartSetScreenState::*;
         match (&self.state, &self.notify_message.has_value()) {
@@ -106,9 +103,7 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
     async fn refresh_data(&mut self) {}
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    StartSetScreen<SSW, SR>
-{
+impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
     fn handle_serving_team_selection(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         use TeamSideEnum::*;
@@ -251,13 +246,13 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
                     }) {
                     Ok((set_entry, snapshot, available_options)) => {
                         AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                            self.settings.clone(),
                             self.current_match.clone(),
                             set_entry,
                             snapshot,
                             available_options,
                             self.back_stack_count.map(|x| x + 1),
                             self.set_writer.clone(),
-                            self.settings_reader.clone(),
                         )))
                     }
                     Err(_) => {
@@ -419,14 +414,15 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
     }
 
     pub fn new(
+        settings: Settings,
         current_match: MatchEntry,
         set_number: u8,
         serving_team: Option<TeamSideEnum>,
         back_stack_count: Option<u8>,
         set_writer: Arc<SSW>,
-        settings_reader: Arc<SR>,
     ) -> Self {
         StartSetScreen {
+            settings,
             current_match,
             set_number,
             serving_team,
@@ -442,7 +438,6 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
             },
             back_stack_count,
             set_writer,
-            settings_reader,
         }
     }
 

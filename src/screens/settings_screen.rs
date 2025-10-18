@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    localization::{current_labels, set_language},
+    localization::current_labels,
     providers::settings_writer::SettingsWriter,
     screens::{
         components::{
@@ -11,12 +11,18 @@ use crate::{
         report_an_issue_screen::ReportAnIssueScreen,
         screen::{AppAction, Renderable, ScreenAsync},
     },
-    shapes::{enums::LanguageEnum, settings::Settings},
+    shapes::{
+        enums::{LanguageEnum, ScreenActionEnum},
+        settings::{set_settings, Settings},
+    },
 };
 use async_trait::async_trait;
+use crokey::{crossterm, KeyCombinationFormat};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    style::Style,
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -31,6 +37,7 @@ pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
     footer_entries: Vec<(String, String)>,
     settings_writer: Arc<SW>,
     settings: Settings,
+    format: KeyCombinationFormat,
 }
 
 impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
@@ -39,13 +46,15 @@ impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(3), // language
-                Constraint::Length(3), // analytics checkbox
+                Constraint::Length(3),       // language
+                Constraint::Length(2),       // analytics checkbox
+                Constraint::Percentage(100), // keybindings
                 Constraint::Min(1),
             ])
             .split(body);
         self.language.render(f, inner[0]);
         self.analytics_enabled.render(f, inner[1]);
+        self.render_key_bindings_widget(f, inner[2]);
         self.notify_message.render(f, footer_right);
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
@@ -112,6 +121,7 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
             ],
             settings_writer,
             settings,
+            format: KeyCombinationFormat::default(),
         }
     }
 
@@ -124,11 +134,12 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
                 let settings = Settings {
                     language,
                     analytics_enabled,
+                    keybindings: self.settings.keybindings.clone(),
                     last_used_dir: self.settings.last_used_dir.clone(),
                 };
                 match self.settings_writer.save(settings).await {
-                    Ok(_) => {
-                        set_language(language);
+                    Ok(saved_settings) => {
+                        set_settings(saved_settings);
                         self.notify_message
                             .set_info(current_labels().operation_successful.to_string());
                         self.back = true;
@@ -183,5 +194,36 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
             self.analytics_enabled.handle_char(c);
             AppAction::None
         }
+    }
+
+    fn render_key_bindings_widget(&mut self, f: &mut Frame, area: Rect) {
+        let keybindings = &self.settings.keybindings;
+        let key_binding_widget = Paragraph::new({
+            let actions_bindings_map = keybindings.reverse_map();
+            let items: Vec<String> = ScreenActionEnum::ALL
+                .iter()
+                .map(|r| {
+                    let s = actions_bindings_map
+                        .get(r)
+                        .map(|f| {
+                            f.iter()
+                                .map(|q| self.format.to_string(*q))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or(current_labels().unassigned.to_string())
+                        .to_string();
+                    format!("{:?}: {}", r.with_desc().1, s)
+                })
+                .collect();
+            format!("{}:", items.join("\n"))
+        })
+        .style(Style::default())
+        .block(
+            Block::new()
+                .title(current_labels().keybinding_settings.to_string())
+                .borders(Borders::ALL),
+        );
+        f.render_widget(key_binding_widget, area);
     }
 }

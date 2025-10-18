@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use crossterm::event::KeyEvent;
+use crokey::crossterm::event::KeyEvent;
 use ratatui::{layout::Rect, Frame};
 
 pub enum AppAction {
     None,
     SwitchScreen(Box<dyn ScreenAsync + Send + Sync>),
     Back(bool, Option<u8>), // the boolean value indicates if the previous screen needs to be refreshed
+    Quit(std::io::Result<()>),
 }
 
 pub trait Renderable {

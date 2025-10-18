@@ -11,12 +11,17 @@ use crate::{
         screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{
-        enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
+        enums::{FriendlyName, GenderEnum, ScreenActionEnum, TeamClassificationEnum},
+        keybinding::KeyBindings,
+        settings::Settings,
         team::TeamEntry,
     },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::{
+    crossterm::event::{KeyCode, KeyEvent},
+    Combiner, KeyCombinationFormat,
+};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -37,6 +42,8 @@ pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
     back: bool,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
+    combiner: Combiner,
+    screen_key_bindings: KeyBindings,
     team_writer: Arc<TW>,
 }
 
@@ -69,17 +76,25 @@ impl<TW: TeamWriter + Send + Sync> Renderable for EditTeamScreen<TW> {
 #[async_trait]
 impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditTeamScreen<TW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => self.handle_error_reset(),
-            (KeyCode::Char(c), _) => self.handle_char(c),
-            (KeyCode::Backspace, _) => self.handle_backspace(),
-            (KeyCode::Up, _) => self.handle_up(),
-            (KeyCode::Down, _) => self.handle_down(),
-            (KeyCode::Tab, _) => self.handle_tab(),
-            (KeyCode::BackTab, _) => self.handle_backtab(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => self.handle_enter().await,
-            _ => AppAction::None,
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => self.handle_error_reset(),
+                (_, KeyCode::Char(c), _) => self.handle_char(c),
+                (_, KeyCode::Backspace, _) => self.handle_backspace(),
+                (_, KeyCode::Up, _) => self.handle_up(),
+                (_, KeyCode::Down, _) => self.handle_down(),
+                (Some(ScreenActionEnum::Next), _, _) => self.handle_tab(),
+                (Some(ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
+                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Confirm), _, _) => self.handle_enter().await,
+                _ => AppAction::None,
+            }
+        } else {
+            AppAction::None
         }
     }
 
@@ -87,7 +102,7 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditTeamScreen<TW> {
 }
 
 impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
-    pub fn new(team_writer: Arc<TW>) -> Self {
+    pub fn new(settings: Settings, team_writer: Arc<TW>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -107,6 +122,29 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             None,
             |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
         );
+        fn get_keybinding_actions(
+            kb: &KeyBindings,
+            actions: &[&ScreenActionEnum],
+        ) -> Vec<(String, String)> {
+            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
+            actions
+                .iter()
+                .flat_map(|action| kb.shortest_key_for(action))
+                .map(|x| (fmt.to_string(x.0), x.1))
+                .collect()
+        }
+
+        let actions = &[
+            &ScreenActionEnum::Next,
+            &ScreenActionEnum::Previous,
+            &ScreenActionEnum::Confirm,
+            &ScreenActionEnum::Back,
+        ];
+
+        let kb = &settings.keybindings.clone();
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(actions.to_vec());
+
         EditTeamScreen {
             name,
             gender,
@@ -117,23 +155,14 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             existing_team: None,
             back: false,
             footer: NavigationFooter::new(),
-            footer_entries: vec![
-                (
-                    "Tab / Shift+Tab".to_string(),
-                    current_labels().switch_field.to_string(),
-                ),
-                (
-                    current_labels().enter.to_string(),
-                    current_labels().confirm.to_string(),
-                ),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
-            ],
+            footer_entries,
             team_writer,
+            screen_key_bindings,
+            combiner: Combiner::default(),
         }
     }
 
-    pub fn edit(team: &TeamEntry, team_writer: Arc<TW>) -> Self {
+    pub fn edit(settings: Settings, team: &TeamEntry, team_writer: Arc<TW>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -153,6 +182,30 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             Some(&team.year.to_string()),
             |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
         );
+        fn get_keybinding_actions(
+            kb: &KeyBindings,
+            actions: &[&ScreenActionEnum],
+        ) -> Vec<(String, String)> {
+            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
+            actions
+                .iter()
+                .flat_map(|action| kb.shortest_key_for(action))
+                .map(|x| (fmt.to_string(x.0), x.1))
+                .collect()
+        }
+
+        let actions = &[
+            &ScreenActionEnum::Next,
+            &ScreenActionEnum::Previous,
+            &ScreenActionEnum::Confirm,
+            &ScreenActionEnum::Back,
+            &ScreenActionEnum::Quit,
+        ];
+
+        let kb = &settings.keybindings.clone();
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(actions.to_vec());
+
         EditTeamScreen {
             name,
             gender,
@@ -163,19 +216,10 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             existing_team: Some(team.clone()),
             back: false,
             footer: NavigationFooter::new(),
-            footer_entries: vec![
-                (
-                    "Tab / Shift+Tab".to_string(),
-                    current_labels().switch_field.to_string(),
-                ),
-                (
-                    current_labels().enter.to_string(),
-                    current_labels().confirm.to_string(),
-                ),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
-            ],
+            footer_entries,
             team_writer,
+            screen_key_bindings,
+            combiner: Combiner::default(),
         }
     }
 

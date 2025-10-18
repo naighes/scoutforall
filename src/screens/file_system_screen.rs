@@ -6,9 +6,10 @@ use crate::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, ScreenAsync},
     },
+    shapes::{enums::ScreenActionEnum, keybinding::KeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
-use crossterm::event::KeyCode;
+use crokey::{Combiner, KeyCombinationFormat};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -39,6 +40,7 @@ pub struct FileSystemScreen<
 > where
     A: FileSystemAction,
 {
+    settings: Settings,
     current_folder: PathBuf,
     notify_message: NotifyBanner,
     list_state: ListState,
@@ -46,9 +48,11 @@ pub struct FileSystemScreen<
     title: String,
     action: A,
     back: bool,
-    footer: NavigationFooter,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
+    combiner: Combiner,
+    screen_key_bindings: KeyBindings,
+    footer: NavigationFooter,
 }
 
 impl<A: Send + Sync, SR: SettingsReader + Send + Sync, SW: SettingsWriter + Send + Sync>
@@ -57,6 +61,7 @@ where
     A: FileSystemAction,
 {
     pub fn new(
+        settings: Settings,
         initial_folder: PathBuf,
         title_label: &str,
         action: A,
@@ -67,6 +72,7 @@ where
         let mut list_state = ListState::default();
         list_state.select(if entries.is_empty() { None } else { Some(0) });
         Self {
+            settings,
             current_folder: initial_folder,
             notify_message: NotifyBanner::new(),
             list_state,
@@ -75,6 +81,8 @@ where
             action,
             back: false,
             footer: NavigationFooter::new(),
+            combiner: Combiner::default(),
+            screen_key_bindings: KeyBindings::empty(),
             settings_reader,
             settings_writer,
         }
@@ -172,10 +180,12 @@ where
         f.render_widget(paragraph, chunks[1]);
     }
 
-    fn get_footer_entries(&self) -> Vec<(String, String)> {
-        let mut entries: Vec<(String, String)> = vec![];
+    fn get_footer_actions(&self) -> Vec<&ScreenActionEnum> {
+        let actions = &mut vec![];
+
         if !self.entries.is_empty() {
-            entries.push(("↑↓".to_string(), current_labels().navigate.to_string()));
+            actions.push(&ScreenActionEnum::Next);
+            actions.push(&ScreenActionEnum::Previous);
         }
         if let Some(true) = self
             .list_state
@@ -183,26 +193,17 @@ where
             .and_then(|s| self.entries.get(s))
             .map(|s| s.is_dir())
         {
-            entries.push((
-                current_labels().space.to_string(),
-                current_labels().enter_directory.to_string(),
-            ));
+            actions.push(&ScreenActionEnum::EnterDirectory);
         }
         if !self.is_root() {
-            entries.push((
-                "Backspace".to_string(),
-                current_labels().up_one_level.to_string(),
-            ));
+            actions.push(&ScreenActionEnum::OneLevelUp);
         }
         if self.list_state.selected().is_some() {
-            entries.push((
-                current_labels().enter.to_string(),
-                current_labels().select.to_string(),
-            ));
+            actions.push(&ScreenActionEnum::Select);
         }
-        entries.push(("Esc".to_string(), current_labels().back.to_string()));
-        entries.push(("Q".to_string(), current_labels().quit.to_string()));
-        entries
+        actions.push(&ScreenActionEnum::Back);
+        actions.push(&ScreenActionEnum::Quit);
+        actions.clone()
     }
 
     fn render_directory_content(
@@ -261,9 +262,27 @@ where
         } else {
             self.render_directory_content(f, chunks[1], items, &self.title.clone());
         }
+
+        fn get_keybinding_actions(
+            kb: &KeyBindings,
+            actions: Vec<&ScreenActionEnum>,
+        ) -> Vec<(String, String)> {
+            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
+            actions
+                .iter()
+                .flat_map(|action| kb.shortest_key_for(action))
+                .map(|x| (fmt.to_string(x.0), x.1))
+                .collect()
+        }
+
+        let actions = self.get_footer_actions();
+
         self.notify_message.render(f, footer_right);
+        let kb = &self.settings.keybindings;
         self.footer
-            .render(f, footer_left, self.get_footer_entries().clone());
+            .render(f, footer_left, get_keybinding_actions(kb, actions.clone()));
+
+        self.screen_key_bindings = kb.slice(actions.to_vec());
     }
 }
 
@@ -273,78 +292,90 @@ impl<A: Send + Sync, SR: SettingsReader + Send + Sync, SW: SettingsWriter + Send
 where
     A: FileSystemAction,
 {
-    async fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> super::screen::AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                if self.back {
-                    AppAction::Back(true, Some(1))
-                } else {
-                    AppAction::None
-                }
-            }
-            (KeyCode::Down, _) => {
-                self.next();
-                AppAction::None
-            }
-            (KeyCode::Up, _) => {
-                self.previous();
-                AppAction::None
-            }
-            (KeyCode::Enter, _) => {
-                let current = self.current_folder.clone();
-                match self.action.is_selectable(&current) {
-                    true => match self.action.on_selected(&current).await {
-                        Ok(_) => {
-                            self.save_selected_directory(&current).await;
-                            let message = if let Some(suffix) = self.action.success_message_suffix()
-                            {
-                                format!("{}: {}", current_labels().operation_successful, suffix)
-                            } else {
-                                current_labels().operation_successful.to_string()
-                            };
-                            self.notify_message.set_info(message);
-                            self.back = true;
-                            AppAction::None
-                        }
-                        Err(e) => {
-                            self.notify_message.set_error(format!("{}", e));
-                            AppAction::None
-                        }
-                    },
-                    _ => {
-                        self.notify_message
-                            .set_error(current_labels().invalid_selection.to_string());
+    async fn handle_key(
+        &mut self,
+        key: crokey::crossterm::event::KeyEvent,
+    ) -> super::screen::AppAction {
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => {
+                    self.notify_message.reset();
+                    if self.back {
+                        AppAction::Back(true, Some(1))
+                    } else {
                         AppAction::None
                     }
                 }
-            }
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Char(' '), _) => {
-                let child = self
-                    .list_state
-                    .selected()
-                    .and_then(|s| self.entries.get(s))
-                    .cloned();
-                match child {
-                    Some(child) => match child.is_dir() {
-                        true => {
-                            self.enter_directory(&child);
+                (Some(ScreenActionEnum::Next), _, _) => {
+                    self.next();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::Previous), _, _) => {
+                    self.previous();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::Select), _, _) => {
+                    let current = self.current_folder.clone();
+                    match self.action.is_selectable(&current) {
+                        true => match self.action.on_selected(&current).await {
+                            Ok(_) => {
+                                self.save_selected_directory(&current).await;
+                                let message = if let Some(suffix) =
+                                    self.action.success_message_suffix()
+                                {
+                                    format!("{}: {}", current_labels().operation_successful, suffix)
+                                } else {
+                                    current_labels().operation_successful.to_string()
+                                };
+                                self.notify_message.set_info(message);
+                                self.back = true;
+                                AppAction::None
+                            }
+                            Err(e) => {
+                                self.notify_message.set_error(format!("{}", e));
+                                AppAction::None
+                            }
+                        },
+                        _ => {
+                            self.notify_message
+                                .set_error(current_labels().invalid_selection.to_string());
                             AppAction::None
                         }
-                        _ => AppAction::None,
-                    },
-                    None => AppAction::None,
+                    }
                 }
-            }
-            (KeyCode::Backspace, _) => {
-                let parent = self.current_folder.parent().map(|p| p.to_path_buf());
-                if let Some(parent) = parent {
-                    self.enter_directory(&parent);
+                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::EnterDirectory), _, _) => {
+                    let child = self
+                        .list_state
+                        .selected()
+                        .and_then(|s| self.entries.get(s))
+                        .cloned();
+                    match child {
+                        Some(child) => match child.is_dir() {
+                            true => {
+                                self.enter_directory(&child);
+                                AppAction::None
+                            }
+                            _ => AppAction::None,
+                        },
+                        None => AppAction::None,
+                    }
                 }
-                AppAction::None
+                (Some(ScreenActionEnum::OneLevelUp), _, _) => {
+                    let parent = self.current_folder.parent().map(|p| p.to_path_buf());
+                    if let Some(parent) = parent {
+                        self.enter_directory(&parent);
+                    }
+                    AppAction::None
+                }
+                _ => AppAction::None,
             }
-            _ => AppAction::None,
+        } else {
+            AppAction::None
         }
     }
 

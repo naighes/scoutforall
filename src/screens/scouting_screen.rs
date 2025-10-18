@@ -1,7 +1,8 @@
 use crate::analytics::global::enqueue_match_for_upload;
+use crate::shapes::settings::Settings;
 use crate::{
     localization::current_labels,
-    providers::{set_writer::SetWriter, settings_reader::SettingsReader},
+    providers::set_writer::SetWriter,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, ScreenAsync},
@@ -16,7 +17,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -27,7 +28,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct ScoutingScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> {
+pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
+    settings: Settings,
     current_match: MatchEntry,
     set: SetEntry,
     snapshot: Snapshot,
@@ -40,7 +42,6 @@ pub struct ScoutingScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Sen
     back: bool,
     footer: NavigationFooter,
     set_writer: Arc<SSW>,
-    settings_reader: Arc<SR>,
 }
 
 #[derive(Debug)]
@@ -81,9 +82,7 @@ enum ScoutingScreenState {
     Replacement,
 }
 
-impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> Renderable
-    for ScoutingScreen<SSW, SR>
-{
+impl<SSW: SetWriter + Send + Sync> Renderable for ScoutingScreen<SSW> {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -128,9 +127,7 @@ impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> Renderable
 }
 
 #[async_trait]
-impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenAsync
-    for ScoutingScreen<SSW, SR>
-{
+impl<SSW: SetWriter + Send + Sync> ScreenAsync for ScoutingScreen<SSW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         use ScoutingScreenState::*;
@@ -154,17 +151,18 @@ impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenAsync
     async fn refresh_data(&mut self) {}
 }
 
-impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScoutingScreen<SSW, SR> {
+impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
     pub fn new(
+        settings: Settings,
         current_match: MatchEntry,
         set: SetEntry,
         snapshot: Snapshot,
         available_options: Vec<EventTypeEnum>,
         back_stack_count: Option<u8>,
         set_writer: Arc<SSW>,
-        settings_reader: Arc<SR>,
     ) -> Self {
         ScoutingScreen {
+            settings,
             current_match,
             set,
             snapshot,
@@ -177,24 +175,15 @@ impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScoutingScr
             back: false,
             footer: NavigationFooter::new(),
             set_writer,
-            settings_reader,
         }
     }
 
     async fn enqueue_match_for_analytics(&self) {
-        match self.settings_reader.read().await {
-            Ok(settings) if settings.analytics_enabled => {
-                let _ = enqueue_match_for_upload(
-                    self.current_match.team.id,
-                    self.current_match.id.clone(),
-                )
-                .await;
-                // silently ignore errors
-            }
-            _ => {
-                // analytics disabled or error reading settings
-                // silently continue without enqueueing
-            }
+        if self.settings.analytics_enabled {
+            let _ =
+                enqueue_match_for_upload(self.current_match.team.id, self.current_match.id.clone())
+                    .await;
+            // silently ignore errors
         }
     }
 
