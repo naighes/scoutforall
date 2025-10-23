@@ -3,7 +3,8 @@ use std::{path::PathBuf, sync::Arc};
 use crate::{
     providers::{
         match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
-        settings_writer::SettingsWriter, team_reader::TeamReader, team_writer::TeamWriter,
+        settings_reader::SettingsReader, settings_writer::SettingsWriter, team_reader::TeamReader,
+        team_writer::TeamWriter,
     },
     screens::{screen::ScreenAsync, team_list_screen::TeamListScreen},
     shapes::{settings::Settings, team::TeamEntry},
@@ -21,6 +22,7 @@ impl App {
         MR: MatchReader + Send + Sync + 'static,
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
     >(
         settings: Settings,
         teams: Vec<TeamEntry>,
@@ -31,6 +33,7 @@ impl App {
         set_writer: Arc<SSW>,
         match_reader: Arc<MR>,
         match_writer: Arc<MW>,
+        settings_reader: Arc<SR>,
     ) -> Self {
         Self {
             screens: vec![Box::new(TeamListScreen::new(
@@ -43,6 +46,7 @@ impl App {
                 match_reader,
                 match_writer,
                 set_writer,
+                settings_reader,
             ))],
         }
     }

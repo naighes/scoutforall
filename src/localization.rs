@@ -216,6 +216,7 @@ pub struct Labels {
     pub failed_to_report_issue: &'static str,
     pub invalid_email_address: &'static str,
     pub y: &'static char,
+    pub enable_send_analytics: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -430,7 +431,8 @@ const EN: Labels = Labels {
     issue_reported_successfully: "issue reported successfully",
     failed_to_report_issue: "failed to report issue (check your internet connection)",
     invalid_email_address: "invalid email address",
-    y: &'y'
+    y: &'y',
+    enable_send_analytics: "enable sending anonymous analytics data",
 };
 
 const IT: Labels = Labels {
@@ -645,7 +647,8 @@ const IT: Labels = Labels {
     issue_reported_successfully: "problema segnalato con successo",
     failed_to_report_issue: "segnalazione del problema non riuscita (controlla la tua connessione a internet)",
     invalid_email_address: "indirizzo email non valido",
-    y: &'s'
+    y: &'s',
+    enable_send_analytics: "abilita l'invio di dati analitici anonimi",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {

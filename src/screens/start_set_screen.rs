@@ -1,6 +1,6 @@
 use crate::{
     localization::current_labels,
-    providers::set_writer::SetWriter,
+    providers::{set_writer::SetWriter, settings_reader::SettingsReader},
     screens::{
         components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
@@ -24,7 +24,7 @@ use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
+pub struct StartSetScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> {
     current_match: MatchEntry,
     set_number: u8,
     lineup: Vec<PlayerEntry>,
@@ -36,6 +36,7 @@ pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
     list_state: TableState,
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
+    settings_reader: Arc<SR>,
 }
 
 #[derive(Debug)]
@@ -45,7 +46,9 @@ pub enum StartSetScreenState {
     SelectLineupPlayers(usize, Option<Uuid>, Option<Uuid>),
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static> Renderable for StartSetScreen<SSW> {
+impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static> Renderable
+    for StartSetScreen<SSW, SR>
+{
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         use StartSetScreenState::*;
         let rows = Layout::default()
@@ -77,7 +80,9 @@ impl<SSW: SetWriter + Send + Sync + 'static> Renderable for StartSetScreen<SSW> 
 }
 
 #[async_trait]
-impl<SSW: SetWriter + Send + Sync + 'static> ScreenAsync for StartSetScreen<SSW> {
+impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static> ScreenAsync
+    for StartSetScreen<SSW, SR>
+{
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use StartSetScreenState::*;
         match (&self.state, &self.notify_message.has_value()) {
@@ -101,7 +106,9 @@ impl<SSW: SetWriter + Send + Sync + 'static> ScreenAsync for StartSetScreen<SSW>
     async fn refresh_data(&mut self) {}
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
+impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
+    StartSetScreen<SSW, SR>
+{
     fn handle_serving_team_selection(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         use TeamSideEnum::*;
@@ -250,6 +257,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
                             available_options,
                             self.back_stack_count.map(|x| x + 1),
                             self.set_writer.clone(),
+                            self.settings_reader.clone(),
                         )))
                     }
                     Err(_) => {
@@ -416,6 +424,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
         serving_team: Option<TeamSideEnum>,
         back_stack_count: Option<u8>,
         set_writer: Arc<SSW>,
+        settings_reader: Arc<SR>,
     ) -> Self {
         StartSetScreen {
             current_match,
@@ -433,6 +442,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             },
             back_stack_count,
             set_writer,
+            settings_reader,
         }
     }
 

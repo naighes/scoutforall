@@ -1,19 +1,7 @@
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use chrono::Utc;
-use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Row, Table},
-    Frame,
-};
-use uuid::Uuid;
-
+use crate::analytics::global::enqueue_match_for_upload;
 use crate::{
     localization::current_labels,
-    providers::set_writer::SetWriter,
+    providers::{set_writer::SetWriter, settings_reader::SettingsReader},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, ScreenAsync},
@@ -26,9 +14,20 @@ use crate::{
         snapshot::{EventEntry, Snapshot},
     },
 };
+use async_trait::async_trait;
+use chrono::Utc;
+use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::{
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Paragraph, Row, Table},
+    Frame,
+};
+use std::sync::Arc;
+use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
+pub struct ScoutingScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> {
     current_match: MatchEntry,
     set: SetEntry,
     snapshot: Snapshot,
@@ -41,6 +40,7 @@ pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
     back: bool,
     footer: NavigationFooter,
     set_writer: Arc<SSW>,
+    settings_reader: Arc<SR>,
 }
 
 #[derive(Debug)]
@@ -81,7 +81,9 @@ enum ScoutingScreenState {
     Replacement,
 }
 
-impl<SSW: SetWriter + Send + Sync> Renderable for ScoutingScreen<SSW> {
+impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> Renderable
+    for ScoutingScreen<SSW, SR>
+{
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -126,7 +128,9 @@ impl<SSW: SetWriter + Send + Sync> Renderable for ScoutingScreen<SSW> {
 }
 
 #[async_trait]
-impl<SSW: SetWriter + Send + Sync> ScreenAsync for ScoutingScreen<SSW> {
+impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenAsync
+    for ScoutingScreen<SSW, SR>
+{
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use KeyCode::*;
         use ScoutingScreenState::*;
@@ -150,7 +154,7 @@ impl<SSW: SetWriter + Send + Sync> ScreenAsync for ScoutingScreen<SSW> {
     async fn refresh_data(&mut self) {}
 }
 
-impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
+impl<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScoutingScreen<SSW, SR> {
     pub fn new(
         current_match: MatchEntry,
         set: SetEntry,
@@ -158,6 +162,7 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
         available_options: Vec<EventTypeEnum>,
         back_stack_count: Option<u8>,
         set_writer: Arc<SSW>,
+        settings_reader: Arc<SR>,
     ) -> Self {
         ScoutingScreen {
             current_match,
@@ -172,10 +177,28 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             back: false,
             footer: NavigationFooter::new(),
             set_writer,
+            settings_reader,
         }
     }
 
-    /// Filters and validates a potential lineup choice for a given event.
+    async fn enqueue_match_for_analytics(&self) {
+        match self.settings_reader.read().await {
+            Ok(settings) if settings.analytics_enabled => {
+                let _ = enqueue_match_for_upload(
+                    self.current_match.team.id,
+                    self.current_match.id.clone(),
+                )
+                .await;
+                // silently ignore errors
+            }
+            _ => {
+                // analytics disabled or error reading settings
+                // silently continue without enqueueing
+            }
+        }
+    }
+
+    // filters and validates a potential lineup choice for a given event.
     fn filter_lineup_choices(
         &self,
         index: u8,
@@ -204,7 +227,7 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             })
     }
 
-    /// Filters and validates the players that can be replaced in the current lineup.
+    // filters and validates the players that can be replaced in the current lineup.
     fn filter_replaceable_choices(
         &self,
         index: u8,
@@ -352,8 +375,27 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
                 match self.snapshot.get_set_winner(self.set.set_number) {
                     None => AppAction::None,
                     Some(_) => {
+                        // update or add the set to the match
+                        if let Some(existing_set) = self
+                            .current_match
+                            .sets
+                            .iter_mut()
+                            .find(|s| s.set_number == self.set.set_number)
+                        {
+                            // replace existing set with the completed one
+                            *existing_set = self.set.clone();
+                        } else {
+                            // add new set if not there
+                            self.current_match.sets.push(self.set.clone());
+                        }
                         self.notify_message
                             .set_info(current_labels().set_over.to_string());
+                        // check if match is finished and analytics are enabled
+                        if let Ok(status) = self.current_match.get_status() {
+                            if status.match_finished {
+                                self.enqueue_match_for_analytics().await;
+                            }
+                        }
                         self.back = true;
                         AppAction::None
                     }

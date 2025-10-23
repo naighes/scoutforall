@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     localization::current_labels,
-    providers::{match_writer::MatchWriter, set_writer::SetWriter},
+    providers::{
+        match_writer::MatchWriter, set_writer::SetWriter, settings_reader::SettingsReader,
+    },
     screens::{
         components::{
             checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
@@ -22,7 +24,11 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct AddMatchScreen<MW: MatchWriter + Send + Sync, SSW: SetWriter + Send + Sync> {
+pub struct AddMatchScreen<
+    MW: MatchWriter + Send + Sync,
+    SSW: SetWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync,
+> {
     team: TeamEntry,
     opponent: TextBox, // field 0
     date: DatePicker,  // field 1
@@ -34,10 +40,14 @@ pub struct AddMatchScreen<MW: MatchWriter + Send + Sync, SSW: SetWriter + Send +
     footer_entries: Vec<(String, String)>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
+    settings_reader: Arc<SR>,
 }
 
-impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> Renderable
-    for AddMatchScreen<MW, SSW>
+impl<
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > Renderable for AddMatchScreen<MW, SSW, SR>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
@@ -67,8 +77,11 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
 }
 
 #[async_trait]
-impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> ScreenAsync
-    for AddMatchScreen<MW, SSW>
+impl<
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > ScreenAsync for AddMatchScreen<MW, SSW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (key.code, &self.notify_message.has_value()) {
@@ -89,12 +102,20 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
     async fn refresh_data(&mut self) {}
 }
 
-impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static>
-    AddMatchScreen<MW, SSW>
+impl<
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > AddMatchScreen<MW, SSW, SR>
 {
-    pub fn new(team: TeamEntry, match_writer: Arc<MW>, set_writer: Arc<SSW>) -> Self {
+    pub fn new(
+        team: TeamEntry,
+        match_writer: Arc<MW>,
+        set_writer: Arc<SSW>,
+        settings_reader: Arc<SR>,
+    ) -> Self {
         let opponent = TextBox::new(current_labels().opponent.to_owned(), true, None);
-        let home = CheckBox::new(current_labels().home.to_owned(), false);
+        let home = CheckBox::new(current_labels().home.to_owned(), false, false);
         let date = DatePicker::new(current_labels().date.to_owned(), false);
         AddMatchScreen {
             team,
@@ -119,6 +140,7 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
             ],
             match_writer,
             set_writer,
+            settings_reader,
         }
     }
 
@@ -151,6 +173,7 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
                         None,
                         Some(2),
                         self.set_writer.clone(),
+                        self.settings_reader.clone(),
                     ))),
                     Err(_) => {
                         self.notify_message

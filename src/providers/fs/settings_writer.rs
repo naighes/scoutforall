@@ -19,8 +19,15 @@ impl FileSystemSettingsWriter {
 
 #[async_trait]
 impl SettingsWriter for FileSystemSettingsWriter {
-    async fn save(&self, language: LanguageEnum) -> Result<Settings, AppError> {
-        let config = Settings { language };
+    async fn save(
+        &self,
+        language: LanguageEnum,
+        analytics_enabled: bool,
+    ) -> Result<Settings, AppError> {
+        let config = Settings {
+            language,
+            analytics_enabled,
+        };
         let path = get_config_file_path(&self.0);
         let bytes = spawn_blocking({
             let config = config.clone();

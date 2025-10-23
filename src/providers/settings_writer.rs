@@ -6,5 +6,9 @@ use async_trait::async_trait;
 
 #[async_trait]
 pub trait SettingsWriter {
-    async fn save(&self, language: LanguageEnum) -> Result<Settings, AppError>;
+    async fn save(
+        &self,
+        language: LanguageEnum,
+        analytics_enabled: bool,
+    ) -> Result<Settings, AppError>;
 }

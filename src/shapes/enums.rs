@@ -778,6 +778,16 @@ impl FromStr for LanguageEnum {
     }
 }
 
+impl FriendlyName for LanguageEnum {
+    fn friendly_name(&self, _: &Labels) -> &'static str {
+        use LanguageEnum::*;
+        match self {
+            En => "english",
+            It => "italiano",
+        }
+    }
+}
+
 /// Global classification system that categorizes teams by their performance model, competitive context and level of professionalism.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum TeamClassificationEnum {

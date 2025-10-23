@@ -35,6 +35,8 @@ pub enum IOError {
     Io(#[from] std::io::Error),
     #[error("serde JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
     #[error("{0}")]
     Msg(String),
     #[error("CSV error: {0}")]

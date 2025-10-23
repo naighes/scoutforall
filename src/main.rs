@@ -1,26 +1,31 @@
-mod constants;
-mod util;
-
+mod analytics;
 mod app;
+mod constants;
 mod errors;
 mod localization;
+mod logging;
 mod providers;
 mod reporting;
 mod screens;
 mod shapes;
+mod util;
 
 #[cfg(test)]
 mod tests;
 
 use crate::{
+    analytics::{global::init_global_queue_manager, upload::AnalyticsUploadWorker},
     app::App,
     localization::init_language,
+    logging::logger::init_logger,
     providers::{
         fs::{
             match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
-            path::get_base_path, set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-            settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
-            team_reader::FileSystemTeamReader, team_writer::FileSystemTeamWriter,
+            path::get_base_path, queue_reader::FileSystemQueueReader,
+            queue_writer::FileSystemQueueWriter, set_reader::FileSystemSetReader,
+            set_writer::FileSystemSetWriter, settings_reader::FileSystemSettingsReader,
+            settings_writer::FileSystemSettingsWriter, team_reader::FileSystemTeamReader,
+            team_writer::FileSystemTeamWriter,
         },
         settings_reader::SettingsReader,
         team_reader::TeamReader,
@@ -40,7 +45,7 @@ use ratatui::{
     widgets::Paragraph,
     Terminal,
 };
-use std::{error::Error, sync::Arc};
+use std::{error::Error, sync::Arc, time::Duration};
 
 #[cfg(feature = "self-update")]
 fn maybe_check_update() {
@@ -85,15 +90,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    let dir = get_base_path().expect("cannot get home directory");
-    let settings_reader = FileSystemSettingsReader::new(&dir);
-    let team_reader = FileSystemTeamReader::new(&dir);
-    let team_writer = FileSystemTeamWriter::new(&dir);
-    let settings_writer = FileSystemSettingsWriter::new(&dir);
-    let set_reader = FileSystemSetReader::new(&dir);
-    let match_reader = FileSystemMatchReader::new(&dir, Arc::new(set_reader));
-    let match_writer = FileSystemMatchWriter::new(&dir);
-    let set_writer = FileSystemSetWriter::new(&dir);
+    let base_dir = get_base_path().expect("cannot get app directory");
+
+    // init logger
+    let log_path = base_dir.join("scout4all.log");
+    init_logger(log_path);
+
+    let queue_path = base_dir.join(constants::UPLOAD_QUEUE_FILE_NAME);
+    let settings_reader = FileSystemSettingsReader::new(&base_dir);
+    let team_reader = FileSystemTeamReader::new(&base_dir);
+    let team_writer = FileSystemTeamWriter::new(&base_dir);
+    let settings_writer = FileSystemSettingsWriter::new(&base_dir);
+    let set_reader = FileSystemSetReader::new(&base_dir);
+    let match_reader = FileSystemMatchReader::new(&base_dir, Arc::new(set_reader));
+    let match_writer = FileSystemMatchWriter::new(&base_dir);
+    let set_writer = FileSystemSetWriter::new(&base_dir);
+    let queue_reader = FileSystemQueueReader::new(&queue_path);
+    let queue_writer = FileSystemQueueWriter::new(&queue_path);
     let teams = team_reader.read_all().await.unwrap_or_else(|_| vec![]);
     let settings = settings_reader
         .read()
@@ -102,32 +115,53 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(Settings::default);
     init_language(settings.language);
     maybe_check_update();
+    let team_reader_arc = Arc::new(team_reader);
+    let team_writer_arc = Arc::new(team_writer);
+    let settings_writer_arc = Arc::new(settings_writer);
+    let set_writer_arc = Arc::new(set_writer);
+    let match_reader_arc = Arc::new(match_reader);
+    let match_writer_arc = Arc::new(match_writer);
+    let settings_reader_arc = Arc::new(settings_reader);
+    let queue_reader_arc = Arc::new(queue_reader);
+    let queue_writer_arc = Arc::new(queue_writer);
+    // start analytics upload worker
+    let worker = AnalyticsUploadWorker::new(
+        base_dir.clone(),
+        Arc::clone(&team_reader_arc),
+        Arc::clone(&match_reader_arc),
+        Arc::clone(&queue_reader_arc),
+        Arc::clone(&queue_writer_arc),
+        Duration::from_secs(30), // poll every 30 seconds
+    );
+    // initialize global queue manager
+    init_global_queue_manager(worker.queue_manager())?;
+    let worker_handle = worker.start();
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
     let res = run_app(
         &mut terminal,
         App::new(
             settings,
             teams,
-            dir,
-            Arc::new(team_reader),
-            Arc::new(team_writer),
-            Arc::new(settings_writer),
-            Arc::new(set_writer),
-            Arc::new(match_reader),
-            Arc::new(match_writer),
+            base_dir,
+            team_reader_arc,
+            team_writer_arc,
+            settings_writer_arc,
+            set_writer_arc,
+            match_reader_arc,
+            match_writer_arc,
+            settings_reader_arc,
         ),
     )
     .await;
-
+    // graceful shutdown: abort worker
+    worker_handle.abort();
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
-
     if let Err(err) = res {
         println!("{:?}", err)
     }
