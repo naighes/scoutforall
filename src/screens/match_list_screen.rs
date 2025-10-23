@@ -3,7 +3,10 @@ use std::{path::PathBuf, sync::Arc};
 use crate::{
     errors::AppError,
     localization::current_labels,
-    providers::{match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter},
+    providers::{
+        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
+        settings_reader::SettingsReader,
+    },
     reporting::pdf::open_match_pdf,
     screens::{
         add_match_screen::AddMatchScreen,
@@ -45,6 +48,7 @@ pub struct MatchListScreen<
     MR: MatchReader + Send + Sync,
     MW: MatchWriter + Send + Sync,
     SSW: SetWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync,
 > {
     list_state: ListState,
     team: TeamEntry,
@@ -56,13 +60,15 @@ pub struct MatchListScreen<
     match_reader: Arc<MR>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
+    settings_reader: Arc<SR>,
 }
 
 impl<
         MR: MatchReader + Send + Sync + 'static,
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
-    > Renderable for MatchListScreen<MR, MW, SSW>
+        SR: SettingsReader + Send + Sync + 'static,
+    > Renderable for MatchListScreen<MR, MW, SSW, SR>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
@@ -126,7 +132,8 @@ impl<
         MR: MatchReader + Send + Sync + 'static,
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
-    > ScreenAsync for MatchListScreen<MR, MW, SSW>
+        SR: SettingsReader + Send + Sync + 'static,
+    > ScreenAsync for MatchListScreen<MR, MW, SSW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (key.code, &self.notify_message.has_value()) {
@@ -146,6 +153,7 @@ impl<
                         self.team.clone(),
                         self.match_writer.clone(),
                         self.set_writer.clone(),
+                        self.settings_reader.clone(),
                     )))
                 } else {
                     AppAction::None
@@ -234,7 +242,8 @@ impl<
         MR: MatchReader + Send + Sync + 'static,
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
-    > MatchListScreen<MR, MW, SSW>
+        SR: SettingsReader + Send + Sync + 'static,
+    > MatchListScreen<MR, MW, SSW, SR>
 {
     pub fn new(
         team: TeamEntry,
@@ -243,6 +252,7 @@ impl<
         match_reader: Arc<MR>,
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
+        settings_reader: Arc<SR>,
     ) -> Self {
         let matches = matches
             .into_iter()
@@ -259,6 +269,7 @@ impl<
             match_reader,
             match_writer,
             set_writer,
+            settings_reader,
         }
     }
 
@@ -332,6 +343,7 @@ impl<
             },
             Some(1),
             self.set_writer.clone(),
+            self.settings_reader.clone(),
         )))
     }
 
@@ -345,6 +357,7 @@ impl<
                     available_options,
                     Some(1),
                     self.set_writer.clone(),
+                    self.settings_reader.clone(),
                 )))
             }
             Err(_) => {

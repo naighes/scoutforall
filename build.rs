@@ -21,4 +21,7 @@ fn inject_env_vars() {
     if let Ok(team_id) = std::env::var("LINEAR_TEAM_ID") {
         println!("cargo:rustc-env=LINEAR_TEAM_ID={}", team_id);
     }
+    if let Ok(url) = std::env::var("ANALYTICS_UPLOAD_URL") {
+        println!("cargo:rustc-env=ANALYTICS_UPLOAD_URL={}", url);
+    }
 }

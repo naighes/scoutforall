@@ -13,11 +13,11 @@ pub struct CheckBox {
 }
 
 impl CheckBox {
-    pub fn new(label: String, writing_mode: bool) -> Self {
+    pub fn new(label: String, writing_mode: bool, selected_value: bool) -> Self {
         Self {
             writing_mode,
             label,
-            value: false,
+            value: selected_value,
         }
     }
 

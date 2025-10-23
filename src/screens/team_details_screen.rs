@@ -6,6 +6,7 @@ use crate::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
         set_writer::SetWriter,
+        settings_reader::SettingsReader,
         team_reader::TeamReader,
         team_writer::{PlayerInput, TeamWriter},
     },
@@ -41,6 +42,7 @@ pub struct TeamDetailsScreen<
     MR: MatchReader + Send + Sync + 'static,
     MW: MatchWriter + Send + Sync + 'static,
     SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
 > {
     list_state: ListState,
     team: TeamEntry,
@@ -53,6 +55,7 @@ pub struct TeamDetailsScreen<
     match_reader: Arc<MR>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
+    settings_reader: Arc<SR>,
 }
 
 #[async_trait]
@@ -62,7 +65,8 @@ impl<
         MR: MatchReader + Send + Sync + 'static,
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
-    > ScreenAsync for TeamDetailsScreen<TR, TW, MR, MW, SSW>
+        SR: SettingsReader + Send + Sync + 'static,
+    > ScreenAsync for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (
@@ -120,6 +124,7 @@ impl<
                         self.match_reader.clone(),
                         self.match_writer.clone(),
                         self.set_writer.clone(),
+                        self.settings_reader.clone(),
                     ))),
                 }
             }
@@ -206,7 +211,8 @@ impl<
         MR: MatchReader + Send + Sync,
         MW: MatchWriter + Send + Sync,
         SSW: SetWriter + Send + Sync,
-    > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW>
+        SR: SettingsReader + Send + Sync,
+    > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notifier.render(f, footer_right);
@@ -260,7 +266,8 @@ impl<
         MR: MatchReader + Send + Sync,
         MW: MatchWriter + Send + Sync,
         SSW: SetWriter + Send + Sync,
-    > TeamDetailsScreen<TR, TW, MR, MW, SSW>
+        SR: SettingsReader + Send + Sync,
+    > TeamDetailsScreen<TR, TW, MR, MW, SSW, SR>
 {
     pub fn new(
         team: &TeamEntry,
@@ -270,6 +277,7 @@ impl<
         match_reader: Arc<MR>,
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
+        settings_reader: Arc<SR>,
     ) -> Self {
         let header = TeamHeader::default();
         TeamDetailsScreen {
@@ -283,6 +291,7 @@ impl<
             match_reader,
             match_writer,
             set_writer,
+            settings_reader,
             notifier: NotifyDialogue::new(),
         }
     }

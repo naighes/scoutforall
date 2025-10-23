@@ -85,6 +85,7 @@ jobs:
         env:
           LINEAR_TOKEN: ${{ secrets.LINEAR_TOKEN }}
           LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
+          ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
       - name: setup variables
         id: variables
         shell: bash

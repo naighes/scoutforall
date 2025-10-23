@@ -1,3 +1,5 @@
+use std::env::var;
+
 use crate::{
     localization::current_labels,
     screens::{
@@ -235,8 +237,8 @@ impl ReportAnIssueScreen {
 
     async fn send_issue(&self, title: &str, description: &str) -> Result<(), String> {
         const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
-        let token = std::env::var("LINEAR_TOKEN").unwrap_or_default();
-        let team_id = std::env::var("LINEAR_TEAM_ID").unwrap_or_default();
+        let token = var("LINEAR_TOKEN").unwrap_or_default();
+        let team_id = var("LINEAR_TEAM_ID").unwrap_or_default();
         let client = reqwest::Client::new();
         let query = r#"
             mutation CreateIssue($input: IssueCreateInput!) {

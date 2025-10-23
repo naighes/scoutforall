@@ -4,7 +4,8 @@ use crate::{
     localization::current_labels,
     providers::{
         match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
-        settings_writer::SettingsWriter, team_reader::TeamReader, team_writer::TeamWriter,
+        settings_reader::SettingsReader, settings_writer::SettingsWriter, team_reader::TeamReader,
+        team_writer::TeamWriter,
     },
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
@@ -35,6 +36,7 @@ pub struct TeamListScreen<
     MR: MatchReader + Send + Sync,
     MW: MatchWriter + Send + Sync,
     SSW: SetWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync,
 > {
     list_state: ListState,
     teams: Vec<TeamEntry>,
@@ -48,6 +50,7 @@ pub struct TeamListScreen<
     match_reader: Arc<MR>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
+    settings_reader: Arc<SR>,
 }
 
 #[async_trait]
@@ -58,7 +61,8 @@ impl<
         MR: MatchReader + Send + Sync + 'static,
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
-    > ScreenAsync for TeamListScreen<TR, TW, SW, MR, MW, SSW>
+        SR: SettingsReader + Send + Sync + 'static,
+    > ScreenAsync for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     async fn refresh_data(&mut self) {
         match self.team_reader.read_all().await {
@@ -107,6 +111,7 @@ impl<
                     self.match_reader.clone(),
                     self.match_writer.clone(),
                     self.set_writer.clone(),
+                    self.settings_reader.clone(),
                 ))),
             },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
@@ -144,7 +149,8 @@ impl<
         MR: MatchReader + Send + Sync + 'static,
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
-    > Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW>
+        SR: SettingsReader + Send + Sync + 'static,
+    > Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notify_message.render(f, footer_right);
@@ -182,7 +188,8 @@ impl<
         MR: MatchReader + Send + Sync,
         MW: MatchWriter + Send + Sync,
         SSW: SetWriter + Send + Sync,
-    > TeamListScreen<TR, TW, SW, MR, MW, SSW>
+        SR: SettingsReader + Send + Sync,
+    > TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     pub fn new(
         settings: Settings,
@@ -194,6 +201,7 @@ impl<
         match_reader: Arc<MR>,
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
+        settings_reader: Arc<SR>,
     ) -> Self {
         TeamListScreen {
             teams,
@@ -208,6 +216,7 @@ impl<
             match_reader,
             match_writer,
             set_writer,
+            settings_reader,
         }
     }
 

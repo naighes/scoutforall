@@ -4,7 +4,10 @@ use crate::{
     localization::{current_labels, set_language},
     providers::settings_writer::SettingsWriter,
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+        components::{
+            checkbox::CheckBox, navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            select::Select,
+        },
         report_an_issue_screen::ReportAnIssueScreen,
         screen::{AppAction, Renderable, ScreenAsync},
     },
@@ -14,16 +17,14 @@ use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
 #[derive(Debug)]
 pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
-    language: Option<LanguageEnum>,
+    language: Select<LanguageEnum>,
+    analytics_enabled: CheckBox,
     field: usize,
-    language_selection: ListState,
     notify_message: NotifyBanner,
     back: bool,
     footer: NavigationFooter,
@@ -36,13 +37,14 @@ impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
         let inner = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
-            .constraints([Constraint::Min(1)])
+            .constraints([
+                Constraint::Length(3), // language
+                Constraint::Length(3), // analytics checkbox
+                Constraint::Min(1),
+            ])
             .split(body);
-        if self.field == 0 {
-            self.render_language_list(f, inner[0]);
-        } else {
-            self.render_language_widget(f, inner[0]);
-        }
+        self.language.render(f, inner[0]);
+        self.analytics_enabled.render(f, inner[1]);
         self.notify_message.render(f, footer_right);
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
@@ -63,10 +65,10 @@ impl<SW: SettingsWriter + Send + Sync> ScreenAsync for SettingsScreen<SW> {
             }
             (KeyCode::Up, _) => self.handle_up(),
             (KeyCode::Down, _) => self.handle_down(),
+            (KeyCode::Tab, _) => self.handle_tab(),
+            (KeyCode::BackTab, _) => self.handle_backtab(),
+            (KeyCode::Char(c), _) => self.handle_char(c),
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Char('i'), _) => {
-                AppAction::SwitchScreen(Box::new(ReportAnIssueScreen::new()))
-            }
             (KeyCode::Enter, _) => self.handle_enter().await,
             _ => AppAction::None,
         }
@@ -77,15 +79,21 @@ impl<SW: SettingsWriter + Send + Sync> ScreenAsync for SettingsScreen<SW> {
 
 impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
     pub fn new(settings: Settings, settings_writer: Arc<SW>) -> Self {
-        let mut language_selection = ListState::default();
-        let index = LanguageEnum::ALL
-            .iter()
-            .position(|&r| r == settings.language);
-        language_selection.select(index);
+        let language = Select::new(
+            current_labels().language.to_owned(),
+            LanguageEnum::ALL.to_vec(),
+            Some(settings.language),
+            true,
+        );
+        let analytics_enabled = CheckBox::new(
+            current_labels().enable_send_analytics.to_owned(),
+            false,
+            settings.analytics_enabled,
+        );
         SettingsScreen {
-            language: Some(settings.language),
+            language,
+            analytics_enabled,
             field: 0,
-            language_selection,
             notify_message: NotifyBanner::new(),
             back: false,
             footer: NavigationFooter::new(),
@@ -106,21 +114,26 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
     }
 
     async fn handle_enter(&mut self) -> AppAction {
-        match self.language {
-            Some(language) => match self.settings_writer.save(language).await {
-                Ok(_) => {
-                    set_language(language);
-                    self.notify_message
-                        .set_info(current_labels().operation_successful.to_string());
-                    self.back = true;
-                    AppAction::None
+        match (
+            self.language.get_selected_value(),
+            self.analytics_enabled.get_selected_value(),
+        ) {
+            (Some(language), analytics_enabled) => {
+                match self.settings_writer.save(language, analytics_enabled).await {
+                    Ok(_) => {
+                        set_language(language);
+                        self.notify_message
+                            .set_info(current_labels().operation_successful.to_string());
+                        self.back = true;
+                        AppAction::None
+                    }
+                    Err(_) => {
+                        self.notify_message
+                            .set_error(current_labels().could_not_save_settings.to_string());
+                        AppAction::None
+                    }
                 }
-                Err(_) => {
-                    self.notify_message
-                        .set_error(current_labels().could_not_save_settings.to_string());
-                    AppAction::None
-                }
-            },
+            }
             _ => {
                 self.notify_message
                     .set_error(current_labels().language_is_required.to_string());
@@ -129,69 +142,39 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
         }
     }
 
+    fn handle_tab(&mut self) -> AppAction {
+        self.field = (self.field + 1) % 2;
+        self.update_writing_modes();
+        AppAction::None
+    }
+
+    fn handle_backtab(&mut self) -> AppAction {
+        self.field = (self.field + 2) % 2;
+        self.update_writing_modes();
+        AppAction::None
+    }
+
+    fn update_writing_modes(&mut self) {
+        self.language.writing_mode = self.field == 0;
+        self.analytics_enabled.writing_mode = self.field == 1;
+    }
+
     fn handle_up(&mut self) -> AppAction {
-        match (self.field, &self.language_selection.selected()) {
-            (0, Some(selected)) => {
-                let new_selected = if *selected == 0 {
-                    LanguageEnum::ALL.len() - 1
-                } else {
-                    selected - 1
-                };
-                self.language = Some(LanguageEnum::ALL[new_selected]);
-                self.language_selection.select(Some(new_selected));
-            }
-            (0, None) => {
-                self.language_selection.select(Some(0));
-                self.language = Some(LanguageEnum::ALL[0]);
-            }
-            _ => {}
-        };
+        self.language.handle_up();
         AppAction::None
     }
 
     fn handle_down(&mut self) -> AppAction {
-        match (self.field, self.language_selection.selected()) {
-            (0, Some(selected)) => {
-                let new_selected = (selected + 1) % LanguageEnum::ALL.len();
-                self.language_selection.select(Some(new_selected));
-                self.language = Some(LanguageEnum::ALL[new_selected]);
-            }
-            (0, None) => {
-                self.language_selection.select(Some(0));
-                self.language = Some(LanguageEnum::ALL[0]);
-            }
-            _ => {}
-        };
+        self.language.handle_down();
         AppAction::None
     }
 
-    fn render_language_widget(&mut self, f: &mut Frame, area: Rect) {
-        let language_widget = Paragraph::new(if let Some(language) = self.language {
-            format!("{}: {}", current_labels().language, language)
+    fn handle_char(&mut self, c: char) -> AppAction {
+        if c == 'i' || c == 'I' {
+            AppAction::SwitchScreen(Box::new(ReportAnIssueScreen::new()))
         } else {
-            format!("{}:", current_labels().language)
-        })
-        .style(Style::default());
-        f.render_widget(language_widget, area);
-    }
-
-    fn render_language_list(&mut self, f: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = LanguageEnum::ALL
-            .iter()
-            .map(|r| ListItem::new(r.to_string()))
-            .collect();
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().language),
-            )
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::REVERSED),
-            )
-            .highlight_symbol(">> ");
-        f.render_stateful_widget(list, area, &mut self.language_selection);
+            self.analytics_enabled.handle_char(c);
+            AppAction::None
+        }
     }
 }
