@@ -30,6 +30,7 @@ pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     settings_writer: Arc<SW>,
+    settings: Settings,
 }
 
 impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
@@ -110,6 +111,7 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
                 ("Q".to_string(), current_labels().quit.to_string()),
             ],
             settings_writer,
+            settings,
         }
     }
 
@@ -119,7 +121,12 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
             self.analytics_enabled.get_selected_value(),
         ) {
             (Some(language), analytics_enabled) => {
-                match self.settings_writer.save(language, analytics_enabled).await {
+                let settings = Settings {
+                    language,
+                    analytics_enabled,
+                    last_used_dir: self.settings.last_used_dir.clone(),
+                };
+                match self.settings_writer.save(settings).await {
                     Ok(_) => {
                         set_language(language);
                         self.notify_message

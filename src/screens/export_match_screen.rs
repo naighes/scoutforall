@@ -1,5 +1,6 @@
 use crate::{
     errors::{AppError, IOError},
+    localization::current_labels,
     providers::fs::path::get_match_folder_path,
     screens::{file_system_screen::FileSystemAction, screen::AppAction},
     shapes::team::TeamEntry,
@@ -15,6 +16,7 @@ pub struct ExportMatchAction {
     team: TeamEntry,
     match_id: String,
     base_path: PathBuf,
+    exported_file_path: Option<PathBuf>,
 }
 
 impl ExportMatchAction {
@@ -23,6 +25,7 @@ impl ExportMatchAction {
             team,
             match_id,
             base_path,
+            exported_file_path: None,
         }
     }
 }
@@ -34,19 +37,24 @@ impl FileSystemAction for ExportMatchAction {
     }
 
     fn is_visible(&self, path: &Path) -> bool {
-        !is_hidden(path).unwrap_or_default()
-            && (path.is_dir()
-                || path
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .map(|e| e.eq_ignore_ascii_case("zip"))
-                    .unwrap_or(false))
+        !is_hidden(path).unwrap_or_default() && path.is_dir()
+    }
+
+    fn success_message_suffix(&self) -> Option<String> {
+        self.exported_file_path
+            .as_ref()
+            .map(|p| p.display().to_string())
     }
 
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
         let match_folder_path =
             get_match_folder_path(&self.base_path, &self.team.id, &self.match_id)?;
         let zip_file_path = path.join(format!("{}.zip", self.match_id));
+        if zip_file_path.exists() {
+            return Err(AppError::IO(IOError::Msg(
+                current_labels().file_already_exists.to_string(),
+            )));
+        }
         let file = File::create(&zip_file_path).map_err(|e| AppError::IO(IOError::from(e)))?;
         let mut zip = ZipWriter::new(file);
         for entry in fs::read_dir(&match_folder_path).map_err(|e| AppError::IO(IOError::from(e)))? {
@@ -68,8 +76,8 @@ impl FileSystemAction for ExportMatchAction {
                     .map_err(|e| AppError::IO(IOError::from(e)))?;
             }
         }
-
         zip.finish().map_err(|e| AppError::IO(IOError::from(e)))?;
+        self.exported_file_path = Some(zip_file_path);
         Ok(AppAction::Back(true, Some(1)))
     }
 }

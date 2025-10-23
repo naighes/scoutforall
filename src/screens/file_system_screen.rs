@@ -1,6 +1,7 @@
 use crate::{
     errors::AppError,
     localization::current_labels,
+    providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, ScreenAsync},
@@ -18,6 +19,7 @@ use ratatui::{
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[async_trait]
@@ -25,10 +27,16 @@ pub trait FileSystemAction {
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError>;
     fn is_selectable(&self, path: &Path) -> bool;
     fn is_visible(&self, path: &Path) -> bool;
+    fn success_message_suffix(&self) -> Option<String> {
+        None
+    }
 }
 
-pub struct FileSystemScreen<A: Send + Sync>
-where
+pub struct FileSystemScreen<
+    A: Send + Sync,
+    SR: SettingsReader + Send + Sync,
+    SW: SettingsWriter + Send + Sync,
+> where
     A: FileSystemAction,
 {
     current_folder: PathBuf,
@@ -39,13 +47,22 @@ where
     action: A,
     back: bool,
     footer: NavigationFooter,
+    settings_reader: Arc<SR>,
+    settings_writer: Arc<SW>,
 }
 
-impl<A: Send + Sync> FileSystemScreen<A>
+impl<A: Send + Sync, SR: SettingsReader + Send + Sync, SW: SettingsWriter + Send + Sync>
+    FileSystemScreen<A, SR, SW>
 where
     A: FileSystemAction,
 {
-    pub fn new(initial_folder: PathBuf, title_label: &str, action: A) -> Self {
+    pub fn new(
+        initial_folder: PathBuf,
+        title_label: &str,
+        action: A,
+        settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
+    ) -> Self {
         let entries = Self::compute_entries(&initial_folder, &action);
         let mut list_state = ListState::default();
         list_state.select(if entries.is_empty() { None } else { Some(0) });
@@ -58,6 +75,8 @@ where
             action,
             back: false,
             footer: NavigationFooter::new(),
+            settings_reader,
+            settings_writer,
         }
     }
 
@@ -121,6 +140,20 @@ where
                 .filter(|x| action.is_visible(x))
                 .collect(),
             Err(_) => vec![],
+        }
+    }
+
+    async fn save_selected_directory(&mut self, child: &Path) {
+        let dir_to_save = if child.is_dir() {
+            Some(child.to_path_buf())
+        } else {
+            child.parent().map(|p| p.to_path_buf())
+        };
+        if let Some(dir) = dir_to_save {
+            if let Ok(mut settings) = self.settings_reader.read().await {
+                settings.last_used_dir = Some(dir.clone());
+                let _ = self.settings_writer.save(settings).await;
+            }
         }
     }
 
@@ -191,7 +224,8 @@ where
     }
 }
 
-impl<A: Send + Sync> Renderable for FileSystemScreen<A>
+impl<A: Send + Sync, SR: SettingsReader + Send + Sync, SW: SettingsWriter + Send + Sync> Renderable
+    for FileSystemScreen<A, SR, SW>
 where
     A: FileSystemAction,
 {
@@ -234,7 +268,8 @@ where
 }
 
 #[async_trait]
-impl<A: Send + Sync> ScreenAsync for FileSystemScreen<A>
+impl<A: Send + Sync, SR: SettingsReader + Send + Sync, SW: SettingsWriter + Send + Sync> ScreenAsync
+    for FileSystemScreen<A, SR, SW>
 where
     A: FileSystemAction,
 {
@@ -257,32 +292,31 @@ where
                 AppAction::None
             }
             (KeyCode::Enter, _) => {
-                let selected = self
-                    .list_state
-                    .selected()
-                    .and_then(|s| self.entries.get(s))
-                    .cloned();
-                match selected {
-                    Some(child) => match self.action.is_selectable(&child) {
-                        true => match self.action.on_selected(&child).await {
-                            Ok(_) => {
-                                self.notify_message
-                                    .set_info(current_labels().operation_successful.to_string());
-                                self.back = true;
-                                AppAction::None
-                            }
-                            Err(e) => {
-                                self.notify_message.set_error(format!("{}", e));
-                                AppAction::None
-                            }
-                        },
-                        _ => {
-                            self.notify_message
-                                .set_error(current_labels().invalid_selection.to_string());
+                let current = self.current_folder.clone();
+                match self.action.is_selectable(&current) {
+                    true => match self.action.on_selected(&current).await {
+                        Ok(_) => {
+                            self.save_selected_directory(&current).await;
+                            let message = if let Some(suffix) = self.action.success_message_suffix()
+                            {
+                                format!("{}: {}", current_labels().operation_successful, suffix)
+                            } else {
+                                current_labels().operation_successful.to_string()
+                            };
+                            self.notify_message.set_info(message);
+                            self.back = true;
+                            AppAction::None
+                        }
+                        Err(e) => {
+                            self.notify_message.set_error(format!("{}", e));
                             AppAction::None
                         }
                     },
-                    None => AppAction::None,
+                    _ => {
+                        self.notify_message
+                            .set_error(current_labels().invalid_selection.to_string());
+                        AppAction::None
+                    }
                 }
             }
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),

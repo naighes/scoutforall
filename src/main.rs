@@ -124,18 +124,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let settings_reader_arc = Arc::new(settings_reader);
     let queue_reader_arc = Arc::new(queue_reader);
     let queue_writer_arc = Arc::new(queue_writer);
-    // start analytics upload worker
-    let worker = AnalyticsUploadWorker::new(
-        base_dir.clone(),
-        Arc::clone(&team_reader_arc),
-        Arc::clone(&match_reader_arc),
-        Arc::clone(&queue_reader_arc),
-        Arc::clone(&queue_writer_arc),
-        Duration::from_secs(30), // poll every 30 seconds
-    );
-    // initialize global queue manager
-    init_global_queue_manager(worker.queue_manager())?;
-    let worker_handle = worker.start();
+    // start analytics upload worker only if analytics is enabled
+    let worker_handle = if settings.analytics_enabled {
+        let worker = AnalyticsUploadWorker::new(
+            base_dir.clone(),
+            Arc::clone(&team_reader_arc),
+            Arc::clone(&match_reader_arc),
+            Arc::clone(&queue_reader_arc),
+            Arc::clone(&queue_writer_arc),
+            Duration::from_secs(30), // poll every 30 seconds
+        );
+        init_global_queue_manager(worker.queue_manager())?;
+        Some(worker.start())
+    } else {
+        None
+    };
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -157,8 +160,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ),
     )
     .await;
-    // graceful shutdown: abort worker
-    worker_handle.abort();
+    // graceful shutdown: abort worker if it was started
+    if let Some(handle) = worker_handle {
+        handle.abort();
+    }
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;

@@ -217,6 +217,7 @@ pub struct Labels {
     pub invalid_email_address: &'static str,
     pub y: &'static char,
     pub enable_send_analytics: &'static str,
+    pub file_already_exists: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -433,6 +434,7 @@ const EN: Labels = Labels {
     invalid_email_address: "invalid email address",
     y: &'y',
     enable_send_analytics: "enable sending anonymous analytics data",
+    file_already_exists: "file already exists",
 };
 
 const IT: Labels = Labels {
@@ -649,6 +651,7 @@ const IT: Labels = Labels {
     invalid_email_address: "indirizzo email non valido",
     y: &'s',
     enable_send_analytics: "abilita l'invio di dati analitici anonimi",
+    file_already_exists: "il file esiste già",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {
