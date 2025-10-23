@@ -5,7 +5,7 @@ use crate::{
     localization::current_labels,
     providers::{
         match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
-        settings_reader::SettingsReader,
+        settings_reader::SettingsReader, settings_writer::SettingsWriter,
     },
     reporting::pdf::open_match_pdf,
     screens::{
@@ -31,7 +31,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
-use dirs::home_dir;
 use ratatui::{
     layout::Alignment,
     widgets::{Row, Table},
@@ -49,6 +48,7 @@ pub struct MatchListScreen<
     MW: MatchWriter + Send + Sync,
     SSW: SetWriter + Send + Sync,
     SR: SettingsReader + Send + Sync,
+    SW: SettingsWriter + Send + Sync,
 > {
     list_state: ListState,
     team: TeamEntry,
@@ -61,6 +61,7 @@ pub struct MatchListScreen<
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
+    settings_writer: Arc<SW>,
 }
 
 impl<
@@ -68,7 +69,8 @@ impl<
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
         SR: SettingsReader + Send + Sync + 'static,
-    > Renderable for MatchListScreen<MR, MW, SSW, SR>
+        SW: SettingsWriter + Send + Sync + 'static,
+    > Renderable for MatchListScreen<MR, MW, SSW, SR, SW>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
@@ -133,7 +135,8 @@ impl<
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
         SR: SettingsReader + Send + Sync + 'static,
-    > ScreenAsync for MatchListScreen<MR, MW, SSW, SR>
+        SW: SettingsWriter + Send + Sync + 'static,
+    > ScreenAsync for MatchListScreen<MR, MW, SSW, SR, SW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (key.code, &self.notify_message.has_value()) {
@@ -159,39 +162,51 @@ impl<
                     AppAction::None
                 }
             }
-            (KeyCode::Char('i'), _) => match home_dir() {
-                Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                    path,
-                    current_labels().import_match,
-                    ImportMatchAction::new(
-                        self.team.clone(),
-                        self.match_reader.clone(),
-                        self.match_writer.clone(),
-                        self.set_writer.clone(),
-                    ),
-                ))),
-                None => {
-                    self.notify_message.set_error(
-                        current_labels()
-                            .could_not_recognize_home_directory
-                            .to_string(),
-                    );
-                    AppAction::None
+            (KeyCode::Char('i'), _) => {
+                let default_path = self.get_default_path().await;
+                match default_path {
+                    Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                        path,
+                        current_labels().import_match,
+                        ImportMatchAction::new(
+                            self.team.clone(),
+                            self.match_reader.clone(),
+                            self.match_writer.clone(),
+                            self.set_writer.clone(),
+                        ),
+                        self.settings_reader.clone(),
+                        self.settings_writer.clone(),
+                    ))),
+                    None => {
+                        self.notify_message.set_error(
+                            current_labels()
+                                .could_not_recognize_home_directory
+                                .to_string(),
+                        );
+                        AppAction::None
+                    }
                 }
-            },
+            }
             (KeyCode::Char('s'), _) => {
                 let selected_match = self.get_selected_match();
-                match (home_dir(), selected_match) {
-                    (Some(path), Some((match_entry, _))) => {
-                        AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                            path,
-                            current_labels().export,
-                            ExportMatchAction::new(
-                                self.team.clone(),
-                                match_entry.id.clone(),
-                                self.base_path.clone(),
-                            ),
-                        )))
+                let default_path = self.get_default_path().await;
+                match (default_path, selected_match) {
+                    (Some(path), Some((match_entry, status))) => {
+                        if !status.match_finished {
+                            AppAction::None
+                        } else {
+                            AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                                path,
+                                current_labels().export,
+                                ExportMatchAction::new(
+                                    self.team.clone(),
+                                    match_entry.id.clone(),
+                                    self.base_path.clone(),
+                                ),
+                                self.settings_reader.clone(),
+                                self.settings_writer.clone(),
+                            )))
+                        }
                     }
                     (None, _) => {
                         self.notify_message.set_error(
@@ -243,7 +258,8 @@ impl<
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
         SR: SettingsReader + Send + Sync + 'static,
-    > MatchListScreen<MR, MW, SSW, SR>
+        SW: SettingsWriter + Send + Sync + 'static,
+    > MatchListScreen<MR, MW, SSW, SR, SW>
 {
     pub fn new(
         team: TeamEntry,
@@ -253,6 +269,7 @@ impl<
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
         settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
     ) -> Self {
         let matches = matches
             .into_iter()
@@ -270,6 +287,7 @@ impl<
             match_writer,
             set_writer,
             settings_reader,
+            settings_writer,
         }
     }
 
@@ -278,6 +296,14 @@ impl<
             .selected()
             .and_then(|i| self.matches.get(i))
             .map(|(m, s)| (m, s))
+    }
+
+    async fn get_default_path(&self) -> Option<PathBuf> {
+        self.settings_reader
+            .read()
+            .await
+            .ok()
+            .and_then(|s| s.get_default_path())
     }
 
     fn get_match_row(
@@ -396,7 +422,9 @@ impl<
                     current_labels().select.to_string(),
                 ));
             }
-            entries.push(("S".to_string(), current_labels().export.to_string()));
+            if status.match_finished {
+                entries.push(("S".to_string(), current_labels().export.to_string()));
+            }
             entries.push((
                 current_labels().space.to_string(),
                 current_labels().match_stats.to_string(),

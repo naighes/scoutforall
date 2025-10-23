@@ -7,6 +7,7 @@ use crate::{
         match_writer::MatchWriter,
         set_writer::SetWriter,
         settings_reader::SettingsReader,
+        settings_writer::SettingsWriter,
         team_reader::TeamReader,
         team_writer::{PlayerInput, TeamWriter},
     },
@@ -26,7 +27,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
-use dirs::home_dir;
 use ratatui::widgets::*;
 use ratatui::{layout::Alignment, widgets::Table};
 use ratatui::{
@@ -43,6 +43,7 @@ pub struct TeamDetailsScreen<
     MW: MatchWriter + Send + Sync + 'static,
     SSW: SetWriter + Send + Sync + 'static,
     SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
 > {
     list_state: ListState,
     team: TeamEntry,
@@ -56,6 +57,7 @@ pub struct TeamDetailsScreen<
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
+    settings_writer: Arc<SW>,
 }
 
 #[async_trait]
@@ -66,7 +68,8 @@ impl<
         MW: MatchWriter + Send + Sync + 'static,
         SSW: SetWriter + Send + Sync + 'static,
         SR: SettingsReader + Send + Sync + 'static,
-    > ScreenAsync for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR>
+        SW: SettingsWriter + Send + Sync + 'static,
+    > ScreenAsync for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR, SW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         match (
@@ -125,6 +128,7 @@ impl<
                         self.match_writer.clone(),
                         self.set_writer.clone(),
                         self.settings_reader.clone(),
+                        self.settings_writer.clone(),
                     ))),
                 }
             }
@@ -132,21 +136,31 @@ impl<
                 &self.team,
                 self.team_writer.clone(),
             ))),
-            (KeyCode::Char('s'), _, _) => match home_dir() {
-                Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                    path,
-                    current_labels().export,
-                    ExportTeamAction::new(self.team.id, self.base_path.clone()),
-                ))),
-                None => {
-                    self.notifier.banner.set_error(
-                        current_labels()
-                            .could_not_recognize_home_directory
-                            .to_string(),
-                    );
-                    AppAction::None
+            (KeyCode::Char('s'), _, _) => {
+                let default_path = self
+                    .settings_reader
+                    .read()
+                    .await
+                    .ok()
+                    .and_then(|s| s.get_default_path());
+                match default_path {
+                    Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                        path,
+                        current_labels().export,
+                        ExportTeamAction::new(self.team.id, self.base_path.clone()),
+                        self.settings_reader.clone(),
+                        self.settings_writer.clone(),
+                    ))),
+                    None => {
+                        self.notifier.banner.set_error(
+                            current_labels()
+                                .could_not_recognize_home_directory
+                                .to_string(),
+                        );
+                        AppAction::None
+                    }
                 }
-            },
+            }
             (KeyCode::Esc, _, _) => AppAction::Back(true, Some(1)),
             (KeyCode::Enter, _, _) => {
                 match self.list_state.selected().map(|selected| {
@@ -212,7 +226,8 @@ impl<
         MW: MatchWriter + Send + Sync,
         SSW: SetWriter + Send + Sync,
         SR: SettingsReader + Send + Sync,
-    > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR>
+        SW: SettingsWriter + Send + Sync,
+    > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR, SW>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notifier.render(f, footer_right);
@@ -267,7 +282,8 @@ impl<
         MW: MatchWriter + Send + Sync,
         SSW: SetWriter + Send + Sync,
         SR: SettingsReader + Send + Sync,
-    > TeamDetailsScreen<TR, TW, MR, MW, SSW, SR>
+        SW: SettingsWriter + Send + Sync,
+    > TeamDetailsScreen<TR, TW, MR, MW, SSW, SR, SW>
 {
     pub fn new(
         team: &TeamEntry,
@@ -278,6 +294,7 @@ impl<
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
         settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
     ) -> Self {
         let header = TeamHeader::default();
         TeamDetailsScreen {
@@ -292,6 +309,7 @@ impl<
             match_writer,
             set_writer,
             settings_reader,
+            settings_writer,
             notifier: NotifyDialogue::new(),
         }
     }

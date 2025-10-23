@@ -20,7 +20,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
-use dirs::home_dir;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -112,27 +111,33 @@ impl<
                     self.match_writer.clone(),
                     self.set_writer.clone(),
                     self.settings_reader.clone(),
+                    self.settings_writer.clone(),
                 ))),
             },
             (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
             (KeyCode::Char('n'), _) => {
                 AppAction::SwitchScreen(Box::new(EditTeamScreen::new(self.team_writer.clone())))
             }
-            (KeyCode::Char('i'), _) => match home_dir() {
-                Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                    path,
-                    current_labels().import_team,
-                    ImportTeamAction::new(self.team_reader.clone(), self.team_writer.clone()),
-                ))),
-                None => {
-                    self.notify_message.set_error(
-                        current_labels()
-                            .could_not_recognize_home_directory
-                            .to_string(),
-                    );
-                    AppAction::None
+            (KeyCode::Char('i'), _) => {
+                let default_path = self.settings.get_default_path();
+                match default_path {
+                    Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
+                        path,
+                        current_labels().import_team,
+                        ImportTeamAction::new(self.team_reader.clone(), self.team_writer.clone()),
+                        self.settings_reader.clone(),
+                        self.settings_writer.clone(),
+                    ))),
+                    None => {
+                        self.notify_message.set_error(
+                            current_labels()
+                                .could_not_recognize_home_directory
+                                .to_string(),
+                        );
+                        AppAction::None
+                    }
                 }
-            },
+            }
             (KeyCode::Char('s'), _) => AppAction::SwitchScreen(Box::new(SettingsScreen::new(
                 self.settings.clone(),
                 self.settings_writer.clone(),

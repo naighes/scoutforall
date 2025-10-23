@@ -1,14 +1,7 @@
-use crate::{
-    errors::AppError,
-    shapes::{enums::LanguageEnum, settings::Settings},
-};
+use crate::{errors::AppError, shapes::settings::Settings};
 use async_trait::async_trait;
 
 #[async_trait]
 pub trait SettingsWriter {
-    async fn save(
-        &self,
-        language: LanguageEnum,
-        analytics_enabled: bool,
-    ) -> Result<Settings, AppError>;
+    async fn save(&self, settings: Settings) -> Result<Settings, AppError>;
 }
