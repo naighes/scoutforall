@@ -19,7 +19,7 @@ use crate::{
         import_match_screen::ImportMatchAction,
         match_stats_screen::MatchStatsScreen,
         scouting_screen::ScoutingScreen,
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
         start_set_screen::StartSetScreen,
     },
     shapes::{
@@ -32,7 +32,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm::event::KeyEvent, Combiner, KeyCombinationFormat};
+use crokey::{crossterm::event::KeyEvent, Combiner};
 use dirs::home_dir;
 use ratatui::{
     layout::Alignment,
@@ -130,13 +130,12 @@ impl<
         }
         self.header.render(f, container[0], Some(&self.team));
         self.notify_message.render(f, footer_right);
-        let screen_actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> =
-            self.screen_actions();
+        let screen_actions = &self.screen_actions();
 
         self.footer.render(
             f,
             footer_left,
-            self.get_footer_entries(screen_actions.clone()),
+            get_keybinding_actions(&self.screen_key_bindings, Sba::MappedAction(screen_actions)),
         );
         self.screen_key_bindings = self
             .settings
@@ -420,36 +419,6 @@ impl<
             self.list_state.select(Some(new_selected));
         };
         AppAction::None
-    }
-
-    fn get_footer_entries(
-        &self,
-        actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)>,
-    ) -> Vec<(String, String)> {
-        let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-        let kb = &self.settings.keybindings;
-        fn map_screen_action(
-            kb: &KeyBindings,
-            action: &(&ScreenActionEnum, Option<fn(String) -> String>),
-            fmt: KeyCombinationFormat,
-        ) -> Option<(String, String)> {
-            let screen_action = kb.shortest_key_for(action.0);
-            let description_fn = action.1;
-            if let Some(found) = screen_action {
-                if let Some(description_fn) = description_fn {
-                    Some((fmt.to_string(found.0), description_fn(found.1)))
-                } else {
-                    Some((fmt.to_string(found.0), found.1))
-                }
-            } else {
-                None
-            }
-        }
-
-        actions
-            .iter()
-            .map_while(|action| map_screen_action(kb, action, fmt.clone()))
-            .collect()
     }
 
     fn screen_actions(&self) -> Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> {

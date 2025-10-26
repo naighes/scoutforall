@@ -70,20 +70,18 @@ impl KeyBindings {
     pub fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) -> bool {
         self.default_bindings
             .entry(action.into())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(ck)
     }
 
     fn set_to_map<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) {
         let action_enum = action.into();
-        if let None = self.map.get_mut(&ck) {
-            self.map.insert(ck, action_enum.clone());
-        }
+        self.map.entry(ck).or_insert(action_enum);
     }
 
     pub fn remove<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) -> bool {
         if let Some(set) = self.default_bindings.get_mut(&action.into()) {
-            return set.remove(&ck);
+            set.remove(&ck)
         } else {
             false
         }
@@ -103,7 +101,7 @@ impl KeyBindings {
                 match &shortest {
                     Some(previous) if previous.1.len() < s.len() => {}
                     _ => {
-                        shortest = Some((*ck, s, action.clone()));
+                        shortest = Some((*ck, s, action.to_owned()));
                     }
                 }
             }
@@ -132,9 +130,8 @@ impl KeyBindings {
         };
         for (action, cks) in &self.default_bindings {
             if actions.contains(&action) {
-                cks.to_owned()
-                    .into_iter()
-                    .for_each(|ck| slice.set_to_map(action.clone(), ck));
+                cks.iter()
+                    .for_each(|ck| slice.set_to_map(action.to_owned(), *ck));
             }
         }
         slice
@@ -174,7 +171,17 @@ fn test_deserialize_keybindings() {
     }
     "#;
     let conf = serde_json::from_str::<Config>(json).unwrap();
-    assert_eq!(conf.keybindings.shortest_key_for(&ScreenActionEnum::Back), None,);
-    assert_eq!(conf.keybindings.shortest_key_for(&ScreenActionEnum::Quit), Some((key!(q), "quit".into())));
-    assert_eq!(conf.keybindings.shortest_key_for(&ScreenActionEnum::Previous), Some((key!(shift-tab), "previous".into())));
+    assert_eq!(
+        conf.keybindings.shortest_key_for(&ScreenActionEnum::Back),
+        None,
+    );
+    assert_eq!(
+        conf.keybindings.shortest_key_for(&ScreenActionEnum::Quit),
+        Some((key!(q), "quit".into()))
+    );
+    assert_eq!(
+        conf.keybindings
+            .shortest_key_for(&ScreenActionEnum::Previous),
+        Some((key!(shift - tab), "previous".into()))
+    );
 }

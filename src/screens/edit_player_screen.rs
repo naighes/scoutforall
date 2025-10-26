@@ -8,7 +8,7 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             team_header::TeamHeader, text_box::TextBox,
         },
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::{RoleEnum, ScreenActionEnum},
@@ -21,7 +21,7 @@ use crate::{
 use async_trait::async_trait;
 use crokey::{
     crossterm::event::{KeyCode, KeyEvent},
-    Combiner, KeyCombinationFormat,
+    Combiner,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -120,17 +120,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             None,
             validate_player_number,
         );
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: &[&ScreenActionEnum],
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
+
         let actions = &[
             &ScreenActionEnum::Next,
             &ScreenActionEnum::Previous,
@@ -138,7 +128,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             &ScreenActionEnum::Back,
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, actions);
+        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&actions.to_vec()));
         let screen_key_bindings = kb.slice(actions.to_vec());
 
         EditPlayerScreen {
@@ -178,17 +168,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             Some(&player.number.to_string()),
             validate_player_number,
         );
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: &[&ScreenActionEnum],
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
+
         let actions = &[
             &ScreenActionEnum::Next,
             &ScreenActionEnum::Previous,
@@ -196,7 +176,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             &ScreenActionEnum::Back,
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, actions);
+        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&actions.to_vec()));
         let screen_key_bindings = kb.slice(actions.to_vec());
 
         EditPlayerScreen {

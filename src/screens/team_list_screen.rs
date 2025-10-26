@@ -13,7 +13,7 @@ use crate::{
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
         keybindings_screen::KeybindingScreen,
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
         settings_screen::SettingsScreen,
         team_details_screen::TeamDetailsScreen,
     },
@@ -25,7 +25,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm::event::KeyEvent, Combiner, KeyCombinationFormat};
+use crokey::{crossterm::event::KeyEvent, Combiner};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -72,9 +72,9 @@ impl<
     > ScreenAsync for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     async fn refresh_data(&mut self) {
-        self.settings_reader.read().await.ok().map(|s| {
+        if let Ok(s) = self.settings_reader.read().await {
             self.settings = s;
-        });
+        }
         match self.team_reader.read_all().await {
             Ok(teams) => {
                 self.teams = teams;
@@ -216,14 +216,11 @@ impl<
         } else {
             self.render_list(f, body, items);
         }
-        let screen_actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> =
-            self.screen_actions();
+        let screen_actions = &self.screen_actions();
+        let kb = &self.settings.keybindings;
 
-        self.footer.render(
-            f,
-            footer_left,
-            self.get_footer_entries(screen_actions.clone()),
-        );
+        let footer_entries = get_keybinding_actions(kb, Sba::MappedAction(screen_actions));
+        self.footer.render(f, footer_left, footer_entries);
 
         self.screen_key_bindings = self
             .settings
@@ -285,37 +282,6 @@ impl<
             let new_selected = if selected == 0 { 0 } else { selected - 1 };
             self.list_state.select(Some(new_selected));
         }
-    }
-
-    fn get_footer_entries(
-        &self,
-        actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)>,
-    ) -> Vec<(String, String)> {
-        let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-
-        fn map_screen_action(
-            kb: &KeyBindings,
-            action: &(&ScreenActionEnum, Option<fn(String) -> String>),
-            fmt: KeyCombinationFormat,
-        ) -> Option<(String, String)> {
-            let screen_action = kb.shortest_key_for(action.0);
-            let description_fn = action.1;
-            if let Some(found) = screen_action {
-                if let Some(description_fn) = description_fn {
-                    return Some((fmt.to_string(found.0), description_fn(found.1)));
-                } else {
-                    return Some((fmt.to_string(found.0), found.1));
-                }
-            } else {
-                None
-            }
-        }
-
-        let kb = &self.settings.keybindings.clone();
-        actions
-            .iter()
-            .map_while(|sa| map_screen_action(kb, sa, fmt.clone()))
-            .collect()
     }
 
     fn screen_actions(&self) -> Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> {

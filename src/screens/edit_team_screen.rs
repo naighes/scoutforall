@@ -8,7 +8,7 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             text_box::TextBox,
         },
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::{FriendlyName, GenderEnum, ScreenActionEnum, TeamClassificationEnum},
@@ -20,7 +20,7 @@ use crate::{
 use async_trait::async_trait;
 use crokey::{
     crossterm::event::{KeyCode, KeyEvent},
-    Combiner, KeyCombinationFormat,
+    Combiner,
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -122,19 +122,8 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             None,
             |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
         );
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: &[&ScreenActionEnum],
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
 
-        let actions = &[
+        let actions = &vec![
             &ScreenActionEnum::Next,
             &ScreenActionEnum::Previous,
             &ScreenActionEnum::Confirm,
@@ -142,8 +131,9 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         ];
 
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, actions);
-        let screen_key_bindings = kb.slice(actions.to_vec());
+        let footer_entries =
+            get_keybinding_actions(kb, crate::screens::screen::Sba::ScreenActions(actions));
+        let screen_key_bindings = kb.slice(actions.to_owned());
 
         EditTeamScreen {
             name,
@@ -182,19 +172,8 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             Some(&team.year.to_string()),
             |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
         );
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: &[&ScreenActionEnum],
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
 
-        let actions = &[
+        let actions = &vec![
             &ScreenActionEnum::Next,
             &ScreenActionEnum::Previous,
             &ScreenActionEnum::Confirm,
@@ -203,8 +182,8 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         ];
 
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, actions);
-        let screen_key_bindings = kb.slice(actions.to_vec());
+        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(actions));
+        let screen_key_bindings = kb.slice(actions.to_owned());
 
         EditTeamScreen {
             name,

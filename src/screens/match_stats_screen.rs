@@ -3,7 +3,7 @@ use crate::{
     localization::current_labels,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::{
@@ -22,7 +22,7 @@ use crate::{
 use async_trait::async_trait;
 use crokey::{
     crossterm::event::{KeyCode, KeyEvent},
-    Combiner, KeyCombinationFormat,
+    Combiner,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -288,18 +288,6 @@ impl Renderable for MatchStatsScreen {
 
 impl MatchStatsScreen {
     pub fn new(settings: Settings, current_match: MatchEntry) -> Result<Self, AppError> {
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: &[&ScreenActionEnum],
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
-
         use EventTypeEnum::*;
         let mut state = ListState::default();
         state.select(Some(0));
@@ -369,7 +357,7 @@ impl MatchStatsScreen {
                 .iter()
                 .map(|p| current_match.team.find_player(*p).cloned()),
         );
-        let screen_actions: &[&ScreenActionEnum] = &[
+        let screen_actions = &vec![
             &ScreenActionEnum::Next,
             &ScreenActionEnum::Previous,
             &ScreenActionEnum::ScrollUp,
@@ -379,8 +367,8 @@ impl MatchStatsScreen {
         ];
         let kb = &settings.keybindings;
         let player_filter = Selection::new(current_labels().player.to_string(), players.collect());
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
-        let screen_key_bindings = kb.slice(screen_actions.to_vec());
+        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(screen_actions));
+        let screen_key_bindings = kb.slice(screen_actions.to_owned());
 
         Ok(Self {
             notify_message: NotifyBanner::new(),

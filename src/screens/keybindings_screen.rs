@@ -10,7 +10,7 @@ use crate::{
         },
         keybindings_action_screen::KeyBindingActionScreen,
         report_an_issue_screen::ReportAnIssueScreen,
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::{LanguageEnum, ScreenActionEnum},
@@ -94,13 +94,13 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 }
                 (Some(ScreenActionEnum::Edit), _, _) => {
                     match self.key_binding_selection.selected().map(|selected| {
-                        let action = ScreenActionEnum::ALL.iter().nth(selected);
+                        let action = ScreenActionEnum::ALL.get(selected);
                         match action {
                             Some(p) => {
                                 let keybindings = self.settings.keybindings.keybindings_for(p);
                                 AppAction::SwitchScreen(Box::new(KeyBindingActionScreen::new(
                                     self.settings.clone(),
-                                    p.clone(),
+                                    p.to_owned(),
                                     keybindings,
                                     self.format.clone(),
                                     self.settings_writer.clone(),
@@ -127,7 +127,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     async fn refresh_data(&mut self) {
         if let Ok(settings) = &self.settings_reader.read().await {
             self.settings = settings.to_owned();
-            let (footer_entries, screen_key_bindings) = get_context_menu(&settings);
+            let (footer_entries, screen_key_bindings) = get_context_menu(settings);
             self.footer_entries = footer_entries;
             self.screen_key_bindings = screen_key_bindings;
         }
@@ -154,7 +154,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             .iter()
             .position(|&r| r == ScreenActionEnum::Back);
         key_binding_selection.select(index);
-        
+
         let (footer_entries, screen_key_bindings) = get_context_menu(&settings);
 
         KeybindingScreen {
@@ -252,7 +252,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                     })
                     .unwrap_or(current_labels().unassigned.to_string())
                     .to_string();
-                return (r.with_desc().1, s);
+                (r.with_desc().1, s)
             })
             .enumerate()
             .map(|(index, (action, keybindings))| {
@@ -298,18 +298,6 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
 }
 
 fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, KeyBindings) {
-    fn get_keybinding_actions(
-        kb: &KeyBindings,
-        actions: &[&ScreenActionEnum],
-    ) -> Vec<(String, String)> {
-        let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-        actions
-            .iter()
-            .flat_map(|action| kb.shortest_key_for(action))
-            .map(|x| (fmt.to_string(x.0), x.1))
-            .collect()
-    }
-
     let screen_actions = vec![
         &ScreenActionEnum::Previous,
         &ScreenActionEnum::Next,
@@ -318,8 +306,9 @@ fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, KeyBindings)
         &ScreenActionEnum::Back,
         &ScreenActionEnum::Quit,
     ];
+
     let kb = &settings.keybindings;
-    let footer_entries = get_keybinding_actions(kb, &screen_actions);
+    let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
     let screen_key_bindings = kb.slice(screen_actions);
     (footer_entries, screen_key_bindings)
 }

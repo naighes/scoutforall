@@ -21,7 +21,7 @@ use crate::{
         export_team_screen::ExportTeamAction,
         file_system_screen::FileSystemScreen,
         match_list_screen::MatchListScreen,
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::ScreenActionEnum, keybinding::KeyBindings, player::PlayerEntry, settings::Settings,
@@ -292,14 +292,17 @@ impl<
             f.render_widget(table, container[1]);
         }
 
-        let screen_actions = self.get_footer_entries();
+        let screen_actions = &self.get_footer_entries();
 
         self.footer.render(
             f,
             footer_left,
-            self.get_keybinding_actions(screen_actions.clone(), &self.settings.keybindings),
+            get_keybinding_actions(
+                &self.settings.keybindings,
+                Sba::ScreenActions(screen_actions),
+            ),
         );
-        self.screen_key_bindings = self.settings.keybindings.slice(screen_actions);
+        self.screen_key_bindings = self.settings.keybindings.slice(screen_actions.to_owned());
     }
 }
 
@@ -358,19 +361,6 @@ impl<
             let new_selected = if selected == 0 { 0 } else { selected - 1 };
             self.list_state.select(Some(new_selected));
         }
-    }
-
-    fn get_keybinding_actions(
-        &self,
-        actions: Vec<&ScreenActionEnum>,
-        kb: &KeyBindings,
-    ) -> Vec<(String, String)> {
-        let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-        actions
-            .iter()
-            .flat_map(|action| kb.shortest_key_for(action))
-            .map(|x| (fmt.to_string(x.0), x.1))
-            .collect()
     }
 
     fn get_footer_entries(&self) -> Vec<&ScreenActionEnum> {

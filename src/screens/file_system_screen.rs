@@ -4,12 +4,12 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{enums::ScreenActionEnum, keybinding::KeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
-use crokey::{Combiner, KeyCombinationFormat};
+use crokey::Combiner;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -263,26 +263,17 @@ where
             self.render_directory_content(f, chunks[1], items, &self.title.clone());
         }
 
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: Vec<&ScreenActionEnum>,
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
-
         let actions = self.get_footer_actions();
 
         self.notify_message.render(f, footer_right);
         let kb = &self.settings.keybindings;
-        self.footer
-            .render(f, footer_left, get_keybinding_actions(kb, actions.clone()));
+        self.footer.render(
+            f,
+            footer_left,
+            get_keybinding_actions(kb, Sba::ScreenActions(&actions)),
+        );
 
-        self.screen_key_bindings = kb.slice(actions.to_vec());
+        self.screen_key_bindings = kb.slice(actions);
     }
 }
 

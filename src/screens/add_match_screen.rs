@@ -8,7 +8,7 @@ use crate::{
             checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
             notify_banner::NotifyBanner, team_header::TeamHeader, text_box::TextBox,
         },
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
         start_set_screen::StartSetScreen,
     },
     shapes::{
@@ -18,7 +18,7 @@ use crate::{
 use async_trait::async_trait;
 use crokey::{
     crossterm::event::{KeyCode, KeyEvent},
-    Combiner, KeyCombinationFormat,
+    Combiner,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -117,17 +117,7 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
         let opponent = TextBox::new(current_labels().opponent.to_owned(), true, None);
         let home = CheckBox::new(current_labels().home.to_owned(), false, false);
         let date = DatePicker::new(current_labels().date.to_owned(), false);
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: &[&ScreenActionEnum],
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
+
         let screen_actions = &[
             &ScreenActionEnum::Next,
             &ScreenActionEnum::Previous,
@@ -135,7 +125,8 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
             &ScreenActionEnum::Back,
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let footer_entries =
+            get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions.to_vec()));
         let screen_key_bindings = kb.slice(screen_actions.to_vec());
         AddMatchScreen {
             settings,

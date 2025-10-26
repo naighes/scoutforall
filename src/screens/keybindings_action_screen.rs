@@ -6,7 +6,7 @@ use crate::{
     screens::{
         components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue},
         keybindings_action_add_screen::AddKeyBindings,
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::ScreenActionEnum,
@@ -57,7 +57,8 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 self.key_combinations = key_combination.clone();
                 let length = self.key_combinations.len();
                 let screen_actions = Self::get_screen_actions(&length);
-                let footer_entries = Self::get_footer_entries(kb, &screen_actions);
+                let footer_entries =
+                    get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
                 let screen_key_bindings = settings.keybindings.slice(screen_actions);
                 self.footer_entries = footer_entries;
                 self.screen_key_bindings = screen_key_bindings;
@@ -110,7 +111,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 }
                 (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::New), _, _, _) => AppAction::SwitchScreen(Box::new(
-                    AddKeyBindings::new(self.action.clone(), self.settings_writer.clone()),
+                    AddKeyBindings::new(self.action, self.settings_writer.clone()),
                 )),
                 (Some(ScreenActionEnum::Delete), _, _, _) => {
                     match self.list_state.selected().map(|selected: usize| {
@@ -172,7 +173,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
         let length = key_combinations.len();
         let screen_actions = Self::get_screen_actions(&length);
         let kb = &settings.keybindings.clone();
-        let footer_entries = Self::get_footer_entries(kb, &screen_actions);
+        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
         let screen_key_bindings = settings.keybindings.slice(screen_actions);
 
         KeyBindingActionScreen {
@@ -189,24 +190,6 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             footer_entries,
             screen_key_bindings,
         }
-    }
-
-    fn get_footer_entries(
-        kb: &KeyBindings,
-        screen_actions: &[&ScreenActionEnum],
-    ) -> Vec<(String, String)> {
-        fn get_keybinding_actions(
-            kb: &KeyBindings,
-            actions: &[&ScreenActionEnum],
-        ) -> Vec<(String, String)> {
-            let fmt: KeyCombinationFormat = KeyCombinationFormat::default();
-            actions
-                .iter()
-                .flat_map(|action| kb.shortest_key_for(action))
-                .map(|x| (fmt.to_string(x.0), x.1))
-                .collect()
-        }
-        get_keybinding_actions(kb, &screen_actions)
     }
 
     fn get_screen_actions(length: &usize) -> Vec<&ScreenActionEnum> {
