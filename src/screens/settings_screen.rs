@@ -9,7 +9,7 @@ use crate::{
             select::Select,
         },
         report_an_issue_screen::ReportAnIssueScreen,
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::{LanguageEnum, ScreenActionEnum},
@@ -17,7 +17,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm, KeyCombinationFormat};
+use crokey::{crossterm, Combiner, KeyCombinationFormat};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -38,6 +38,8 @@ pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
     settings_writer: Arc<SW>,
     settings: Settings,
     format: KeyCombinationFormat,
+    combiner: crokey::Combiner,
+    screen_key_bindings: crate::shapes::keybinding::KeyBindings,
 }
 
 impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
@@ -64,23 +66,31 @@ impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
 #[async_trait]
 impl<SW: SettingsWriter + Send + Sync> ScreenAsync for SettingsScreen<SW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                if self.back {
-                    AppAction::Back(true, Some(1))
-                } else {
-                    AppAction::None
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => {
+                    self.notify_message.reset();
+                    if self.back {
+                        AppAction::Back(true, Some(1))
+                    } else {
+                        AppAction::None
+                    }
                 }
+                (_, KeyCode::Up, _) => self.handle_up(),
+                (_, KeyCode::Down, _) => self.handle_down(),
+                (Some(&ScreenActionEnum::Next), _, _) => self.handle_tab(),
+                (Some(&ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
+                (_, KeyCode::Char(c), _) => self.handle_char(c),
+                (Some(&ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(&ScreenActionEnum::Confirm), _, _) => self.handle_enter().await,
+                _ => AppAction::None,
             }
-            (KeyCode::Up, _) => self.handle_up(),
-            (KeyCode::Down, _) => self.handle_down(),
-            (KeyCode::Tab, _) => self.handle_tab(),
-            (KeyCode::BackTab, _) => self.handle_backtab(),
-            (KeyCode::Char(c), _) => self.handle_char(c),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => self.handle_enter().await,
-            _ => AppAction::None,
+        } else {
+            AppAction::None
         }
     }
 
@@ -100,6 +110,15 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
             false,
             settings.analytics_enabled,
         );
+        let screen_actions = vec![
+            &ScreenActionEnum::Confirm,
+            &ScreenActionEnum::ReportAnIssue,
+            &ScreenActionEnum::Back,
+            &ScreenActionEnum::Quit,
+        ];
+        let kb = &settings.keybindings;
+        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
+        let screen_key_bindings = kb.slice(screen_actions.to_vec());
         SettingsScreen {
             language,
             analytics_enabled,
@@ -107,21 +126,12 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
             notify_message: NotifyBanner::new(),
             back: false,
             footer: NavigationFooter::new(),
-            footer_entries: vec![
-                (
-                    current_labels().enter.to_string(),
-                    current_labels().confirm.to_string(),
-                ),
-                (
-                    "I".to_string(),
-                    current_labels().report_an_issue.to_string(),
-                ),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
-            ],
+            footer_entries,
             settings_writer,
             settings,
             format: KeyCombinationFormat::default(),
+            combiner: Combiner::default(),
+            screen_key_bindings,
         }
     }
 
@@ -189,7 +199,7 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
 
     fn handle_char(&mut self, c: char) -> AppAction {
         if c == 'i' || c == 'I' {
-            AppAction::SwitchScreen(Box::new(ReportAnIssueScreen::new()))
+            AppAction::SwitchScreen(Box::new(ReportAnIssueScreen::new(self.settings.clone())))
         } else {
             self.analytics_enabled.handle_char(c);
             AppAction::None

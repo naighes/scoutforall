@@ -89,9 +89,9 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 }
                 (Some(ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
                 (Some(ScreenActionEnum::Next), _, _) => self.handle_tab(),
-                (Some(ScreenActionEnum::ReportAnIssue), _, _) => {
-                    AppAction::SwitchScreen(Box::new(ReportAnIssueScreen::new()))
-                }
+                (Some(ScreenActionEnum::ReportAnIssue), _, _) => AppAction::SwitchScreen(Box::new(
+                    ReportAnIssueScreen::new(self.settings.clone()),
+                )),
                 (Some(ScreenActionEnum::Edit), _, _) => {
                     match self.key_binding_selection.selected().map(|selected| {
                         let action = ScreenActionEnum::ALL.get(selected);

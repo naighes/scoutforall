@@ -6,11 +6,15 @@ use crate::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, text_box::TextBox,
         },
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
+    shapes::{enums::ScreenActionEnum, keybinding::KeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
-use crokey::crossterm::event::{KeyCode, KeyEvent};
+use crokey::{
+    crossterm::event::{KeyCode, KeyEvent},
+    Combiner,
+};
 use once_cell::sync::Lazy;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -43,6 +47,8 @@ pub struct ReportAnIssueScreen {
     back: bool,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
+    combiner: Combiner,
+    screen_key_bindings: KeyBindings,
 }
 
 impl Renderable for ReportAnIssueScreen {
@@ -72,22 +78,31 @@ impl Renderable for ReportAnIssueScreen {
 #[async_trait]
 impl ScreenAsync for ReportAnIssueScreen {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => self.handle_error_reset(),
-            (KeyCode::Char(c), _) => self.handle_char(c),
-            (KeyCode::Backspace, _) => self.handle_backspace(),
-            (KeyCode::Tab, _) => self.handle_tab(),
-            (KeyCode::BackTab, _) => self.handle_backtab(),
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Enter, _) => {
-                if self.field == 1 {
-                    self.description.handle_char('\n');
-                    AppAction::None
-                } else {
-                    self.handle_enter().await
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => self.handle_error_reset(),
+                (None, KeyCode::Backspace, _) => self.handle_backspace(),
+                (None, KeyCode::Char(c), _) => self.handle_char(c),
+                (Some(&ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
+                (Some(&ScreenActionEnum::Next), _, _) => self.handle_tab(),
+                (Some(&ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(&ScreenActionEnum::Confirm), _, _) => {
+                    if self.field == 1 {
+                        self.description.handle_char('\n');
+                        AppAction::None
+                    } else {
+                        self.handle_enter().await
+                    }
                 }
+                (Some(&ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
+                _ => AppAction::None,
             }
-            _ => AppAction::None,
+        } else {
+            AppAction::None
         }
     }
 
@@ -95,7 +110,7 @@ impl ScreenAsync for ReportAnIssueScreen {
 }
 
 impl ReportAnIssueScreen {
-    pub fn new() -> Self {
+    pub fn new(settings: Settings) -> Self {
         let title = TextBox::new(current_labels().title.to_owned(), true, None);
         let description = TextBox::new(current_labels().description.to_owned(), false, None)
             .enable_multiline(true);
@@ -106,6 +121,16 @@ impl ReportAnIssueScreen {
             None,
             email_validator,
         );
+        let screen_actions = vec![
+            &ScreenActionEnum::Next,
+            &ScreenActionEnum::Previous,
+            &ScreenActionEnum::Confirm,
+            &ScreenActionEnum::Back,
+            &ScreenActionEnum::Quit,
+        ];
+        let kb = &settings.keybindings;
+        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
+        let screen_key_bindings = kb.slice(screen_actions);
         ReportAnIssueScreen {
             title,
             description,
@@ -115,18 +140,9 @@ impl ReportAnIssueScreen {
             notify_message: NotifyBanner::new(),
             back: false,
             footer: NavigationFooter::new(),
-            footer_entries: vec![
-                (
-                    "Tab / Shift+Tab".to_string(),
-                    current_labels().switch_field.to_string(),
-                ),
-                (
-                    current_labels().enter.to_string(),
-                    current_labels().confirm.to_string(),
-                ),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
-            ],
+            footer_entries,
+            combiner: Combiner::default(),
+            screen_key_bindings,
         }
     }
 

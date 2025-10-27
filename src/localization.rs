@@ -9,7 +9,6 @@ pub struct Labels {
     pub could_not_create_team_directory: &'static str,
     pub could_not_create_match_directory: &'static str,
     pub new_match: &'static str,
-    pub navigate: &'static str,
     pub previous: &'static str,
     pub next: &'static str,
     pub confirm: &'static str,
@@ -70,7 +69,6 @@ pub struct Labels {
     pub lineup_selection_setter: &'static str,
     pub lineup_selection_libero: &'static str,
     pub serving_team: &'static str,
-    pub choose: &'static str,
     pub could_not_load_teams: &'static str,
     pub players: &'static str,
     pub team_not_found: &'static str,
@@ -169,8 +167,6 @@ pub struct Labels {
     pub match_stats: &'static str,
     pub rotation: &'static str,
     pub could_not_open_match_stats: &'static str,
-    pub enter: &'static str,
-    pub switch_field: &'static str,
     pub player: &'static str,
     pub conversion_rate: &'static str,
     pub evaluations: &'static str,
@@ -236,7 +232,6 @@ const EN: Labels = Labels {
     could_not_create_team_directory: "could not create team directory",
     could_not_create_match_directory: "could not create match directory",
     new_match: "new match",
-    navigate: "navigate",
     previous: "previous",
     next: "next",
     confirm: "confirm",
@@ -297,7 +292,6 @@ const EN: Labels = Labels {
     lineup_selection_setter: "lineup selection - setter",
     lineup_selection_libero: "lineup selection - libero",
     serving_team: "serving team",
-    choose: "choose",
     could_not_load_teams: "could not load teams",
     players: "players",
     team_not_found: "team not found",
@@ -392,8 +386,6 @@ const EN: Labels = Labels {
     match_stats: "match stats",
     rotation: "rotation",
     could_not_open_match_stats: "could not open match stats",
-    enter: "Enter",
-    switch_field: "switch field",
     player: "player",
     conversion_rate: "conversion rate",
     evaluations: "evaluations",
@@ -450,11 +442,11 @@ const EN: Labels = Labels {
     unassigned: "Unassigned",
     scroll_up: "scroll up",
     scroll_down: "scroll down",
+    delete: "delete",
     #[cfg(feature = "self-update")]
     updated_to_version: "updated to version",
     #[cfg(feature = "self-update")]
     update_check_failed: "update check failed",
-    delete: "delete",
 };
 
 const IT: Labels = Labels {
@@ -463,7 +455,6 @@ const IT: Labels = Labels {
     could_not_create_team_directory: "impossibile creare la directory della squadra",
     could_not_create_match_directory: "impossibile creare la directory della partita",
     new_match: "nuova partita",
-    navigate: "naviga",
     previous: "precedente",
     next: "successivo",
     confirm: "conferma",
@@ -524,7 +515,6 @@ const IT: Labels = Labels {
     lineup_selection_setter: "selezione formazione - palleggiatore",
     lineup_selection_libero: "selezione formazione - libero",
     serving_team: "squadra al servizio",
-    choose: "scegli",
     could_not_load_teams: "impossibile caricare le squadre",
     players: "giocatori",
     team_not_found: "squadra non trovata",
@@ -619,8 +609,6 @@ const IT: Labels = Labels {
     match_stats: "statistiche partita",
     rotation: "rotazione",
     could_not_open_match_stats: "impossibile aprire le statistiche della partita",
-    enter: "Invio",
-    switch_field: "cambia campo",
     player: "giocatore",
     conversion_rate: "percentuale di realizzazione",
     evaluations: "valutazioni",
@@ -677,11 +665,11 @@ const IT: Labels = Labels {
     unassigned: "Non assegnato",
     scroll_up: "scorri su",
     scroll_down: "scorri giù",
+    delete: "elimina",
     #[cfg(feature = "self-update")]
     updated_to_version: "aggiornato alla versione",
     #[cfg(feature = "self-update")]
     update_check_failed: "impossibile controllare la presenza di aggiornamenti",
-    delete: "elimina",
 };
 
 static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {
