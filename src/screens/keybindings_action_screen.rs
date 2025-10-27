@@ -271,7 +271,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 Err(_) => {
                     self.notifier
                         .banner
-                        .set_error(current_labels().could_not_remove_player.to_string());
+                        .set_error(current_labels().could_not_reset_keybindings.to_string());
                     AppAction::None
                 }
             }
