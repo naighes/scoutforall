@@ -28,6 +28,7 @@ pub struct Labels {
     pub role_is_required: &'static str,
     pub could_not_create_player: &'static str,
     pub could_not_remove_player: &'static str,
+    pub could_not_reset_keybindings: &'static str,
     pub number_must_be_between_0_and_99: &'static str,
     pub role: &'static str,
     pub edit: &'static str,
@@ -225,6 +226,8 @@ pub struct Labels {
     pub scroll_up: &'static str,
     pub scroll_down: &'static str,
     pub delete: &'static str,
+    pub reset: &'static str,
+    pub reset_to_defaults_confirmation: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -252,6 +255,7 @@ const EN: Labels = Labels {
     role_is_required: "role is required",
     could_not_create_player: "could not create player",
     could_not_remove_player: "could not remove player",
+    could_not_reset_keybindings: "could not reset keybinding",
     number_must_be_between_0_and_99: "number must be between 0 and 99",
     role: "role",
     edit: "edit",
@@ -445,6 +449,8 @@ const EN: Labels = Labels {
     scroll_up: "scroll up",
     scroll_down: "scroll down",
     delete: "delete",
+    reset: "reset to defaults",
+    reset_to_defaults_confirmation: "resetting keybindings to their default values: irreversible operation. Are you sure? (y/n)",
     #[cfg(feature = "self-update")]
     updated_to_version: "updated to version",
     #[cfg(feature = "self-update")]
@@ -476,6 +482,7 @@ const IT: Labels = Labels {
     role_is_required: "il ruolo è obbligatorio",
     could_not_create_player: "impossibile creare il giocatore",
     could_not_remove_player: "impossibile rimuovere il giocatore",
+    could_not_reset_keybindings: "impossibile reimpostare le scorciatoie",
     number_must_be_between_0_and_99: "il numero deve essere compreso tra 0 e 99",
     role: "ruolo",
     edit: "modifica",
@@ -669,6 +676,8 @@ const IT: Labels = Labels {
     scroll_up: "scorri su",
     scroll_down: "scorri giù",
     delete: "elimina",
+    reset: "ripristina i valori predefiniti",
+    reset_to_defaults_confirmation: "ripristino delle scorciatoie ai valori predefiniti: operazione irreversibile. Confermi? (s/n)",
     #[cfg(feature = "self-update")]
     updated_to_version: "aggiornato alla versione",
     #[cfg(feature = "self-update")]

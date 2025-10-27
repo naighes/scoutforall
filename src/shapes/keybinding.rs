@@ -55,6 +55,7 @@ impl Default for KeyBindings {
         bindings.set(ScreenActionEnum::ScrollUp, key!(up));
         bindings.set(ScreenActionEnum::ReportAnIssue, key!(i));
         bindings.set(ScreenActionEnum::Select, key!(enter));
+        bindings.set(ScreenActionEnum::Reset, key!(r));
         bindings
     }
 }

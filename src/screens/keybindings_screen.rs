@@ -5,8 +5,8 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{
-            checkbox::CheckBox, navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
-            select::Select,
+            checkbox::CheckBox, navigation_footer::NavigationFooter,
+            notify_dialogue::NotifyDialogue, select::Select,
         },
         keybindings_action_screen::KeyBindingActionScreen,
         report_an_issue_screen::ReportAnIssueScreen,
@@ -19,7 +19,10 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm, Combiner, KeyCombinationFormat};
+use crokey::{
+    crossterm::{self, event::KeyCode},
+    Combiner, KeyCombinationFormat,
+};
 use crossterm::event::KeyEvent;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -33,7 +36,7 @@ pub struct KeybindingScreen<SW: SettingsWriter + Send + Sync, SR: SettingsReader
     language: Select<LanguageEnum>,
     analytics_enabled: CheckBox,
     key_binding_selection: ListState,
-    notify_message: NotifyBanner,
+    notifier: NotifyDialogue<Settings>,
     back: bool,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
@@ -62,7 +65,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
         self.language.render(f, inner[0]);
         self.analytics_enabled.render(f, inner[1]);
         self.render_key_bindings_list(f, inner[2]);
-        self.notify_message.render(f, footer_right);
+        self.notifier.render(f, footer_right);
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
     }
@@ -77,22 +80,37 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
-                &self.notify_message.has_value(),
+                &self.notifier.banner.has_value(),
+                &self.notifier.has_value(),
             ) {
-                (_, _, true) => {
-                    self.notify_message.reset();
+                (_, KeyCode::Char(x), _, true) => {
+                    self.notifier.banner.reset();
+                    let default_settings = self.notifier.entry.to_owned();
+                    self.notifier.reset();
+                    if x == *current_labels().y {
+                        match default_settings {
+                            Some(settings) => self.reset_settings(settings).await,
+
+                            None => return AppAction::None,
+                        }
+                    } else {
+                        AppAction::None
+                    }
+                }
+                (_, _, true, _) => {
+                    self.notifier.reset();
                     if self.back {
                         AppAction::Back(true, Some(1))
                     } else {
                         AppAction::None
                     }
                 }
-                (Some(ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
-                (Some(ScreenActionEnum::Next), _, _) => self.handle_tab(),
-                (Some(ScreenActionEnum::ReportAnIssue), _, _) => AppAction::SwitchScreen(Box::new(
-                    ReportAnIssueScreen::new(self.settings.clone()),
-                )),
-                (Some(ScreenActionEnum::Edit), _, _) => {
+                (Some(ScreenActionEnum::Previous), _, _, _) => self.handle_backtab(),
+                (Some(ScreenActionEnum::Next), _, _, _) => self.handle_tab(),
+                (Some(ScreenActionEnum::ReportAnIssue), _, _, _) => AppAction::SwitchScreen(
+                    Box::new(ReportAnIssueScreen::new(self.settings.clone())),
+                ),
+                (Some(ScreenActionEnum::Edit), _, _, _) => {
                     match self.key_binding_selection.selected().map(|selected| {
                         let action = ScreenActionEnum::ALL.get(selected);
                         match action {
@@ -114,9 +132,22 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                         None => AppAction::None,
                     }
                 }
-                (Some(ScreenActionEnum::Confirm), _, _) => self.handle_enter().await,
-                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
-                (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
+                (Some(ScreenActionEnum::Reset), _, _, _) => {
+                    let settings = Settings {
+                        language: self.settings.language,
+                        analytics_enabled: self.settings.analytics_enabled,
+                        keybindings: KeyBindings::default(),
+                        last_used_dir: self.settings.last_used_dir.to_owned(),
+                    };
+                    self.notifier
+                        .set(settings.to_owned())
+                        .banner
+                        .set_warning(current_labels().reset_to_defaults_confirmation.to_string());
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::Confirm), _, _, _) => self.handle_enter().await,
+                (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Quit), _, _, _) => AppAction::Quit(Ok(())),
                 _ => AppAction::None,
             }
         } else {
@@ -161,7 +192,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             language,
             analytics_enabled,
             key_binding_selection,
-            notify_message: NotifyBanner::new(),
+            notifier: NotifyDialogue::new(),
             back: false,
             footer: NavigationFooter::new(),
             footer_entries,
@@ -189,20 +220,23 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 match self.settings_writer.save(settings).await {
                     Ok(saved_settings) => {
                         set_settings(saved_settings);
-                        self.notify_message
+                        self.notifier
+                            .banner
                             .set_info(current_labels().operation_successful.to_string());
                         self.back = true;
                         AppAction::None
                     }
                     Err(_) => {
-                        self.notify_message
+                        self.notifier
+                            .banner
                             .set_error(current_labels().could_not_save_settings.to_string());
                         AppAction::None
                     }
                 }
             }
             _ => {
-                self.notify_message
+                self.notifier
+                    .banner
                     .set_error(current_labels().language_is_required.to_string());
                 AppAction::None
             }
@@ -295,6 +329,25 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
 
         f.render_widget(table, area);
     }
+
+    async fn reset_settings(&mut self, default_settings: Settings) -> AppAction {
+        match self.settings_writer.save(default_settings).await {
+            Ok(saved_settings) => {
+                set_settings(saved_settings.clone());
+                self.refresh_data().await;
+                self.notifier
+                    .banner
+                    .set_info(current_labels().operation_successful.to_string());
+                AppAction::None
+            }
+            Err(_) => {
+                self.notifier
+                    .banner
+                    .set_error(current_labels().could_not_remove_keybinding.to_string());
+                AppAction::None
+            }
+        }
+    }
 }
 
 fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, KeyBindings) {
@@ -302,6 +355,7 @@ fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, KeyBindings)
         &ScreenActionEnum::Previous,
         &ScreenActionEnum::Next,
         &ScreenActionEnum::Edit,
+        &ScreenActionEnum::Reset,
         &ScreenActionEnum::ReportAnIssue,
         &ScreenActionEnum::Back,
         &ScreenActionEnum::Quit,
