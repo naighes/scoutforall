@@ -198,9 +198,7 @@ impl<
                 (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::RemovePlayer), _, _, _) => {
                     match self.list_state.selected().map(async |selected: usize| {
-                        let u = self.team.active_players().get(selected).cloned();
-                        let player = async move { u };
-                        match player.await {
+                        match self.team.active_players().get(selected).cloned() {
                             Some(p) => {
                                 self.notifier.set(p.to_owned()).banner.set_warning(
                                     current_labels()
