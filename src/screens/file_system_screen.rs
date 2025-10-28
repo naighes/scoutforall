@@ -311,31 +311,45 @@ where
                 }
                 (Some(ScreenActionEnum::Select), _, _) => {
                     let current = self.current_folder.clone();
-                    match self.action.is_selectable(&current) {
-                        true => match self.action.on_selected(&current).await {
-                            Ok(_) => {
-                                self.save_selected_directory(&current).await;
-                                let message = if let Some(suffix) =
-                                    self.action.success_message_suffix()
-                                {
-                                    format!("{}: {}", current_labels().operation_successful, suffix)
-                                } else {
-                                    current_labels().operation_successful.to_string()
-                                };
-                                self.notify_message.set_info(message);
-                                self.back = true;
+                    if let Some(selected_path) = &self
+                        .list_state
+                        .selected()
+                        .and_then(|s| self.entries.get(s))
+                    {
+                        match self.action.is_selectable(selected_path) {
+                            true => match self.action.on_selected(selected_path).await {
+                                Ok(_) => {
+                                    self.save_selected_directory(&current).await;
+                                    let message = if let Some(suffix) =
+                                        self.action.success_message_suffix()
+                                    {
+                                        format!(
+                                            "{}: {}",
+                                            current_labels().operation_successful,
+                                            suffix
+                                        )
+                                    } else {
+                                        current_labels().operation_successful.to_string()
+                                    };
+                                    self.notify_message.set_info(message);
+                                    self.back = true;
+                                    AppAction::None
+                                }
+                                Err(e) => {
+                                    self.notify_message.set_error(format!("{}", e));
+                                    AppAction::None
+                                }
+                            },
+                            _ => {
+                                self.notify_message
+                                    .set_error(current_labels().invalid_selection.to_string());
                                 AppAction::None
                             }
-                            Err(e) => {
-                                self.notify_message.set_error(format!("{}", e));
-                                AppAction::None
-                            }
-                        },
-                        _ => {
-                            self.notify_message
-                                .set_error(current_labels().invalid_selection.to_string());
-                            AppAction::None
                         }
+                    } else {
+                        self.notify_message
+                            .set_error(current_labels().invalid_selection.to_string());
+                        AppAction::None
                     }
                 }
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
