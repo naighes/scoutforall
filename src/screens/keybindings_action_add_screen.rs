@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{
     localization::current_labels,
@@ -16,10 +16,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
-    Combiner,
-};
+use crokey::{crossterm::event::KeyEvent, key, Combiner, KeyCombinationFormat};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
@@ -37,6 +34,7 @@ pub struct AddKeyBindings<SW: SettingsWriter + Send + Sync> {
     settings_writer: Arc<SW>,
     combiner: Combiner,
     screen_key_bindings: KeyBindings,
+    fmt: KeyCombinationFormat,
 }
 
 impl<SW: SettingsWriter + Send + Sync> Renderable for AddKeyBindings<SW> {
@@ -67,18 +65,18 @@ impl<SW: SettingsWriter + Send + Sync> ScreenAsync for AddKeyBindings<SW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.combiner.transform(key) {
             match (
+                key_combination,
                 self.screen_key_bindings.get(key_combination),
-                key.code,
                 &self.notify_message.has_value(),
             ) {
                 (_, _, true) => {
                     self.notify_message.reset();
                     AppAction::None
                 }
-                (None, KeyCode::Char(c), _) => self.handle_char(c),
-                (None, KeyCode::Backspace, _) => self.handle_backspace(),
-                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
-                (Some(ScreenActionEnum::Confirm), _, _) => self.handle_confirm().await,
+                (key!(Backspace), _, _) => self.handle_backspace(),
+                (_, Some(ScreenActionEnum::Back), _) => AppAction::Back(true, Some(1)),
+                (_, Some(ScreenActionEnum::Confirm), _) => self.handle_confirm().await,
+                (_, None, false) => self.handle_combination(self.fmt.to_string(key_combination)),
                 _ => AppAction::None,
             }
         } else {
@@ -112,6 +110,7 @@ impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
             combiner: Combiner::default(),
             screen_key_bindings,
             settings_writer,
+            fmt: KeyCombinationFormat::default(),
         }
     }
 
@@ -167,8 +166,8 @@ impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
         AppAction::None
     }
 
-    fn handle_char(&mut self, c: char) -> AppAction {
-        self.shortcut.handle_char(c);
+    fn handle_combination(&mut self, c: String) -> AppAction {
+        c.chars().for_each(|ch| self.shortcut.handle_char(ch));
         AppAction::None
     }
 }
