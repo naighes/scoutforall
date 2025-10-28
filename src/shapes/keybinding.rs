@@ -38,6 +38,7 @@ impl Default for KeyBindings {
         bindings.set(ScreenActionEnum::Export, key!(s));
         bindings.set(ScreenActionEnum::Import, key!(i));
         bindings.set(ScreenActionEnum::New, key!(n));
+        bindings.set(ScreenActionEnum::NewPlayer, key!(n));
         bindings.set(ScreenActionEnum::MatchList, key!(m));
         bindings.set(ScreenActionEnum::MatchStats, key!(space));
         bindings.set(ScreenActionEnum::PrintReport, key!(p));
