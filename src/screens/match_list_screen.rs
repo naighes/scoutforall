@@ -130,17 +130,14 @@ impl<
         }
         self.header.render(f, container[0], Some(&self.team));
         self.notify_message.render(f, footer_right);
+        let kb: &KeyBindings = &self.settings.keybindings;
         let screen_actions = &self.screen_actions();
-
-        self.footer.render(
-            f,
-            footer_left,
-            get_keybinding_actions(&self.screen_key_bindings, Sba::MappedAction(screen_actions)),
-        );
-        self.screen_key_bindings = self
-            .settings
-            .keybindings
-            .slice(screen_actions.iter().map(|a| a.0).collect());
+        let sc = screen_actions.iter().map(|f| f.0).collect();
+        let screen_key_bindings = &kb.slice(sc);
+        let footer_entries =
+            get_keybinding_actions(kb, Sba::MappedAction(screen_actions));
+        self.footer.render(f, footer_left, footer_entries);
+        self.screen_key_bindings = screen_key_bindings.to_owned()
     }
 }
 
