@@ -129,7 +129,7 @@ impl ReportAnIssueScreen {
             &ScreenActionEnum::Quit,
         ];
         let kb = &settings.keybindings;
-        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
+        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
         let screen_key_bindings = kb.slice(screen_actions);
         ReportAnIssueScreen {
             title,

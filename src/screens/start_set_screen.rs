@@ -601,7 +601,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             .slice(lineup_selection_actions.to_owned());
         let footer_entries = get_keybinding_actions(
             &self.settings.keybindings,
-            Sba::ScreenActions(lineup_selection_actions),
+            Sba::Simple(lineup_selection_actions),
         );
         let paragraph = Paragraph::new(
             footer_entries
@@ -799,7 +799,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             .slice(serving_team_actions.to_owned());
         let footer_entries = get_keybinding_actions(
             &self.settings.keybindings,
-            Sba::ScreenActions(serving_team_actions),
+            Sba::Simple(serving_team_actions),
         );
         let paragraph = Paragraph::new(
             footer_entries

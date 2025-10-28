@@ -28,12 +28,12 @@ pub fn get_keybinding_actions(kb: &KeyBindings, actions: Sba) -> Vec<(String, St
     use crokey::KeyCombinationFormat;
     let fmt = &KeyCombinationFormat::default();
     match actions {
-        Sba::ScreenActions(actions) => actions
+        Sba::Simple(actions) => actions
             .iter()
             .flat_map(|action| kb.shortest_key_for(action))
             .map(|x| (KeyCombinationFormatExt::new(fmt).to_string(x.0), x.1))
             .collect(),
-        Sba::MappedAction(action) => {
+        Sba::Redacted(action) => {
             fn map_screen_action(
                 kb: &KeyBindings,
                 action: &(&ScreenActionEnum, Option<fn(String) -> String>),
@@ -67,8 +67,8 @@ pub fn get_keybinding_actions(kb: &KeyBindings, actions: Sba) -> Vec<(String, St
 }
 
 pub enum Sba<'a> {
-    ScreenActions(&'a Vec<&'a ScreenActionEnum>),
-    MappedAction(&'a Vec<(&'a ScreenActionEnum, Option<fn(String) -> String>)>),
+    Simple(&'a Vec<&'a ScreenActionEnum>),
+    Redacted(&'a Vec<(&'a ScreenActionEnum, Option<fn(String) -> String>)>),
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn test_get_keybinding_actions() {
     // Setup test data
     let kb = KeyBindings::default();
     let actions = vec![&ScreenActionEnum::Next, &ScreenActionEnum::Previous];
-    let sba = Sba::ScreenActions(&actions);
+    let sba = Sba::Simple(&actions);
 
     // Call the function under test
     let result = get_keybinding_actions(&kb, sba);

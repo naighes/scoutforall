@@ -367,7 +367,7 @@ impl MatchStatsScreen {
         ];
         let kb = &settings.keybindings;
         let player_filter = Selection::new(current_labels().player.to_string(), players.collect());
-        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(screen_actions));
+        let footer_entries = get_keybinding_actions(kb, Sba::Simple(screen_actions));
         let screen_key_bindings = kb.slice(screen_actions.to_owned());
 
         Ok(Self {

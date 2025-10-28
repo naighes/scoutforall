@@ -98,7 +98,7 @@ impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
         ];
         let settings = current_settings();
         let kb = settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(&kb, Sba::ScreenActions(screen_actions));
+        let footer_entries = get_keybinding_actions(&kb, Sba::Simple(screen_actions));
         let screen_key_bindings = kb.slice(screen_actions.to_owned());
         AddKeyBindings {
             settings,

@@ -125,8 +125,7 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
             &ScreenActionEnum::Back,
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries =
-            get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions.to_vec()));
+        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions.to_vec()));
         let screen_key_bindings = kb.slice(screen_actions.to_vec());
         AddMatchScreen {
             settings,

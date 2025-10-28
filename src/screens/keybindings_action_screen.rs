@@ -57,8 +57,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 self.key_combinations = key_combination.clone();
                 let length = self.key_combinations.len();
                 let screen_actions = Self::get_screen_actions(&length);
-                let footer_entries =
-                    get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
+                let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
                 let screen_key_bindings = settings.keybindings.slice(screen_actions);
                 self.footer_entries = footer_entries;
                 self.screen_key_bindings = screen_key_bindings;
@@ -173,7 +172,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
         let length = key_combinations.len();
         let screen_actions = Self::get_screen_actions(&length);
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&screen_actions));
+        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
         let screen_key_bindings = settings.keybindings.slice(screen_actions);
 
         KeyBindingActionScreen {

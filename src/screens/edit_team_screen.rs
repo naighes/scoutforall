@@ -132,7 +132,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
 
         let kb = &settings.keybindings.clone();
         let footer_entries =
-            get_keybinding_actions(kb, crate::screens::screen::Sba::ScreenActions(actions));
+            get_keybinding_actions(kb, crate::screens::screen::Sba::Simple(actions));
         let screen_key_bindings = kb.slice(actions.to_owned());
 
         EditTeamScreen {
@@ -182,7 +182,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         ];
 
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(actions));
+        let footer_entries = get_keybinding_actions(kb, Sba::Simple(actions));
         let screen_key_bindings = kb.slice(actions.to_owned());
 
         EditTeamScreen {

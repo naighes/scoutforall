@@ -219,7 +219,7 @@ impl<
         let screen_actions = &self.screen_actions();
         let kb = &self.settings.keybindings;
 
-        let footer_entries = get_keybinding_actions(kb, Sba::MappedAction(screen_actions));
+        let footer_entries = get_keybinding_actions(kb, Sba::Redacted(screen_actions));
         self.footer.render(f, footer_left, footer_entries);
 
         self.screen_key_bindings = self

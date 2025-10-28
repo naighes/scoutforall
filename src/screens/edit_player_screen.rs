@@ -128,7 +128,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             &ScreenActionEnum::Back,
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&actions.to_vec()));
+        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&actions.to_vec()));
         let screen_key_bindings = kb.slice(actions.to_vec());
 
         EditPlayerScreen {
@@ -176,7 +176,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             &ScreenActionEnum::Back,
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::ScreenActions(&actions.to_vec()));
+        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&actions.to_vec()));
         let screen_key_bindings = kb.slice(actions.to_vec());
 
         EditPlayerScreen {

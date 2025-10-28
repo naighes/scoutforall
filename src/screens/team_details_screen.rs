@@ -295,10 +295,7 @@ impl<
         self.footer.render(
             f,
             footer_left,
-            get_keybinding_actions(
-                &self.settings.keybindings,
-                Sba::ScreenActions(screen_actions),
-            ),
+            get_keybinding_actions(&self.settings.keybindings, Sba::Simple(screen_actions)),
         );
         self.screen_key_bindings = self.settings.keybindings.slice(screen_actions.to_owned());
     }

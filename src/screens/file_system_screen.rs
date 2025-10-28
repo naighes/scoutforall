@@ -270,7 +270,7 @@ where
         self.footer.render(
             f,
             footer_left,
-            get_keybinding_actions(kb, Sba::ScreenActions(&actions)),
+            get_keybinding_actions(kb, Sba::Simple(&actions)),
         );
 
         self.screen_key_bindings = kb.slice(actions);
@@ -311,10 +311,8 @@ where
                 }
                 (Some(ScreenActionEnum::Select), _, _) => {
                     let current = self.current_folder.clone();
-                    if let Some(selected_path) = &self
-                        .list_state
-                        .selected()
-                        .and_then(|s| self.entries.get(s))
+                    if let Some(selected_path) =
+                        &self.list_state.selected().and_then(|s| self.entries.get(s))
                     {
                         match self.action.is_selectable(selected_path) {
                             true => match self.action.on_selected(selected_path).await {
