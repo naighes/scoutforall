@@ -165,6 +165,7 @@ impl<
                 (Some(ScreenActionEnum::PrintReport), _, _) => self.handle_print(),
                 (Some(ScreenActionEnum::MatchStats), _, _) => self.handle_space_key(),
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (Some(ScreenActionEnum::New), _, _) => {
                     if self.team.players.len() >= 6 {
                         AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
