@@ -595,7 +595,6 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             Sba::Simple(ScreenActionEnum::Down),
             Sba::Simple(ScreenActionEnum::Select),
             Sba::Simple(ScreenActionEnum::Back),
-            Sba::Simple(ScreenActionEnum::Quit),
         ];
         self.screen_key_bindings = self
             .settings
@@ -795,7 +794,6 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
-            Sba::Simple(ScreenActionEnum::Quit),
         ];
         self.screen_key_bindings = self
             .settings
