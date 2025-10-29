@@ -360,6 +360,7 @@ impl<
 
     fn get_footer_entries(&self) -> Vec<Sba> {
         let base_screen_actions = &mut vec![
+            Sba::Simple(ScreenActionEnum::EditTeam),
             Sba::Simple(ScreenActionEnum::NewPlayer),
             Sba::Simple(ScreenActionEnum::MatchList),
             Sba::Simple(ScreenActionEnum::Back),
