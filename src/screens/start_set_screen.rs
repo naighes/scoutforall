@@ -585,7 +585,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
         self.render_lineup_selection_footer(f, footer_area);
     }
 
-    fn render_lineup_selection_footer(&self, f: &mut Frame, area: Rect) {
+    fn render_lineup_selection_footer(&mut self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
@@ -597,6 +597,10 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             Sba::Simple(ScreenActionEnum::Back),
             Sba::Simple(ScreenActionEnum::Quit),
         ];
+        self.screen_key_bindings = self
+            .settings
+            .keybindings
+            .slice(Sba::keys(lineup_selection_actions));
         self.screen_key_bindings
             .slice(Sba::keys(lineup_selection_actions));
         let footer_entries =
@@ -781,7 +785,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
         self.render_serving_team_footer(f, footer_area);
     }
 
-    fn render_serving_team_footer(&self, f: &mut Frame, area: Rect) {
+    fn render_serving_team_footer(&mut self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
@@ -793,6 +797,10 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             Sba::Simple(ScreenActionEnum::Back),
             Sba::Simple(ScreenActionEnum::Quit),
         ];
+        self.screen_key_bindings = self
+            .settings
+            .keybindings
+            .slice(Sba::keys(serving_team_actions));
         self.screen_key_bindings
             .slice(Sba::keys(serving_team_actions));
         let footer_entries =
