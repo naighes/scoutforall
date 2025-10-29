@@ -819,10 +819,11 @@ pub enum ScreenActionEnum {
     ScrollUp,
     ScrollDown,
     Reset,
+    Undo,
 }
 
 impl ScreenActionEnum {
-    pub const ALL: [ScreenActionEnum; 28] = [
+    pub const ALL: [ScreenActionEnum; 29] = [
         ScreenActionEnum::Back,
         ScreenActionEnum::Confirm,
         ScreenActionEnum::Next,
@@ -851,6 +852,7 @@ impl ScreenActionEnum {
         ScreenActionEnum::ScrollUp,
         ScreenActionEnum::ScrollDown,
         ScreenActionEnum::Reset,
+        ScreenActionEnum::Undo,
     ];
 
     pub fn with_desc(self) -> (ScreenActionEnum, String) {
@@ -890,6 +892,7 @@ impl ScreenActionEnum {
             ScrollDown => (ScrollDown, current_labels().scroll_down.to_string()),
             Delete => (Delete, current_labels().delete.to_string()),
             Reset => (Reset, current_labels().reset.to_string()),
+            Undo => (Undo, current_labels().undo.to_string()),
         }
     }
 }
@@ -925,6 +928,7 @@ impl fmt::Display for ScreenActionEnum {
             ScrollDown => "scroll-down",
             Delete => "delete",
             Reset => "reset",
+            Undo => "undo",
         };
         write!(f, "{}", label)
     }

@@ -1,4 +1,7 @@
 use crate::analytics::global::enqueue_match_for_upload;
+use crate::screens::screen::{get_keybinding_actions, Sba};
+use crate::shapes::enums::ScreenActionEnum;
+use crate::shapes::keybinding::KeyBindings;
 use crate::shapes::settings::Settings;
 use crate::{
     localization::current_labels,
@@ -42,6 +45,8 @@ pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
     back: bool,
     footer: NavigationFooter,
     set_writer: Arc<SSW>,
+    combiner: crokey::Combiner,
+    screen_key_bindings: KeyBindings,
 }
 
 #[derive(Debug)]
@@ -116,35 +121,56 @@ impl<SSW: SetWriter + Send + Sync> Renderable for ScoutingScreen<SSW> {
                 self.render_replacement_choices(f, left_top);
             }
         }
+        let screen_actions = &self.get_sreen_actions();
+        let kb = &self.settings.keybindings.clone();
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
+
         self.render_header(f, header);
-        self.footer
-            .render(f, footer_left, self.get_footer_entries());
+        self.footer.render(f, footer_left, footer_entries);
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
         self.render_court(f, right);
         self.notify_message.render(f, footer_right);
+        self.screen_key_bindings = screen_key_bindings;
     }
 }
 
 #[async_trait]
 impl<SSW: SetWriter + Send + Sync> ScreenAsync for ScoutingScreen<SSW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        use KeyCode::*;
         use ScoutingScreenState::*;
-        match (&self.notify_message.has_value(), key.code, &self.state) {
-            (true, _, _) => {
-                self.notify_message.reset();
-                if self.back {
-                    AppAction::Back(true, self.back_stack_count)
-                } else {
-                    AppAction::None
+        if let Some(key_combination) = self.combiner.transform(key) {
+            match (
+                &self.notify_message.has_value(),
+                &self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.state,
+            ) {
+                (true, _, _, _) => {
+                    self.notify_message.reset();
+                    if self.back {
+                        return AppAction::Back(true, self.back_stack_count);
+                    } else {
+                        return AppAction::None;
+                    }
+                }
+                (false, Some(ScreenActionEnum::Back), _, _) => {
+                    return AppAction::Back(true, self.back_stack_count)
+                }
+                (false, action, _, Event) => self.handle_event_screen(key, action.cloned()).await,
+                (false, action, _, Player) => {
+                    return self.handle_player_screen(key, action.cloned()).await
+                }
+                (false, action, _, Eval) => {
+                    return self.handle_eval_screen(key, action.cloned()).await
+                }
+                (false, action, _, Replacement) => {
+                    return self.handle_replacement_screen(key, action.cloned()).await
                 }
             }
-            (false, Esc, _) => AppAction::Back(true, self.back_stack_count),
-            (false, _, Event) => self.handle_event_screen(key).await,
-            (false, _, Player) => self.handle_player_screen(key).await,
-            (false, _, Eval) => self.handle_eval_screen(key).await,
-            (false, _, Replacement) => self.handle_replacement_screen(key).await,
+        } else {
+            return AppAction::None;
         }
     }
 
@@ -175,6 +201,8 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             back: false,
             footer: NavigationFooter::new(),
             set_writer,
+            combiner: crokey::Combiner::default(),
+            screen_key_bindings: KeyBindings::empty(),
         }
     }
 
@@ -401,14 +429,17 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
     /* event handling */
 
     // sequence is event type => player => eval
-    async fn handle_event_screen(&mut self, key: KeyEvent) -> AppAction {
+    async fn handle_event_screen(
+        &mut self,
+        key: KeyEvent,
+        action: Option<ScreenActionEnum>,
+    ) -> AppAction {
         use EventTypeEnum::*;
-        use KeyCode::*;
         let last_event = self.map_key_to_event(key.code, &self.current_event);
-        match (key.code, last_event) {
+        match (action, key.code, last_event) {
             // undo
-            (Char('u'), _) => self.undo_last_event().await,
-            (_, EventTypeInput::Some(event_type)) => {
+            (Some(ScreenActionEnum::Undo), _, _) => self.undo_last_event().await,
+            (_, _, EventTypeInput::Some(event_type)) => {
                 let is_option_available = self.currently_available_options.contains(&event_type);
                 match (is_option_available, event_type) {
                     // player is inferred when serving
@@ -445,7 +476,7 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
                     }
                 }
             }
-            (_, EventTypeInput::Partial(c)) => {
+            (_, _, EventTypeInput::Partial(c)) => {
                 self.current_event = EventTypeInput::Partial(c);
                 AppAction::None
             }
@@ -456,22 +487,26 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
         }
     }
 
-    async fn handle_replacement_screen(&mut self, key: KeyEvent) -> AppAction {
+    async fn handle_replacement_screen(
+        &mut self,
+        key: KeyEvent,
+        action: Option<ScreenActionEnum>,
+    ) -> AppAction {
         use KeyCode::*;
-        match (key.code, &self.current_event, self.player) {
-            (Char('u'), _, _) => {
+        match (action, key.code, &self.current_event, self.player) {
+            (Some(ScreenActionEnum::Undo), _, _, _) => {
                 // undo
                 self.player = None;
                 self.state = ScoutingScreenState::Player;
                 AppAction::None
             }
-            (Char(_), EventTypeInput::Some(_), None) => {
+            (_, Char(_), EventTypeInput::Some(_), None) => {
                 // replaced player is required
                 self.notify_message
                     .set_error(current_labels().no_player_selected.to_string());
                 AppAction::None
             }
-            (Char(c), EventTypeInput::Some(event_type), Some(replaced_id)) => {
+            (_, Char(c), EventTypeInput::Some(event_type), Some(replaced_id)) => {
                 // find available replacements for the selected (replaced) player
                 let available_replacements = self
                     .snapshot
@@ -497,11 +532,15 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
         }
     }
 
-    async fn handle_player_screen(&mut self, key: KeyEvent) -> AppAction {
-        use KeyCode::*;
+    async fn handle_player_screen(
+        &mut self,
+        key: KeyEvent,
+        action: Option<ScreenActionEnum>,
+    ) -> AppAction {
         let available_lineup_players = self.get_lineup_choices();
+        use KeyCode::*;
         // undo
-        if key.code == Char('u') {
+        if let Some(ScreenActionEnum::Undo) = action {
             self.current_event = EventTypeInput::None;
             self.state = ScoutingScreenState::Event;
             return AppAction::None;
@@ -545,9 +584,13 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
         }
     }
 
-    async fn handle_eval_screen(&mut self, key: KeyEvent) -> AppAction {
+    async fn handle_eval_screen(
+        &mut self,
+        key: KeyEvent,
+        action: Option<ScreenActionEnum>,
+    ) -> AppAction {
         // undo
-        if key.code == Char('u') {
+        if let Some(ScreenActionEnum::Undo) = action {
             // it's an eval screen, so go to
             // * the ScoutingScreenState::Player screen if it's not serving
             // * otherwise, so it's serving, go to the ScoutingScreenState::Event
@@ -933,16 +976,16 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
         f.render_widget(table, area);
     }
 
-    fn get_footer_entries(&self) -> Vec<(String, String)> {
+    fn get_sreen_actions(&self) -> Vec<Sba> {
         match (self.set.events.len(), &self.state) {
             (0, ScoutingScreenState::Event) => vec![
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
+                Sba::Simple(ScreenActionEnum::Back),
+                Sba::Simple(ScreenActionEnum::Quit),
             ],
             _ => vec![
-                ("U".to_string(), current_labels().undo.to_string()),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
+                Sba::Simple(ScreenActionEnum::Undo),
+                Sba::Simple(ScreenActionEnum::Back),
+                Sba::Simple(ScreenActionEnum::Quit),
             ],
         }
     }
