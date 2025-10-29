@@ -14,7 +14,7 @@ use crate::{
     },
     shapes::{
         enums::{LanguageEnum, ScreenActionEnum},
-        keybinding::KeyBindings,
+        keybinding::{KeyBindings, ScreenKeyBindings},
         settings::{set_settings, Settings},
     },
 };
@@ -43,7 +43,7 @@ pub struct KeybindingScreen<SW: SettingsWriter + Send + Sync, SR: SettingsReader
     settings_writer: Arc<SW>,
     settings_reader: Arc<SR>,
     settings: Settings,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
     format: KeyCombinationFormat,
     combiner: Combiner,
 }
@@ -350,7 +350,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
 }
 
-fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, KeyBindings) {
+fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, ScreenKeyBindings) {
     let screen_actions = &[
         Sba::Simple(ScreenActionEnum::Previous),
         Sba::Simple(ScreenActionEnum::Next),

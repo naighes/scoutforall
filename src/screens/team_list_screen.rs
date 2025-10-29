@@ -19,7 +19,7 @@ use crate::{
     },
     shapes::{
         enums::{FriendlyName, ScreenActionEnum},
-        keybinding::KeyBindings,
+        keybinding::ScreenKeyBindings,
         settings::Settings,
         team::TeamEntry,
     },
@@ -56,7 +56,7 @@ pub struct TeamListScreen<
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
     combiner: crokey::Combiner,
 }
 
@@ -262,7 +262,7 @@ impl<
             match_writer,
             set_writer,
             settings_reader,
-            screen_key_bindings: KeyBindings::empty(),
+            screen_key_bindings: ScreenKeyBindings::empty(),
             combiner: Combiner::default(),
         }
     }

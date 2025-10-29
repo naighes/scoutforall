@@ -24,7 +24,7 @@ use crate::{
     },
     shapes::{
         enums::{ScreenActionEnum, TeamSideEnum},
-        keybinding::KeyBindings,
+        keybinding::{KeyBindings, ScreenKeyBindings},
         r#match::{MatchEntry, MatchStatus},
         set::SetEntry,
         settings::Settings,
@@ -67,7 +67,7 @@ pub struct MatchListScreen<
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
     combiner: Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 impl<
@@ -303,7 +303,7 @@ impl<
             set_writer,
             settings_reader,
             settings_writer,
-            screen_key_bindings: KeyBindings::empty(),
+            screen_key_bindings: ScreenKeyBindings::empty(),
         }
     }
     fn get_selected_match(&self) -> Option<(&MatchEntry, &MatchStatus)> {

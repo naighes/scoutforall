@@ -19,6 +19,27 @@ pub struct KeyBindings {
     default_bindings: HashMap<ScreenActionEnum, HashSet<KeyCombination>>,
 }
 
+/// A mapping from key combinations to actions for a specific screen.
+#[derive(Clone, Debug)]
+pub struct ScreenKeyBindings {
+    map: HashMap<KeyCombination, ScreenActionEnum>,
+}
+
+impl ScreenKeyBindings {
+    pub fn empty() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+    pub fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) {
+        let action_enum = action.into();
+        self.map.entry(ck).or_insert(action_enum);
+    }
+    pub fn get(&self, key: KeyCombination) -> Option<&ScreenActionEnum> {
+        self.map.get(&key)
+    }
+}
+
 impl Default for KeyBindings {
     fn default() -> Self {
         let mut bindings = Self {
@@ -62,23 +83,11 @@ impl Default for KeyBindings {
 }
 
 impl KeyBindings {
-    pub fn empty() -> Self {
-        Self {
-            map: HashMap::default(),
-            default_bindings: HashMap::new(),
-        }
-    }
-
     pub fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) -> bool {
         self.default_bindings
             .entry(action.into())
             .or_default()
             .insert(ck)
-    }
-
-    fn set_to_map<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) {
-        let action_enum = action.into();
-        self.map.entry(ck).or_insert(action_enum);
     }
 
     pub fn remove<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) -> bool {
@@ -87,10 +96,6 @@ impl KeyBindings {
         } else {
             false
         }
-    }
-
-    pub fn get(&self, key: KeyCombination) -> Option<&ScreenActionEnum> {
-        self.map.get(&key)
     }
 
     /// return the key combination for the action matching the filter, choosing
@@ -125,15 +130,13 @@ impl KeyBindings {
         self.default_bindings.clone()
     }
 
-    pub fn slice(&self, actions: Vec<&ScreenActionEnum>) -> KeyBindings {
-        let mut slice = KeyBindings {
+    pub fn slice(&self, actions: Vec<&ScreenActionEnum>) -> ScreenKeyBindings {
+        let mut slice = ScreenKeyBindings {
             map: HashMap::new(),
-            default_bindings: HashMap::new(),
         };
         for (action, cks) in &self.default_bindings {
             if actions.contains(&action) {
-                cks.iter()
-                    .for_each(|ck| slice.set_to_map(action.to_owned(), *ck));
+                cks.iter().for_each(|ck| slice.set(action.to_owned(), *ck));
             }
         }
         slice

@@ -6,7 +6,7 @@ use crate::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
-    shapes::{enums::ScreenActionEnum, keybinding::KeyBindings, settings::Settings},
+    shapes::{enums::ScreenActionEnum, keybinding::ScreenKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use crokey::Combiner;
@@ -51,7 +51,7 @@ pub struct FileSystemScreen<
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
     combiner: Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
     footer: NavigationFooter,
 }
 
@@ -82,7 +82,7 @@ where
             back: false,
             footer: NavigationFooter::new(),
             combiner: Combiner::default(),
-            screen_key_bindings: KeyBindings::empty(),
+            screen_key_bindings: ScreenKeyBindings::empty(),
             settings_reader,
             settings_writer,
         }

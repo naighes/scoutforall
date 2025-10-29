@@ -10,7 +10,7 @@ use crate::{
             ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum,
             ScreenActionEnum, ZoneEnum,
         },
-        keybinding::KeyBindings,
+        keybinding::ScreenKeyBindings,
         player::PlayerEntry,
         r#match::MatchEntry,
         set::SetEntry,
@@ -172,7 +172,7 @@ pub struct MatchStatsScreen {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     combiner: Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 #[async_trait]

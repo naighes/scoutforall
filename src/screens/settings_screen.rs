@@ -13,6 +13,7 @@ use crate::{
     },
     shapes::{
         enums::{LanguageEnum, ScreenActionEnum},
+        keybinding::ScreenKeyBindings,
         settings::{set_settings, Settings},
     },
 };
@@ -39,7 +40,7 @@ pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
     settings: Settings,
     format: KeyCombinationFormat,
     combiner: crokey::Combiner,
-    screen_key_bindings: crate::shapes::keybinding::KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {

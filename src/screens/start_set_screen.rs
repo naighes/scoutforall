@@ -8,7 +8,7 @@ use crate::{
     },
     shapes::{
         enums::{RoleEnum, ScreenActionEnum, TeamSideEnum},
-        keybinding::KeyBindings,
+        keybinding::ScreenKeyBindings,
         player::PlayerEntry,
         r#match::MatchEntry,
         settings::Settings,
@@ -43,7 +43,7 @@ pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
     combiner: crokey::Combiner,
-    screen_key_bindings: crate::shapes::keybinding::KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 #[derive(Debug)]
@@ -451,7 +451,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             back_stack_count,
             set_writer,
             combiner: Combiner::default(),
-            screen_key_bindings: KeyBindings::default(),
+            screen_key_bindings: ScreenKeyBindings::empty(),
         }
     }
 
@@ -599,8 +599,6 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
         self.screen_key_bindings = self
             .settings
             .keybindings
-            .slice(Sba::keys(lineup_selection_actions));
-        self.screen_key_bindings
             .slice(Sba::keys(lineup_selection_actions));
         let footer_entries =
             get_keybinding_actions(&self.settings.keybindings, lineup_selection_actions);
@@ -798,8 +796,6 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
         self.screen_key_bindings = self
             .settings
             .keybindings
-            .slice(Sba::keys(serving_team_actions));
-        self.screen_key_bindings
             .slice(Sba::keys(serving_team_actions));
         let footer_entries =
             get_keybinding_actions(&self.settings.keybindings, serving_team_actions);

@@ -8,7 +8,7 @@ use crate::{
         },
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
-    shapes::{enums::ScreenActionEnum, keybinding::KeyBindings, settings::Settings},
+    shapes::{enums::ScreenActionEnum, keybinding::ScreenKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use crokey::{
@@ -48,7 +48,7 @@ pub struct ReportAnIssueScreen {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     combiner: Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 impl Renderable for ReportAnIssueScreen {

@@ -11,7 +11,7 @@ use crate::{
     },
     shapes::{
         enums::ScreenActionEnum,
-        keybinding::KeyBindings,
+        keybinding::ScreenKeyBindings,
         settings::{current_settings, set_settings, Settings},
     },
 };
@@ -33,7 +33,7 @@ pub struct AddKeyBindings<SW: SettingsWriter + Send + Sync> {
     footer_entries: Vec<(String, String)>,
     settings_writer: Arc<SW>,
     combiner: Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
     fmt: KeyCombinationFormat,
 }
 

@@ -24,8 +24,8 @@ use crate::{
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
-        enums::ScreenActionEnum, keybinding::KeyBindings, player::PlayerEntry, settings::Settings,
-        team::TeamEntry,
+        enums::ScreenActionEnum, keybinding::ScreenKeyBindings, player::PlayerEntry,
+        settings::Settings, team::TeamEntry,
     },
 };
 use async_trait::async_trait;
@@ -64,7 +64,7 @@ pub struct TeamDetailsScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
     combiner: Combiner,
 }
 
@@ -340,7 +340,7 @@ impl<
             settings_writer,
             notifier: NotifyDialogue::new(),
             combiner: Combiner::default(),
-            screen_key_bindings: KeyBindings::empty(),
+            screen_key_bindings: ScreenKeyBindings::empty(),
         }
     }
 

@@ -10,7 +10,7 @@ use crate::{
     },
     shapes::{
         enums::ScreenActionEnum,
-        keybinding::KeyBindings,
+        keybinding::ScreenKeyBindings,
         settings::{set_settings, Settings},
     },
 };
@@ -40,7 +40,7 @@ pub struct KeyBindingActionScreen<
     action: ScreenActionEnum,
     format: KeyCombinationFormat,
     key_combinations: HashSet<KeyCombination>,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
     combiner: Combiner,
     footer_entries: Vec<(String, String)>,
 }

@@ -1,7 +1,7 @@
 use crate::analytics::global::enqueue_match_for_upload;
 use crate::screens::screen::{get_keybinding_actions, Sba};
 use crate::shapes::enums::ScreenActionEnum;
-use crate::shapes::keybinding::KeyBindings;
+use crate::shapes::keybinding::ScreenKeyBindings;
 use crate::shapes::settings::Settings;
 use crate::{
     localization::current_labels,
@@ -46,7 +46,7 @@ pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
     footer: NavigationFooter,
     set_writer: Arc<SSW>,
     combiner: crokey::Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 #[derive(Debug)]
@@ -202,7 +202,7 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             footer: NavigationFooter::new(),
             set_writer,
             combiner: crokey::Combiner::default(),
-            screen_key_bindings: KeyBindings::empty(),
+            screen_key_bindings: ScreenKeyBindings::empty(),
         }
     }
 

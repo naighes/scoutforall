@@ -12,7 +12,7 @@ use crate::{
     },
     shapes::{
         enums::{FriendlyName, GenderEnum, ScreenActionEnum, TeamClassificationEnum},
-        keybinding::KeyBindings,
+        keybinding::ScreenKeyBindings,
         settings::Settings,
         team::TeamEntry,
     },
@@ -43,7 +43,7 @@ pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     combiner: Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
     team_writer: Arc<TW>,
 }
 

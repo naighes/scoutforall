@@ -12,7 +12,7 @@ use crate::{
         start_set_screen::StartSetScreen,
     },
     shapes::{
-        enums::ScreenActionEnum, keybinding::KeyBindings, settings::Settings, team::TeamEntry,
+        enums::ScreenActionEnum, keybinding::ScreenKeyBindings, settings::Settings, team::TeamEntry,
     },
 };
 use async_trait::async_trait;
@@ -41,7 +41,7 @@ pub struct AddMatchScreen<MW: MatchWriter + Send + Sync, SSW: SetWriter + Send +
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     combiner: Combiner,
-    screen_key_bindings: KeyBindings,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> Renderable
