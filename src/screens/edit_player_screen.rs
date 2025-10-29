@@ -122,14 +122,14 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         );
 
         let actions = &[
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::Back,
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&actions.to_vec()));
-        let screen_key_bindings = kb.slice(actions.to_vec());
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditPlayerScreen {
             team,
@@ -170,14 +170,14 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         );
 
         let actions = &[
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::Back,
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
         ];
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&actions.to_vec()));
-        let screen_key_bindings = kb.slice(actions.to_vec());
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditPlayerScreen {
             team,

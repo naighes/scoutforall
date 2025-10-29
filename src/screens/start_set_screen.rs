@@ -590,19 +590,17 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
 
-        let lineup_selection_actions = &vec![
-            &ScreenActionEnum::Up,
-            &ScreenActionEnum::Down,
-            &ScreenActionEnum::Select,
-            &ScreenActionEnum::Back,
-            &ScreenActionEnum::Quit,
+        let lineup_selection_actions = &[
+            Sba::Simple(ScreenActionEnum::Up),
+            Sba::Simple(ScreenActionEnum::Down),
+            Sba::Simple(ScreenActionEnum::Select),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
         ];
         self.screen_key_bindings
-            .slice(lineup_selection_actions.to_owned());
-        let footer_entries = get_keybinding_actions(
-            &self.settings.keybindings,
-            Sba::Simple(lineup_selection_actions),
-        );
+            .slice(Sba::keys(lineup_selection_actions));
+        let footer_entries =
+            get_keybinding_actions(&self.settings.keybindings, lineup_selection_actions);
         let paragraph = Paragraph::new(
             footer_entries
                 .iter()
@@ -788,19 +786,17 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
 
-        let serving_team_actions = &vec![
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::Back,
-            &ScreenActionEnum::Quit,
+        let serving_team_actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
         ];
         self.screen_key_bindings
-            .slice(serving_team_actions.to_owned());
-        let footer_entries = get_keybinding_actions(
-            &self.settings.keybindings,
-            Sba::Simple(serving_team_actions),
-        );
+            .slice(Sba::keys(serving_team_actions));
+        let footer_entries =
+            get_keybinding_actions(&self.settings.keybindings, serving_team_actions);
         let paragraph = Paragraph::new(
             footer_entries
                 .iter()

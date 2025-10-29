@@ -180,12 +180,12 @@ where
         f.render_widget(paragraph, chunks[1]);
     }
 
-    fn get_footer_actions(&self) -> Vec<&ScreenActionEnum> {
+    fn get_footer_actions(&self) -> Vec<Sba> {
         let actions = &mut vec![];
 
         if !self.entries.is_empty() {
-            actions.push(&ScreenActionEnum::Next);
-            actions.push(&ScreenActionEnum::Previous);
+            actions.push(Sba::Simple(ScreenActionEnum::Next));
+            actions.push(Sba::Simple(ScreenActionEnum::Previous));
         }
         if let Some(true) = self
             .list_state
@@ -193,16 +193,16 @@ where
             .and_then(|s| self.entries.get(s))
             .map(|s| s.is_dir())
         {
-            actions.push(&ScreenActionEnum::EnterDirectory);
+            actions.push(Sba::Simple(ScreenActionEnum::EnterDirectory));
         }
         if !self.is_root() {
-            actions.push(&ScreenActionEnum::OneLevelUp);
+            actions.push(Sba::Simple(ScreenActionEnum::OneLevelUp));
         }
         if self.list_state.selected().is_some() {
-            actions.push(&ScreenActionEnum::Select);
+            actions.push(Sba::Simple(ScreenActionEnum::Select));
         }
-        actions.push(&ScreenActionEnum::Back);
-        actions.push(&ScreenActionEnum::Quit);
+        actions.push(Sba::Simple(ScreenActionEnum::Back));
+        actions.push(Sba::Simple(ScreenActionEnum::Quit));
         actions.clone()
     }
 
@@ -263,17 +263,14 @@ where
             self.render_directory_content(f, chunks[1], items, &self.title.clone());
         }
 
-        let actions = self.get_footer_actions();
+        let actions = &self.get_footer_actions();
 
         self.notify_message.render(f, footer_right);
         let kb = &self.settings.keybindings;
-        self.footer.render(
-            f,
-            footer_left,
-            get_keybinding_actions(kb, Sba::Simple(&actions)),
-        );
+        self.footer
+            .render(f, footer_left, get_keybinding_actions(kb, actions));
 
-        self.screen_key_bindings = kb.slice(actions);
+        self.screen_key_bindings = kb.slice(Sba::keys(actions));
     }
 }
 

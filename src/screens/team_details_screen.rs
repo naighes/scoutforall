@@ -295,9 +295,9 @@ impl<
         self.footer.render(
             f,
             footer_left,
-            get_keybinding_actions(&self.settings.keybindings, Sba::Simple(screen_actions)),
+            get_keybinding_actions(&self.settings.keybindings, screen_actions),
         );
-        self.screen_key_bindings = self.settings.keybindings.slice(screen_actions.to_owned());
+        self.screen_key_bindings = self.settings.keybindings.slice(Sba::keys(screen_actions));
     }
 }
 
@@ -358,24 +358,24 @@ impl<
         }
     }
 
-    fn get_footer_entries(&self) -> Vec<&ScreenActionEnum> {
+    fn get_footer_entries(&self) -> Vec<Sba> {
         let base_screen_actions = &mut vec![
-            &ScreenActionEnum::NewPlayer,
-            &ScreenActionEnum::MatchList,
-            &ScreenActionEnum::Back,
-            &ScreenActionEnum::Quit,
+            Sba::Simple(ScreenActionEnum::NewPlayer),
+            Sba::Simple(ScreenActionEnum::MatchList),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
         ];
         if self.team.active_players().is_empty() {
             base_screen_actions.clone()
         } else {
-            let scren_actions = &mut vec![
-                &ScreenActionEnum::Previous,
-                &ScreenActionEnum::Next,
-                &ScreenActionEnum::EditPlayer,
-                &ScreenActionEnum::RemovePlayer,
+            let screen_actions = &mut vec![
+                Sba::Simple(ScreenActionEnum::Previous),
+                Sba::Simple(ScreenActionEnum::Next),
+                Sba::Simple(ScreenActionEnum::EditPlayer),
+                Sba::Simple(ScreenActionEnum::RemovePlayer),
             ];
-            scren_actions.append(base_screen_actions);
-            scren_actions.clone()
+            screen_actions.append(base_screen_actions);
+            screen_actions.clone()
         }
     }
 

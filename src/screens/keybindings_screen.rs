@@ -351,18 +351,18 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
 }
 
 fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, KeyBindings) {
-    let screen_actions = vec![
-        &ScreenActionEnum::Previous,
-        &ScreenActionEnum::Next,
-        &ScreenActionEnum::Edit,
-        &ScreenActionEnum::Reset,
-        &ScreenActionEnum::ReportAnIssue,
-        &ScreenActionEnum::Back,
-        &ScreenActionEnum::Quit,
+    let screen_actions = &[
+        Sba::Simple(ScreenActionEnum::Previous),
+        Sba::Simple(ScreenActionEnum::Next),
+        Sba::Simple(ScreenActionEnum::Edit),
+        Sba::Simple(ScreenActionEnum::Reset),
+        Sba::Simple(ScreenActionEnum::ReportAnIssue),
+        Sba::Simple(ScreenActionEnum::Back),
+        Sba::Simple(ScreenActionEnum::Quit),
     ];
 
     let kb = &settings.keybindings;
-    let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
-    let screen_key_bindings = kb.slice(screen_actions);
+    let footer_entries = get_keybinding_actions(kb, screen_actions);
+    let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
     (footer_entries, screen_key_bindings)
 }

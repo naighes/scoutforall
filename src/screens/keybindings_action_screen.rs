@@ -56,9 +56,9 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 let kb = &settings.keybindings.clone();
                 self.key_combinations = key_combination.clone();
                 let length = self.key_combinations.len();
-                let screen_actions = Self::get_screen_actions(&length);
-                let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
-                let screen_key_bindings = settings.keybindings.slice(screen_actions);
+                let screen_actions = &Self::get_screen_actions(&length);
+                let footer_entries = get_keybinding_actions(kb, screen_actions);
+                let screen_key_bindings = settings.keybindings.slice(Sba::keys(screen_actions));
                 self.footer_entries = footer_entries;
                 self.screen_key_bindings = screen_key_bindings;
             } else {
@@ -170,10 +170,10 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
         settings_reader: Arc<SR>,
     ) -> Self {
         let length = key_combinations.len();
-        let screen_actions = Self::get_screen_actions(&length);
+        let screen_actions = &Self::get_screen_actions(&length);
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
-        let screen_key_bindings = settings.keybindings.slice(screen_actions);
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let screen_key_bindings = settings.keybindings.slice(Sba::keys(screen_actions));
 
         KeyBindingActionScreen {
             settings,
@@ -191,21 +191,21 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
         }
     }
 
-    fn get_screen_actions(length: &usize) -> Vec<&ScreenActionEnum> {
+    fn get_screen_actions(length: &usize) -> Vec<Sba> {
         if *length > 1 {
             vec![
-                &ScreenActionEnum::Previous,
-                &ScreenActionEnum::Next,
-                &ScreenActionEnum::New,
-                &ScreenActionEnum::Delete,
-                &ScreenActionEnum::Back,
-                &ScreenActionEnum::Quit,
+                Sba::Simple(ScreenActionEnum::Previous),
+                Sba::Simple(ScreenActionEnum::Next),
+                Sba::Simple(ScreenActionEnum::New),
+                Sba::Simple(ScreenActionEnum::Delete),
+                Sba::Simple(ScreenActionEnum::Back),
+                Sba::Simple(ScreenActionEnum::Quit),
             ]
         } else {
             vec![
-                &ScreenActionEnum::New,
-                &ScreenActionEnum::Back,
-                &ScreenActionEnum::Quit,
+                Sba::Simple(ScreenActionEnum::New),
+                Sba::Simple(ScreenActionEnum::Back),
+                Sba::Simple(ScreenActionEnum::Quit),
             ]
         }
     }

@@ -121,16 +121,16 @@ impl ReportAnIssueScreen {
             None,
             email_validator,
         );
-        let screen_actions = vec![
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::Back,
-            &ScreenActionEnum::Quit,
+        let screen_actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
         ];
         let kb = &settings.keybindings;
-        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
-        let screen_key_bindings = kb.slice(screen_actions);
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         ReportAnIssueScreen {
             title,
             description,

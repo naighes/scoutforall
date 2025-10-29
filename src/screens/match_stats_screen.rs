@@ -357,18 +357,18 @@ impl MatchStatsScreen {
                 .iter()
                 .map(|p| current_match.team.find_player(*p).cloned()),
         );
-        let screen_actions = &vec![
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::ScrollUp,
-            &ScreenActionEnum::ScrollDown,
-            &ScreenActionEnum::Back,
-            &ScreenActionEnum::Quit,
+        let screen_actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::ScrollUp),
+            Sba::Simple(ScreenActionEnum::ScrollDown),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
         ];
         let kb = &settings.keybindings;
         let player_filter = Selection::new(current_labels().player.to_string(), players.collect());
-        let footer_entries = get_keybinding_actions(kb, Sba::Simple(screen_actions));
-        let screen_key_bindings = kb.slice(screen_actions.to_owned());
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
 
         Ok(Self {
             notify_message: NotifyBanner::new(),

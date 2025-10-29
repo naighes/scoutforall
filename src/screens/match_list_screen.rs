@@ -132,9 +132,8 @@ impl<
         self.notify_message.render(f, footer_right);
         let kb: &KeyBindings = &self.settings.keybindings;
         let screen_actions = &self.screen_actions();
-        let sc = screen_actions.iter().map(|f| f.0).collect();
-        let screen_key_bindings = &kb.slice(sc);
-        let footer_entries = get_keybinding_actions(kb, Sba::Redacted(screen_actions));
+        let screen_key_bindings = &kb.slice(Sba::keys(screen_actions));
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
         self.footer.render(f, footer_left, footer_entries);
         self.screen_key_bindings = screen_key_bindings.to_owned()
     }
@@ -417,30 +416,29 @@ impl<
         AppAction::None
     }
 
-    fn screen_actions(&self) -> Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> {
-        let mut actions: Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> = Vec::new();
-        actions.push((
-            &ScreenActionEnum::Import,
-            Some(|lbl| -> String { lbl.replace("{}", current_labels().match_word) }),
-        ));
+    fn screen_actions(&self) -> Vec<Sba> {
+        let mut actions = Vec::new();
+        actions.push(Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
+            lbl.replace("{}", current_labels().match_word)
+        }));
 
         if !self.matches.is_empty() {
-            actions.push((&ScreenActionEnum::Next, None));
-            actions.push((&ScreenActionEnum::Previous, None));
+            actions.push(Sba::Simple(ScreenActionEnum::Next));
+            actions.push(Sba::Simple(ScreenActionEnum::Previous));
         }
         if let Some((_, status)) = self.get_selected_match() {
             if !status.match_finished {
-                actions.push((&ScreenActionEnum::Select, None));
+                actions.push(Sba::Simple(ScreenActionEnum::Select));
             }
-            actions.push((&ScreenActionEnum::Export, None));
-            actions.push((&ScreenActionEnum::MatchStats, None));
-            actions.push((&ScreenActionEnum::PrintReport, None));
+            actions.push(Sba::Simple(ScreenActionEnum::Export));
+            actions.push(Sba::Simple(ScreenActionEnum::MatchStats));
+            actions.push(Sba::Simple(ScreenActionEnum::PrintReport));
         }
         if self.team.players.len() >= 6 {
-            actions.push((&ScreenActionEnum::New, None));
+            actions.push(Sba::Simple(ScreenActionEnum::New));
         };
-        actions.push((&ScreenActionEnum::Back, None));
-        actions.push((&ScreenActionEnum::Quit, None));
+        actions.push(Sba::Simple(ScreenActionEnum::Back));
+        actions.push(Sba::Simple(ScreenActionEnum::Quit));
         actions
     }
 

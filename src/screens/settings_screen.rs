@@ -110,15 +110,15 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
             false,
             settings.analytics_enabled,
         );
-        let screen_actions = vec![
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::ReportAnIssue,
-            &ScreenActionEnum::Back,
-            &ScreenActionEnum::Quit,
+        let screen_actions = &[
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::ReportAnIssue),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
         ];
         let kb = &settings.keybindings;
-        let footer_entries = get_keybinding_actions(kb, Sba::Simple(&screen_actions));
-        let screen_key_bindings = kb.slice(screen_actions.to_vec());
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         SettingsScreen {
             language,
             analytics_enabled,

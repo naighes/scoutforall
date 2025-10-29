@@ -219,13 +219,10 @@ impl<
         let screen_actions = &self.screen_actions();
         let kb = &self.settings.keybindings;
 
-        let footer_entries = get_keybinding_actions(kb, Sba::Redacted(screen_actions));
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
         self.footer.render(f, footer_left, footer_entries);
 
-        self.screen_key_bindings = self
-            .settings
-            .keybindings
-            .slice(screen_actions.iter().map(|a| a.0).collect());
+        self.screen_key_bindings = self.settings.keybindings.slice(Sba::keys(screen_actions));
     }
 }
 
@@ -284,31 +281,29 @@ impl<
         }
     }
 
-    fn screen_actions(&self) -> Vec<(&ScreenActionEnum, Option<fn(String) -> String>)> {
+    fn screen_actions(&self) -> Vec<Sba> {
         if self.teams.is_empty() {
             vec![
-                (&ScreenActionEnum::New, None),
-                (&ScreenActionEnum::LanguageSettings, None),
-                (&ScreenActionEnum::KeybindingSettings, None),
-                (
-                    &ScreenActionEnum::Import,
-                    Some(|lbl| -> String { lbl.replace("{}", current_labels().team) }),
-                ),
-                (&ScreenActionEnum::Quit, None),
+                Sba::Simple(ScreenActionEnum::New),
+                Sba::Simple(ScreenActionEnum::LanguageSettings),
+                Sba::Simple(ScreenActionEnum::KeybindingSettings),
+                Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
+                    lbl.replace("{}", current_labels().team)
+                }),
+                Sba::Simple(ScreenActionEnum::Quit),
             ]
         } else {
             vec![
-                (&ScreenActionEnum::Previous, None),
-                (&ScreenActionEnum::Next, None),
-                (&ScreenActionEnum::New, None),
-                (&ScreenActionEnum::Select, None),
-                (&ScreenActionEnum::LanguageSettings, None),
-                (&ScreenActionEnum::KeybindingSettings, None),
-                (
-                    &ScreenActionEnum::Import,
-                    Some(|lbl| -> String { lbl.replace("{}", current_labels().team) }),
-                ),
-                (&ScreenActionEnum::Quit, None),
+                Sba::Simple(ScreenActionEnum::Previous),
+                Sba::Simple(ScreenActionEnum::Next),
+                Sba::Simple(ScreenActionEnum::New),
+                Sba::Simple(ScreenActionEnum::Select),
+                Sba::Simple(ScreenActionEnum::LanguageSettings),
+                Sba::Simple(ScreenActionEnum::KeybindingSettings),
+                Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
+                    lbl.replace("{}", current_labels().team)
+                }),
+                Sba::Simple(ScreenActionEnum::Quit),
             ]
         }
     }

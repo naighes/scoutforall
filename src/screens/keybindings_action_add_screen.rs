@@ -90,16 +90,16 @@ impl<SW: SettingsWriter + Send + Sync> ScreenAsync for AddKeyBindings<SW> {
 impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
     pub fn new(action: ScreenActionEnum, settings_writer: Arc<SW>) -> Self {
         let shortcut = TextBox::new("shortcut".to_owned(), true, None);
-        let screen_actions = &vec![
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::Back,
+        let screen_actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
         ];
         let settings = current_settings();
         let kb = settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(&kb, Sba::Simple(screen_actions));
-        let screen_key_bindings = kb.slice(screen_actions.to_owned());
+        let footer_entries = get_keybinding_actions(&kb, screen_actions);
+        let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         AddKeyBindings {
             settings,
             action,

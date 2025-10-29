@@ -123,17 +123,16 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
         );
 
-        let actions = &vec![
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::Back,
+        let actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
         ];
 
         let kb = &settings.keybindings.clone();
-        let footer_entries =
-            get_keybinding_actions(kb, crate::screens::screen::Sba::Simple(actions));
-        let screen_key_bindings = kb.slice(actions.to_owned());
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditTeamScreen {
             name,
@@ -173,17 +172,17 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             |current: &str, c: char| current.len() < 4 && c.is_ascii_digit(),
         );
 
-        let actions = &vec![
-            &ScreenActionEnum::Next,
-            &ScreenActionEnum::Previous,
-            &ScreenActionEnum::Confirm,
-            &ScreenActionEnum::Back,
-            &ScreenActionEnum::Quit,
+        let actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
         ];
 
         let kb = &settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(kb, Sba::Simple(actions));
-        let screen_key_bindings = kb.slice(actions.to_owned());
+        let footer_entries = get_keybinding_actions(kb, actions);
+        let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditTeamScreen {
             name,
