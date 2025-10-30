@@ -9,7 +9,6 @@ use crate::{
     shapes::{enums::ScreenActionEnum, keybinding::ScreenKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
-use crokey::Combiner;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -50,7 +49,6 @@ pub struct FileSystemScreen<
     back: bool,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    combiner: Combiner,
     screen_key_bindings: ScreenKeyBindings,
     footer: NavigationFooter,
 }
@@ -81,7 +79,6 @@ where
             action,
             back: false,
             footer: NavigationFooter::new(),
-            combiner: Combiner::default(),
             screen_key_bindings: ScreenKeyBindings::empty(),
             settings_reader,
             settings_writer,
@@ -284,7 +281,7 @@ where
         &mut self,
         key: crokey::crossterm::event::KeyEvent,
     ) -> super::screen::AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,

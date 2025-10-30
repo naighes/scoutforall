@@ -32,7 +32,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm::event::KeyEvent, Combiner};
+use crokey::crossterm::event::KeyEvent;
 use dirs::home_dir;
 use ratatui::{
     layout::Alignment,
@@ -66,7 +66,6 @@ pub struct MatchListScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    combiner: Combiner,
     screen_key_bindings: ScreenKeyBindings,
 }
 
@@ -149,7 +148,7 @@ impl<
     > ScreenAsync for MatchListScreen<MR, MW, SSW, SR, SW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
@@ -290,7 +289,6 @@ impl<
             .collect::<Vec<_>>();
         MatchListScreen {
             settings,
-            combiner: Combiner::default(),
             matches,
             team,
             list_state: ListState::default(),

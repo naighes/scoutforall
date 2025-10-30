@@ -19,10 +19,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
-    Combiner,
-};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
@@ -46,7 +43,6 @@ pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     team_writer: Arc<TW>,
-    combiner: Combiner,
     screen_key_bindings: ScreenKeyBindings,
 }
 
@@ -80,7 +76,7 @@ impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {
 #[async_trait]
 impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditPlayerScreen<TW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
@@ -144,7 +140,6 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             footer: NavigationFooter::new(),
             footer_entries,
             team_writer,
-            combiner: Combiner::default(),
             screen_key_bindings,
         }
     }
@@ -192,7 +187,6 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             footer: NavigationFooter::new(),
             footer_entries,
             team_writer,
-            combiner: Combiner::default(),
             screen_key_bindings,
         }
     }

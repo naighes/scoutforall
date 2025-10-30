@@ -25,7 +25,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm::event::KeyEvent, Combiner};
+use crokey::crossterm::event::KeyEvent;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -57,7 +57,6 @@ pub struct TeamListScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     screen_key_bindings: ScreenKeyBindings,
-    combiner: crokey::Combiner,
 }
 
 #[async_trait]
@@ -97,7 +96,7 @@ impl<
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
@@ -263,7 +262,6 @@ impl<
             set_writer,
             settings_reader,
             screen_key_bindings: ScreenKeyBindings::empty(),
-            combiner: Combiner::default(),
         }
     }
 

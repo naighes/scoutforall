@@ -1,6 +1,6 @@
 use {
     crate::shapes::enums::ScreenActionEnum,
-    crokey::*,
+    crokey::{crossterm::event::KeyEvent, *},
     serde::{Deserialize, Serialize},
     std::{
         collections::{hash_map, HashMap, HashSet},
@@ -20,23 +20,39 @@ pub struct KeyBindings {
 }
 
 /// A mapping from key combinations to actions for a specific screen.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ScreenKeyBindings {
     map: HashMap<KeyCombination, ScreenActionEnum>,
+    combiner: Combiner,
 }
 
 impl ScreenKeyBindings {
     pub fn empty() -> Self {
         Self {
+            combiner: Combiner::default(),
             map: HashMap::new(),
         }
     }
+
+    pub fn transform(&mut self, key: KeyEvent) -> Option<KeyCombination> {
+        self.combiner.transform(key)
+    }
+
     pub fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) {
         let action_enum = action.into();
         self.map.entry(ck).or_insert(action_enum);
     }
     pub fn get(&self, key: KeyCombination) -> Option<&ScreenActionEnum> {
         self.map.get(&key)
+    }
+}
+
+impl Clone for ScreenKeyBindings {
+    fn clone(&self) -> Self {
+        Self {
+            map: self.map.clone(),
+            combiner: Combiner::default(),
+        }
     }
 }
 
@@ -131,9 +147,7 @@ impl KeyBindings {
     }
 
     pub fn slice(&self, actions: Vec<&ScreenActionEnum>) -> ScreenKeyBindings {
-        let mut slice = ScreenKeyBindings {
-            map: HashMap::new(),
-        };
+        let mut slice = ScreenKeyBindings::empty();
         for (action, cks) in &self.default_bindings {
             if actions.contains(&action) {
                 cks.iter().for_each(|ck| slice.set(action.to_owned(), *ck));

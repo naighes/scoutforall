@@ -17,7 +17,7 @@ use crate::{
 use async_trait::async_trait;
 use crokey::{
     crossterm::event::{KeyCode, KeyEvent},
-    Combiner, KeyCombination, KeyCombinationFormat,
+    KeyCombination, KeyCombinationFormat,
 };
 use ratatui::{
     layout::Rect,
@@ -41,7 +41,6 @@ pub struct KeyBindingActionScreen<
     format: KeyCombinationFormat,
     key_combinations: HashSet<KeyCombination>,
     screen_key_bindings: ScreenKeyBindings,
-    combiner: Combiner,
     footer_entries: Vec<(String, String)>,
 }
 
@@ -68,7 +67,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
@@ -185,7 +184,6 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             footer: NavigationFooter::new(),
             settings_writer,
             settings_reader,
-            combiner: Combiner::default(),
             footer_entries,
             screen_key_bindings,
         }

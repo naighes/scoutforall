@@ -45,7 +45,6 @@ pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
     back: bool,
     footer: NavigationFooter,
     set_writer: Arc<SSW>,
-    combiner: crokey::Combiner,
     screen_key_bindings: ScreenKeyBindings,
 }
 
@@ -140,7 +139,7 @@ impl<SSW: SetWriter + Send + Sync> Renderable for ScoutingScreen<SSW> {
 impl<SSW: SetWriter + Send + Sync> ScreenAsync for ScoutingScreen<SSW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use ScoutingScreenState::*;
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 &self.notify_message.has_value(),
                 &self.screen_key_bindings.get(key_combination),
@@ -201,7 +200,6 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             back: false,
             footer: NavigationFooter::new(),
             set_writer,
-            combiner: crokey::Combiner::default(),
             screen_key_bindings: ScreenKeyBindings::empty(),
         }
     }

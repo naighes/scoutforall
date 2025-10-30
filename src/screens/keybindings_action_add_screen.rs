@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm::event::KeyEvent, key, Combiner, KeyCombinationFormat};
+use crokey::{crossterm::event::KeyEvent, key, KeyCombinationFormat};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
@@ -32,7 +32,6 @@ pub struct AddKeyBindings<SW: SettingsWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     settings_writer: Arc<SW>,
-    combiner: Combiner,
     screen_key_bindings: ScreenKeyBindings,
     fmt: KeyCombinationFormat,
 }
@@ -63,7 +62,7 @@ impl<SW: SettingsWriter + Send + Sync> Renderable for AddKeyBindings<SW> {
 #[async_trait]
 impl<SW: SettingsWriter + Send + Sync> ScreenAsync for AddKeyBindings<SW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 key_combination,
                 self.screen_key_bindings.get(key_combination),
@@ -107,7 +106,6 @@ impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
             notify_message: NotifyBanner::new(),
             footer: NavigationFooter::new(),
             footer_entries,
-            combiner: Combiner::default(),
             screen_key_bindings,
             settings_writer,
             fmt: KeyCombinationFormat::default(),

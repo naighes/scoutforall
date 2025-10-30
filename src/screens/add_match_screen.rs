@@ -16,10 +16,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
-    Combiner,
-};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
@@ -40,7 +37,6 @@ pub struct AddMatchScreen<MW: MatchWriter + Send + Sync, SSW: SetWriter + Send +
     footer_entries: Vec<(String, String)>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
-    combiner: Combiner,
     screen_key_bindings: ScreenKeyBindings,
 }
 
@@ -79,7 +75,7 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
     for AddMatchScreen<MW, SSW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
@@ -140,7 +136,6 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
             footer_entries,
             match_writer,
             set_writer,
-            combiner: Combiner::default(),
             screen_key_bindings,
         }
     }

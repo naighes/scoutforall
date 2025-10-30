@@ -20,10 +20,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
-    Combiner,
-};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -171,14 +168,13 @@ pub struct MatchStatsScreen {
     sets: Vec<(SetEntry, Snapshot)>,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
-    combiner: Combiner,
     screen_key_bindings: ScreenKeyBindings,
 }
 
 #[async_trait]
 impl ScreenAsync for MatchStatsScreen {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
@@ -381,7 +377,6 @@ impl MatchStatsScreen {
             sets,
             footer: NavigationFooter::new(),
             footer_entries,
-            combiner: Combiner::default(),
             screen_key_bindings,
         })
     }

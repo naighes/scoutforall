@@ -15,10 +15,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
-    Combiner,
-};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -42,7 +39,6 @@ pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
     list_state: TableState,
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
-    combiner: crokey::Combiner,
     screen_key_bindings: ScreenKeyBindings,
 }
 
@@ -88,7 +84,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> Renderable for StartSetScreen<SSW> 
 impl<SSW: SetWriter + Send + Sync + 'static> ScreenAsync for StartSetScreen<SSW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use StartSetScreenState::*;
-        if let Some(key_combination) = self.combiner.transform(key) {
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             let action = self.screen_key_bindings.get(key_combination).copied();
             match (&self.state, &self.notify_message.has_value()) {
                 (_, true) => {
@@ -450,7 +446,6 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             },
             back_stack_count,
             set_writer,
-            combiner: Combiner::default(),
             screen_key_bindings: ScreenKeyBindings::empty(),
         }
     }
