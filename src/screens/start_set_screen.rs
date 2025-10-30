@@ -1,19 +1,21 @@
 use crate::{
     localization::current_labels,
-    providers::{set_writer::SetWriter, settings_reader::SettingsReader},
+    providers::set_writer::SetWriter,
     screens::{
         components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
-        enums::{RoleEnum, TeamSideEnum},
+        enums::{RoleEnum, ScreenActionEnum, TeamSideEnum},
+        keybinding::ScreenKeyBindings,
         player::PlayerEntry,
         r#match::MatchEntry,
+        settings::Settings,
     },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -24,7 +26,8 @@ use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct StartSetScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Send + Sync> {
+pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
+    settings: Settings,
     current_match: MatchEntry,
     set_number: u8,
     lineup: Vec<PlayerEntry>,
@@ -36,7 +39,7 @@ pub struct StartSetScreen<SSW: SetWriter + Send + Sync, SR: SettingsReader + Sen
     list_state: TableState,
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
-    settings_reader: Arc<SR>,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 #[derive(Debug)]
@@ -46,9 +49,7 @@ pub enum StartSetScreenState {
     SelectLineupPlayers(usize, Option<Uuid>, Option<Uuid>),
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static> Renderable
-    for StartSetScreen<SSW, SR>
-{
+impl<SSW: SetWriter + Send + Sync + 'static> Renderable for StartSetScreen<SSW> {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         use StartSetScreenState::*;
         let rows = Layout::default()
@@ -80,60 +81,61 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
 }
 
 #[async_trait]
-impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static> ScreenAsync
-    for StartSetScreen<SSW, SR>
-{
+impl<SSW: SetWriter + Send + Sync + 'static> ScreenAsync for StartSetScreen<SSW> {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use StartSetScreenState::*;
-        match (&self.state, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                AppAction::None
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
+            let action = self.screen_key_bindings.get(key_combination).copied();
+            match (&self.state, &self.notify_message.has_value()) {
+                (_, true) => {
+                    self.notify_message.reset();
+                    AppAction::None
+                }
+                (SelectServingTeam, _) => self.handle_serving_team_selection(action),
+                (SelectLineupPlayers(current_player_position, setter, libero), _) => {
+                    self.handle_select_lineup_players_key(
+                        action,
+                        key,
+                        *current_player_position,
+                        *setter,
+                        *libero,
+                    )
+                    .await
+                }
             }
-            (SelectServingTeam, _) => self.handle_serving_team_selection(key),
-            (SelectLineupPlayers(current_player_position, setter, libero), _) => {
-                self.handle_select_lineup_players_key(
-                    key,
-                    *current_player_position,
-                    *setter,
-                    *libero,
-                )
-                .await
-            }
+        } else {
+            AppAction::None
         }
     }
 
     async fn refresh_data(&mut self) {}
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    StartSetScreen<SSW, SR>
-{
-    fn handle_serving_team_selection(&mut self, key: KeyEvent) -> AppAction {
-        use KeyCode::*;
+impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
+    fn handle_serving_team_selection(&mut self, action: Option<ScreenActionEnum>) -> AppAction {
         use TeamSideEnum::*;
-        match (key.code, self.serving_team) {
-            (Left | Right, Some(Them)) => {
+        match (action, self.serving_team) {
+            (Some(ScreenActionEnum::Next | ScreenActionEnum::Previous), Some(Them)) => {
                 self.serving_team = Some(Us);
                 AppAction::None
             }
-            (Left, None) => {
+            (Some(ScreenActionEnum::Previous), None) => {
                 self.serving_team = Some(Us);
                 AppAction::None
             }
-            (Right | Left, Some(Us)) => {
+            (Some(ScreenActionEnum::Next | ScreenActionEnum::Previous), Some(Us)) => {
                 self.serving_team = Some(Them);
                 AppAction::None
             }
-            (Right, None) => {
+            (Some(ScreenActionEnum::Next), None) => {
                 self.serving_team = Some(Them);
                 AppAction::None
             }
-            (Enter, Some(_)) => {
+            (Some(ScreenActionEnum::Confirm), Some(_)) => {
                 self.state = StartSetScreenState::SelectLineupPlayers(0, None, None);
                 AppAction::None
             }
-            (Esc, _) => AppAction::Back(true, self.back_stack_count),
+            (Some(ScreenActionEnum::Back), _) => AppAction::Back(true, self.back_stack_count),
             _ => AppAction::None,
         }
     }
@@ -251,13 +253,13 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
                     }) {
                     Ok((set_entry, snapshot, available_options)) => {
                         AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                            self.settings.clone(),
                             self.current_match.clone(),
                             set_entry,
                             snapshot,
                             available_options,
                             self.back_stack_count.map(|x| x + 1),
                             self.set_writer.clone(),
-                            self.settings_reader.clone(),
                         )))
                     }
                     Err(_) => {
@@ -328,6 +330,7 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
 
     async fn handle_select_lineup_players_key(
         &mut self,
+        action: Option<ScreenActionEnum>,
         key: KeyEvent,
         current_player_position: usize,
         setter: Option<Uuid>,
@@ -350,14 +353,14 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
             self.list_state
                 .select(Some(available_players.len().saturating_sub(1)));
         }
-        match (key.code, self.list_state.selected()) {
+        match (action, key.code, self.list_state.selected()) {
             // no player selection: select the first one
-            (KeyCode::Down | KeyCode::Up, None) => {
+            (Some(ScreenActionEnum::Up | ScreenActionEnum::Down), _, None) => {
                 self.list_state.select(Some(0));
                 AppAction::None
             }
             // move up
-            (KeyCode::Up, Some(i)) => {
+            (Some(ScreenActionEnum::Up), _, Some(i)) => {
                 self.list_state.select(Some(if i == 0 {
                     available_players.len() - 1
                 } else {
@@ -366,7 +369,7 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
                 AppAction::None
             }
             // move down
-            (KeyCode::Down, Some(i)) => {
+            (Some(ScreenActionEnum::Down), _, Some(i)) => {
                 self.list_state
                     .select(Some(if i + 1 >= available_players.len() {
                         0
@@ -375,10 +378,10 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
                     }));
                 AppAction::None
             }
-            (KeyCode::Esc, _) => {
+            (Some(ScreenActionEnum::Back), _, _) => {
                 self.handle_lineup_selection_back(current_player_position, setter, libero)
             }
-            (KeyCode::Enter, Some(selection_index)) => {
+            (Some(ScreenActionEnum::Select), _, Some(selection_index)) => {
                 match (current_player_position, setter, libero) {
                     // players selection
                     (0..6, None, _) => self.handle_player_selection(
@@ -403,7 +406,7 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
                     _ => AppAction::None,
                 }
             }
-            (KeyCode::Tab, _) => {
+            (None, KeyCode::Tab, _) => {
                 if matches!(
                     (current_player_position, setter, libero),
                     (6, Some(_), Some(_))
@@ -419,14 +422,15 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
     }
 
     pub fn new(
+        settings: Settings,
         current_match: MatchEntry,
         set_number: u8,
         serving_team: Option<TeamSideEnum>,
         back_stack_count: Option<u8>,
         set_writer: Arc<SSW>,
-        settings_reader: Arc<SR>,
     ) -> Self {
         StartSetScreen {
+            settings,
             current_match,
             set_number,
             serving_team,
@@ -442,7 +446,7 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
             },
             back_stack_count,
             set_writer,
-            settings_reader,
+            screen_key_bindings: ScreenKeyBindings::empty(),
         }
     }
 
@@ -576,17 +580,30 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
         self.render_lineup_selection_footer(f, footer_area);
     }
 
-    fn render_lineup_selection_footer(&self, f: &mut Frame, area: Rect) {
+    fn render_lineup_selection_footer(&mut self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = Paragraph::new(format!(
-            "↑↓ = {} | Enter = {} | Esc = {} | Q = {}",
-            current_labels().navigate,
-            current_labels().select,
-            current_labels().back,
-            current_labels().quit
-        ))
+
+        let lineup_selection_actions = &[
+            Sba::Simple(ScreenActionEnum::Up),
+            Sba::Simple(ScreenActionEnum::Down),
+            Sba::Simple(ScreenActionEnum::Select),
+            Sba::Simple(ScreenActionEnum::Back),
+        ];
+        self.screen_key_bindings = self
+            .settings
+            .keybindings
+            .slice(Sba::keys(lineup_selection_actions));
+        let footer_entries =
+            get_keybinding_actions(&self.settings.keybindings, lineup_selection_actions);
+        let paragraph = Paragraph::new(
+            footer_entries
+                .iter()
+                .map(|(key, desc)| format!("{} = {}", key, desc))
+                .collect::<Vec<_>>()
+                .join(" | "),
+        )
         .block(block);
         f.render_widget(paragraph, area);
     }
@@ -760,17 +777,30 @@ impl<SSW: SetWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 
         self.render_serving_team_footer(f, footer_area);
     }
 
-    fn render_serving_team_footer(&self, f: &mut Frame, area: Rect) {
+    fn render_serving_team_footer(&mut self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
-        let paragraph = Paragraph::new(format!(
-            "← → = {} | Enter = {} | Esc = {} | Q = {}",
-            current_labels().choose,
-            current_labels().confirm,
-            current_labels().back,
-            current_labels().quit,
-        ))
+
+        let serving_team_actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::Confirm),
+            Sba::Simple(ScreenActionEnum::Back),
+        ];
+        self.screen_key_bindings = self
+            .settings
+            .keybindings
+            .slice(Sba::keys(serving_team_actions));
+        let footer_entries =
+            get_keybinding_actions(&self.settings.keybindings, serving_team_actions);
+        let paragraph = Paragraph::new(
+            footer_entries
+                .iter()
+                .map(|(key, desc)| format!("{} = {}", key, desc))
+                .collect::<Vec<_>>()
+                .join(" | "),
+        )
         .block(block);
         f.render_widget(paragraph, area);
     }

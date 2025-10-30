@@ -3,21 +3,24 @@ use crate::{
     localization::current_labels,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Renderable, ScreenAsync},
+        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::{
-            ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum,
+            ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum,
+            ScreenActionEnum, ZoneEnum,
         },
+        keybinding::ScreenKeyBindings,
         player::PlayerEntry,
         r#match::MatchEntry,
         set::SetEntry,
+        settings::Settings,
         snapshot::Snapshot,
         stats::{Metric, Stats},
     },
 };
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyEvent};
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -165,84 +168,93 @@ pub struct MatchStatsScreen {
     sets: Vec<(SetEntry, Snapshot)>,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
+    screen_key_bindings: ScreenKeyBindings,
 }
 
 #[async_trait]
 impl ScreenAsync for MatchStatsScreen {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        match (key.code, &self.notify_message.has_value()) {
-            (_, true) => {
-                self.notify_message.reset();
-                AppAction::None
-            }
-            (KeyCode::Up, _) => {
-                self.set_filter.previous();
-                self.rotation_filter.previous();
-                self.phase_filter.previous();
-                self.event_filter.previous();
-                self.player_filter.previous();
-                AppAction::None
-            }
-            (KeyCode::Down, _) => {
-                self.set_filter.next();
-                self.rotation_filter.next();
-                self.phase_filter.next();
-                self.event_filter.next();
-                self.player_filter.next();
-                AppAction::None
-            }
-            (KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
-            (KeyCode::Tab, _) => {
-                match self.state.selected() {
-                    Some(i) => {
-                        let next_index = if i >= 4 { 0 } else { i + 1 };
-                        self.state.select(Some(next_index));
-                        self.set_filter.disable_writing_mode();
-                        self.rotation_filter.disable_writing_mode();
-                        self.phase_filter.disable_writing_mode();
-                        self.event_filter.disable_writing_mode();
-                        self.player_filter.disable_writing_mode();
-                        match next_index {
-                            0 => self.set_filter.enable_writing_mode(),
-                            1 => self.rotation_filter.enable_writing_mode(),
-                            2 => self.phase_filter.enable_writing_mode(),
-                            3 => self.event_filter.enable_writing_mode(),
-                            4 => self.player_filter.enable_writing_mode(),
-                            _ => {}
+        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
+            match (
+                self.screen_key_bindings.get(key_combination),
+                key.code,
+                &self.notify_message.has_value(),
+            ) {
+                (_, _, true) => {
+                    self.notify_message.reset();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::ScrollDown), _, _) => {
+                    self.set_filter.previous();
+                    self.rotation_filter.previous();
+                    self.phase_filter.previous();
+                    self.event_filter.previous();
+                    self.player_filter.previous();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::ScrollUp), _, _) => {
+                    self.set_filter.next();
+                    self.rotation_filter.next();
+                    self.phase_filter.next();
+                    self.event_filter.next();
+                    self.player_filter.next();
+                    AppAction::None
+                }
+                (Some(ScreenActionEnum::Back), KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Next), _, _) => {
+                    match self.state.selected() {
+                        Some(i) => {
+                            let next_index = if i >= 4 { 0 } else { i + 1 };
+                            self.state.select(Some(next_index));
+                            self.set_filter.disable_writing_mode();
+                            self.rotation_filter.disable_writing_mode();
+                            self.phase_filter.disable_writing_mode();
+                            self.event_filter.disable_writing_mode();
+                            self.player_filter.disable_writing_mode();
+                            match next_index {
+                                0 => self.set_filter.enable_writing_mode(),
+                                1 => self.rotation_filter.enable_writing_mode(),
+                                2 => self.phase_filter.enable_writing_mode(),
+                                3 => self.event_filter.enable_writing_mode(),
+                                4 => self.player_filter.enable_writing_mode(),
+                                _ => {}
+                            }
+                        }
+                        None => {
+                            self.state.select(Some(0));
                         }
                     }
-                    None => {
-                        self.state.select(Some(0));
-                    }
+                    AppAction::None
                 }
-                AppAction::None
-            }
-            (KeyCode::BackTab, _) => {
-                match self.state.selected() {
-                    Some(i) => {
-                        let prev_index = if i == 0 { 4 } else { i - 1 };
-                        self.state.select(Some(prev_index));
-                        self.set_filter.disable_writing_mode();
-                        self.rotation_filter.disable_writing_mode();
-                        self.phase_filter.disable_writing_mode();
-                        self.event_filter.disable_writing_mode();
-                        self.player_filter.disable_writing_mode();
-                        match prev_index {
-                            0 => self.set_filter.enable_writing_mode(),
-                            1 => self.rotation_filter.enable_writing_mode(),
-                            2 => self.phase_filter.enable_writing_mode(),
-                            3 => self.event_filter.enable_writing_mode(),
-                            4 => self.player_filter.enable_writing_mode(),
-                            _ => {}
+                (Some(ScreenActionEnum::Previous), _, _) => {
+                    match self.state.selected() {
+                        Some(i) => {
+                            let prev_index = if i == 0 { 4 } else { i - 1 };
+                            self.state.select(Some(prev_index));
+                            self.set_filter.disable_writing_mode();
+                            self.rotation_filter.disable_writing_mode();
+                            self.phase_filter.disable_writing_mode();
+                            self.event_filter.disable_writing_mode();
+                            self.player_filter.disable_writing_mode();
+                            match prev_index {
+                                0 => self.set_filter.enable_writing_mode(),
+                                1 => self.rotation_filter.enable_writing_mode(),
+                                2 => self.phase_filter.enable_writing_mode(),
+                                3 => self.event_filter.enable_writing_mode(),
+                                4 => self.player_filter.enable_writing_mode(),
+                                _ => {}
+                            }
+                        }
+                        None => {
+                            self.state.select(Some(0));
                         }
                     }
-                    None => {
-                        self.state.select(Some(0));
-                    }
+                    AppAction::None
                 }
-                AppAction::None
+                _ => AppAction::None,
             }
-            _ => AppAction::None,
+        } else {
+            AppAction::None
         }
     }
 
@@ -271,7 +283,7 @@ impl Renderable for MatchStatsScreen {
 }
 
 impl MatchStatsScreen {
-    pub fn new(current_match: MatchEntry) -> Result<Self, AppError> {
+    pub fn new(settings: Settings, current_match: MatchEntry) -> Result<Self, AppError> {
         use EventTypeEnum::*;
         let mut state = ListState::default();
         state.select(Some(0));
@@ -341,7 +353,19 @@ impl MatchStatsScreen {
                 .iter()
                 .map(|p| current_match.team.find_player(*p).cloned()),
         );
+        let screen_actions = &[
+            Sba::Simple(ScreenActionEnum::Next),
+            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Simple(ScreenActionEnum::ScrollUp),
+            Sba::Simple(ScreenActionEnum::ScrollDown),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
+        ];
+        let kb = &settings.keybindings;
         let player_filter = Selection::new(current_labels().player.to_string(), players.collect());
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
+
         Ok(Self {
             notify_message: NotifyBanner::new(),
             set_filter,
@@ -352,18 +376,8 @@ impl MatchStatsScreen {
             state,
             sets,
             footer: NavigationFooter::new(),
-            footer_entries: vec![
-                (
-                    "Tab / Shift+Tab".to_string(),
-                    current_labels().switch_filter.to_string(),
-                ),
-                (
-                    "↑↓".to_string(),
-                    current_labels().change_filter_value.to_string(),
-                ),
-                ("Esc".to_string(), current_labels().back.to_string()),
-                ("Q".to_string(), current_labels().quit.to_string()),
-            ],
+            footer_entries,
+            screen_key_bindings,
         })
     }
 
