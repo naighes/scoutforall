@@ -27,15 +27,17 @@ use crossterm::event::KeyEvent;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, ListState, Row, Table},
+    widgets::{Block, Borders, Row, ScrollbarState, Table, TableState},
     Frame,
 };
+
+const ITEM_HEIGHT: usize = 2;
 
 #[derive(Debug)]
 pub struct KeybindingScreen<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> {
     language: Select<LanguageEnum>,
     analytics_enabled: CheckBox,
-    key_binding_selection: ListState,
+    key_binding_state: TableState,
     notifier: NotifyDialogue<Settings>,
     back: bool,
     footer: NavigationFooter,
@@ -45,6 +47,8 @@ pub struct KeybindingScreen<SW: SettingsWriter + Send + Sync, SR: SettingsReader
     settings: Settings,
     screen_key_bindings: ScreenKeyBindings,
     format: KeyCombinationFormat,
+    scroll_state: ScrollbarState,
+    items: Vec<(String, String)>,
 }
 
 impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
@@ -110,7 +114,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                     Box::new(ReportAnIssueScreen::new(self.settings.clone())),
                 ),
                 (Some(ScreenActionEnum::Edit), _, _, _) => {
-                    match self.key_binding_selection.selected().map(|selected| {
+                    match self.key_binding_state.selected().map(|selected| {
                         let action = ScreenActionEnum::ALL.get(selected);
                         match action {
                             Some(p) => {
@@ -157,6 +161,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     async fn refresh_data(&mut self) {
         if let Ok(settings) = &self.settings_reader.read().await {
             self.settings = settings.to_owned();
+            self.items = Self::get_items(&settings.keybindings, &self.format);
             let (footer_entries, screen_key_bindings) = get_context_menu(settings);
             self.footer_entries = footer_entries;
             self.screen_key_bindings = screen_key_bindings;
@@ -179,18 +184,20 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             false,
             settings.analytics_enabled,
         );
-        let mut key_binding_selection = ListState::default();
-        let index = ScreenActionEnum::ALL
-            .iter()
-            .position(|&r| r == ScreenActionEnum::Back);
-        key_binding_selection.select(index);
+        let key_binding_state = TableState::default().with_selected(0);
+
+        let format = KeyCombinationFormat::default();
+
+        let items = Self::get_items(&settings.keybindings, &format);
+
+        let scroll_state = ScrollbarState::new((items.len() - 1) * ITEM_HEIGHT);
 
         let (footer_entries, screen_key_bindings) = get_context_menu(&settings);
 
         KeybindingScreen {
             language,
             analytics_enabled,
-            key_binding_selection,
+            key_binding_state,
             notifier: NotifyDialogue::new(),
             back: false,
             footer: NavigationFooter::new(),
@@ -199,7 +206,9 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             settings_reader,
             settings,
             screen_key_bindings,
-            format: KeyCombinationFormat::default(),
+            format,
+            scroll_state,
+            items,
         }
     }
 
@@ -242,43 +251,68 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
 
     fn handle_tab(&mut self) -> AppAction {
-        if let Some(selected) = self.key_binding_selection.selected() {
-            let next = if selected >= ScreenActionEnum::ALL.len() - 1 {
-                0
-            } else {
-                selected + 1
-            };
-            self.key_binding_selection.select(Some(next));
-        } else {
-            self.key_binding_selection.select(Some(0));
-        }
+        let selected_index = match self.key_binding_state.selected() {
+            Some(i) => {
+                if i >= self.items.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.key_binding_state.select(Some(selected_index));
+        self.scroll_state = self.scroll_state.position(selected_index * ITEM_HEIGHT);
         AppAction::None
     }
 
     fn handle_backtab(&mut self) -> AppAction {
-        if let Some(selected) = self.key_binding_selection.selected() {
-            let prev = if selected == 0 {
-                ScreenActionEnum::ALL.len() - 1
-            } else {
-                selected - 1
-            };
-            self.key_binding_selection.select(Some(prev));
-        } else {
-            self.key_binding_selection.select(Some(0));
-        }
+        let selected_index = match self.key_binding_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.items.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.key_binding_state.select(Some(selected_index));
+        self.scroll_state = self.scroll_state.position(selected_index * ITEM_HEIGHT);
         AppAction::None
     }
 
-    fn get_rows(&self, selected_action: usize) -> Vec<Row<'_>> {
-        let actions_bindings_map = self.settings.keybindings.reverse_map();
-        let items = ScreenActionEnum::ALL
+    fn get_rows(items: Vec<(String, String)>, selected_action: usize) -> Vec<Row<'static>> {
+        let rows = items
+            .iter()
+            .enumerate()
+            .map(|(index, (action, keybindings))| {
+                let mut row = Row::new(vec![action.to_owned(), keybindings.to_owned()]);
+                if index == selected_action {
+                    row = row
+                        .style(
+                            Style::default()
+                                .add_modifier(Modifier::REVERSED)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .height(ITEM_HEIGHT as u16);
+                }
+                row
+            })
+            .collect();
+        rows
+    }
+
+    fn get_items(kc: &KeyBindings, format: &KeyCombinationFormat) -> Vec<(String, String)> {
+        ScreenActionEnum::ALL
             .iter()
             .map(|r| {
-                let s = actions_bindings_map
+                let s = kc
+                    .reverse_map()
                     .get(r)
                     .map(|f| {
                         f.iter()
-                            .map(|q| self.format.to_string(*q))
+                            .map(|q| format.to_string(*q))
                             .collect::<Vec<_>>()
                             .join(", ")
                     })
@@ -286,46 +320,34 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                     .to_string();
                 (r.with_desc().1, s)
             })
-            .enumerate()
-            .map(|(index, (action, keybindings))| {
-                let mut row = Row::new(vec![action, keybindings]);
-                if index == selected_action {
-                    row = row.style(
-                        Style::default()
-                            .add_modifier(Modifier::REVERSED)
-                            .add_modifier(Modifier::BOLD),
-                    );
-                }
-                row
-            })
-            .collect();
-        items
+            .collect::<Vec<_>>()
     }
 
     fn render_key_bindings_list(&mut self, f: &mut Frame, area: Rect) {
-        let selected_action = match self.key_binding_selection.selected() {
-            None => {
-                self.key_binding_selection.select(Some(0));
-                0
-            }
-            Some(p) => p,
-        };
-        let table = Table::new(
-            self.get_rows(selected_action),
-            vec![Constraint::Length(20), Constraint::Length(30)],
-        )
-        .header(
-            Row::new(vec!["action", current_labels().name])
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-        )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().keybinding_settings),
-        )
-        .widths([Constraint::Length(20), Constraint::Length(30)]);
+        // First, get the selected index without borrowing self immutably for too long
+        let selected_action = self.key_binding_state.selected().unwrap_or_else(|| {
+            self.key_binding_state.select(Some(0));
+            0
+        });
 
-        f.render_widget(table, area);
+        // Now, generate the rows
+        let rows = Self::get_rows(self.items.clone(), selected_action);
+
+        // Create the table widget
+        let table = Table::new(rows, vec![Constraint::Length(20), Constraint::Length(30)])
+            .header(
+                Row::new(vec!["action", current_labels().name])
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
+            )
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(current_labels().keybinding_settings),
+            )
+            .widths([Constraint::Length(20), Constraint::Length(30)]);
+
+        // Finally, render the widget with a mutable borrow
+        f.render_stateful_widget(table, area, &mut self.key_binding_state);
     }
 
     async fn reset_settings(&mut self, default_settings: Settings) -> AppAction {

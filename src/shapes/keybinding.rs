@@ -2,19 +2,14 @@ use {
     crate::shapes::enums::ScreenActionEnum,
     crokey::{crossterm::event::KeyEvent, *},
     serde::{Deserialize, Serialize},
-    std::{
-        collections::{hash_map, HashMap, HashSet},
-        fmt,
-    },
+    std::collections::{hash_map, HashMap, HashSet},
 };
 
 /// A mapping from key combinations to actions.
 ///
 /// Several key combinations can go to the same action.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct KeyBindings {
-    #[serde(skip)]
-    map: HashMap<KeyCombination, ScreenActionEnum>,
     #[serde(flatten)]
     default_bindings: HashMap<ScreenActionEnum, HashSet<KeyCombination>>,
 }
@@ -26,6 +21,14 @@ pub struct ScreenKeyBindings {
     combiner: Combiner,
 }
 
+impl<'a> IntoIterator for &'a ScreenKeyBindings {
+    type Item = (&'a KeyCombination, &'a ScreenActionEnum);
+    type IntoIter = hash_map::Iter<'a, KeyCombination, ScreenActionEnum>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.map.iter()
+    }
+}
+
 impl ScreenKeyBindings {
     pub fn empty() -> Self {
         Self {
@@ -34,11 +37,21 @@ impl ScreenKeyBindings {
         }
     }
 
+    pub fn from(slice: Vec<(&ScreenActionEnum, &HashSet<KeyCombination>)>) -> Self {
+        let mut skb = Self::empty();
+        for (action, cks) in slice {
+            for ck in cks {
+                skb.set(action.to_owned(), *ck);
+            }
+        }
+        skb
+    }
+
     pub fn transform(&mut self, key: KeyEvent) -> Option<KeyCombination> {
         self.combiner.transform(key)
     }
 
-    pub fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) {
+    fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) {
         let action_enum = action.into();
         self.map.entry(ck).or_insert(action_enum);
     }
@@ -59,7 +72,6 @@ impl Clone for ScreenKeyBindings {
 impl Default for KeyBindings {
     fn default() -> Self {
         let mut bindings = Self {
-            map: HashMap::default(),
             default_bindings: HashMap::new(),
         };
         bindings.set(ScreenActionEnum::Quit, key!(cmd - e));
@@ -147,31 +159,12 @@ impl KeyBindings {
     }
 
     pub fn slice(&self, actions: Vec<&ScreenActionEnum>) -> ScreenKeyBindings {
-        let mut slice = ScreenKeyBindings::empty();
-        for (action, cks) in &self.default_bindings {
-            if actions.contains(&action) {
-                cks.iter().for_each(|ck| slice.set(action.to_owned(), *ck));
-            }
-        }
-        slice
-    }
-}
-
-impl<'a> IntoIterator for &'a KeyBindings {
-    type Item = (&'a KeyCombination, &'a ScreenActionEnum);
-    type IntoIter = hash_map::Iter<'a, KeyCombination, ScreenActionEnum>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.map.iter()
-    }
-}
-
-impl fmt::Debug for KeyBindings {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ds = f.debug_struct("KeyBindings");
-        for (kc, action) in &self.map {
-            ds.field(&kc.to_string(), &action);
-        }
-        ds.finish()
+        ScreenKeyBindings::from(
+            actions
+                .iter()
+                .filter_map(|a| self.default_bindings.get(a).map(|cks| (*a, cks)))
+                .collect(),
+        )
     }
 }
 
