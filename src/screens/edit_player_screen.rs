@@ -43,7 +43,7 @@ pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     team_writer: Arc<TW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {

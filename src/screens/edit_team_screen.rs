@@ -39,7 +39,7 @@ pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
     back: bool,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
     team_writer: Arc<TW>,
 }
 

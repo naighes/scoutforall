@@ -168,7 +168,7 @@ pub struct MatchStatsScreen {
     sets: Vec<(SetEntry, Snapshot)>,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 #[async_trait]

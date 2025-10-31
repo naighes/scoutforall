@@ -48,7 +48,7 @@ pub struct ReportAnIssueScreen {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     combiner: Combiner,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 impl Renderable for ReportAnIssueScreen {

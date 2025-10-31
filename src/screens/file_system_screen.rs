@@ -49,7 +49,7 @@ pub struct FileSystemScreen<
     back: bool,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
     footer: NavigationFooter,
 }
 
@@ -177,7 +177,7 @@ where
         f.render_widget(paragraph, chunks[1]);
     }
 
-    fn get_footer_actions(&self) -> Vec<Sba> {
+    fn get_footer_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         let actions = &mut vec![];
 
         if !self.entries.is_empty() {

@@ -37,7 +37,7 @@ pub struct AddMatchScreen<MW: MatchWriter + Send + Sync, SSW: SetWriter + Send +
     footer_entries: Vec<(String, String)>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> Renderable

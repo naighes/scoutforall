@@ -21,12 +21,14 @@ use crate::{
 use async_trait::async_trait;
 use chrono::Utc;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::text::Line;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
     Frame,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -45,7 +47,7 @@ pub struct ScoutingScreen<SSW: SetWriter + Send + Sync> {
     back: bool,
     footer: NavigationFooter,
     set_writer: Arc<SSW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 #[derive(Debug)]
@@ -57,7 +59,7 @@ pub struct LineupChoiceEntry {
     role: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 enum EventTypeInput {
     Some(EventTypeEnum),
     Partial(char),
@@ -120,7 +122,7 @@ impl<SSW: SetWriter + Send + Sync> Renderable for ScoutingScreen<SSW> {
                 self.render_replacement_choices(f, left_top);
             }
         }
-        let screen_actions = &self.get_sreen_actions();
+        let screen_actions = &self.get_screen_actions();
         let kb = &self.settings.keybindings.clone();
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
@@ -705,14 +707,22 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
             .currently_available_options
             .iter()
             .map(|ev| {
-                Row::new(vec![format!(
-                    "{} ({})",
-                    ev,
-                    ev.friendly_name(current_labels())
-                )])
+                Row::new(vec![
+                    Line::from(ev.to_string()),
+                    Line::from(format!("({})", ev.friendly_name(current_labels()))),
+                    Line::from(se.get(ev).cloned().unwrap_or_default()).right_aligned(),
+                ])
             })
             .collect();
-        let table = Table::new(rows, [Constraint::Percentage(100)]).block(
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(2),
+                Constraint::Percentage(60),
+                Constraint::Min(2),
+            ],
+        )
+        .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(current_labels().choose_the_event)
@@ -974,7 +984,7 @@ impl<SSW: SetWriter + Send + Sync> ScoutingScreen<SSW> {
         f.render_widget(table, area);
     }
 
-    fn get_sreen_actions(&self) -> Vec<Sba> {
+    fn get_screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         match (self.set.events.len(), &self.state) {
             (0, ScoutingScreenState::Event) => vec![
                 Sba::Simple(ScreenActionEnum::Back),

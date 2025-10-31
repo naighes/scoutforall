@@ -56,7 +56,7 @@ pub struct TeamListScreen<
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 #[async_trait]
@@ -279,7 +279,7 @@ impl<
         }
     }
 
-    fn screen_actions(&self) -> Vec<Sba> {
+    fn screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         if self.teams.is_empty() {
             vec![
                 Sba::Simple(ScreenActionEnum::New),

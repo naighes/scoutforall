@@ -12,7 +12,7 @@ use crate::{
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
-        enums::{LanguageEnum, ScreenActionEnum},
+        enums::{LanguageEnum, ScreenActionEnum, WithDesc},
         keybinding::ScreenKeyBindings,
         settings::{set_settings, Settings},
     },
@@ -39,7 +39,7 @@ pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
     settings_writer: Arc<SW>,
     settings: Settings,
     format: KeyCombinationFormat,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {

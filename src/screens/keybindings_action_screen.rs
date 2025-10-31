@@ -9,7 +9,7 @@ use crate::{
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
-        enums::ScreenActionEnum,
+        enums::{ScreenActionEnum, WithDesc},
         keybinding::ScreenKeyBindings,
         settings::{set_settings, Settings},
     },
@@ -40,7 +40,7 @@ pub struct KeyBindingActionScreen<
     action: ScreenActionEnum,
     format: KeyCombinationFormat,
     key_combinations: HashSet<KeyCombination>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
     footer_entries: Vec<(String, String)>,
 }
 
@@ -189,7 +189,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
         }
     }
 
-    fn get_screen_actions(length: &usize) -> Vec<Sba> {
+    fn get_screen_actions(length: &usize) -> Vec<Sba<ScreenActionEnum>> {
         if *length > 1 {
             vec![
                 Sba::Simple(ScreenActionEnum::Previous),

@@ -821,7 +821,9 @@ pub enum ScreenActionEnum {
     Reset,
     Undo,
 }
-
+pub trait WithDesc<T> {
+    fn with_desc(self) -> (T, String);
+}
 impl ScreenActionEnum {
     pub const ALL: [ScreenActionEnum; 29] = [
         ScreenActionEnum::Back,
@@ -854,8 +856,10 @@ impl ScreenActionEnum {
         ScreenActionEnum::Reset,
         ScreenActionEnum::Undo,
     ];
+}
 
-    pub fn with_desc(self) -> (ScreenActionEnum, String) {
+impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
+    fn with_desc(self) -> (ScreenActionEnum, String) {
         use ScreenActionEnum::*;
         match self {
             Back => (Back, current_labels().back.to_string()),
@@ -896,6 +900,7 @@ impl ScreenActionEnum {
         }
     }
 }
+
 impl fmt::Display for ScreenActionEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ScreenActionEnum::*;

@@ -10,7 +10,7 @@ use crate::{
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
-        enums::ScreenActionEnum,
+        enums::{ScreenActionEnum, WithDesc},
         keybinding::ScreenKeyBindings,
         settings::{current_settings, set_settings, Settings},
     },
@@ -32,7 +32,7 @@ pub struct AddKeyBindings<SW: SettingsWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
     fmt: KeyCombinationFormat,
 }
 

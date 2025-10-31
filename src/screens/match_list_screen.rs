@@ -66,7 +66,7 @@ pub struct MatchListScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 impl<
@@ -129,7 +129,7 @@ impl<
         }
         self.header.render(f, container[0], Some(&self.team));
         self.notify_message.render(f, footer_right);
-        let kb: &KeyBindings = &self.settings.keybindings;
+        let kb: &KeyBindings<ScreenActionEnum> = &self.settings.keybindings;
         let screen_actions = &self.screen_actions();
         let screen_key_bindings = &kb.slice(Sba::keys(screen_actions));
         let footer_entries = get_keybinding_actions(kb, screen_actions);
@@ -415,7 +415,7 @@ impl<
         AppAction::None
     }
 
-    fn screen_actions(&self) -> Vec<Sba> {
+    fn screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         let mut actions = Vec::new();
         actions.push(Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
             lbl.replace("{}", current_labels().match_word)

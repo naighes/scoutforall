@@ -1,6 +1,9 @@
 use crate::{
     constants::DEFAULT_LANGUAGE,
-    shapes::{enums::LanguageEnum, keybinding::KeyBindings},
+    shapes::{
+        enums::{LanguageEnum, ScreenActionEnum},
+        keybinding::KeyBindings,
+    },
 };
 use dirs::home_dir;
 use once_cell::sync::OnceCell;
@@ -10,7 +13,7 @@ use std::{path::PathBuf, str::FromStr, sync::RwLock};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
     pub language: LanguageEnum,
-    pub keybindings: KeyBindings,
+    pub keybindings: KeyBindings<ScreenActionEnum>,
     #[serde(default = "default_analytics_enabled")]
     pub analytics_enabled: bool,
     #[serde(default = "default_last_used_dir")]

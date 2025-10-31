@@ -63,7 +63,7 @@ pub struct TeamDetailsScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 #[async_trait]
@@ -355,7 +355,7 @@ impl<
         }
     }
 
-    fn get_footer_entries(&self) -> Vec<Sba> {
+    fn get_footer_entries(&self) -> Vec<Sba<ScreenActionEnum>> {
         let base_screen_actions = &mut vec![
             Sba::Simple(ScreenActionEnum::EditTeam),
             Sba::Simple(ScreenActionEnum::NewPlayer),

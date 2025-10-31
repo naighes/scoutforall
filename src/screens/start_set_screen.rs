@@ -39,7 +39,7 @@ pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
     list_state: TableState,
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
 }
 
 #[derive(Debug)]
