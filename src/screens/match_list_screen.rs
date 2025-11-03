@@ -24,7 +24,7 @@ use crate::{
     },
     shapes::{
         enums::{ScreenActionEnum, TeamSideEnum},
-        keybinding::{KeyBindings, ScreenKeyBindings},
+        keybinding::{ActionsKeyBindings, KeyBindings},
         r#match::{MatchEntry, MatchStatus},
         set::SetEntry,
         settings::Settings,
@@ -66,7 +66,7 @@ pub struct MatchListScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
 impl<
@@ -168,6 +168,8 @@ impl<
                 (Some(ScreenActionEnum::New), _, _) => {
                     if self.team.players.len() >= 6 {
                         AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
+                            self.settings_reader.clone(),
+                            self.settings_writer.clone(),
                             self.settings.clone(),
                             self.team.clone(),
                             self.match_writer.clone(),
@@ -301,7 +303,7 @@ impl<
             set_writer,
             settings_reader,
             settings_writer,
-            screen_key_bindings: ScreenKeyBindings::empty(),
+            screen_key_bindings: ActionsKeyBindings::empty(),
         }
     }
     fn get_selected_match(&self) -> Option<(&MatchEntry, &MatchStatus)> {
@@ -364,6 +366,8 @@ impl<
         last_serving_team: Option<TeamSideEnum>,
     ) -> AppAction {
         AppAction::SwitchScreen(Box::new(StartSetScreen::new(
+            self.settings_reader.clone(),
+            self.settings_writer.clone(),
             self.settings.clone(),
             m.clone(),
             next_set_number,
@@ -381,7 +385,9 @@ impl<
     fn continue_set(&mut self, m: &MatchEntry, last_incomplete_set: SetEntry) -> AppAction {
         match last_incomplete_set.compute_snapshot() {
             Ok((snapshot, available_options)) => {
-                AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                let x = ScoutingScreen::new(
+                    self.settings_reader.clone(),
+                    self.settings_writer.clone(),
                     self.settings.clone(),
                     m.clone(),
                     last_incomplete_set,
@@ -389,7 +395,17 @@ impl<
                     available_options,
                     Some(1),
                     self.set_writer.clone(),
-                )))
+                );
+                // let x = ScoutingScreenOrig::new(
+                //     self.settings.clone(),
+                //     m.clone(),
+                //     last_incomplete_set,
+                //     snapshot,
+                //     available_options,
+                //     Some(1),
+                //     self.set_writer.clone(),
+                // );
+                AppAction::SwitchScreen(Box::new(x))
             }
             Err(_) => {
                 self.notify_message

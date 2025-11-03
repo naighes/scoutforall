@@ -1,7 +1,7 @@
 use crate::{
     constants::DEFAULT_LANGUAGE,
     shapes::{
-        enums::{LanguageEnum, ScreenActionEnum},
+        enums::{EventTypeEnum, LanguageEnum, ScreenActionEnum},
         keybinding::KeyBindings,
     },
 };
@@ -14,6 +14,7 @@ use std::{path::PathBuf, str::FromStr, sync::RwLock};
 pub struct Settings {
     pub language: LanguageEnum,
     pub keybindings: KeyBindings<ScreenActionEnum>,
+    pub scouting_keybindings: KeyBindings<EventTypeEnum>,
     #[serde(default = "default_analytics_enabled")]
     pub analytics_enabled: bool,
     #[serde(default = "default_last_used_dir")]
@@ -33,6 +34,7 @@ impl Default for Settings {
         Self {
             language: LanguageEnum::from_str(DEFAULT_LANGUAGE).unwrap_or(LanguageEnum::En),
             keybindings: KeyBindings::default(),
+            scouting_keybindings: KeyBindings::default(),
             analytics_enabled: true,
             last_used_dir: None,
         }

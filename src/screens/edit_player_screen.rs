@@ -12,7 +12,7 @@ use crate::{
     },
     shapes::{
         enums::{RoleEnum, ScreenActionEnum},
-        keybinding::ScreenKeyBindings,
+        keybinding::ActionsKeyBindings,
         player::PlayerEntry,
         settings::Settings,
         team::TeamEntry,
@@ -43,7 +43,7 @@ pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     team_writer: Arc<TW>,
-    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
 impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {

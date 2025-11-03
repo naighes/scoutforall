@@ -19,12 +19,12 @@ where
 
 /// A mapping from key combinations to actions for a specific screen.
 #[derive(Debug)]
-pub struct ScreenKeyBindings<T> {
+pub struct ActionsKeyBindings<T> {
     map: HashMap<KeyCombination, T>,
     combiner: Combiner,
 }
 
-impl<'a, T> IntoIterator for &'a ScreenKeyBindings<T> {
+impl<'a, T> IntoIterator for &'a ActionsKeyBindings<T> {
     type Item = (&'a KeyCombination, &'a T);
     type IntoIter = hash_map::Iter<'a, KeyCombination, T>;
     fn into_iter(self) -> Self::IntoIter {
@@ -32,7 +32,7 @@ impl<'a, T> IntoIterator for &'a ScreenKeyBindings<T> {
     }
 }
 
-impl<T> ScreenKeyBindings<T> {
+impl<T> ActionsKeyBindings<T> {
     pub fn empty() -> Self {
         Self {
             combiner: Combiner::default(),
@@ -66,7 +66,7 @@ impl<T> ScreenKeyBindings<T> {
     }
 }
 
-impl<T> Clone for ScreenKeyBindings<T>
+impl<T> Clone for ActionsKeyBindings<T>
 where
     T: Clone,
 {
@@ -135,11 +135,11 @@ where
         self.default_bindings.clone()
     }
 
-    pub fn slice(&self, actions: Vec<&T>) -> ScreenKeyBindings<T>
+    pub fn slice(&self, actions: Vec<&T>) -> ActionsKeyBindings<T>
     where
         T: Clone + std::hash::Hash + Eq,
     {
-        ScreenKeyBindings::from(
+        ActionsKeyBindings::from(
             actions
                 .iter()
                 .filter_map(|a| self.default_bindings.get(a).map(|cks| (*a, cks)))
@@ -185,12 +185,29 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::ReportAnIssue, key!(i));
         bindings.set(ScreenActionEnum::Select, key!(enter));
         bindings.set(ScreenActionEnum::Reset, key!(r));
+        bindings.set(ScreenActionEnum::Undo, key!(u));
         bindings
     }
 }
-
-
-
+impl Default for KeyBindings<EventTypeEnum> {
+    fn default() -> Self {
+        let mut bindings = Self {
+            default_bindings: HashMap::new(),
+        };
+        bindings.set(EventTypeEnum::S, key!(s));
+        bindings.set(EventTypeEnum::P, key!(p));
+        bindings.set(EventTypeEnum::A, key!(a));
+        bindings.set(EventTypeEnum::D, key!(d));
+        bindings.set(EventTypeEnum::B, key!(b));
+        bindings.set(EventTypeEnum::F, key!(f));
+        bindings.set(EventTypeEnum::R, key!(r));
+        bindings.set(EventTypeEnum::OE, key!(shift - e));
+        bindings.set(EventTypeEnum::OS, key!(shift - s));
+        bindings.set(EventTypeEnum::CL, key!(shift - l));
+        bindings.set(EventTypeEnum::CS, key!(shift - c));
+        bindings
+    }
+}
 #[test]
 fn test_deserialize_keybindings() {
     #[derive(Deserialize)]

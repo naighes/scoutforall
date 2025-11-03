@@ -12,14 +12,14 @@ use crate::{
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
-        keybindings_screen::KeybindingScreen,
+        keybindings_screen::{KeyBindingsScreen, KeybindingScreen},
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
         settings_screen::SettingsScreen,
         team_details_screen::TeamDetailsScreen,
     },
     shapes::{
         enums::{FriendlyName, ScreenActionEnum},
-        keybinding::ScreenKeyBindings,
+        keybinding::ActionsKeyBindings,
         settings::Settings,
         team::TeamEntry,
     },
@@ -56,7 +56,7 @@ pub struct TeamListScreen<
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
-    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
 #[async_trait]
@@ -167,6 +167,7 @@ impl<
                 }
                 (Some(ScreenActionEnum::KeybindingSettings), _, _) => {
                     AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
+                        KeyBindingsScreen::<ScreenActionEnum>::new(self.settings.clone()),
                         self.settings.clone(),
                         self.settings_writer.clone(),
                         self.settings_reader.clone(),
@@ -261,7 +262,7 @@ impl<
             match_writer,
             set_writer,
             settings_reader,
-            screen_key_bindings: ScreenKeyBindings::empty(),
+            screen_key_bindings: ActionsKeyBindings::empty(),
         }
     }
 

@@ -184,7 +184,29 @@ impl fmt::Display for EventTypeEnum {
     }
 }
 
+impl WithDesc<EventTypeEnum> for EventTypeEnum {
+    fn with_desc(self) -> (EventTypeEnum, String) {
+        let labels = current_labels();
+        let desc = self.friendly_name(labels).to_string();
+        (self, desc)
+    }
+}
+
 impl EventTypeEnum {
+    pub const ALL: [EventTypeEnum; 11] = [
+        EventTypeEnum::S,
+        EventTypeEnum::P,
+        EventTypeEnum::A,
+        EventTypeEnum::D,
+        EventTypeEnum::B,
+        EventTypeEnum::F,
+        EventTypeEnum::OS,
+        EventTypeEnum::OE,
+        EventTypeEnum::R,
+        EventTypeEnum::CL,
+        EventTypeEnum::CS,
+    ];
+
     pub fn requires_evaluation(&self) -> bool {
         use EventTypeEnum::*;
         matches!(self, S | P | A | D | B)

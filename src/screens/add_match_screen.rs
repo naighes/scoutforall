@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use crate::{
     localization::current_labels,
-    providers::{match_writer::MatchWriter, set_writer::SetWriter},
+    providers::{
+        match_writer::MatchWriter, set_writer::SetWriter, settings_reader::SettingsReader,
+        settings_writer::SettingsWriter,
+    },
     screens::{
         components::{
             checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
@@ -12,7 +15,8 @@ use crate::{
         start_set_screen::StartSetScreen,
     },
     shapes::{
-        enums::ScreenActionEnum, keybinding::ScreenKeyBindings, settings::Settings, team::TeamEntry,
+        enums::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings,
+        team::TeamEntry,
     },
 };
 use async_trait::async_trait;
@@ -24,7 +28,16 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct AddMatchScreen<MW: MatchWriter + Send + Sync, SSW: SetWriter + Send + Sync> {
+pub struct AddMatchScreen<
+    MW: MatchWriter + Send + Sync,
+    SSW: SetWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+> {
+    settings_reader: Arc<SR>,
+    settings_writer: Arc<SW>,
+    match_writer: Arc<MW>,
+    set_writer: Arc<SSW>,
     settings: Settings,
     team: TeamEntry,
     opponent: TextBox, // field 0
@@ -35,13 +48,15 @@ pub struct AddMatchScreen<MW: MatchWriter + Send + Sync, SSW: SetWriter + Send +
     header: TeamHeader,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
-    match_writer: Arc<MW>,
-    set_writer: Arc<SSW>,
-    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
-impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> Renderable
-    for AddMatchScreen<MW, SSW>
+impl<
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+    > Renderable for AddMatchScreen<MW, SSW, SR, SW>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
@@ -71,8 +86,12 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
 }
 
 #[async_trait]
-impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> ScreenAsync
-    for AddMatchScreen<MW, SSW>
+impl<
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+    > ScreenAsync for AddMatchScreen<MW, SSW, SR, SW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
@@ -101,10 +120,16 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
     async fn refresh_data(&mut self) {}
 }
 
-impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static>
-    AddMatchScreen<MW, SSW>
+impl<
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+    > AddMatchScreen<MW, SSW, SR, SW>
 {
     pub fn new(
+        settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
         settings: Settings,
         team: TeamEntry,
         match_writer: Arc<MW>,
@@ -124,6 +149,8 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         AddMatchScreen {
+            settings_reader,
+            settings_writer,
             settings,
             team,
             opponent,
@@ -164,6 +191,8 @@ impl<MW: MatchWriter + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
                     .await
                 {
                     Ok(m) => AppAction::SwitchScreen(Box::new(StartSetScreen::new(
+                        self.settings_reader.clone(),
+                        self.settings_writer.clone(),
                         self.settings.clone(),
                         m,
                         1,

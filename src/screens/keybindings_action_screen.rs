@@ -5,12 +5,12 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue},
-        keybindings_action_add_screen::AddKeyBindings,
+        keybindings_action_add_screen::AddKeyBindingScreen,
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
         enums::{ScreenActionEnum, WithDesc},
-        keybinding::ScreenKeyBindings,
+        keybinding::{ActionsKeyBindings, KeyBindings},
         settings::{set_settings, Settings},
     },
 };
@@ -25,11 +25,13 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
+use std::hash::Hash;
 
 #[derive(Debug)]
-pub struct KeyBindingActionScreen<
+pub struct KeyBindingScreen<
     SW: SettingsWriter + Send + Sync,
     SR: SettingsReader + Send + Sync,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
 > {
     settings: Settings,
     list_state: ListState,
@@ -37,21 +39,28 @@ pub struct KeyBindingActionScreen<
     footer: NavigationFooter,
     settings_writer: Arc<SW>,
     settings_reader: Arc<SR>,
-    action: ScreenActionEnum,
+    keybindings: KeyBindings<T>,
+    action: T,
     format: KeyCombinationFormat,
     key_combinations: HashSet<KeyCombination>,
-    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
     footer_entries: Vec<(String, String)>,
+    fn_kb_retriever: fn(s: &Settings) -> KeyBindings<T>,
+    fn_settings_updater: fn(s: &Settings, &KeyBindings<T>) -> Settings,
 }
 
 #[async_trait]
-impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    ScreenAsync for KeyBindingActionScreen<SW, SR>
+impl<
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+    > ScreenAsync for KeyBindingScreen<SW, SR, T>
 {
     async fn refresh_data(&mut self) {
         if let Ok(settings) = &self.settings_reader.read().await {
             self.settings = settings.to_owned();
-            if let Some(key_combination) = settings.keybindings.reverse_map().get(&self.action) {
+            self.keybindings = (self.fn_kb_retriever)(&self.settings);
+            if let Some(key_combination) = self.keybindings.reverse_map().get(&self.action) {
                 let kb = &settings.keybindings.clone();
                 self.key_combinations = key_combination.clone();
                 let length = self.key_combinations.len();
@@ -108,9 +117,14 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                     AppAction::None
                 }
                 (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
-                (Some(ScreenActionEnum::New), _, _, _) => AppAction::SwitchScreen(Box::new(
-                    AddKeyBindings::new(self.action, self.settings_writer.clone()),
-                )),
+                (Some(ScreenActionEnum::New), _, _, _) => {
+                    AppAction::SwitchScreen(Box::new(AddKeyBindingScreen::new(
+                        self.action,
+                        self.settings_writer.clone(),
+                        self.keybindings.clone(),
+                        self.fn_settings_updater,
+                    )))
+                }
                 (Some(ScreenActionEnum::Delete), _, _, _) => {
                     match self.list_state.selected().map(|selected: usize| {
                         let u = self.key_combinations.iter().nth(selected).cloned();
@@ -139,8 +153,11 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
 }
 
-impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    Renderable for KeyBindingActionScreen<SW, SR>
+impl<
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+    > Renderable for KeyBindingScreen<SW, SR, T>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notifier.render(f, footer_right);
@@ -157,16 +174,22 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
 }
 
-impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    KeyBindingActionScreen<SW, SR>
+impl<
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+    > KeyBindingScreen<SW, SR, T>
 {
     pub fn new(
         settings: Settings,
-        action: ScreenActionEnum,
+        action: T,
         key_combinations: HashSet<KeyCombination>,
         format: KeyCombinationFormat,
         settings_writer: Arc<SW>,
         settings_reader: Arc<SR>,
+        keybindings: KeyBindings<T>,
+        fn_kb_retriever: fn(s: &Settings) -> KeyBindings<T>,
+        fn_settings_updater: fn(s: &Settings, &KeyBindings<T>) -> Settings,
     ) -> Self {
         let length = key_combinations.len();
         let screen_actions = &Self::get_screen_actions(&length);
@@ -174,7 +197,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = settings.keybindings.slice(Sba::keys(screen_actions));
 
-        KeyBindingActionScreen {
+        KeyBindingScreen {
             settings,
             action,
             key_combinations,
@@ -186,6 +209,9 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             settings_reader,
             footer_entries,
             screen_key_bindings,
+            keybindings,
+            fn_kb_retriever,
+            fn_settings_updater,
         }
     }
 
@@ -197,13 +223,11 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                 Sba::Simple(ScreenActionEnum::New),
                 Sba::Simple(ScreenActionEnum::Delete),
                 Sba::Simple(ScreenActionEnum::Back),
-                Sba::Simple(ScreenActionEnum::Quit),
             ]
         } else {
             vec![
                 Sba::Simple(ScreenActionEnum::New),
                 Sba::Simple(ScreenActionEnum::Back),
-                Sba::Simple(ScreenActionEnum::Quit),
             ]
         }
     }
@@ -243,19 +267,14 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
     async fn remove(
         &mut self,
-        action: &mut ScreenActionEnum,
+        action: &mut T,
         key_combination: KeyCombination,
         settings_writer: Arc<SW>,
     ) -> AppAction {
-        let keybindings = &mut self.settings.keybindings;
+        let keybindings = &mut (self.fn_kb_retriever)(&self.settings);
 
         if keybindings.remove(*action, key_combination) {
-            let settings = Settings {
-                language: self.settings.language,
-                analytics_enabled: self.settings.analytics_enabled,
-                keybindings: keybindings.clone(),
-                last_used_dir: self.settings.last_used_dir.to_owned(),
-            };
+            let settings = (self.fn_settings_updater)(&self.settings, keybindings);
             match settings_writer.save(settings).await {
                 Ok(saved_settings) => {
                     set_settings(saved_settings.clone());

@@ -13,7 +13,7 @@ use crate::{
     },
     shapes::{
         enums::{LanguageEnum, ScreenActionEnum, WithDesc},
-        keybinding::ScreenKeyBindings,
+        keybinding::ActionsKeyBindings,
         settings::{set_settings, Settings},
     },
 };
@@ -39,7 +39,7 @@ pub struct SettingsScreen<SW: SettingsWriter + Send + Sync> {
     settings_writer: Arc<SW>,
     settings: Settings,
     format: KeyCombinationFormat,
-    screen_key_bindings: ScreenKeyBindings<ScreenActionEnum>,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
 impl<SW: SettingsWriter + Send + Sync> Renderable for SettingsScreen<SW> {
@@ -144,6 +144,7 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
                     language,
                     analytics_enabled,
                     keybindings: self.settings.keybindings.clone(),
+                    scouting_keybindings: self.settings.scouting_keybindings.clone(),
                     last_used_dir: self.settings.last_used_dir.clone(),
                 };
                 match self.settings_writer.save(settings).await {
