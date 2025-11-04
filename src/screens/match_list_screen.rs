@@ -385,7 +385,7 @@ impl<
     fn continue_set(&mut self, m: &MatchEntry, last_incomplete_set: SetEntry) -> AppAction {
         match last_incomplete_set.compute_snapshot() {
             Ok((snapshot, available_options)) => {
-                let x = ScoutingScreen::new(
+                AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
                     self.settings_reader.clone(),
                     self.settings_writer.clone(),
                     self.settings.clone(),
@@ -395,17 +395,7 @@ impl<
                     available_options,
                     Some(1),
                     self.set_writer.clone(),
-                );
-                // let x = ScoutingScreenOrig::new(
-                //     self.settings.clone(),
-                //     m.clone(),
-                //     last_incomplete_set,
-                //     snapshot,
-                //     available_options,
-                //     Some(1),
-                //     self.set_writer.clone(),
-                // );
-                AppAction::SwitchScreen(Box::new(x))
+                )))
             }
             Err(_) => {
                 self.notify_message
