@@ -12,14 +12,14 @@ use crate::{
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
-        keybindings_screen::KeybindingScreen,
+        keybindings_screen::{KeyBindingsScreen, KeybindingScreen},
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
         settings_screen::SettingsScreen,
         team_details_screen::TeamDetailsScreen,
     },
     shapes::{
         enums::{FriendlyName, ScreenActionEnum},
-        keybinding::ScreenKeyBindings,
+        keybinding::ActionsKeyBindings,
         settings::Settings,
         team::TeamEntry,
     },
@@ -56,7 +56,7 @@ pub struct TeamListScreen<
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
 #[async_trait]
@@ -167,7 +167,7 @@ impl<
                 }
                 (Some(ScreenActionEnum::KeybindingSettings), _, _) => {
                     AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
-                        self.settings.clone(),
+                        KeyBindingsScreen::<ScreenActionEnum>::new(self.settings.clone()),
                         self.settings_writer.clone(),
                         self.settings_reader.clone(),
                     )))
@@ -226,13 +226,13 @@ impl<
 }
 
 impl<
-        TR: TeamReader + Send + Sync,
-        TW: TeamWriter + Send + Sync,
-        SW: SettingsWriter + Send + Sync,
-        MR: MatchReader + Send + Sync,
-        MW: MatchWriter + Send + Sync,
-        SSW: SetWriter + Send + Sync,
-        SR: SettingsReader + Send + Sync,
+        TR: TeamReader + Send + Sync + 'static,
+        TW: TeamWriter + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        MR: MatchReader + Send + Sync + 'static,
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
     > TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     pub fn new(
@@ -261,7 +261,7 @@ impl<
             match_writer,
             set_writer,
             settings_reader,
-            screen_key_bindings: ScreenKeyBindings::empty(),
+            screen_key_bindings: ActionsKeyBindings::empty(),
         }
     }
 
@@ -279,7 +279,7 @@ impl<
         }
     }
 
-    fn screen_actions(&self) -> Vec<Sba> {
+    fn screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         if self.teams.is_empty() {
             vec![
                 Sba::Simple(ScreenActionEnum::New),

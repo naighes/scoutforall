@@ -6,7 +6,7 @@ use crate::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
-    shapes::{enums::ScreenActionEnum, keybinding::ScreenKeyBindings, settings::Settings},
+    shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use ratatui::{
@@ -49,7 +49,7 @@ pub struct FileSystemScreen<
     back: bool,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
     footer: NavigationFooter,
 }
 
@@ -79,7 +79,7 @@ where
             action,
             back: false,
             footer: NavigationFooter::new(),
-            screen_key_bindings: ScreenKeyBindings::empty(),
+            screen_key_bindings: ActionsKeyBindings::empty(),
             settings_reader,
             settings_writer,
         }
@@ -177,7 +177,7 @@ where
         f.render_widget(paragraph, chunks[1]);
     }
 
-    fn get_footer_actions(&self) -> Vec<Sba> {
+    fn get_footer_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         let actions = &mut vec![];
 
         if !self.entries.is_empty() {

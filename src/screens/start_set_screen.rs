@@ -1,6 +1,8 @@
 use crate::{
     localization::current_labels,
-    providers::set_writer::SetWriter,
+    providers::{
+        set_writer::SetWriter, settings_reader::SettingsReader, settings_writer::SettingsWriter,
+    },
     screens::{
         components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
@@ -8,7 +10,7 @@ use crate::{
     },
     shapes::{
         enums::{RoleEnum, ScreenActionEnum, TeamSideEnum},
-        keybinding::ScreenKeyBindings,
+        keybinding::ActionsKeyBindings,
         player::PlayerEntry,
         r#match::MatchEntry,
         settings::Settings,
@@ -26,7 +28,13 @@ use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
+pub struct StartSetScreen<
+    SSW: SetWriter + Send + Sync,
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> {
+    settings_reader: Arc<SR>,
+    settings_writer: Arc<SW>,
     settings: Settings,
     current_match: MatchEntry,
     set_number: u8,
@@ -39,7 +47,7 @@ pub struct StartSetScreen<SSW: SetWriter + Send + Sync> {
     list_state: TableState,
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
 #[derive(Debug)]
@@ -49,7 +57,12 @@ pub enum StartSetScreenState {
     SelectLineupPlayers(usize, Option<Uuid>, Option<Uuid>),
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static> Renderable for StartSetScreen<SSW> {
+impl<
+        SSW: SetWriter + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > Renderable for StartSetScreen<SSW, SW, SR>
+{
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         use StartSetScreenState::*;
         let rows = Layout::default()
@@ -81,7 +94,12 @@ impl<SSW: SetWriter + Send + Sync + 'static> Renderable for StartSetScreen<SSW> 
 }
 
 #[async_trait]
-impl<SSW: SetWriter + Send + Sync + 'static> ScreenAsync for StartSetScreen<SSW> {
+impl<
+        SSW: SetWriter + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > ScreenAsync for StartSetScreen<SSW, SW, SR>
+{
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use StartSetScreenState::*;
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
@@ -111,7 +129,12 @@ impl<SSW: SetWriter + Send + Sync + 'static> ScreenAsync for StartSetScreen<SSW>
     async fn refresh_data(&mut self) {}
 }
 
-impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
+impl<
+        SSW: SetWriter + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > StartSetScreen<SSW, SW, SR>
+{
     fn handle_serving_team_selection(&mut self, action: Option<ScreenActionEnum>) -> AppAction {
         use TeamSideEnum::*;
         match (action, self.serving_team) {
@@ -253,6 +276,8 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
                     }) {
                     Ok((set_entry, snapshot, available_options)) => {
                         AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                            self.settings_reader.clone(),
+                            self.settings_writer.clone(),
                             self.settings.clone(),
                             self.current_match.clone(),
                             set_entry,
@@ -422,6 +447,8 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
     }
 
     pub fn new(
+        settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
         settings: Settings,
         current_match: MatchEntry,
         set_number: u8,
@@ -430,6 +457,8 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
         set_writer: Arc<SSW>,
     ) -> Self {
         StartSetScreen {
+            settings_reader,
+            settings_writer,
             settings,
             current_match,
             set_number,
@@ -446,7 +475,7 @@ impl<SSW: SetWriter + Send + Sync + 'static> StartSetScreen<SSW> {
             },
             back_stack_count,
             set_writer,
-            screen_key_bindings: ScreenKeyBindings::empty(),
+            screen_key_bindings: ActionsKeyBindings::empty(),
         }
     }
 

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, hash::Hash, sync::Arc};
 
 use crate::{
     localization::current_labels,
@@ -10,8 +10,8 @@ use crate::{
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
-        enums::ScreenActionEnum,
-        keybinding::ScreenKeyBindings,
+        enums::{ScreenActionEnum, WithDesc},
+        keybinding::{ActionsKeyBindings, KeyBindings},
         settings::{current_settings, set_settings, Settings},
     },
 };
@@ -24,19 +24,28 @@ use ratatui::{
 };
 
 #[derive(Debug)]
-pub struct AddKeyBindings<SW: SettingsWriter + Send + Sync> {
+pub struct AddKeyBindingScreen<
+    SW: SettingsWriter + Send + Sync,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+> {
     settings: Settings,
-    action: ScreenActionEnum,
+    action: T,
     shortcut: TextBox,
     notify_message: NotifyBanner,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
     fmt: KeyCombinationFormat,
+    keybindings: KeyBindings<T>,
+    fn_settings_updater: fn(&Settings, &KeyBindings<T>) -> Settings,
 }
 
-impl<SW: SettingsWriter + Send + Sync> Renderable for AddKeyBindings<SW> {
+impl<
+        SW: SettingsWriter + Send + Sync,
+        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+    > Renderable for AddKeyBindingScreen<SW, T>
+{
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -60,7 +69,11 @@ impl<SW: SettingsWriter + Send + Sync> Renderable for AddKeyBindings<SW> {
 }
 
 #[async_trait]
-impl<SW: SettingsWriter + Send + Sync> ScreenAsync for AddKeyBindings<SW> {
+impl<
+        SW: SettingsWriter + Send + Sync,
+        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+    > ScreenAsync for AddKeyBindingScreen<SW, T>
+{
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
@@ -86,8 +99,17 @@ impl<SW: SettingsWriter + Send + Sync> ScreenAsync for AddKeyBindings<SW> {
     async fn refresh_data(&mut self) {}
 }
 
-impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
-    pub fn new(action: ScreenActionEnum, settings_writer: Arc<SW>) -> Self {
+impl<
+        SW: SettingsWriter + Send + Sync,
+        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+    > AddKeyBindingScreen<SW, T>
+{
+    pub fn new(
+        action: T,
+        settings_writer: Arc<SW>,
+        keybindings: KeyBindings<T>,
+        fn_settings_updater: fn(&Settings, &KeyBindings<T>) -> Settings,
+    ) -> Self {
         let shortcut = TextBox::new("shortcut".to_owned(), true, None);
         let screen_actions = &[
             Sba::Simple(ScreenActionEnum::Next),
@@ -99,7 +121,7 @@ impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
         let kb = settings.keybindings.clone();
         let footer_entries = get_keybinding_actions(&kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
-        AddKeyBindings {
+        AddKeyBindingScreen {
             settings,
             action,
             shortcut,
@@ -109,6 +131,8 @@ impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
             screen_key_bindings,
             settings_writer,
             fmt: KeyCombinationFormat::default(),
+            keybindings,
+            fn_settings_updater,
         }
     }
 
@@ -130,10 +154,9 @@ impl<SW: SettingsWriter + Send + Sync> AddKeyBindings<SW> {
                 let kc = crokey::parse(&sc);
                 match kc {
                     Ok(kc) => {
-                        let mut settings = self.settings.clone();
-                        let mut keybindings = settings.keybindings.clone();
+                        let mut keybindings = self.keybindings.clone();
                         if keybindings.set(self.action, kc) {
-                            settings.keybindings = keybindings.clone();
+                            let settings = (self.fn_settings_updater)(&self.settings, &keybindings);
                             match self.settings_writer.save(settings).await {
                                 Ok(saved_settings) => {
                                     set_settings(saved_settings.clone());

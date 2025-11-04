@@ -1,5 +1,7 @@
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::{hash::Hash, marker::PhantomData, sync::Arc};
 
+use crate::shapes::enums::WithDesc;
 use crate::{
     localization::current_labels,
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
@@ -8,34 +10,183 @@ use crate::{
             checkbox::CheckBox, navigation_footer::NavigationFooter,
             notify_dialogue::NotifyDialogue, select::Select,
         },
-        keybindings_action_screen::KeyBindingActionScreen,
+        keybindings_action_screen::KeyBindingScreen,
         report_an_issue_screen::ReportAnIssueScreen,
         screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
     },
     shapes::{
-        enums::{LanguageEnum, ScreenActionEnum},
-        keybinding::{KeyBindings, ScreenKeyBindings},
+        enums::{EventTypeEnum, LanguageEnum, ScreenActionEnum},
+        keybinding::{ActionsKeyBindings, KeyBindings},
         settings::{set_settings, Settings},
     },
 };
 use async_trait::async_trait;
+use crokey::KeyCombination;
 use crokey::{
-    crossterm::{self, event::KeyCode},
+    crossterm::event::{KeyCode, KeyEvent},
     KeyCombinationFormat,
 };
-use crossterm::event::KeyEvent;
+
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, ListState, Row, Table},
+    widgets::{Block, Borders, Row, ScrollbarState, Table, TableState},
     Frame,
 };
 
+const ITEM_HEIGHT: usize = 2;
+
 #[derive(Debug)]
-pub struct KeybindingScreen<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> {
+pub struct KeyBindingsScreen<T>
+where
+    T: Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+{
+    key_bindings: KeyBindings<T>,
+    all_values: Vec<T>,
+    settings: Settings,
+    get_keybindings_from_settings: fn(s: &Settings) -> KeyBindings<T>,
+    merge_keybindings_into_settings: fn(s: &Settings, &KeyBindings<T>) -> Settings,
+    derive_key_combinations_from_event: fn(s: &Settings, action: &T) -> HashSet<KeyCombination>,
+}
+
+pub trait ScreenKeyBindingTrait<T>
+where
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T>,
+{
+    fn get_selected_item(&self, selected: usize) -> Option<T>;
+    fn get_formatted_items(&self, format: &KeyCombinationFormat) -> Vec<(String, String)>;
+    fn apply_settings(&mut self, settings: &Settings);
+    fn reset_settings(&mut self) -> Settings;
+    fn get_keybindings(&mut self) -> fn(&Settings) -> KeyBindings<T>;
+    fn merge_keybindings_into_settings(&mut self) -> fn(&Settings, &KeyBindings<T>) -> Settings;
+    fn current_keybindings(&self) -> &KeyBindings<T>;
+    fn key_combinations_for(&self, action: &T) -> HashSet<KeyCombination>;
+    fn get_settings(&self) -> &Settings;
+}
+
+impl KeyBindingsScreen<EventTypeEnum> {
+    pub fn new(settings: Settings) -> Self {
+        let fn_kb_retriever = |s: &Settings| s.scouting_keybindings.clone();
+        KeyBindingsScreen {
+            key_bindings: (fn_kb_retriever)(&settings),
+            all_values: EventTypeEnum::ALL.to_vec(),
+            settings,
+            get_keybindings_from_settings: fn_kb_retriever,
+            merge_keybindings_into_settings: |s: &Settings, kb: &KeyBindings<EventTypeEnum>| {
+                Settings {
+                    language: s.language,
+                    analytics_enabled: s.analytics_enabled,
+                    keybindings: s.keybindings.clone(),
+                    scouting_keybindings: kb.clone(),
+                    last_used_dir: s.last_used_dir.to_owned(),
+                }
+            },
+            derive_key_combinations_from_event: |s: &Settings, action| {
+                s.scouting_keybindings.keybindings_for(action)
+            },
+        }
+    }
+}
+
+impl KeyBindingsScreen<ScreenActionEnum> {
+    pub fn new(settings: Settings) -> Self {
+        let fn_kb_retriever = |s: &Settings| s.keybindings.clone();
+        KeyBindingsScreen {
+            all_values: ScreenActionEnum::ALL.to_vec(),
+            key_bindings: (fn_kb_retriever)(&settings),
+            settings,
+            get_keybindings_from_settings: fn_kb_retriever,
+            merge_keybindings_into_settings: |s: &Settings, kb: &KeyBindings<ScreenActionEnum>| {
+                Settings {
+                    language: s.language,
+                    analytics_enabled: s.analytics_enabled,
+                    keybindings: kb.clone(),
+                    scouting_keybindings: s.scouting_keybindings.clone(),
+                    last_used_dir: s.last_used_dir.to_owned(),
+                }
+            },
+            derive_key_combinations_from_event: |s: &Settings, action| {
+                s.keybindings.keybindings_for(action)
+            },
+        }
+    }
+}
+
+impl<T: Hash + Eq + WithDesc<T> + Send + Sync + Copy + Clone + 'static> ScreenKeyBindingTrait<T>
+    for KeyBindingsScreen<T>
+{
+    fn get_formatted_items(&self, format: &KeyCombinationFormat) -> Vec<(String, String)> {
+        self.all_values
+            .iter()
+            .map(|r| {
+                let s = self
+                    .key_bindings
+                    .reverse_map()
+                    .get(r)
+                    .map(|f| {
+                        f.iter()
+                            .map(|q| format.to_string(*q))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or(current_labels().unassigned.to_string())
+                    .to_string();
+                (r.with_desc().1, s)
+            })
+            .collect::<Vec<_>>()
+    }
+    fn reset_settings(&mut self) -> Settings {
+        Settings {
+            language: self.settings.language,
+            analytics_enabled: self.settings.analytics_enabled,
+            keybindings: KeyBindings::default(),
+            scouting_keybindings: self.settings.scouting_keybindings.clone(),
+            last_used_dir: self.settings.last_used_dir.to_owned(),
+        }
+    }
+
+    fn get_keybindings(&mut self) -> fn(&Settings) -> KeyBindings<T> {
+        self.get_keybindings_from_settings
+    }
+
+    fn merge_keybindings_into_settings(&mut self) -> fn(&Settings, &KeyBindings<T>) -> Settings {
+        self.merge_keybindings_into_settings
+    }
+
+    fn current_keybindings(&self) -> &KeyBindings<T> {
+        &self.key_bindings
+    }
+
+    fn get_selected_item(&self, selected: usize) -> Option<T> {
+        self.all_values.get(selected).cloned()
+    }
+
+    fn key_combinations_for(&self, action: &T) -> HashSet<KeyCombination> {
+        (self.derive_key_combinations_from_event)(&self.settings, action)
+    }
+
+    fn apply_settings(&mut self, settings: &Settings) {
+        self.key_bindings = (self.get_keybindings_from_settings)(settings);
+        self.settings = settings.to_owned();
+    }
+
+    fn get_settings(&self) -> &Settings {
+        &self.settings
+    }
+}
+
+#[derive(Debug)]
+pub struct KeybindingScreen<
+    T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+    DR: ScreenKeyBindingTrait<T>,
+    SW: SettingsWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync,
+> where
+    DR: Sync + std::marker::Send,
+{
     language: Select<LanguageEnum>,
     analytics_enabled: CheckBox,
-    key_binding_selection: ListState,
+    key_binding_state: TableState,
     notifier: NotifyDialogue<Settings>,
     back: bool,
     footer: NavigationFooter,
@@ -43,12 +194,22 @@ pub struct KeybindingScreen<SW: SettingsWriter + Send + Sync, SR: SettingsReader
     settings_writer: Arc<SW>,
     settings_reader: Arc<SR>,
     settings: Settings,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
     format: KeyCombinationFormat,
+    scroll_state: ScrollbarState,
+    items: Vec<(String, String)>,
+    data_renderer: DR,
+    phantom: PhantomData<T>,
 }
 
-impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    Renderable for KeybindingScreen<SW, SR>
+impl<
+        T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+        DR: ScreenKeyBindingTrait<T> + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > Renderable for KeybindingScreen<T, DR, SW, SR>
+where
+    DR: Sync + std::marker::Send,
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let inner = Layout::default()
@@ -63,7 +224,7 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             .split(body);
         self.language.render(f, inner[0]);
         self.analytics_enabled.render(f, inner[1]);
-        self.render_key_bindings_list(f, inner[2]);
+        self.render_key_bindings_table(f, inner[2]);
         self.notifier.render(f, footer_right);
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
@@ -71,8 +232,12 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
 }
 
 #[async_trait]
-impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    ScreenAsync for KeybindingScreen<SW, SR>
+impl<
+        T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+        DR: ScreenKeyBindingTrait<T> + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > ScreenAsync for KeybindingScreen<T, DR, SW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
@@ -110,18 +275,21 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                     Box::new(ReportAnIssueScreen::new(self.settings.clone())),
                 ),
                 (Some(ScreenActionEnum::Edit), _, _, _) => {
-                    match self.key_binding_selection.selected().map(|selected| {
-                        let action = ScreenActionEnum::ALL.get(selected);
-                        match action {
-                            Some(p) => {
-                                let keybindings = self.settings.keybindings.keybindings_for(p);
-                                AppAction::SwitchScreen(Box::new(KeyBindingActionScreen::new(
+                    match self.key_binding_state.selected().map(|selected| {
+                        let selected_action = self.data_renderer.get_selected_item(selected);
+                        match selected_action {
+                            Some(action) => {
+                                let keybindings = self.data_renderer.key_combinations_for(&action);
+                                AppAction::SwitchScreen(Box::new(KeyBindingScreen::new(
                                     self.settings.clone(),
-                                    p.to_owned(),
+                                    action.to_owned(),
                                     keybindings,
                                     self.format.clone(),
                                     self.settings_writer.clone(),
                                     self.settings_reader.clone(),
+                                    self.data_renderer.current_keybindings().clone(),
+                                    self.data_renderer.get_keybindings(),
+                                    self.data_renderer.merge_keybindings_into_settings(),
                                 )))
                             }
                             None => AppAction::None,
@@ -132,19 +300,13 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
                     }
                 }
                 (Some(ScreenActionEnum::Reset), _, _, _) => {
-                    let settings = Settings {
-                        language: self.settings.language,
-                        analytics_enabled: self.settings.analytics_enabled,
-                        keybindings: KeyBindings::default(),
-                        last_used_dir: self.settings.last_used_dir.to_owned(),
-                    };
+                    let settings = self.data_renderer.reset_settings();
                     self.notifier
                         .set(settings.to_owned())
                         .banner
                         .set_warning(current_labels().reset_to_defaults_confirmation.to_string());
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::Confirm), _, _, _) => self.handle_enter().await,
                 (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::Quit), _, _, _) => AppAction::Quit(Ok(())),
                 _ => AppAction::None,
@@ -157,6 +319,8 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     async fn refresh_data(&mut self) {
         if let Ok(settings) = &self.settings_reader.read().await {
             self.settings = settings.to_owned();
+            self.data_renderer.apply_settings(&self.settings);
+            self.items = self.data_renderer.get_formatted_items(&self.format);
             let (footer_entries, screen_key_bindings) = get_context_menu(settings);
             self.footer_entries = footer_entries;
             self.screen_key_bindings = screen_key_bindings;
@@ -164,10 +328,17 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
 }
 
-impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Sync + 'static>
-    KeybindingScreen<SW, SR>
+impl<
+        T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+        DR: ScreenKeyBindingTrait<T> + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
+    > KeybindingScreen<T, DR, SW, SR>
+where
+    DR: Sync + std::marker::Send,
 {
-    pub fn new(settings: Settings, settings_writer: Arc<SW>, settings_reader: Arc<SR>) -> Self {
+    pub fn new(data_renderer: DR, settings_writer: Arc<SW>, settings_reader: Arc<SR>) -> Self {
+        let settings = data_renderer.get_settings().to_owned();
         let language = Select::new(
             current_labels().language.to_owned(),
             LanguageEnum::ALL.to_vec(),
@@ -179,18 +350,20 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             false,
             settings.analytics_enabled,
         );
-        let mut key_binding_selection = ListState::default();
-        let index = ScreenActionEnum::ALL
-            .iter()
-            .position(|&r| r == ScreenActionEnum::Back);
-        key_binding_selection.select(index);
+        let key_binding_state = TableState::default().with_selected(0);
+
+        let format = KeyCombinationFormat::default();
+
+        let items = data_renderer.get_formatted_items(&format);
+
+        let scroll_state = ScrollbarState::new((items.len() - 1) * ITEM_HEIGHT);
 
         let (footer_entries, screen_key_bindings) = get_context_menu(&settings);
 
         KeybindingScreen {
             language,
             analytics_enabled,
-            key_binding_selection,
+            key_binding_state,
             notifier: NotifyDialogue::new(),
             back: false,
             footer: NavigationFooter::new(),
@@ -199,133 +372,92 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
             settings_reader,
             settings,
             screen_key_bindings,
-            format: KeyCombinationFormat::default(),
-        }
-    }
-
-    async fn handle_enter(&mut self) -> AppAction {
-        match (
-            self.language.get_selected_value(),
-            self.analytics_enabled.get_selected_value(),
-        ) {
-            (Some(language), analytics_enabled) => {
-                let settings = Settings {
-                    language,
-                    analytics_enabled,
-                    keybindings: self.settings.keybindings.clone(),
-                    last_used_dir: self.settings.last_used_dir.clone(),
-                };
-                match self.settings_writer.save(settings).await {
-                    Ok(saved_settings) => {
-                        set_settings(saved_settings);
-                        self.notifier
-                            .banner
-                            .set_info(current_labels().operation_successful.to_string());
-                        self.back = true;
-                        AppAction::None
-                    }
-                    Err(_) => {
-                        self.notifier
-                            .banner
-                            .set_error(current_labels().could_not_save_settings.to_string());
-                        AppAction::None
-                    }
-                }
-            }
-            _ => {
-                self.notifier
-                    .banner
-                    .set_error(current_labels().language_is_required.to_string());
-                AppAction::None
-            }
+            format,
+            scroll_state,
+            items,
+            data_renderer,
+            phantom: PhantomData,
         }
     }
 
     fn handle_tab(&mut self) -> AppAction {
-        if let Some(selected) = self.key_binding_selection.selected() {
-            let next = if selected >= ScreenActionEnum::ALL.len() - 1 {
-                0
-            } else {
-                selected + 1
-            };
-            self.key_binding_selection.select(Some(next));
-        } else {
-            self.key_binding_selection.select(Some(0));
-        }
+        let selected_index = match self.key_binding_state.selected() {
+            Some(i) => {
+                if i >= self.items.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.key_binding_state.select(Some(selected_index));
+        self.scroll_state = self.scroll_state.position(selected_index * ITEM_HEIGHT);
         AppAction::None
     }
 
     fn handle_backtab(&mut self) -> AppAction {
-        if let Some(selected) = self.key_binding_selection.selected() {
-            let prev = if selected == 0 {
-                ScreenActionEnum::ALL.len() - 1
-            } else {
-                selected - 1
-            };
-            self.key_binding_selection.select(Some(prev));
-        } else {
-            self.key_binding_selection.select(Some(0));
-        }
+        let selected_index = match self.key_binding_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.items.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.key_binding_state.select(Some(selected_index));
+        self.scroll_state = self.scroll_state.position(selected_index * ITEM_HEIGHT);
         AppAction::None
     }
 
-    fn get_rows(&self, selected_action: usize) -> Vec<Row<'_>> {
-        let actions_bindings_map = self.settings.keybindings.reverse_map();
-        let items = ScreenActionEnum::ALL
+    fn get_rows(items: Vec<(String, String)>, selected_action: usize) -> Vec<Row<'static>> {
+        let rows = items
             .iter()
-            .map(|r| {
-                let s = actions_bindings_map
-                    .get(r)
-                    .map(|f| {
-                        f.iter()
-                            .map(|q| self.format.to_string(*q))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or(current_labels().unassigned.to_string())
-                    .to_string();
-                (r.with_desc().1, s)
-            })
             .enumerate()
             .map(|(index, (action, keybindings))| {
-                let mut row = Row::new(vec![action, keybindings]);
+                let mut row = Row::new(vec![action.to_owned(), keybindings.to_owned()]);
                 if index == selected_action {
-                    row = row.style(
-                        Style::default()
-                            .add_modifier(Modifier::REVERSED)
-                            .add_modifier(Modifier::BOLD),
-                    );
+                    row = row
+                        .style(
+                            Style::default()
+                                .add_modifier(Modifier::REVERSED)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .height(ITEM_HEIGHT as u16);
                 }
                 row
             })
             .collect();
-        items
+        rows
     }
 
-    fn render_key_bindings_list(&mut self, f: &mut Frame, area: Rect) {
-        let selected_action = match self.key_binding_selection.selected() {
-            None => {
-                self.key_binding_selection.select(Some(0));
-                0
-            }
-            Some(p) => p,
-        };
-        let table = Table::new(
-            self.get_rows(selected_action),
-            vec![Constraint::Length(20), Constraint::Length(30)],
-        )
-        .header(
-            Row::new(vec!["action", current_labels().name])
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-        )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().keybinding_settings),
-        )
-        .widths([Constraint::Length(20), Constraint::Length(30)]);
+    fn render_key_bindings_table(&mut self, f: &mut Frame, area: Rect) {
+        // First, get the selected index without borrowing self immutably for too long
+        let selected_action = self.key_binding_state.selected().unwrap_or_else(|| {
+            self.key_binding_state.select(Some(0));
+            0
+        });
 
-        f.render_widget(table, area);
+        // Now, generate the rows
+        let rows = Self::get_rows(self.items.clone(), selected_action);
+
+        // Create the table widget
+        let table = Table::new(rows, vec![Constraint::Length(20), Constraint::Length(30)])
+            .header(
+                Row::new(vec!["action", current_labels().name])
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
+            )
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(current_labels().keybinding_settings),
+            )
+            .widths([Constraint::Length(20), Constraint::Length(30)]);
+
+        // Finally, render the widget with a mutable borrow
+        f.render_stateful_widget(table, area, &mut self.key_binding_state);
     }
 
     async fn reset_settings(&mut self, default_settings: Settings) -> AppAction {
@@ -348,7 +480,9 @@ impl<SW: SettingsWriter + Send + Sync + 'static, SR: SettingsReader + Send + Syn
     }
 }
 
-fn get_context_menu(settings: &Settings) -> (Vec<(String, String)>, ScreenKeyBindings) {
+fn get_context_menu(
+    settings: &Settings,
+) -> (Vec<(String, String)>, ActionsKeyBindings<ScreenActionEnum>) {
     let screen_actions = &[
         Sba::Simple(ScreenActionEnum::Previous),
         Sba::Simple(ScreenActionEnum::Next),

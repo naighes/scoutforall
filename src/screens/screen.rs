@@ -2,9 +2,7 @@ use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
 use ratatui::{layout::Rect, Frame};
 
-use crate::shapes::{
-    enums::ScreenActionEnum, keybinding::KeyBindings, symbol::KeyCombinationFormatExt,
-};
+use crate::shapes::{enums::WithDesc, keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
 
 pub enum AppAction {
     None,
@@ -23,8 +21,10 @@ pub trait ScreenAsync: Renderable + Send + Sync {
     async fn refresh_data(&mut self);
 }
 
-pub fn get_keybinding_actions(kb: &KeyBindings, actions: &[Sba]) -> Vec<(String, String)> {
-    use crate::shapes::enums::ScreenActionEnum;
+pub fn get_keybinding_actions<T>(kb: &KeyBindings<T>, actions: &[Sba<T>]) -> Vec<(String, String)>
+where
+    T: std::hash::Hash + Eq + Clone + WithDesc<T>,
+{
     use crokey::KeyCombinationFormat;
     let fmt = &KeyCombinationFormat::default();
     actions
@@ -41,9 +41,9 @@ pub fn get_keybinding_actions(kb: &KeyBindings, actions: &[Sba]) -> Vec<(String,
                 }
             }
             Sba::Redacted(ae, description_fn) => {
-                fn map_screen_action(
-                    kb: &KeyBindings,
-                    action: &ScreenActionEnum,
+                fn map_screen_action<T: std::hash::Hash + Eq + Clone + WithDesc<T>>(
+                    kb: &KeyBindings<T>,
+                    action: &T,
                     description_fn: fn(String) -> String,
                     fmt: &KeyCombinationFormat,
                 ) -> Option<(String, String)> {
@@ -65,26 +65,27 @@ pub fn get_keybinding_actions(kb: &KeyBindings, actions: &[Sba]) -> Vec<(String,
 }
 
 #[derive(Clone)]
-pub enum Sba {
-    Simple(ScreenActionEnum),
-    Redacted(ScreenActionEnum, fn(String) -> String),
+pub enum Sba<T> {
+    Simple(T),
+    Redacted(T, fn(String) -> String),
 }
-impl Sba {
-    pub fn key(&self) -> &ScreenActionEnum {
+impl<T> Sba<T> {
+    pub fn key(&self) -> &T {
         match self {
             Sba::Simple(ae) => ae,
             Sba::Redacted(ae, _) => ae,
         }
     }
-    pub fn keys(slice: &[Sba]) -> Vec<&ScreenActionEnum> {
+    pub fn keys(slice: &[Sba<T>]) -> Vec<&T> {
         slice.iter().map(|f| f.key()).collect()
     }
 }
 
 #[test]
 fn test_get_keybinding_actions() {
+    use crate::shapes::enums::ScreenActionEnum;
     // Setup test data
-    let kb = KeyBindings::default();
+    let kb = KeyBindings::<ScreenActionEnum>::default();
     let actions = &[
         Sba::Simple(ScreenActionEnum::Next),
         Sba::Simple(ScreenActionEnum::Previous),

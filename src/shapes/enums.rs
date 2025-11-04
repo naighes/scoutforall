@@ -184,7 +184,29 @@ impl fmt::Display for EventTypeEnum {
     }
 }
 
+impl WithDesc<EventTypeEnum> for EventTypeEnum {
+    fn with_desc(self) -> (EventTypeEnum, String) {
+        let labels = current_labels();
+        let desc = self.friendly_name(labels).to_string();
+        (self, desc)
+    }
+}
+
 impl EventTypeEnum {
+    pub const ALL: [EventTypeEnum; 11] = [
+        EventTypeEnum::S,
+        EventTypeEnum::P,
+        EventTypeEnum::A,
+        EventTypeEnum::D,
+        EventTypeEnum::B,
+        EventTypeEnum::F,
+        EventTypeEnum::OS,
+        EventTypeEnum::OE,
+        EventTypeEnum::R,
+        EventTypeEnum::CL,
+        EventTypeEnum::CS,
+    ];
+
     pub fn requires_evaluation(&self) -> bool {
         use EventTypeEnum::*;
         matches!(self, S | P | A | D | B)
@@ -821,7 +843,9 @@ pub enum ScreenActionEnum {
     Reset,
     Undo,
 }
-
+pub trait WithDesc<T> {
+    fn with_desc(self) -> (T, String);
+}
 impl ScreenActionEnum {
     pub const ALL: [ScreenActionEnum; 29] = [
         ScreenActionEnum::Back,
@@ -854,8 +878,10 @@ impl ScreenActionEnum {
         ScreenActionEnum::Reset,
         ScreenActionEnum::Undo,
     ];
+}
 
-    pub fn with_desc(self) -> (ScreenActionEnum, String) {
+impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
+    fn with_desc(self) -> (ScreenActionEnum, String) {
         use ScreenActionEnum::*;
         match self {
             Back => (Back, current_labels().back.to_string()),
@@ -896,6 +922,7 @@ impl ScreenActionEnum {
         }
     }
 }
+
 impl fmt::Display for ScreenActionEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ScreenActionEnum::*;

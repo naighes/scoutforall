@@ -24,7 +24,7 @@ use crate::{
     },
     shapes::{
         enums::{ScreenActionEnum, TeamSideEnum},
-        keybinding::{KeyBindings, ScreenKeyBindings},
+        keybinding::{ActionsKeyBindings, KeyBindings},
         r#match::{MatchEntry, MatchStatus},
         set::SetEntry,
         settings::Settings,
@@ -66,7 +66,7 @@ pub struct MatchListScreen<
     set_writer: Arc<SSW>,
     settings_reader: Arc<SR>,
     settings_writer: Arc<SW>,
-    screen_key_bindings: ScreenKeyBindings,
+    screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
 impl<
@@ -129,7 +129,7 @@ impl<
         }
         self.header.render(f, container[0], Some(&self.team));
         self.notify_message.render(f, footer_right);
-        let kb: &KeyBindings = &self.settings.keybindings;
+        let kb: &KeyBindings<ScreenActionEnum> = &self.settings.keybindings;
         let screen_actions = &self.screen_actions();
         let screen_key_bindings = &kb.slice(Sba::keys(screen_actions));
         let footer_entries = get_keybinding_actions(kb, screen_actions);
@@ -168,6 +168,8 @@ impl<
                 (Some(ScreenActionEnum::New), _, _) => {
                     if self.team.players.len() >= 6 {
                         AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
+                            self.settings_reader.clone(),
+                            self.settings_writer.clone(),
                             self.settings.clone(),
                             self.team.clone(),
                             self.match_writer.clone(),
@@ -301,7 +303,7 @@ impl<
             set_writer,
             settings_reader,
             settings_writer,
-            screen_key_bindings: ScreenKeyBindings::empty(),
+            screen_key_bindings: ActionsKeyBindings::empty(),
         }
     }
     fn get_selected_match(&self) -> Option<(&MatchEntry, &MatchStatus)> {
@@ -364,6 +366,8 @@ impl<
         last_serving_team: Option<TeamSideEnum>,
     ) -> AppAction {
         AppAction::SwitchScreen(Box::new(StartSetScreen::new(
+            self.settings_reader.clone(),
+            self.settings_writer.clone(),
             self.settings.clone(),
             m.clone(),
             next_set_number,
@@ -382,6 +386,8 @@ impl<
         match last_incomplete_set.compute_snapshot() {
             Ok((snapshot, available_options)) => {
                 AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                    self.settings_reader.clone(),
+                    self.settings_writer.clone(),
                     self.settings.clone(),
                     m.clone(),
                     last_incomplete_set,
@@ -415,7 +421,7 @@ impl<
         AppAction::None
     }
 
-    fn screen_actions(&self) -> Vec<Sba> {
+    fn screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         let mut actions = Vec::new();
         actions.push(Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
             lbl.replace("{}", current_labels().match_word)

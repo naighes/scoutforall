@@ -1,32 +1,38 @@
 use {
-    crate::shapes::enums::ScreenActionEnum,
+    crate::shapes::enums::{EventTypeEnum, ScreenActionEnum, WithDesc},
     crokey::{crossterm::event::KeyEvent, *},
     serde::{Deserialize, Serialize},
-    std::{
-        collections::{hash_map, HashMap, HashSet},
-        fmt,
-    },
+    std::collections::{hash_map, HashMap, HashSet},
 };
 
 /// A mapping from key combinations to actions.
 ///
 /// Several key combinations can go to the same action.
-#[derive(Clone, Deserialize, Serialize)]
-pub struct KeyBindings {
-    #[serde(skip)]
-    map: HashMap<KeyCombination, ScreenActionEnum>,
+#[derive(Clone, Deserialize, Serialize, Debug)]
+pub struct KeyBindings<T>
+where
+    T: std::hash::Hash + Eq,
+{
     #[serde(flatten)]
-    default_bindings: HashMap<ScreenActionEnum, HashSet<KeyCombination>>,
+    default_bindings: HashMap<T, HashSet<KeyCombination>>,
 }
 
 /// A mapping from key combinations to actions for a specific screen.
 #[derive(Debug)]
-pub struct ScreenKeyBindings {
-    map: HashMap<KeyCombination, ScreenActionEnum>,
+pub struct ActionsKeyBindings<T> {
+    map: HashMap<KeyCombination, T>,
     combiner: Combiner,
 }
 
-impl ScreenKeyBindings {
+impl<'a, T> IntoIterator for &'a ActionsKeyBindings<T> {
+    type Item = (&'a KeyCombination, &'a T);
+    type IntoIter = hash_map::Iter<'a, KeyCombination, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.map.iter()
+    }
+}
+
+impl<T> ActionsKeyBindings<T> {
     pub fn empty() -> Self {
         Self {
             combiner: Combiner::default(),
@@ -34,20 +40,36 @@ impl ScreenKeyBindings {
         }
     }
 
+    pub fn from(slice: Vec<(&T, &HashSet<KeyCombination>)>) -> Self
+    where
+        T: Clone + std::hash::Hash + Eq,
+    {
+        let mut skb = Self::empty();
+        for (action, cks) in slice {
+            for ck in cks {
+                skb.set(action.to_owned(), *ck);
+            }
+        }
+        skb
+    }
+
     pub fn transform(&mut self, key: KeyEvent) -> Option<KeyCombination> {
         self.combiner.transform(key)
     }
 
-    pub fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) {
+    fn set<A: Into<T>>(&mut self, action: A, ck: KeyCombination) {
         let action_enum = action.into();
         self.map.entry(ck).or_insert(action_enum);
     }
-    pub fn get(&self, key: KeyCombination) -> Option<&ScreenActionEnum> {
+    pub fn get(&self, key: KeyCombination) -> Option<&T> {
         self.map.get(&key)
     }
 }
 
-impl Clone for ScreenKeyBindings {
+impl<T> Clone for ActionsKeyBindings<T>
+where
+    T: Clone,
+{
     fn clone(&self) -> Self {
         Self {
             map: self.map.clone(),
@@ -56,10 +78,79 @@ impl Clone for ScreenKeyBindings {
     }
 }
 
-impl Default for KeyBindings {
+impl<T> KeyBindings<T>
+where
+    T: std::hash::Hash + Eq,
+{
+    pub fn set<A: Into<T>>(&mut self, action: A, ck: KeyCombination) -> bool {
+        self.default_bindings
+            .entry(action.into())
+            .or_default()
+            .insert(ck)
+    }
+
+    pub fn remove<A: Into<T>>(&mut self, action: A, ck: KeyCombination) -> bool {
+        if let Some(set) = self.default_bindings.get_mut(&action.into()) {
+            set.remove(&ck)
+        } else {
+            false
+        }
+    }
+
+    /// return the key combination for the action matching the filter, choosing
+    /// the one with the shortest Display representation.
+    pub fn shortest_key_for(&self, action: &T) -> Option<(KeyCombination, String)>
+    where
+        T: Clone + std::hash::Hash + Eq + WithDesc<T>,
+    {
+        let mut shortest: Option<(KeyCombination, String, T)> = None;
+        if let Some(cks) = self.default_bindings.get(action) {
+            for ck in cks {
+                let s = ck.to_string();
+                match &shortest {
+                    Some(previous) if previous.1.len() < s.len() => {}
+                    _ => {
+                        shortest = Some((*ck, s, action.to_owned()));
+                    }
+                }
+            }
+            shortest.map(|o| (o.0, o.2.with_desc().1))
+        } else {
+            None
+        }
+    }
+
+    pub fn keybindings_for(&self, action: &T) -> HashSet<KeyCombination> {
+        self.default_bindings
+            .get(action)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// build and return a map from actions to all the possible shortcuts
+    pub fn reverse_map(&self) -> HashMap<T, HashSet<KeyCombination>>
+    where
+        T: Clone + std::hash::Hash + Eq,
+    {
+        self.default_bindings.clone()
+    }
+
+    pub fn slice(&self, actions: Vec<&T>) -> ActionsKeyBindings<T>
+    where
+        T: Clone + std::hash::Hash + Eq,
+    {
+        ActionsKeyBindings::from(
+            actions
+                .iter()
+                .filter_map(|a| self.default_bindings.get(a).map(|cks| (*a, cks)))
+                .collect(),
+        )
+    }
+}
+
+impl Default for KeyBindings<ScreenActionEnum> {
     fn default() -> Self {
         let mut bindings = Self {
-            map: HashMap::default(),
             default_bindings: HashMap::new(),
         };
         bindings.set(ScreenActionEnum::Quit, key!(cmd - e));
@@ -94,92 +185,34 @@ impl Default for KeyBindings {
         bindings.set(ScreenActionEnum::ReportAnIssue, key!(i));
         bindings.set(ScreenActionEnum::Select, key!(enter));
         bindings.set(ScreenActionEnum::Reset, key!(r));
+        bindings.set(ScreenActionEnum::Undo, key!(u));
         bindings
     }
 }
-
-impl KeyBindings {
-    pub fn set<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) -> bool {
-        self.default_bindings
-            .entry(action.into())
-            .or_default()
-            .insert(ck)
-    }
-
-    pub fn remove<A: Into<ScreenActionEnum>>(&mut self, action: A, ck: KeyCombination) -> bool {
-        if let Some(set) = self.default_bindings.get_mut(&action.into()) {
-            set.remove(&ck)
-        } else {
-            false
-        }
-    }
-
-    /// return the key combination for the action matching the filter, choosing
-    /// the one with the shortest Display representation.
-    pub fn shortest_key_for(&self, action: &ScreenActionEnum) -> Option<(KeyCombination, String)> {
-        let mut shortest: Option<(KeyCombination, String, ScreenActionEnum)> = None;
-        if let Some(cks) = self.default_bindings.get(action) {
-            for ck in cks {
-                let s = ck.to_string();
-                match &shortest {
-                    Some(previous) if previous.1.len() < s.len() => {}
-                    _ => {
-                        shortest = Some((*ck, s, action.to_owned()));
-                    }
-                }
-            }
-            shortest.map(|o| (o.0, o.2.with_desc().1))
-        } else {
-            None
-        }
-    }
-
-    pub fn keybindings_for(&self, action: &ScreenActionEnum) -> HashSet<KeyCombination> {
-        self.default_bindings
-            .get(action)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// build and return a map from actions to all the possible shortcuts
-    pub fn reverse_map(&self) -> HashMap<ScreenActionEnum, HashSet<KeyCombination>> {
-        self.default_bindings.clone()
-    }
-
-    pub fn slice(&self, actions: Vec<&ScreenActionEnum>) -> ScreenKeyBindings {
-        let mut slice = ScreenKeyBindings::empty();
-        for (action, cks) in &self.default_bindings {
-            if actions.contains(&action) {
-                cks.iter().for_each(|ck| slice.set(action.to_owned(), *ck));
-            }
-        }
-        slice
+impl Default for KeyBindings<EventTypeEnum> {
+    fn default() -> Self {
+        let mut bindings = Self {
+            default_bindings: HashMap::new(),
+        };
+        bindings.set(EventTypeEnum::S, key!(s));
+        bindings.set(EventTypeEnum::P, key!(p));
+        bindings.set(EventTypeEnum::A, key!(a));
+        bindings.set(EventTypeEnum::D, key!(d));
+        bindings.set(EventTypeEnum::B, key!(b));
+        bindings.set(EventTypeEnum::F, key!(f));
+        bindings.set(EventTypeEnum::R, key!(r));
+        bindings.set(EventTypeEnum::OE, key!(shift - e));
+        bindings.set(EventTypeEnum::OS, key!(shift - s));
+        bindings.set(EventTypeEnum::CL, key!(shift - l));
+        bindings.set(EventTypeEnum::CS, key!(shift - c));
+        bindings
     }
 }
-
-impl<'a> IntoIterator for &'a KeyBindings {
-    type Item = (&'a KeyCombination, &'a ScreenActionEnum);
-    type IntoIter = hash_map::Iter<'a, KeyCombination, ScreenActionEnum>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.map.iter()
-    }
-}
-
-impl fmt::Debug for KeyBindings {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ds = f.debug_struct("KeyBindings");
-        for (kc, action) in &self.map {
-            ds.field(&kc.to_string(), &action);
-        }
-        ds.finish()
-    }
-}
-
 #[test]
 fn test_deserialize_keybindings() {
     #[derive(Deserialize)]
     struct Config {
-        keybindings: KeyBindings,
+        keybindings: KeyBindings<ScreenActionEnum>,
     }
     let json = r#"
     {
