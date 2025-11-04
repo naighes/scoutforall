@@ -168,7 +168,6 @@ impl<
                 (Some(ScreenActionEnum::KeybindingSettings), _, _) => {
                     AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
                         KeyBindingsScreen::<ScreenActionEnum>::new(self.settings.clone()),
-                        self.settings.clone(),
                         self.settings_writer.clone(),
                         self.settings_reader.clone(),
                     )))
@@ -227,13 +226,13 @@ impl<
 }
 
 impl<
-        TR: TeamReader + Send + Sync,
-        TW: TeamWriter + Send + Sync,
-        SW: SettingsWriter + Send + Sync,
-        MR: MatchReader + Send + Sync,
-        MW: MatchWriter + Send + Sync,
-        SSW: SetWriter + Send + Sync,
-        SR: SettingsReader + Send + Sync,
+        TR: TeamReader + Send + Sync + 'static,
+        TW: TeamWriter + Send + Sync + 'static,
+        SW: SettingsWriter + Send + Sync + 'static,
+        MR: MatchReader + Send + Sync + 'static,
+        MW: MatchWriter + Send + Sync + 'static,
+        SSW: SetWriter + Send + Sync + 'static,
+        SR: SettingsReader + Send + Sync + 'static,
     > TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     pub fn new(

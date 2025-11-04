@@ -182,7 +182,6 @@ impl<
                 (false, Some(ScreenActionEnum::KeybindingSettings), _, _) => {
                     AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
                         KeyBindingsScreen::<EventTypeEnum>::new(self.settings.clone()),
-                        self.settings.clone(),
                         self.settings_writer.clone(),
                         self.settings_reader.clone(),
                     )))

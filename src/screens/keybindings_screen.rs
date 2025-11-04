@@ -54,13 +54,14 @@ where
     T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T>,
 {
     fn get_selected_item(&self, selected: usize) -> Option<T>;
-    fn obtain_formatted_items(&self, format: &KeyCombinationFormat) -> Vec<(String, String)>;
-    fn set_items(&mut self, settings: &Settings);
+    fn get_formatted_items(&self, format: &KeyCombinationFormat) -> Vec<(String, String)>;
+    fn apply_settings(&mut self, settings: &Settings);
     fn reset_settings(&mut self) -> Settings;
     fn get_keybindings(&mut self) -> fn(&Settings) -> KeyBindings<T>;
     fn merge_keybindings_into_settings(&mut self) -> fn(&Settings, &KeyBindings<T>) -> Settings;
     fn current_keybindings(&self) -> &KeyBindings<T>;
-    fn derive_key_combinations(&self, action: &T) -> HashSet<KeyCombination>;
+    fn key_combinations_for(&self, action: &T) -> HashSet<KeyCombination>;
+    fn get_settings(&self) -> &Settings;
 }
 
 impl KeyBindingsScreen<EventTypeEnum> {
@@ -114,7 +115,7 @@ impl KeyBindingsScreen<ScreenActionEnum> {
 impl<T: Hash + Eq + WithDesc<T> + Send + Sync + Copy + Clone + 'static> ScreenKeyBindingTrait<T>
     for KeyBindingsScreen<T>
 {
-    fn obtain_formatted_items(&self, format: &KeyCombinationFormat) -> Vec<(String, String)> {
+    fn get_formatted_items(&self, format: &KeyCombinationFormat) -> Vec<(String, String)> {
         self.all_values
             .iter()
             .map(|r| {
@@ -160,13 +161,17 @@ impl<T: Hash + Eq + WithDesc<T> + Send + Sync + Copy + Clone + 'static> ScreenKe
         self.all_values.get(selected).cloned()
     }
 
-    fn derive_key_combinations(&self, action: &T) -> HashSet<KeyCombination> {
+    fn key_combinations_for(&self, action: &T) -> HashSet<KeyCombination> {
         (self.derive_key_combinations_from_event)(&self.settings, action)
     }
 
-    fn set_items(&mut self, settings: &Settings) {
+    fn apply_settings(&mut self, settings: &Settings) {
         self.key_bindings = (self.get_keybindings_from_settings)(settings);
         self.settings = settings.to_owned();
+    }
+
+    fn get_settings(&self) -> &Settings {
+        &self.settings
     }
 }
 
@@ -274,8 +279,7 @@ impl<
                         let selected_action = self.data_renderer.get_selected_item(selected);
                         match selected_action {
                             Some(action) => {
-                                let keybindings =
-                                    self.data_renderer.derive_key_combinations(&action);
+                                let keybindings = self.data_renderer.key_combinations_for(&action);
                                 AppAction::SwitchScreen(Box::new(KeyBindingScreen::new(
                                     self.settings.clone(),
                                     action.to_owned(),
@@ -315,8 +319,8 @@ impl<
     async fn refresh_data(&mut self) {
         if let Ok(settings) = &self.settings_reader.read().await {
             self.settings = settings.to_owned();
-            self.data_renderer.set_items(&self.settings);
-            self.items = self.data_renderer.obtain_formatted_items(&self.format);
+            self.data_renderer.apply_settings(&self.settings);
+            self.items = self.data_renderer.get_formatted_items(&self.format);
             let (footer_entries, screen_key_bindings) = get_context_menu(settings);
             self.footer_entries = footer_entries;
             self.screen_key_bindings = screen_key_bindings;
@@ -333,12 +337,8 @@ impl<
 where
     DR: Sync + std::marker::Send,
 {
-    pub fn new(
-        data_renderer: DR,
-        settings: Settings,
-        settings_writer: Arc<SW>,
-        settings_reader: Arc<SR>,
-    ) -> Self {
+    pub fn new(data_renderer: DR, settings_writer: Arc<SW>, settings_reader: Arc<SR>) -> Self {
+        let settings = data_renderer.get_settings().to_owned();
         let language = Select::new(
             current_labels().language.to_owned(),
             LanguageEnum::ALL.to_vec(),
@@ -354,7 +354,7 @@ where
 
         let format = KeyCombinationFormat::default();
 
-        let items = data_renderer.obtain_formatted_items(&format);
+        let items = data_renderer.get_formatted_items(&format);
 
         let scroll_state = ScrollbarState::new((items.len() - 1) * ITEM_HEIGHT);
 
