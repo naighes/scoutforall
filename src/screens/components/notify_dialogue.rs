@@ -1,5 +1,5 @@
 use crate::screens::components::notify_banner::NotifyBanner;
-use ratatui::{layout::Rect, Frame};
+use ratatui::{Frame, layout::Rect};
 
 #[derive(Debug)]
 pub struct NotifyDialogue<T> {

@@ -7,20 +7,20 @@ use crate::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, text_box::TextBox,
         },
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{ScreenActionEnum, WithDesc},
         keybinding::{ActionsKeyBindings, KeyBindings},
-        settings::{current_settings, set_settings, Settings},
+        settings::{Settings, current_settings, set_settings},
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm::event::KeyEvent, key, KeyCombinationFormat};
+use crokey::{KeyCombinationFormat, crossterm::event::KeyEvent, key};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
-    Frame,
 };
 
 #[derive(Debug)]
@@ -42,9 +42,9 @@ pub struct AddKeyBindingScreen<
 }
 
 impl<
-        SW: SettingsWriter + Send + Sync,
-        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-    > Renderable for AddKeyBindingScreen<SW, T>
+    SW: SettingsWriter + Send + Sync,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+> Renderable for AddKeyBindingScreen<SW, T>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
@@ -70,9 +70,9 @@ impl<
 
 #[async_trait]
 impl<
-        SW: SettingsWriter + Send + Sync,
-        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-    > ScreenAsync for AddKeyBindingScreen<SW, T>
+    SW: SettingsWriter + Send + Sync,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+> ScreenAsync for AddKeyBindingScreen<SW, T>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
@@ -100,9 +100,9 @@ impl<
 }
 
 impl<
-        SW: SettingsWriter + Send + Sync,
-        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-    > AddKeyBindingScreen<SW, T>
+    SW: SettingsWriter + Send + Sync,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+> AddKeyBindingScreen<SW, T>
 {
     pub fn new(
         action: T,

@@ -30,15 +30,15 @@ use crate::{
         team_reader::TeamReader,
     },
     screens::screen::AppAction,
-    shapes::settings::{init_settings, Settings},
+    shapes::settings::{Settings, init_settings},
 };
 use crokey::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
+    Terminal,
     backend::Backend,
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     widgets::Paragraph,
-    Terminal,
 };
 use std::{error::Error, sync::Arc, time::Duration};
 
@@ -203,25 +203,23 @@ async fn run_app<B: Backend<Error = std::io::Error>>(
                 screen.render(f, container[1], footer[0], footer[1]);
             }
         })?;
-        if event::poll(std::time::Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()? {
-                match (key.code, key.kind, app.current_screen()) {
-                    (_, KeyEventKind::Release, _) => continue,
-                    (_, _, Some(screen)) => match screen.handle_key(key).await {
-                        AppAction::None => {}
-                        AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
-                        AppAction::Back(refresh, count) => {
-                            app.pop_screen(refresh, count).await;
-                            if refresh {
-                                if let Some(screen) = app.current_screen() {
-                                    screen.refresh_data().await;
-                                }
-                            }
+        if event::poll(std::time::Duration::from_millis(200))?
+            && let Event::Key(key) = event::read()?
+        {
+            match (key.code, key.kind, app.current_screen()) {
+                (_, KeyEventKind::Release, _) => continue,
+                (_, _, Some(screen)) => match screen.handle_key(key).await {
+                    AppAction::None => {}
+                    AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
+                    AppAction::Back(refresh, count) => {
+                        app.pop_screen(refresh, count).await;
+                        if refresh && let Some(screen) = app.current_screen() {
+                            screen.refresh_data().await;
                         }
-                        AppAction::Quit(result) => return result,
-                    },
-                    _ => {}
-                }
+                    }
+                    AppAction::Quit(result) => return result,
+                },
+                _ => {}
             }
         }
     }

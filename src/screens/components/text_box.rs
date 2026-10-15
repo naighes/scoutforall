@@ -1,8 +1,8 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     widgets::Paragraph,
-    Frame,
 };
 use std::{
     fmt::{Debug, Formatter},

@@ -39,10 +39,10 @@ type SetMap = BTreeMap<
 
 #[async_trait]
 impl<
-        MR: MatchReader + Send + Sync + 'static,
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-    > FileSystemAction for ImportMatchAction<MR, MW, SSW>
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+> FileSystemAction for ImportMatchAction<MR, MW, SSW>
 {
     fn is_selectable(&self, path: &Path) -> bool {
         !is_hidden(path).unwrap_or_default()
@@ -115,11 +115,8 @@ impl<
     }
 }
 
-impl<
-        MR: MatchReader + Send + Sync,
-        MW: MatchWriter + Send + Sync,
-        SSW: SetWriter + Send + Sync,
-    > ImportMatchAction<MR, MW, SSW>
+impl<MR: MatchReader + Send + Sync, MW: MatchWriter + Send + Sync, SSW: SetWriter + Send + Sync>
+    ImportMatchAction<MR, MW, SSW>
 {
     pub fn new(
         team: TeamEntry,
@@ -194,16 +191,15 @@ impl<
             let (name, content) = Self::read_file_content(&mut archive, i)?;
             if name.eq_ignore_ascii_case(MATCH_DESCRIPTOR_FILE_NAME) {
                 match_entry_content = content;
-            } else if let Some(caps) = name.strip_prefix("set_") {
-                if let Some((num_str, ext)) = caps.split_once('.') {
-                    if let Ok(num) = num_str.parse::<u8>() {
-                        let entry = set_map.entry(num).or_insert((None, None));
-                        match ext {
-                            "json" => entry.0 = Self::parse_set_json(num, content),
-                            "csv" => entry.1 = Self::parse_set_csv(content),
-                            _ => {}
-                        }
-                    }
+            } else if let Some(caps) = name.strip_prefix("set_")
+                && let Some((num_str, ext)) = caps.split_once('.')
+                && let Ok(num) = num_str.parse::<u8>()
+            {
+                let entry = set_map.entry(num).or_insert((None, None));
+                match ext {
+                    "json" => entry.0 = Self::parse_set_json(num, content),
+                    "csv" => entry.1 = Self::parse_set_csv(content),
+                    _ => {}
                 }
             }
         }

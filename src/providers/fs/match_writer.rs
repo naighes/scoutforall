@@ -9,7 +9,7 @@ use chrono::{DateTime, FixedOffset};
 use serde_json::to_vec_pretty;
 use std::path::{Path, PathBuf};
 use tokio::{
-    fs::{try_exists, File},
+    fs::{File, try_exists},
     io::AsyncWriteExt,
 };
 

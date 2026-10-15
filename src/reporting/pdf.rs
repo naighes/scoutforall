@@ -1,5 +1,5 @@
 use crate::errors::{AppError, IOError};
-use crate::localization::{current_labels, Labels};
+use crate::localization::{Labels, current_labels};
 use crate::reporting::align::Align;
 use crate::reporting::circle::Circle;
 use crate::reporting::court::render_court;
@@ -10,8 +10,8 @@ use crate::reporting::typst_content::TypstContent;
 use crate::reporting::typst_world::ReportWorld;
 use crate::reporting::util::escape_text;
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum};
-use crate::shapes::player::PlayerEntry;
 use crate::shapes::r#match::{MatchEntry, MatchStatus};
+use crate::shapes::player::PlayerEntry;
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::Snapshot;
 use crate::shapes::stats::{Metric, Stats};

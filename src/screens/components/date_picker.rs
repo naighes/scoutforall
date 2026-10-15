@@ -1,9 +1,9 @@
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     widgets::Paragraph,
-    Frame,
 };
 
 use crate::errors::{AppError, IOError};

@@ -8,7 +8,7 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             text_box::TextBox,
         },
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{FriendlyName, GenderEnum, ScreenActionEnum, TeamClassificationEnum},
@@ -20,11 +20,11 @@ use crate::{
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 #[derive(Debug)]

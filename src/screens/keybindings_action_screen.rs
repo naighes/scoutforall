@@ -6,24 +6,24 @@ use crate::{
     screens::{
         components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue},
         keybindings_action_add_screen::AddKeyBindingScreen,
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{ScreenActionEnum, WithDesc},
         keybinding::{ActionsKeyBindings, KeyBindings},
-        settings::{set_settings, Settings},
+        settings::{Settings, set_settings},
     },
 };
 use async_trait::async_trait;
 use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
     KeyCombination, KeyCombinationFormat,
+    crossterm::event::{KeyCode, KeyEvent},
 };
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState},
-    Frame,
 };
 use std::hash::Hash;
 
@@ -51,10 +51,10 @@ pub struct KeyBindingScreen<
 
 #[async_trait]
 impl<
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-    > ScreenAsync for KeyBindingScreen<SW, SR, T>
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+> ScreenAsync for KeyBindingScreen<SW, SR, T>
 {
     async fn refresh_data(&mut self) {
         if let Ok(settings) = &self.settings_reader.read().await {
@@ -154,10 +154,10 @@ impl<
 }
 
 impl<
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-    > Renderable for KeyBindingScreen<SW, SR, T>
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+> Renderable for KeyBindingScreen<SW, SR, T>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notifier.render(f, footer_right);
@@ -175,10 +175,10 @@ impl<
 }
 
 impl<
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-    > KeyBindingScreen<SW, SR, T>
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
+> KeyBindingScreen<SW, SR, T>
 {
     pub fn new(
         settings: Settings,

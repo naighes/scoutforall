@@ -12,26 +12,26 @@ use crate::{
         },
         keybindings_action_screen::KeyBindingScreen,
         report_an_issue_screen::ReportAnIssueScreen,
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{EventTypeEnum, LanguageEnum, ScreenActionEnum},
         keybinding::{ActionsKeyBindings, KeyBindings},
-        settings::{set_settings, Settings},
+        settings::{Settings, set_settings},
     },
 };
 use async_trait::async_trait;
 use crokey::KeyCombination;
 use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
     KeyCombinationFormat,
+    crossterm::event::{KeyCode, KeyEvent},
 };
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     widgets::{Block, Borders, Row, ScrollbarState, Table, TableState},
-    Frame,
 };
 
 const ITEM_HEIGHT: usize = 2;
@@ -203,11 +203,11 @@ pub struct KeybindingScreen<
 }
 
 impl<
-        T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
-        DR: ScreenKeyBindingTrait<T> + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > Renderable for KeybindingScreen<T, DR, SW, SR>
+    T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+    DR: ScreenKeyBindingTrait<T> + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> Renderable for KeybindingScreen<T, DR, SW, SR>
 where
     DR: Sync + std::marker::Send,
 {
@@ -233,11 +233,11 @@ where
 
 #[async_trait]
 impl<
-        T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
-        DR: ScreenKeyBindingTrait<T> + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > ScreenAsync for KeybindingScreen<T, DR, SW, SR>
+    T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+    DR: ScreenKeyBindingTrait<T> + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> ScreenAsync for KeybindingScreen<T, DR, SW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
@@ -329,11 +329,11 @@ impl<
 }
 
 impl<
-        T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
-        DR: ScreenKeyBindingTrait<T> + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > KeybindingScreen<T, DR, SW, SR>
+    T: Clone + Copy + Send + Sync + Hash + Eq + WithDesc<T> + 'static,
+    DR: ScreenKeyBindingTrait<T> + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> KeybindingScreen<T, DR, SW, SR>
 where
     DR: Sync + std::marker::Send,
 {
@@ -413,7 +413,7 @@ where
     }
 
     fn get_rows(items: Vec<(String, String)>, selected_action: usize) -> Vec<Row<'static>> {
-        let rows = items
+        items
             .iter()
             .enumerate()
             .map(|(index, (action, keybindings))| {
@@ -429,8 +429,7 @@ where
                 }
                 row
             })
-            .collect();
-        rows
+            .collect()
     }
 
     fn render_key_bindings_table(&mut self, f: &mut Frame, area: Rect) {

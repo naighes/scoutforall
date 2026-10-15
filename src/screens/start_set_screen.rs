@@ -6,23 +6,23 @@ use crate::{
     screens::{
         components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{RoleEnum, ScreenActionEnum, TeamSideEnum},
         keybinding::ActionsKeyBindings,
-        player::PlayerEntry,
         r#match::MatchEntry,
+        player::PlayerEntry,
         settings::Settings,
     },
 };
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState},
-    Frame,
 };
 use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
@@ -58,10 +58,10 @@ pub enum StartSetScreenState {
 }
 
 impl<
-        SSW: SetWriter + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > Renderable for StartSetScreen<SSW, SW, SR>
+    SSW: SetWriter + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> Renderable for StartSetScreen<SSW, SW, SR>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         use StartSetScreenState::*;
@@ -95,10 +95,10 @@ impl<
 
 #[async_trait]
 impl<
-        SSW: SetWriter + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > ScreenAsync for StartSetScreen<SSW, SW, SR>
+    SSW: SetWriter + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> ScreenAsync for StartSetScreen<SSW, SW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use StartSetScreenState::*;
@@ -130,10 +130,10 @@ impl<
 }
 
 impl<
-        SSW: SetWriter + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > StartSetScreen<SSW, SW, SR>
+    SSW: SetWriter + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> StartSetScreen<SSW, SW, SR>
 {
     fn handle_serving_team_selection(&mut self, action: Option<ScreenActionEnum>) -> AppAction {
         use TeamSideEnum::*;

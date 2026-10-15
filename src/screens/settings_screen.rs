@@ -9,22 +9,22 @@ use crate::{
             select::Select,
         },
         report_an_issue_screen::ReportAnIssueScreen,
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{LanguageEnum, ScreenActionEnum, WithDesc},
         keybinding::ActionsKeyBindings,
-        settings::{set_settings, Settings},
+        settings::{Settings, set_settings},
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm, KeyCombinationFormat};
+use crokey::{KeyCombinationFormat, crossterm};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 #[derive(Debug)]

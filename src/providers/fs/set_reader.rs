@@ -12,7 +12,7 @@ use serde_json::from_str;
 use std::path::PathBuf;
 use std::{fs::File, path::Path};
 use tokio::{
-    fs::{read_dir, read_to_string, DirEntry},
+    fs::{DirEntry, read_dir, read_to_string},
     task::spawn_blocking,
 };
 

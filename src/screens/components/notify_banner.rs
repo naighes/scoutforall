@@ -1,8 +1,8 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::localization::current_labels;

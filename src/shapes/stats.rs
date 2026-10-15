@@ -953,11 +953,7 @@ impl Stats {
         ) {
             total += *incr;
         }
-        if total > 0 {
-            Some(total)
-        } else {
-            None
-        }
+        if total > 0 { Some(total) } else { None }
     }
 
     pub fn sideout_first_rally_errors(
@@ -975,12 +971,11 @@ impl Stats {
             finalizing_event_type,
             finalizing_event_eval,
         ) {
-            if let Some(final_type) = key.finalizing_event_type {
-                if let Some(err) = final_type.error_type(key.finalizing_event_eval) {
-                    if error_type.is_none() || error_type == Some(err) {
-                        total_errors += *incr;
-                    }
-                }
+            if let Some(final_type) = key.finalizing_event_type
+                && let Some(err) = final_type.error_type(key.finalizing_event_eval)
+                && (error_type.is_none() || error_type == Some(err))
+            {
+                total_errors += *incr;
             }
         }
         if total_errors > 0 {

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
-use ratatui::{layout::Rect, Frame};
+use ratatui::{Frame, layout::Rect};
 
 use crate::shapes::{enums::WithDesc, keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
 

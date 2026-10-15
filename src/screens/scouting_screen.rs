@@ -2,7 +2,7 @@ use crate::analytics::global::enqueue_match_for_upload;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::keybindings_screen::{KeyBindingsScreen, KeybindingScreen};
-use crate::screens::screen::{get_keybinding_actions, Sba};
+use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::shapes::enums::ScreenActionEnum;
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings};
 use crate::shapes::settings::Settings;
@@ -15,22 +15,22 @@ use crate::{
     },
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
-        player::PlayerEntry,
         r#match::MatchEntry,
+        player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
     },
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use crokey::crossterm::event::{KeyCode, KeyEvent};
 use crokey::KeyCombinationFormat;
+use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
-    Frame,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -99,10 +99,10 @@ enum ScoutingScreenState {
 }
 
 impl<
-        SSW: SetWriter + Send + Sync,
-        SW: SettingsWriter + Send + Sync,
-        SR: SettingsReader + Send + Sync,
-    > Renderable for ScoutingScreen<SSW, SW, SR>
+    SSW: SetWriter + Send + Sync,
+    SW: SettingsWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync,
+> Renderable for ScoutingScreen<SSW, SW, SR>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
@@ -154,10 +154,10 @@ impl<
 
 #[async_trait]
 impl<
-        SSW: SetWriter + Send + Sync,
-        SW: SettingsWriter + Send + Sync,
-        SR: SettingsReader + Send + Sync,
-    > ScreenAsync for ScoutingScreen<SSW, SW, SR>
+    SSW: SetWriter + Send + Sync,
+    SW: SettingsWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync,
+> ScreenAsync for ScoutingScreen<SSW, SW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         use ScoutingScreenState::*;
@@ -177,7 +177,7 @@ impl<
                     }
                 }
                 (false, Some(ScreenActionEnum::Back), _, _) => {
-                    return AppAction::Back(true, self.back_stack_count)
+                    return AppAction::Back(true, self.back_stack_count);
                 }
                 (false, Some(ScreenActionEnum::KeybindingSettings), _, _) => {
                     AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
@@ -188,13 +188,13 @@ impl<
                 }
                 (false, action, _, Event) => self.handle_event_screen(key, action.cloned()).await,
                 (false, action, _, Player) => {
-                    return self.handle_player_screen(key, action.cloned()).await
+                    return self.handle_player_screen(key, action.cloned()).await;
                 }
                 (false, action, _, Eval) => {
-                    return self.handle_eval_screen(key, action.cloned()).await
+                    return self.handle_eval_screen(key, action.cloned()).await;
                 }
                 (false, action, _, Replacement) => {
-                    return self.handle_replacement_screen(key, action.cloned()).await
+                    return self.handle_replacement_screen(key, action.cloned()).await;
                 }
             }
         } else {
@@ -214,10 +214,10 @@ impl<
 }
 
 impl<
-        SSW: SetWriter + Send + Sync,
-        SW: SettingsWriter + Send + Sync,
-        SR: SettingsReader + Send + Sync,
-    > ScoutingScreen<SSW, SW, SR>
+    SSW: SetWriter + Send + Sync,
+    SW: SettingsWriter + Send + Sync,
+    SR: SettingsReader + Send + Sync,
+> ScoutingScreen<SSW, SW, SR>
 {
     pub fn new(
         settings_reader: Arc<SR>,
@@ -435,10 +435,10 @@ impl<
                         self.notify_message
                             .set_info(current_labels().set_over.to_string());
                         // check if match is finished and analytics are enabled
-                        if let Ok(status) = self.current_match.get_status() {
-                            if status.match_finished {
-                                self.enqueue_match_for_analytics().await;
-                            }
+                        if let Ok(status) = self.current_match.get_status()
+                            && status.match_finished
+                        {
+                            self.enqueue_match_for_analytics().await;
                         }
                         self.back = true;
                         AppAction::None
@@ -535,19 +535,18 @@ impl<
                     .snapshot
                     .current_lineup
                     .get_available_replacements(&self.current_match.team, replaced_id);
-                if let Some(d) = c.to_digit(10).and_then(|d| u8::try_from(d).ok()) {
-                    if (1..=available_replacements.len() as u8).contains(&d) {
-                        if let Some((_, p)) = available_replacements.iter().find(|(i, _)| *i == d) {
-                            let entry = EventEntry {
-                                timestamp: Utc::now(),
-                                event_type: *event_type,
-                                eval: None,
-                                player: Some(replaced_id),
-                                target_player: Some(p.id),
-                            };
-                            return self.add_event(&entry).await;
-                        }
-                    }
+                if let Some(d) = c.to_digit(10).and_then(|d| u8::try_from(d).ok())
+                    && (1..=available_replacements.len() as u8).contains(&d)
+                    && let Some((_, p)) = available_replacements.iter().find(|(i, _)| *i == d)
+                {
+                    let entry = EventEntry {
+                        timestamp: Utc::now(),
+                        event_type: *event_type,
+                        eval: None,
+                        player: Some(replaced_id),
+                        target_player: Some(p.id),
+                    };
+                    return self.add_event(&entry).await;
                 }
                 AppAction::None
             }

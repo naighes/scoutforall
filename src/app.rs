@@ -66,10 +66,10 @@ impl App {
             for _ in 0..to_pop {
                 self.screens.pop();
             }
-            if let Some(prev) = self.screens.last_mut() {
-                if refresh {
-                    prev.refresh_data().await;
-                }
+            if let Some(prev) = self.screens.last_mut()
+                && refresh
+            {
+                prev.refresh_data().await;
             }
         }
     }

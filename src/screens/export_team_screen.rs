@@ -10,9 +10,9 @@ use hf::is_hidden;
 use std::{fs::File, io::Read, path::Path};
 use std::{io::Write, path::PathBuf};
 use uuid::Uuid;
-use zip::write::FileOptions;
 use zip::CompressionMethod::*;
 use zip::ZipWriter;
+use zip::write::FileOptions;
 
 pub struct ExportTeamAction {
     team_id: Uuid,

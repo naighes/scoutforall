@@ -6,19 +6,19 @@ use crate::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, text_box::TextBox,
         },
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use crokey::{
-    crossterm::event::{KeyCode, KeyEvent},
     Combiner,
+    crossterm::event::{KeyCode, KeyEvent},
 };
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
-    Frame,
 };
 use regex::Regex;
 use serde_json::json;
@@ -203,10 +203,10 @@ impl ReportAnIssueScreen {
             }
             (_, Some(title), Some(description), _, _) => {
                 let mut full_description = description.to_string();
-                if let Some(name) = self.name.get_selected_value() {
-                    if !name.is_empty() {
-                        full_description.push_str(&format!("\n\nname: {}", name));
-                    }
+                if let Some(name) = self.name.get_selected_value()
+                    && !name.is_empty()
+                {
+                    full_description.push_str(&format!("\n\nname: {}", name));
                 }
                 if let Some(email) = self.email.get_selected_value() {
                     if !email.is_empty() {

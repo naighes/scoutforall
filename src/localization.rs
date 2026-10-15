@@ -466,7 +466,7 @@ const IT: Labels = Labels {
     previous: "precedente",
     next: "successivo",
     confirm: "conferma",
-    back: "indietro", 
+    back: "indietro",
     quit: "esci",
     home: "in casa",
     opponent: "avversario",

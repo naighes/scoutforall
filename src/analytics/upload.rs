@@ -30,7 +30,7 @@ use tokio::time::interval;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio::{spawn, task::JoinHandle};
 use uuid::Uuid;
-use zip::{write::FileOptions, CompressionMethod, ZipWriter};
+use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
 #[derive(Debug, Serialize)]
 pub struct UploadRequest {
@@ -216,11 +216,11 @@ pub struct AnalyticsUploadWorker<
 }
 
 impl<
-        TR: TeamReader + Send + Sync + 'static,
-        MR: MatchReader + Send + Sync + 'static,
-        QR: QueueReader + Send + Sync + 'static,
-        QW: QueueWriter + Send + Sync + 'static,
-    > AnalyticsUploadWorker<TR, MR, QR, QW>
+    TR: TeamReader + Send + Sync + 'static,
+    MR: MatchReader + Send + Sync + 'static,
+    QR: QueueReader + Send + Sync + 'static,
+    QW: QueueWriter + Send + Sync + 'static,
+> AnalyticsUploadWorker<TR, MR, QR, QW>
 {
     pub fn new(
         base_path: PathBuf,

@@ -259,7 +259,7 @@ impl Lineup {
             _ => {
                 return Err(AppError::Snapshot(SnapshotError::LineupError(
                     "invalid offset in rotation".to_string(),
-                )))
+                )));
             }
         };
         Ok(role)
@@ -432,13 +432,13 @@ impl Lineup {
                 )));
             }
             // closed change
-            if let Some(enforced) = self.get_enforced_replacement(replaced) {
-                if enforced != *replacement {
-                    return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
-                        "player {:?} can be only replaced by player {:?}",
-                        replaced, enforced,
-                    ))));
-                }
+            if let Some(enforced) = self.get_enforced_replacement(replaced)
+                && enforced != *replacement
+            {
+                return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
+                    "player {:?} can be only replaced by player {:?}",
+                    replaced, enforced,
+                ))));
             }
 
             self.try_set(replacement, pos)?;
@@ -553,10 +553,10 @@ impl Lineup {
             1 => {
                 // still open
                 let s = subs[0];
-                if s.replacement == replaced_id {
-                    if let Some(player) = team.players.iter().find(|p| p.id == s.replaced) {
-                        return vec![(1, player)];
-                    }
+                if s.replacement == replaced_id
+                    && let Some(player) = team.players.iter().find(|p| p.id == s.replaced)
+                {
+                    return vec![(1, player)];
                 }
                 // should not happen
                 return vec![];
