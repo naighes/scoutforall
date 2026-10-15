@@ -15,7 +15,6 @@ use crokey::{
     crossterm::event::{KeyCode, KeyEvent},
     Combiner,
 };
-use once_cell::sync::Lazy;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
@@ -23,9 +22,10 @@ use ratatui::{
 };
 use regex::Regex;
 use serde_json::json;
+use std::sync::LazyLock;
 
-static EMAIL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^[a-z0-9._%+-]+@[a-z0-9.-]*$").unwrap());
+static EMAIL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^[a-z0-9._%+-]+@[a-z0-9.-]*$").unwrap());
 
 fn email_validator(current: &str, c: char) -> bool {
     if !c.is_ascii_alphanumeric() && !"@._%+-".contains(c) {

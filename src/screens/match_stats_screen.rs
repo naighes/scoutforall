@@ -538,7 +538,7 @@ impl MatchStatsScreen {
                 {
                     bars.push(
                         Bar::default()
-                            .label(eval.to_string().into())
+                            .label(eval.to_string())
                             .value((percent.round() as u64).min(100))
                             .text_value(format!("{}%", percent.round()))
                             .style(Style::default().fg(color))

@@ -67,7 +67,7 @@ fn maybe_check_update() {
         .and_then(|u| u.update());
     match status {
         Ok(status) => {
-            if status.updated() {
+            if status.is_updated() {
                 println!(
                     "{} {}",
                     current_labels().updated_to_version,
@@ -185,7 +185,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// |----------------------------|
 /// | footer_left | footer_right |
 /// |----------------------------|
-async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Result<()> {
+async fn run_app<B: Backend<Error = std::io::Error>>(
+    terminal: &mut Terminal<B>,
+    mut app: App,
+) -> std::io::Result<()> {
     loop {
         terminal.draw(|f| {
             let size = f.area();

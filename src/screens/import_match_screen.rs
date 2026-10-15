@@ -170,7 +170,10 @@ impl<
         let mut entry = archive
             .by_index(i)
             .map_err(|e| AppError::IO(IOError::from(e)))?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|e| AppError::IO(IOError::from(e)))?
+            .to_string();
         let mut content = String::new();
         entry
             .read_to_string(&mut content)
