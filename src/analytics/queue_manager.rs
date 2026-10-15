@@ -30,7 +30,7 @@ impl<QR: QueueReader + Send + Sync + 'static, QW: QueueWriter + Send + Sync + 's
 
     // enqueue a match for upload (thread-safe)
     pub async fn enqueue(&self, team_id: Uuid, match_id: String) -> Result<(), AppError> {
-        let _ = self.lock.lock().await;
+        let _guard = self.lock.lock().await;
         let mut queue = self.queue_reader.load().await?;
         queue.enqueue(team_id, match_id);
         self.queue_writer.save(&queue).await
@@ -38,13 +38,13 @@ impl<QR: QueueReader + Send + Sync + 'static, QW: QueueWriter + Send + Sync + 's
 
     // load queue (thread-safe)
     pub async fn load(&self) -> Result<UploadQueue, AppError> {
-        let _ = self.lock.lock().await;
+        let _guard = self.lock.lock().await;
         self.queue_reader.load().await
     }
 
     // remove successfully uploaded match (thread-safe)
     pub async fn dequeue(&self, match_id: &str) -> Result<(), AppError> {
-        let _ = self.lock.lock().await;
+        let _guard = self.lock.lock().await;
         let mut queue = self.queue_reader.load().await?;
         queue.dequeue(match_id);
         self.queue_writer.save(&queue).await
@@ -52,7 +52,7 @@ impl<QR: QueueReader + Send + Sync + 'static, QW: QueueWriter + Send + Sync + 's
 
     // mark retry for failed upload (thread-safe)
     pub async fn mark_retry(&self, match_id: &str) -> Result<(), AppError> {
-        let _ = self.lock.lock().await;
+        let _guard = self.lock.lock().await;
         let mut queue = self.queue_reader.load().await?;
         queue.mark_retry(match_id);
         self.queue_writer.save(&queue).await
