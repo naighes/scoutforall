@@ -12,7 +12,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   RUSTDOCFLAGS: "--deny warnings"
-  MINIMUM_SUPPORTED_RUST_VERSION: 1.89.0
+  MINIMUM_SUPPORTED_RUST_VERSION: 1.92.0
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
