@@ -32,13 +32,9 @@ use crate::{
     screens::screen::AppAction,
     shapes::settings::{init_settings, Settings},
 };
-use crokey::crossterm::{
-    event::{self, Event, KeyEventKind},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use crokey::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
+    backend::Backend,
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     widgets::Paragraph,
@@ -138,11 +134,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    // also installs a panic hook restoring the terminal state
+    let mut terminal = ratatui::init();
     let res = run_app(
         &mut terminal,
         App::new(
@@ -163,9 +156,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(handle) = worker_handle {
         handle.abort();
     }
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    ratatui::restore();
     if let Err(err) = res {
         println!("{:?}", err)
     }
