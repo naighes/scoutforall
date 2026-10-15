@@ -201,6 +201,7 @@ impl ScreenAsync for MatchStatsScreen {
                     AppAction::None
                 }
                 (Some(ScreenActionEnum::Back), KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (Some(ScreenActionEnum::Next), _, _) => {
                     match self.state.selected() {
                         Some(i) => {

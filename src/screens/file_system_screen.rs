@@ -345,6 +345,7 @@ where
                     }
                 }
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (Some(ScreenActionEnum::EnterDirectory), _, _) => {
                     let child = self
                         .list_state

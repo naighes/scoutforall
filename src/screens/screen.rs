@@ -59,8 +59,7 @@ where
                 map_screen_action(kb, ae, *description_fn, fmt)
             }
         })
-        .take_while(|f| f.is_some())
-        .map(|f| f.unwrap())
+        .map_while(|f| f)
         .collect()
 }
 

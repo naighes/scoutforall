@@ -172,7 +172,6 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
-            Sba::Simple(ScreenActionEnum::Quit),
         ];
 
         let kb = &settings.keybindings.clone();
