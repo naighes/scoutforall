@@ -432,15 +432,12 @@ impl Lineup {
                 )));
             }
             // closed change
-            match self.get_enforced_replacement(replaced) {
-                None => {}
-                Some(enforced) => {
-                    if enforced != *replacement {
-                        return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
-                            "player {:?} can be only replaced by player {:?}",
-                            replaced, enforced,
-                        ))));
-                    }
+            if let Some(enforced) = self.get_enforced_replacement(replaced) {
+                if enforced != *replacement {
+                    return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
+                        "player {:?} can be only replaced by player {:?}",
+                        replaced, enforced,
+                    ))));
                 }
             }
 

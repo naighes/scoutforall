@@ -918,13 +918,7 @@ impl Stats {
                     // direct point us
                     EventTypeEnum::OE => 1,
                     // direct point them
-                    EventTypeEnum::OS | EventTypeEnum::F => {
-                        if metric == Metric::Efficiency {
-                            -1
-                        } else {
-                            0
-                        }
-                    }
+                    EventTypeEnum::OS | EventTypeEnum::F if metric == Metric::Efficiency => -1,
                     // other neutral events
                     _ => 0,
                 }
