@@ -9,22 +9,22 @@ use crate::{
             select::Select,
         },
         report_an_issue_screen::ReportAnIssueScreen,
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{LanguageEnum, ScreenActionEnum, WithDesc},
         keybinding::ActionsKeyBindings,
-        settings::{set_settings, Settings},
+        settings::{Settings, set_settings},
     },
 };
 use async_trait::async_trait;
-use crokey::{crossterm, KeyCombinationFormat};
+use crokey::{KeyCombinationFormat, crossterm};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 #[derive(Debug)]
@@ -84,6 +84,10 @@ impl<SW: SettingsWriter + Send + Sync> ScreenAsync for SettingsScreen<SW> {
                 (_, KeyCode::Down, _) => self.handle_down(),
                 (Some(&ScreenActionEnum::Next), _, _) => self.handle_tab(),
                 (Some(&ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
+                (Some(&ScreenActionEnum::ReportAnIssue), _, _) => AppAction::SwitchScreen(
+                    Box::new(ReportAnIssueScreen::new(self.settings.clone())),
+                ),
+                (Some(&ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (_, KeyCode::Char(c), _) => self.handle_char(c),
                 (Some(&ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(&ScreenActionEnum::Confirm), _, _) => self.handle_enter().await,
@@ -198,12 +202,8 @@ impl<SW: SettingsWriter + Send + Sync> SettingsScreen<SW> {
     }
 
     fn handle_char(&mut self, c: char) -> AppAction {
-        if c == 'i' || c == 'I' {
-            AppAction::SwitchScreen(Box::new(ReportAnIssueScreen::new(self.settings.clone())))
-        } else {
-            self.analytics_enabled.handle_char(c);
-            AppAction::None
-        }
+        self.analytics_enabled.handle_char(c);
+        AppAction::None
     }
 
     fn render_key_bindings_widget(&mut self, f: &mut Frame, area: Rect) {

@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::{
     errors::{AppError, IOError},
-    localization::{current_labels, Labels},
+    localization::{Labels, current_labels},
 };
 
 pub trait FriendlyName {

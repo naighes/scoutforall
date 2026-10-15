@@ -4,17 +4,17 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 use std::{
     fs,
@@ -106,11 +106,7 @@ where
     fn next(&mut self) {
         self.move_selection(
             |selected, len| {
-                if selected < len - 1 {
-                    selected + 1
-                } else {
-                    0
-                }
+                if selected < len - 1 { selected + 1 } else { 0 }
             },
         );
     }
@@ -118,11 +114,7 @@ where
     fn previous(&mut self) {
         self.move_selection(
             |selected, len| {
-                if selected > 0 {
-                    selected - 1
-                } else {
-                    len - 1
-                }
+                if selected > 0 { selected - 1 } else { len - 1 }
             },
         );
     }
@@ -154,11 +146,11 @@ where
         } else {
             child.parent().map(|p| p.to_path_buf())
         };
-        if let Some(dir) = dir_to_save {
-            if let Ok(mut settings) = self.settings_reader.read().await {
-                settings.last_used_dir = Some(dir.clone());
-                let _ = self.settings_writer.save(settings).await;
-            }
+        if let Some(dir) = dir_to_save
+            && let Ok(mut settings) = self.settings_reader.read().await
+        {
+            settings.last_used_dir = Some(dir.clone());
+            let _ = self.settings_writer.save(settings).await;
         }
     }
 
@@ -345,6 +337,7 @@ where
                     }
                 }
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (Some(ScreenActionEnum::EnterDirectory), _, _) => {
                     let child = self
                         .list_state

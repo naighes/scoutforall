@@ -3,7 +3,7 @@ use crate::{
     localization::current_labels,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{
@@ -11,8 +11,8 @@ use crate::{
             ScreenActionEnum, ZoneEnum,
         },
         keybinding::ActionsKeyBindings,
-        player::PlayerEntry,
         r#match::MatchEntry,
+        player::PlayerEntry,
         set::SetEntry,
         settings::Settings,
         snapshot::Snapshot,
@@ -22,14 +22,14 @@ use crate::{
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{
-        canvas::Canvas, Bar, BarChart, BarGroup, Block, Borders, Cell, Gauge, List, ListItem,
-        ListState, Padding, Row, Table,
+        Bar, BarChart, BarGroup, Block, Borders, Cell, Gauge, List, ListItem, ListState, Padding,
+        Row, Table, canvas::Canvas,
     },
-    Frame,
 };
 use std::{collections::HashSet, fmt::Display, iter::once};
 use uuid::Uuid;
@@ -81,7 +81,7 @@ where
             .items
             .iter()
             .map(|p| {
-                ListItem::new(if let Some(ref p) = p {
+                ListItem::new(if let Some(p) = p {
                     p.to_string()
                 } else {
                     "-".to_string()
@@ -201,6 +201,7 @@ impl ScreenAsync for MatchStatsScreen {
                     AppAction::None
                 }
                 (Some(ScreenActionEnum::Back), KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (Some(ScreenActionEnum::Next), _, _) => {
                     match self.state.selected() {
                         Some(i) => {
@@ -538,7 +539,7 @@ impl MatchStatsScreen {
                 {
                     bars.push(
                         Bar::default()
-                            .label(eval.to_string().into())
+                            .label(eval.to_string())
                             .value((percent.round() as u64).min(100))
                             .text_value(format!("{}%", percent.round()))
                             .style(Style::default().fg(color))
@@ -569,43 +570,43 @@ impl MatchStatsScreen {
         let phase = self.phase_filter.selected().cloned();
         let player = self.player_filter.selected().map(|p| p.id);
         let stats = self.get_current_stats(set);
-        if let Some(stats) = &stats {
-            if let Some((eff, _tot, _count)) = stats.event_positiveness(
+        if let Some(stats) = &stats
+            && let Some((eff, _tot, _count)) = stats.event_positiveness(
                 event_type,
                 player,
                 phase,
                 rotation,
                 None,
                 Metric::Efficiency,
-            ) {
-                let color = if eff < 10.0 {
-                    Color::Red
-                } else if eff < 30.0 {
-                    Color::Yellow
-                } else if eff < 40.0 {
-                    Color::LightGreen
-                } else {
-                    Color::Green
-                };
-                let normalized = (((eff + 100.0) / 2.0).clamp(0.0, 100.0)).round() as u16;
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(3), Constraint::Min(0)])
-                    .split(area);
-                let gauge = Gauge::default()
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title(current_labels().efficiency),
-                    )
-                    .gauge_style(Style::default().fg(color).bg(Color::Black))
-                    .percent(normalized)
-                    .label(Span::styled(
-                        format!("{:.0}%", eff),
-                        Style::default().fg(Color::White),
-                    ));
-                f.render_widget(gauge, chunks[0]);
-            }
+            )
+        {
+            let color = if eff < 10.0 {
+                Color::Red
+            } else if eff < 30.0 {
+                Color::Yellow
+            } else if eff < 40.0 {
+                Color::LightGreen
+            } else {
+                Color::Green
+            };
+            let normalized = (((eff + 100.0) / 2.0).clamp(0.0, 100.0)).round() as u16;
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(0)])
+                .split(area);
+            let gauge = Gauge::default()
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().efficiency),
+                )
+                .gauge_style(Style::default().fg(color).bg(Color::Black))
+                .percent(normalized)
+                .label(Span::styled(
+                    format!("{:.0}%", eff),
+                    Style::default().fg(Color::White),
+                ));
+            f.render_widget(gauge, chunks[0]);
         }
     }
 
@@ -616,43 +617,43 @@ impl MatchStatsScreen {
         let phase = self.phase_filter.selected().cloned();
         let player = self.player_filter.selected().map(|p| p.id);
         let stats = self.get_current_stats(set);
-        if let Some(stats) = &stats {
-            if let Some((eff, _tot, _count)) = stats.event_positiveness(
+        if let Some(stats) = &stats
+            && let Some((eff, _tot, _count)) = stats.event_positiveness(
                 event_type,
                 player,
                 phase,
                 rotation,
                 None,
                 Metric::Positive,
-            ) {
-                let color = if eff < 10.0 {
-                    Color::Red
-                } else if eff < 20.0 {
-                    Color::Yellow
-                } else if eff < 30.0 {
-                    Color::LightGreen
-                } else {
-                    Color::Green
-                };
-                let normalized = eff.round() as u16;
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(3), Constraint::Min(0)])
-                    .split(area);
-                let gauge = Gauge::default()
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title(current_labels().positiveness),
-                    )
-                    .gauge_style(Style::default().fg(color).bg(Color::Black))
-                    .percent(normalized)
-                    .label(Span::styled(
-                        format!("{:.0}%", eff),
-                        Style::default().fg(Color::White),
-                    ));
-                f.render_widget(gauge, chunks[0]);
-            }
+            )
+        {
+            let color = if eff < 10.0 {
+                Color::Red
+            } else if eff < 20.0 {
+                Color::Yellow
+            } else if eff < 30.0 {
+                Color::LightGreen
+            } else {
+                Color::Green
+            };
+            let normalized = eff.round() as u16;
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(0)])
+                .split(area);
+            let gauge = Gauge::default()
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(current_labels().positiveness),
+                )
+                .gauge_style(Style::default().fg(color).bg(Color::Black))
+                .percent(normalized)
+                .label(Span::styled(
+                    format!("{:.0}%", eff),
+                    Style::default().fg(Color::White),
+                ));
+            f.render_widget(gauge, chunks[0]);
         }
     }
 

@@ -13,7 +13,7 @@ use crate::{
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
         keybindings_screen::{KeyBindingsScreen, KeybindingScreen},
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
         settings_screen::SettingsScreen,
         team_details_screen::TeamDetailsScreen,
     },
@@ -27,10 +27,10 @@ use crate::{
 use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 
 #[derive(Debug)]
@@ -61,14 +61,14 @@ pub struct TeamListScreen<
 
 #[async_trait]
 impl<
-        TR: TeamReader + Send + Sync + 'static,
-        TW: TeamWriter + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        MR: MatchReader + Send + Sync + 'static,
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > ScreenAsync for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
+    TR: TeamReader + Send + Sync + 'static,
+    TW: TeamWriter + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> ScreenAsync for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     async fn refresh_data(&mut self) {
         if let Ok(s) = self.settings_reader.read().await {
@@ -182,14 +182,14 @@ impl<
 }
 
 impl<
-        TR: TeamReader + Send + Sync + 'static,
-        TW: TeamWriter + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        MR: MatchReader + Send + Sync + 'static,
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
+    TR: TeamReader + Send + Sync + 'static,
+    TW: TeamWriter + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notify_message.render(f, footer_right);
@@ -226,14 +226,14 @@ impl<
 }
 
 impl<
-        TR: TeamReader + Send + Sync + 'static,
-        TW: TeamWriter + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-        MR: MatchReader + Send + Sync + 'static,
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-    > TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
+    TR: TeamReader + Send + Sync + 'static,
+    TW: TeamWriter + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+> TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     pub fn new(
         settings: Settings,

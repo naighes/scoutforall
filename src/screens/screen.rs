@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
-use ratatui::{layout::Rect, Frame};
+use ratatui::{Frame, layout::Rect};
 
 use crate::shapes::{enums::WithDesc, keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
 
@@ -59,8 +59,7 @@ where
                 map_screen_action(kb, ae, *description_fn, fmt)
             }
         })
-        .take_while(|f| f.is_some())
-        .map(|f| f.unwrap())
+        .map_while(|f| f)
         .collect()
 }
 

@@ -99,7 +99,11 @@ impl<TR: TeamReader + Send + Sync, TW: TeamWriter + Send + Sync> ImportTeamActio
                 .by_index(i)
                 .map_err(|e| AppError::IO(IOError::from(e)))?;
             // look for the team.json file
-            if file.name().eq_ignore_ascii_case("team.json") {
+            let is_team_json = file
+                .name()
+                .map_err(|e| AppError::IO(IOError::from(e)))?
+                .eq_ignore_ascii_case("team.json");
+            if is_team_json {
                 file.read_to_string(&mut team_json_content)
                     .map_err(|e| AppError::IO(IOError::from(e)))?;
                 found = true;

@@ -4,8 +4,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-static LOGGER: once_cell::sync::Lazy<Mutex<Logger>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(Logger::new()));
+static LOGGER: std::sync::LazyLock<Mutex<Logger>> =
+    std::sync::LazyLock::new(|| Mutex::new(Logger::new()));
 
 struct Logger {
     path: Option<PathBuf>,

@@ -30,19 +30,15 @@ use crate::{
         team_reader::TeamReader,
     },
     screens::screen::AppAction,
-    shapes::settings::{init_settings, Settings},
+    shapes::settings::{Settings, init_settings},
 };
-use crokey::crossterm::{
-    event::{self, Event, KeyEventKind},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use crokey::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
+    Terminal,
+    backend::Backend,
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     widgets::Paragraph,
-    Terminal,
 };
 use std::{error::Error, sync::Arc, time::Duration};
 
@@ -67,7 +63,7 @@ fn maybe_check_update() {
         .and_then(|u| u.update());
     match status {
         Ok(status) => {
-            if status.updated() {
+            if status.is_updated() {
                 println!(
                     "{} {}",
                     current_labels().updated_to_version,
@@ -138,11 +134,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    // also installs a panic hook restoring the terminal state
+    let mut terminal = ratatui::init();
     let res = run_app(
         &mut terminal,
         App::new(
@@ -163,9 +156,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(handle) = worker_handle {
         handle.abort();
     }
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    ratatui::restore();
     if let Err(err) = res {
         println!("{:?}", err)
     }
@@ -185,7 +176,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// |----------------------------|
 /// | footer_left | footer_right |
 /// |----------------------------|
-async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::io::Result<()> {
+async fn run_app<B: Backend<Error = std::io::Error>>(
+    terminal: &mut Terminal<B>,
+    mut app: App,
+) -> std::io::Result<()> {
     loop {
         terminal.draw(|f| {
             let size = f.area();
@@ -209,25 +203,23 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> std::i
                 screen.render(f, container[1], footer[0], footer[1]);
             }
         })?;
-        if event::poll(std::time::Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()? {
-                match (key.code, key.kind, app.current_screen()) {
-                    (_, KeyEventKind::Release, _) => continue,
-                    (_, _, Some(screen)) => match screen.handle_key(key).await {
-                        AppAction::None => {}
-                        AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
-                        AppAction::Back(refresh, count) => {
-                            app.pop_screen(refresh, count).await;
-                            if refresh {
-                                if let Some(screen) = app.current_screen() {
-                                    screen.refresh_data().await;
-                                }
-                            }
+        if event::poll(std::time::Duration::from_millis(200))?
+            && let Event::Key(key) = event::read()?
+        {
+            match (key.code, key.kind, app.current_screen()) {
+                (_, KeyEventKind::Release, _) => continue,
+                (_, _, Some(screen)) => match screen.handle_key(key).await {
+                    AppAction::None => {}
+                    AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
+                    AppAction::Back(refresh, count) => {
+                        app.pop_screen(refresh, count).await;
+                        if refresh && let Some(screen) = app.current_screen() {
+                            screen.refresh_data().await;
                         }
-                        AppAction::Quit(result) => return result,
-                    },
-                    _ => {}
-                }
+                    }
+                    AppAction::Quit(result) => return result,
+                },
+                _ => {}
             }
         }
     }

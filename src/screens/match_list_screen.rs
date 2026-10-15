@@ -19,7 +19,7 @@ use crate::{
         import_match_screen::ImportMatchAction,
         match_stats_screen::MatchStatsScreen,
         scouting_screen::ScoutingScreen,
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
         start_set_screen::StartSetScreen,
     },
     shapes::{
@@ -35,14 +35,14 @@ use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
 use dirs::home_dir;
 use ratatui::{
-    layout::Alignment,
-    widgets::{Row, Table},
-};
-use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, ListState, Paragraph},
-    Frame,
+};
+use ratatui::{
+    layout::Alignment,
+    widgets::{Row, Table},
 };
 
 #[derive(Debug)]
@@ -70,12 +70,12 @@ pub struct MatchListScreen<
 }
 
 impl<
-        MR: MatchReader + Send + Sync + 'static,
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-    > Renderable for MatchListScreen<MR, MW, SSW, SR, SW>
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+> Renderable for MatchListScreen<MR, MW, SSW, SR, SW>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
@@ -140,12 +140,12 @@ impl<
 
 #[async_trait]
 impl<
-        MR: MatchReader + Send + Sync + 'static,
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-    > ScreenAsync for MatchListScreen<MR, MW, SSW, SR, SW>
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+> ScreenAsync for MatchListScreen<MR, MW, SSW, SR, SW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
@@ -267,12 +267,12 @@ impl<
 }
 
 impl<
-        MR: MatchReader + Send + Sync + 'static,
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-    > MatchListScreen<MR, MW, SSW, SR, SW>
+    MR: MatchReader + Send + Sync + 'static,
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+> MatchListScreen<MR, MW, SSW, SR, SW>
 {
     pub fn new(
         settings: Settings,

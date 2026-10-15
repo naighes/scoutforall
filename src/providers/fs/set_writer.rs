@@ -14,7 +14,7 @@ use serde_json::to_vec_pretty;
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 use tokio::{
-    fs::{create_dir_all, write, File},
+    fs::{File, create_dir_all, write},
     task::spawn_blocking,
 };
 use uuid::Uuid;

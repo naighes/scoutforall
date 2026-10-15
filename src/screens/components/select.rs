@@ -1,10 +1,10 @@
 use crate::{localization::current_labels, shapes::enums::FriendlyName};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 
 #[derive(Debug)]

@@ -3,11 +3,11 @@ use crate::{
     errors::AppError,
     providers::{queue_reader::QueueReader, queue_writer::QueueWriter},
 };
-use once_cell::sync::OnceCell;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
-static GLOBAL_QUEUE_MANAGER: OnceCell<Arc<dyn GlobalQueueManager>> = OnceCell::new();
+static GLOBAL_QUEUE_MANAGER: OnceLock<Arc<dyn GlobalQueueManager>> = OnceLock::new();
 
 #[async_trait::async_trait]
 pub trait GlobalQueueManager: Send + Sync {

@@ -10,9 +10,9 @@ use hf::is_hidden;
 use std::{fs::File, io::Read, path::Path};
 use std::{io::Write, path::PathBuf};
 use uuid::Uuid;
-use zip::write::FileOptions;
 use zip::CompressionMethod::*;
 use zip::ZipWriter;
+use zip::write::FileOptions;
 
 pub struct ExportTeamAction {
     team_id: Uuid,
@@ -49,7 +49,7 @@ impl FileSystemAction for ExportTeamAction {
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
         let team_descriptor_file_path =
             get_team_folder_path(&self.base_path, &self.team_id)?.join(TEAM_DESCRIPTOR_FILE_NAME);
-        let zip_file_path = path.join(format!("{}.zip", &self.team_id));
+        let zip_file_path = path.join(format!("{}.zip", self.team_id));
         if zip_file_path.exists() {
             return Err(AppError::IO(IOError::Msg(
                 current_labels().file_already_exists.to_string(),

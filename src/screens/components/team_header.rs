@@ -3,11 +3,11 @@ use crate::{
     shapes::{enums::FriendlyName, team::TeamEntry},
 };
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 #[derive(Debug, Clone)]

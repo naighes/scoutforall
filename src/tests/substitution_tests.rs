@@ -23,19 +23,19 @@ mod tests {
         let snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
         let options = snapshot.current_lineup.get_replaceable_lineup_choices();
         assert_eq!(
-            options[0].1 .1,
+            options[0].1.1,
             Some(setter),
             "first option should be setter"
         );
-        assert_eq!(options[1].1 .1, Some(oh1), "second option should be oh1");
-        assert_eq!(options[2].1 .1, Some(mb2), "third option should be mb2");
+        assert_eq!(options[1].1.1, Some(oh1), "second option should be oh1");
+        assert_eq!(options[2].1.1, Some(mb2), "third option should be mb2");
         assert_eq!(
-            options[3].1 .1,
+            options[3].1.1,
             Some(opposite),
             "fourth option should be opposite"
         );
-        assert_eq!(options[4].1 .1, Some(oh2), "fifth option should be oh2");
-        assert_eq!(options[5].1 .1, Some(mb1), "sixth option should be mb1");
+        assert_eq!(options[4].1.1, Some(oh2), "fifth option should be oh2");
+        assert_eq!(options[5].1.1, Some(mb1), "sixth option should be mb1");
         assert_eq!(options.len(), 6);
     }
 
@@ -62,15 +62,15 @@ mod tests {
             .add_substitution(&setter_replacement, &setter)
             .expect("no errors expected");
         let options = snapshot.current_lineup.get_replaceable_lineup_choices();
-        assert_eq!(options[0].1 .1, Some(oh1), "first option should be oh1");
-        assert_eq!(options[1].1 .1, Some(mb2), "second option should be mb2");
+        assert_eq!(options[0].1.1, Some(oh1), "first option should be oh1");
+        assert_eq!(options[1].1.1, Some(mb2), "second option should be mb2");
         assert_eq!(
-            options[2].1 .1,
+            options[2].1.1,
             Some(opposite),
             "third option should be opposite"
         );
-        assert_eq!(options[3].1 .1, Some(oh2), "fourth option should be oh2");
-        assert_eq!(options[4].1 .1, Some(mb1), "fifth option should be mb1");
+        assert_eq!(options[3].1.1, Some(oh2), "fourth option should be oh2");
+        assert_eq!(options[4].1.1, Some(mb1), "fifth option should be mb1");
         assert_eq!(options.len(), 5);
     }
 
@@ -94,19 +94,19 @@ mod tests {
             .expect("no errors expected");
         let options = snapshot.current_lineup.get_replaceable_lineup_choices();
         assert_eq!(
-            options[0].1 .1,
+            options[0].1.1,
             Some(setter_replacement),
             "first option should be setter_replacement"
         );
-        assert_eq!(options[1].1 .1, Some(oh1), "second option should be oh1");
-        assert_eq!(options[2].1 .1, Some(mb2), "third option should be mb2");
+        assert_eq!(options[1].1.1, Some(oh1), "second option should be oh1");
+        assert_eq!(options[2].1.1, Some(mb2), "third option should be mb2");
         assert_eq!(
-            options[3].1 .1,
+            options[3].1.1,
             Some(opposite),
             "fourth option should be opposite"
         );
-        assert_eq!(options[4].1 .1, Some(oh2), "fifth option should be oh2");
-        assert_eq!(options[5].1 .1, Some(mb1), "sixth option should be mb1");
+        assert_eq!(options[4].1.1, Some(oh2), "fifth option should be oh2");
+        assert_eq!(options[5].1.1, Some(mb1), "sixth option should be mb1");
         assert_eq!(options.len(), 6);
     }
 

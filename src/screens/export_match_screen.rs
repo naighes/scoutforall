@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use hf::is_hidden;
 use std::{fs, io::Write, path::PathBuf};
 use std::{fs::File, path::Path};
-use zip::write::FileOptions;
 use zip::ZipWriter;
+use zip::write::FileOptions;
 
 pub struct ExportMatchAction {
     team: TeamEntry,

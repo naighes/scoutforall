@@ -1,5 +1,5 @@
-use crate::errors::AppError;
-use crate::localization::{current_labels, Labels};
+use crate::errors::{AppError, IOError};
+use crate::localization::{Labels, current_labels};
 use crate::reporting::align::Align;
 use crate::reporting::circle::Circle;
 use crate::reporting::court::render_court;
@@ -7,10 +7,11 @@ use crate::reporting::stack::{Stack, StackDirection};
 use crate::reporting::table_row::{Cell, Row};
 use crate::reporting::text::Text;
 use crate::reporting::typst_content::TypstContent;
+use crate::reporting::typst_world::ReportWorld;
 use crate::reporting::util::escape_text;
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum};
-use crate::shapes::player::PlayerEntry;
 use crate::shapes::r#match::{MatchEntry, MatchStatus};
+use crate::shapes::player::PlayerEntry;
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::Snapshot;
 use crate::shapes::stats::{Metric, Stats};
@@ -18,7 +19,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fs};
-use typst_as_library::TypstWrapperWorld;
+use typst_layout::PagedDocument;
 use typst_pdf::PdfOptions;
 use uuid::Uuid;
 
@@ -30,6 +31,15 @@ pub const GRAY: &str = "#666666";
 pub const ALTERNATE_COLOR: &str = "#efefef";
 
 pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
+    let pdf = render_match_pdf(m)?;
+    let mut path: PathBuf = env::temp_dir();
+    let uid = Uuid::new_v4().to_string();
+    path.push(format!("{}_{}.pdf", m.id, uid));
+    fs::write(&path, pdf).map_err(|e| AppError::IO(IOError::from(e)))?;
+    open_with_system_viewer(&path)
+}
+
+pub fn render_match_pdf(m: &MatchEntry) -> Result<Vec<u8>, AppError> {
     let mut content = String::new();
     let created_with = current_labels().created_with;
     let match_status = m.get_status()?;
@@ -106,17 +116,17 @@ pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
     content.push_str(&render_global_stats_table(&aggregated_stats));
     content.push_str(&render_sets_stats_table(&sets));
     content.push_str(&render_bottom_stats(&aggregated_stats));
-    let mut path: PathBuf = env::temp_dir();
-    let uid = Uuid::new_v4().to_string();
-    path.push(format!("{}_{}.pdf", m.id, uid));
-    let world = TypstWrapperWorld::new("../".to_owned(), content);
-    let document = typst::compile(&world)
+    let world = ReportWorld::new(content);
+    let document = typst::compile::<PagedDocument>(&world)
         .output
-        .expect("error compiling typst");
-    let pdf = typst_pdf::pdf(&document, &PdfOptions::default()).expect("error exporting PDF");
-    fs::write(&path, pdf).expect("error writing PDF");
-    open_with_system_viewer(&path);
-    Ok(())
+        .map_err(|e| typst_error("error compiling typst", &e))?;
+    typst_pdf::pdf(&document, &PdfOptions::default())
+        .map_err(|e| typst_error("error exporting PDF", &e))
+}
+
+fn typst_error(context: &str, diagnostics: &[typst::diag::SourceDiagnostic]) -> AppError {
+    let details: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+    AppError::IO(IOError::Msg(format!("{}: {}", context, details.join("; "))))
 }
 
 fn render_bottom_stats(aggregated_stats: &Stats) -> String {
@@ -1723,35 +1733,35 @@ block(
     )
 }
 
-fn open_with_system_viewer(file: &Path) {
-    let path = file;
-
+fn open_with_system_viewer(path: &Path) -> Result<(), AppError> {
+    // the empty argument is the window title: without it `start` would treat
+    // a quoted path (e.g. containing spaces) as the title
     #[cfg(target_os = "windows")]
-    {
-        #[allow(clippy::zombie_processes)]
-        Command::new("cmd")
-            .args(&["/C", "start", path.to_str().unwrap()])
-            .spawn()
-            .expect("failed to open PDF");
-    }
+    let mut command = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", ""]).arg(path);
+        c
+    };
 
     #[cfg(target_os = "macos")]
-    {
-        #[allow(clippy::zombie_processes)]
-        Command::new("open")
-            .arg(path)
-            .spawn()
-            .expect("failed to open PDF");
-    }
+    let mut command = {
+        let mut c = Command::new("open");
+        c.arg(path);
+        c
+    };
 
     #[cfg(target_os = "linux")]
-    {
-        #[allow(clippy::zombie_processes)]
-        Command::new("xdg-open")
-            .arg(path)
-            .spawn()
-            .expect("failed to open PDF");
-    }
+    let mut command = {
+        let mut c = Command::new("xdg-open");
+        c.arg(path);
+        c
+    };
+
+    #[allow(clippy::zombie_processes)]
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
 fn fmt_pct(opt: Option<f64>) -> String {

@@ -1,9 +1,9 @@
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     widgets::Paragraph,
-    Frame,
 };
 
 use crate::errors::{AppError, IOError};
@@ -108,16 +108,8 @@ impl DatePicker {
             1 => {
                 let first = self.month.chars().next().unwrap();
                 match first {
-                    '0' => {
-                        if ('1'..='9').contains(&c) {
-                            self.month.push(c);
-                        }
-                    }
-                    '1' => {
-                        if ('0'..='2').contains(&c) {
-                            self.month.push(c);
-                        }
-                    }
+                    '0' if ('1'..='9').contains(&c) => self.month.push(c),
+                    '1' if ('0'..='2').contains(&c) => self.month.push(c),
                     _ => {}
                 }
             }

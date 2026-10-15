@@ -1,7 +1,7 @@
 use crate::shapes::enums::LanguageEnum;
 use crate::shapes::settings::current_settings;
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 pub struct Labels {
     pub could_not_recognize_home_directory: &'static str,
@@ -466,7 +466,7 @@ const IT: Labels = Labels {
     previous: "precedente",
     next: "successivo",
     confirm: "conferma",
-    back: "indietro", 
+    back: "indietro",
     quit: "esci",
     home: "in casa",
     opponent: "avversario",
@@ -684,7 +684,7 @@ const IT: Labels = Labels {
     update_check_failed: "impossibile controllare la presenza di aggiornamenti",
 };
 
-static DICTIONARY: Lazy<HashMap<LanguageEnum, &'static Labels>> = Lazy::new(|| {
+static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert(LanguageEnum::En, &EN);
     m.insert(LanguageEnum::It, &IT);

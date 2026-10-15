@@ -8,7 +8,7 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             team_header::TeamHeader, text_box::TextBox,
         },
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
         enums::{RoleEnum, ScreenActionEnum},
@@ -21,9 +21,9 @@ use crate::{
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
-    Frame,
 };
 
 fn validate_player_number(current: &str, c: char) -> bool {

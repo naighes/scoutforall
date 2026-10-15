@@ -6,15 +6,15 @@ use crate::{
     shapes::{r#match::MatchEntry, team::TeamEntry},
 };
 use async_trait::async_trait;
-use futures::{future::ready, TryStreamExt};
+use futures::{TryStreamExt, future::ready};
 use serde_json::from_str;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::fs::{read_dir, read_to_string, try_exists, ReadDir};
-use tokio_stream::wrappers::ReadDirStream;
+use tokio::fs::{ReadDir, read_dir, read_to_string, try_exists};
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReadDirStream;
 
 pub struct FileSystemMatchReader {
     base_path: PathBuf,
@@ -38,7 +38,7 @@ impl MatchReader for FileSystemMatchReader {
             })
             .try_collect::<Vec<_>>()
             .await?;
-        entries.sort_by(|a, b| b.date.cmp(&a.date));
+        entries.sort_by_key(|a| std::cmp::Reverse(a.date));
         Ok(entries)
     }
 

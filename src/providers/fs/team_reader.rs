@@ -6,12 +6,12 @@ use crate::{
     shapes::team::TeamEntry,
 };
 use async_trait::async_trait;
-use futures::{future::ready, TryStreamExt};
+use futures::{TryStreamExt, future::ready};
 use serde_json::from_str;
 use std::path::{Path, PathBuf};
 use tokio::fs::{read_dir, read_to_string};
-use tokio_stream::wrappers::ReadDirStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReadDirStream;
 use uuid::Uuid;
 
 pub struct FileSystemTeamReader(PathBuf);

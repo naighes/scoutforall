@@ -11,7 +11,7 @@ use crate::{
             checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
             notify_banner::NotifyBanner, team_header::TeamHeader, text_box::TextBox,
         },
-        screen::{get_keybinding_actions, AppAction, Renderable, Sba, ScreenAsync},
+        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
         start_set_screen::StartSetScreen,
     },
     shapes::{
@@ -22,9 +22,9 @@ use crate::{
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
-    Frame,
 };
 
 #[derive(Debug)]
@@ -52,11 +52,11 @@ pub struct AddMatchScreen<
 }
 
 impl<
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-    > Renderable for AddMatchScreen<MW, SSW, SR, SW>
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+> Renderable for AddMatchScreen<MW, SSW, SR, SW>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
@@ -87,11 +87,11 @@ impl<
 
 #[async_trait]
 impl<
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-    > ScreenAsync for AddMatchScreen<MW, SSW, SR, SW>
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+> ScreenAsync for AddMatchScreen<MW, SSW, SR, SW>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
@@ -121,11 +121,11 @@ impl<
 }
 
 impl<
-        MW: MatchWriter + Send + Sync + 'static,
-        SSW: SetWriter + Send + Sync + 'static,
-        SR: SettingsReader + Send + Sync + 'static,
-        SW: SettingsWriter + Send + Sync + 'static,
-    > AddMatchScreen<MW, SSW, SR, SW>
+    MW: MatchWriter + Send + Sync + 'static,
+    SSW: SetWriter + Send + Sync + 'static,
+    SR: SettingsReader + Send + Sync + 'static,
+    SW: SettingsWriter + Send + Sync + 'static,
+> AddMatchScreen<MW, SSW, SR, SW>
 {
     pub fn new(
         settings_reader: Arc<SR>,

@@ -6,4 +6,5 @@ pub mod stack;
 pub mod table_row;
 pub mod text;
 pub mod typst_content;
+pub mod typst_world;
 pub mod util;

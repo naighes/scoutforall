@@ -2,7 +2,7 @@ use {
     crate::shapes::enums::{EventTypeEnum, ScreenActionEnum, WithDesc},
     crokey::{crossterm::event::KeyEvent, *},
     serde::{Deserialize, Serialize},
-    std::collections::{hash_map, HashMap, HashSet},
+    std::collections::{HashMap, HashSet, hash_map},
 };
 
 /// A mapping from key combinations to actions.

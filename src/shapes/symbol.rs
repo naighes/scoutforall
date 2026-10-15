@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use crokey::{KeyCombination, KeyCombinationFormat};
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static SYMBOLS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+static SYMBOLS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert("Tab", "⇥");
     m.insert("Enter", "↵");

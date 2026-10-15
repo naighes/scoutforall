@@ -6,8 +6,8 @@ use crate::{
     },
 };
 use dirs::home_dir;
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use std::{path::PathBuf, str::FromStr, sync::RwLock};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -47,7 +47,7 @@ impl Settings {
     }
 }
 
-static CURRENT_SETTING: OnceCell<RwLock<Settings>> = OnceCell::new();
+static CURRENT_SETTING: OnceLock<RwLock<Settings>> = OnceLock::new();
 
 /// Default settings initialization (should be called once at startup).
 pub fn init_settings(default: Settings) {
