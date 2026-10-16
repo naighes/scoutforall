@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
 use crate::{
@@ -13,7 +14,6 @@ use crate::{
     shapes::{
         enums::{FriendlyName, GenderEnum, ScreenActionEnum, TeamClassificationEnum},
         keybinding::ActionsKeyBindings,
-        settings::Settings,
         team::TeamEntry,
     },
 };
@@ -98,7 +98,7 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditTeamScreen<TW> {
 }
 
 impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
-    pub fn new(settings: Settings, team_writer: Arc<TW>) -> Self {
+    pub fn new(team_writer: Arc<TW>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -126,7 +126,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             Sba::Simple(ScreenActionEnum::Back),
         ];
 
-        let kb = &settings.keybindings.clone();
+        let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, actions);
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 
@@ -146,7 +146,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         }
     }
 
-    pub fn edit(settings: Settings, team: &TeamEntry, team_writer: Arc<TW>) -> Self {
+    pub fn edit(team: &TeamEntry, team_writer: Arc<TW>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -174,7 +174,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             Sba::Simple(ScreenActionEnum::Back),
         ];
 
-        let kb = &settings.keybindings.clone();
+        let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, actions);
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 

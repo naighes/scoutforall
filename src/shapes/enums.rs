@@ -371,7 +371,6 @@ pub enum EvalEnum {
 }
 
 impl EvalEnum {
-    #[allow(dead_code)]
     pub const ALL: [EvalEnum; 6] = [
         EvalEnum::Perfect,
         EvalEnum::Positive,
@@ -410,6 +409,23 @@ impl FromStr for EvalEnum {
             "-" => Ok(Negative),
             _ => Err(AppError::IO(IOError::Msg(format!("invalid eval: {}", s)))),
         }
+    }
+}
+
+impl WithDesc<EvalEnum> for EvalEnum {
+    /// the evaluation regardless of the event, e.g. "# (perfect)"
+    fn with_desc(self) -> (EvalEnum, String) {
+        let labels = current_labels();
+        use EvalEnum::*;
+        let name = match self {
+            Perfect => labels.perfect,
+            Positive => labels.positive,
+            Exclamative => labels.subpositive,
+            Over => labels.over_eval,
+            Error => labels.error,
+            Negative => labels.negative,
+        };
+        (self, format!("{} ({})", self, name))
     }
 }
 
@@ -834,8 +850,7 @@ pub enum ScreenActionEnum {
     Up,
     Down,
     ReportAnIssue,
-    LanguageSettings,
-    KeybindingSettings,
+    Settings,
     OneLevelUp,
     EnterDirectory,
     ScrollUp,
@@ -845,39 +860,6 @@ pub enum ScreenActionEnum {
 }
 pub trait WithDesc<T> {
     fn with_desc(self) -> (T, String);
-}
-impl ScreenActionEnum {
-    pub const ALL: [ScreenActionEnum; 29] = [
-        ScreenActionEnum::Back,
-        ScreenActionEnum::Confirm,
-        ScreenActionEnum::Next,
-        ScreenActionEnum::Edit,
-        ScreenActionEnum::Export,
-        ScreenActionEnum::Import,
-        ScreenActionEnum::EditPlayer,
-        ScreenActionEnum::NewPlayer,
-        ScreenActionEnum::RemovePlayer,
-        ScreenActionEnum::EditTeam,
-        ScreenActionEnum::MatchList,
-        ScreenActionEnum::MatchStats,
-        ScreenActionEnum::New,
-        ScreenActionEnum::Delete,
-        ScreenActionEnum::Previous,
-        ScreenActionEnum::PrintReport,
-        ScreenActionEnum::Quit,
-        ScreenActionEnum::Select,
-        ScreenActionEnum::Up,
-        ScreenActionEnum::Down,
-        ScreenActionEnum::ReportAnIssue,
-        ScreenActionEnum::LanguageSettings,
-        ScreenActionEnum::KeybindingSettings,
-        ScreenActionEnum::OneLevelUp,
-        ScreenActionEnum::EnterDirectory,
-        ScreenActionEnum::ScrollUp,
-        ScreenActionEnum::ScrollDown,
-        ScreenActionEnum::Reset,
-        ScreenActionEnum::Undo,
-    ];
 }
 
 impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
@@ -904,14 +886,7 @@ impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
             Up => (Up, current_labels().previous.to_string()),
             Down => (Down, current_labels().next.to_string()),
             ReportAnIssue => (ReportAnIssue, current_labels().report_an_issue.to_string()),
-            LanguageSettings => (
-                LanguageSettings,
-                current_labels().language_settings.to_string(),
-            ),
-            KeybindingSettings => (
-                KeybindingSettings,
-                current_labels().keybinding_settings.to_string(),
-            ),
+            Settings => (Settings, current_labels().settings.to_string()),
             OneLevelUp => (OneLevelUp, current_labels().up_one_level.to_string()),
             EnterDirectory => (EnterDirectory, current_labels().enter_directory.to_string()),
             ScrollUp => (ScrollUp, current_labels().scroll_up.to_string()),
@@ -947,8 +922,7 @@ impl fmt::Display for ScreenActionEnum {
             Up => "up",
             Down => "down",
             ReportAnIssue => "report-an-issue",
-            LanguageSettings => "language-settings",
-            KeybindingSettings => "keybinding-settings",
+            Settings => "settings",
             OneLevelUp => "one-level-up",
             EnterDirectory => "enter-directory",
             ScrollUp => "scroll-up",

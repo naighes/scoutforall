@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
@@ -129,7 +130,7 @@ impl<
         }
         self.header.render(f, container[0], Some(&self.team));
         self.notify_message.render(f, footer_right);
-        let kb: &KeyBindings<ScreenActionEnum> = &self.settings.keybindings;
+        let kb: &KeyBindings<ScreenActionEnum> = navigation_keybindings();
         let screen_actions = &self.screen_actions();
         let screen_key_bindings = &kb.slice(Sba::keys(screen_actions));
         let footer_entries = get_keybinding_actions(kb, screen_actions);
@@ -183,7 +184,6 @@ impl<
                 }
                 (Some(ScreenActionEnum::Import), _, _) => match home_dir() {
                     Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                        self.settings.clone(),
                         path,
                         current_labels().import_match,
                         ImportMatchAction::new(
@@ -209,7 +209,6 @@ impl<
                     match (home_dir(), selected_match) {
                         (Some(path), Some((match_entry, _))) => {
                             AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                                self.settings.clone(),
                                 path,
                                 current_labels().export,
                                 ExportMatchAction::new(
@@ -468,7 +467,7 @@ impl<
 
     fn handle_space_key(&mut self) -> AppAction {
         match self.get_selected_match() {
-            Some((m, _)) => match MatchStatsScreen::new(self.settings.clone(), m.clone()) {
+            Some((m, _)) => match MatchStatsScreen::new(m.clone()) {
                 Ok(screen) => AppAction::SwitchScreen(Box::new(screen)),
                 Err(_) => {
                     self.notify_message

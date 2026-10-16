@@ -1,9 +1,54 @@
 use {
-    crate::shapes::enums::{EventTypeEnum, ScreenActionEnum, WithDesc},
-    crokey::{crossterm::event::KeyEvent, *},
+    crate::shapes::enums::{EvalEnum, EventTypeEnum, ScreenActionEnum, WithDesc},
+    crokey::{
+        crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
+        *,
+    },
     serde::{Deserialize, Serialize},
     std::collections::{HashMap, HashSet, hash_map},
 };
+
+static NAVIGATION_KEYBINDINGS: std::sync::LazyLock<KeyBindings<ScreenActionEnum>> =
+    std::sync::LazyLock::new(KeyBindings::default);
+
+/// The keys moving through the screens: unlike the scouting ones, they can't
+/// be customized.
+pub fn navigation_keybindings() -> &'static KeyBindings<ScreenActionEnum> {
+    &NAVIGATION_KEYBINDINGS
+}
+
+/// Opens the settings, from home and while scouting.
+pub const SETTINGS_KEY: KeyCombination = key!(f2);
+/// Undoes the last scouting step.
+pub const UNDO_KEY: KeyCombination = key!(u);
+/// Leaves the scouting.
+pub const BACK_KEY: KeyCombination = key!(esc);
+
+/// Whether the key is one scouting keeps for itself (settings, undo, back and
+/// the digits choosing players): it can't be assigned to events nor
+/// evaluations.
+pub fn is_fixed_key(ck: &KeyCombination) -> bool {
+    [SETTINGS_KEY, UNDO_KEY, BACK_KEY].contains(ck)
+        || ck.as_letter().is_some_and(|c| c.is_ascii_digit())
+}
+
+/// Some terminals report shift along with the symbols it produces (e.g.
+/// "shift-+" for "+"): the symbol alone is what users mean.
+pub fn normalized(ck: KeyCombination) -> KeyCombination {
+    match ck.codes {
+        OneToThree::One(KeyCode::Char(c))
+            if ck.modifiers == KeyModifiers::SHIFT && !c.is_alphabetic() =>
+        {
+            KeyCombination::one_key(KeyCode::Char(c), KeyModifiers::NONE)
+        }
+        _ => ck,
+    }
+}
+
+/// The key combination of a key event, as it's looked up in the bindings.
+pub fn combination_of(key: KeyEvent) -> KeyCombination {
+    normalized(key.into())
+}
 
 /// A mapping from key combinations to actions.
 ///
@@ -54,7 +99,7 @@ impl<T> ActionsKeyBindings<T> {
     }
 
     pub fn transform(&mut self, key: KeyEvent) -> Option<KeyCombination> {
-        self.combiner.transform(key)
+        self.combiner.transform(key).map(normalized)
     }
 
     fn set<A: Into<T>>(&mut self, action: A, ck: KeyCombination) {
@@ -120,6 +165,22 @@ where
         }
     }
 
+    /// unbinds the fixed keys (see [`is_fixed_key`]) from every action
+    pub fn without_fixed_keys(mut self) -> Self {
+        for cks in self.default_bindings.values_mut() {
+            cks.retain(|ck| !is_fixed_key(ck));
+        }
+        self
+    }
+
+    /// the action bound to the key combination, if any
+    pub fn action_for(&self, ck: &KeyCombination) -> Option<&T> {
+        self.default_bindings
+            .iter()
+            .find(|(_, cks)| cks.contains(ck))
+            .map(|(action, _)| action)
+    }
+
     pub fn keybindings_for(&self, action: &T) -> HashSet<KeyCombination> {
         self.default_bindings
             .get(action)
@@ -156,7 +217,7 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::Quit, key!(cmd - e));
         bindings.set(ScreenActionEnum::Quit, key!(ctrl - q));
         bindings.set(ScreenActionEnum::Quit, key!(q));
-        bindings.set(ScreenActionEnum::Back, key!(esc));
+        bindings.set(ScreenActionEnum::Back, BACK_KEY);
         bindings.set(ScreenActionEnum::Edit, key!(e));
         bindings.set(ScreenActionEnum::Delete, key!(d));
         bindings.set(ScreenActionEnum::EditPlayer, key!(enter));
@@ -176,8 +237,7 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::Previous, key!(shift - backtab));
         bindings.set(ScreenActionEnum::Previous, key!(left));
         bindings.set(ScreenActionEnum::Up, key!(up));
-        bindings.set(ScreenActionEnum::LanguageSettings, key!(s));
-        bindings.set(ScreenActionEnum::KeybindingSettings, key!(b));
+        bindings.set(ScreenActionEnum::Settings, SETTINGS_KEY);
         bindings.set(ScreenActionEnum::OneLevelUp, key!(backspace));
         bindings.set(ScreenActionEnum::EnterDirectory, key!(space));
         bindings.set(ScreenActionEnum::ScrollDown, key!(down));
@@ -185,7 +245,7 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::ReportAnIssue, key!(i));
         bindings.set(ScreenActionEnum::Select, key!(enter));
         bindings.set(ScreenActionEnum::Reset, key!(r));
-        bindings.set(ScreenActionEnum::Undo, key!(u));
+        bindings.set(ScreenActionEnum::Undo, UNDO_KEY);
         bindings
     }
 }
@@ -208,6 +268,22 @@ impl Default for KeyBindings<EventTypeEnum> {
         bindings
     }
 }
+impl Default for KeyBindings<EvalEnum> {
+    fn default() -> Self {
+        let mut bindings = Self {
+            default_bindings: HashMap::new(),
+        };
+        for eval in EvalEnum::ALL {
+            let symbol = eval.to_string().chars().next().unwrap_or_default();
+            bindings.set(
+                eval,
+                KeyCombination::one_key(KeyCode::Char(symbol), KeyModifiers::NONE),
+            );
+        }
+        bindings
+    }
+}
+
 #[test]
 fn test_deserialize_keybindings() {
     #[derive(Deserialize)]
@@ -236,4 +312,45 @@ fn test_deserialize_keybindings() {
             .shortest_key_for(&ScreenActionEnum::Previous),
         Some((key!(shift - tab), "previous".into()))
     );
+}
+
+#[test]
+fn test_normalized_symbols() {
+    use crokey::crossterm::event::{KeyCode::Char, KeyModifiers as M};
+    let shift_plus = KeyCombination::one_key(Char('+'), M::SHIFT);
+    assert_eq!(normalized(shift_plus), key!('+'));
+    // shift still matters on letters and with other modifiers
+    assert_eq!(normalized(key!(shift - e)), key!(shift - e));
+    let ctrl_shift_plus = KeyCombination::one_key(Char('+'), M::SHIFT | M::CONTROL);
+    assert_eq!(normalized(ctrl_shift_plus), ctrl_shift_plus);
+}
+
+#[test]
+fn test_fixed_keys() {
+    for ck in [key!(u), key!(esc), key!(f2), key!('0'), key!('9')] {
+        assert!(is_fixed_key(&ck), "{ck}");
+    }
+    for ck in [
+        key!(a),
+        key!(shift - u),
+        key!(f3),
+        key!('+'),
+        key!(ctrl - '1'),
+    ] {
+        assert!(!is_fixed_key(&ck), "{ck}");
+    }
+}
+
+#[test]
+fn test_without_fixed_keys_and_action_for() {
+    let mut kb = KeyBindings::<EventTypeEnum>::default();
+    kb.set(EventTypeEnum::A, key!(u));
+    kb.set(EventTypeEnum::A, key!('3'));
+    let kb = kb.without_fixed_keys();
+    assert_eq!(
+        kb.keybindings_for(&EventTypeEnum::A),
+        HashSet::from([key!(a)])
+    );
+    assert_eq!(kb.action_for(&key!(b)), Some(&EventTypeEnum::B));
+    assert_eq!(kb.action_for(&key!(u)), None);
 }

@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
 use crate::{
@@ -14,7 +15,6 @@ use crate::{
         enums::{RoleEnum, ScreenActionEnum},
         keybinding::ActionsKeyBindings,
         player::PlayerEntry,
-        settings::Settings,
         team::TeamEntry,
     },
 };
@@ -102,7 +102,7 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditPlayerScreen<TW> {
 }
 
 impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
-    pub fn new(settings: Settings, team: TeamEntry, team_writer: Arc<TW>) -> Self {
+    pub fn new(team: TeamEntry, team_writer: Arc<TW>) -> Self {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
@@ -123,7 +123,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
-        let kb = &settings.keybindings.clone();
+        let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, actions);
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 
@@ -144,12 +144,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         }
     }
 
-    pub fn edit(
-        settings: Settings,
-        team: TeamEntry,
-        player: PlayerEntry,
-        team_writer: Arc<TW>,
-    ) -> Self {
+    pub fn edit(team: TeamEntry, player: PlayerEntry, team_writer: Arc<TW>) -> Self {
         let role = Select::new(
             current_labels().role.to_owned(),
             RoleEnum::ALL.to_vec(),
@@ -170,7 +165,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
-        let kb = &settings.keybindings.clone();
+        let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, actions);
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 

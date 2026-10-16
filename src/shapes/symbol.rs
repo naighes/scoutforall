@@ -21,6 +21,7 @@ static SYMBOLS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("Backspace", "⌫");
     m.insert("Escape", "⎋");
     m.insert("Command", "⌘");
+    m.insert("Hyphen", "-");
     m
 });
 pub struct KeyCombinationFormatExt<'a> {

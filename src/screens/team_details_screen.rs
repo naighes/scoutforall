@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
@@ -120,19 +121,14 @@ impl<
                     self.previous_player();
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::NewPlayer), _, _, _) => {
-                    AppAction::SwitchScreen(Box::new(EditPlayerScreen::new(
-                        self.settings.clone(),
-                        self.team.clone(),
-                        self.team_writer.clone(),
-                    )))
-                }
+                (Some(ScreenActionEnum::NewPlayer), _, _, _) => AppAction::SwitchScreen(Box::new(
+                    EditPlayerScreen::new(self.team.clone(), self.team_writer.clone()),
+                )),
                 (Some(ScreenActionEnum::EditPlayer), _, _, _) => {
                     match self.list_state.selected().map(|selected| {
                         let player = self.team.active_players().get(selected).cloned();
                         match player {
                             Some(p) => AppAction::SwitchScreen(Box::new(EditPlayerScreen::edit(
-                                self.settings.clone(),
                                 self.team.clone(),
                                 p.clone(),
                                 self.team_writer.clone(),
@@ -144,13 +140,9 @@ impl<
                         None => AppAction::None,
                     }
                 }
-                (Some(ScreenActionEnum::EditTeam), _, _, _) => {
-                    AppAction::SwitchScreen(Box::new(EditTeamScreen::edit(
-                        self.settings.clone(),
-                        &self.team,
-                        self.team_writer.clone(),
-                    )))
-                }
+                (Some(ScreenActionEnum::EditTeam), _, _, _) => AppAction::SwitchScreen(Box::new(
+                    EditTeamScreen::edit(&self.team, self.team_writer.clone()),
+                )),
                 (Some(ScreenActionEnum::MatchList), _, _, _) => {
                     let match_list = self.match_reader.read_all(&self.team).await;
                     match match_list {
@@ -177,7 +169,6 @@ impl<
                 }
                 (Some(ScreenActionEnum::Export), _, _, _) => match home_dir() {
                     Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                        self.settings.clone(),
                         path,
                         current_labels().export,
                         ExportTeamAction::new(self.team.id, self.base_path.clone()),
@@ -293,9 +284,9 @@ impl<
         self.footer.render(
             f,
             footer_left,
-            get_keybinding_actions(&self.settings.keybindings, screen_actions),
+            get_keybinding_actions(navigation_keybindings(), screen_actions),
         );
-        self.screen_key_bindings = self.settings.keybindings.slice(Sba::keys(screen_actions));
+        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(screen_actions));
     }
 }
 
