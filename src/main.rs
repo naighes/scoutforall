@@ -29,17 +29,10 @@ use crate::{
         settings_reader::SettingsReader,
         team_reader::TeamReader,
     },
-    screens::screen::AppAction,
     shapes::settings::{Settings, init_settings},
 };
-use crokey::crossterm::event::{self, Event, KeyEventKind};
-use ratatui::{
-    Terminal,
-    backend::Backend,
-    layout::{Constraint, Direction, Layout},
-    style::{Modifier, Style},
-    widgets::Paragraph,
-};
+use crokey::crossterm::event::{self, Event};
+use ratatui::{Terminal, backend::Backend};
 use std::{error::Error, sync::Arc, time::Duration};
 
 #[cfg(feature = "self-update")]
@@ -163,64 +156,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// The main structure is the following one:
-///
-/// |----------------------------|
-/// |          header            |
-/// |----------------------------|
-/// |                            |
-/// |                            |
-/// |           body             |
-/// |                            |
-/// |                            |
-/// |----------------------------|
-/// | footer_left | footer_right |
-/// |----------------------------|
 async fn run_app<B: Backend<Error = std::io::Error>>(
     terminal: &mut Terminal<B>,
     mut app: App,
 ) -> std::io::Result<()> {
     loop {
-        terminal.draw(|f| {
-            let size = f.area();
-            let container = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints([
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ])
-                .split(size);
-            let footer = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(container[2]);
-            let header =
-                Paragraph::new("🏐 scout4all").style(Style::default().add_modifier(Modifier::BOLD));
-            f.render_widget(header, container[0]);
-            if let Some(screen) = app.current_screen() {
-                screen.render(f, container[1], footer[0], footer[1]);
-            }
-        })?;
+        terminal.draw(|f| app.draw(f))?;
         if event::poll(std::time::Duration::from_millis(200))?
             && let Event::Key(key) = event::read()?
+            && let Some(result) = app.handle_key(key).await
         {
-            match (key.code, key.kind, app.current_screen()) {
-                (_, KeyEventKind::Release, _) => continue,
-                (_, _, Some(screen)) => match screen.handle_key(key).await {
-                    AppAction::None => {}
-                    AppAction::SwitchScreen(new_screen) => app.push_screen(new_screen),
-                    AppAction::Back(refresh, count) => {
-                        app.pop_screen(refresh, count).await;
-                        if refresh && let Some(screen) = app.current_screen() {
-                            screen.refresh_data().await;
-                        }
-                    }
-                    AppAction::Quit(result) => return result,
-                },
-                _ => {}
-            }
+            return result;
         }
     }
 }

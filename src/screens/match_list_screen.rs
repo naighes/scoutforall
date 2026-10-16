@@ -158,8 +158,10 @@ impl<
                     self.notify_message.reset();
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::Next), _, _) => self.next_match(),
-                (Some(ScreenActionEnum::Previous), _, _) => self.previous_match(),
+                (Some(ScreenActionEnum::Next | ScreenActionEnum::Down), _, _) => self.next_match(),
+                (Some(ScreenActionEnum::Previous | ScreenActionEnum::Up), _, _) => {
+                    self.previous_match()
+                }
                 (Some(ScreenActionEnum::Select), _, _) => self.handle_enter_key(),
                 (Some(ScreenActionEnum::PrintReport), _, _) => self.handle_print(),
                 (Some(ScreenActionEnum::MatchStats), _, _) => self.handle_space_key(),
@@ -428,8 +430,10 @@ impl<
         }));
 
         if !self.matches.is_empty() {
-            actions.push(Sba::Simple(ScreenActionEnum::Next));
-            actions.push(Sba::Simple(ScreenActionEnum::Previous));
+            actions.push(Sba::Simple(ScreenActionEnum::Up));
+            actions.push(Sba::Simple(ScreenActionEnum::Down));
+            actions.push(Sba::Hidden(ScreenActionEnum::Previous));
+            actions.push(Sba::Hidden(ScreenActionEnum::Next));
         }
         if let Some((_, status)) = self.get_selected_match() {
             if !status.match_finished {

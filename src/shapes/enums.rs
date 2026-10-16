@@ -901,8 +901,8 @@ impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
             PrintReport => (PrintReport, current_labels().print_report.to_string()),
             Quit => (Quit, current_labels().quit.to_string()),
             Select => (Select, current_labels().select.to_string()),
-            Up => (Confirm, current_labels().previous.to_string()),
-            Down => (Confirm, current_labels().next.to_string()),
+            Up => (Up, current_labels().previous.to_string()),
+            Down => (Down, current_labels().next.to_string()),
             ReportAnIssue => (ReportAnIssue, current_labels().report_an_issue.to_string()),
             LanguageSettings => (
                 LanguageSettings,
