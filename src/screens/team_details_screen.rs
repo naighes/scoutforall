@@ -112,11 +112,11 @@ impl<
                     }
                 }
                 (Some(ScreenActionEnum::Quit), _, _, _) => AppAction::Quit(Ok(())),
-                (Some(ScreenActionEnum::Next), _, _, _) => {
+                (Some(ScreenActionEnum::Next | ScreenActionEnum::Down), _, _, _) => {
                     self.next_player();
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::Previous), _, _, _) => {
+                (Some(ScreenActionEnum::Previous | ScreenActionEnum::Up), _, _, _) => {
                     self.previous_player();
                     AppAction::None
                 }
@@ -367,8 +367,10 @@ impl<
             base_screen_actions.clone()
         } else {
             let screen_actions = &mut vec![
-                Sba::Simple(ScreenActionEnum::Previous),
-                Sba::Simple(ScreenActionEnum::Next),
+                Sba::Simple(ScreenActionEnum::Up),
+                Sba::Simple(ScreenActionEnum::Down),
+                Sba::Hidden(ScreenActionEnum::Previous),
+                Sba::Hidden(ScreenActionEnum::Next),
                 Sba::Simple(ScreenActionEnum::EditPlayer),
                 Sba::Simple(ScreenActionEnum::RemovePlayer),
             ];

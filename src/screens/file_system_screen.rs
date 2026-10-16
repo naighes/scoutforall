@@ -173,8 +173,10 @@ where
         let actions = &mut vec![];
 
         if !self.entries.is_empty() {
-            actions.push(Sba::Simple(ScreenActionEnum::Next));
-            actions.push(Sba::Simple(ScreenActionEnum::Previous));
+            actions.push(Sba::Simple(ScreenActionEnum::Up));
+            actions.push(Sba::Simple(ScreenActionEnum::Down));
+            actions.push(Sba::Hidden(ScreenActionEnum::Previous));
+            actions.push(Sba::Hidden(ScreenActionEnum::Next));
         }
         if let Some(true) = self
             .list_state
@@ -287,11 +289,11 @@ where
                         AppAction::None
                     }
                 }
-                (Some(ScreenActionEnum::Next), _, _) => {
+                (Some(ScreenActionEnum::Next | ScreenActionEnum::Down), _, _) => {
                     self.next();
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::Previous), _, _) => {
+                (Some(ScreenActionEnum::Previous | ScreenActionEnum::Up), _, _) => {
                     self.previous();
                     AppAction::None
                 }

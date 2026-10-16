@@ -1,12 +1,23 @@
 use std::{path::PathBuf, sync::Arc};
 
+use crokey::crossterm::event::{KeyEvent, KeyEventKind};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout},
+    style::{Modifier, Style},
+    widgets::Paragraph,
+};
+
 use crate::{
     providers::{
         match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
         settings_reader::SettingsReader, settings_writer::SettingsWriter, team_reader::TeamReader,
         team_writer::TeamWriter,
     },
-    screens::{screen::ScreenAsync, team_list_screen::TeamListScreen},
+    screens::{
+        screen::{AppAction, ScreenAsync},
+        team_list_screen::TeamListScreen,
+    },
     shapes::{settings::Settings, team::TeamEntry},
 };
 
@@ -72,5 +83,62 @@ impl App {
                 prev.refresh_data().await;
             }
         }
+    }
+
+    /// The main structure is the following one:
+    ///
+    /// |----------------------------|
+    /// |          header            |
+    /// |----------------------------|
+    /// |                            |
+    /// |                            |
+    /// |           body             |
+    /// |                            |
+    /// |                            |
+    /// |----------------------------|
+    /// | footer_left | footer_right |
+    /// |----------------------------|
+    pub fn draw(&mut self, f: &mut Frame) {
+        let size = f.area();
+        let container = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
+            .split(size);
+        let footer = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(container[2]);
+        let header =
+            Paragraph::new("🏐 scout4all").style(Style::default().add_modifier(Modifier::BOLD));
+        f.render_widget(header, container[0]);
+        if let Some(screen) = self.current_screen() {
+            screen.render(f, container[1], footer[0], footer[1]);
+        }
+    }
+
+    /// Dispatches a key event to the current screen; returns the exit result
+    /// when the app has to quit.
+    pub async fn handle_key(&mut self, key: KeyEvent) -> Option<std::io::Result<()>> {
+        if key.kind == KeyEventKind::Release {
+            return None;
+        }
+        let screen = self.current_screen()?;
+        match screen.handle_key(key).await {
+            AppAction::None => {}
+            AppAction::SwitchScreen(new_screen) => self.push_screen(new_screen),
+            AppAction::Back(refresh, count) => {
+                self.pop_screen(refresh, count).await;
+                if refresh && let Some(screen) = self.current_screen() {
+                    screen.refresh_data().await;
+                }
+            }
+            AppAction::Quit(result) => return Some(result),
+        }
+        None
     }
 }

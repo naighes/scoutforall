@@ -106,11 +106,11 @@ impl<
                     self.notify_message.reset();
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::Next), _, _) => {
+                (Some(ScreenActionEnum::Next | ScreenActionEnum::Down), _, _) => {
                     self.next_team();
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::Previous), _, _) => {
+                (Some(ScreenActionEnum::Previous | ScreenActionEnum::Up), _, _) => {
                     self.previous_team();
                     AppAction::None
                 }
@@ -292,8 +292,10 @@ impl<
             ]
         } else {
             vec![
-                Sba::Simple(ScreenActionEnum::Previous),
-                Sba::Simple(ScreenActionEnum::Next),
+                Sba::Simple(ScreenActionEnum::Up),
+                Sba::Simple(ScreenActionEnum::Down),
+                Sba::Hidden(ScreenActionEnum::Previous),
+                Sba::Hidden(ScreenActionEnum::Next),
                 Sba::Simple(ScreenActionEnum::New),
                 Sba::Simple(ScreenActionEnum::Select),
                 Sba::Simple(ScreenActionEnum::LanguageSettings),

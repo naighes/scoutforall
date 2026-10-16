@@ -3,6 +3,9 @@ name: build
 on:
   schedule:
     - cron: "0 0 1 * *" # first day of every month
+  pull_request:
+    branches:
+      - master
   push:
     branches-ignore:
       - master
@@ -111,8 +114,8 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
-      - name: check lockfile is updated
-        run: cargo update --locked
+      - name: check lockfile matches Cargo.toml
+        run: cargo metadata --locked --format-version 1 > /dev/null
 
   clippy:
     needs: check

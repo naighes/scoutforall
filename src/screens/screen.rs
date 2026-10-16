@@ -29,6 +29,7 @@ where
     let fmt = &KeyCombinationFormat::default();
     actions
         .iter()
+        .filter(|action| !matches!(action, Sba::Hidden(_)))
         .map(|action| match action {
             Sba::Simple(ae) => {
                 if let Some((key_combination, description)) = kb.shortest_key_for(ae) {
@@ -58,6 +59,7 @@ where
                 }
                 map_screen_action(kb, ae, *description_fn, fmt)
             }
+            Sba::Hidden(_) => None,
         })
         .map_while(|f| f)
         .collect()
@@ -67,12 +69,15 @@ where
 pub enum Sba<T> {
     Simple(T),
     Redacted(T, fn(String) -> String),
+    /// bound to its key combinations, but not listed in the footer
+    Hidden(T),
 }
 impl<T> Sba<T> {
     pub fn key(&self) -> &T {
         match self {
             Sba::Simple(ae) => ae,
             Sba::Redacted(ae, _) => ae,
+            Sba::Hidden(ae) => ae,
         }
     }
     pub fn keys(slice: &[Sba<T>]) -> Vec<&T> {
@@ -101,4 +106,25 @@ fn test_get_keybinding_actions() {
     assert_eq!(result[0], ("⇥".to_string(), "next".to_string()));
     assert_eq!(result[1], ("⬅".to_string(), "previous".to_string()));
     assert_eq!(result[2], ("i".to_string(), "import pizza".to_string()));
+}
+
+#[test]
+fn test_hidden_actions_are_bound_but_not_listed() {
+    use crate::shapes::enums::ScreenActionEnum;
+    use crokey::key;
+    let kb = KeyBindings::<ScreenActionEnum>::default();
+    let actions = &[
+        Sba::Simple(ScreenActionEnum::Up),
+        Sba::Hidden(ScreenActionEnum::Next),
+        Sba::Simple(ScreenActionEnum::Quit),
+    ];
+
+    let footer = get_keybinding_actions(&kb, actions);
+    assert_eq!(footer.len(), 2);
+    assert_eq!(footer[0].1, "previous");
+    assert_eq!(footer[1].1, "quit");
+
+    let bindings = kb.slice(Sba::keys(actions));
+    assert_eq!(bindings.get(key!(tab)), Some(&ScreenActionEnum::Next));
+    assert_eq!(bindings.get(key!(up)), Some(&ScreenActionEnum::Up));
 }
