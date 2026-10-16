@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
 use crate::{
@@ -12,9 +13,8 @@ use crate::{
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
-        keybindings_screen::{KeyBindingsScreen, KeybindingScreen},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
-        settings_screen::SettingsScreen,
+        settings_screen::{SettingsPanel, SettingsScreen},
         team_details_screen::TeamDetailsScreen,
     },
     shapes::{
@@ -132,14 +132,13 @@ impl<
                     }
                 }
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
-                (Some(ScreenActionEnum::New), _, _) => AppAction::SwitchScreen(Box::new(
-                    EditTeamScreen::new(self.settings.clone(), self.team_writer.clone()),
-                )),
+                (Some(ScreenActionEnum::New), _, _) => {
+                    AppAction::SwitchScreen(Box::new(EditTeamScreen::new(self.team_writer.clone())))
+                }
                 (Some(ScreenActionEnum::Import), _, _) => {
                     let default_path = self.settings.get_default_path();
                     match default_path {
                         Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
-                            self.settings.clone(),
                             path,
                             current_labels().import_team,
                             ImportTeamAction::new(
@@ -159,17 +158,12 @@ impl<
                         }
                     }
                 }
-                (Some(ScreenActionEnum::LanguageSettings), _, _) => {
+                (Some(ScreenActionEnum::Settings), _, _) => {
                     AppAction::SwitchScreen(Box::new(SettingsScreen::new(
                         self.settings.clone(),
                         self.settings_writer.clone(),
-                    )))
-                }
-                (Some(ScreenActionEnum::KeybindingSettings), _, _) => {
-                    AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
-                        KeyBindingsScreen::<ScreenActionEnum>::new(self.settings.clone()),
-                        self.settings_writer.clone(),
                         self.settings_reader.clone(),
+                        SettingsPanel::General,
                     )))
                 }
                 (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
@@ -216,12 +210,12 @@ impl<
             self.render_list(f, body, items);
         }
         let screen_actions = &self.screen_actions();
-        let kb = &self.settings.keybindings;
+        let kb = navigation_keybindings();
 
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         self.footer.render(f, footer_left, footer_entries);
 
-        self.screen_key_bindings = self.settings.keybindings.slice(Sba::keys(screen_actions));
+        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(screen_actions));
     }
 }
 
@@ -283,8 +277,7 @@ impl<
         if self.teams.is_empty() {
             vec![
                 Sba::Simple(ScreenActionEnum::New),
-                Sba::Simple(ScreenActionEnum::LanguageSettings),
-                Sba::Simple(ScreenActionEnum::KeybindingSettings),
+                Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
                     lbl.replace("{}", current_labels().team)
                 }),
@@ -298,8 +291,7 @@ impl<
                 Sba::Hidden(ScreenActionEnum::Next),
                 Sba::Simple(ScreenActionEnum::New),
                 Sba::Simple(ScreenActionEnum::Select),
-                Sba::Simple(ScreenActionEnum::LanguageSettings),
-                Sba::Simple(ScreenActionEnum::KeybindingSettings),
+                Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
                     lbl.replace("{}", current_labels().team)
                 }),

@@ -1,11 +1,13 @@
 use crate::analytics::global::enqueue_match_for_upload;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
-use crate::screens::keybindings_screen::{KeyBindingsScreen, KeybindingScreen};
 use crate::screens::screen::{Sba, get_keybinding_actions};
+use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
 use crate::shapes::enums::ScreenActionEnum;
-use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings};
+use crate::shapes::keybinding::navigation_keybindings;
+use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
 use crate::shapes::settings::Settings;
+use crate::shapes::symbol::KeyCombinationFormatExt;
 use crate::{
     localization::current_labels,
     providers::set_writer::SetWriter,
@@ -14,7 +16,7 @@ use crate::{
         screen::{AppAction, Renderable, ScreenAsync},
     },
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
+        enums::{EventTypeEnum, FriendlyName, RoleEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
@@ -138,7 +140,7 @@ impl<
             }
         }
         let screen_actions = &self.get_screen_actions();
-        let kb = &self.settings.keybindings.clone();
+        let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
 
@@ -179,11 +181,12 @@ impl<
                 (false, Some(ScreenActionEnum::Back), _, _) => {
                     return AppAction::Back(true, self.back_stack_count);
                 }
-                (false, Some(ScreenActionEnum::KeybindingSettings), _, _) => {
-                    AppAction::SwitchScreen(Box::new(KeybindingScreen::new(
-                        KeyBindingsScreen::<EventTypeEnum>::new(self.settings.clone()),
+                (false, Some(ScreenActionEnum::Settings), _, _) => {
+                    AppAction::SwitchScreen(Box::new(SettingsScreen::new(
+                        self.settings.clone(),
                         self.settings_writer.clone(),
                         self.settings_reader.clone(),
+                        SettingsPanel::Shortcuts,
                     )))
                 }
                 (false, action, _, Event) => self.handle_event_screen(key, action.cloned()).await,
@@ -206,9 +209,10 @@ impl<
         if let Ok(settings) = &self.settings_reader.read().await {
             self.settings = settings.to_owned();
             self.event_key_bindings = settings.scouting_keybindings.clone();
-            self.event_screen_key_bindings = self
-                .event_key_bindings
-                .slice(self.currently_available_options.iter().collect())
+            // all the events: the available ones change along the set, and the
+            // others get "not available" when pressed
+            self.event_screen_key_bindings =
+                ActionsKeyBindings::from(self.event_key_bindings.reverse_map().iter().collect());
         }
     }
 }
@@ -626,15 +630,15 @@ impl<
             return AppAction::None;
         }
         use EventTypeEnum::*;
-        use KeyCode::*;
-        let eval = match (key.code, &self.current_event) {
-            (Char('#'), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Perfect),
-            (Char('+'), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Positive),
-            (Char('!'), EventTypeInput::Some(P | D)) => Some(EvalEnum::Exclamative),
-            (Char('-'), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Negative),
-            (Char('/'), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Over),
-            (Char('='), EventTypeInput::Some(A | B | D | P | S)) => Some(EvalEnum::Error),
-            _ => None,
+        // the evaluation bound to the key, if the event allows it
+        let eval = match &self.current_event {
+            EventTypeInput::Some(event_type) => self
+                .settings
+                .eval_keybindings
+                .action_for(&combination_of(key))
+                .copied()
+                .filter(|eval| event_type.available_evals().contains(eval)),
+            EventTypeInput::None => None,
         };
         if let (Some(eval), EventTypeInput::Some(event_type)) = (eval, &self.current_event) {
             match event_type {
@@ -770,9 +774,27 @@ impl<
         let rows: Vec<Row> = available_evals
             .iter()
             .map(|ev| {
+                let mut keys: Vec<_> = self
+                    .settings
+                    .eval_keybindings
+                    .keybindings_for(ev)
+                    .into_iter()
+                    .collect();
+                keys.sort();
+                let keys = keys
+                    .into_iter()
+                    .map(|k| {
+                        KeyCombinationFormatExt::new(&KeyCombinationFormat::default()).to_string(k)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 Row::new(vec![format!(
                     "{} => {}",
-                    ev.to_string(),
+                    if keys.is_empty() {
+                        current_labels().unassigned.to_string()
+                    } else {
+                        keys
+                    },
                     if let EventTypeInput::Some(last_event) = self.current_event {
                         if let Some(desc) = ev.friendly_description(last_event, current_labels()) {
                             format!(
@@ -1018,12 +1040,12 @@ impl<
     fn get_screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         match (self.set.events.len(), &self.state) {
             (0, ScoutingScreenState::Event) => vec![
-                Sba::Simple(ScreenActionEnum::KeybindingSettings),
+                Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Simple(ScreenActionEnum::Back),
             ],
             _ => vec![
                 Sba::Simple(ScreenActionEnum::Undo),
-                Sba::Simple(ScreenActionEnum::KeybindingSettings),
+                Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Simple(ScreenActionEnum::Back),
             ],
         }

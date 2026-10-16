@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     errors::AppError,
     localization::current_labels,
@@ -6,7 +7,7 @@ use crate::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
+    shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
 use ratatui::{
@@ -39,7 +40,6 @@ pub struct FileSystemScreen<
 > where
     A: FileSystemAction,
 {
-    settings: Settings,
     current_folder: PathBuf,
     notify_message: NotifyBanner,
     list_state: ListState,
@@ -59,7 +59,6 @@ where
     A: FileSystemAction,
 {
     pub fn new(
-        settings: Settings,
         initial_folder: PathBuf,
         title_label: &str,
         action: A,
@@ -70,7 +69,6 @@ where
         let mut list_state = ListState::default();
         list_state.select(if entries.is_empty() { None } else { Some(0) });
         Self {
-            settings,
             current_folder: initial_folder,
             notify_message: NotifyBanner::new(),
             list_state,
@@ -257,7 +255,7 @@ where
         let actions = &self.get_footer_actions();
 
         self.notify_message.render(f, footer_right);
-        let kb = &self.settings.keybindings;
+        let kb = navigation_keybindings();
         self.footer
             .render(f, footer_left, get_keybinding_actions(kb, actions));
 

@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use std::env::var;
 
 use crate::{
@@ -8,7 +9,7 @@ use crate::{
         },
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
+    shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
 use crokey::{
@@ -110,7 +111,7 @@ impl ScreenAsync for ReportAnIssueScreen {
 }
 
 impl ReportAnIssueScreen {
-    pub fn new(settings: Settings) -> Self {
+    pub fn new() -> Self {
         let title = TextBox::new(current_labels().title.to_owned(), true, None);
         let description = TextBox::new(current_labels().description.to_owned(), false, None)
             .enable_multiline(true);
@@ -128,7 +129,7 @@ impl ReportAnIssueScreen {
             Sba::Simple(ScreenActionEnum::Back),
             Sba::Simple(ScreenActionEnum::Quit),
         ];
-        let kb = &settings.keybindings;
+        let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         ReportAnIssueScreen {

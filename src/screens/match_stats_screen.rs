@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     errors::AppError,
     localization::current_labels,
@@ -14,7 +15,6 @@ use crate::{
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
-        settings::Settings,
         snapshot::Snapshot,
         stats::{Metric, Stats},
     },
@@ -284,7 +284,7 @@ impl Renderable for MatchStatsScreen {
 }
 
 impl MatchStatsScreen {
-    pub fn new(settings: Settings, current_match: MatchEntry) -> Result<Self, AppError> {
+    pub fn new(current_match: MatchEntry) -> Result<Self, AppError> {
         use EventTypeEnum::*;
         let mut state = ListState::default();
         state.select(Some(0));
@@ -362,7 +362,7 @@ impl MatchStatsScreen {
             Sba::Simple(ScreenActionEnum::Back),
             Sba::Simple(ScreenActionEnum::Quit),
         ];
-        let kb = &settings.keybindings;
+        let kb = navigation_keybindings();
         let player_filter = Selection::new(current_labels().player.to_string(), players.collect());
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));

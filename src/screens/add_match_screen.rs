@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
 use crate::{
@@ -145,7 +146,7 @@ impl<
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
-        let kb = &settings.keybindings.clone();
+        let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         AddMatchScreen {

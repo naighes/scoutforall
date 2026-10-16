@@ -1,194 +1,173 @@
-use std::{fmt::Debug, hash::Hash, sync::Arc};
+use crate::shapes::keybinding::navigation_keybindings;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::{
     localization::current_labels,
     providers::settings_writer::SettingsWriter,
     screens::{
-        components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, text_box::TextBox,
-        },
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
-        enums::{ScreenActionEnum, WithDesc},
-        keybinding::{ActionsKeyBindings, KeyBindings},
-        settings::{Settings, current_settings, set_settings},
+        enums::ScreenActionEnum,
+        keybinding::{ActionsKeyBindings, KeyBindings, combination_of, is_fixed_key},
+        settings::{ScoutingShortcut, Settings, set_settings},
+        symbol::KeyCombinationFormatExt,
     },
 };
 use async_trait::async_trait;
-use crokey::{KeyCombinationFormat, crossterm::event::KeyEvent, key};
+use crokey::{
+    KeyCombination, KeyCombinationFormat,
+    crossterm::event::{KeyCode, KeyEvent},
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
 };
 
+/// Assigns one more key to a scouting shortcut: the key pressed is taken as it
+/// is (enter confirms it, backspace clears it, esc goes back), unless it's a
+/// fixed key or already bound to another shortcut of the same kind.
 #[derive(Debug)]
-pub struct AddKeyBindingScreen<
-    SW: SettingsWriter + Send + Sync,
-    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-> {
+pub struct AddKeyBindingScreen<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut> {
     settings: Settings,
     action: T,
-    shortcut: TextBox,
+    shortcut: Option<KeyCombination>,
     notify_message: NotifyBanner,
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     settings_writer: Arc<SW>,
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
     fmt: KeyCombinationFormat,
-    keybindings: KeyBindings<T>,
-    fn_settings_updater: fn(&Settings, &KeyBindings<T>) -> Settings,
 }
 
-impl<
-    SW: SettingsWriter + Send + Sync,
-    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-> Renderable for AddKeyBindingScreen<SW, T>
+impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> Renderable
+    for AddKeyBindingScreen<SW, T>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        let container = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(5), Constraint::Min(1)])
-            .split(body);
-
         let area = Layout::default()
             .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3), // opponent
-                Constraint::Min(1),
-            ])
-            .split(container[1]);
+            .constraints([Constraint::Length(4), Constraint::Min(1)])
+            .split(body);
+        let shortcut = self
+            .shortcut
+            .map(|ck| KeyCombinationFormatExt::new(&self.fmt).to_string(ck))
+            .unwrap_or_default();
+        let widget = Paragraph::new(vec![
+            Line::from(current_labels().press_the_shortcut),
+            Line::from(Span::styled(
+                shortcut,
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(self.action.with_desc().1),
+        );
+        f.render_widget(widget, area[0]);
         self.notify_message.render(f, footer_right);
-        self.render_header(f, container[1]);
-        self.shortcut.render(f, area[0]);
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
     }
 }
 
 #[async_trait]
-impl<
-    SW: SettingsWriter + Send + Sync,
-    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-> ScreenAsync for AddKeyBindingScreen<SW, T>
+impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> ScreenAsync
+    for AddKeyBindingScreen<SW, T>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if let Some(key_combination) = self.screen_key_bindings.transform(key) {
-            match (
-                key_combination,
-                self.screen_key_bindings.get(key_combination),
-                &self.notify_message.has_value(),
-            ) {
-                (_, _, true) => {
-                    self.notify_message.reset();
-                    AppAction::None
-                }
-                (key!(Backspace), _, _) => self.handle_backspace(),
-                (_, Some(ScreenActionEnum::Back), _) => AppAction::Back(true, Some(1)),
-                (_, Some(ScreenActionEnum::Confirm), _) => self.handle_confirm().await,
-                (_, None, false) => self.handle_combination(self.fmt.to_string(key_combination)),
-                _ => AppAction::None,
+        let Some(key_combination) = self.screen_key_bindings.transform(key) else {
+            return AppAction::None;
+        };
+        self.notify_message.reset();
+        match (self.screen_key_bindings.get(key_combination), key.code) {
+            (Some(ScreenActionEnum::Back), _) => AppAction::Back(true, Some(1)),
+            (Some(ScreenActionEnum::Confirm), _) => self.handle_confirm().await,
+            (_, KeyCode::Backspace) => {
+                self.shortcut = None;
+                AppAction::None
             }
-        } else {
-            AppAction::None
+            _ => {
+                let ck = combination_of(key);
+                self.shortcut = None;
+                match self.conflict(&ck) {
+                    Some(message) => self.notify_message.set_error(message),
+                    None => self.shortcut = Some(ck),
+                }
+                AppAction::None
+            }
         }
     }
 
     async fn refresh_data(&mut self) {}
 }
 
-impl<
-    SW: SettingsWriter + Send + Sync,
-    T: Clone + Copy + Send + Sync + Eq + Hash + WithDesc<T> + 'static,
-> AddKeyBindingScreen<SW, T>
-{
-    pub fn new(
-        action: T,
-        settings_writer: Arc<SW>,
-        keybindings: KeyBindings<T>,
-        fn_settings_updater: fn(&Settings, &KeyBindings<T>) -> Settings,
-    ) -> Self {
-        let shortcut = TextBox::new("shortcut".to_owned(), true, None);
+impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> AddKeyBindingScreen<SW, T> {
+    pub fn new(action: T, settings: Settings, settings_writer: Arc<SW>) -> Self {
         let screen_actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
-        let settings = current_settings();
-        let kb = settings.keybindings.clone();
-        let footer_entries = get_keybinding_actions(&kb, screen_actions);
+        let kb = navigation_keybindings();
+        let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         AddKeyBindingScreen {
             settings,
             action,
-            shortcut,
+            shortcut: None,
             notify_message: NotifyBanner::new(),
             footer: NavigationFooter::new(),
             footer_entries,
             screen_key_bindings,
             settings_writer,
             fmt: KeyCombinationFormat::default(),
-            keybindings,
-            fn_settings_updater,
         }
     }
 
-    fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(self.action.with_desc().1);
-        f.render_widget(block, area);
+    /// why the key can't be assigned, if it can't
+    fn conflict(&self, ck: &KeyCombination) -> Option<String> {
+        let key = KeyCombinationFormatExt::new(&self.fmt).to_string(*ck);
+        if is_fixed_key(ck) {
+            return Some(current_labels().reserved_shortcut.replace("{}", &key));
+        }
+        T::bindings(&self.settings)
+            .action_for(ck)
+            .filter(|other| **other != self.action)
+            .map(|other| {
+                current_labels()
+                    .shortcut_already_assigned
+                    .replacen("{}", &key, 1)
+                    .replacen("{}", &other.with_desc().1, 1)
+            })
     }
 
     async fn handle_confirm(&mut self) -> AppAction {
-        match self.shortcut.get_selected_value() {
-            None => {
-                self.notify_message
-                    .set_error(current_labels().opponent_cannot_be_empty.to_string());
-                AppAction::None
+        let Some(ck) = self.shortcut else {
+            self.notify_message
+                .set_error(current_labels().press_the_shortcut.to_string());
+            return AppAction::None;
+        };
+        if let Some(message) = self.conflict(&ck) {
+            self.notify_message.set_error(message);
+            return AppAction::None;
+        }
+        let mut keybindings: KeyBindings<T> = T::bindings(&self.settings);
+        keybindings.set(self.action, ck);
+        let settings = T::with_bindings(&self.settings, &keybindings);
+        match self.settings_writer.save(settings).await {
+            Ok(saved_settings) => {
+                set_settings(saved_settings);
+                AppAction::Back(true, Some(1))
             }
-            Some(sc) => {
-                let kc = crokey::parse(&sc);
-                match kc {
-                    Ok(kc) => {
-                        let mut keybindings = self.keybindings.clone();
-                        if keybindings.set(self.action, kc) {
-                            let settings = (self.fn_settings_updater)(&self.settings, &keybindings);
-                            match self.settings_writer.save(settings).await {
-                                Ok(saved_settings) => {
-                                    set_settings(saved_settings.clone());
-                                    return AppAction::Back(true, Some(1));
-                                }
-                                Err(_) => {
-                                    self.notify_message.set_error(
-                                        current_labels().could_not_save_settings.to_string(),
-                                    );
-                                    return AppAction::None;
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        self.notify_message
-                            .set_error(current_labels().invalid_shortcut.to_string());
-                        return AppAction::None;
-                    }
-                }
+            Err(_) => {
+                self.notify_message
+                    .set_error(current_labels().could_not_save_settings.to_string());
                 AppAction::None
             }
         }
-    }
-
-    fn handle_backspace(&mut self) -> AppAction {
-        self.shortcut.handle_backspace();
-        AppAction::None
-    }
-
-    fn handle_combination(&mut self, c: String) -> AppAction {
-        c.chars().for_each(|ch| self.shortcut.handle_char(ch));
-        AppAction::None
     }
 }

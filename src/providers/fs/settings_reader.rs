@@ -25,6 +25,11 @@ impl SettingsReader for FileSystemSettingsReader {
             .map_err(|e| AppError::IO(IOError::from(e)))?;
         let settings =
             from_str::<Settings>(&content).map_err(|e| AppError::IO(IOError::from(e)))?;
-        Ok(settings)
+        // fixed keys may come from older versions or hand-edited files
+        Ok(Settings {
+            scouting_keybindings: settings.scouting_keybindings.without_fixed_keys(),
+            eval_keybindings: settings.eval_keybindings.without_fixed_keys(),
+            ..settings
+        })
     }
 }

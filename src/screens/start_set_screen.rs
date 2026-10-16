@@ -1,3 +1,4 @@
+use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     localization::current_labels,
     providers::{
@@ -620,12 +621,10 @@ impl<
             Sba::Simple(ScreenActionEnum::Select),
             Sba::Simple(ScreenActionEnum::Back),
         ];
-        self.screen_key_bindings = self
-            .settings
-            .keybindings
-            .slice(Sba::keys(lineup_selection_actions));
+        self.screen_key_bindings =
+            navigation_keybindings().slice(Sba::keys(lineup_selection_actions));
         let footer_entries =
-            get_keybinding_actions(&self.settings.keybindings, lineup_selection_actions);
+            get_keybinding_actions(navigation_keybindings(), lineup_selection_actions);
         let paragraph = Paragraph::new(
             footer_entries
                 .iter()
@@ -817,12 +816,8 @@ impl<
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
-        self.screen_key_bindings = self
-            .settings
-            .keybindings
-            .slice(Sba::keys(serving_team_actions));
-        let footer_entries =
-            get_keybinding_actions(&self.settings.keybindings, serving_team_actions);
+        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(serving_team_actions));
+        let footer_entries = get_keybinding_actions(navigation_keybindings(), serving_team_actions);
         let paragraph = Paragraph::new(
             footer_entries
                 .iter()
