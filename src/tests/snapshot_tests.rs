@@ -8,6 +8,7 @@ mod tests {
             },
             set::SetEntry,
             snapshot::{EventEntry, Snapshot},
+            stats::StatsFilter,
         },
     };
     use chrono::Utc;
@@ -21,7 +22,6 @@ mod tests {
         score_them: u8,
         serving_team: Option<TeamSideEnum>,
         libero_position: Option<u8>,
-        possessions: u32,
         attacks: u32,
         errors: u32,
         unforced_errors: u32,
@@ -74,38 +74,34 @@ mod tests {
                 "wrong middle-blocker"
             );
         }
+        // the counters these numbers used to come from are gone: the same
+        // numbers now come from the counters left
         assert_eq!(
-            snapshot.stats.possessions.0.values().sum::<u32>(),
-            possessions,
-            "wrong possessions count"
-        );
-        assert_eq!(
-            snapshot.stats.attack.0.values().sum::<u32>(),
+            snapshot.stats.attacks.count(|_| true),
             attacks,
             "wrong attacks count"
         );
         assert_eq!(
-            snapshot.stats.errors.0.values().sum::<u32>(),
+            snapshot.stats.total_errors(None, &StatsFilter::default()),
             errors,
             "wrong errors count"
         );
         assert_eq!(
-            snapshot.stats.counter_attack.0.values().sum::<u32>(),
+            snapshot.stats.attacks.count(|k| k.is_counter_attack()),
             counter_attacks,
             "wrong counter_attacks count"
         );
         assert_eq!(
             snapshot
                 .stats
-                .errors
-                .query(None, None, None, Some(ErrorTypeEnum::Unforced))
-                .map(|(_, v)| *v)
-                .sum::<u32>(),
+                .total_errors(Some(ErrorTypeEnum::Unforced), &StatsFilter::default()),
             unforced_errors,
             "wrong unforced_errors count"
         );
         assert_eq!(
-            snapshot.stats.opponent_errors.0.values().sum::<u32>(),
+            snapshot
+                .stats
+                .event_count(EventTypeEnum::OE, None, &StatsFilter::default()),
             opponent_errors,
             "wrong opponent_errors count"
         );
@@ -222,7 +218,6 @@ mod tests {
                         1,
                         Some(TeamSideEnum::Them),
                         Some(5),
-                        2,
                         0,
                         1,
                         1,
@@ -249,7 +244,6 @@ mod tests {
                         1,       // score_them
                         None,    // serving_team
                         Some(5), // libero_position
-                        3,
                         0,
                         1,
                         1,
@@ -276,7 +270,6 @@ mod tests {
                         1,
                         Some(TeamSideEnum::Us),
                         Some(4),
-                        3,
                         1,
                         1,
                         1,
@@ -287,17 +280,12 @@ mod tests {
                                 1,
                                 snapshot
                                     .stats
-                                    .distribution
-                                    .query(
-                                        Some(PhaseEnum::SideOut),
-                                        Some(0),
-                                        None,
-                                        Some(ZoneEnum::Four),
-                                        Some(EvalEnum::Perfect),
-                                        Some(EvalEnum::Perfect)
-                                    )
-                                    .map(|(_, v)| *v)
-                                    .sum::<u32>()
+                                    .attacks
+                                    .count(|k| k.phase == PhaseEnum::SideOut
+                                        && k.rotation == 0
+                                        && k.zone == ZoneEnum::Four
+                                        && k.prev_eval == EvalEnum::Perfect
+                                        && k.eval == EvalEnum::Perfect)
                             );
                         },
                     );
@@ -320,7 +308,6 @@ mod tests {
                         1,
                         None,
                         Some(4),
-                        4,
                         1,
                         1,
                         1,
@@ -347,7 +334,6 @@ mod tests {
                         1,
                         Some(TeamSideEnum::Us),
                         Some(4),
-                        4,
                         1,
                         1,
                         1,
@@ -374,7 +360,6 @@ mod tests {
                         1,                      // score_them
                         Some(TeamSideEnum::Us), // serving_team
                         Some(4),                // libero_position
-                        4,                      // possessions
                         1,                      // attacks
                         1,                      // errors
                         1,                      // unforced_errors
@@ -406,7 +391,6 @@ mod tests {
                         1,       // score_them
                         None,    // serving_team
                         Some(4), // libero_position
-                        5,       // possessions
                         1,       // attacks
                         1,       // errors
                         1,       // unforced_errors
@@ -433,7 +417,6 @@ mod tests {
                         1,       // score_them
                         None,    // serving_team
                         Some(4), // libero_position
-                        5,       // possessions
                         1,       // attacks
                         1,       // errors
                         1,       // unforced_errors
@@ -460,7 +443,6 @@ mod tests {
                         2,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(4),                  // libero_position
-                        5,                        // possessions
                         1,                        // attacks
                         1,                        // errors
                         1,                        // unforced_errors
@@ -487,7 +469,6 @@ mod tests {
                         2,       // score_them
                         None,    // serving_team
                         Some(4), // libero_position
-                        6,       // possessions
                         1,       // attacks
                         1,       // errors
                         1,       // unforced_errors
@@ -514,7 +495,6 @@ mod tests {
                         3,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(4),                  // libero_position
-                        6,                        // possessions
                         1,                        // attacks
                         2,                        // errors
                         2,                        // unforced_errors
@@ -525,12 +505,9 @@ mod tests {
                                 snapshot.stats.event_count(
                                     EventTypeEnum::F,
                                     None,
-                                    None,
-                                    None,
-                                    None,
-                                    None
+                                    &StatsFilter::new(None, None, None)
                                 ),
-                                Some(1)
+                                1
                             );
                         },
                     );
@@ -553,7 +530,6 @@ mod tests {
                         3,                      // score_them
                         Some(TeamSideEnum::Us), // serving_team
                         None,                   // libero_position
-                        6,                      // possessions
                         1,                      // attacks
                         2,                      // errors
                         2,                      // unforced_errors
@@ -580,7 +556,6 @@ mod tests {
                         3,    // score_them
                         None, // serving_team
                         None, // libero_position
-                        7,    // possessions
                         1,    // attacks
                         2,    // errors
                         2,    // unforced_errors
@@ -627,7 +602,6 @@ mod tests {
                             3,                      // score_them
                             Some(TeamSideEnum::Us), // serving_team
                             None,                   // libero_position
-                            7,                      // possessions
                             2,                      // attacks
                             2,                      // errors
                             2,                      // unforced_errors
@@ -636,19 +610,11 @@ mod tests {
                             || {
                                 assert_eq!(
                                     1,
-                                    snapshot
-                                        .stats
-                                        .distribution
-                                        .query(
-                                            Some(PhaseEnum::Break),
-                                            Some(4),
-                                            None,
-                                            Some(ZoneEnum::Four),
-                                            Some(EvalEnum::Over),
-                                            Some(EvalEnum::Perfect)
-                                        )
-                                        .map(|(_, v)| *v)
-                                        .sum::<u32>()
+                                    snapshot.stats.attacks.count(|k| k.phase == PhaseEnum::Break
+                                        && k.rotation == 4
+                                        && k.zone == ZoneEnum::Four
+                                        && k.prev_eval == EvalEnum::Over
+                                        && k.eval == EvalEnum::Perfect)
                                 );
                                 // next phase is serve, so a pass is not expected
                                 assert!(!available_options.contains(&EventTypeEnum::P));
@@ -674,7 +640,6 @@ mod tests {
                         4,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(0),                  // libero_position
-                        8,                        // possessions
                         2,                        // attacks
                         3,                        // errors
                         3,                        // unforced_errors
@@ -701,7 +666,6 @@ mod tests {
                         4,       // score_them
                         None,    // serving_team
                         Some(0), // libero_position
-                        9,       // possessions
                         2,       // attacks
                         3,       // errors
                         3,       // unforced_errors
@@ -728,7 +692,6 @@ mod tests {
                         4,       // score_them
                         None,    // serving_team
                         Some(0), // libero_position
-                        9,       // possessions
                         3,       // attacks
                         3,       // errors
                         3,       // unforced_errors
@@ -739,17 +702,12 @@ mod tests {
                                 1,
                                 snapshot
                                     .stats
-                                    .distribution
-                                    .query(
-                                        Some(PhaseEnum::SideOut),
-                                        Some(4),
-                                        None,
-                                        Some(ZoneEnum::Eight),
-                                        Some(EvalEnum::Positive),
-                                        Some(EvalEnum::Negative)
-                                    )
-                                    .map(|(_, v)| *v)
-                                    .sum::<u32>()
+                                    .attacks
+                                    .count(|k| k.phase == PhaseEnum::SideOut
+                                        && k.rotation == 4
+                                        && k.zone == ZoneEnum::Eight
+                                        && k.prev_eval == EvalEnum::Positive
+                                        && k.eval == EvalEnum::Negative)
                             );
                         },
                     );
@@ -772,7 +730,6 @@ mod tests {
                         4,       // score_them
                         None,    // serving_team
                         Some(0), // libero_position
-                        10,      // possessions
                         3,       // attacks
                         3,       // errors
                         3,       // unforced_errors
@@ -799,7 +756,6 @@ mod tests {
                         4,                      // score_them
                         Some(TeamSideEnum::Us), // serving_team
                         Some(5),                // libero_position
-                        10,                     // possessions
                         4,                      // attacks
                         3,                      // errors
                         3,                      // unforced_errors
@@ -826,7 +782,6 @@ mod tests {
                         4,       // score_them
                         None,    // serving_team
                         Some(5), // libero_position
-                        11,      // possessions
                         4,       // attacks
                         3,       // errors
                         3,       // unforced_errors
@@ -853,7 +808,6 @@ mod tests {
                         5,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(5),                  // libero_position
-                        11,                       // possessions
                         4,                        // attacks
                         4,                        // errors
                         3,                        // unforced_errors
@@ -880,7 +834,6 @@ mod tests {
                         5,       // score_them
                         None,    // serving_team
                         Some(5), // libero_position
-                        12,      // possessions
                         4,       // attacks
                         4,       // errors
                         3,       // unforced_errors
@@ -907,7 +860,6 @@ mod tests {
                         6,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(5),                  // libero_position
-                        12,                       // possessions
                         5,                        // attacks
                         5,                        // errors
                         3,                        // unforced_errors
@@ -934,7 +886,6 @@ mod tests {
                         6,                      // score_them
                         Some(TeamSideEnum::Us), // serving_team
                         Some(4),                // libero_position
-                        12,                     // possessions
                         5,                      // attacks
                         5,                      // errors
                         3,                      // unforced_errors
@@ -961,7 +912,6 @@ mod tests {
                         6,       // score_them
                         None,    // serving_team
                         Some(4), // libero_position
-                        13,      // possessions
                         5,       // attacks
                         5,       // errors
                         3,       // unforced_errors
@@ -988,7 +938,6 @@ mod tests {
                         6,       // score_them
                         None,    // serving_team
                         Some(4), // libero_position
-                        14,      // possessions
                         5,       // attacks
                         5,       // errors
                         3,       // unforced_errors
@@ -1015,7 +964,6 @@ mod tests {
                         7,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(4),                  // libero_position
-                        14,                       // possessions
                         6,                        // attacks
                         6,                        // errors
                         4,                        // unforced_errors
@@ -1042,7 +990,6 @@ mod tests {
                         7,                      // score_them
                         Some(TeamSideEnum::Us), // serving_team
                         None,                   // libero_position
-                        14,                     // possessions
                         6,                      // attacks
                         6,                      // errors
                         4,                      // unforced_errors
@@ -1069,7 +1016,6 @@ mod tests {
                         8,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(0),                  // libero_position
-                        15,                       // possessions
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
@@ -1080,12 +1026,9 @@ mod tests {
                                 snapshot.stats.event_count(
                                     EventTypeEnum::S,
                                     None,
-                                    None,
-                                    Some(4),
-                                    None,
-                                    None
+                                    &StatsFilter::new(None, Some(4), None)
                                 ),
-                                Some(2)
+                                2
                             );
                         },
                     );
@@ -1108,7 +1051,6 @@ mod tests {
                         8,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(0),                  // libero_position
-                        15,                       // possessions
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
@@ -1137,7 +1079,6 @@ mod tests {
                         8,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(0),                  // libero_position
-                        15,                       // possessions
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
@@ -1169,7 +1110,6 @@ mod tests {
                         8,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(0),                  // libero_position
-                        15,                       // possessions
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
@@ -1199,7 +1139,6 @@ mod tests {
                         8,       // score_them
                         None,    // serving_team
                         Some(0), // libero_position
-                        16,      // possessions
                         6,       // attacks
                         7,       // errors
                         5,       // unforced_errors
@@ -1226,7 +1165,6 @@ mod tests {
                         9,                        // score_them
                         Some(TeamSideEnum::Them), // serving_team
                         Some(0),                  // libero_position
-                        16,                       // possessions
                         6,                        // attacks
                         8,                        // errors
                         6,                        // unforced_errors
@@ -1237,12 +1175,9 @@ mod tests {
                                 snapshot.stats.event_count(
                                     EventTypeEnum::F,
                                     None,
-                                    None,
-                                    None,
-                                    None,
-                                    None
+                                    &StatsFilter::new(None, None, None)
                                 ),
-                                Some(2)
+                                2
                             );
                         },
                     );
@@ -1265,7 +1200,6 @@ mod tests {
                         9,                      // score_them
                         Some(TeamSideEnum::Us), // serving_team
                         None,                   // libero_position
-                        16,                     // possessions
                         6,                      // attacks
                         8,                      // errors
                         6,                      // unforced_errors
@@ -1292,7 +1226,6 @@ mod tests {
                         9,    // score_them
                         None, // serving_team
                         None, // libero_position
-                        17,   // possessions
                         6,    // attacks
                         8,    // errors
                         6,    // unforced_errors
@@ -1303,23 +1236,17 @@ mod tests {
                                 snapshot.stats.event_count(
                                     EventTypeEnum::S,
                                     None,
-                                    None,
-                                    Some(3),
-                                    None,
-                                    None
+                                    &StatsFilter::new(None, Some(3), None)
                                 ),
-                                Some(2)
+                                2
                             );
                             assert_eq!(
                                 snapshot.stats.event_count(
                                     EventTypeEnum::S,
                                     None,
-                                    None,
-                                    None,
-                                    None,
-                                    None
+                                    &StatsFilter::new(None, None, None)
                                 ),
-                                Some(10)
+                                10
                             );
                         },
                     );
@@ -1432,57 +1359,30 @@ mod tests {
             )
             .expect("should not throw");
 
-        let (_, total, count) = snapshot
+        // 4 serve errors of theirs and a kill won, a blocked attack and 2
+        // faults lost, an attack countered
+        let first_rallies = snapshot
             .stats
-            .sideout_first_rally_positiveness(
-                None,
-                None,
-                None,
-                crate::shapes::stats::Metric::Positive,
-            )
+            .first_rallies(None, &StatsFilter::default())
             .unwrap();
-        assert_eq!(total, 9);
-        assert_eq!(count, 5);
-        let (_, _, count) = snapshot
-            .stats
-            .sideout_first_rally_positiveness(
-                None,
-                None,
-                None,
-                crate::shapes::stats::Metric::Efficiency,
-            )
-            .unwrap();
-        assert_eq!(total, 9);
-        assert_eq!(count, 2);
-        let blocker_sideout_attacks = snapshot
-            .stats
-            .event_count(
-                EventTypeEnum::A,
-                None,
-                Some(PhaseEnum::SideOut),
-                None,
-                None,
-                Some(EvalEnum::Over),
-            )
-            .unwrap();
+        assert_eq!(first_rallies.total, 9);
+        assert_eq!(first_rallies.won, 5);
+        assert_eq!(first_rallies.lost, 3);
+        assert_eq!(first_rallies.blocked, 1);
+        assert_eq!(first_rallies.errors, 3);
+        assert_eq!(first_rallies.unforced_errors, 2);
+        let blocker_sideout_attacks = snapshot.stats.event_count(
+            EventTypeEnum::A,
+            Some(EvalEnum::Over),
+            &StatsFilter::new(Some(PhaseEnum::SideOut), None, None),
+        );
         assert_eq!(blocker_sideout_attacks, 1);
-        let errors_total = snapshot
+        let counter_attacks = snapshot.stats.attacks.count(|k| k.is_counter_attack());
+        let kills = snapshot
             .stats
-            .sideout_first_rally_errors(None, None, None, None, None)
-            .unwrap();
-        assert_eq!(errors_total, 3);
-        let errors_total_unforced = snapshot
-            .stats
-            .sideout_first_rally_errors(None, None, None, None, Some(ErrorTypeEnum::Unforced))
-            .unwrap();
-        assert_eq!(errors_total_unforced, 2);
-        let (counter_attacks_conversion_rate, total_counter_attacks, successful_counter_attacks) =
-            snapshot
-                .stats
-                .counter_attack_conversion_rate(None, None, None, None)
-                .unwrap();
-        assert_eq!(counter_attacks_conversion_rate, 50.0);
-        assert_eq!(total_counter_attacks, 2);
-        assert_eq!(successful_counter_attacks, 1);
+            .attacks
+            .count(|k| k.is_counter_attack() && k.eval == EvalEnum::Perfect);
+        assert_eq!(counter_attacks, 2);
+        assert_eq!(kills, 1);
     }
 }

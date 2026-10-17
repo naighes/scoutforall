@@ -16,7 +16,7 @@ use crate::{
         player::PlayerEntry,
         set::SetEntry,
         snapshot::Snapshot,
-        stats::{Metric, Stats},
+        stats::{Metric, Stats, StatsFilter},
     },
 };
 use async_trait::async_trait;
@@ -399,6 +399,16 @@ impl MatchStatsScreen {
         }
     }
 
+    /// The statistics filtered by the selected phase, rotation and player.
+    fn current_filter(&self) -> StatsFilter {
+        StatsFilter::new(
+            self.phase_filter.selected().cloned(),
+            // the rotations are listed in order, from the setter in position 1
+            self.rotation_filter.selected().map(|r| *r as u8),
+            self.player_filter.selected().map(|p| p.id),
+        )
+    }
+
     fn render_event_stats(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -409,10 +419,15 @@ impl MatchStatsScreen {
                 Constraint::Length(3),
             ])
             .split(area);
-        self.render_evals_bars(f, selection, chunks[0]);
-        self.render_summary_table(f, selection, chunks[1]);
-        self.render_efficiency_bars(f, selection, chunks[2]);
-        self.render_positiveness_bars(f, selection, chunks[3]);
+        let Some(stats) = self.get_current_stats(self.set_filter.selected().copied()) else {
+            return;
+        };
+        let filter = self.current_filter();
+        let event_type = selection.event_type;
+        Self::render_evals_bars(f, &stats, &filter, event_type, chunks[0]);
+        Self::render_summary_table(f, &stats, &filter, event_type, chunks[1]);
+        Self::render_efficiency_bars(f, &stats, &filter, event_type, chunks[2]);
+        Self::render_positiveness_bars(f, &stats, &filter, event_type, chunks[3]);
     }
 
     fn render_right(&mut self, f: &mut Frame, area: Rect) {
@@ -435,9 +450,7 @@ impl MatchStatsScreen {
         F: Fn((f64, f64)) -> f64,
     {
         let set = self.set_filter.selected().copied();
-        let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
-        let phase = self.phase_filter.selected().cloned();
-        let player = self.player_filter.selected().map(|p| p.id);
+        let filter = self.current_filter();
         if let Some(stats) = self.get_current_stats(set) {
             let zones = [
                 (ZoneEnum::Four, 1.0, 1.0),
@@ -473,8 +486,7 @@ impl MatchStatsScreen {
                     });
                     for (zone, x, y) in zones.iter() {
                         let text = stats
-                            .distribution
-                            .zone_stats(*zone, phase, rotation, player, None)
+                            .zone_distribution(*zone, &filter)
                             .map(|(p, s)| format!("{:.1}%", select_value((p, s))))
                             .unwrap_or("-".to_string());
                         ctx.print(*x, y_inverted(*y), text);
@@ -484,13 +496,13 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_evals_bars(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
-        let event_type = selection.event_type;
-        let set = self.set_filter.selected().copied();
-        let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
-        let phase = self.phase_filter.selected().cloned();
-        let player = self.player_filter.selected().map(|p| p.id);
-        let stats = self.get_current_stats(set);
+    fn render_evals_bars(
+        f: &mut Frame,
+        stats: &Stats,
+        filter: &StatsFilter,
+        event_type: EventTypeEnum,
+        area: Rect,
+    ) {
         let evals_with_colors = match event_type {
             EventTypeEnum::S => vec![
                 (EvalEnum::Perfect, Color::Green),
@@ -532,20 +544,19 @@ impl MatchStatsScreen {
             _ => vec![],
         };
         let mut bars: Vec<Bar> = Vec::new();
-        if let Some(stats) = &stats {
-            for (eval, color) in evals_with_colors {
-                if let Some((percent, _total, _count)) =
-                    stats.event_percentage(event_type, player, phase, rotation, None, eval)
-                {
-                    bars.push(
-                        Bar::default()
-                            .label(eval.to_string())
-                            .value((percent.round() as u64).min(100))
-                            .text_value(format!("{}%", percent.round()))
-                            .style(Style::default().fg(color))
-                            .value_style(Style::default().fg(Color::Black).bg(color)),
-                    );
-                }
+        for (eval, color) in evals_with_colors {
+            // only the evaluations given at least once
+            if let Some(percent) = stats.event_percentage(event_type, eval, filter)
+                && percent > 0.0
+            {
+                bars.push(
+                    Bar::default()
+                        .label(eval.to_string())
+                        .value((percent.round() as u64).min(100))
+                        .text_value(format!("{}%", percent.round()))
+                        .style(Style::default().fg(color))
+                        .value_style(Style::default().fg(Color::Black).bg(color)),
+                );
             }
         }
         let group = BarGroup::default().bars(&bars);
@@ -563,23 +574,14 @@ impl MatchStatsScreen {
         f.render_widget(evals_barchart, area);
     }
 
-    fn render_efficiency_bars(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
-        let event_type = selection.event_type;
-        let set = self.set_filter.selected().copied();
-        let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
-        let phase = self.phase_filter.selected().cloned();
-        let player = self.player_filter.selected().map(|p| p.id);
-        let stats = self.get_current_stats(set);
-        if let Some(stats) = &stats
-            && let Some((eff, _tot, _count)) = stats.event_positiveness(
-                event_type,
-                player,
-                phase,
-                rotation,
-                None,
-                Metric::Efficiency,
-            )
-        {
+    fn render_efficiency_bars(
+        f: &mut Frame,
+        stats: &Stats,
+        filter: &StatsFilter,
+        event_type: EventTypeEnum,
+        area: Rect,
+    ) {
+        if let Some(eff) = stats.metric_percentage(event_type, Metric::Efficiency, filter) {
             let color = if eff < 10.0 {
                 Color::Red
             } else if eff < 30.0 {
@@ -610,23 +612,14 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_positiveness_bars(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
-        let event_type = selection.event_type;
-        let set = self.set_filter.selected().copied();
-        let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
-        let phase = self.phase_filter.selected().cloned();
-        let player = self.player_filter.selected().map(|p| p.id);
-        let stats = self.get_current_stats(set);
-        if let Some(stats) = &stats
-            && let Some((eff, _tot, _count)) = stats.event_positiveness(
-                event_type,
-                player,
-                phase,
-                rotation,
-                None,
-                Metric::Positive,
-            )
-        {
+    fn render_positiveness_bars(
+        f: &mut Frame,
+        stats: &Stats,
+        filter: &StatsFilter,
+        event_type: EventTypeEnum,
+        area: Rect,
+    ) {
+        if let Some(eff) = stats.metric_percentage(event_type, Metric::Positive, filter) {
             let color = if eff < 10.0 {
                 Color::Red
             } else if eff < 20.0 {
@@ -657,81 +650,64 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_summary_table(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
-        let event_type = selection.event_type;
-        let set = self.set_filter.selected().copied();
-        let rotation = self.rotation_filter.selected().cloned().map(|r| r as u8);
-        let phase = self.phase_filter.selected().cloned();
-        let player = self.player_filter.selected().map(|p| p.id);
-        let stats = self.get_current_stats(set);
-        if let Some(stats) = &stats {
-            let mut rows: Vec<Row> = vec![];
-            let total = stats
-                .event_count(event_type, player, phase, rotation, None, None)
-                .map(|x| x.to_string())
-                .unwrap_or("-".to_string());
+    fn render_summary_table(
+        f: &mut Frame,
+        stats: &Stats,
+        filter: &StatsFilter,
+        event_type: EventTypeEnum,
+        area: Rect,
+    ) {
+        let count = |n: u32| match n {
+            0 => "-".to_string(),
+            n => n.to_string(),
+        };
+        let mut rows: Vec<Row> = vec![Row::new(vec![
+            Cell::from(current_labels().total),
+            Cell::from(count(stats.event_count(event_type, None, filter))),
+        ])];
+        let errors = stats.errors(event_type, None, filter);
+        let unforced_errors = stats.errors(event_type, Some(ErrorTypeEnum::Unforced), filter);
+        rows.push(Row::new(vec![
+            Cell::from(format!(
+                "{}({})",
+                current_labels().errors,
+                current_labels().unforced
+            )),
+            Cell::from(match (errors, unforced_errors) {
+                (0, _) => "-".to_string(),
+                (e, 0) => format!("{}(-)", e),
+                (e, ue) => format!("{}({})", e, ue),
+            }),
+        ]));
+        // the rallies have no player
+        if filter.player.is_none() {
             rows.push(Row::new(vec![
-                Cell::from(current_labels().total),
-                Cell::from(total),
-            ]));
-            let errors = stats.errors(event_type, None, player, phase, rotation, None);
-            let unforced_errors = stats.errors(
-                event_type,
-                Some(ErrorTypeEnum::Unforced),
-                player,
-                phase,
-                rotation,
-                None,
-            );
-            rows.push(Row::new(vec![
-                Cell::from(format!(
-                    "{}({})",
-                    current_labels().errors,
-                    current_labels().unforced
-                )),
-                Cell::from(match (errors, unforced_errors) {
-                    (Some(e), Some(ue)) => format!("{}({})", e, ue),
-                    (Some(e), None) => format!("{}(-)", e),
+                Cell::from(current_labels().phase_efficiency),
+                Cell::from(match stats.phases_per_point(filter) {
+                    Some((p, won, rallies)) => format!("{:.2}({}/{})", p, won, rallies),
                     _ => "-".to_string(),
                 }),
             ]));
-            let phases_convertion_rate = stats.number_of_phases_per_scored_point(phase, rotation);
-            if player.is_none() {
-                rows.push(Row::new(vec![
-                    Cell::from(current_labels().phase_efficiency),
-                    Cell::from(match phases_convertion_rate {
-                        Some((p, t, c)) => format!("{:.2}({}/{})", p, c, t),
-                        _ => "-".to_string(),
-                    }),
-                ]));
-            }
-            let faults = stats
-                .event_count(EventTypeEnum::F, player, phase, rotation, None, None)
-                .map(|x| x.to_string())
-                .unwrap_or("-".to_string());
-            rows.push(Row::new(vec![
-                Cell::from(current_labels().faults),
-                Cell::from(faults),
-            ]));
-            if event_type.provides_direct_points() {
-                let points = stats
-                    .scored_points(event_type, player, phase, rotation, None)
-                    .map(|x| x.to_string())
-                    .unwrap_or("-".to_string());
-                rows.push(Row::new(vec![
-                    Cell::from(current_labels().points),
-                    Cell::from(points),
-                ]));
-            }
-            let summary_box = Table::new(rows, [Constraint::Length(16), Constraint::Length(5)])
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().summary),
-                )
-                .widths([Constraint::Percentage(70), Constraint::Percentage(30)]);
-            f.render_widget(summary_box, area);
         }
+        rows.push(Row::new(vec![
+            Cell::from(current_labels().faults),
+            Cell::from(count(stats.event_count(EventTypeEnum::F, None, filter))),
+        ]));
+        if event_type.provides_direct_points() {
+            let points = stats.event_count(event_type, Some(EvalEnum::Perfect), filter);
+            rows.push(Row::new(vec![
+                Cell::from(current_labels().points),
+                Cell::from(count(points)),
+            ]));
+        }
+        let summary_box = Table::new(rows, [Constraint::Length(16), Constraint::Length(5)])
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(current_labels().summary),
+            )
+            .widths([Constraint::Percentage(70), Constraint::Percentage(30)]);
+        f.render_widget(summary_box, area);
     }
 
     fn render_center(&mut self, f: &mut Frame, area: Rect) {
