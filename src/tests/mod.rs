@@ -7,6 +7,7 @@ mod navigation_tests;
 mod scouting_tests;
 mod settings_tests;
 mod snapshot_tests;
+mod stats_tests;
 mod substitution_tests;
 mod ui;
 mod unreadable_data_tests;

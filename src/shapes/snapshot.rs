@@ -7,7 +7,7 @@ use crate::{
         },
         lineup::Lineup,
         set::SetEntry,
-        stats::Stats,
+        stats::{AttackKey, EventKey, FirstRallyKey, RallyKey, Stats},
     },
 };
 use chrono::{DateTime, Utc};
@@ -85,6 +85,19 @@ impl Snapshot {
         })
     }
 
+    /// The zone a player attacks from, told by their role and row (the
+    /// scouting doesn't ask for it):
+    /// - in the front row, the setter and the middle blockers attack from
+    ///   3, the outside hitter from 4 and the opposite from 2, but in
+    ///   rotation 0 (setter in position 1, "S1" in the report) in side
+    ///   out, where they receive
+    ///   and attack from the side they stand on (outside hitter 2,
+    ///   opposite 4);
+    /// - in the back row, the outside hitter attacks from 8 (pipe) and the
+    ///   opposite from 9 (from position 1);
+    /// - the others (back row setter and middle blocker, libero, a player
+    ///   not on court) have no zone: their attacks still count, but not in
+    ///   the distribution and the counter-attacks.
     fn get_attack_zone(&self, player_id: &Uuid) -> Option<ZoneEnum> {
         use PhaseEnum::*;
         use RoleEnum::*;
@@ -131,70 +144,8 @@ impl Snapshot {
         }
     }
 
-    fn set_distribution_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        let rotation = self.current_lineup.get_current_rotation()?;
-        let prev_event = match self.last_event.as_ref() {
-            Some(e) => e,
-            None => return Ok(()),
-        };
-        let prev_eval = match prev_event.eval {
-            Some(eval) => eval,
-            None => return Ok(()),
-        };
-        let current_eval = match event.eval {
-            Some(eval) => eval,
-            None => return Ok(()),
-        };
-        let attack_zone = match event.player.and_then(|p| self.get_attack_zone(&p)) {
-            Some(zone) => zone,
-            None => return Ok(()),
-        };
-        let player = match event.player {
-            Some(player) => player,
-            None => return Ok(()),
-        };
-        if matches!(
-            (
-                event.event_type,
-                prev_event.event_type,
-                prev_eval,
-                current_eval,
-            ),
-            (A, D | P, Perfect | Positive | Exclamative | Negative, _)
-                | (A, S, Over, _)
-                | (A, A | B, Positive, _)
-        ) {
-            self.stats.distribution.add(
-                self.current_lineup.get_current_phase(),
-                rotation,
-                player,
-                attack_zone,
-                prev_eval,
-                current_eval,
-            );
-        }
-        Ok(())
-    }
-
-    fn has_scored(&mut self, event: &EventEntry) -> Option<TeamSideEnum> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        match (event.event_type, event.eval) {
-            (OE, _) | (B | A | S, Some(Perfect)) => Some(TeamSideEnum::Us),
-            (B | A, Some(Error | Over))
-            | (D, Some(Error))
-            | (P, Some(Error))
-            | (S, Some(Error))
-            | (F, _)
-            | (OS, _) => Some(TeamSideEnum::Them),
-            _ => None,
-        }
-    }
-
-    fn set_score_stats(&mut self, event: &EventEntry) {
-        if let Some(side) = self.has_scored(event) {
+    fn set_score(&mut self, event: &EventEntry) {
+        if let Some(side) = event.event_type.rally_winner(event.eval) {
             let (score, opponent_score) = match side {
                 TeamSideEnum::Us => (&mut self.score_us, self.score_them),
                 TeamSideEnum::Them => (&mut self.score_them, self.score_us),
@@ -207,153 +158,121 @@ impl Snapshot {
         }
     }
 
-    fn set_phase_count_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
+    /// The team serving next: the one serving the set at its start, then
+    /// the one winning the last rally. `None` while a rally is being played.
+    pub fn get_serving_team(&self) -> Option<TeamSideEnum> {
+        match &self.last_event {
+            None => Some(match self.current_lineup.get_current_phase() {
+                PhaseEnum::Break => TeamSideEnum::Us,
+                PhaseEnum::SideOut => TeamSideEnum::Them,
+            }),
+            Some(last) => last.event_type.rally_winner(last.eval),
+        }
+    }
+
+    /// Whether an attack after this event was built by us: after a
+    /// reception or a dig keeping the ball on our side (`#`, `+`, `!`, `-`),
+    /// after their reception coming straight back to us (serve `/`), or
+    /// after an attack or block of ours they couldn't counter (`+`, we play
+    /// the ball again). An attack after anything else (e.g. after an
+    /// overpass of ours) still counts among the attacks, but not in the
+    /// distribution and the counter-attacks.
+    fn is_attack_setup(prev_type: EventTypeEnum, prev_eval: EvalEnum) -> bool {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        matches!(
+            (prev_type, prev_eval),
+            (D | P, Perfect | Positive | Exclamative | Negative) | (S, Over) | (A | B, Positive)
+        )
+    }
+
+    /// Collects the statistics of an event, in the phase and rotation it was
+    /// played in: called before the event updates the lineup, and with the
+    /// event before it still in `last_event`.
+    fn record_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
+        use EventTypeEnum::*;
         let phase = self.current_lineup.get_current_phase();
         let rotation = self.current_lineup.get_current_rotation()?;
-        match &self.has_scored(event) {
-            Some(TeamSideEnum::Us) => {
-                self.stats.scored_points.add(phase, rotation);
-                self.stats.phases.add(phase, rotation);
-            }
-            Some(TeamSideEnum::Them) => {
-                self.stats.phases.add(phase, rotation);
-            }
-            _ => {}
+        // the zone of an attack comes from the role of the attacker
+        let zone = match event.event_type {
+            A => event.player.and_then(|p| self.get_attack_zone(&p)),
+            _ => None,
         };
+        // every event of the rally: an action missing its evaluation can't
+        // be scored, and the substitutions and libero and setter changes
+        // aren't part of the rally
+        let skip = matches!(event.event_type, R | CL | CS)
+            || (event.event_type.requires_evaluation() && event.eval.is_none());
+        if !skip {
+            self.stats.events.add(EventKey {
+                event_type: event.event_type,
+                phase,
+                rotation,
+                player: event.player,
+                zone,
+                eval: event.eval,
+            });
+        }
+        if let Some(winner) = event.event_type.rally_winner(event.eval) {
+            self.stats.rallies.add(RallyKey {
+                phase,
+                rotation,
+                winner,
+            });
+        }
+        // the attacks built by us, for the distribution and the
+        // counter-attacks: they need the zone of the attack
+        if let (A, Some(player), Some(zone), Some(eval), Some(prev)) = (
+            event.event_type,
+            event.player,
+            zone,
+            event.eval,
+            &self.last_event,
+        ) && let Some(prev_eval) = prev.eval
+            && Self::is_attack_setup(prev.event_type, prev_eval)
+        {
+            self.stats.attacks.add(AttackKey {
+                phase,
+                rotation,
+                player,
+                zone,
+                eval,
+                prev_type: prev.event_type,
+                prev_eval,
+            });
+        }
+        self.record_first_rally(event, rotation);
         Ok(())
     }
 
-    pub fn get_serving_team(&self) -> Option<TeamSideEnum> {
+    /// The first rally of a side out goes from their serve to the end of
+    /// our first attack; it's recorded by the event ending it:
+    /// - their serve error (`OE`), their ace (`OS`) or our fault (`F`)
+    ///   before the reception;
+    /// - a reception error, or an overpass (the rally goes on, but our first
+    ///   attack is lost);
+    /// - after a reception keeping the ball, our attack (whatever its
+    ///   outcome), their error or our fault.
+    fn record_first_rally(&mut self, event: &EventEntry, rotation: u8) {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        use PhaseEnum::*;
-        use TeamSideEnum::*;
-        match (
-            self.last_event.as_ref().map(|e| e.event_type),
-            self.last_event.as_ref().and_then(|e| e.eval),
-            self.current_lineup.get_current_phase(),
-        ) {
-            (None, _, Break) | (Some(OE), _, _) | (Some(B | A | S), Some(Perfect), _) => Some(Us),
-            (None, _, SideOut)
-            | (Some(B | A), Some(Error | Over), _)
-            | (Some(D | P | S), Some(Error), _)
-            | (Some(F | OS), _, _) => Some(Them),
-            _ => None,
-        }
-    }
-
-    fn set_possessions_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        use TeamSideEnum::*;
-        let us_was_serving = self.get_serving_team() == Some(Us);
-        let them_was_serving = self.get_serving_team() == Some(Them);
-        let rotation = self.current_lineup.get_current_rotation()?;
-        match (
-            event.event_type,
-            event.eval,
-            them_was_serving,
-            us_was_serving,
-        ) {
-            (P | D | S, _, _, _)
-            | (A | B, Some(Positive), _, _) // TODO: should perfect block and perfect attack count as possession?
-            | (OS, _, true, _)
-            | (F, _, _, true) => {self.stats.possessions.add(
-                self.current_lineup.get_current_phase(),
-                rotation,
-            ); Ok(())},
-            _ => Ok(())
-        }
-    }
-
-    fn set_opponent_errors_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        let rotation = self.current_lineup.get_current_rotation()?;
-        if event.event_type == EventTypeEnum::OE {
-            self.stats
-                .opponent_errors
-                .add(self.current_lineup.get_current_phase(), rotation);
-            Ok(())
-        } else {
-            Ok(())
-        }
-    }
-
-    fn set_errors_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        let rotation = self.current_lineup.get_current_rotation()?;
-        let error_type = event.event_type.error_type(event.eval);
-        match (error_type, event.player) {
-            (Some(err), Some(player)) => {
-                self.stats.errors.add(
-                    self.current_lineup.get_current_phase(),
-                    rotation,
-                    player,
-                    err,
-                );
-                Ok(())
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn set_points_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        use TeamSideEnum::*;
-        let them_was_serving = self.get_serving_team() == Some(Them);
-        let rotation = self.current_lineup.get_current_rotation()?;
-        if matches!(
-            (event.event_type, event.eval, them_was_serving,),
-            (OE, _, false) | (B, Some(Perfect), _) | (A, Some(Perfect), _) | (S, Some(Perfect), _)
-        ) {
-            self.stats
-                .earned_points
-                .add(self.current_lineup.get_current_phase(), rotation);
-            Ok(())
-        } else {
-            Ok(())
-        }
-    }
-
-    fn set_events_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EventTypeEnum::*;
-        let zone = event.player.and_then(|p| self.get_attack_zone(&p));
-        let rotation = self.current_lineup.get_current_rotation()?;
-        match (event.event_type, event.eval, event.player, zone) {
-            (B | D | P | S, Some(ev), Some(player), _) => {
-                self.stats.events.add(
-                    event.event_type,
-                    self.current_lineup.get_current_phase(),
-                    rotation,
-                    Some(player),
-                    None,
-                    Some(ev),
-                );
-                Ok(())
-            }
-            (A, Some(ev), Some(player), Some(z)) => {
-                self.stats.events.add(
-                    event.event_type,
-                    self.current_lineup.get_current_phase(),
-                    rotation,
-                    Some(player),
-                    Some(z),
-                    Some(ev),
-                );
-                Ok(())
-            }
-            (F, _, Some(player), _) => {
-                self.stats.events.add(
-                    event.event_type,
-                    self.current_lineup.get_current_phase(),
-                    rotation,
-                    Some(player),
-                    None,
-                    None,
-                );
-                Ok(())
-            }
-            _ => Ok(()),
-        }
+        let prev = self.last_event.as_ref().map(|e| (e.event_type, e.eval));
+        let reception_eval = match (event.event_type, event.eval, prev) {
+            (OE | OS | F, _, _) if self.get_serving_team() == Some(TeamSideEnum::Them) => None,
+            (P, Some(Error | Over), _) => event.eval,
+            (
+                A | OE | F,
+                _,
+                Some((P, Some(eval @ (Perfect | Positive | Exclamative | Negative)))),
+            ) => Some(eval),
+            _ => return,
+        };
+        self.stats.first_rallies.add(FirstRallyKey {
+            rotation,
+            reception_eval,
+            ending: event.event_type,
+            ending_eval: event.eval,
+        });
     }
 
     /// The events available before a serve: in side out when they serve,
@@ -420,165 +339,13 @@ impl Snapshot {
         }
     }
 
-    fn set_counter_attack_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        let rotation = self.current_lineup.get_current_rotation()?;
-        if let (A, Some(last_event), Some(player), Some(zone), Some(eval)) = (
-            event.event_type,
-            &self.last_event,
-            event.player,
-            event.player.and_then(|p| self.get_attack_zone(&p)),
-            event.eval,
-        ) {
-            let is_counter_attack = match (last_event.event_type, last_event.eval) {
-                // defense that keeps the ball alive
-                (D, Some(Perfect | Positive | Negative | Exclamative)) => true,
-                // positive block or attack that keeps play going
-                (B | A, Some(Positive)) => true,
-                _ => false,
-            };
-            if is_counter_attack {
-                self.stats.counter_attack.add(
-                    self.current_lineup.get_current_phase(),
-                    rotation,
-                    player,
-                    zone,
-                    eval,
-                );
-            }
-        }
-        Ok(())
-    }
-
-    fn set_first_rally_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        let rotation = self.current_lineup.get_current_rotation()?;
-        let last_event_type = self.last_event.as_ref().map(|e| e.event_type);
-        let last_event_eval = self.last_event.as_ref().and_then(|e| e.eval);
-        match (
-            event.event_type,
-            event.eval,
-            last_event_type,
-            last_event_eval,
-            self.get_serving_team(),
-        ) {
-            (OE, _, _, _, Some(TeamSideEnum::Them)) => {
-                // our ace
-                self.stats.first_rally.add(
-                    rotation,
-                    None,                   // reception eval
-                    Some(event.event_type), // finalizing event type
-                    None,                   // finalizing event eval
-                );
-            }
-            (OS | F, _, _, _, Some(TeamSideEnum::Them)) => {
-                // opponent ace
-                self.stats.first_rally.add(
-                    rotation,
-                    None,                   // reception eval
-                    Some(event.event_type), // finalizing event type
-                    None,                   // finalizing event eval
-                );
-            }
-            (P, Some(Error | Over), _, _, _) => {
-                // reception error or slash
-                self.stats.first_rally.add(
-                    rotation,
-                    event.eval,             // reception eval
-                    Some(event.event_type), // finalizing event type
-                    None,                   // finalizing event eval
-                );
-            }
-            (A, _, Some(P), Some(Perfect | Positive | Exclamative | Negative), _) => {
-                // attack (previous is a non error reception)
-                self.stats.first_rally.add(
-                    rotation,
-                    last_event_eval,        // reception eval
-                    Some(event.event_type), // finalizing event type
-                    event.eval,             // finalizing event eval
-                );
-            }
-            (OE, _, Some(P), Some(Perfect | Positive | Exclamative | Negative), _) => {
-                // opponent error (previous is a non error pass)
-                self.stats.first_rally.add(
-                    rotation,
-                    last_event_eval,        // reception eval
-                    Some(event.event_type), // finalizing event type
-                    None,                   // finalizing event eval
-                );
-            }
-            (F, _, Some(P), Some(Perfect | Positive | Exclamative | Negative), _) => {
-                // fault after reception
-                self.stats.first_rally.add(
-                    rotation,
-                    last_event_eval,        // reception eval
-                    Some(event.event_type), // finalizing event type
-                    None,                   // finalizing event eval
-                );
-            }
-            _ => {}
-        };
-        Ok(())
-    }
-
-    fn set_attack_stats(&mut self, event: &EventEntry) -> Result<(), AppError> {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        let rotation = self.current_lineup.get_current_rotation()?;
-        if let Some(prev_eval) = self.last_event.as_ref().and_then(|e| e.eval) {
-            match (
-                event.event_type,
-                self.last_event.as_ref().map(|e| e.event_type), // prev event type
-                prev_eval,                                      // prev eval
-                event.eval,                                     // current eval
-                event.player,                                   // current player
-                event.player.and_then(|p| self.get_attack_zone(&p)), // zone
-            ) {
-                (
-                    A,
-                    Some(D | P),
-                    Exclamative | Negative | Perfect | Positive,
-                    Some(eval),
-                    Some(player),
-                    Some(zone),
-                )
-                | (A, Some(S), Over, Some(eval), Some(player), Some(zone))
-                | (A, Some(A | B), Positive, Some(eval), Some(player), Some(zone)) => {
-                    self.stats.attack.add(
-                        self.current_lineup.get_current_phase(),
-                        rotation,
-                        player,
-                        zone,
-                        eval,
-                        prev_eval,
-                    );
-                    Ok(())
-                }
-                _ => Ok(()),
-            }
-        } else {
-            Ok(())
-        }
-    }
-
     pub fn add_event(
         &mut self,
         event: &EventEntry,
         current_available_options: &[EventTypeEnum],
     ) -> Result<Vec<EventTypeEnum>, AppError> {
-        self.set_score_stats(event);
-        self.set_phase_count_stats(event)?;
-        self.set_possessions_stats(event)?;
-        self.set_opponent_errors_stats(event)?;
-        self.set_errors_stats(event)?;
-        self.set_points_stats(event)?;
-        self.set_events_stats(event)?;
-        self.set_counter_attack_stats(event)?;
-        self.set_attack_stats(event)?;
-        self.set_distribution_stats(event)?;
-        self.set_first_rally_stats(event)?;
+        self.set_score(event);
+        self.record_stats(event)?;
         let available_options = self.get_available_options(event, current_available_options);
         if event.event_type == EventTypeEnum::R {
             // replace lineup entry

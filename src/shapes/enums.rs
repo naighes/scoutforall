@@ -252,6 +252,28 @@ impl EventTypeEnum {
         matches!(self, S | A | B)
     }
 
+    /// The team winning the rally this event ends, or `None` when the rally
+    /// goes on. The score, the serving team and the statistics all rely on it.
+    ///
+    /// - we score on an opponent error, an ace, a kill or a block point;
+    /// - they score on our errors (an attack out or blocked, a block out or
+    ///   an invasion, a serve, reception or dig error), our faults and their
+    ///   own points.
+    ///
+    /// An overpass (`/`) in reception or defense isn't a point: the rally
+    /// goes on with the ball on their side.
+    pub fn rally_winner(&self, eval: Option<EvalEnum>) -> Option<TeamSideEnum> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        match (self, eval) {
+            (OE, _) | (B | A | S, Some(Perfect)) => Some(TeamSideEnum::Us),
+            (B | A, Some(Error | Over)) | (D | P | S, Some(Error)) | (F | OS, _) => {
+                Some(TeamSideEnum::Them)
+            }
+            _ => None,
+        }
+    }
+
     pub fn error_type(&self, eval: Option<EvalEnum>) -> Option<ErrorTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -617,21 +639,6 @@ impl fmt::Display for ErrorTypeEnum {
             Unforced => "unforced",
         };
         write!(f, "{}", label)
-    }
-}
-
-impl FromStr for ErrorTypeEnum {
-    type Err = AppError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use ErrorTypeEnum::*;
-        match s.to_uppercase().as_str() {
-            "forced" => Ok(Forced),
-            "unforced" => Ok(Unforced),
-            _ => Err(AppError::IO(IOError::Msg(format!(
-                "invalid error type: {}",
-                s
-            )))),
-        }
     }
 }
 
