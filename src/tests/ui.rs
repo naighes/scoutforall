@@ -26,7 +26,10 @@ use crate::{
 use chrono::{Duration, TimeZone, Utc};
 use crokey::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, style::Modifier};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tempfile::TempDir;
 
 const WIDTH: u16 = 120;
@@ -49,17 +52,28 @@ impl Ui {
     /// Starts the app on the team list. `browse_dirs` are created in the
     /// folder the file system screens open on.
     pub async fn start(teams: &[TeamFixture], browse_dirs: &[&str]) -> Self {
-        Self::start_with(teams, browse_dirs, false).await
+        Self::start_with(teams, browse_dirs, false, |_| {}).await
     }
 
     /// Starts the app on the team list, with the first set of every match
     /// already started and serving: the first six players of the team are on
     /// court, the seventh is the libero.
     pub async fn start_with_sets(teams: &[TeamFixture]) -> Self {
-        Self::start_with(teams, &[], true).await
+        Self::start_with(teams, &[], true, |_| {}).await
     }
 
-    async fn start_with(teams: &[TeamFixture], browse_dirs: &[&str], start_sets: bool) -> Self {
+    /// Like `start_with_sets`, changing the saved files before the app
+    /// starts, e.g. to damage them: `edit` gets the data folder.
+    pub async fn start_with_files(teams: &[TeamFixture], edit: impl FnOnce(&Path)) -> Self {
+        Self::start_with(teams, &[], true, edit).await
+    }
+
+    async fn start_with(
+        teams: &[TeamFixture],
+        browse_dirs: &[&str],
+        start_sets: bool,
+        edit: impl FnOnce(&Path),
+    ) -> Self {
         let dir = TempDir::new().unwrap();
         let base = dir.path().join("data");
         std::fs::create_dir_all(&base).unwrap();
@@ -120,6 +134,7 @@ impl Ui {
             }
         }
 
+        edit(&base);
         let team_reader = FileSystemTeamReader::new(&base);
         let teams = team_reader.read_all().await.unwrap();
         let settings = Settings {

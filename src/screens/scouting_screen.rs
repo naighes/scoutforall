@@ -404,18 +404,21 @@ impl<
     }
 
     async fn add_event(&mut self, event: &EventEntry) -> AppAction {
-        // append event to the file
-        let currently_available_options = self
-            .set_writer
-            .append_event(&self.current_match, self.set.set_number, event)
-            .await
-            // update snapshot and get new available options
-            .and_then(|_| {
-                self.snapshot
-                    .add_event(event, &self.currently_available_options)
-            });
+        // the event is saved only when it applies: otherwise the set wouldn't
+        // replay anymore. The snapshot is updated only when it's saved.
+        let mut snapshot = self.snapshot.clone();
+        let currently_available_options =
+            match snapshot.add_event(event, &self.currently_available_options) {
+                Ok(options) => self
+                    .set_writer
+                    .append_event(&self.current_match, self.set.set_number, event)
+                    .await
+                    .map(|_| options),
+                Err(e) => Err(e),
+            };
         match currently_available_options {
             Ok(options) => {
+                self.snapshot = snapshot;
                 // append event to the set
                 self.set.events.push(event.clone());
                 // reset state
@@ -1113,5 +1116,121 @@ impl<
                 f.render_widget(paragraph, area);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        constants::DEFAULT_MAX_SUBSTITUTIONS,
+        providers::{
+            fs::{
+                match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
+                set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
+                settings_reader::FileSystemSettingsReader,
+                settings_writer::FileSystemSettingsWriter, team_writer::FileSystemTeamWriter,
+            },
+            match_reader::MatchReader,
+            match_writer::MatchWriter,
+            team_writer::{TeamInput, TeamWriter},
+        },
+        shapes::{enums::TeamSideEnum, player::PlayerEntry},
+    };
+    use tempfile::TempDir;
+
+    /// An event that doesn't apply isn't saved: up to v0.3.0 it was, and the
+    /// set didn't open anymore.
+    #[tokio::test]
+    async fn event_that_does_not_apply_is_not_saved() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path();
+        let players: Vec<PlayerEntry> = (0..7)
+            .map(|i| PlayerEntry {
+                name: format!("player {}", i + 1),
+                number: i + 1,
+                ..Default::default()
+            })
+            .collect();
+        let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
+        let team = FileSystemTeamWriter::new(base)
+            .save(TeamInput::New {
+                id: None,
+                name: "Volley Club".into(),
+                year: 2025,
+                classification: None,
+                gender: None,
+                players,
+            })
+            .await
+            .unwrap();
+        let m = FileSystemMatchWriter::new(base)
+            .create(
+                &team,
+                "Cortona Volley".into(),
+                Utc::now().fixed_offset(),
+                true,
+                DEFAULT_MAX_SUBSTITUTIONS,
+            )
+            .await
+            .unwrap();
+        let set_writer = Arc::new(FileSystemSetWriter::new(base));
+        let positions: [Uuid; 6] = ids[..6].try_into().unwrap();
+        let set = set_writer
+            .create(
+                &m,
+                1,
+                TeamSideEnum::Them,
+                positions,
+                ids[6],
+                None,
+                positions[0],
+                vec![],
+            )
+            .await
+            .unwrap();
+        let (snapshot, options) = set.compute_snapshot(m.max_substitutions).unwrap();
+        let mut screen = ScoutingScreen::new(
+            Arc::new(FileSystemSettingsReader::new(base)),
+            Arc::new(FileSystemSettingsWriter::new(base)),
+            Settings::default(),
+            m.clone(),
+            set,
+            snapshot,
+            options,
+            None,
+            set_writer,
+        );
+        let event = |event_type, player, target_player| EventEntry {
+            timestamp: Utc::now(),
+            event_type,
+            player,
+            eval: None,
+            target_player,
+        };
+        // a player who isn't on court is substituted
+        screen
+            .add_event(&event(
+                EventTypeEnum::R,
+                Some(Uuid::new_v4()),
+                Some(Uuid::new_v4()),
+            ))
+            .await;
+        assert!(screen.notify_message.has_value());
+        assert!(screen.set.events.is_empty());
+        screen
+            .add_event(&event(EventTypeEnum::OE, None, None))
+            .await;
+        assert_eq!(screen.snapshot.score_us, 1);
+        // the set opens with the event that applied only
+        let reader = FileSystemMatchReader::new(base, Arc::new(FileSystemSetReader::new(base)));
+        let m = reader
+            .read_single(&team, &m.id)
+            .await
+            .expect("expected the set to open");
+        assert_eq!(m.sets[0].events.len(), 1);
+        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        assert_eq!(snapshot.score_us, 1);
+        assert_eq!(snapshot.score_them, 0);
     }
 }

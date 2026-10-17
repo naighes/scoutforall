@@ -1,7 +1,7 @@
 use crate::{
     errors::{AppError, SnapshotError},
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum},
+        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum},
         player::PlayerEntry,
         snapshot::EventEntry,
         team::TeamEntry,
@@ -26,6 +26,7 @@ pub struct Lineup {
     fallback_libero: Option<Uuid>,
     substitutions: Vec<SubstitutionRecord>,
     max_substitutions: u8,
+    rules: LineupRulesEnum,
     libero_replacement: Option<Uuid>,
     idle_player: Option<Uuid>,
     liberos_played: Vec<Uuid>,
@@ -39,6 +40,7 @@ impl Lineup {
         current_libero: Uuid,
         fallback_libero: Option<Uuid>,
         max_substitutions: u8,
+        rules: LineupRulesEnum,
     ) -> Result<Lineup, AppError> {
         let rotation = Lineup::get_rotation(players, &current_setter)?;
         let libero_slot = Lineup::get_libero_slot(rotation)?;
@@ -53,12 +55,18 @@ impl Lineup {
             previous_phase: None,
             substitutions: vec![],
             max_substitutions,
+            rules,
             current_setter,
             current_libero,
             fallback_libero,
             // even when the middle blocker serves first: once the libero
-            // replaces it, the other middle blocker replaces the libero
-            libero_replacement: Some(libero_replacement),
+            // replaces it, the other middle blocker replaces the libero (up to
+            // v0.2.0 the libero stayed on court)
+            libero_replacement: if has_libero || rules != LineupRulesEnum::V1 {
+                Some(libero_replacement)
+            } else {
+                None
+            },
             idle_player: if has_libero { Some(idle_player) } else { None },
             liberos_played: vec![current_libero],
         };
@@ -461,7 +469,7 @@ impl Lineup {
                 self.current_setter = *replacement;
             }
             // the substitute is the one replacing the libero
-            if self.libero_replacement == Some(*replaced) {
+            if self.rules != LineupRulesEnum::V1 && self.libero_replacement == Some(*replaced) {
                 self.libero_replacement = Some(*replacement);
             }
             Ok(())

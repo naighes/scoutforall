@@ -1,6 +1,7 @@
 pub mod enums;
 pub mod keybinding;
 pub mod lineup;
+pub mod listed;
 pub mod r#match;
 pub mod player;
 pub mod set;

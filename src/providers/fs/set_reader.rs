@@ -50,11 +50,12 @@ impl FileSystemSetReader {
         spawn_blocking(move || -> Result<Vec<EventEntry>, AppError> {
             let file = File::open(&p).map_err(|e| AppError::IO(IOError::from(e)))?;
             let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
-            let events: Vec<EventEntry> = reader
+            // a row that can't be read makes the set unreadable: without it
+            // the set would replay to something else
+            reader
                 .deserialize()
-                .filter_map(|r: Result<EventEntry, csv::Error>| r.ok())
-                .collect();
-            Ok(events)
+                .collect::<Result<Vec<EventEntry>, csv::Error>>()
+                .map_err(|e| AppError::IO(IOError::from(e)))
         })
         .await
         .map_err(|e| AppError::IO(IOError::Msg(format!("tokio join error: {}", e))))?

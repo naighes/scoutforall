@@ -1,7 +1,7 @@
 use crate::{
     errors::{AppError, MatchError},
     shapes::{
-        enums::{EventTypeEnum, TeamSideEnum},
+        enums::{EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         snapshot::{EventEntry, Snapshot},
     },
 };
@@ -17,6 +17,9 @@ pub struct SetEntry {
     pub libero: Uuid,
     pub fallback_libero: Option<Uuid>,
     pub setter: Uuid,
+    // missing in the sets saved up to v0.3.0
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineup_rules: Option<LineupRulesEnum>,
     #[serde(skip_serializing, skip_deserializing)]
     pub events: Vec<EventEntry>,
 }
@@ -48,6 +51,7 @@ impl SetEntry {
                     libero,
                     fallback_libero,
                     setter: *s,
+                    lineup_rules: Some(LineupRulesEnum::CURRENT),
                     events: vec![],
                 }),
             }
@@ -60,8 +64,23 @@ impl SetEntry {
         &self,
         max_substitutions: u8,
     ) -> Result<(Snapshot, Vec<EventTypeEnum>), AppError> {
+        match self.lineup_rules {
+            Some(rules) => self.replay(max_substitutions, rules),
+            // saved without the rules: scouted up to v0.2.0, unless only the
+            // rules of v0.3.0 (which didn't save them) replay the set
+            None => self
+                .replay(max_substitutions, LineupRulesEnum::V1)
+                .or_else(|_| self.replay(max_substitutions, LineupRulesEnum::V2)),
+        }
+    }
+
+    fn replay(
+        &self,
+        max_substitutions: u8,
+        rules: LineupRulesEnum,
+    ) -> Result<(Snapshot, Vec<EventTypeEnum>), AppError> {
         // prepare the initial snapshot
-        let mut snapshot = Snapshot::new(self, max_substitutions)?;
+        let mut snapshot = Snapshot::with_rules(self, max_substitutions, rules)?;
         // the events available before the first serve: also the ones after a
         // substitution, setter or libero change opening the set
         let mut available_options =

@@ -81,6 +81,26 @@ pub enum TeamSideEnum {
     Them,
 }
 
+/// The rules moving the lineup when the events of a set are replayed: a set
+/// is replayed with the rules it was scouted with, or the lineup could differ
+/// from the one the events were chosen on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineupRulesEnum {
+    /// Up to v0.2.0: the libero is replaced by the middle blocker it went in
+    /// with the first time, even when substituted, and stays on court if the
+    /// set starts with a middle blocker serving.
+    V1,
+    /// Since v0.3.0: the libero is replaced by whoever plays as the other
+    /// middle blocker.
+    V2,
+}
+
+impl LineupRulesEnum {
+    /// The rules new sets are scouted with.
+    pub const CURRENT: LineupRulesEnum = LineupRulesEnum::V2;
+}
+
 impl fmt::Display for TeamSideEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TeamSideEnum::*;

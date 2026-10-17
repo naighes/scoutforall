@@ -207,7 +207,10 @@ mod tests {
             .expect("expected an import");
         let all = reader.read_all(&team).await.unwrap();
         assert_eq!(all.len(), 1);
-        all.into_iter().next().unwrap()
+        all.into_iter()
+            .next()
+            .unwrap()
+            .expect("expected a readable match")
     }
 
     #[tokio::test]

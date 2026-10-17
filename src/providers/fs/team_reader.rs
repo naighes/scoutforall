@@ -2,8 +2,12 @@ use crate::{
     constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
     localization::current_labels,
+    logging::logger::log_error,
     providers::team_reader::TeamReader,
-    shapes::team::TeamEntry,
+    shapes::{
+        listed::{Listed, Unreadable},
+        team::TeamEntry,
+    },
 };
 use async_trait::async_trait;
 use futures::{TryStreamExt, future::ready};
@@ -42,7 +46,7 @@ impl FileSystemTeamReader {
 
 #[async_trait]
 impl TeamReader for FileSystemTeamReader {
-    async fn read_all(&self) -> Result<Vec<TeamEntry>, AppError> {
+    async fn read_all(&self) -> Result<Vec<Listed<TeamEntry>>, AppError> {
         let base_path = &self.0;
         let dir = read_dir(&base_path)
             .await
@@ -50,10 +54,17 @@ impl TeamReader for FileSystemTeamReader {
         let entries = ReadDirStream::new(dir)
             .try_filter(|e| ready(e.path().is_dir()))
             .then(|res| async {
-                match res {
-                    Ok(e) => FileSystemTeamReader::map_entry(&e.path()).await,
-                    Err(err) => Err(AppError::IO(IOError::from(err))),
-                }
+                let path = res.map_err(|e| AppError::IO(IOError::from(e)))?.path();
+                Ok::<_, AppError>(FileSystemTeamReader::map_entry(&path).await.map_err(|e| {
+                    let unreadable = Unreadable {
+                        id: path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    };
+                    log_error(&format!("team {:?} is unreadable: {}", unreadable.id, e));
+                    unreadable
+                }))
             })
             .try_collect::<Vec<_>>()
             .await?;

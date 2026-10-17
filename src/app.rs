@@ -18,7 +18,7 @@ use crate::{
         screen::{AppAction, ScreenAsync},
         team_list_screen::TeamListScreen,
     },
-    shapes::{settings::Settings, team::TeamEntry},
+    shapes::{listed::Listed, settings::Settings, team::TeamEntry},
 };
 
 pub struct App {
@@ -36,7 +36,7 @@ impl App {
         SR: SettingsReader + Send + Sync + 'static,
     >(
         settings: Settings,
-        teams: Vec<TeamEntry>,
+        teams: Vec<Listed<TeamEntry>>,
         base_path: PathBuf,
         team_reader: Arc<TR>,
         team_writer: Arc<TW>,
