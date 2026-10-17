@@ -146,6 +146,7 @@ mod tests {
             libero,
             fallback_libero: Some(fallback_libero),
             setter,
+            lineup_rules: None,
             events: vec![EventEntry {
                 event_type: EventTypeEnum::S,
                 player: Some(setter),

@@ -2,7 +2,9 @@ use crate::{
     constants::{DEFAULT_SET_TARGET_SCORE, TIE_BREAK_SET_TARGET_SCORE},
     errors::AppError,
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum},
+        enums::{
+            EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
+        },
         lineup::Lineup,
         set::SetEntry,
         stats::Stats,
@@ -47,7 +49,20 @@ pub struct Snapshot {
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
 impl Snapshot {
+    /// The snapshot before the first event, with the lineup rules saved with
+    /// the set (`SetEntry::compute_snapshot` finds them for the sets saved
+    /// without).
+    #[cfg(test)]
     pub fn new(set_entry: &SetEntry, max_substitutions: u8) -> Result<Self, AppError> {
+        let rules = set_entry.lineup_rules.unwrap_or(LineupRulesEnum::CURRENT);
+        Self::with_rules(set_entry, max_substitutions, rules)
+    }
+
+    pub fn with_rules(
+        set_entry: &SetEntry,
+        max_substitutions: u8,
+        rules: LineupRulesEnum,
+    ) -> Result<Self, AppError> {
         let current_lineup = Lineup::new(
             set_entry.initial_positions,
             match set_entry.serving_team {
@@ -58,6 +73,7 @@ impl Snapshot {
             set_entry.libero,
             set_entry.fallback_libero,
             max_substitutions,
+            rules,
         )?;
         Ok(Snapshot {
             score_us: 0,

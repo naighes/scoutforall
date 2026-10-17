@@ -2,13 +2,20 @@ use crate::{
     constants::MATCH_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
     localization::current_labels,
+    logging::logger::log_error,
     providers::{fs::path::get_team_folder_path, match_reader::MatchReader, set_reader::SetReader},
-    shapes::{r#match::MatchEntry, team::TeamEntry},
+    shapes::{
+        enums::LineupRulesEnum,
+        listed::{Listed, Unreadable},
+        r#match::MatchEntry,
+        team::TeamEntry,
+    },
 };
 use async_trait::async_trait;
 use futures::{TryStreamExt, future::ready};
-use serde_json::from_str;
+use serde_json::{Value, from_str, from_value};
 use std::{
+    cmp::Ordering,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -23,22 +30,38 @@ pub struct FileSystemMatchReader {
 
 #[async_trait]
 impl MatchReader for FileSystemMatchReader {
-    async fn read_all(&self, team: &TeamEntry) -> Result<Vec<MatchEntry>, AppError> {
+    async fn read_all(&self, team: &TeamEntry) -> Result<Vec<Listed<MatchEntry>>, AppError> {
         let team_path = get_team_folder_path(&self.base_path, &team.id)?;
         let dir: ReadDir = read_dir(&team_path)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))?;
-        let mut entries: Vec<_> = ReadDirStream::new(dir)
+        let mut entries: Vec<Listed<MatchEntry>> = ReadDirStream::new(dir)
             .try_filter(|e| ready(e.path().is_dir()))
             .then(|res| async {
-                match res {
-                    Ok(e) => self.map_entry(&e.path(), team).await,
-                    Err(err) => Err(AppError::IO(IOError::from(err))),
-                }
+                let path = res.map_err(|e| AppError::IO(IOError::from(e)))?.path();
+                Ok::<_, AppError>(self.map_entry(&path, team).await.map_err(|e| {
+                    let unreadable = Unreadable {
+                        id: path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    };
+                    log_error(&format!(
+                        "match {:?} of team {} is unreadable: {}",
+                        unreadable.id, team.id, e
+                    ));
+                    unreadable
+                }))
             })
-            .try_collect::<Vec<_>>()
+            .try_collect()
             .await?;
-        entries.sort_by_key(|a| std::cmp::Reverse(a.date));
+        // the most recent first, then the unreadable ones by name
+        entries.sort_by(|a, b| match (a, b) {
+            (Ok(a), Ok(b)) => b.date.cmp(&a.date),
+            (Ok(_), Err(_)) => Ordering::Less,
+            (Err(_), Ok(_)) => Ordering::Greater,
+            (Err(a), Err(b)) => a.id.cmp(&b.id),
+        });
         Ok(entries)
     }
 
@@ -73,8 +96,11 @@ impl FileSystemMatchReader {
         let content = read_to_string(&descriptor_path)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))?;
+        let descriptor: Value = from_str(&content).map_err(|e| AppError::IO(IOError::from(e)))?;
+        // only matches created since v0.3.0 save the substitutions
+        let created_since_v0_3_0 = descriptor.get("max_substitutions").is_some();
         let mut entry: MatchEntry =
-            from_str(&content).map_err(|e| AppError::IO(IOError::from(e)))?;
+            from_value(descriptor).map_err(|e| AppError::IO(IOError::from(e)))?;
         entry.id = path
             .file_name()
             .and_then(|s| s.to_str())
@@ -86,6 +112,15 @@ impl FileSystemMatchReader {
             .into();
         entry.team = team.clone();
         entry.sets = self.set_reader.read_all(&entry).await?;
+        if created_since_v0_3_0 {
+            // v0.3.0 didn't save the lineup rules of its sets, but scouted
+            // them with these ones
+            for set in entry.sets.iter_mut() {
+                set.lineup_rules.get_or_insert(LineupRulesEnum::V2);
+            }
+        }
+        // a match whose sets don't replay can't be shown nor scouted
+        entry.get_status()?;
         Ok(entry)
     }
 }

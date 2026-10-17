@@ -26,6 +26,7 @@ use crate::{
     shapes::{
         enums::{ScreenActionEnum, TeamSideEnum},
         keybinding::{ActionsKeyBindings, KeyBindings},
+        listed::{Listed, Unreadable},
         r#match::{MatchEntry, MatchStatus},
         set::SetEntry,
         settings::Settings,
@@ -57,7 +58,7 @@ pub struct MatchListScreen<
     settings: Settings,
     list_state: ListState,
     team: TeamEntry,
-    matches: Vec<(MatchEntry, MatchStatus)>,
+    matches: Vec<Listed<(MatchEntry, MatchStatus)>>,
     notify_message: NotifyBanner,
     header: TeamHeader,
     footer: NavigationFooter,
@@ -205,15 +206,17 @@ impl<
                     }
                 },
                 (Some(ScreenActionEnum::Export), _, _) => {
-                    let selected_match = self.get_selected_match();
+                    // unreadable matches too: their files are what can be
+                    // sent to get them fixed
+                    let selected_match = self.get_selected_match_id().map(str::to_owned);
                     match (home_dir(), selected_match) {
-                        (Some(path), Some((match_entry, _))) => {
+                        (Some(path), Some(match_id)) => {
                             AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
                                 path,
                                 current_labels().export,
                                 ExportMatchAction::new(
                                     self.team.clone(),
-                                    match_entry.id.clone(),
+                                    match_id,
                                     self.base_path.clone(),
                                 ),
                                 self.settings_reader.clone(),
@@ -244,11 +247,7 @@ impl<
     async fn refresh_data(&mut self) {
         match self.match_reader.read_all(&self.team).await {
             Ok(matches) => {
-                let matches = matches
-                    .into_iter()
-                    .filter_map(|m| m.get_status().ok().map(|s| (m, s)))
-                    .collect::<Vec<_>>();
-                self.matches = matches;
+                self.matches = with_status(matches);
                 if self.matches.is_empty() {
                     self.list_state.select(None);
                 } else if let Some(selected) = self.list_state.selected() {
@@ -278,7 +277,7 @@ impl<
     pub fn new(
         settings: Settings,
         team: TeamEntry,
-        matches: Vec<MatchEntry>,
+        matches: Vec<Listed<MatchEntry>>,
         base_path: PathBuf,
         match_reader: Arc<MR>,
         match_writer: Arc<MW>,
@@ -286,13 +285,9 @@ impl<
         settings_reader: Arc<SR>,
         settings_writer: Arc<SW>,
     ) -> Self {
-        let matches = matches
-            .into_iter()
-            .filter_map(|m| m.get_status().ok().map(|s| (m, s)))
-            .collect::<Vec<_>>();
         MatchListScreen {
             settings,
-            matches,
+            matches: with_status(matches),
             team,
             list_state: ListState::default(),
             base_path,
@@ -307,20 +302,52 @@ impl<
             screen_key_bindings: ActionsKeyBindings::empty(),
         }
     }
+    fn get_selected(&self) -> Option<&Listed<(MatchEntry, MatchStatus)>> {
+        self.list_state.selected().and_then(|i| self.matches.get(i))
+    }
+
     fn get_selected_match(&self) -> Option<(&MatchEntry, &MatchStatus)> {
-        self.list_state
-            .selected()
-            .and_then(|i| self.matches.get(i))
-            .map(|(m, s)| (m, s))
+        match self.get_selected() {
+            Some(Ok((m, s))) => Some((m, s)),
+            _ => None,
+        }
+    }
+
+    /// The folder of the selected match, even when it's unreadable.
+    fn get_selected_match_id(&self) -> Option<&str> {
+        self.get_selected().map(|m| match m {
+            Ok((m, _)) => m.id.as_str(),
+            Err(unreadable) => unreadable.id.as_str(),
+        })
     }
 
     fn get_match_row(
         &self,
-        m: &(MatchEntry, MatchStatus),
+        m: &Listed<(MatchEntry, MatchStatus)>,
         row_index: usize,
         match_index: usize,
     ) -> Result<Row<'_>, AppError> {
-        let (m, status) = m;
+        let selected_style = |style: Style| {
+            if row_index == match_index {
+                style.add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                style
+            }
+        };
+        let (m, status) = match m {
+            Ok(m) => m,
+            Err(unreadable) => {
+                // the folder in the wider column
+                return Ok(Row::new(vec![
+                    String::new(),
+                    unreadable.id.clone(),
+                    String::new(),
+                    String::new(),
+                    current_labels().unreadable.to_string(),
+                ])
+                .style(selected_style(Style::default().fg(Color::Yellow))));
+            }
+        };
         let (name_left, name_right, score_left, score_right) = if m.home {
             (
                 m.team.name.clone(),
@@ -348,15 +375,12 @@ impl<
             })
             .into(),
         ]);
-        let mut style = match (status.match_finished, status.us_wins, status.them_wins) {
+        let style = match (status.match_finished, status.us_wins, status.them_wins) {
             (true, 3, _) => Style::default().fg(Color::LightGreen),
             (true, _, 3) => Style::default().fg(Color::Red),
             _ => Style::default().fg(Color::White),
         };
-        if row_index == match_index {
-            style = style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
-        }
-        row = row.style(style);
+        row = row.style(selected_style(style));
         Ok(row)
     }
 
@@ -434,13 +458,17 @@ impl<
             actions.push(Sba::Hidden(ScreenActionEnum::Previous));
             actions.push(Sba::Hidden(ScreenActionEnum::Next));
         }
-        if let Some((_, status)) = self.get_selected_match() {
-            if !status.match_finished {
-                actions.push(Sba::Simple(ScreenActionEnum::Select));
+        match self.get_selected() {
+            Some(Ok((_, status))) => {
+                if !status.match_finished {
+                    actions.push(Sba::Simple(ScreenActionEnum::Select));
+                }
+                actions.push(Sba::Simple(ScreenActionEnum::Export));
+                actions.push(Sba::Simple(ScreenActionEnum::MatchStats));
+                actions.push(Sba::Simple(ScreenActionEnum::PrintReport));
             }
-            actions.push(Sba::Simple(ScreenActionEnum::Export));
-            actions.push(Sba::Simple(ScreenActionEnum::MatchStats));
-            actions.push(Sba::Simple(ScreenActionEnum::PrintReport));
+            Some(Err(_)) => actions.push(Sba::Simple(ScreenActionEnum::Export)),
+            None => {}
         }
         if self.team.players.len() >= 6 {
             actions.push(Sba::Simple(ScreenActionEnum::New));
@@ -521,4 +549,18 @@ impl<
             AppAction::None
         }
     }
+}
+
+/// The matches with their status: a match whose sets don't replay is
+/// unreadable.
+fn with_status(matches: Vec<Listed<MatchEntry>>) -> Vec<Listed<(MatchEntry, MatchStatus)>> {
+    matches
+        .into_iter()
+        .map(|m| {
+            m.and_then(|m| match m.get_status() {
+                Ok(status) => Ok((m, status)),
+                Err(_) => Err(Unreadable { id: m.id }),
+            })
+        })
+        .collect()
 }

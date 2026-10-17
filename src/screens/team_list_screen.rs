@@ -20,6 +20,7 @@ use crate::{
     shapes::{
         enums::{FriendlyName, ScreenActionEnum},
         keybinding::ActionsKeyBindings,
+        listed::Listed,
         settings::Settings,
         team::TeamEntry,
     },
@@ -29,7 +30,7 @@ use crokey::crossterm::event::KeyEvent;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
@@ -44,7 +45,7 @@ pub struct TeamListScreen<
     SR: SettingsReader + Send + Sync,
 > {
     list_state: ListState,
-    teams: Vec<TeamEntry>,
+    teams: Vec<Listed<TeamEntry>>,
     settings: Settings,
     notify_message: NotifyBanner,
     footer: NavigationFooter,
@@ -114,23 +115,21 @@ impl<
                     self.previous_team();
                     AppAction::None
                 }
-                (Some(ScreenActionEnum::Select), _, _) => {
-                    match self.list_state.selected().and_then(|x| self.teams.get(x)) {
-                        None => AppAction::None,
-                        Some(team) => AppAction::SwitchScreen(Box::new(TeamDetailsScreen::new(
-                            self.settings.clone(),
-                            team,
-                            self.base_path.clone(),
-                            self.team_reader.clone(),
-                            self.team_writer.clone(),
-                            self.match_reader.clone(),
-                            self.match_writer.clone(),
-                            self.set_writer.clone(),
-                            self.settings_reader.clone(),
-                            self.settings_writer.clone(),
-                        ))),
-                    }
-                }
+                (Some(ScreenActionEnum::Select), _, _) => match self.get_selected_team() {
+                    None => AppAction::None,
+                    Some(team) => AppAction::SwitchScreen(Box::new(TeamDetailsScreen::new(
+                        self.settings.clone(),
+                        team,
+                        self.base_path.clone(),
+                        self.team_reader.clone(),
+                        self.team_writer.clone(),
+                        self.match_reader.clone(),
+                        self.match_writer.clone(),
+                        self.set_writer.clone(),
+                        self.settings_reader.clone(),
+                        self.settings_writer.clone(),
+                    ))),
+                },
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::New), _, _) => {
                     AppAction::SwitchScreen(Box::new(EditTeamScreen::new(self.team_writer.clone())))
@@ -190,8 +189,8 @@ impl<
         let items: Vec<ListItem> = self
             .teams
             .iter()
-            .map(|t| {
-                ListItem::new(format!(
+            .map(|t| match t {
+                Ok(t) => ListItem::new(format!(
                     "{} ({}/{}, {})",
                     t.name,
                     t.classification
@@ -201,7 +200,13 @@ impl<
                         .map(|g| g.friendly_name(current_labels()))
                         .unwrap_or_default(),
                     t.year,
+                )),
+                Err(unreadable) => ListItem::new(format!(
+                    "{} ({})",
+                    unreadable.id,
+                    current_labels().unreadable
                 ))
+                .style(Style::default().fg(Color::Yellow)),
             })
             .collect();
         if items.is_empty() {
@@ -231,7 +236,7 @@ impl<
 {
     pub fn new(
         settings: Settings,
-        teams: Vec<TeamEntry>,
+        teams: Vec<Listed<TeamEntry>>,
         base_path: PathBuf,
         team_reader: Arc<TR>,
         team_writer: Arc<TW>,
@@ -256,6 +261,13 @@ impl<
             set_writer,
             settings_reader,
             screen_key_bindings: ActionsKeyBindings::empty(),
+        }
+    }
+
+    fn get_selected_team(&self) -> Option<&TeamEntry> {
+        match self.list_state.selected().and_then(|x| self.teams.get(x)) {
+            Some(Ok(team)) => Some(team),
+            _ => None,
         }
     }
 
@@ -290,7 +302,11 @@ impl<
                 Sba::Hidden(ScreenActionEnum::Previous),
                 Sba::Hidden(ScreenActionEnum::Next),
                 Sba::Simple(ScreenActionEnum::New),
-                Sba::Simple(ScreenActionEnum::Select),
+                if self.get_selected_team().is_some() {
+                    Sba::Simple(ScreenActionEnum::Select)
+                } else {
+                    Sba::Hidden(ScreenActionEnum::Select)
+                },
                 Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
                     lbl.replace("{}", current_labels().team)
