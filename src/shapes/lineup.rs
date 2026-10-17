@@ -1,5 +1,4 @@
 use crate::{
-    constants::MAX_SUBSTITUTIONS,
     errors::{AppError, SnapshotError},
     shapes::{
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum},
@@ -26,8 +25,10 @@ pub struct Lineup {
     current_libero: Uuid,
     fallback_libero: Option<Uuid>,
     substitutions: Vec<SubstitutionRecord>,
+    max_substitutions: u8,
     libero_replacement: Option<Uuid>,
     idle_player: Option<Uuid>,
+    liberos_played: Vec<Uuid>,
 }
 
 impl Lineup {
@@ -37,6 +38,7 @@ impl Lineup {
         current_setter: Uuid,
         current_libero: Uuid,
         fallback_libero: Option<Uuid>,
+        max_substitutions: u8,
     ) -> Result<Lineup, AppError> {
         let rotation = Lineup::get_rotation(players, &current_setter)?;
         let libero_slot = Lineup::get_libero_slot(rotation)?;
@@ -50,15 +52,15 @@ impl Lineup {
             phase,
             previous_phase: None,
             substitutions: vec![],
+            max_substitutions,
             current_setter,
             current_libero,
             fallback_libero,
-            libero_replacement: if has_libero {
-                Some(libero_replacement)
-            } else {
-                None
-            },
+            // even when the middle blocker serves first: once the libero
+            // replaces it, the other middle blocker replaces the libero
+            libero_replacement: Some(libero_replacement),
             idle_player: if has_libero { Some(idle_player) } else { None },
+            liberos_played: vec![current_libero],
         };
         if has_libero {
             // set is started: put the libero in
@@ -143,6 +145,9 @@ impl Lineup {
             let old_current = self.current_libero;
             self.current_libero = fallback;
             self.fallback_libero = Some(old_current);
+            if !self.liberos_played.contains(&fallback) {
+                self.liberos_played.push(fallback);
+            }
             let has_libero = self
                 .get_current_rotation()
                 .map(|r| Lineup::has_libero(r, self.get_current_phase()));
@@ -341,7 +346,7 @@ impl Lineup {
 
     pub fn get_involved_players(&self) -> Vec<Uuid> {
         let mut set: HashSet<Uuid> = self.players.iter().cloned().collect();
-        set.insert(self.current_libero);
+        set.extend(self.liberos_played.iter().copied());
         if let Some(libero_replacement) = self.libero_replacement {
             set.insert(libero_replacement);
         }
@@ -395,8 +400,12 @@ impl Lineup {
             .map(|p| p.replaced)
     }
 
-    fn was_max_number_of_substitutions_reached(&self) -> bool {
-        self.substitutions.len() == MAX_SUBSTITUTIONS
+    pub fn get_max_substitutions(&self) -> u8 {
+        self.max_substitutions
+    }
+
+    pub fn was_max_number_of_substitutions_reached(&self) -> bool {
+        self.substitutions.len() >= self.max_substitutions as usize
     }
 
     pub fn add_substitution(
@@ -451,6 +460,10 @@ impl Lineup {
             if self.current_setter == *replaced {
                 self.current_setter = *replacement;
             }
+            // the substitute is the one replacing the libero
+            if self.libero_replacement == Some(*replaced) {
+                self.libero_replacement = Some(*replacement);
+            }
             Ok(())
         } else {
             Err(AppError::Snapshot(SnapshotError::LineupError(format!(
@@ -495,7 +508,7 @@ impl Lineup {
     }
 
     pub fn get_replaceable_lineup_choices(&self) -> Vec<(u8, (String, Option<Uuid>))> {
-        if self.substitutions.len() >= MAX_SUBSTITUTIONS {
+        if self.was_max_number_of_substitutions_reached() {
             return vec![];
         }
         let already_replaced: HashSet<Uuid> =
@@ -578,9 +591,11 @@ impl Lineup {
         team.players
             .iter()
             .filter(|p| {
-                !options.contains(&p.id)
+                !p.deleted
+                    && !options.contains(&p.id)
                     && !excluded.contains(&p.id)
-                    && p.id != self.get_current_libero()
+                    && p.id != self.current_libero
+                    && Some(p.id) != self.fallback_libero
             })
             .enumerate()
             .map(|(i, p)| ((i + 1) as u8, p))

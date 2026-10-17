@@ -134,12 +134,17 @@ where
             .insert(ck)
     }
 
-    pub fn remove<A: Into<T>>(&mut self, action: A, ck: KeyCombination) -> bool {
-        if let Some(set) = self.default_bindings.get_mut(&action.into()) {
-            set.remove(&ck)
-        } else {
-            false
-        }
+    /// binds the action to that key only, in place of the one it had
+    pub fn assign<A: Into<T>>(&mut self, action: A, ck: KeyCombination) {
+        self.default_bindings
+            .insert(action.into(), HashSet::from([ck]));
+    }
+
+    /// the one key bound to the action, the first in order if there are more
+    pub fn key_for(&self, action: &T) -> Option<KeyCombination> {
+        self.default_bindings
+            .get(action)
+            .and_then(|cks| cks.iter().min().copied())
     }
 
     /// return the key combination for the action matching the filter, choosing
@@ -173,6 +178,31 @@ where
         self
     }
 
+    /// leaves every action of `defaults` with exactly one key: the first of
+    /// its keys, or its default one when it has none and the default one is
+    /// still free
+    pub fn one_key_each(mut self, defaults: &Self) -> Self
+    where
+        T: Clone,
+    {
+        for cks in self.default_bindings.values_mut() {
+            if let Some(first) = cks.iter().min().copied() {
+                *cks = HashSet::from([first]);
+            }
+        }
+        for action in defaults.default_bindings.keys() {
+            if self.key_for(action).is_some() {
+                continue;
+            }
+            if let Some(ck) = defaults.key_for(action)
+                && self.action_for(&ck).is_none()
+            {
+                self.assign(action.clone(), ck);
+            }
+        }
+        self
+    }
+
     /// the action bound to the key combination, if any
     pub fn action_for(&self, ck: &KeyCombination) -> Option<&T> {
         self.default_bindings
@@ -181,6 +211,7 @@ where
             .map(|(action, _)| action)
     }
 
+    #[cfg(test)]
     pub fn keybindings_for(&self, action: &T) -> HashSet<KeyCombination> {
         self.default_bindings
             .get(action)
@@ -353,4 +384,38 @@ fn test_without_fixed_keys_and_action_for() {
     );
     assert_eq!(kb.action_for(&key!(b)), Some(&EventTypeEnum::B));
     assert_eq!(kb.action_for(&key!(u)), None);
+}
+
+#[test]
+fn test_one_key_each() {
+    let defaults = KeyBindings::<EventTypeEnum>::default();
+    let mut kb = KeyBindings::<EventTypeEnum>::default();
+    // more keys, as older versions allowed: only the first one is kept
+    kb.set(EventTypeEnum::A, key!(x));
+    // no key at all: the default one comes back
+    kb.default_bindings.insert(EventTypeEnum::S, HashSet::new());
+    // no key, and the default one is taken: nothing to do
+    kb.default_bindings.insert(EventTypeEnum::P, HashSet::new());
+    kb.assign(EventTypeEnum::D, key!(p));
+    let kb = kb.one_key_each(&defaults);
+    assert_eq!(
+        kb.keybindings_for(&EventTypeEnum::A),
+        HashSet::from([key!(a)])
+    );
+    assert_eq!(
+        kb.keybindings_for(&EventTypeEnum::S),
+        HashSet::from([key!(s)])
+    );
+    assert_eq!(kb.key_for(&EventTypeEnum::P), None);
+    assert_eq!(kb.key_for(&EventTypeEnum::D), Some(key!(p)));
+}
+
+#[test]
+fn test_assign_replaces_the_key() {
+    let mut kb = KeyBindings::<EvalEnum>::default();
+    kb.assign(EvalEnum::Perfect, key!(z));
+    assert_eq!(
+        kb.keybindings_for(&EvalEnum::Perfect),
+        HashSet::from([key!(z)])
+    );
 }

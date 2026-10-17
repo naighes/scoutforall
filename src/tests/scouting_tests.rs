@@ -31,17 +31,16 @@ mod tests {
         ui
     }
 
-    /// From the scouting, adds `key` to the shortcut at `index` of the
+    /// From the scouting, changes the key of the shortcut at `index` of the
     /// shortcuts list (events first, then evaluations) and goes back.
     async fn bind_from_scouting(ui: &mut Ui, index: usize, key: KeyCode) {
         ui.press(KeyCode::F(2)).await;
         for _ in 0..index {
             ui.press(KeyCode::Down).await;
         }
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('n'), key, KeyCode::Enter])
-            .await;
-        // shortcut keys, settings, scouting
-        ui.type_keys(&[KeyCode::Esc, KeyCode::Esc]).await;
+        ui.type_keys(&[KeyCode::Enter, key, KeyCode::Enter]).await;
+        // settings, scouting
+        ui.press(KeyCode::Esc).await;
         assert!(
             ui.screen().contains(current_labels().choose_the_event),
             "not back to scouting: {}",
@@ -68,6 +67,26 @@ mod tests {
             "block did not ask for the player: {screen}"
         );
         assert!(screen.contains(current_labels().block), "{screen}");
+    }
+
+    /// Each event is listed by its name, with its key on the right: no event
+    /// code in front, no parentheses.
+    #[tokio::test]
+    async fn events_listed_by_name_and_key() {
+        let mut ui = scouting().await;
+        ui.type_keys(&[KeyCode::Char('s'), KeyCode::Char('+')])
+            .await;
+        let lines = ui.lines();
+        let block = current_labels().block;
+        let line = lines
+            .iter()
+            .find(|l| l.contains(block))
+            .unwrap_or_else(|| panic!("{}", lines.join("\n")));
+        // the events panel among the others on the same line
+        let row = line.split('│').find(|c| c.contains(block)).unwrap().trim();
+        assert!(row.starts_with(block), "{line}");
+        assert!(row.ends_with('b'), "{line}");
+        assert!(!row.contains('('), "{line}");
     }
 
     #[tokio::test]
@@ -109,10 +128,11 @@ mod tests {
         bind_from_scouting(&mut ui, 0, KeyCode::Char('x')).await;
         ui.press(KeyCode::Char('x')).await;
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
-        // the previous key still works too
+        // the previous key is gone
         ui.type_keys(&[KeyCode::Char('u'), KeyCode::Char('s')])
             .await;
-        assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+        assert!(!is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+        assert!(ui.screen().contains(current_labels().choose_the_event));
     }
 
     #[tokio::test]
@@ -121,10 +141,11 @@ mod tests {
         bind_from_scouting(&mut ui, eval_index(EvalEnum::Positive), KeyCode::Char('w')).await;
         ui.press(KeyCode::Char('s')).await;
         assert!(
-            ui.screen().contains("+, w => "),
+            ui.screen().contains("w => "),
             "evaluation keys not listed: {}",
             ui.screen()
         );
+        assert!(!ui.screen().contains("+ => "), "{}", ui.screen());
         ui.press(KeyCode::Char('w')).await;
         assert!(!is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         assert!(ui.screen().contains(current_labels().choose_the_event));

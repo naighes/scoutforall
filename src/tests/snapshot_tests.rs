@@ -1,4 +1,5 @@
 mod tests {
+    use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::{
         errors::{AppError, SnapshotError},
         shapes::{
@@ -154,7 +155,7 @@ mod tests {
             }],
         };
         let (mut snapshot, mut availeble_options) = set
-            .compute_snapshot()
+            .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
             .expect("expected successful computation");
         assert_eq!(snapshot.score_us, 1);
         assert_eq!(snapshot.score_them, 0);

@@ -47,7 +47,7 @@ pub struct Snapshot {
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
 impl Snapshot {
-    pub fn new(set_entry: &SetEntry) -> Result<Self, AppError> {
+    pub fn new(set_entry: &SetEntry, max_substitutions: u8) -> Result<Self, AppError> {
         let current_lineup = Lineup::new(
             set_entry.initial_positions,
             match set_entry.serving_team {
@@ -57,6 +57,7 @@ impl Snapshot {
             set_entry.setter,
             set_entry.libero,
             set_entry.fallback_libero,
+            max_substitutions,
         )?;
         Ok(Snapshot {
             score_us: 0,
@@ -339,6 +340,20 @@ impl Snapshot {
         }
     }
 
+    /// The events available before a serve: in side out when they serve,
+    /// in break point when we do.
+    pub fn get_rally_start_options(&self, phase: PhaseEnum) -> Vec<EventTypeEnum> {
+        use EventTypeEnum::*;
+        let mut options = match phase {
+            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, CS],
+            PhaseEnum::Break => vec![OE, F, S, R, CL, CS],
+        };
+        if self.current_lineup.get_fallback_libero().is_none() {
+            options.retain(|o| *o != CL);
+        }
+        options
+    }
+
     fn get_available_options(
         &self,
         event: &EventEntry,
@@ -346,16 +361,8 @@ impl Snapshot {
     ) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        let serve_them = if self.current_lineup.get_fallback_libero().is_some() {
-            vec![OS, OE, F, P, R, CL, CS]
-        } else {
-            vec![OS, OE, F, P, R, CS]
-        };
-        let serve_us = if self.current_lineup.get_fallback_libero().is_some() {
-            vec![OE, F, S, R, CL, CS]
-        } else {
-            vec![OE, F, S, R, CS]
-        };
+        let serve_them = self.get_rally_start_options(PhaseEnum::SideOut);
+        let serve_us = self.get_rally_start_options(PhaseEnum::Break);
         let options_map: HashMap<_, _> = [
             // order: OS, OE, F, A, S, P, D, B, R, CL, CS
             ((OS, None), serve_them.clone()),

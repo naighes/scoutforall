@@ -49,22 +49,24 @@ pub fn render_match_pdf(m: &MatchEntry) -> Result<Vec<u8>, AppError> {
         .sets
         .iter()
         .filter_map(|set| {
-            set.compute_snapshot().ok().map(|(snapshot, _)| {
-                aggregated_stats.merge(&snapshot.stats);
-                for &p in snapshot.current_lineup.get_involved_players().iter() {
-                    let entered_late = if set.libero == p {
-                        false
-                    } else {
-                        snapshot.current_lineup.was_player_already_used(&p)
-                    };
-                    players
-                        .entry(p)
-                        .or_default()
-                        .insert(set.set_number, entered_late);
-                }
+            set.compute_snapshot(m.max_substitutions)
+                .ok()
+                .map(|(snapshot, _)| {
+                    aggregated_stats.merge(&snapshot.stats);
+                    for &p in snapshot.current_lineup.get_involved_players().iter() {
+                        let entered_late = if set.libero == p {
+                            false
+                        } else {
+                            snapshot.current_lineup.was_player_already_used(&p)
+                        };
+                        players
+                            .entry(p)
+                            .or_default()
+                            .insert(set.set_number, entered_late);
+                    }
 
-                (set, snapshot)
-            })
+                    (set, snapshot)
+                })
         })
         .collect();
     let mut players: Vec<_> = players

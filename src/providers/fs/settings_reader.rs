@@ -1,7 +1,7 @@
 use crate::{
     errors::{AppError, IOError},
     providers::{fs::path::get_config_file_path, settings_reader::SettingsReader},
-    shapes::settings::Settings,
+    shapes::{keybinding::KeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use serde_json::from_str;
@@ -25,10 +25,17 @@ impl SettingsReader for FileSystemSettingsReader {
             .map_err(|e| AppError::IO(IOError::from(e)))?;
         let settings =
             from_str::<Settings>(&content).map_err(|e| AppError::IO(IOError::from(e)))?;
-        // fixed keys may come from older versions or hand-edited files
+        // fixed keys, and more keys for the same action, may come from older
+        // versions or hand-edited files
         Ok(Settings {
-            scouting_keybindings: settings.scouting_keybindings.without_fixed_keys(),
-            eval_keybindings: settings.eval_keybindings.without_fixed_keys(),
+            scouting_keybindings: settings
+                .scouting_keybindings
+                .without_fixed_keys()
+                .one_key_each(&KeyBindings::default()),
+            eval_keybindings: settings
+                .eval_keybindings
+                .without_fixed_keys()
+                .one_key_each(&KeyBindings::default()),
             ..settings
         })
     }

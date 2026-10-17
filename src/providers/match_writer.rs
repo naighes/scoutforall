@@ -13,5 +13,6 @@ pub trait MatchWriter {
         opponent: String,
         date: DateTime<FixedOffset>,
         home: bool,
+        max_substitutions: u8,
     ) -> Result<MatchEntry, AppError>;
 }

@@ -13,18 +13,13 @@ use crate::{
         enums::{GenderEnum, TeamClassificationEnum},
         r#match::MatchEntry,
     },
+    util::config_var,
 };
 use futures::TryFutureExt;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string_pretty;
-use std::{
-    env::{temp_dir, var},
-    fs::remove_file,
-    io::Write,
-    path::Path,
-    time::Duration,
-};
+use std::{env::temp_dir, fs::remove_file, io::Write, path::Path, time::Duration};
 use std::{path::PathBuf, sync::Arc};
 use tokio::time::interval;
 use tokio::{fs::File, io::AsyncReadExt};
@@ -45,6 +40,7 @@ pub struct MatchMetadata {
     pub gender: Option<GenderEnum>,
     pub year: u16,
     pub classification: Option<TeamClassificationEnum>,
+    pub max_substitutions: u8,
 }
 
 // generate a deterministic UUID v5 from team_id and match_id
@@ -89,7 +85,7 @@ async fn upload_file_to_signed_url(signed_url: &str, file_path: &Path) -> Result
 }
 
 // create a ZIP archive with match data and set files
-async fn create_match_archive(
+pub(crate) async fn create_match_archive(
     m: &MatchEntry,
     base_path: &Path,
     zip_path: &Path,
@@ -103,6 +99,7 @@ async fn create_match_archive(
         gender: m.team.gender,
         year: m.team.year,
         classification: m.team.classification,
+        max_substitutions: m.max_substitutions,
     };
     let metadata_json = to_string_pretty(&metadata).map_err(|e| AppError::IO(IOError::from(e)))?;
     zip.start_file::<_, ()>(
@@ -169,8 +166,10 @@ async fn get_signed_url(m: &MatchEntry) -> Result<(String, Uuid), AppError> {
     let payload = UploadRequest {
         filename: format!("{}.zip", uuid),
     };
-    let analytics_upload_url = var("ANALYTICS_UPLOAD_URL")
-        .map_err(|_| AppError::IO(IOError::Msg("could not get analytics upload url".into())))?;
+    let analytics_upload_url =
+        config_var("ANALYTICS_UPLOAD_URL", option_env!("ANALYTICS_UPLOAD_URL")).ok_or_else(
+            || AppError::IO(IOError::Msg("could not get analytics upload url".into())),
+        )?;
     let response = client
         .post(analytics_upload_url)
         .json(&payload)

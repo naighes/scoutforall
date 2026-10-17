@@ -384,7 +384,10 @@ impl<
             }
         };
         // need to recompute snapshot from scratch
-        match self.set.compute_snapshot() {
+        match self
+            .set
+            .compute_snapshot(self.current_match.max_substitutions)
+        {
             // since the last event has been removed, snapshot needs to
             // be re-computed from scratch
             Ok((snapshot, available_options)) => {
@@ -473,6 +476,17 @@ impl<
         if let Some(key_combination) = self.event_screen_key_bindings.transform(key) {
             if let Some(evt) = self.event_screen_key_bindings.get(key_combination) {
                 match (self.currently_available_options.contains(evt), evt) {
+                    // no substitutions left
+                    (true, R)
+                        if self
+                            .snapshot
+                            .current_lineup
+                            .was_max_number_of_substitutions_reached() =>
+                    {
+                        self.notify_message
+                            .set_error(current_labels().max_substitutions_reached.to_string());
+                        AppAction::None
+                    }
                     // player is inferred when serving
                     (true, S) => {
                         self.player = self.snapshot.current_lineup.get_serving_player();
@@ -736,28 +750,17 @@ impl<
             .iter()
             .map(|ev| {
                 Row::new(vec![
-                    Line::from(ev.to_string()),
-                    Line::from(format!("({})", ev.friendly_name(current_labels()))),
+                    Line::from(ev.friendly_name(current_labels())),
                     Line::from(
-                        se.reverse_map()
-                            .get(ev)
-                            .and_then(|set| set.iter().next())
-                            .map(|kc| scf.to_string(*kc))
+                        se.key_for(ev)
+                            .map(|kc| scf.to_string(kc))
                             .unwrap_or_default(),
                     )
                     .right_aligned(),
                 ])
             })
             .collect();
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(2),
-                Constraint::Percentage(60),
-                Constraint::Min(2),
-            ],
-        )
-        .block(
+        let table = Table::new(rows, [Constraint::Percentage(60), Constraint::Min(2)]).block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(current_labels().choose_the_event)
@@ -774,27 +777,17 @@ impl<
         let rows: Vec<Row> = available_evals
             .iter()
             .map(|ev| {
-                let mut keys: Vec<_> = self
+                let key = self
                     .settings
                     .eval_keybindings
-                    .keybindings_for(ev)
-                    .into_iter()
-                    .collect();
-                keys.sort();
-                let keys = keys
-                    .into_iter()
+                    .key_for(ev)
                     .map(|k| {
                         KeyCombinationFormatExt::new(&KeyCombinationFormat::default()).to_string(k)
                     })
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    .unwrap_or_else(|| current_labels().unassigned.to_string());
                 Row::new(vec![format!(
                     "{} => {}",
-                    if keys.is_empty() {
-                        current_labels().unassigned.to_string()
-                    } else {
-                        keys
-                    },
+                    key,
                     if let EventTypeInput::Some(last_event) = self.current_event {
                         if let Some(desc) = ev.friendly_description(last_event, current_labels()) {
                             format!(
@@ -1059,6 +1052,7 @@ impl<
                 Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(3),
+                Constraint::Length(3),
                 Constraint::Length(5),
                 Constraint::Min(0),
             ])
@@ -1097,6 +1091,17 @@ impl<
                     .and_then(|p| self.current_match.team.find_player(p))
                     .map(|p| p.name.clone()),
                 Color::Magenta,
+                Color::Black,
+            ),
+            (
+                chunks[4],
+                Some(format!(
+                    "{} {}/{}",
+                    current_labels().substitutions,
+                    self.snapshot.current_lineup.get_substitutions().len(),
+                    self.snapshot.current_lineup.get_max_substitutions()
+                )),
+                Color::Gray,
                 Color::Black,
             ),
         ];

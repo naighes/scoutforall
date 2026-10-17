@@ -6,7 +6,7 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue},
-        keybindings_action_screen::KeyBindingScreen,
+        keybindings_change_screen::ChangeKeyBindingScreen,
         report_an_issue_screen::ReportAnIssueScreen,
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
@@ -19,7 +19,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use crokey::{
-    KeyCombination, KeyCombinationFormat,
+    KeyCombinationFormat,
     crossterm::event::{KeyCode, KeyEvent},
 };
 use ratatui::{
@@ -230,7 +230,9 @@ where
             SettingsPanel::Shortcuts => vec![
                 Sba::Simple(ScreenActionEnum::Up),
                 Sba::Simple(ScreenActionEnum::Down),
-                Sba::Simple(ScreenActionEnum::Edit),
+                Sba::Redacted(ScreenActionEnum::Edit, |_| {
+                    current_labels().change.to_string()
+                }),
                 Sba::Simple(ScreenActionEnum::Reset),
             ],
         };
@@ -315,11 +317,10 @@ where
             SR: SettingsReader + Send + Sync + 'static,
             T: ScoutingShortcut + Debug,
         {
-            AppAction::SwitchScreen(Box::new(KeyBindingScreen::new(
-                s.settings.clone(),
+            AppAction::SwitchScreen(Box::new(ChangeKeyBindingScreen::new(
                 action,
+                s.settings.clone(),
                 s.settings_writer.clone(),
-                s.settings_reader.clone(),
             )))
         }
         match shortcuts()[self.shortcut] {
@@ -378,18 +379,10 @@ where
     }
 
     fn keys_of<T: ScoutingShortcut>(&self, action: &T) -> String {
-        let mut keys: Vec<KeyCombination> = T::bindings(&self.settings)
-            .keybindings_for(action)
-            .into_iter()
-            .collect();
-        keys.sort();
-        if keys.is_empty() {
-            return current_labels().unassigned.to_string();
-        }
-        keys.iter()
-            .map(|k| KeyCombinationFormatExt::new(&self.format).to_string(*k))
-            .collect::<Vec<_>>()
-            .join(", ")
+        T::bindings(&self.settings)
+            .key_for(action)
+            .map(|k| KeyCombinationFormatExt::new(&self.format).to_string(k))
+            .unwrap_or_else(|| current_labels().unassigned.to_string())
     }
 
     fn render_shortcuts(&mut self, f: &mut Frame, area: Rect) {

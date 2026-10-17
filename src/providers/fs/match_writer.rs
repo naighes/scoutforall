@@ -8,10 +8,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
 use serde_json::to_vec_pretty;
 use std::path::{Path, PathBuf};
-use tokio::{
-    fs::{File, try_exists},
-    io::AsyncWriteExt,
-};
+use tokio::fs::{try_exists, write};
 
 pub struct FileSystemMatchWriter(PathBuf);
 
@@ -29,6 +26,7 @@ impl MatchWriter for FileSystemMatchWriter {
         opponent: String,
         date: DateTime<FixedOffset>,
         home: bool,
+        max_substitutions: u8,
     ) -> Result<MatchEntry, AppError> {
         let opponent_clean = sanitize_filename(&opponent);
         let date_str = date.format("%Y-%m-%d").to_string();
@@ -39,6 +37,7 @@ impl MatchWriter for FileSystemMatchWriter {
             id: match_id.clone(),
             team: team.clone(),
             home,
+            max_substitutions,
             sets: vec![],
         };
         let path = get_match_descriptor_file_path(&self.0, &team.id, &match_id)?;
@@ -48,11 +47,9 @@ impl MatchWriter for FileSystemMatchWriter {
         {
             return Err(AppError::Match(MatchError::MatchAlreadyExists(match_id)));
         }
-        let mut file = File::create(&path)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
         let json = to_vec_pretty(&m).map_err(|e| AppError::IO(IOError::from(e)))?;
-        file.write_all(&json)
+        // written when awaited: a tokio file isn't, unless flushed
+        write(&path, json)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))?;
         Ok(m)
