@@ -42,10 +42,10 @@ mod tests {
         ui
     }
 
-    /// The key screen of the shortcut at `index`, ready for a new key.
-    async fn new_key_for(index: usize) -> Ui {
+    /// The key screen of the shortcut at `index`, ready for its new key.
+    async fn change_key_for(index: usize) -> Ui {
         let mut ui = shortcut(index).await;
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('n')]).await;
+        ui.press(KeyCode::Enter).await;
         ui
     }
 
@@ -141,7 +141,10 @@ mod tests {
             "{selected}"
         );
         let footer = ui.footer();
-        assert!(footer.contains("e = "), "{footer}");
+        assert!(
+            footer.contains(&format!("e = {}", current_labels().change)),
+            "{footer}"
+        );
         assert!(footer.contains("r = "), "{footer}");
         assert!(
             footer.contains(&format!("⇥ = {}", current_labels().switch_panel)),
@@ -183,9 +186,8 @@ mod tests {
 
     #[tokio::test]
     async fn changing_a_setting_keeps_the_others() {
-        let mut ui = new_key_for(0).await;
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter, KeyCode::Esc])
-            .await;
+        let mut ui = change_key_for(0).await;
+        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
         ui.press(KeyCode::BackTab).await;
         ui.press(KeyCode::Right).await;
         let settings = saved(&ui).await;
@@ -194,60 +196,84 @@ mod tests {
             settings
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(s), key!(x)])
+            keys(&[key!(x)])
         );
     }
 
+    /// One key per shortcut, always: it can be changed, not added nor
+    /// removed.
     #[tokio::test]
-    async fn event_key_is_added() {
-        let mut ui = new_key_for(0).await;
-        ui.press(KeyCode::Char('x')).await;
-        assert!(ui.screen().contains(current_labels().press_the_shortcut));
-        ui.press(KeyCode::Enter).await;
+    async fn event_key_is_changed() {
+        let mut ui = change_key_for(0).await;
+        let screen = ui.screen();
+        assert!(
+            screen.contains(current_labels().press_the_shortcut),
+            "{screen}"
+        );
+        let footer = ui.footer();
+        for action in [ScreenActionEnum::New, ScreenActionEnum::Delete] {
+            let (_, desc) = action.with_desc();
+            assert!(!footer.contains(&desc), "{desc}: {footer}");
+        }
+        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
         assert_eq!(
             saved(&ui)
                 .await
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(s), key!(x)])
+            keys(&[key!(x)])
         );
-        // back on the keys of the serve, then on the settings
-        assert!(ui.screen().contains("x"), "{}", ui.screen());
-        ui.press(KeyCode::Esc).await;
+        // straight back on the settings
         let selected = ui.selected().unwrap_or_default();
-        assert!(selected.contains("s, x"), "{selected}");
+        assert!(
+            selected.contains(&EventTypeEnum::S.with_desc().1),
+            "{selected}"
+        );
+        assert!(selected.trim_end().ends_with('x'), "{selected}");
     }
 
     #[tokio::test]
-    async fn eval_key_is_added() {
-        let mut ui = new_key_for(eval_index(EvalEnum::Negative)).await;
+    async fn current_key_is_shown() {
+        let mut ui = change_key_for(eval_index(EvalEnum::Negative)).await;
+        let lines = ui.lines();
+        let prompt = lines
+            .iter()
+            .position(|l| l.contains(current_labels().press_the_shortcut))
+            .unwrap();
+        assert!(lines[prompt + 1].contains('-'), "{}", lines.join("\n"));
+    }
+
+    #[tokio::test]
+    async fn eval_key_is_changed() {
+        let mut ui = change_key_for(eval_index(EvalEnum::Negative)).await;
         ui.type_keys(&[KeyCode::Char('m'), KeyCode::Enter]).await;
         assert_eq!(
             saved(&ui)
                 .await
                 .eval_keybindings
                 .keybindings_for(&EvalEnum::Negative),
-            keys(&[key!(m), key!('-')])
+            keys(&[key!(m)])
         );
     }
 
     #[tokio::test]
     async fn symbol_key_is_added() {
         // "-" and "+" couldn't be typed as shortcuts before
-        let mut ui = new_key_for(0).await;
+        let mut ui = change_key_for(0).await;
         ui.type_keys(&[KeyCode::Char('.'), KeyCode::Enter]).await;
         assert_eq!(
             saved(&ui)
                 .await
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(s), key!('.')])
+            keys(&[key!('.')])
         );
     }
 
+    /// A shortcut can't be left without a key.
     #[tokio::test]
     async fn backspace_clears_the_key() {
-        let mut ui = new_key_for(0).await;
+        let mut ui = change_key_for(0).await;
         ui.type_keys(&[KeyCode::Char('x'), KeyCode::Backspace, KeyCode::Enter])
             .await;
         assert!(
@@ -267,7 +293,7 @@ mod tests {
             (KeyCode::Char('7'), "7"),
         ] {
             for index in [0, eval_index(EvalEnum::Perfect)] {
-                let mut ui = new_key_for(index).await;
+                let mut ui = change_key_for(index).await;
                 ui.press(code).await;
                 let message = current_labels().reserved_shortcut.replace("{}", shown);
                 assert!(ui.screen().contains(&message), "{shown}: {}", ui.screen());
@@ -279,7 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn event_keys_do_not_conflict() {
-        let mut ui = new_key_for(0).await;
+        let mut ui = change_key_for(0).await;
         ui.press(KeyCode::Char('b')).await;
         let message = current_labels()
             .shortcut_already_assigned
@@ -292,7 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn eval_keys_do_not_conflict() {
-        let mut ui = new_key_for(eval_index(EvalEnum::Positive)).await;
+        let mut ui = change_key_for(eval_index(EvalEnum::Positive)).await;
         ui.press(KeyCode::Char('#')).await;
         let message = current_labels()
             .shortcut_already_assigned
@@ -311,42 +337,32 @@ mod tests {
             .position(|e| *e == EventTypeEnum::A)
             .unwrap();
         let negative = eval_index(EvalEnum::Negative);
-        let mut ui = new_key_for(0).await;
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter, KeyCode::Esc])
-            .await;
+        let mut ui = change_key_for(0).await;
+        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
         for _ in 0..eval_index(EvalEnum::Perfect) {
             ui.press(KeyCode::Down).await;
         }
-        ui.type_keys(&[
-            KeyCode::Enter,
-            KeyCode::Char('n'),
-            KeyCode::Char('z'),
-            KeyCode::Enter,
-            KeyCode::Esc,
-        ])
-        .await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('z'), KeyCode::Enter])
+            .await;
         let before = saved(&ui).await;
 
         // "x" is now the serve: not for the attack
         for _ in attack..eval_index(EvalEnum::Perfect) {
             ui.press(KeyCode::Up).await;
         }
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('n'), KeyCode::Char('x')])
-            .await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('x')]).await;
         let message = current_labels()
             .shortcut_already_assigned
             .replacen("{}", "x", 1)
             .replacen("{}", &EventTypeEnum::S.with_desc().1, 1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Esc, KeyCode::Esc])
-            .await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Esc]).await;
 
         // "z" is now the perfect evaluation: not for the negative one
         for _ in attack..negative {
             ui.press(KeyCode::Down).await;
         }
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('n'), KeyCode::Char('z')])
-            .await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('z')]).await;
         let message = current_labels()
             .shortcut_already_assigned
             .replacen("{}", "z", 1)
@@ -371,59 +387,31 @@ mod tests {
 
     #[tokio::test]
     async fn own_key_again_is_not_a_conflict() {
-        let mut ui = new_key_for(0).await;
+        let mut ui = change_key_for(0).await;
         ui.type_keys(&[KeyCode::Char('s'), KeyCode::Enter]).await;
-        assert_eq!(
-            saved(&ui)
-                .await
-                .scouting_keybindings
-                .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(s)])
-        );
-    }
-
-    #[tokio::test]
-    async fn key_is_removed_after_confirmation() {
-        let mut ui = new_key_for(0).await;
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
-        // the keys are listed in order: "s" first
-        ui.type_keys(&[KeyCode::Char('d'), KeyCode::Char('n')])
-            .await;
-        assert_eq!(
-            saved(&ui)
-                .await
-                .scouting_keybindings
-                .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(s), key!(x)])
-        );
-        ui.type_keys(&[KeyCode::Char('d'), KeyCode::Char('y')])
-            .await;
-        assert_eq!(
-            saved(&ui)
-                .await
-                .scouting_keybindings
-                .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(x)])
+        assert!(ui.saved_settings().await.is_none());
+        let selected = ui.selected().unwrap_or_default();
+        assert!(
+            selected.contains(&EventTypeEnum::S.with_desc().1),
+            "{selected}"
         );
     }
 
     #[tokio::test]
     async fn reset_to_defaults_asks_for_confirmation() {
-        let mut ui = new_key_for(0).await;
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter, KeyCode::Esc])
-            .await;
+        let mut ui = change_key_for(0).await;
+        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
         for _ in 0..eval_index(EvalEnum::Perfect) {
             ui.press(KeyCode::Down).await;
         }
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('n'), KeyCode::Char('y')])
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('y'), KeyCode::Enter])
             .await;
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Esc]).await;
         let customized = saved(&ui).await;
         assert_eq!(
             customized
                 .eval_keybindings
                 .keybindings_for(&EvalEnum::Perfect),
-            keys(&[key!('#'), key!(y)])
+            keys(&[key!(y)])
         );
 
         // the whole question fits a narrow terminal
@@ -441,7 +429,7 @@ mod tests {
             after_no
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(s), key!(x)])
+            keys(&[key!(x)])
         );
         // the dialog is gone: "y" alone does nothing
         ui.press(KeyCode::Char('y')).await;
@@ -501,7 +489,7 @@ mod tests {
             let mut seen = HashSet::new();
             for action in all {
                 let cks = kb.keybindings_for(action);
-                assert!(!cks.is_empty(), "{action:?} unbound");
+                assert_eq!(cks.len(), 1, "{action:?} not on one key");
                 for ck in cks {
                     assert!(!is_fixed_key(&ck), "{action:?} on fixed {ck}");
                     assert!(seen.insert(ck), "{ck} bound twice");
@@ -535,9 +523,9 @@ mod tests {
         );
     }
 
-    /// A settings file as saved up to v0.1.1: navigation keys customized
-    /// (keybinding settings on "b"), an event on a key now fixed, no
-    /// evaluation keys.
+    /// A settings file as saved up to v0.2.0: navigation keys customized
+    /// (keybinding settings on "b"), events on a key now fixed, on more keys
+    /// or on none, no evaluation keys.
     #[tokio::test]
     async fn settings_saved_by_older_versions() {
         let dir = TempDir::new().unwrap();
@@ -550,7 +538,8 @@ mod tests {
                 "quit": ["x"]
             },
             "scouting_keybindings": {
-                "S": ["s"],
+                "S": ["x", "s"],
+                "P": [],
                 "A": ["a", "u"],
                 "B": ["b", "F2"]
             }
@@ -563,6 +552,18 @@ mod tests {
         let defaults = Settings::default();
         assert_eq!(settings.language, LanguageEnum::It);
         assert!(!settings.analytics_enabled);
+        assert_eq!(
+            settings
+                .scouting_keybindings
+                .keybindings_for(&EventTypeEnum::S),
+            keys(&[key!(s)])
+        );
+        assert_eq!(
+            settings
+                .scouting_keybindings
+                .keybindings_for(&EventTypeEnum::P),
+            keys(&[key!(p)])
+        );
         assert_eq!(
             settings
                 .scouting_keybindings

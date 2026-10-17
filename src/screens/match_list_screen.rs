@@ -384,7 +384,7 @@ impl<
     }
 
     fn continue_set(&mut self, m: &MatchEntry, last_incomplete_set: SetEntry) -> AppAction {
-        match last_incomplete_set.compute_snapshot() {
+        match last_incomplete_set.compute_snapshot(m.max_substitutions) {
             Ok((snapshot, available_options)) => {
                 AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
                     self.settings_reader.clone(),

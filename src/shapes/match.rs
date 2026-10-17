@@ -1,4 +1,5 @@
 use crate::{
+    constants::LEGACY_MAX_SUBSTITUTIONS,
     errors::AppError,
     shapes::{
         enums::{EventTypeEnum, TeamSideEnum},
@@ -29,8 +30,15 @@ pub struct MatchEntry {
     #[serde(skip_serializing, skip_deserializing)]
     pub team: TeamEntry,
     pub home: bool,
+    // matches saved before the number was configurable used the old rules
+    #[serde(default = "legacy_max_substitutions")]
+    pub max_substitutions: u8,
     #[serde(skip_serializing, skip_deserializing)]
     pub sets: Vec<SetEntry>,
+}
+
+fn legacy_max_substitutions() -> u8 {
+    LEGACY_MAX_SUBSTITUTIONS
 }
 
 impl MatchEntry {
@@ -98,7 +106,7 @@ impl MatchEntry {
             Some(set) => set,
             None => return Ok(None),
         };
-        let snapshot = s.compute_snapshot()?;
+        let snapshot = s.compute_snapshot(self.max_substitutions)?;
         Ok(Some(snapshot))
     }
 }

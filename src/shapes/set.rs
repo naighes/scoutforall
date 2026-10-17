@@ -1,7 +1,7 @@
 use crate::{
     errors::{AppError, MatchError},
     shapes::{
-        enums::{EventTypeEnum, PhaseEnum, TeamSideEnum},
+        enums::{EventTypeEnum, TeamSideEnum},
         snapshot::{EventEntry, Snapshot},
     },
 };
@@ -54,36 +54,20 @@ impl SetEntry {
         }
     }
 
-    pub fn has_events(&self) -> bool {
-        !self.events.is_empty()
-    }
-
-    pub fn compute_snapshot(&self) -> Result<(Snapshot, Vec<EventTypeEnum>), AppError> {
+    /// Replays the events of the set; `max_substitutions` comes from the
+    /// match.
+    pub fn compute_snapshot(
+        &self,
+        max_substitutions: u8,
+    ) -> Result<(Snapshot, Vec<EventTypeEnum>), AppError> {
         // prepare the initial snapshot
-        let mut snapshot = Snapshot::new(self)?;
-        // prepare initial available options
-        let mut available_options: Vec<EventTypeEnum> = vec![];
-        if self.has_events() {
-            for event in &self.events {
-                available_options = snapshot.add_event(event, &available_options)?;
-            }
-        } else {
-            // there are no events: set is just started
-            available_options = match snapshot.current_lineup.get_current_phase() {
-                PhaseEnum::SideOut => vec![
-                    EventTypeEnum::P,
-                    EventTypeEnum::OS,
-                    EventTypeEnum::OE,
-                    EventTypeEnum::F,
-                    EventTypeEnum::R,
-                ],
-                _ => vec![
-                    EventTypeEnum::S,
-                    EventTypeEnum::F,
-                    EventTypeEnum::R,
-                    EventTypeEnum::OE,
-                ],
-            }
+        let mut snapshot = Snapshot::new(self, max_substitutions)?;
+        // the events available before the first serve: also the ones after a
+        // substitution, setter or libero change opening the set
+        let mut available_options =
+            snapshot.get_rally_start_options(snapshot.current_lineup.get_current_phase());
+        for event in &self.events {
+            available_options = snapshot.add_event(event, &available_options)?;
         }
         Ok((snapshot, available_options))
     }

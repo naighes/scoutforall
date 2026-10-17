@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::shapes::{
         enums::{RoleEnum, TeamSideEnum},
         set::SetEntry,
@@ -16,7 +17,7 @@ mod tests {
     ) -> Snapshot {
         let set = SetEntry::new(set_number, serving_team, lineup, libero, None, setter)
             .expect("expected a valid set");
-        Snapshot::new(&set).expect("expected a valid snapshot")
+        Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot")
     }
 
     #[test]

@@ -87,14 +87,16 @@ impl<
                     .map(|f| (match_id, f))
             })
             .and_then(|(match_id, mut f)| Self::archive_content(&mut f, &self.team, match_id))?;
-        // save match entry
-        let m = match_entry.clone();
-        self.match_writer
+        // save match entry: its folder is named after date and opponent, the
+        // sets go there whatever the name of the file
+        let m = self
+            .match_writer
             .create(
                 &match_entry.team,
                 match_entry.opponent,
                 match_entry.date,
                 match_entry.home,
+                match_entry.max_substitutions,
             )
             .await?;
         for set in match_entry.sets {

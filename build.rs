@@ -15,6 +15,10 @@ fn main() {
 }
 
 fn inject_env_vars() {
+    // rebuild when they change, not only when the sources do
+    for name in ["LINEAR_TOKEN", "LINEAR_TEAM_ID", "ANALYTICS_UPLOAD_URL"] {
+        println!("cargo:rerun-if-env-changed={}", name);
+    }
     if let Ok(token) = std::env::var("LINEAR_TOKEN") {
         println!("cargo:rustc-env=LINEAR_TOKEN={}", token);
     }

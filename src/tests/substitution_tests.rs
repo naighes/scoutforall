@@ -1,4 +1,5 @@
 mod tests {
+    use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::shapes::{
         enums::{GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
         player::PlayerEntry,
@@ -20,7 +21,8 @@ mod tests {
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
         let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
-        let snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
+        let snapshot: Snapshot =
+            Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot");
         let options = snapshot.current_lineup.get_replaceable_lineup_choices();
         assert_eq!(
             options[0].1.1,
@@ -52,7 +54,8 @@ mod tests {
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
         let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
-        let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
+        let mut snapshot: Snapshot =
+            Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot");
         snapshot
             .current_lineup
             .add_substitution(&setter, &setter_replacement)
@@ -87,7 +90,8 @@ mod tests {
         let positions: [Uuid; 6] = [setter, oh1, mb2, opposite, oh2, mb1];
         let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
-        let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
+        let mut snapshot: Snapshot =
+            Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot");
         snapshot
             .current_lineup
             .add_substitution(&setter, &setter_replacement)
@@ -211,7 +215,8 @@ mod tests {
         ];
         let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
-        let snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
+        let snapshot: Snapshot =
+            Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot");
         let options = snapshot
             .current_lineup
             .get_available_replacements(&team, setter);
@@ -233,7 +238,8 @@ mod tests {
         ];
         let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
-        let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
+        let mut snapshot: Snapshot =
+            Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot");
         snapshot
             .current_lineup
             .add_substitution(&setter, &setter_replacement)
@@ -259,7 +265,8 @@ mod tests {
         ];
         let set = SetEntry::new(1, TeamSideEnum::Us, positions, libero, None, setter)
             .expect("expected a valid set");
-        let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
+        let mut snapshot: Snapshot =
+            Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot");
         snapshot
             .current_lineup
             .add_substitution(&setter, &setter_replacement)
@@ -295,7 +302,8 @@ mod tests {
             setter,
         )
         .expect("expected a valid set");
-        let mut snapshot: Snapshot = Snapshot::new(&set).expect("expected a valid snapshot");
+        let mut snapshot: Snapshot =
+            Snapshot::new(&set, DEFAULT_MAX_SUBSTITUTIONS).expect("expected a valid snapshot");
         snapshot
             .current_lineup
             .add_substitution(&team.players[3].id, &setter_replacement)

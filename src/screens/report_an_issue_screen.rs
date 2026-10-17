@@ -1,5 +1,4 @@
 use crate::shapes::keybinding::navigation_keybindings;
-use std::env::var;
 
 use crate::{
     localization::current_labels,
@@ -10,6 +9,7 @@ use crate::{
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings},
+    util::config_var,
 };
 use async_trait::async_trait;
 use crokey::{
@@ -254,8 +254,9 @@ impl ReportAnIssueScreen {
 
     async fn send_issue(&self, title: &str, description: &str) -> Result<(), String> {
         const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
-        let token = var("LINEAR_TOKEN").unwrap_or_default();
-        let team_id = var("LINEAR_TEAM_ID").unwrap_or_default();
+        let token = config_var("LINEAR_TOKEN", option_env!("LINEAR_TOKEN")).unwrap_or_default();
+        let team_id =
+            config_var("LINEAR_TEAM_ID", option_env!("LINEAR_TEAM_ID")).unwrap_or_default();
         let client = reqwest::Client::new();
         let query = r#"
             mutation CreateIssue($input: IssueCreateInput!) {

@@ -4,6 +4,7 @@
 
 use crate::{
     app::App,
+    constants::DEFAULT_MAX_SUBSTITUTIONS,
     providers::{
         fs::{
             match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
@@ -96,7 +97,7 @@ impl Ui {
             for (i, o) in t.opponents.iter().enumerate() {
                 let date = first_match + Duration::days(i as i64);
                 let m = match_writer
-                    .create(&team, o.to_string(), date, true)
+                    .create(&team, o.to_string(), date, true, DEFAULT_MAX_SUBSTITUTIONS)
                     .await
                     .unwrap();
                 if start_sets {
@@ -188,6 +189,40 @@ impl Ui {
     pub async fn saved_settings_json(&self) -> serde_json::Value {
         let path = crate::providers::fs::path::get_config_file_path(&self.base);
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// The match descriptors as saved on disk.
+    pub fn saved_matches(&self) -> Vec<serde_json::Value> {
+        self.match_descriptor_paths()
+            .iter()
+            .map(|p| serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap())
+            .collect()
+    }
+
+    /// Changes the match descriptors on disk, e.g. to save them as an older
+    /// version did.
+    pub fn edit_saved_matches(&self, edit: impl Fn(&mut serde_json::Value)) {
+        for path in self.match_descriptor_paths() {
+            let mut value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            edit(&mut value);
+            std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        }
+    }
+
+    fn match_descriptor_paths(&self) -> Vec<PathBuf> {
+        let dirs = |p: &PathBuf| -> Vec<PathBuf> {
+            std::fs::read_dir(p)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .filter(|p| p.is_dir())
+                .collect()
+        };
+        dirs(&self.base)
+            .iter()
+            .flat_map(dirs)
+            .map(|m| m.join(crate::constants::MATCH_DESCRIPTOR_FILE_NAME))
+            .filter(|p| p.exists())
+            .collect()
     }
 
     /// The settings as saved on disk; None until something saves them.

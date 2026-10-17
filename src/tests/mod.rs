@@ -1,4 +1,7 @@
+mod config_tests;
+mod lineup_scenario_tests;
 mod lineup_tests;
+mod max_substitutions_tests;
 mod navigation_tests;
 mod scouting_tests;
 mod settings_tests;

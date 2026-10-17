@@ -28,11 +28,12 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-/// Assigns one more key to a scouting shortcut: the key pressed is taken as it
-/// is (enter confirms it, backspace clears it, esc goes back), unless it's a
-/// fixed key or already bound to another shortcut of the same kind.
+/// Changes the key of a scouting shortcut, which always has exactly one: the
+/// current key is shown first, the key pressed takes its place (enter confirms
+/// it, backspace clears it, esc goes back), unless it's a fixed key or already
+/// bound to another shortcut of the same kind.
 #[derive(Debug)]
-pub struct AddKeyBindingScreen<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut> {
+pub struct ChangeKeyBindingScreen<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut> {
     settings: Settings,
     action: T,
     shortcut: Option<KeyCombination>,
@@ -45,7 +46,7 @@ pub struct AddKeyBindingScreen<SW: SettingsWriter + Send + Sync, T: ScoutingShor
 }
 
 impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> Renderable
-    for AddKeyBindingScreen<SW, T>
+    for ChangeKeyBindingScreen<SW, T>
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let area = Layout::default()
@@ -77,7 +78,7 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> Renderable
 
 #[async_trait]
 impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> ScreenAsync
-    for AddKeyBindingScreen<SW, T>
+    for ChangeKeyBindingScreen<SW, T>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
         let Some(key_combination) = self.screen_key_bindings.transform(key) else {
@@ -106,7 +107,7 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> ScreenAsync
     async fn refresh_data(&mut self) {}
 }
 
-impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> AddKeyBindingScreen<SW, T> {
+impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> ChangeKeyBindingScreen<SW, T> {
     pub fn new(action: T, settings: Settings, settings_writer: Arc<SW>) -> Self {
         let screen_actions = &[
             Sba::Simple(ScreenActionEnum::Confirm),
@@ -115,10 +116,11 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> AddKeyBindin
         let kb = navigation_keybindings();
         let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
-        AddKeyBindingScreen {
+        let shortcut = T::bindings(&settings).key_for(&action);
+        ChangeKeyBindingScreen {
             settings,
             action,
-            shortcut: None,
+            shortcut,
             notify_message: NotifyBanner::new(),
             footer: NavigationFooter::new(),
             footer_entries,
@@ -156,7 +158,10 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> AddKeyBindin
             return AppAction::None;
         }
         let mut keybindings: KeyBindings<T> = T::bindings(&self.settings);
-        keybindings.set(self.action, ck);
+        if keybindings.key_for(&self.action) == Some(ck) {
+            return AppAction::Back(true, Some(1));
+        }
+        keybindings.assign(self.action, ck);
         let settings = T::with_bindings(&self.settings, &keybindings);
         match self.settings_writer.save(settings).await {
             Ok(saved_settings) => {

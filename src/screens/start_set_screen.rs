@@ -272,7 +272,7 @@ impl<
                     .await
                     .and_then(|set_entry| {
                         set_entry
-                            .compute_snapshot()
+                            .compute_snapshot(self.current_match.max_substitutions)
                             .map(|(snapshot, options)| (set_entry, snapshot, options))
                     }) {
                     Ok((set_entry, snapshot, available_options)) => {
