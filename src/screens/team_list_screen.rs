@@ -187,17 +187,21 @@ impl<
             .teams
             .iter()
             .map(|t| match t {
-                Ok(t) => ListItem::new(format!(
-                    "{} ({}/{}, {})",
-                    t.name,
-                    t.classification
-                        .map(|c| c.friendly_name(current_labels()))
-                        .unwrap_or_default(),
-                    t.gender
-                        .map(|g| g.friendly_name(current_labels()))
-                        .unwrap_or_default(),
-                    t.year,
-                )),
+                Ok(t) => {
+                    let labels = current_labels();
+                    let details = [
+                        t.classification.map(|c| c.friendly_name(labels)),
+                        t.gender.map(|g| g.friendly_name(labels)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("/");
+                    ListItem::new(match details.as_str() {
+                        "" => format!("{} ({})", t.name, t.year),
+                        _ => format!("{} ({}, {})", t.name, details, t.year),
+                    })
+                }
                 Err(unreadable) => ListItem::new(format!(
                     "{} ({})",
                     unreadable.id,
