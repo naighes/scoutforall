@@ -605,7 +605,7 @@ mod tests {
                             2,                      // attacks
                             2,                      // errors
                             2,                      // unforced_errors
-                            0,                      // counter_attacks
+                            1,                      // counter_attacks
                             2,                      // opponent_errors
                             || {
                                 assert_eq!(
@@ -644,7 +644,7 @@ mod tests {
                         2,                        // attacks
                         3,                        // errors
                         3,                        // unforced_errors
-                        0,                        // counter_attacks
+                        1,                        // counter_attacks
                         2,                        // opponent_errors
                         || {},
                     );
@@ -670,7 +670,7 @@ mod tests {
                         2,       // attacks
                         3,       // errors
                         3,       // unforced_errors
-                        0,       // counter_attacks
+                        1,       // counter_attacks
                         2,       // opponent_errors
                         || {},
                     );
@@ -696,7 +696,7 @@ mod tests {
                         3,       // attacks
                         3,       // errors
                         3,       // unforced_errors
-                        0,       // counter_attacks
+                        1,       // counter_attacks
                         2,       // opponent_errors
                         || {
                             assert_eq!(
@@ -734,7 +734,7 @@ mod tests {
                         3,       // attacks
                         3,       // errors
                         3,       // unforced_errors
-                        0,       // counter_attacks
+                        1,       // counter_attacks
                         2,       // opponent_errors
                         || {},
                     );
@@ -760,7 +760,7 @@ mod tests {
                         4,                      // attacks
                         3,                      // errors
                         3,                      // unforced_errors
-                        1,                      // counter_attacks
+                        2,                      // counter_attacks
                         2,                      // opponent_errors
                         || {},
                     );
@@ -786,7 +786,7 @@ mod tests {
                         4,       // attacks
                         3,       // errors
                         3,       // unforced_errors
-                        1,       // counter_attacks
+                        2,       // counter_attacks
                         2,       // opponent_errors
                         || {},
                     );
@@ -812,7 +812,7 @@ mod tests {
                         4,                        // attacks
                         4,                        // errors
                         3,                        // unforced_errors
-                        1,                        // counter_attacks
+                        2,                        // counter_attacks
                         2,                        // opponent_errors
                         || {},
                     );
@@ -838,7 +838,7 @@ mod tests {
                         4,       // attacks
                         4,       // errors
                         3,       // unforced_errors
-                        1,       // counter_attacks
+                        2,       // counter_attacks
                         2,       // opponent_errors
                         || {},
                     );
@@ -864,7 +864,7 @@ mod tests {
                         5,                        // attacks
                         5,                        // errors
                         3,                        // unforced_errors
-                        1,                        // counter_attacks
+                        2,                        // counter_attacks
                         2,                        // opponent_errors
                         || {},
                     );
@@ -890,7 +890,7 @@ mod tests {
                         5,                      // attacks
                         5,                      // errors
                         3,                      // unforced_errors
-                        1,                      // counter_attacks
+                        2,                      // counter_attacks
                         3,                      // opponent_errors
                         || {},
                     );
@@ -916,7 +916,7 @@ mod tests {
                         5,       // attacks
                         5,       // errors
                         3,       // unforced_errors
-                        1,       // counter_attacks
+                        2,       // counter_attacks
                         3,       // opponent_errors
                         || {},
                     );
@@ -942,7 +942,7 @@ mod tests {
                         5,       // attacks
                         5,       // errors
                         3,       // unforced_errors
-                        1,       // counter_attacks
+                        2,       // counter_attacks
                         3,       // opponent_errors
                         || {},
                     );
@@ -968,7 +968,7 @@ mod tests {
                         6,                        // attacks
                         6,                        // errors
                         4,                        // unforced_errors
-                        2,                        // counter_attacks
+                        3,                        // counter_attacks
                         3,                        // opponent_errors
                         || {},
                     );
@@ -994,7 +994,7 @@ mod tests {
                         6,                      // attacks
                         6,                      // errors
                         4,                      // unforced_errors
-                        2,                      // counter_attacks
+                        3,                      // counter_attacks
                         4,                      // opponent_errors
                         || {},
                     );
@@ -1020,7 +1020,7 @@ mod tests {
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
-                        2,                        // counter_attacks
+                        3,                        // counter_attacks
                         4,                        // opponent_errors
                         || {
                             assert_eq!(
@@ -1055,7 +1055,7 @@ mod tests {
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
-                        2,                        // counter_attacks
+                        3,                        // counter_attacks
                         4,                        // opponent_errors
                         || {
                             assert_eq!(snapshot.current_lineup.get_setter(), Some(setter));
@@ -1083,7 +1083,7 @@ mod tests {
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
-                        2,                        // counter_attacks
+                        3,                        // counter_attacks
                         4,                        // opponent_errors
                         || {
                             assert_eq!(
@@ -1114,7 +1114,7 @@ mod tests {
                         6,                        // attacks
                         7,                        // errors
                         5,                        // unforced_errors
-                        2,                        // counter_attacks
+                        3,                        // counter_attacks
                         4,                        // opponent_errors
                         || {
                             assert_eq!(snapshot.current_lineup.get_setter(), Some(opposite));
@@ -1143,7 +1143,7 @@ mod tests {
                         6,       // attacks
                         7,       // errors
                         5,       // unforced_errors
-                        2,       // counter_attacks
+                        3,       // counter_attacks
                         4,       // opponent_errors
                         || {},
                     );
@@ -1169,7 +1169,7 @@ mod tests {
                         6,                        // attacks
                         8,                        // errors
                         6,                        // unforced_errors
-                        2,                        // counter_attacks
+                        3,                        // counter_attacks
                         4,                        // opponent_errors
                         || {
                             assert_eq!(
@@ -1204,7 +1204,7 @@ mod tests {
                         6,                      // attacks
                         8,                      // errors
                         6,                      // unforced_errors
-                        2,                      // counter_attacks
+                        3,                      // counter_attacks
                         5,                      // opponent_errors
                         || {},
                     );
@@ -1231,7 +1231,7 @@ mod tests {
                         6,    // attacks
                         8,    // errors
                         6,    // unforced_errors
-                        2,    // counter_attacks
+                        3,    // counter_attacks
                         5,    // opponent_errors
                         || {
                             assert_eq!(
@@ -1377,7 +1377,7 @@ mod tests {
             .stats
             .attacks
             .count(|k| k.is_counter_attack() && k.eval == EvalEnum::Perfect);
-        assert_eq!(counter_attacks, 2);
-        assert_eq!(kills, 1);
+        assert_eq!(counter_attacks, 3);
+        assert_eq!(kills, 2);
     }
 }

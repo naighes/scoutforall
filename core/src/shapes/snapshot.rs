@@ -1,5 +1,8 @@
 use crate::{
-    constants::{DEFAULT_SET_TARGET_SCORE, TIE_BREAK_SET_TARGET_SCORE},
+    constants::{
+        DEFAULT_SET_PARTIALS, DEFAULT_SET_TARGET_SCORE, TIE_BREAK_SET_PARTIALS,
+        TIE_BREAK_SET_TARGET_SCORE,
+    },
     errors::{AppError, SnapshotError},
     shapes::{
         enums::{
@@ -256,8 +259,13 @@ impl Snapshot {
                 TeamSideEnum::Them => (&mut self.score_them, self.score_us),
             };
             *score += 1;
-            // keep track of partials at 8, 16, 21
-            if [8, 16, 21].contains(score) && *score > opponent_score {
+            // keep track of the partials
+            let partials = if self.set_number == 5 {
+                TIE_BREAK_SET_PARTIALS
+            } else {
+                DEFAULT_SET_PARTIALS
+            };
+            if partials.contains(&*score) && *score > opponent_score {
                 self.partials.push((self.score_us, self.score_them));
             }
         }

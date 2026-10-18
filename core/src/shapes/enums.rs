@@ -365,8 +365,7 @@ impl FromStr for EventTypeEnum {
 ///
 /// - **Exclamative (`!`)**  
 ///   An action worth highlighting, often unusual or remarkable.
-///   - Serve: similar to `/` - the opponent returns the ball,
-///     but it comes back at the "third touch", giving us a chance to continue.
+///   - Serve: not used.
 ///   - Reception: between `+` and `-` - pass is neither perfect nor bad.
 ///   - Attack: blocked, but kept alive by our team coverage, allowing a
 ///     possible re-attack (still a positive attack).
