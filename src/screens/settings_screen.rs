@@ -2,7 +2,6 @@ use crate::shapes::keybinding::navigation_keybindings;
 use std::{fmt::Debug, sync::Arc};
 
 use crate::{
-    localization::current_labels,
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue},
@@ -11,7 +10,7 @@ use crate::{
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum, ScreenActionEnum, WithDesc},
+        actions::ScreenActionEnum,
         keybinding::{ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, UNDO_KEY},
         settings::{ScoutingShortcut, Settings, set_settings},
         symbol::KeyCombinationFormatExt,
@@ -28,6 +27,10 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Row, Table, TableState},
+};
+use scout4all_core::{
+    localization::current_labels,
+    shapes::enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum, WithDesc},
 };
 
 /// below this width the two panels are stacked instead of side by side

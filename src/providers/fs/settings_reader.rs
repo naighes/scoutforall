@@ -1,9 +1,12 @@
 use crate::{
-    errors::{AppError, IOError},
-    providers::{fs::path::get_config_file_path, settings_reader::SettingsReader},
+    providers::settings_reader::SettingsReader,
     shapes::{keybinding::KeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
+use scout4all_core::{
+    errors::{AppError, IOError},
+    providers::fs::path::get_config_file_path,
+};
 use serde_json::from_str;
 use std::path::{Path, PathBuf};
 use tokio::fs::read_to_string;

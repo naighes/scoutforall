@@ -4,19 +4,22 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        localization::current_labels,
         providers::{
-            fs::{path::get_config_file_path, settings_reader::FileSystemSettingsReader},
-            settings_reader::SettingsReader,
+            fs::settings_reader::FileSystemSettingsReader, settings_reader::SettingsReader,
         },
         shapes::{
-            enums::{EvalEnum, EventTypeEnum, LanguageEnum, ScreenActionEnum, WithDesc},
+            actions::ScreenActionEnum,
             keybinding::{KeyBindings, SETTINGS_KEY, navigation_keybindings},
             settings::Settings,
         },
         tests::ui::{TeamFixture, Ui},
     };
     use crokey::{KeyCombination, crossterm::event::KeyCode, key};
+    use scout4all_core::{
+        localization::current_labels,
+        providers::fs::path::get_config_file_path,
+        shapes::enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
+    };
     use std::collections::HashSet;
     use tempfile::TempDir;
 
@@ -582,5 +585,23 @@ mod tests {
                 defaults.eval_keybindings.keybindings_for(&eval)
             );
         }
+    }
+
+    /// Up to v0.0.7 the settings were the language only.
+    #[tokio::test]
+    async fn settings_saved_by_v0_0_x_load() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(get_config_file_path(dir.path()), r#"{ "language": "it" }"#).unwrap();
+        let settings = FileSystemSettingsReader::new(dir.path())
+            .read()
+            .await
+            .expect("expected the settings");
+        let defaults = Settings::default();
+        assert_eq!(settings.language, LanguageEnum::It);
+        assert!(settings.analytics_enabled);
+        assert_eq!(
+            settings.scouting_keybindings.key_for(&EventTypeEnum::S),
+            defaults.scouting_keybindings.key_for(&EventTypeEnum::S)
+        );
     }
 }

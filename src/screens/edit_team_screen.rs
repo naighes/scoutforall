@@ -2,8 +2,6 @@ use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
 use crate::{
-    localization::current_labels,
-    providers::team_writer::{TeamInput, TeamWriter},
     screens::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
@@ -11,11 +9,7 @@ use crate::{
         },
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{
-        enums::{FriendlyName, GenderEnum, ScreenActionEnum, TeamClassificationEnum},
-        keybinding::ActionsKeyBindings,
-        team::TeamEntry,
-    },
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
@@ -25,6 +19,14 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{Block, Borders, Paragraph},
+};
+use scout4all_core::{
+    localization::current_labels,
+    providers::team_writer::{TeamInput, TeamWriter},
+    shapes::{
+        enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
+        team::TeamEntry,
+    },
 };
 
 #[derive(Debug)]

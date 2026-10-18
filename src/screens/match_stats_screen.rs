@@ -1,23 +1,10 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
-    errors::AppError,
-    localization::current_labels,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{
-        enums::{
-            ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum,
-            ScreenActionEnum, ZoneEnum,
-        },
-        keybinding::ActionsKeyBindings,
-        r#match::MatchEntry,
-        player::PlayerEntry,
-        set::SetEntry,
-        snapshot::Snapshot,
-        stats::{Metric, Stats, StatsFilter},
-    },
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
@@ -29,6 +16,20 @@ use ratatui::{
     widgets::{
         Bar, BarChart, BarGroup, Block, Borders, Cell, Gauge, List, ListItem, ListState, Padding,
         Row, Table, canvas::Canvas,
+    },
+};
+use scout4all_core::{
+    errors::AppError,
+    localization::current_labels,
+    shapes::{
+        enums::{
+            ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum,
+        },
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        set::SetEntry,
+        snapshot::Snapshot,
+        stats::{Metric, Stats, StatsFilter},
     },
 };
 use std::{collections::HashSet, fmt::Display, iter::once};
@@ -290,7 +291,7 @@ impl MatchStatsScreen {
         state.select(Some(0));
         let mut sets: Vec<(SetEntry, Snapshot)> = Vec::new();
         for set in &current_match.sets {
-            let (snapshot, _) = set.compute_snapshot(current_match.max_substitutions)?;
+            let snapshot = set.compute_snapshot(current_match.max_substitutions)?;
             sets.push((set.clone(), snapshot));
         }
         let set_numbers = sets.iter().map(|(set, _)| set.set_number);

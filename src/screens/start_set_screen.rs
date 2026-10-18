@@ -1,21 +1,12 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
-    localization::current_labels,
-    providers::{
-        set_writer::SetWriter, settings_reader::SettingsReader, settings_writer::SettingsWriter,
-    },
+    providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{
-        enums::{RoleEnum, ScreenActionEnum, TeamSideEnum},
-        keybinding::ActionsKeyBindings,
-        r#match::MatchEntry,
-        player::PlayerEntry,
-        settings::Settings,
-    },
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
@@ -24,6 +15,15 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState},
+};
+use scout4all_core::{
+    localization::current_labels,
+    providers::set_writer::SetWriter,
+    shapes::{
+        enums::{RoleEnum, TeamSideEnum},
+        r#match::MatchEntry,
+        player::PlayerEntry,
+    },
 };
 use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
@@ -273,9 +273,9 @@ impl<
                     .and_then(|set_entry| {
                         set_entry
                             .compute_snapshot(self.current_match.max_substitutions)
-                            .map(|(snapshot, options)| (set_entry, snapshot, options))
+                            .map(|snapshot| (set_entry, snapshot))
                     }) {
-                    Ok((set_entry, snapshot, available_options)) => {
+                    Ok((set_entry, snapshot)) => {
                         AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
                             self.settings_reader.clone(),
                             self.settings_writer.clone(),
@@ -283,7 +283,6 @@ impl<
                             self.current_match.clone(),
                             set_entry,
                             snapshot,
-                            available_options,
                             self.back_stack_count.map(|x| x + 1),
                             self.set_writer.clone(),
                         )))

@@ -1,5 +1,6 @@
 use crate::reporting::typst_content::TypstContent;
 
+#[derive(Default)]
 pub struct Circle {
     stroke: Option<&'static str>,
     fill: Option<&'static str>,
@@ -10,13 +11,7 @@ pub struct Circle {
 
 impl Circle {
     pub fn new() -> Self {
-        Self {
-            stroke: None,
-            fill: None,
-            inset: None,
-            outset: None,
-            content: None,
-        }
+        Self::default()
     }
 
     pub fn stroke(mut self, s: &'static str) -> Self {

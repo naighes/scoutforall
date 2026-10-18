@@ -5,11 +5,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        localization::current_labels,
-        tests::ui::{TeamFixture, Ui},
-    };
+    use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
+    use scout4all_core::localization::current_labels;
     use std::{
         fs::OpenOptions,
         io::Write,
@@ -152,6 +150,34 @@ mod tests {
                 "2025-09-01T18:00:00Z,R,0c5a7b9e-1c1b-4d7e-9a43-2f6f2b1d1a11,,\
                  9d0f3c55-55c4-4a1b-8c43-0e8a8d9c2b22\n",
             );
+            cortona = folder_name(&folder);
+        })
+        .await;
+        assert_only_cortona_unreadable(&mut ui, &cortona);
+    }
+
+    /// A set edited by hand breaking the order of the events: their error
+    /// gives us the serve, so they can't score an ace.
+    #[tokio::test]
+    async fn set_edited_by_hand_with_an_event_out_of_order() {
+        let mut cortona = String::new();
+        let mut ui = match_list(|base| {
+            let folder = match_folder(base, "cortona");
+            append(&folder.join("set_1.csv"), "2025-09-01T18:00:00Z,OE,,,\n");
+            append(&folder.join("set_1.csv"), "2025-09-01T18:00:01Z,OS,,,\n");
+            cortona = folder_name(&folder);
+        })
+        .await;
+        assert_only_cortona_unreadable(&mut ui, &cortona);
+    }
+
+    /// A set edited by hand giving an evaluation to their error.
+    #[tokio::test]
+    async fn set_edited_by_hand_with_an_unexpected_evaluation() {
+        let mut cortona = String::new();
+        let mut ui = match_list(|base| {
+            let folder = match_folder(base, "cortona");
+            append(&folder.join("set_1.csv"), "2025-09-01T18:00:00Z,OE,,#,\n");
             cortona = folder_name(&folder);
         })
         .await;

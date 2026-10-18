@@ -1,7 +1,7 @@
 use crate::{
     errors::{AppError, MatchError},
     shapes::{
-        enums::{EventTypeEnum, LineupRulesEnum, TeamSideEnum},
+        enums::{LineupRulesEnum, TeamSideEnum},
         snapshot::{EventEntry, Snapshot},
     },
 };
@@ -60,10 +60,7 @@ impl SetEntry {
 
     /// Replays the events of the set; `max_substitutions` comes from the
     /// match.
-    pub fn compute_snapshot(
-        &self,
-        max_substitutions: u8,
-    ) -> Result<(Snapshot, Vec<EventTypeEnum>), AppError> {
+    pub fn compute_snapshot(&self, max_substitutions: u8) -> Result<Snapshot, AppError> {
         match self.lineup_rules {
             Some(rules) => self.replay(max_substitutions, rules),
             // saved without the rules: scouted up to v0.2.0, unless only the
@@ -74,20 +71,13 @@ impl SetEntry {
         }
     }
 
-    fn replay(
-        &self,
-        max_substitutions: u8,
-        rules: LineupRulesEnum,
-    ) -> Result<(Snapshot, Vec<EventTypeEnum>), AppError> {
-        // prepare the initial snapshot
+    /// Replays the events with the lineup rules: every event is validated,
+    /// as when it's scouted.
+    fn replay(&self, max_substitutions: u8, rules: LineupRulesEnum) -> Result<Snapshot, AppError> {
         let mut snapshot = Snapshot::with_rules(self, max_substitutions, rules)?;
-        // the events available before the first serve: also the ones after a
-        // substitution, setter or libero change opening the set
-        let mut available_options =
-            snapshot.get_rally_start_options(snapshot.current_lineup.get_current_phase());
         for event in &self.events {
-            available_options = snapshot.add_event(event, &available_options)?;
+            snapshot.add_event(event)?;
         }
-        Ok((snapshot, available_options))
+        Ok(snapshot)
     }
 }

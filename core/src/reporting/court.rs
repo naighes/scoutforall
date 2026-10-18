@@ -5,6 +5,7 @@ use crate::{
 };
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct CourtCell {
     stroke: Option<&'static str>,
     spacing: Option<u8>,
@@ -14,12 +15,7 @@ pub struct CourtCell {
 
 impl CourtCell {
     pub fn new() -> Self {
-        Self {
-            stroke: None,
-            spacing: None,
-            text_top: None,
-            text_bottom: None,
-        }
+        Self::default()
     }
 
     pub fn stroke(mut self, s: &'static str) -> Self {

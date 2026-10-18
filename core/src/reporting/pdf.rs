@@ -62,7 +62,7 @@ pub fn render_match_typst(m: &MatchEntry) -> Result<String, AppError> {
         .filter_map(|set| {
             set.compute_snapshot(m.max_substitutions)
                 .ok()
-                .map(|(snapshot, _)| {
+                .map(|snapshot| {
                     aggregated_stats.merge(&snapshot.stats);
                     for &p in snapshot.current_lineup.get_involved_players().iter() {
                         let entered_late = if set.libero == p {

@@ -2,12 +2,7 @@ use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
 use crate::{
-    constants::DEFAULT_MAX_SUBSTITUTIONS,
-    localization::current_labels,
-    providers::{
-        match_writer::MatchWriter, set_writer::SetWriter, settings_reader::SettingsReader,
-        settings_writer::SettingsWriter,
-    },
+    providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{
             checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
@@ -16,10 +11,7 @@ use crate::{
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
         start_set_screen::StartSetScreen,
     },
-    shapes::{
-        enums::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings,
-        team::TeamEntry,
-    },
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
@@ -27,6 +19,12 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders},
+};
+use scout4all_core::{
+    constants::DEFAULT_MAX_SUBSTITUTIONS,
+    localization::current_labels,
+    providers::{match_writer::MatchWriter, set_writer::SetWriter},
+    shapes::team::TeamEntry,
 };
 
 #[derive(Debug)]

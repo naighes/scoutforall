@@ -1,28 +1,16 @@
-use crate::analytics::global::enqueue_match_for_upload;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
-use crate::shapes::enums::ScreenActionEnum;
+use crate::screens::{
+    components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+    screen::{AppAction, Renderable, ScreenAsync},
+};
+use crate::shapes::actions::ScreenActionEnum;
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
 use crate::shapes::settings::Settings;
 use crate::shapes::symbol::KeyCombinationFormatExt;
-use crate::{
-    localization::current_labels,
-    providers::set_writer::SetWriter,
-    screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Renderable, ScreenAsync},
-    },
-    shapes::{
-        enums::{EventTypeEnum, FriendlyName, RoleEnum},
-        r#match::MatchEntry,
-        player::PlayerEntry,
-        set::SetEntry,
-        snapshot::{EventEntry, Snapshot},
-    },
-};
 use async_trait::async_trait;
 use chrono::Utc;
 use crokey::KeyCombinationFormat;
@@ -33,6 +21,18 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
+};
+use scout4all_core::analytics::global::enqueue_match_for_upload;
+use scout4all_core::{
+    localization::current_labels,
+    providers::set_writer::SetWriter,
+    shapes::{
+        enums::{EventTypeEnum, FriendlyName},
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        set::SetEntry,
+        snapshot::{EventEntry, Snapshot},
+    },
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -47,7 +47,6 @@ pub struct ScoutingScreen<
     current_match: MatchEntry,
     set: SetEntry,
     snapshot: Snapshot,
-    currently_available_options: Vec<EventTypeEnum>,
     current_event: EventTypeInput,
     player: Option<Uuid>,
     state: ScoutingScreenState,
@@ -76,20 +75,6 @@ pub struct LineupChoiceEntry {
 enum EventTypeInput {
     Some(EventTypeEnum),
     None,
-}
-
-impl EventTypeInput {
-    pub fn is_allowed_for(&self, role: RoleEnum) -> bool {
-        use EventTypeEnum::*;
-        use EventTypeInput::*;
-        !matches!(
-            (self, role),
-            (Some(A), RoleEnum::Libero)
-                | (Some(B), RoleEnum::Libero)
-                | (Some(S), RoleEnum::Libero)
-                | (Some(CS), RoleEnum::Libero)
-        )
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -230,7 +215,6 @@ impl<
         current_match: MatchEntry,
         set: SetEntry,
         snapshot: Snapshot,
-        available_options: Vec<EventTypeEnum>,
         back_stack_count: Option<u8>,
         set_writer: Arc<SSW>,
     ) -> Self {
@@ -242,7 +226,6 @@ impl<
             current_match,
             set,
             snapshot,
-            currently_available_options: available_options,
             current_event: EventTypeInput::None,
             player: None,
             state: ScoutingScreenState::Event,
@@ -275,17 +258,10 @@ impl<
         (role, player_id): (String, Option<Uuid>),
     ) -> Option<LineupChoiceEntry> {
         player_id
-            // ensure is within the lineup
-            .and_then(|id| self.snapshot.current_lineup.find_position(&id).map(|_| id))
-            // ensure this action is allowed for libero
-            .take_if(|id| {
-                self.snapshot.current_lineup.get_current_libero() != *id
-                    || self.current_event.is_allowed_for(RoleEnum::Libero)
-            })
-            // on block, do not allow back players
-            .take_if(|id| {
-                !self.snapshot.current_lineup.is_back_row_player(id)
-                    || self.current_event != EventTypeInput::Some(EventTypeEnum::B)
+            // ensure the player can play the event
+            .filter(|id| match self.current_event {
+                EventTypeInput::Some(event_type) => self.snapshot.can_play(event_type, id),
+                EventTypeInput::None => self.snapshot.current_lineup.find_position(id).is_some(),
             })
             .and_then(|id| self.current_match.team.find_player(id))
             .map(|player| LineupChoiceEntry {
@@ -390,9 +366,8 @@ impl<
         {
             // since the last event has been removed, snapshot needs to
             // be re-computed from scratch
-            Ok((snapshot, available_options)) => {
+            Ok(snapshot) => {
                 self.snapshot = snapshot;
-                self.currently_available_options = available_options;
                 AppAction::None
             }
             Err(_) => {
@@ -407,22 +382,20 @@ impl<
         // the event is saved only when it applies: otherwise the set wouldn't
         // replay anymore. The snapshot is updated only when it's saved.
         let mut snapshot = self.snapshot.clone();
-        let currently_available_options =
-            match snapshot.add_event(event, &self.currently_available_options) {
-                Ok(options) => self
-                    .set_writer
+        let saved = match snapshot.add_event(event) {
+            Ok(()) => {
+                self.set_writer
                     .append_event(&self.current_match, self.set.set_number, event)
                     .await
-                    .map(|_| options),
-                Err(e) => Err(e),
-            };
-        match currently_available_options {
-            Ok(options) => {
+            }
+            Err(e) => Err(e),
+        };
+        match saved {
+            Ok(_) => {
                 self.snapshot = snapshot;
                 // append event to the set
                 self.set.events.push(event.clone());
                 // reset state
-                self.currently_available_options = options;
                 self.current_event = EventTypeInput::None;
                 self.player = None;
                 self.state = ScoutingScreenState::Event;
@@ -478,7 +451,7 @@ impl<
         }
         if let Some(key_combination) = self.event_screen_key_bindings.transform(key) {
             if let Some(evt) = self.event_screen_key_bindings.get(key_combination) {
-                match (self.currently_available_options.contains(evt), evt) {
+                match (self.snapshot.get_available_options().contains(evt), evt) {
                     // no substitutions left
                     (true, R)
                         if self
@@ -749,7 +722,8 @@ impl<
         let scf = KeyCombinationFormat::default();
         let se = self.event_key_bindings.clone();
         let rows: Vec<Row> = self
-            .currently_available_options
+            .snapshot
+            .get_available_options()
             .iter()
             .map(|ev| {
                 Row::new(vec![
@@ -864,8 +838,11 @@ impl<
             .snapshot
             .current_lineup
             .has_libero_at_pos(position_index);
-        let is_serving =
-            self.currently_available_options.contains(&EventTypeEnum::S) && position_index == 0;
+        let is_serving = self
+            .snapshot
+            .get_available_options()
+            .contains(&EventTypeEnum::S)
+            && position_index == 0;
         let player = self.current_match.team.find_player(player_id);
         let content =
             self.format_court_cell(player, position_index, is_serving, is_libero, is_setter);
@@ -1122,14 +1099,16 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use crate::providers::fs::{
+        settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
+    };
+    use scout4all_core::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         providers::{
             fs::{
                 match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
                 set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-                settings_reader::FileSystemSettingsReader,
-                settings_writer::FileSystemSettingsWriter, team_writer::FileSystemTeamWriter,
+                team_writer::FileSystemTeamWriter,
             },
             match_reader::MatchReader,
             match_writer::MatchWriter,
@@ -1189,7 +1168,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let (snapshot, options) = set.compute_snapshot(m.max_substitutions).unwrap();
+        let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
         let mut screen = ScoutingScreen::new(
             Arc::new(FileSystemSettingsReader::new(base)),
             Arc::new(FileSystemSettingsWriter::new(base)),
@@ -1197,7 +1176,6 @@ mod tests {
             m.clone(),
             set,
             snapshot,
-            options,
             None,
             set_writer,
         );
@@ -1229,7 +1207,7 @@ mod tests {
             .await
             .expect("expected the set to open");
         assert_eq!(m.sets[0].events.len(), 1);
-        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(snapshot.score_us, 1);
         assert_eq!(snapshot.score_them, 0);
     }

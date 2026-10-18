@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::localization::current_labels;
+use scout4all_core::localization::current_labels;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotifyMessage {

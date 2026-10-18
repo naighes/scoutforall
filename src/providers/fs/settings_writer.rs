@@ -1,9 +1,9 @@
-use crate::{
-    errors::{AppError, IOError},
-    providers::{fs::path::get_config_file_path, settings_writer::SettingsWriter},
-    shapes::settings::Settings,
-};
+use crate::{providers::settings_writer::SettingsWriter, shapes::settings::Settings};
 use async_trait::async_trait;
+use scout4all_core::{
+    errors::{AppError, IOError},
+    providers::fs::path::get_config_file_path,
+};
 use serde_json::to_vec_pretty;
 use std::path::{Path, PathBuf};
 use tokio::fs;

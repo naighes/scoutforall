@@ -1,9 +1,10 @@
 use {
-    crate::shapes::enums::{EvalEnum, EventTypeEnum, ScreenActionEnum, WithDesc},
+    crate::shapes::actions::ScreenActionEnum,
     crokey::{
         crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
         *,
     },
+    scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum, WithDesc},
     serde::{Deserialize, Serialize},
     std::collections::{HashMap, HashSet, hash_map},
 };

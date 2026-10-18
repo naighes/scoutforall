@@ -5,6 +5,12 @@
 #[cfg(test)]
 mod tests {
     use crate::{
+        screens::{file_system_screen::FileSystemAction, import_match_screen::ImportMatchAction},
+        tests::ui::{TeamFixture, Ui},
+    };
+    use chrono::Utc;
+    use crokey::crossterm::event::KeyCode;
+    use scout4all_core::{
         constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
         localization::current_labels,
         providers::{
@@ -16,7 +22,6 @@ mod tests {
             match_reader::MatchReader,
             team_writer::{PlayerInput, TeamInput, TeamWriter},
         },
-        screens::{file_system_screen::FileSystemAction, import_match_screen::ImportMatchAction},
         shapes::{
             enums::{EventTypeEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
@@ -24,10 +29,7 @@ mod tests {
             snapshot::{EventEntry, Snapshot},
             team::TeamEntry,
         },
-        tests::ui::{TeamFixture, Ui},
     };
-    use chrono::Utc;
-    use crokey::crossterm::event::KeyCode;
     use std::{io::Write, path::Path, sync::Arc};
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -127,7 +129,7 @@ mod tests {
         let mut m: MatchEntry = serde_json::from_str(LEGACY_DESCRIPTOR).unwrap();
         m.sets = vec![set];
         let reached = |m: &MatchEntry| {
-            let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+            let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
             snapshot
                 .current_lineup
                 .was_max_number_of_substitutions_reached()
@@ -217,7 +219,7 @@ mod tests {
     async fn imported_match_without_the_number_allows_6() {
         let m = import(EXPORTED, LEGACY_DESCRIPTOR).await;
         assert_eq!(m.max_substitutions, 6);
-        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(snapshot.current_lineup.get_max_substitutions(), 6);
     }
 

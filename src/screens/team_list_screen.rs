@@ -2,12 +2,7 @@ use crate::shapes::keybinding::navigation_keybindings;
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
 use crate::{
-    localization::current_labels,
-    providers::{
-        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
-        settings_reader::SettingsReader, settings_writer::SettingsWriter, team_reader::TeamReader,
-        team_writer::TeamWriter,
-    },
+    providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         edit_team_screen::EditTeamScreen,
@@ -17,13 +12,7 @@ use crate::{
         settings_screen::{SettingsPanel, SettingsScreen},
         team_details_screen::TeamDetailsScreen,
     },
-    shapes::{
-        enums::{FriendlyName, ScreenActionEnum},
-        keybinding::ActionsKeyBindings,
-        listed::Listed,
-        settings::Settings,
-        team::TeamEntry,
-    },
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
@@ -32,6 +21,14 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+};
+use scout4all_core::{
+    localization::current_labels,
+    providers::{
+        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
+        team_reader::TeamReader, team_writer::TeamWriter,
+    },
+    shapes::{enums::FriendlyName, listed::Listed, team::TeamEntry},
 };
 
 #[derive(Debug)]

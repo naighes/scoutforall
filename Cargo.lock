@@ -3849,12 +3849,32 @@ dependencies = [
  "crokey",
  "csv",
  "dirs 7.0.0",
- "futures",
  "hf",
  "ratatui",
  "regex",
  "reqwest",
+ "scout4all-core",
  "self_update",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "winres",
+ "zip",
+]
+
+[[package]]
+name = "scout4all-core"
+version = "0.4.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "csv",
+ "dirs 7.0.0",
+ "futures",
+ "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
@@ -3866,7 +3886,6 @@ dependencies = [
  "typst-layout",
  "typst-pdf",
  "uuid",
- "winres",
  "zip",
 ]
 

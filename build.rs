@@ -16,7 +16,8 @@ fn main() {
 
 fn inject_env_vars() {
     // rebuild when they change, not only when the sources do
-    for name in ["LINEAR_TOKEN", "LINEAR_TEAM_ID", "ANALYTICS_UPLOAD_URL"] {
+    // (the analytics endpoint is baked into the core, see core/build.rs)
+    for name in ["LINEAR_TOKEN", "LINEAR_TEAM_ID"] {
         println!("cargo:rerun-if-env-changed={}", name);
     }
     if let Ok(token) = std::env::var("LINEAR_TOKEN") {
@@ -24,8 +25,5 @@ fn inject_env_vars() {
     }
     if let Ok(team_id) = std::env::var("LINEAR_TEAM_ID") {
         println!("cargo:rustc-env=LINEAR_TEAM_ID={}", team_id);
-    }
-    if let Ok(url) = std::env::var("ANALYTICS_UPLOAD_URL") {
-        println!("cargo:rustc-env=ANALYTICS_UPLOAD_URL={}", url);
     }
 }

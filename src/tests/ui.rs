@@ -4,28 +4,32 @@
 
 use crate::{
     app::App,
+    providers::{
+        fs::{
+            settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
+        },
+        settings_reader::SettingsReader,
+    },
+    shapes::settings::Settings,
+};
+use chrono::{Duration, TimeZone, Utc};
+use crokey::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, style::Modifier};
+use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
     providers::{
         fs::{
             match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
             set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-            settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
             team_reader::FileSystemTeamReader, team_writer::FileSystemTeamWriter,
         },
         match_writer::MatchWriter,
         set_writer::SetWriter,
-        settings_reader::SettingsReader,
         team_reader::TeamReader,
         team_writer::{PlayerInput, TeamInput, TeamWriter},
     },
-    shapes::{
-        enums::{RoleEnum, TeamSideEnum},
-        settings::Settings,
-    },
+    shapes::enums::{RoleEnum, TeamSideEnum},
 };
-use chrono::{Duration, TimeZone, Utc};
-use crokey::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, style::Modifier};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -202,7 +206,7 @@ impl Ui {
 
     /// The settings file as saved on disk.
     pub async fn saved_settings_json(&self) -> serde_json::Value {
-        let path = crate::providers::fs::path::get_config_file_path(&self.base);
+        let path = scout4all_core::providers::fs::path::get_config_file_path(&self.base);
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
@@ -244,7 +248,7 @@ impl Ui {
         dirs(&self.base)
             .iter()
             .flat_map(dirs)
-            .map(|m| m.join(crate::constants::MATCH_DESCRIPTOR_FILE_NAME))
+            .map(|m| m.join(scout4all_core::constants::MATCH_DESCRIPTOR_FILE_NAME))
             .filter(|p| p.exists())
             .collect()
     }

@@ -5,12 +5,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use crate::tests::ui::{TeamFixture, Ui};
+    use crokey::crossterm::event::{KeyCode, KeyModifiers};
+    use scout4all_core::{
         localization::current_labels,
         shapes::enums::{EvalEnum, EventTypeEnum, WithDesc},
-        tests::ui::{TeamFixture, Ui},
     };
-    use crokey::crossterm::event::{KeyCode, KeyModifiers};
 
     pub const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",

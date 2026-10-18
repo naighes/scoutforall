@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Rect};
 
-use crate::shapes::{enums::WithDesc, keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
+use crate::shapes::{keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
+use scout4all_core::shapes::enums::WithDesc;
 
 pub enum AppAction {
     None,
@@ -87,7 +88,7 @@ impl<T> Sba<T> {
 
 #[test]
 fn test_get_keybinding_actions() {
-    use crate::shapes::enums::ScreenActionEnum;
+    use crate::shapes::actions::ScreenActionEnum;
     // Setup test data
     let kb = KeyBindings::<ScreenActionEnum>::default();
     let actions = &[
@@ -110,7 +111,7 @@ fn test_get_keybinding_actions() {
 
 #[test]
 fn test_hidden_actions_are_bound_but_not_listed() {
-    use crate::shapes::enums::ScreenActionEnum;
+    use crate::shapes::actions::ScreenActionEnum;
     use crokey::key;
     let kb = KeyBindings::<ScreenActionEnum>::default();
     let actions = &[

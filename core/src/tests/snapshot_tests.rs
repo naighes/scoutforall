@@ -151,7 +151,7 @@ mod tests {
                 timestamp: Utc::now(),
             }],
         };
-        let (mut snapshot, mut availeble_options) = set
+        let mut snapshot = set
             .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
             .expect("expected successful computation");
         assert_eq!(snapshot.score_us, 1);
@@ -627,7 +627,8 @@ mod tests {
                 EventEntry {
                     event_type: EventTypeEnum::S,
                     eval: Some(EvalEnum::Error),
-                    player: Some(oh2),
+                    // middle blocker 2 is still serving
+                    player: Some(mb2),
                     target_player: None,
                     timestamp: Utc::now(),
                 },
@@ -1214,7 +1215,8 @@ mod tests {
                     event_type: EventTypeEnum::S,
                     eval: Some(EvalEnum::Positive),
                     target_player: None,
-                    player: Some(opposite),
+                    // the setter, back on court, serves after the rotation
+                    player: Some(setter),
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1254,23 +1256,31 @@ mod tests {
             ),
         ];
 
-        for (event, assert) in list {
-            availeble_options = snapshot
-                .add_event(&event, &availeble_options)
-                .expect("expected a successful computation");
-            assert(&snapshot, &availeble_options);
+        for (i, (event, assert)) in list.into_iter().enumerate() {
+            snapshot
+                .add_event(&event)
+                .unwrap_or_else(|e| panic!("expected event {i} to apply: {e}"));
+            assert(&snapshot, &snapshot.get_available_options().to_vec());
         }
 
-        let setter_already_replaced = snapshot.add_event(
-            &EventEntry {
-                event_type: EventTypeEnum::R,
+        // their error ends the rally: the substitutions come before a serve
+        snapshot
+            .add_event(&EventEntry {
+                event_type: EventTypeEnum::OE,
                 eval: None,
-                player: Some(setter),                    // out
-                target_player: Some(setter_replacement), // in
+                player: None,
+                target_player: None,
                 timestamp: Utc::now(),
-            },
-            &[EventTypeEnum::R],
-        );
+            })
+            .expect("expected their error to apply");
+
+        let setter_already_replaced = snapshot.add_event(&EventEntry {
+            event_type: EventTypeEnum::R,
+            eval: None,
+            player: Some(setter),                    // out
+            target_player: Some(setter_replacement), // in
+            timestamp: Utc::now(),
+        });
         assert!(match setter_already_replaced {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
                 error == format!("player {:?} was already replaced", setter)
@@ -1278,16 +1288,13 @@ mod tests {
             _ => false,
         });
 
-        let setter_replacement_already_used = snapshot.add_event(
-            &EventEntry {
-                event_type: EventTypeEnum::R,
-                eval: None,
-                player: Some(oh1),                       // out
-                target_player: Some(setter_replacement), // in
-                timestamp: Utc::now(),
-            },
-            &[EventTypeEnum::R],
-        );
+        let setter_replacement_already_used = snapshot.add_event(&EventEntry {
+            event_type: EventTypeEnum::R,
+            eval: None,
+            player: Some(oh1),                       // out
+            target_player: Some(setter_replacement), // in
+            timestamp: Utc::now(),
+        });
         assert!(match setter_replacement_already_used {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
                 error == format!("player {:?} was already a replacement", setter_replacement)
@@ -1295,16 +1302,13 @@ mod tests {
             _ => false,
         });
 
-        let libero_cannot_be_replaced = snapshot.add_event(
-            &EventEntry {
-                event_type: EventTypeEnum::R,
-                eval: None,
-                player: Some(fallback_libero),               // out
-                target_player: Some(some_other_replacement), // in
-                timestamp: Utc::now(),
-            },
-            &[EventTypeEnum::R],
-        );
+        let libero_cannot_be_replaced = snapshot.add_event(&EventEntry {
+            event_type: EventTypeEnum::R,
+            eval: None,
+            player: Some(fallback_libero),               // out
+            target_player: Some(some_other_replacement), // in
+            timestamp: Utc::now(),
+        });
         assert!(match libero_cannot_be_replaced {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
                 error == "cannot replace the libero player"
@@ -1313,28 +1317,22 @@ mod tests {
         });
 
         snapshot
-            .add_event(
-                &EventEntry {
-                    event_type: EventTypeEnum::R,
-                    eval: None,
-                    player: Some(oh1),                           // out
-                    target_player: Some(some_other_replacement), // in
-                    timestamp: Utc::now(),
-                },
-                &[EventTypeEnum::R],
-            )
-            .expect("should not throw");
-
-        let unclosed_change_error = snapshot.add_event(
-            &EventEntry {
+            .add_event(&EventEntry {
                 event_type: EventTypeEnum::R,
                 eval: None,
-                player: Some(some_other_replacement),   // out
-                target_player: Some(some_other_player), // in
+                player: Some(oh1),                           // out
+                target_player: Some(some_other_replacement), // in
                 timestamp: Utc::now(),
-            },
-            &[EventTypeEnum::R],
-        );
+            })
+            .expect("should not throw");
+
+        let unclosed_change_error = snapshot.add_event(&EventEntry {
+            event_type: EventTypeEnum::R,
+            eval: None,
+            player: Some(some_other_replacement),   // out
+            target_player: Some(some_other_player), // in
+            timestamp: Utc::now(),
+        });
         assert!(match unclosed_change_error {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
                 error
@@ -1347,16 +1345,13 @@ mod tests {
         });
 
         snapshot
-            .add_event(
-                &EventEntry {
-                    event_type: EventTypeEnum::R,
-                    eval: None,
-                    player: Some(some_other_replacement), // out
-                    target_player: Some(oh1),             // in
-                    timestamp: Utc::now(),
-                },
-                &[EventTypeEnum::R],
-            )
+            .add_event(&EventEntry {
+                event_type: EventTypeEnum::R,
+                eval: None,
+                player: Some(some_other_replacement), // out
+                target_player: Some(oh1),             // in
+                timestamp: Utc::now(),
+            })
             .expect("should not throw");
 
         // 4 serve errors of theirs and a kill won, a blocked attack and 2

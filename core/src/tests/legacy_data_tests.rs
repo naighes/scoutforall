@@ -1,5 +1,6 @@
-//! Data saved by older versions: after an update, teams, matches and
-//! settings load as they were, and sets replay as they were scouted.
+//! Data saved by older versions: after an update, teams and matches load as
+//! they were, and sets replay as they were scouted (the settings are in the
+//! settings tests of the terminal interface).
 
 #[cfg(test)]
 mod tests {
@@ -7,19 +8,16 @@ mod tests {
         constants::LEGACY_MAX_SUBSTITUTIONS,
         providers::{
             fs::{
-                match_reader::FileSystemMatchReader, path::get_config_file_path,
-                set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-                settings_reader::FileSystemSettingsReader, team_reader::FileSystemTeamReader,
+                match_reader::FileSystemMatchReader, set_reader::FileSystemSetReader,
+                set_writer::FileSystemSetWriter, team_reader::FileSystemTeamReader,
             },
             match_reader::MatchReader,
             set_writer::SetWriter,
-            settings_reader::SettingsReader,
             team_reader::TeamReader,
         },
         shapes::{
-            enums::{EventTypeEnum, LanguageEnum, LineupRulesEnum, RoleEnum, TeamSideEnum},
+            enums::{LineupRulesEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
-            settings::Settings,
             team::TeamEntry,
         },
     };
@@ -143,11 +141,11 @@ mod tests {
         vec![
             row("R", Some(p.mb2), "", Some(p.sub)),
             row("OE", None, "", None),
-            row("OS", None, "", None),
+            row("F", Some(p.setter), "", None),
             row("OE", None, "", None),
-            // middle blocker 2 is serving
-            row("S", Some(p.mb2), "+", None),
-            // ...and chosen as setter
+            // middle blocker 2 serves an ace
+            row("S", Some(p.mb2), "#", None),
+            // ...and is chosen as setter
             row("CS", Some(p.mb2), "", None),
         ]
     }
@@ -190,24 +188,6 @@ mod tests {
         );
     }
 
-    /// Up to v0.0.7 the settings were the language only.
-    #[tokio::test]
-    async fn settings_saved_by_v0_0_x_load() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(get_config_file_path(dir.path()), r#"{ "language": "it" }"#).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
-            .read()
-            .await
-            .expect("expected the settings");
-        let defaults = Settings::default();
-        assert_eq!(settings.language, LanguageEnum::It);
-        assert!(settings.analytics_enabled);
-        assert_eq!(
-            settings.scouting_keybindings.key_for(&EventTypeEnum::S),
-            defaults.scouting_keybindings.key_for(&EventTypeEnum::S)
-        );
-    }
-
     /// A set scouted up to v0.2.0 replays with the lineup it was scouted on,
     /// not the one v0.3.0 would have: otherwise the setter change fails, and
     /// the match disappears from the list.
@@ -222,11 +202,11 @@ mod tests {
         assert_eq!(m.max_substitutions, LEGACY_MAX_SUBSTITUTIONS);
         assert_eq!(m.sets[0].lineup_rules, None);
         m.get_status().expect("expected the match status");
-        let (snapshot, _) = m
+        let snapshot = m
             .get_set_snapshot(1)
             .expect("expected the set to replay")
             .unwrap();
-        assert_eq!(snapshot.score_us, 2);
+        assert_eq!(snapshot.score_us, 3);
         assert_eq!(snapshot.score_them, 1);
         assert_eq!(snapshot.current_lineup.get_serving_player(), Some(p.mb2));
         assert_eq!(snapshot.current_lineup.get_setter(), Some(p.mb2));
@@ -245,7 +225,7 @@ mod tests {
         assert!(m.get_set_snapshot(1).is_err());
         // until the serve, the substitute is the one serving
         m.sets[0].events.truncate(4);
-        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(snapshot.current_lineup.get_serving_player(), Some(p.sub));
     }
 
@@ -261,7 +241,7 @@ mod tests {
         legacy_set(dir.path(), &p, &events);
         let (_, m) = load(dir.path()).await;
         assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
-        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(snapshot.current_lineup.get_serving_player(), Some(p.sub));
     }
 
@@ -275,11 +255,11 @@ mod tests {
         match_descriptor(dir.path(), None);
         let mut events = events_scouted_up_to_v0_2_0(&p)[..4].to_vec();
         // the substitute serves, as v0.3.0 showed
-        events.push(row("S", Some(p.sub), "+", None));
+        events.push(row("S", Some(p.sub), "#", None));
         events.push(row("CS", Some(p.sub), "", None));
         legacy_set(dir.path(), &p, &events);
         let (_, m) = load(dir.path()).await;
-        let (snapshot, _) = m
+        let snapshot = m
             .get_set_snapshot(1)
             .expect("expected the set to replay")
             .unwrap();

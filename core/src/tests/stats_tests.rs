@@ -87,7 +87,6 @@ mod tests {
             };
             set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
                 .expect("expected the set to replay")
-                .0
         }
 
         /// A set from rotation 0, with them serving (side out).
@@ -246,10 +245,10 @@ mod tests {
             act(B, t.mb2, Error),
             // won: their serve error, then we serve again
             opp(OE),
-            // won: an ace
-            act(S, t.oh2, Perfect),
+            // won: an ace, outside hitter 1 serving after the rotation
+            act(S, t.oh1, Perfect),
             // lost: a serve error
-            act(S, t.oh2, Error),
+            act(S, t.oh1, Error),
         ]);
         let break_ = StatsFilter::new(Some(PhaseEnum::Break), None, None);
         let side_out = StatsFilter::new(Some(PhaseEnum::SideOut), None, None);
@@ -276,7 +275,8 @@ mod tests {
             opp(OS),
             act(P, t.libero, Perfect),
             act(A, t.opposite, Perfect),
-            act(S, t.oh1, Negative),
+            // middle blocker 2 serving after the rotation
+            act(S, t.mb2, Negative),
             act(D, t.oh2, Positive),
             ev(F, Some(t.mb2), None),
         ]);
@@ -883,9 +883,9 @@ mod tests {
             act(A, t.oh1, Perfect),
             // we serve, they side out
             act(S, t.oh1, Error),
-            // won
+            // won, middle blocker 2 serving after the rotation
             opp(OE),
-            act(S, t.oh1, Error),
+            act(S, t.mb2, Error),
             // lost
             act(P, t.libero, Error),
             // nothing
@@ -928,7 +928,8 @@ mod tests {
                 act(A, t.opposite, Exclamative),
             ],
         };
-        let (_, options) = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        let snapshot = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        let options = snapshot.get_available_options();
         assert_eq!(options, vec![OE, F, A]);
         let snapshot = t.serving(vec![
             act(S, t.setter, Negative),
@@ -961,7 +962,7 @@ mod tests {
         // the events before each action, so that it's available
         let before = |event_type| match event_type {
             S => vec![],
-            P => vec![opp(OE), act(S, t.oh1, Error)],
+            P => vec![opp(OE), act(S, t.setter, Error)],
             A | D | B => vec![act(S, t.setter, Negative)],
             _ => unreachable!(),
         };
@@ -972,7 +973,9 @@ mod tests {
                 if event_type == A {
                     events.push(act(D, t.oh2, Positive));
                 }
-                events.push(act(event_type, t.oh1, eval));
+                // the setter serves first
+                let player = if event_type == S { t.setter } else { t.oh1 };
+                events.push(act(event_type, player, eval));
                 let set = SetEntry {
                     set_number: 1,
                     serving_team: TeamSideEnum::Us,
@@ -983,7 +986,8 @@ mod tests {
                     lineup_rules: Some(LineupRulesEnum::CURRENT),
                     events,
                 };
-                let (_, options) = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+                let snapshot = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+                let options = snapshot.get_available_options();
                 assert!(!options.is_empty(), "{:?} {:?}", event_type, eval);
             }
         }
