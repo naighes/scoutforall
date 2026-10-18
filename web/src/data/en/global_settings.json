@@ -24,5 +24,15 @@
       "title": "GitHub",
       "link": "https://github.com/naighes/scoutforall"
     }
-  ]
+  ],
+  "labels": {
+    "skip_to_content": "Skip to content",
+    "back_to_top": "Back to top",
+    "license": "License",
+    "made_with": "Made with ❤️ by",
+    "previous_slide": "Previous slide",
+    "next_slide": "Next slide",
+    "hero_image_alt": "The scout4all statistics screen on a laptop",
+    "language": "Language"
+  }
 }

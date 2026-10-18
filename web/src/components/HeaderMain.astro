@@ -46,11 +46,11 @@ const languages = [
       <!-- Language selector -->
       <select
         class="bg-black text-white px-2 py-1 rounded"
-        onChange="window.location.href=this.value"
-        value={`/scoutforall/${currentLang}/`}
+        aria-label={ settings.labels.language }
+        onchange="try { localStorage.setItem('scout4all-language', this.selectedOptions[0].dataset.lang) } catch (e) {} window.location.href = this.value"
       >
         {languages.map(lang =>
-          <option value={`/scoutforall/${lang.code}/`} selected={lang.code === currentLang}>{lang.label}</option>
+          <option value={`/scoutforall/${lang.code}/`} data-lang={lang.code} lang={lang.code} selected={lang.code === currentLang}>{lang.label}</option>
         )}
       </select>
     </div>

@@ -2,7 +2,7 @@
 
 import Arrow from '../assets/theme-images/icon-arrow.svg'
 
-const { title, overview } = Astro.props
+const { title, overview, labels } = Astro.props
 
 ---
 
@@ -17,7 +17,7 @@ const { title, overview } = Astro.props
     <nav class="bs-st-button-wrapper flex justify-center gap-4">
 
       <!-- Prev -->
-      <button aria-label="Previous slide"
+      <button aria-label={ labels.previous_slide }
         class="js-fc-btn-prev group bs-btn rounded-full !p-0 flex items-center justify-center h-10 w-10 md:h-12 md:w-12">
 
         <Arrow class="opacity-60 h-4 w-4 -translate-x-[2px] group-active:translate-y-[1px]" height="16" width="25" />
@@ -26,7 +26,7 @@ const { title, overview } = Astro.props
 
       <!-- Next -->
       <button
-        aria-label="Next slide"
+        aria-label={ labels.next_slide }
         class="js-fc-btn-next group bs-btn rounded-full !p-0 flex items-center justify-center h-10 w-10 md:h-12 md:w-12 -scale-x-100">
 
         <Arrow class="opacity-60 h-4 w-4 -translate-x-[2px] group-active:translate-y-[1px]" height="16" width="25" />
