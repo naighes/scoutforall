@@ -2,16 +2,7 @@ use crate::shapes::keybinding::navigation_keybindings;
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    localization::current_labels,
-    providers::{
-        match_reader::MatchReader,
-        match_writer::MatchWriter,
-        set_writer::SetWriter,
-        settings_reader::SettingsReader,
-        settings_writer::SettingsWriter,
-        team_reader::TeamReader,
-        team_writer::{PlayerInput, TeamWriter},
-    },
+    providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{
             navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue,
@@ -24,10 +15,7 @@ use crate::{
         match_list_screen::MatchListScreen,
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{
-        enums::ScreenActionEnum, keybinding::ActionsKeyBindings, player::PlayerEntry,
-        settings::Settings, team::TeamEntry,
-    },
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
@@ -39,6 +27,17 @@ use ratatui::{
     style::{Modifier, Style},
 };
 use ratatui::{layout::Alignment, widgets::Table};
+use scout4all_core::{
+    localization::current_labels,
+    providers::{
+        match_reader::MatchReader,
+        match_writer::MatchWriter,
+        set_writer::SetWriter,
+        team_reader::TeamReader,
+        team_writer::{PlayerInput, TeamWriter},
+    },
+    shapes::{player::PlayerEntry, team::TeamEntry},
+};
 
 #[derive(Debug)]
 pub struct TeamDetailsScreen<

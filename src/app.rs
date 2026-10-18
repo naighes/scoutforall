@@ -9,16 +9,19 @@ use ratatui::{
 };
 
 use crate::{
-    providers::{
-        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
-        settings_reader::SettingsReader, settings_writer::SettingsWriter, team_reader::TeamReader,
-        team_writer::TeamWriter,
-    },
+    providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         screen::{AppAction, ScreenAsync},
         team_list_screen::TeamListScreen,
     },
-    shapes::{listed::Listed, settings::Settings, team::TeamEntry},
+    shapes::settings::Settings,
+};
+use scout4all_core::{
+    providers::{
+        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
+        team_reader::TeamReader, team_writer::TeamWriter,
+    },
+    shapes::{listed::Listed, team::TeamEntry},
 };
 
 pub struct App {

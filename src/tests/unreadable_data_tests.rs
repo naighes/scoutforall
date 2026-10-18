@@ -5,11 +5,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        localization::current_labels,
-        tests::ui::{TeamFixture, Ui},
-    };
+    use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
+    use scout4all_core::localization::current_labels;
     use std::{
         fs::OpenOptions,
         io::Write,

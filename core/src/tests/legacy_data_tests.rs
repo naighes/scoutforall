@@ -1,5 +1,6 @@
-//! Data saved by older versions: after an update, teams, matches and
-//! settings load as they were, and sets replay as they were scouted.
+//! Data saved by older versions: after an update, teams and matches load as
+//! they were, and sets replay as they were scouted (the settings are in the
+//! settings tests of the terminal interface).
 
 #[cfg(test)]
 mod tests {
@@ -7,19 +8,16 @@ mod tests {
         constants::LEGACY_MAX_SUBSTITUTIONS,
         providers::{
             fs::{
-                match_reader::FileSystemMatchReader, path::get_config_file_path,
-                set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-                settings_reader::FileSystemSettingsReader, team_reader::FileSystemTeamReader,
+                match_reader::FileSystemMatchReader, set_reader::FileSystemSetReader,
+                set_writer::FileSystemSetWriter, team_reader::FileSystemTeamReader,
             },
             match_reader::MatchReader,
             set_writer::SetWriter,
-            settings_reader::SettingsReader,
             team_reader::TeamReader,
         },
         shapes::{
-            enums::{EventTypeEnum, LanguageEnum, LineupRulesEnum, RoleEnum, TeamSideEnum},
+            enums::{LineupRulesEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
-            settings::Settings,
             team::TeamEntry,
         },
     };
@@ -187,24 +185,6 @@ mod tests {
                 .unwrap()
                 .role,
             Some(RoleEnum::Libero)
-        );
-    }
-
-    /// Up to v0.0.7 the settings were the language only.
-    #[tokio::test]
-    async fn settings_saved_by_v0_0_x_load() {
-        let dir = TempDir::new().unwrap();
-        std::fs::write(get_config_file_path(dir.path()), r#"{ "language": "it" }"#).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
-            .read()
-            .await
-            .expect("expected the settings");
-        let defaults = Settings::default();
-        assert_eq!(settings.language, LanguageEnum::It);
-        assert!(settings.analytics_enabled);
-        assert_eq!(
-            settings.scouting_keybindings.key_for(&EventTypeEnum::S),
-            defaults.scouting_keybindings.key_for(&EventTypeEnum::S)
         );
     }
 

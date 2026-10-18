@@ -1,4 +1,3 @@
-use crate::{localization::current_labels, shapes::enums::FriendlyName};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -6,6 +5,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+use scout4all_core::{localization::current_labels, shapes::enums::FriendlyName};
 
 #[derive(Debug)]
 pub struct Select<T>

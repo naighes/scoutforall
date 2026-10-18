@@ -55,7 +55,6 @@ impl Snapshot {
     /// The snapshot before the first event, with the lineup rules saved with
     /// the set (`SetEntry::compute_snapshot` finds them for the sets saved
     /// without).
-    #[cfg(test)]
     pub fn new(set_entry: &SetEntry, max_substitutions: u8) -> Result<Self, AppError> {
         let rules = set_entry.lineup_rules.unwrap_or(LineupRulesEnum::CURRENT);
         Self::with_rules(set_entry, max_substitutions, rules)

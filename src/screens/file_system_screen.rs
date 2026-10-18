@@ -1,13 +1,11 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
-    errors::AppError,
-    localization::current_labels,
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings},
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
 use ratatui::{
@@ -17,6 +15,7 @@ use ratatui::{
     text::Span,
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+use scout4all_core::{errors::AppError, localization::current_labels};
 use std::{
     fs,
     path::{Path, PathBuf},

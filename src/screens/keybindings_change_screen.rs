@@ -2,14 +2,13 @@ use crate::shapes::keybinding::navigation_keybindings;
 use std::{fmt::Debug, sync::Arc};
 
 use crate::{
-    localization::current_labels,
     providers::settings_writer::SettingsWriter,
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
-        enums::ScreenActionEnum,
+        actions::ScreenActionEnum,
         keybinding::{ActionsKeyBindings, KeyBindings, combination_of, is_fixed_key},
         settings::{ScoutingShortcut, Settings, set_settings},
         symbol::KeyCombinationFormatExt,
@@ -27,6 +26,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
+use scout4all_core::localization::current_labels;
 
 /// Changes the key of a scouting shortcut, which always has exactly one: the
 /// current key is shown first, the key pressed takes its place (enter confirms

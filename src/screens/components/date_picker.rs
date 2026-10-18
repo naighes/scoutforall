@@ -6,7 +6,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::errors::{AppError, IOError};
+use scout4all_core::errors::{AppError, IOError};
 
 #[derive(Debug)]
 pub struct DatePicker {

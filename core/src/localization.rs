@@ -1,7 +1,7 @@
-use crate::shapes::enums::LanguageEnum;
-use crate::shapes::settings::current_settings;
+use crate::{constants::DEFAULT_LANGUAGE, shapes::enums::LanguageEnum};
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::str::FromStr;
+use std::sync::{LazyLock, RwLock};
 
 pub struct Labels {
     pub could_not_recognize_home_directory: &'static str,
@@ -128,9 +128,7 @@ pub struct Labels {
     pub fixed: &'static str,
     pub could_not_save_settings: &'static str,
     pub language: &'static str,
-    #[cfg(feature = "self-update")]
     pub updated_to_version: &'static str,
-    #[cfg(feature = "self-update")]
     pub update_check_failed: &'static str,
     pub top_international: &'static str,
     pub high_national: &'static str,
@@ -475,9 +473,7 @@ const EN: Labels = Labels {
     delete: "delete",
     reset: "reset to defaults",
     reset_to_defaults_confirmation: "restore the defaults? (y/n)",
-    #[cfg(feature = "self-update")]
     updated_to_version: "updated to version",
-    #[cfg(feature = "self-update")]
     update_check_failed: "update check failed",
 };
 
@@ -714,9 +710,7 @@ const IT: Labels = Labels {
     delete: "elimina",
     reset: "ripristina i valori predefiniti",
     reset_to_defaults_confirmation: "ripristinare i predefiniti? (s/n)",
-    #[cfg(feature = "self-update")]
     updated_to_version: "aggiornato alla versione",
-    #[cfg(feature = "self-update")]
     update_check_failed: "impossibile controllare la presenza di aggiornamenti",
 };
 
@@ -727,7 +721,16 @@ static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::
     m
 });
 
+static CURRENT_LANGUAGE: LazyLock<RwLock<LanguageEnum>> = LazyLock::new(|| {
+    RwLock::new(LanguageEnum::from_str(DEFAULT_LANGUAGE).unwrap_or(LanguageEnum::En))
+});
+
+/// Changes the language of the labels.
+pub fn set_language(language: LanguageEnum) {
+    *CURRENT_LANGUAGE.write().unwrap() = language;
+}
+
 /// Returns the labels for the current language.
 pub fn current_labels() -> &'static Labels {
-    DICTIONARY.get(&current_settings().language).unwrap()
+    DICTIONARY.get(&*CURRENT_LANGUAGE.read().unwrap()).unwrap()
 }

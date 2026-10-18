@@ -1,43 +1,43 @@
-mod analytics;
 mod app;
-mod constants;
-mod errors;
-mod localization;
-mod logging;
 mod providers;
-mod reporting;
 mod screens;
 mod shapes;
-mod util;
 
 #[cfg(test)]
 mod tests;
 
 use crate::{
-    analytics::{global::init_global_queue_manager, upload::AnalyticsUploadWorker},
     app::App,
+    providers::{
+        fs::{
+            settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
+        },
+        settings_reader::SettingsReader,
+    },
+    shapes::settings::{Settings, init_settings},
+};
+use crokey::crossterm::event::{self, Event};
+use ratatui::{Terminal, backend::Backend};
+use scout4all_core::{
+    analytics::{global::init_global_queue_manager, upload::AnalyticsUploadWorker},
+    constants,
     logging::logger::init_logger,
     providers::{
         fs::{
             match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
             path::get_base_path, queue_reader::FileSystemQueueReader,
             queue_writer::FileSystemQueueWriter, set_reader::FileSystemSetReader,
-            set_writer::FileSystemSetWriter, settings_reader::FileSystemSettingsReader,
-            settings_writer::FileSystemSettingsWriter, team_reader::FileSystemTeamReader,
+            set_writer::FileSystemSetWriter, team_reader::FileSystemTeamReader,
             team_writer::FileSystemTeamWriter,
         },
-        settings_reader::SettingsReader,
         team_reader::TeamReader,
     },
-    shapes::settings::{Settings, init_settings},
 };
-use crokey::crossterm::event::{self, Event};
-use ratatui::{Terminal, backend::Backend};
 use std::{error::Error, sync::Arc, time::Duration};
 
 #[cfg(feature = "self-update")]
 fn maybe_check_update() {
-    use crate::localization::current_labels;
+    use scout4all_core::localization::current_labels;
     use self_update::backends::github::Update;
     use self_update::cargo_crate_version;
     let repo_url = env!("CARGO_PKG_REPOSITORY");

@@ -1,15 +1,13 @@
 use crate::shapes::keybinding::navigation_keybindings;
 
 use crate::{
-    localization::current_labels,
     screens::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, text_box::TextBox,
         },
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
-    shapes::{enums::ScreenActionEnum, keybinding::ActionsKeyBindings},
-    util::config_var,
+    shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
 use crokey::{
@@ -22,6 +20,7 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 use regex::Regex;
+use scout4all_core::{localization::current_labels, util::config_var};
 use serde_json::json;
 use std::sync::LazyLock;
 

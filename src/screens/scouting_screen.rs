@@ -1,28 +1,16 @@
-use crate::analytics::global::enqueue_match_for_upload;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
-use crate::shapes::enums::ScreenActionEnum;
+use crate::screens::{
+    components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+    screen::{AppAction, Renderable, ScreenAsync},
+};
+use crate::shapes::actions::ScreenActionEnum;
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
 use crate::shapes::settings::Settings;
 use crate::shapes::symbol::KeyCombinationFormatExt;
-use crate::{
-    localization::current_labels,
-    providers::set_writer::SetWriter,
-    screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
-        screen::{AppAction, Renderable, ScreenAsync},
-    },
-    shapes::{
-        enums::{EventTypeEnum, FriendlyName},
-        r#match::MatchEntry,
-        player::PlayerEntry,
-        set::SetEntry,
-        snapshot::{EventEntry, Snapshot},
-    },
-};
 use async_trait::async_trait;
 use chrono::Utc;
 use crokey::KeyCombinationFormat;
@@ -33,6 +21,18 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
+};
+use scout4all_core::analytics::global::enqueue_match_for_upload;
+use scout4all_core::{
+    localization::current_labels,
+    providers::set_writer::SetWriter,
+    shapes::{
+        enums::{EventTypeEnum, FriendlyName},
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        set::SetEntry,
+        snapshot::{EventEntry, Snapshot},
+    },
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -1099,14 +1099,16 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
+    use crate::providers::fs::{
+        settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
+    };
+    use scout4all_core::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         providers::{
             fs::{
                 match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
                 set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-                settings_reader::FileSystemSettingsReader,
-                settings_writer::FileSystemSettingsWriter, team_writer::FileSystemTeamWriter,
+                team_writer::FileSystemTeamWriter,
             },
             match_reader::MatchReader,
             match_writer::MatchWriter,

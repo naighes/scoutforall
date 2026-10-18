@@ -1,13 +1,13 @@
-use crate::{
-    localization::current_labels,
-    shapes::{enums::FriendlyName, team::TeamEntry},
-};
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph},
+};
+use scout4all_core::{
+    localization::current_labels,
+    shapes::{enums::FriendlyName, team::TeamEntry},
 };
 
 #[derive(Debug, Clone)]

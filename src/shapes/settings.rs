@@ -1,14 +1,13 @@
-use crate::{
-    constants::DEFAULT_LANGUAGE,
-    shapes::{
-        enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
-        keybinding::KeyBindings,
-    },
-};
+use crate::shapes::keybinding::KeyBindings;
 use dirs::home_dir;
+use scout4all_core::{
+    constants::DEFAULT_LANGUAGE,
+    localization::set_language,
+    shapes::enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
+};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
-use std::{path::PathBuf, str::FromStr, sync::RwLock};
+use std::{path::PathBuf, str::FromStr};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
@@ -82,25 +81,18 @@ impl ScoutingShortcut for EvalEnum {
     }
 }
 
-static CURRENT_SETTING: OnceLock<RwLock<Settings>> = OnceLock::new();
+static INITIALIZED: OnceLock<()> = OnceLock::new();
 
 /// Default settings initialization (should be called once at startup).
 pub fn init_settings(default: Settings) {
-    CURRENT_SETTING.set(RwLock::new(default)).ok().unwrap();
+    INITIALIZED.set(()).ok().unwrap();
+    set_language(default.language);
 }
 
-/// Change the current language.
+/// Change the current language: only once initialized, the tests keep the
+/// default one.
 pub fn set_settings(settings: Settings) {
-    if let Some(lock) = CURRENT_SETTING.get() {
-        *lock.write().unwrap() = settings;
-    }
-}
-
-/// Returns the current language.
-pub fn current_settings() -> Settings {
-    if let Some(lock) = CURRENT_SETTING.get() {
-        lock.read().unwrap().clone()
-    } else {
-        Settings::default()
+    if let Some(()) = INITIALIZED.get() {
+        set_language(settings.language);
     }
 }
