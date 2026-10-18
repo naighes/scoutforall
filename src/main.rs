@@ -112,21 +112,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let settings_reader_arc = Arc::new(settings_reader);
     let queue_reader_arc = Arc::new(queue_reader);
     let queue_writer_arc = Arc::new(queue_writer);
-    // start analytics upload worker only if analytics is enabled
-    let worker_handle = if settings.analytics_enabled {
-        let worker = AnalyticsUploadWorker::new(
-            base_dir.clone(),
-            Arc::clone(&team_reader_arc),
-            Arc::clone(&match_reader_arc),
-            Arc::clone(&queue_reader_arc),
-            Arc::clone(&queue_writer_arc),
-            Duration::from_secs(30), // poll every 30 seconds
-        );
-        init_global_queue_manager(worker.queue_manager())?;
-        Some(worker.start())
-    } else {
-        None
-    };
+    // the analytics upload worker always runs: it uploads only while
+    // analytics is enabled, which can change from the settings
+    let worker = AnalyticsUploadWorker::new(
+        base_dir.clone(),
+        Arc::clone(&team_reader_arc),
+        Arc::clone(&match_reader_arc),
+        Arc::clone(&queue_reader_arc),
+        Arc::clone(&queue_writer_arc),
+        Duration::from_secs(30), // poll every 30 seconds
+    );
+    init_global_queue_manager(worker.queue_manager())?;
+    let worker_handle = worker.start();
     // also installs a panic hook restoring the terminal state
     let mut terminal = ratatui::init();
     let res = run_app(
@@ -145,10 +142,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ),
     )
     .await;
-    // graceful shutdown: abort worker if it was started
-    if let Some(handle) = worker_handle {
-        handle.abort();
-    }
+    // graceful shutdown
+    worker_handle.abort();
     ratatui::restore();
     if let Err(err) = res {
         println!("{:?}", err)
