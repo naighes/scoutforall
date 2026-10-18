@@ -35,8 +35,9 @@ impl Metric {
             // coming straight back (`/`)
             (S, _) => matches!(eval, Perfect | Positive | Over),
             // a kill; positiveness also counts an attack they couldn't
-            // counter (`+`, we play the ball again)
-            (A, Metric::Positive) => matches!(eval, Perfect | Positive),
+            // counter (`+`, we play the ball again) and an attack blocked
+            // but covered (`!`, we play the ball again)
+            (A, Metric::Positive) => matches!(eval, Perfect | Positive | Exclamative),
             (A, Metric::Efficiency) => eval == Perfect,
             // a perfect or good reception, dig or block (touch)
             (P | D | B, _) => matches!(eval, Perfect | Positive),
@@ -160,7 +161,7 @@ pub struct AttackKey {
 
 impl AttackKey {
     /// A counter-attack: an attack built on a dig, or on our attack or block
-    /// they couldn't counter, i.e. not after a reception (side out on first
+    /// they couldn't counter (attack `+` or `!`, block `+`), i.e. not after a reception (side out on first
     /// rally) nor after a serve (their reception coming straight back).
     pub fn is_counter_attack(&self) -> bool {
         matches!(

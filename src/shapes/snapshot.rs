@@ -172,9 +172,9 @@ impl Snapshot {
 
     /// Whether an attack after this event was built by us: after a
     /// reception or a dig keeping the ball on our side (`#`, `+`, `!`, `-`),
-    /// after their reception coming straight back to us (serve `/`), or
-    /// after an attack or block of ours they couldn't counter (`+`, we play
-    /// the ball again). An attack after anything else (e.g. after an
+    /// after their reception coming straight back to us (serve `/`), after
+    /// an attack or block of ours they couldn't counter (`+`, we play the
+    /// ball again), or after an attack of ours blocked but covered (`!`). An attack after anything else (e.g. after an
     /// overpass of ours) still counts among the attacks, but not in the
     /// distribution and the counter-attacks.
     fn is_attack_setup(prev_type: EventTypeEnum, prev_eval: EvalEnum) -> bool {
@@ -182,7 +182,10 @@ impl Snapshot {
         use EventTypeEnum::*;
         matches!(
             (prev_type, prev_eval),
-            (D | P, Perfect | Positive | Exclamative | Negative) | (S, Over) | (A | B, Positive)
+            (D | P, Perfect | Positive | Exclamative | Negative)
+                | (S, Over)
+                | (A | B, Positive)
+                | (A, Exclamative)
         )
     }
 
@@ -312,6 +315,7 @@ impl Snapshot {
             ((A, Some(Negative)), vec![OS, OE, F, A, D, B]),
             ((A, Some(Perfect)), serve_us.clone()),
             ((A, Some(Positive)), vec![OE, F, A]),
+            ((A, Some(Exclamative)), vec![OE, F, A]),
             ((D, Some(Error)), serve_them.clone()),
             ((D, Some(Over)), vec![OS, OE, F, A, D, B]),
             ((D, Some(Exclamative)), vec![OE, F, A]),

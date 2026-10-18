@@ -224,6 +224,15 @@ impl Ui {
         }
     }
 
+    /// The events saved for the first set of each match, as CSV rows.
+    pub fn saved_first_set_events(&self) -> Vec<String> {
+        self.match_descriptor_paths()
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p.with_file_name("set_1.csv")).ok())
+            .flat_map(|csv| csv.lines().map(str::to_string).collect::<Vec<_>>())
+            .collect()
+    }
+
     fn match_descriptor_paths(&self) -> Vec<PathBuf> {
         let dirs = |p: &PathBuf| -> Vec<PathBuf> {
             std::fs::read_dir(p)
