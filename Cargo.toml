@@ -16,7 +16,7 @@ members = ["core"]
 
 # the version of the release: shared by all the crates
 [workspace.package]
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 authors = ["Nicola @naighes Baldi <nic.baldi@gmail.com>"]
 homepage = "https://github.com/naighes/scoutforall"
