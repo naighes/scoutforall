@@ -71,7 +71,7 @@ hf = "0.6"
 ratatui = "0.30"
 regex.workspace = true
 reqwest.workspace = true
-self_update = { version = "1", optional = true }
+self_update = { version = "1", optional = true, features = ["checksums"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

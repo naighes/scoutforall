@@ -50,6 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
+          ARCHIVE: ${{ steps.variables.outputs.archive }}
 
   build-and-publish:
     needs: [version, create-release]
@@ -86,74 +87,95 @@ jobs:
           LINEAR_TOKEN: ${{ secrets.LINEAR_TOKEN }}
           LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
           ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
+      # the self update of every released client (src/updater.rs) picks the
+      # first asset whose name contains its target, then installs it as is or
+      # extracts `scout4all` (`scout4all.exe`) from it: only the bare binary
+      # and the archives may carry the target in their name, and the bare
+      # binary is uploaded first and sorts first
       - name: setup variables
         id: variables
         shell: bash
         run: |
           name="$(cargo metadata --manifest-path Cargo.toml --no-deps --format-version=1 | jq -r '.packages[] | select(.name=="scout4all").targets[0].name')"
-          source=target/${{ matrix.platforms.target }}/release/${name}
-          archive="scout4all-${{matrix.platforms.target }}"
-          subjectName="${name}-${{matrix.platforms.target }}-${VERSION}"
-          binaryName="${subjectName}"
-          destination="dist/${binaryName}"
+          exe=""
           if [ "${{ matrix.platforms.os }}" = "windows-latest" ]; then
-             source=${source}.exe
-             binaryName=${binaryName}.exe
-             destination="dist/${binaryName}"
+             exe=".exe"
           fi
           {
             echo "name=${name}"
-            echo "source=${source}"
-            echo "archive=${archive}"
-            echo "subjectName=${subjectName}"
-            echo "destination=${destination}"
-            echo "binaryName=${binaryName}"
+            echo "source=target/${{ matrix.platforms.target }}/release/${name}${exe}"
+            echo "archive=scout4all-${{ matrix.platforms.target }}"
+            echo "binaryName=${name}${exe}"
+            echo "binaryAsset=scout4all-${{ matrix.platforms.target }}${exe}"
           } >> "$GITHUB_OUTPUT"
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
       - name: attest
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: "${{ steps.variables.outputs.source }}"
           subject-name: "${{ steps.variables.outputs.archive }}-${{ needs.version.outputs.version }}"
-      - name: create temp dir
-        run: mkdir -p dist
-      - name: rename binary
-        shell: bash
-        run: |
-          mv "${SOURCE}" "${DEST}"
-        env:
-          SOURCE: ${{ steps.variables.outputs.source }}
-          DEST: ${{ steps.variables.outputs.destination }}
-      - name: build archive for windows
-        shell: bash
-        working-directory: ./dist
-        if: matrix.platforms.os == 'windows-latest'
-        run: 7z a "${ARCHIVE}.zip" "${BINARY}"
-        env:
-          ARCHIVE: ${{ steps.variables.outputs.archive }}
-          BINARY: ${{ steps.variables.outputs.binaryName }}
-      - name: build archive for unix systems
-        if: matrix.platforms.os != 'windows-latest'
-        shell: bash
-        working-directory: ./dist
-        run: |
-          tar cvzf "${{ steps.variables.outputs.archive }}.tar.gz" "${{ steps.variables.outputs.binaryName}}"
-      - name: clean release directory
-        shell: bash
-        run: |
-          rm -f "dist/${{ steps.variables.outputs.binaryName }}"
       - name: cargo install cargo-cyclonedx
         run: cargo install --locked cargo-cyclonedx
       - name: generate SBOM
         run: |
           cargo cyclonedx --describe binaries --format json ${{ matrix.platforms.features }} --target ${{ matrix.platforms.target }}
-      - name: rename SBOM
+      - name: stage archive content
         shell: bash
         run: |
-          mv ${{ steps.variables.outputs.name }}_bin.cdx.json "dist/${{ steps.variables.outputs.archive }}.cdx.json"
-      - name: upload binary
+          mkdir -p package dist
+          cp "${SOURCE}" "package/${BINARY}"
+          mv "${NAME}_bin.cdx.json" "package/${NAME}.cdx.json"
+          cp "${SOURCE}" "dist/${BINARY_ASSET}"
+        env:
+          NAME: ${{ steps.variables.outputs.name }}
+          SOURCE: ${{ steps.variables.outputs.source }}
+          BINARY: ${{ steps.variables.outputs.binaryName }}
+          BINARY_ASSET: ${{ steps.variables.outputs.binaryAsset }}
+      - name: build archive for windows
         shell: bash
-        run: gh release upload "v${{ needs.version.outputs.version }}" dist/* --clobber
+        working-directory: ./package
+        if: matrix.platforms.os == 'windows-latest'
+        run: 7z a "../dist/${ARCHIVE}.zip" "${BINARY}" "${NAME}.cdx.json"
+        env:
+          NAME: ${{ steps.variables.outputs.name }}
+          ARCHIVE: ${{ steps.variables.outputs.archive }}
+          BINARY: ${{ steps.variables.outputs.binaryName }}
+      - name: build archive for unix systems
+        if: matrix.platforms.os != 'windows-latest'
+        shell: bash
+        working-directory: ./package
+        run: tar cvzf "../dist/${ARCHIVE}.tar.gz" "${BINARY}" "${NAME}.cdx.json"
+        env:
+          NAME: ${{ steps.variables.outputs.name }}
+          ARCHIVE: ${{ steps.variables.outputs.archive }}
+          BINARY: ${{ steps.variables.outputs.binaryName }}
+      - name: check release assets
+        shell: bash
+        working-directory: ./dist
+        run: |
+          for asset in *; do
+            case "${asset}" in
+              "${BINARY_ASSET}"|"${ARCHIVE}.tar.gz"|"${ARCHIVE}.zip") ;;
+              *) echo "unexpected release asset: ${asset}"; exit 1 ;;
+            esac
+          done
+          [ "$(ls | LC_ALL=C sort | head -n 1)" = "${BINARY_ASSET}" ] || { echo "the bare binary must sort first"; exit 1; }
+          "./${BINARY_ASSET}" --version | grep -q "^${NAME} ${VERSION}$" || { echo "the bare binary does not report ${NAME} ${VERSION}"; exit 1; }
+        env:
+          NAME: ${{ steps.variables.outputs.name }}
+          ARCHIVE: ${{ steps.variables.outputs.archive }}
+          BINARY_ASSET: ${{ steps.variables.outputs.binaryAsset }}
+          VERSION: ${{ needs.version.outputs.version }}
+      - name: upload bare binary
+        shell: bash
+        run: gh release upload "v${VERSION}" "dist/${BINARY_ASSET}" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          BINARY_ASSET: ${{ steps.variables.outputs.binaryAsset }}
+      - name: upload archives
+        shell: bash
+        run: gh release upload "v${VERSION}" "dist/${ARCHIVE}".* --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          ARCHIVE: ${{ steps.variables.outputs.archive }}

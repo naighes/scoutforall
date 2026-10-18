@@ -2,6 +2,8 @@ mod app;
 mod providers;
 mod screens;
 mod shapes;
+#[cfg(feature = "self-update")]
+mod updater;
 
 #[cfg(test)]
 mod tests;
@@ -36,40 +38,15 @@ use scout4all_core::{
 use std::{error::Error, sync::Arc, time::Duration};
 
 #[cfg(feature = "self-update")]
-fn maybe_check_update() {
-    use scout4all_core::localization::current_labels;
-    use self_update::backends::github::Update;
-    use self_update::cargo_crate_version;
-    let repo_url = env!("CARGO_PKG_REPOSITORY");
-    let pkg_name = env!("CARGO_PKG_NAME");
-    let (repo_owner, repo_name) = repo_url
-        .trim_start_matches("https://github.com/")
-        .split_once('/')
-        .unwrap_or(("naighes", "scoutforall"));
-    let status = Update::configure()
-        .repo_owner(repo_owner)
-        .repo_name(repo_name)
-        .bin_name(pkg_name)
-        .show_download_progress(true)
-        .current_version(cargo_crate_version!())
-        .build()
-        .and_then(|u| u.update());
-    match status {
-        Ok(status) => {
-            if status.is_updated() {
-                println!(
-                    "{} {}",
-                    current_labels().updated_to_version,
-                    status.version(),
-                );
-            }
-        }
-        Err(_) => println!("{}", current_labels().update_check_failed),
+async fn maybe_check_update() {
+    // the updater blocks on network and on the confirmation prompt
+    if let Err(err) = tokio::task::spawn_blocking(updater::check_update).await {
+        scout4all_core::logging::logger::log_error(&format!("self update panicked: {err}"));
     }
 }
 
 #[cfg(not(feature = "self-update"))]
-fn maybe_check_update() {}
+async fn maybe_check_update() {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -102,7 +79,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .ok()
         .unwrap_or_else(Settings::default);
     init_settings(settings.clone());
-    maybe_check_update();
+    maybe_check_update().await;
     let team_reader_arc = Arc::new(team_reader);
     let team_writer_arc = Arc::new(team_writer);
     let settings_writer_arc = Arc::new(settings_writer);
