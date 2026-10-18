@@ -241,8 +241,8 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match self {
-            S | A | B => vec![Perfect, Positive, Over, Negative, Error],
-            D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
+            S | B => vec![Perfect, Positive, Over, Negative, Error],
+            A | D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
             _ => vec![],
         }
     }
@@ -261,7 +261,8 @@ impl EventTypeEnum {
     ///   own points.
     ///
     /// An overpass (`/`) in reception or defense isn't a point: the rally
-    /// goes on with the ball on their side.
+    /// goes on with the ball on their side; neither is an attack blocked but
+    /// covered (`!`): the rally goes on with the ball on our side.
     pub fn rally_winner(&self, eval: Option<EvalEnum>) -> Option<TeamSideEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -355,7 +356,9 @@ impl FromStr for EventTypeEnum {
 ///   - Reception: accurate pass, but not perfect — still allows
 ///     first-tempo attacks.  
 ///   - Attack: does not score, but keeps the rally alive and allows
-///     our team to continue the play (a chance for a re-attack).
+///     our team to continue the play (a chance for a re-attack), e.g. the
+///     ball rebounds off their block and comes back easy, with no need
+///     of our coverage.
 ///   - Block: successful, but does not score - the ball remains
 ///     playable and allows a re-attack.
 ///   - Defense: playable ball, but with limited attacking transition.
@@ -365,8 +368,8 @@ impl FromStr for EventTypeEnum {
 ///   - Serve: similar to `/` - the opponent returns the ball,
 ///     but it comes back at the "third touch", giving us a chance to continue.
 ///   - Reception: between `+` and `-` - pass is neither perfect nor bad.
-///   - Attack: keeps the rally alive thanks to our team coverage,
-///     allowing a possible re-attack.
+///   - Attack: blocked, but kept alive by our team coverage, allowing a
+///     possible re-attack (still a positive attack).
 ///   - Block: not used.
 ///   - Defense: similar to reception - playable, but not perfect.
 ///
@@ -478,6 +481,7 @@ impl EvalEnum {
         match (self, event) {
             (Perfect, A) => Some(labels.winning_attack.to_string()),
             (Positive, A) => Some(labels.attack_continuation.to_string()),
+            (Exclamative, A) => Some(labels.kept_alive_by_our_coverage.to_string()),
             (Negative, A) => Some(labels.opponent_counter_attack_opportunity.to_string()),
 
             (Perfect, B) => Some(labels.winning_block.to_string()),
@@ -508,6 +512,7 @@ impl EvalEnum {
         match (self, event) {
             (Perfect, A) => labels.score.to_string(),
             (Positive, A) => labels.positive.to_string(),
+            (Exclamative, A) => labels.covered.to_string(),
             (Negative, A) => labels.negative.to_string(),
             (Error, A) => labels.error.to_string(),
             (Over, A) => labels.blocked.to_string(),

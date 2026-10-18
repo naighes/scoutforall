@@ -162,6 +162,8 @@ mod tests {
             (A, Some(Error), them),
             (A, Some(Over), them),
             (A, Some(Positive), None),
+            // blocked, but covered: the rally goes on on our side
+            (A, Some(Exclamative), None),
             (A, Some(Negative), None),
             (B, Some(Perfect), us),
             (B, Some(Error), them),
@@ -397,9 +399,11 @@ mod tests {
             (P, Over, 0, -1),
             (P, Error, 0, -1),
             // attack: a kill; positiveness also counts an attack they
-            // couldn't counter; an error or being blocked is bad
+            // couldn't counter and one blocked but covered; an error or
+            // being blocked is bad
             (A, Perfect, 1, 1),
             (A, Positive, 1, 0),
+            (A, Exclamative, 1, 0),
             (A, Negative, 0, 0),
             (A, Over, 0, -1),
             (A, Error, 0, -1),
@@ -480,6 +484,8 @@ mod tests {
             (D, Some(Over), None),
             (S, Some(Over), None),
             (A, Some(Negative), None),
+            // blocked, but covered: the ball is still ours
+            (A, Some(Exclamative), None),
         ];
         for (event_type, eval, error_type) in cases {
             let stats = stats_of(&[(event_type, eval)]);
@@ -519,6 +525,7 @@ mod tests {
             (B, Some(Perfect)),
             (OE, None),
             (A, Some(Positive)),
+            (A, Some(Exclamative)),
             (P, Some(Perfect)),
             (D, Some(Perfect)),
         ]);
@@ -637,6 +644,20 @@ mod tests {
         let keys = attacks(&transition);
         assert_eq!(keys.len(), 2);
         assert!(keys.iter().all(|k| k.is_counter_attack()));
+        // after our attack blocked but covered: we attack again
+        let covered = t.serving(vec![
+            act(S, t.setter, Negative),
+            act(D, t.oh2, Positive),
+            act(A, t.opposite, Exclamative),
+            act(A, t.oh1, Perfect),
+        ]);
+        let keys = attacks(&covered);
+        assert_eq!(keys.len(), 2);
+        assert!(keys.iter().all(|k| k.is_counter_attack()));
+        assert!(
+            keys.iter()
+                .any(|k| (k.prev_type, k.prev_eval, k.eval) == (A, Exclamative, Perfect))
+        );
         // after our overpass the ball is theirs: an attack then isn't built
         // by us (but it's still an attack)
         let overpass = t.serving(vec![
@@ -734,6 +755,16 @@ mod tests {
             // an attack they counter: not a point (it used to count as one)
             (
                 vec![act(P, t.libero, Perfect), act(A, t.oh1, Positive)],
+                Some(Perfect),
+                0,
+                0,
+                0,
+                0,
+                0,
+            ),
+            // blocked, but covered: not lost, the rally goes on
+            (
+                vec![act(P, t.libero, Perfect), act(A, t.oh1, Exclamative)],
                 Some(Perfect),
                 0,
                 0,
@@ -869,6 +900,93 @@ mod tests {
         // the first rallies have no player
         let player = StatsFilter::new(None, None, Some(t.oh1));
         assert_eq!(snapshot.stats.first_rallies(None, &player), None);
+    }
+
+    /// An attack blocked but covered keeps the ball on our side: the score
+    /// and the serving team don't change, and the attacks after it count.
+    #[test]
+    fn attack_covered_keeps_the_rally() {
+        let t = Team::new();
+        let snapshot = t.serving(vec![
+            act(S, t.setter, Negative),
+            act(D, t.oh2, Positive),
+            act(A, t.opposite, Exclamative),
+        ]);
+        assert_eq!((snapshot.score_us, snapshot.score_them), (0, 0));
+        assert_eq!(snapshot.get_serving_team(), None);
+        let set = SetEntry {
+            set_number: 1,
+            serving_team: TeamSideEnum::Us,
+            initial_positions: t.rotation_0(),
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events: vec![
+                act(S, t.setter, Negative),
+                act(D, t.oh2, Positive),
+                act(A, t.opposite, Exclamative),
+            ],
+        };
+        let (_, options) = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        assert_eq!(options, vec![OE, F, A]);
+        let snapshot = t.serving(vec![
+            act(S, t.setter, Negative),
+            act(D, t.oh2, Positive),
+            act(A, t.opposite, Exclamative),
+            act(A, t.opposite, Exclamative),
+            act(A, t.oh1, Perfect),
+        ]);
+        assert_eq!((snapshot.score_us, snapshot.score_them), (1, 0));
+        let stats = &snapshot.stats;
+        assert_eq!(stats.event_count(A, None, &all()), 3);
+        assert_eq!(stats.event_count(A, Some(Exclamative), &all()), 2);
+        assert_eq!(
+            stats.metric_percentage(A, Metric::Positive, &all()),
+            Some(100.0)
+        );
+        assert_eq!(
+            stats
+                .metric_percentage(A, Metric::Efficiency, &all())
+                .map(|v| v.round()),
+            Some(33.0)
+        );
+    }
+
+    /// Every evaluation an event can be given leads to the events that can
+    /// follow it: none leaves the scouting with nothing to choose.
+    #[test]
+    fn every_evaluation_has_a_follow_up() {
+        let t = Team::new();
+        // the events before each action, so that it's available
+        let before = |event_type| match event_type {
+            S => vec![],
+            P => vec![opp(OE), act(S, t.oh1, Error)],
+            A | D | B => vec![act(S, t.setter, Negative)],
+            _ => unreachable!(),
+        };
+        for event_type in [S, P, A, D, B] {
+            for eval in event_type.available_evals() {
+                let mut events = before(event_type);
+                // the attacker after a serve: a dig first
+                if event_type == A {
+                    events.push(act(D, t.oh2, Positive));
+                }
+                events.push(act(event_type, t.oh1, eval));
+                let set = SetEntry {
+                    set_number: 1,
+                    serving_team: TeamSideEnum::Us,
+                    initial_positions: t.rotation_0(),
+                    libero: t.libero,
+                    fallback_libero: None,
+                    setter: t.setter,
+                    lineup_rules: Some(LineupRulesEnum::CURRENT),
+                    events,
+                };
+                let (_, options) = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+                assert!(!options.is_empty(), "{:?} {:?}", event_type, eval);
+            }
+        }
     }
 
     // --- the report -------------------------------------------------------

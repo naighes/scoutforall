@@ -207,9 +207,60 @@ mod tests {
     #[tokio::test]
     async fn evaluation_not_available_for_the_event() {
         let mut ui = scouting().await;
-        // "!" only evaluates passes and digs
+        // "!" only evaluates passes, digs and attacks
         ui.type_keys(&[KeyCode::Char('s'), KeyCode::Char('!')])
             .await;
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+    }
+
+    /// An attack blocked but covered (`!`) is saved, and the rally goes on
+    /// with the ball on our side: we attack again.
+    #[tokio::test]
+    async fn attack_covered() {
+        let mut ui = scouting().await;
+        // a negative serve, a positive dig, then an attack
+        ui.type_keys(&[
+            KeyCode::Char('s'),
+            KeyCode::Char('-'),
+            KeyCode::Char('d'),
+            KeyCode::Char('2'),
+            KeyCode::Char('+'),
+            KeyCode::Char('a'),
+            KeyCode::Char('2'),
+        ])
+        .await;
+        assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+        let covered = format!(
+            "! => {} ({})",
+            current_labels().covered,
+            current_labels().kept_alive_by_our_coverage
+        );
+        assert!(ui.screen().contains(&covered), "{}", ui.screen());
+        ui.press(KeyCode::Char('!')).await;
+        assert!(!is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+        let events = ui.saved_first_set_events();
+        assert_eq!(events.len(), 3, "{events:?}");
+        assert!(
+            events[2].contains(",A,") && events[2].contains(",!,"),
+            "{events:?}"
+        );
+        // the ball is ours: no dig nor block, but another attack
+        let labels = current_labels();
+        let listed = |ui: &mut Ui, event: &str, key: char| {
+            ui.lines().iter().any(|l| {
+                l.split('│')
+                    .map(str::trim)
+                    .any(|c| c.starts_with(event) && c.ends_with(key))
+            })
+        };
+        assert!(listed(&mut ui, labels.attack, 'a'), "{}", ui.screen());
+        assert!(!listed(&mut ui, labels.defense, 'd'), "{}", ui.screen());
+        assert!(!listed(&mut ui, labels.block, 'b'), "{}", ui.screen());
+        ui.press(KeyCode::Char('a')).await;
+        assert!(
+            ui.screen().contains(current_labels().player_selection),
+            "{}",
+            ui.screen()
+        );
     }
 }

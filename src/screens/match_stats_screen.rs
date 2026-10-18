@@ -537,6 +537,7 @@ impl MatchStatsScreen {
             EventTypeEnum::A => vec![
                 (EvalEnum::Perfect, Color::Green),
                 (EvalEnum::Positive, Color::LightGreen),
+                (EvalEnum::Exclamative, Color::LightGreen),
                 (EvalEnum::Negative, Color::Yellow),
                 (EvalEnum::Over, Color::Red),
                 (EvalEnum::Error, Color::Red),
