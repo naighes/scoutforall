@@ -27,6 +27,8 @@ pub enum MatchError {
 pub enum SnapshotError {
     #[error("missing initial rotation: {0}")]
     LineupError(String),
+    #[error("invalid event: {0}")]
+    InvalidEvent(String),
 }
 
 #[derive(Debug, Error)]

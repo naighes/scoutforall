@@ -273,9 +273,9 @@ impl<
                     .and_then(|set_entry| {
                         set_entry
                             .compute_snapshot(self.current_match.max_substitutions)
-                            .map(|(snapshot, options)| (set_entry, snapshot, options))
+                            .map(|snapshot| (set_entry, snapshot))
                     }) {
-                    Ok((set_entry, snapshot, available_options)) => {
+                    Ok((set_entry, snapshot)) => {
                         AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
                             self.settings_reader.clone(),
                             self.settings_writer.clone(),
@@ -283,7 +283,6 @@ impl<
                             self.current_match.clone(),
                             set_entry,
                             snapshot,
-                            available_options,
                             self.back_stack_count.map(|x| x + 1),
                             self.set_writer.clone(),
                         )))

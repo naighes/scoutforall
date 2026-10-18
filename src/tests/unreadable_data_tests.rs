@@ -158,6 +158,34 @@ mod tests {
         assert_only_cortona_unreadable(&mut ui, &cortona);
     }
 
+    /// A set edited by hand breaking the order of the events: their error
+    /// gives us the serve, so they can't score an ace.
+    #[tokio::test]
+    async fn set_edited_by_hand_with_an_event_out_of_order() {
+        let mut cortona = String::new();
+        let mut ui = match_list(|base| {
+            let folder = match_folder(base, "cortona");
+            append(&folder.join("set_1.csv"), "2025-09-01T18:00:00Z,OE,,,\n");
+            append(&folder.join("set_1.csv"), "2025-09-01T18:00:01Z,OS,,,\n");
+            cortona = folder_name(&folder);
+        })
+        .await;
+        assert_only_cortona_unreadable(&mut ui, &cortona);
+    }
+
+    /// A set edited by hand giving an evaluation to their error.
+    #[tokio::test]
+    async fn set_edited_by_hand_with_an_unexpected_evaluation() {
+        let mut cortona = String::new();
+        let mut ui = match_list(|base| {
+            let folder = match_folder(base, "cortona");
+            append(&folder.join("set_1.csv"), "2025-09-01T18:00:00Z,OE,,#,\n");
+            cortona = folder_name(&folder);
+        })
+        .await;
+        assert_only_cortona_unreadable(&mut ui, &cortona);
+    }
+
     /// An unreadable match can only be exported, e.g. to send it and get it
     /// fixed.
     #[tokio::test]

@@ -409,19 +409,16 @@ impl<
 
     fn continue_set(&mut self, m: &MatchEntry, last_incomplete_set: SetEntry) -> AppAction {
         match last_incomplete_set.compute_snapshot(m.max_substitutions) {
-            Ok((snapshot, available_options)) => {
-                AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
-                    self.settings_reader.clone(),
-                    self.settings_writer.clone(),
-                    self.settings.clone(),
-                    m.clone(),
-                    last_incomplete_set,
-                    snapshot,
-                    available_options,
-                    Some(1),
-                    self.set_writer.clone(),
-                )))
-            }
+            Ok(snapshot) => AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                self.settings_reader.clone(),
+                self.settings_writer.clone(),
+                self.settings.clone(),
+                m.clone(),
+                last_incomplete_set,
+                snapshot,
+                Some(1),
+                self.set_writer.clone(),
+            ))),
             Err(_) => {
                 self.notify_message
                     .set_error(current_labels().could_not_compute_snapshot.to_string());

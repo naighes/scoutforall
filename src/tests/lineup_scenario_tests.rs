@@ -116,32 +116,33 @@ mod tests {
 
     struct Scout {
         snapshot: Snapshot,
-        options: Vec<EventTypeEnum>,
         events: Vec<EventEntry>,
     }
 
     impl Scout {
         fn new(set: &SetEntry) -> Self {
-            let (snapshot, options) = set
+            let snapshot = set
                 .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
                 .expect("expected a snapshot");
             Scout {
                 snapshot,
-                options,
                 events: set.events.clone(),
             }
         }
 
+        fn options(&self) -> Vec<EventTypeEnum> {
+            self.snapshot.get_available_options().to_vec()
+        }
+
         fn add(&mut self, event: EventEntry) {
             assert!(
-                self.options.contains(&event.event_type),
+                self.options().contains(&event.event_type),
                 "{:?} not available among {:?}",
                 event.event_type,
-                self.options
+                self.options()
             );
-            self.options = self
-                .snapshot
-                .add_event(&event, &self.options)
+            self.snapshot
+                .add_event(&event)
                 .expect("expected a valid event");
             self.events.push(event);
         }
@@ -508,7 +509,7 @@ mod tests {
         set.events = scout.events.clone();
         let replayed = Scout::new(&set);
         assert_eq!(replayed.on_court(), scout.on_court());
-        assert_eq!(replayed.options, scout.options);
+        assert_eq!(replayed.options(), scout.options());
         assert_eq!(replayed.rotation(), scout.rotation());
         assert_eq!(
             replayed.snapshot.current_lineup.get_current_libero(),
@@ -524,12 +525,12 @@ mod tests {
         let p = Players::new();
         let mut set = p.set(0, TeamSideEnum::Them);
         let mut scout = Scout::new(&set);
-        let before = scout.options.clone();
+        let before = scout.options().clone();
         scout.substitute(p.oh1, p.bench[0]);
-        assert_eq!(scout.options, before);
+        assert_eq!(scout.options(), before);
         set.events = scout.events.clone();
         let reloaded = Scout::new(&set);
-        assert_eq!(reloaded.options, before);
+        assert_eq!(reloaded.options(), before);
         assert_eq!(reloaded.on_court(), scout.on_court());
     }
 
@@ -541,7 +542,10 @@ mod tests {
         for serving in [TeamSideEnum::Us, TeamSideEnum::Them] {
             let scout = Scout::new(&p.set(0, serving));
             for e in [EventTypeEnum::R, EventTypeEnum::CL, EventTypeEnum::CS] {
-                assert!(scout.options.contains(&e), "{e:?} with {serving:?} serving");
+                assert!(
+                    scout.options().contains(&e),
+                    "{e:?} with {serving:?} serving"
+                );
             }
         }
         let without_second_libero = SetEntry::new(
@@ -554,7 +558,7 @@ mod tests {
         )
         .expect("expected a valid set");
         let scout = Scout::new(&without_second_libero);
-        assert!(!scout.options.contains(&EventTypeEnum::CL));
+        assert!(!scout.options().contains(&EventTypeEnum::CL));
     }
 
     #[test]

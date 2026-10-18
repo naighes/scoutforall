@@ -290,7 +290,7 @@ impl MatchStatsScreen {
         state.select(Some(0));
         let mut sets: Vec<(SetEntry, Snapshot)> = Vec::new();
         for set in &current_match.sets {
-            let (snapshot, _) = set.compute_snapshot(current_match.max_substitutions)?;
+            let snapshot = set.compute_snapshot(current_match.max_substitutions)?;
             sets.push((set.clone(), snapshot));
         }
         let set_numbers = sets.iter().map(|(set, _)| set.set_number);

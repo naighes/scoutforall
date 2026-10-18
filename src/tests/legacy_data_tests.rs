@@ -143,11 +143,11 @@ mod tests {
         vec![
             row("R", Some(p.mb2), "", Some(p.sub)),
             row("OE", None, "", None),
-            row("OS", None, "", None),
+            row("F", Some(p.setter), "", None),
             row("OE", None, "", None),
-            // middle blocker 2 is serving
-            row("S", Some(p.mb2), "+", None),
-            // ...and chosen as setter
+            // middle blocker 2 serves an ace
+            row("S", Some(p.mb2), "#", None),
+            // ...and is chosen as setter
             row("CS", Some(p.mb2), "", None),
         ]
     }
@@ -222,11 +222,11 @@ mod tests {
         assert_eq!(m.max_substitutions, LEGACY_MAX_SUBSTITUTIONS);
         assert_eq!(m.sets[0].lineup_rules, None);
         m.get_status().expect("expected the match status");
-        let (snapshot, _) = m
+        let snapshot = m
             .get_set_snapshot(1)
             .expect("expected the set to replay")
             .unwrap();
-        assert_eq!(snapshot.score_us, 2);
+        assert_eq!(snapshot.score_us, 3);
         assert_eq!(snapshot.score_them, 1);
         assert_eq!(snapshot.current_lineup.get_serving_player(), Some(p.mb2));
         assert_eq!(snapshot.current_lineup.get_setter(), Some(p.mb2));
@@ -245,7 +245,7 @@ mod tests {
         assert!(m.get_set_snapshot(1).is_err());
         // until the serve, the substitute is the one serving
         m.sets[0].events.truncate(4);
-        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(snapshot.current_lineup.get_serving_player(), Some(p.sub));
     }
 
@@ -261,7 +261,7 @@ mod tests {
         legacy_set(dir.path(), &p, &events);
         let (_, m) = load(dir.path()).await;
         assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
-        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(snapshot.current_lineup.get_serving_player(), Some(p.sub));
     }
 
@@ -275,11 +275,11 @@ mod tests {
         match_descriptor(dir.path(), None);
         let mut events = events_scouted_up_to_v0_2_0(&p)[..4].to_vec();
         // the substitute serves, as v0.3.0 showed
-        events.push(row("S", Some(p.sub), "+", None));
+        events.push(row("S", Some(p.sub), "#", None));
         events.push(row("CS", Some(p.sub), "", None));
         legacy_set(dir.path(), &p, &events);
         let (_, m) = load(dir.path()).await;
-        let (snapshot, _) = m
+        let snapshot = m
             .get_set_snapshot(1)
             .expect("expected the set to replay")
             .unwrap();

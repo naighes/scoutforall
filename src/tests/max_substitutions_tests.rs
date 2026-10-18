@@ -127,7 +127,7 @@ mod tests {
         let mut m: MatchEntry = serde_json::from_str(LEGACY_DESCRIPTOR).unwrap();
         m.sets = vec![set];
         let reached = |m: &MatchEntry| {
-            let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+            let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
             snapshot
                 .current_lineup
                 .was_max_number_of_substitutions_reached()
@@ -217,7 +217,7 @@ mod tests {
     async fn imported_match_without_the_number_allows_6() {
         let m = import(EXPORTED, LEGACY_DESCRIPTOR).await;
         assert_eq!(m.max_substitutions, 6);
-        let (snapshot, _) = m.get_set_snapshot(1).unwrap().unwrap();
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(snapshot.current_lineup.get_max_substitutions(), 6);
     }
 

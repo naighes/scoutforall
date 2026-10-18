@@ -1,12 +1,7 @@
 use crate::{
     constants::LEGACY_MAX_SUBSTITUTIONS,
     errors::AppError,
-    shapes::{
-        enums::{EventTypeEnum, TeamSideEnum},
-        set::SetEntry,
-        snapshot::Snapshot,
-        team::TeamEntry,
-    },
+    shapes::{enums::TeamSideEnum, set::SetEntry, snapshot::Snapshot, team::TeamEntry},
 };
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
@@ -53,7 +48,7 @@ impl MatchEntry {
             if let Some(set_entry) = self.sets.iter().find(|s| s.set_number == set_number) {
                 // set found
                 let snapshot = &self.get_set_snapshot(set_number)?;
-                if let Some((snapshot, _)) = snapshot {
+                if let Some(snapshot) = snapshot {
                     match snapshot.get_set_winner(set_number) {
                         Some(TeamSideEnum::Us) => {
                             last_serving_team = Some(set_entry.serving_team);
@@ -98,10 +93,7 @@ impl MatchEntry {
         })
     }
 
-    pub fn get_set_snapshot(
-        &self,
-        set_number: u8,
-    ) -> Result<Option<(Snapshot, Vec<EventTypeEnum>)>, AppError> {
+    pub fn get_set_snapshot(&self, set_number: u8) -> Result<Option<Snapshot>, AppError> {
         let s = match self.sets.iter().find(|s| s.set_number == set_number) {
             Some(set) => set,
             None => return Ok(None),

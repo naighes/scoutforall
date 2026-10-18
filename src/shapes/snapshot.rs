@@ -1,6 +1,6 @@
 use crate::{
     constants::{DEFAULT_SET_TARGET_SCORE, TIE_BREAK_SET_TARGET_SCORE},
-    errors::AppError,
+    errors::{AppError, SnapshotError},
     shapes::{
         enums::{
             EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
@@ -45,6 +45,9 @@ pub struct Snapshot {
     pub current_lineup: Lineup,
     pub last_event: Option<EventEntry>,
     pub partials: Vec<(u8, u8)>, // (us, them)
+    set_number: u8,
+    // the events that can come next
+    available_options: Vec<EventTypeEnum>,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -75,14 +78,117 @@ impl Snapshot {
             max_substitutions,
             rules,
         )?;
-        Ok(Snapshot {
+        let mut snapshot = Snapshot {
             score_us: 0,
             score_them: 0,
             stats: Stats::new(),
             current_lineup,
             last_event: None,
             partials: vec![],
-        })
+            set_number: set_entry.set_number,
+            available_options: vec![],
+        };
+        // the events available before the first serve: also the ones after a
+        // substitution, setter or libero change opening the set
+        snapshot.available_options =
+            snapshot.get_rally_start_options(snapshot.current_lineup.get_current_phase());
+        Ok(snapshot)
+    }
+
+    /// The events that can come next.
+    pub fn get_available_options(&self) -> &[EventTypeEnum] {
+        &self.available_options
+    }
+
+    /// Whether the player can play the event: a player on court, but the
+    /// libero doesn't attack, block or become the setter, a back row player
+    /// doesn't block, and the serve is of the player in position 1.
+    pub fn can_play(&self, event_type: EventTypeEnum, player_id: &Uuid) -> bool {
+        use EventTypeEnum::*;
+        let lineup = &self.current_lineup;
+        let is_libero = lineup.get_current_libero() == *player_id;
+        lineup.find_position(player_id).is_some()
+            && match event_type {
+                S => lineup.get_serving_player() == Some(*player_id),
+                A | CS => !is_libero,
+                B => !is_libero && !lineup.is_back_row_player(player_id),
+                _ => true,
+            }
+    }
+
+    /// Whether the player can come in for a substitution: a player not on
+    /// court, and not a libero (the other substitution rules are checked by
+    /// the lineup).
+    fn can_come_in(&self, player_id: &Uuid) -> bool {
+        let lineup = &self.current_lineup;
+        lineup.find_position(player_id).is_none()
+            && lineup.get_current_libero() != *player_id
+            && lineup.get_fallback_libero() != Some(*player_id)
+    }
+
+    /// Checks that the event can follow the ones before it, whether it comes
+    /// from the scouting or from a saved set: the set isn't over, the event
+    /// is among the available ones, and it has the evaluation and the
+    /// players it needs (and none it doesn't).
+    fn validate(&self, event: &EventEntry) -> Result<(), AppError> {
+        match self
+            .sequence_issue(event)
+            .or_else(|| Self::evaluation_issue(event))
+            .or_else(|| self.player_issue(event))
+            .or_else(|| self.replacement_issue(event))
+        {
+            Some(reason) => Err(AppError::Snapshot(SnapshotError::InvalidEvent(format!(
+                "{event}: {reason}"
+            )))),
+            None => Ok(()),
+        }
+    }
+
+    fn sequence_issue(&self, event: &EventEntry) -> Option<String> {
+        match (
+            self.get_set_winner(self.set_number),
+            self.available_options.contains(&event.event_type),
+        ) {
+            (Some(_), _) => Some("the set is over".to_string()),
+            (None, false) => Some(format!(
+                "not available, the available events are {:?}",
+                self.available_options
+            )),
+            (None, true) => None,
+        }
+    }
+
+    fn evaluation_issue(event: &EventEntry) -> Option<String> {
+        match (event.event_type.requires_evaluation(), event.eval) {
+            (true, None) => Some("missing evaluation".to_string()),
+            (true, Some(eval)) if !event.event_type.available_evals().contains(&eval) => {
+                Some(format!("evaluation {eval} not allowed"))
+            }
+            (false, Some(_)) => Some("unexpected evaluation".to_string()),
+            _ => None,
+        }
+    }
+
+    fn player_issue(&self, event: &EventEntry) -> Option<String> {
+        match (event.event_type.requires_player(), event.player) {
+            (true, None) => Some("missing player".to_string()),
+            (true, Some(player)) if !self.can_play(event.event_type, &player) => {
+                Some(format!("player {player} can't play it"))
+            }
+            (false, Some(_)) => Some("unexpected player".to_string()),
+            _ => None,
+        }
+    }
+
+    fn replacement_issue(&self, event: &EventEntry) -> Option<String> {
+        match (event.event_type, event.target_player) {
+            (EventTypeEnum::R, None) => Some("missing replacement".to_string()),
+            (EventTypeEnum::R, Some(replacement)) if !self.can_come_in(&replacement) => {
+                Some(format!("player {replacement} can't come in"))
+            }
+            (EventTypeEnum::R, Some(_)) | (_, None) => None,
+            (_, Some(_)) => Some("unexpected replacement".to_string()),
+        }
     }
 
     /// The zone a player attacks from, told by their role and row (the
@@ -292,11 +398,7 @@ impl Snapshot {
         options
     }
 
-    fn get_available_options(
-        &self,
-        event: &EventEntry,
-        current_available_options: &[EventTypeEnum],
-    ) -> Vec<EventTypeEnum> {
+    fn get_next_options(&self, event: &EventEntry) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
         let serve_them = self.get_rally_start_options(PhaseEnum::SideOut);
@@ -338,26 +440,26 @@ impl Snapshot {
         .into_iter()
         .collect();
         match (event.event_type, event.eval) {
-            (R | CL | CS, _) => current_available_options.to_vec(),
+            (R | CL | CS, _) => self.available_options.clone(),
             key => options_map.get(&key).cloned().unwrap_or_default(),
         }
     }
 
-    pub fn add_event(
-        &mut self,
-        event: &EventEntry,
-        current_available_options: &[EventTypeEnum],
-    ) -> Result<Vec<EventTypeEnum>, AppError> {
-        self.set_score(event);
-        self.record_stats(event)?;
-        let available_options = self.get_available_options(event, current_available_options);
+    /// Applies the event, once validated: an invalid event leaves the
+    /// snapshot as it was.
+    pub fn add_event(&mut self, event: &EventEntry) -> Result<(), AppError> {
+        self.validate(event)?;
         if event.event_type == EventTypeEnum::R {
-            // replace lineup entry
+            // replace lineup entry: it's the only change to the lineup that
+            // can fail, so before anything else is updated
             if let (Some(replaced), Some(replacement)) = (event.player, event.target_player) {
                 self.current_lineup
                     .add_substitution(&replaced, &replacement)?;
             }
         }
+        self.set_score(event);
+        self.record_stats(event)?;
+        self.available_options = self.get_next_options(event);
         if event.event_type == EventTypeEnum::CL
             && self.current_lineup.get_fallback_libero().is_some()
         {
@@ -377,6 +479,6 @@ impl Snapshot {
         {
             self.last_event = Some(event.clone());
         }
-        Ok(available_options)
+        Ok(())
     }
 }
