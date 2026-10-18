@@ -32,6 +32,7 @@ const { title, description } = Astro.props
     <title>{ title ?? global_settings.title }</title>
 
     <link rel="icon" type="image/svg+xml" href="/scoutforall/favicon.svg" />
+    <link rel="apple-touch-icon" href="/scoutforall/apple-touch-icon.png" />
     <link rel="manifest" href="/scoutforall/manifest.json" />
 
     <meta name="description" content={ description ?? global_settings.description } />
@@ -39,6 +40,10 @@ const { title, description } = Astro.props
 
     <meta property="og:title" content={ title ?? global_settings.title } />
     <meta property="og:description" content={ description ?? global_settings.description } />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={`https://naighes.github.io/scoutforall/${lang === 'en' ? '' : lang + '/'}`} />
+    <meta property="og:image" content="https://naighes.github.io/scoutforall/1200x630.jpg" />
+    <meta property="og:locale" content={ lang === 'it' ? 'it_IT' : 'en_US' } />
     <meta name="google-site-verification" content="bKdeAtfwmVXhzaUofyWon1aIpsOL0egnqXIeN8dfS7k" />
 
     <Font cssVariable="--font-inter" preload />
@@ -87,20 +92,28 @@ const { title, description } = Astro.props
         })
       }
     </script>
-    <script>
-      if (location.pathname === '/' && !location.search && !location.hash) {
-        const userLang = navigator.language || navigator.userLanguage;
-        if (userLang.startsWith('it')) {
+    <!-- the home page is english: move to the language picked in the
+         selector, or else to the one of the browser; inline, so that it
+         runs before the page renders -->
+    <script is:inline>
+      (function () {
+        var picked = null;
+        try {
+          picked = localStorage.getItem('scout4all-language');
+        } catch (e) {}
+        var browser = (navigator.language || navigator.userLanguage || '').slice(0, 2);
+        var lang = picked || browser;
+        if (location.pathname === '/scoutforall/' && !location.search && !location.hash && lang === 'it') {
           window.location.replace('/scoutforall/it/');
         }
-      }
+      })();
     </script>
   </head>
 
   <body id="top">
 
     <!-- Skip link -->
-    <a class="fixed -top-20 focus-visible:top-0 p-3 bg-black/90 transition-all duration-300" href="#main">Skip to content</a>
+    <a class="fixed -top-20 focus-visible:top-0 p-3 bg-black/90 transition-all duration-300" href="#main">{ global_settings.labels.skip_to_content }</a>
 
     <!-- bg image -->
     <Image src={ bg_image } alt="" format="avif" height={1080} width={1920} class="absolute min-h-svh object-cover inset-0 bottom-auto -z-1 w-full h-auto opacity-20 mask-b-from-50%" loading="eager" />

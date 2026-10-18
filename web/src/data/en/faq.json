@@ -17,6 +17,10 @@
   },
   {
     "question": "How often is the software updated and do I need to install updates manually?",
-    "answer": "The software is under active development and constantly evolving. New features, improvements and bug fixes are released on a regular basis. You don't need to worry about manual updates: the application updates itself automatically, so you're always running the latest version without extra effort. This ensures you benefit right away from community contributions and the continuous improvement of the project."
+    "answer": "The software is under active development and constantly evolving. New features, improvements and bug fixes are released on a regular basis. You don't need to download updates manually: every time it starts, the application checks for a new version and, after asking for your confirmation, installs it and restarts into it. This ensures you benefit right away from community contributions and the continuous improvement of the project."
+  },
+  {
+    "question": "The application no longer starts after an automatic update. What happened?",
+    "answer": "Up to version 0.4.2, the automatic update could replace the application with a data file published alongside each release (the software bill of materials) instead of the new version: after the update, the application fails to start. This is fixed starting with version 0.4.3. To recover, download the latest version again from the <a href=\"#download\">downloads</a> section and replace the old file. Your teams and matches are stored separately and are not affected."
   }
 ]

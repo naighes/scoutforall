@@ -12,6 +12,6 @@
   {
     "title": "Linux",
     "image": "/scoutforall/content-images/linux.svg",
-    "href": "https://github.com/naighes/scoutforall/releases/latest/download/scout4all-aarch64-unknown-linux-gnu.tar.gz"
+    "href": "https://github.com/naighes/scoutforall/releases/latest/download/scout4all-x86_64-unknown-linux-gnu.tar.gz"
   }
 ]

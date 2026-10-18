@@ -18,7 +18,7 @@ const copyright =
       <div class="w-max flex flex-col gap-8 md:gap-0 justify-between text-bs-foreground-light">
 
         <!-- Logo -->
-        <a class="flex items-center gap-4 group" href="#top" aria-label="Back to top">
+        <a class="flex items-center gap-4 group" href="#top" aria-label={ settings.labels.back_to_top }>
           <Logo class="group-hover:-rotate-180 group-hover:scale-80 transition-transform ease-bs-spring duration-1000" height="48" width="48" />
           <span class="text-2xl font-bold text-white leading-none">
             scout4all
@@ -33,7 +33,7 @@ const copyright =
         <!-- Nav -->
         <nav class="flex flex-col">
 
-          { settings.nav.sort((a,b) => a.title.localeCompare(b.title)).map( item =>
+          { [...settings.nav].sort((a,b) => a.title.localeCompare(b.title)).map( item =>
 
             <a href={ item.link }>
               { item.title }
@@ -46,7 +46,7 @@ const copyright =
         <!-- Social links -->
         <nav class="flex flex-col">
 
-          { settings.social_links.sort((a,b) => a.title.localeCompare(b.title)).map( item =>
+          { [...settings.social_links].sort((a,b) => a.title.localeCompare(b.title)).map( item =>
 
             <a href={ item.link }>
               { item.title }
@@ -70,9 +70,9 @@ const copyright =
         GitHub
       </a>
       <span>•</span>
-      <span><a href="https://github.com/naighes/scoutforall/blob/master/LICENSE">License</a></span>
+      <span><a href="https://github.com/naighes/scoutforall/blob/master/LICENSE">{ settings.labels.license }</a></span>
       <span>•</span>
-      <span>Made with ❤️ by <a href="https://github.com/naighes">n@ighes</a></span>
+      <span>{ settings.labels.made_with } <a href="https://github.com/naighes">n@ighes</a></span>
     </nav>
   </aside>
 

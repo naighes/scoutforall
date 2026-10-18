@@ -17,6 +17,10 @@
   },
   {
     "question": "Quanto spesso viene aggiornato il software? Devo installare gli aggiornamenti manualmente?",
-    "answer": "Il software è in sviluppo attivo e in costante evoluzione. Nuove funzionalità, miglioramenti e correzioni di bug vengono rilasciati regolarmente. Non è necessario preoccuparsi di aggiornamenti manuali: l'applicazione si aggiorna automaticamente, così avrai sempre l'ultima versione senza alcuno sforzo. Questo assicura che tu possa beneficiare immediatamente dei contributi della community e del continuo miglioramento del progetto."
+    "answer": "Il software è in sviluppo attivo e in costante evoluzione. Nuove funzionalità, miglioramenti e correzioni di bug vengono rilasciati regolarmente. Non è necessario scaricare gli aggiornamenti manualmente: a ogni avvio l'applicazione controlla se è disponibile una nuova versione e, dopo averti chiesto conferma, la installa e si riavvia con la nuova versione. Questo assicura che tu possa beneficiare immediatamente dei contributi della community e del continuo miglioramento del progetto."
+  },
+  {
+    "question": "Dopo un aggiornamento automatico l'applicazione non si avvia più. Cosa è successo?",
+    "answer": "Fino alla versione 0.4.2, l'aggiornamento automatico poteva sostituire l'applicazione con un file di dati pubblicato insieme a ogni release (la distinta dei componenti software, o SBOM) invece che con la nuova versione: dopo l'aggiornamento, l'applicazione non si avvia più. Il problema è risolto a partire dalla versione 0.4.3. Per ripristinarla, scarica di nuovo l'ultima versione dalla sezione <a href=\"#download\">download</a> e sostituisci il vecchio file. Le tue squadre e le tue partite sono salvate separatamente e non vengono toccate."
   }
 ]

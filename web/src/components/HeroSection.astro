@@ -5,8 +5,6 @@ import hero_screens from "../assets/theme-images/hero-screens.png"
 
 const { settings, title, content } = Astro.props
 
-const lang = Astro.params.lang || 'en';
-
 ---
 
 <section class="bs-container py-6 flex flex-col lg:flex-row items-center">
@@ -25,7 +23,7 @@ const lang = Astro.params.lang || 'en';
   <!-- Image -->
   <figure class="flex place-content-center -mt-20 lg:mt-0">
 
-    <Image src={ hero_screens } format="avif" quality="high" alt="Screens showing phone, tablet and desktop views of our website" loading="eager" />
+    <Image src={ hero_screens } format="avif" quality="high" alt={ settings.labels.hero_image_alt } loading="eager" />
 
   </figure>
 
