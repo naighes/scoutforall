@@ -1,5 +1,5 @@
 use crate::{
-    analytics::queue_manager::QueueManager,
+    analytics::{global::uploads_enabled, queue_manager::QueueManager},
     errors::{AppError, IOError},
     logging::logger::{log_error, log_info},
     providers::{
@@ -54,6 +54,21 @@ fn generate_upload_id(team_id: Uuid, match_id: &str) -> Uuid {
     Uuid::new_v5(&NAMESPACE, name.as_bytes())
 }
 
+// the render free plan stops the API when idle: the first request can wait
+// for it to start again. The user agent tells the app version in the API log
+fn http_client() -> Result<Client, AppError> {
+    Client::builder()
+        .user_agent(concat!("scout4all/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| AppError::IO(IOError::from(e)))
+}
+
+// the query string of a signed URL holds its token: keep it out of the log
+pub(crate) fn without_token(signed_url: &str) -> &str {
+    signed_url.split('?').next().unwrap_or(signed_url)
+}
+
 // upload file to signed URL using PUT
 async fn upload_file_to_signed_url(signed_url: &str, file_path: &Path) -> Result<(), AppError> {
     let mut file = File::open(file_path)
@@ -63,8 +78,7 @@ async fn upload_file_to_signed_url(signed_url: &str, file_path: &Path) -> Result
     file.read_to_end(&mut contents)
         .await
         .map_err(|e| AppError::IO(IOError::from(e)))?;
-    let client = Client::new();
-    let response = client
+    let response = http_client()?
         .put(signed_url)
         .header("Content-Type", "application/zip")
         .body(contents)
@@ -72,7 +86,13 @@ async fn upload_file_to_signed_url(signed_url: &str, file_path: &Path) -> Result
         .await
         .map_err(|e| AppError::IO(IOError::from(e)))?;
     if response.status().is_success() {
-        log_info(format!("uploaded file to signed URL '{}'", signed_url).as_str());
+        log_info(
+            format!(
+                "uploaded file to signed URL '{}'",
+                without_token(signed_url)
+            )
+            .as_str(),
+        );
         Ok(())
     } else {
         let message = format!(
@@ -158,10 +178,7 @@ pub(crate) async fn create_match_archive(
 
 // retrieve signed URL for sending analytics data
 async fn get_signed_url(m: &MatchEntry) -> Result<(String, Uuid), AppError> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| AppError::IO(IOError::from(e)))?;
+    let client = http_client()?;
     let uuid = generate_upload_id(m.team.id, m.id.as_str());
     let payload = UploadRequest {
         filename: format!("{}.zip", uuid),
@@ -193,7 +210,8 @@ async fn get_signed_url(m: &MatchEntry) -> Result<(String, Uuid), AppError> {
         log_info(
             format!(
                 "generated signed URL '{}' for file '{}.zip'",
-                signed_url, uuid
+                without_token(&signed_url),
+                uuid
             )
             .as_str(),
         );
@@ -257,6 +275,7 @@ impl<
             loop {
                 ticker.tick().await;
                 let _ = async {
+                    uploads_enabled().then_some(())?;
                     let queue = queue_manager.load().await.ok()?;
                     if queue.is_empty() {
                         return Some(());
@@ -278,15 +297,21 @@ impl<
                                 .is_ok()
                             {
                                 // success
-                                let _ = queue_manager.dequeue(&pending.match_id).await;
+                                let _ = queue_manager
+                                    .dequeue(&pending.team_id, &pending.match_id)
+                                    .await;
                             } else {
                                 // failure: just mark retry, keep in queue indefinitely
-                                let _ = queue_manager.mark_retry(&pending.match_id).await;
+                                let _ = queue_manager
+                                    .mark_retry(&pending.team_id, &pending.match_id)
+                                    .await;
                             }
                         }
                         Err(_) => {
                             // match not found
-                            let _ = queue_manager.dequeue(&pending.match_id).await;
+                            let _ = queue_manager
+                                .dequeue(&pending.team_id, &pending.match_id)
+                                .await;
                         }
                     }
                     Some(())

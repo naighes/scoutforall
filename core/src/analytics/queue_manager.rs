@@ -43,18 +43,18 @@ impl<QR: QueueReader + Send + Sync + 'static, QW: QueueWriter + Send + Sync + 's
     }
 
     // remove successfully uploaded match (thread-safe)
-    pub async fn dequeue(&self, match_id: &str) -> Result<(), AppError> {
+    pub async fn dequeue(&self, team_id: &Uuid, match_id: &str) -> Result<(), AppError> {
         let _guard = self.lock.lock().await;
         let mut queue = self.queue_reader.load().await?;
-        queue.dequeue(match_id);
+        queue.dequeue(team_id, match_id);
         self.queue_writer.save(&queue).await
     }
 
     // mark retry for failed upload (thread-safe)
-    pub async fn mark_retry(&self, match_id: &str) -> Result<(), AppError> {
+    pub async fn mark_retry(&self, team_id: &Uuid, match_id: &str) -> Result<(), AppError> {
         let _guard = self.lock.lock().await;
         let mut queue = self.queue_reader.load().await?;
-        queue.mark_retry(match_id);
+        queue.mark_retry(team_id, match_id);
         self.queue_writer.save(&queue).await
     }
 }

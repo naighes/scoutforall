@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::KeyBindings;
 use dirs::home_dir;
 use scout4all_core::{
+    analytics::global::set_uploads_enabled,
     constants::DEFAULT_LANGUAGE,
     localization::set_language,
     shapes::enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
@@ -87,12 +88,14 @@ static INITIALIZED: OnceLock<()> = OnceLock::new();
 pub fn init_settings(default: Settings) {
     INITIALIZED.set(()).ok().unwrap();
     set_language(default.language);
+    set_uploads_enabled(default.analytics_enabled);
 }
 
-/// Change the current language: only once initialized, the tests keep the
-/// default one.
+/// Change the current language and whether analytics uploads run: only once
+/// initialized, the tests keep the defaults (no uploads).
 pub fn set_settings(settings: Settings) {
     if let Some(()) = INITIALIZED.get() {
         set_language(settings.language);
+        set_uploads_enabled(settings.analytics_enabled);
     }
 }

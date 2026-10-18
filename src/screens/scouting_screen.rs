@@ -22,7 +22,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Row, Table},
 };
-use scout4all_core::analytics::global::enqueue_match_for_upload;
+use scout4all_core::analytics::global::{enqueue_match_for_upload, uploads_enabled};
 use scout4all_core::{
     localization::current_labels,
     providers::set_writer::SetWriter,
@@ -243,7 +243,9 @@ impl<
     }
 
     async fn enqueue_match_for_analytics(&self) {
-        if self.settings.analytics_enabled {
+        // the global flag, not the settings this screen was created with: they
+        // may have changed since
+        if uploads_enabled() {
             let _ =
                 enqueue_match_for_upload(self.current_match.team.id, self.current_match.id.clone())
                     .await;

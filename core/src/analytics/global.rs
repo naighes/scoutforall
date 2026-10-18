@@ -5,9 +5,22 @@ use crate::{
 };
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 static GLOBAL_QUEUE_MANAGER: OnceLock<Arc<dyn GlobalQueueManager>> = OnceLock::new();
+
+// whether the user allows uploads: the worker always runs and checks it at
+// each tick, so the setting applies without a restart
+static UPLOADS_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_uploads_enabled(enabled: bool) {
+    UPLOADS_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn uploads_enabled() -> bool {
+    UPLOADS_ENABLED.load(Ordering::Relaxed)
+}
 
 #[async_trait::async_trait]
 pub trait GlobalQueueManager: Send + Sync {
