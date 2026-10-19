@@ -4,7 +4,10 @@ use {
         crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
         *,
     },
-    scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum, WithDesc},
+    scout4all_core::shapes::{
+        enums::{EvalEnum, EventTypeEnum, WithDesc},
+        technique::{ServeTypeEnum, SetTypeEnum},
+    },
     serde::{Deserialize, Serialize},
     std::collections::{HashMap, HashSet, hash_map},
 };
@@ -25,12 +28,18 @@ pub const UNDO_KEY: KeyCombination = key!(u);
 /// Leaves the scouting.
 pub const BACK_KEY: KeyCombination = key!(esc);
 
+/// Whether the key is one scouting keeps for itself all along (settings, undo
+/// and back): it can't be assigned to anything.
+pub fn is_reserved_key(ck: &KeyCombination) -> bool {
+    [SETTINGS_KEY, UNDO_KEY, BACK_KEY].contains(ck)
+}
+
 /// Whether the key is one scouting keeps for itself (settings, undo, back and
 /// the digits choosing players): it can't be assigned to events nor
-/// evaluations.
+/// evaluations. Sets and serves can have digits: they're chosen along with
+/// the evaluation, once the player is.
 pub fn is_fixed_key(ck: &KeyCombination) -> bool {
-    [SETTINGS_KEY, UNDO_KEY, BACK_KEY].contains(ck)
-        || ck.as_letter().is_some_and(|c| c.is_ascii_digit())
+    is_reserved_key(ck) || ck.as_letter().is_some_and(|c| c.is_ascii_digit())
 }
 
 /// Some terminals report shift along with the symbols it produces (e.g.
@@ -172,9 +181,14 @@ where
     }
 
     /// unbinds the fixed keys (see [`is_fixed_key`]) from every action
-    pub fn without_fixed_keys(mut self) -> Self {
+    pub fn without_fixed_keys(self) -> Self {
+        self.without_keys(is_fixed_key)
+    }
+
+    /// unbinds the keys matching the filter from every action
+    pub fn without_keys(mut self, filter: impl Fn(&KeyCombination) -> bool) -> Self {
         for cks in self.default_bindings.values_mut() {
-            cks.retain(|ck| !is_fixed_key(ck));
+            cks.retain(|ck| !filter(ck));
         }
         self
     }
@@ -316,6 +330,34 @@ impl Default for KeyBindings<EvalEnum> {
     }
 }
 
+/// Every set and serve is bound to its code, e.g. "a" for the high set.
+fn bound_to_codes<T>(all: &[T]) -> KeyBindings<T>
+where
+    T: Copy + std::hash::Hash + Eq + std::fmt::Display,
+{
+    let mut bindings = KeyBindings {
+        default_bindings: HashMap::new(),
+    };
+    for item in all {
+        let code = item.to_string().chars().next().unwrap_or_default();
+        bindings.set(
+            *item,
+            KeyCombination::one_key(KeyCode::Char(code.to_ascii_lowercase()), KeyModifiers::NONE),
+        );
+    }
+    bindings
+}
+impl Default for KeyBindings<SetTypeEnum> {
+    fn default() -> Self {
+        bound_to_codes(&SetTypeEnum::ALL)
+    }
+}
+impl Default for KeyBindings<ServeTypeEnum> {
+    fn default() -> Self {
+        bound_to_codes(&ServeTypeEnum::ALL)
+    }
+}
+
 #[test]
 fn test_deserialize_keybindings() {
     #[derive(Deserialize)]
@@ -419,4 +461,26 @@ fn test_assign_replaces_the_key() {
         kb.keybindings_for(&EvalEnum::Perfect),
         HashSet::from([key!(z)])
     );
+}
+
+#[test]
+fn test_without_keys() {
+    let kb = KeyBindings::<SetTypeEnum>::default().without_keys(|ck| *ck == key!(a));
+    assert_eq!(kb.key_for(&SetTypeEnum::High), None);
+    assert_eq!(kb.key_for(&SetTypeEnum::Super), Some(key!(s)));
+    // the digits are fixed for events and evaluations, not for sets
+    let kb = KeyBindings::<SetTypeEnum>::default().without_keys(is_reserved_key);
+    assert_eq!(kb.key_for(&SetTypeEnum::Pipe), Some(key!('0')));
+    let kb = KeyBindings::<SetTypeEnum>::default().without_fixed_keys();
+    assert_eq!(kb.key_for(&SetTypeEnum::Pipe), None);
+}
+
+#[test]
+fn test_reserved_and_fixed_keys() {
+    for ck in [key!(u), key!(esc), key!(f2)] {
+        assert!(is_reserved_key(&ck), "{ck}");
+    }
+    for ck in [key!('0'), key!('9'), key!(a)] {
+        assert!(!is_reserved_key(&ck), "{ck}");
+    }
 }

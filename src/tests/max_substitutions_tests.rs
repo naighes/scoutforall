@@ -124,6 +124,7 @@ mod tests {
                 player: Some(*out),
                 eval: None,
                 target_player: Some(*r#in),
+                technique: None,
             })
             .collect();
         let mut m: MatchEntry = serde_json::from_str(LEGACY_DESCRIPTOR).unwrap();

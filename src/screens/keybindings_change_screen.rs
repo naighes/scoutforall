@@ -9,7 +9,7 @@ use crate::{
     },
     shapes::{
         actions::ScreenActionEnum,
-        keybinding::{ActionsKeyBindings, KeyBindings, combination_of, is_fixed_key},
+        keybinding::{ActionsKeyBindings, KeyBindings, combination_of},
         settings::{ScoutingShortcut, Settings, set_settings},
         symbol::KeyCombinationFormatExt,
     },
@@ -130,21 +130,25 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> ChangeKeyBin
         }
     }
 
-    /// why the key can't be assigned, if it can't
+    /// why the key can't be assigned, if it can't: it's reserved, or bound
+    /// to another shortcut of the same kind or of a kind active at the same
+    /// time
     fn conflict(&self, ck: &KeyCombination) -> Option<String> {
         let key = KeyCombinationFormatExt::new(&self.fmt).to_string(*ck);
-        if is_fixed_key(ck) {
-            return Some(current_labels().reserved_shortcut.replace("{}", &key));
-        }
-        T::bindings(&self.settings)
+        let other = T::bindings(&self.settings)
             .action_for(ck)
             .filter(|other| **other != self.action)
-            .map(|other| {
+            .map(|other| other.with_desc().1)
+            .or_else(|| T::rival(&self.settings, ck));
+        match (T::is_reserved(ck), other) {
+            (true, _) => Some(current_labels().reserved_shortcut.replace("{}", &key)),
+            (false, other) => other.map(|other| {
                 current_labels()
                     .shortcut_already_assigned
                     .replacen("{}", &key, 1)
-                    .replacen("{}", &other.with_desc().1, 1)
-            })
+                    .replacen("{}", &other, 1)
+            }),
+        }
     }
 
     async fn handle_confirm(&mut self) -> AppAction {

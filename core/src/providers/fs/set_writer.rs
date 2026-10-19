@@ -2,14 +2,16 @@ use crate::{
     errors::{AppError, IOError},
     localization::current_labels,
     providers::{
-        fs::path::{get_match_folder_path, get_set_descriptor_file_path, get_set_events_file_path},
+        fs::{
+            path::{get_match_folder_path, get_set_descriptor_file_path, get_set_events_file_path},
+            set_reader::read_events,
+        },
         set_writer::SetWriter,
     },
     shapes::{enums::TeamSideEnum, r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
 };
 use async_trait::async_trait;
-use csv::ReaderBuilder;
-use csv::WriterBuilder;
+use csv::{ReaderBuilder, StringRecord, WriterBuilder};
 use serde_json::to_vec_pretty;
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
@@ -86,16 +88,15 @@ impl SetWriter for FileSystemSetWriter {
         let events_path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set_number)?;
         let event = event.clone();
         spawn_blocking(move || {
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(events_path)
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
-            writer
-                .serialize(event)
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            writer.flush().map_err(|e| AppError::IO(IOError::from(e)))
+            // the older versions read a file only when all its rows have the
+            // same columns: the rows saved without the technique get it
+            has_rows_without_technique(&events_path).and_then(|rewrite| match rewrite {
+                true => read_events(&events_path).and_then(|mut events| {
+                    events.push(event);
+                    write_events(&events_path, &events)
+                }),
+                false => append(&events_path, &event),
+            })
         })
         .await
         .map_err(|e| AppError::IO(IOError::Msg(format!("tokio join error: {}", e))))?
@@ -109,30 +110,62 @@ impl SetWriter for FileSystemSetWriter {
         let path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set_number)?;
         let path_clone = path.clone();
         spawn_blocking(move || {
-            let mut reader = ReaderBuilder::new()
-                .has_headers(false)
-                .from_path(&path_clone)
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let mut records: Vec<EventEntry> = reader
-                .deserialize()
-                .collect::<Result<Vec<EventEntry>, _>>()
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let last = records.pop();
-            let file = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&path_clone)
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
-            for rec in &records {
-                writer
-                    .serialize(rec)
-                    .map_err(|e| AppError::IO(IOError::from(e)))?;
-            }
-            writer.flush().map_err(|e| AppError::IO(IOError::from(e)))?;
-            Ok(last)
+            read_events(&path_clone).and_then(|mut events| {
+                let last = events.pop();
+                write_events(&path_clone, &events).map(|_| last)
+            })
         })
         .await
         .map_err(|e| AppError::IO(IOError::Msg(format!("tokio join error: {}", e))))?
     }
+}
+
+/// The columns of a saved event, the technique included.
+const EVENT_COLUMNS: usize = 6;
+
+/// Whether some events were saved without the technique, by v0.4.3 or older.
+fn has_rows_without_technique(path: &Path) -> Result<bool, AppError> {
+    match path.exists() {
+        false => Ok(false),
+        true => ReaderBuilder::new()
+            .has_headers(false)
+            .flexible(true)
+            .from_path(path)
+            .and_then(|mut reader| {
+                reader
+                    .records()
+                    .collect::<Result<Vec<StringRecord>, csv::Error>>()
+            })
+            .map(|records| records.iter().any(|r| r.len() < EVENT_COLUMNS))
+            .map_err(|e| AppError::IO(IOError::from(e))),
+    }
+}
+
+fn append(path: &Path, event: &EventEntry) -> Result<(), AppError> {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+    let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
+    writer
+        .serialize(event)
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+    writer.flush().map_err(|e| AppError::IO(IOError::from(e)))
+}
+
+/// Saves the events in place of the ones in the file.
+fn write_events(path: &Path, events: &[EventEntry]) -> Result<(), AppError> {
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+    let mut writer = WriterBuilder::new().has_headers(false).from_writer(file);
+    events
+        .iter()
+        .try_for_each(|event| writer.serialize(event))
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+    writer.flush().map_err(|e| AppError::IO(IOError::from(e)))
 }

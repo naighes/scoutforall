@@ -16,13 +16,18 @@ mod tests {
             team_reader::TeamReader,
         },
         shapes::{
-            enums::{LineupRulesEnum, RoleEnum, TeamSideEnum},
+            enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
+            snapshot::EventEntry,
             team::TeamEntry,
+            technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
         },
     };
+    use chrono::{DateTime, Utc};
+    use csv::ReaderBuilder;
+    use serde::Deserialize;
     use serde_json::json;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -296,5 +301,286 @@ mod tests {
         assert_eq!(saved["lineup_rules"], "v2");
         let (_, m) = load(dir.path()).await;
         assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
+    }
+
+    // --- the technique column, added after v0.4.3 ---------------------------
+
+    /// An event as v0.4.3 reads it: no technique, and every row of the file
+    /// with the same columns.
+    #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
+    struct EventUpToV0_4_3 {
+        timestamp: DateTime<Utc>,
+        event_type: EventTypeEnum,
+        player: Option<Uuid>,
+        eval: Option<EvalEnum>,
+        target_player: Option<Uuid>,
+    }
+
+    fn read_as_v0_4_3(path: &Path) -> Result<Vec<EventUpToV0_4_3>, csv::Error> {
+        ReaderBuilder::new()
+            .has_headers(false)
+            .from_path(path)?
+            .deserialize()
+            .collect()
+    }
+
+    fn events_path(base: &Path) -> PathBuf {
+        base.join(TEAM_ID).join(MATCH_ID).join("set_1.csv")
+    }
+
+    /// A positive reception and a kill of outside hitter 1, who then serves.
+    fn events_scouted_up_to_v0_4_3(p: &Players) -> Vec<String> {
+        vec![
+            row("P", Some(p.libero), "+", None),
+            row("A", Some(p.oh1), "#", None),
+        ]
+    }
+
+    fn event(
+        event_type: EventTypeEnum,
+        player: Uuid,
+        eval: EvalEnum,
+        technique: Option<TechniqueEnum>,
+    ) -> EventEntry {
+        EventEntry {
+            timestamp: Utc::now(),
+            event_type,
+            player: Some(player),
+            eval: Some(eval),
+            target_player: None,
+            technique,
+        }
+    }
+
+    fn float_serve(p: &Players) -> EventEntry {
+        event(
+            EventTypeEnum::S,
+            p.oh1,
+            EvalEnum::Positive,
+            Some(TechniqueEnum::Serve(ServeTypeEnum::Float)),
+        )
+    }
+
+    /// The fields v0.4.3 knows, to compare events across versions.
+    fn known_fields(e: &EventEntry) -> (EventTypeEnum, Option<Uuid>, Option<EvalEnum>) {
+        (e.event_type, e.player, e.eval)
+    }
+
+    fn columns(path: &Path) -> Vec<usize> {
+        std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|l| l.split(',').count())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn set_scouted_up_to_v0_4_3_loads_without_techniques() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
+        let (_, m) = load(dir.path()).await;
+        assert_eq!(m.sets[0].events.len(), 2);
+        assert!(m.sets[0].events.iter().all(|e| e.technique.is_none()));
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
+        assert_eq!((snapshot.score_us, snapshot.score_them), (1, 0));
+    }
+
+    /// v0.4.3 reads a file only when all its rows have the same columns: the
+    /// first event saved with the technique gives it to the older rows too.
+    #[tokio::test]
+    async fn events_added_to_a_set_of_v0_4_3_rewrite_its_rows() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
+        let (_, m) = load(dir.path()).await;
+        let before = m.sets[0].events.clone();
+        assert_eq!(columns(&events_path(dir.path())), vec![5, 5]);
+        FileSystemSetWriter::new(dir.path())
+            .append_event(&m, 1, &float_serve(&p))
+            .await
+            .expect("expected the event to be saved");
+        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6]);
+        // the older rows are the same
+        let (_, m) = load(dir.path()).await;
+        let events = &m.sets[0].events;
+        assert_eq!(events.len(), 3);
+        for (old, new) in before.iter().zip(events) {
+            assert_eq!(known_fields(old), known_fields(new));
+            assert_eq!(old.timestamp, new.timestamp);
+            assert_eq!(new.technique, None);
+        }
+        assert_eq!(
+            events[2].technique,
+            Some(TechniqueEnum::Serve(ServeTypeEnum::Float))
+        );
+        // ...and v0.4.3 still reads them all
+        let old_reader = read_as_v0_4_3(&events_path(dir.path())).expect("v0.4.3 can't read");
+        assert_eq!(old_reader.len(), 3);
+        // the next events are appended
+        FileSystemSetWriter::new(dir.path())
+            .append_event(
+                &m,
+                1,
+                &event(
+                    EventTypeEnum::A,
+                    p.opposite,
+                    EvalEnum::Perfect,
+                    Some(TechniqueEnum::Set(SetTypeEnum::Super)),
+                ),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6, 6]);
+        assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 4);
+    }
+
+    /// A set scouted now opens with v0.4.3: it skips the technique.
+    #[tokio::test]
+    async fn set_scouted_now_is_read_by_v0_4_3() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), None);
+        let (_, m) = load(dir.path()).await;
+        let writer = FileSystemSetWriter::new(dir.path());
+        let reception = event(EventTypeEnum::P, p.libero, EvalEnum::Positive, None);
+        writer
+            .create(
+                &m,
+                1,
+                TeamSideEnum::Them,
+                [p.setter, p.oh1, p.mb2, p.opposite, p.oh2, p.mb1],
+                p.libero,
+                None,
+                p.setter,
+                vec![reception],
+            )
+            .await
+            .expect("expected a new set");
+        writer
+            .append_event(
+                &m,
+                1,
+                &event(
+                    EventTypeEnum::A,
+                    p.oh1,
+                    EvalEnum::Perfect,
+                    Some(TechniqueEnum::Set(SetTypeEnum::Five)),
+                ),
+            )
+            .await
+            .unwrap();
+        writer.append_event(&m, 1, &float_serve(&p)).await.unwrap();
+        let old_reader = read_as_v0_4_3(&events_path(dir.path())).expect("v0.4.3 can't read");
+        let kinds: Vec<_> = old_reader.iter().map(|e| e.event_type).collect();
+        assert_eq!(
+            kinds,
+            vec![EventTypeEnum::P, EventTypeEnum::A, EventTypeEnum::S]
+        );
+        let (_, m) = load(dir.path()).await;
+        let techniques: Vec<_> = m.sets[0].events.iter().map(|e| e.technique).collect();
+        assert_eq!(
+            techniques,
+            vec![
+                None,
+                Some(TechniqueEnum::Set(SetTypeEnum::Five)),
+                Some(TechniqueEnum::Serve(ServeTypeEnum::Float)),
+            ]
+        );
+    }
+
+    /// v0.4.3 appends its rows without the technique to a set scouted now:
+    /// this version still opens it (v0.4.3 itself doesn't).
+    #[tokio::test]
+    async fn rows_added_by_v0_4_3_to_a_set_scouted_now_load() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        // a reception and an attack scouted now, then the older version
+        // appends a serve
+        let with_technique =
+            |row: String, technique: &str| format!("{},{}\n", row.trim_end(), technique);
+        legacy_set(
+            dir.path(),
+            &p,
+            &[
+                with_technique(row("P", Some(p.libero), "+", None), ""),
+                with_technique(row("A", Some(p.oh1), "#", None), "5"),
+                row("S", Some(p.oh1), "+", None),
+            ],
+        );
+        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 5]);
+        assert!(read_as_v0_4_3(&events_path(dir.path())).is_err());
+        let (_, m) = load(dir.path()).await;
+        let techniques: Vec<_> = m.sets[0].events.iter().map(|e| e.technique).collect();
+        assert_eq!(
+            techniques,
+            vec![None, Some(TechniqueEnum::Set(SetTypeEnum::Five)), None]
+        );
+        // and saving again makes it readable by v0.4.3 too
+        FileSystemSetWriter::new(dir.path())
+            .append_event(
+                &m,
+                1,
+                &event(EventTypeEnum::D, p.libero, EvalEnum::Positive, None),
+            )
+            .await
+            .unwrap();
+        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6, 6]);
+        assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 4);
+    }
+
+    /// The undo rewrites the file: the techniques stay, and the rows of
+    /// v0.4.3 get the column.
+    #[tokio::test]
+    async fn undo_keeps_the_techniques() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
+        let (_, m) = load(dir.path()).await;
+        let writer = FileSystemSetWriter::new(dir.path());
+        writer.append_event(&m, 1, &float_serve(&p)).await.unwrap();
+        let spin = EventEntry {
+            technique: Some(TechniqueEnum::Serve(ServeTypeEnum::Spin)),
+            eval: Some(EvalEnum::Perfect),
+            ..float_serve(&p)
+        };
+        // the float serve is "+": the rally goes on, so a dig and not a
+        // second serve would come; the file doesn't care
+        writer.append_event(&m, 1, &spin).await.unwrap();
+        let removed = writer.remove_last_event(&m, 1).await.unwrap().unwrap();
+        assert_eq!(
+            removed.technique,
+            Some(TechniqueEnum::Serve(ServeTypeEnum::Spin))
+        );
+        let (_, m) = load(dir.path()).await;
+        assert_eq!(
+            m.sets[0].events.last().unwrap().technique,
+            Some(TechniqueEnum::Serve(ServeTypeEnum::Float))
+        );
+        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6]);
+        // the undo of a set of v0.4.3 gives the column to its rows
+        let dir = TempDir::new().unwrap();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
+        let (_, m) = load(dir.path()).await;
+        let removed = FileSystemSetWriter::new(dir.path())
+            .remove_last_event(&m, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(removed.event_type, EventTypeEnum::A);
+        assert_eq!(columns(&events_path(dir.path())), vec![6]);
+        assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 1);
     }
 }

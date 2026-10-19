@@ -1,5 +1,7 @@
 //! The settings screen: general settings on a panel, the scouting keyboard
-//! shortcuts on the other one, every change saved right away.
+//! shortcuts on the other one, every change saved right away. The sets and
+//! the serves are chosen along with the evaluation: their keys can't be the
+//! ones of the evaluations.
 
 #[cfg(test)]
 mod tests {
@@ -9,7 +11,7 @@ mod tests {
         },
         shapes::{
             actions::ScreenActionEnum,
-            keybinding::{KeyBindings, SETTINGS_KEY, navigation_keybindings},
+            keybinding::{KeyBindings, SETTINGS_KEY, is_reserved_key, navigation_keybindings},
             settings::Settings,
         },
         tests::ui::{TeamFixture, Ui},
@@ -18,7 +20,10 @@ mod tests {
     use scout4all_core::{
         localization::current_labels,
         providers::fs::path::get_config_file_path,
-        shapes::enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
+        shapes::{
+            enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
+            technique::{ServeTypeEnum, SetTypeEnum},
+        },
     };
     use std::collections::HashSet;
     use tempfile::TempDir;
@@ -54,6 +59,26 @@ mod tests {
 
     fn eval_index(eval: EvalEnum) -> usize {
         EventTypeEnum::ALL.len() + EvalEnum::ALL.iter().position(|e| *e == eval).unwrap()
+    }
+
+    fn set_index(set: SetTypeEnum) -> usize {
+        EventTypeEnum::ALL.len()
+            + EvalEnum::ALL.len()
+            + SetTypeEnum::ALL.iter().position(|s| *s == set).unwrap()
+    }
+
+    fn serve_index(serve: ServeTypeEnum) -> usize {
+        EventTypeEnum::ALL.len()
+            + EvalEnum::ALL.len()
+            + SetTypeEnum::ALL.len()
+            + ServeTypeEnum::ALL.iter().position(|s| *s == serve).unwrap()
+    }
+
+    fn assigned_message(key: &str, other: &str) -> String {
+        current_labels()
+            .shortcut_already_assigned
+            .replacen("{}", key, 1)
+            .replacen("{}", other, 1)
     }
 
     async fn saved(ui: &Ui) -> Settings {
@@ -129,9 +154,48 @@ mod tests {
         }
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&EvalEnum::ALL.last().unwrap().with_desc().1),
+            selected.contains(&ServeTypeEnum::ALL.last().unwrap().with_desc().1),
             "{selected}"
         );
+        // still shown at the end of the list
+        let screen = ui.screen();
+        assert!(screen.contains(&format!("u ({fixed})")), "{screen}");
+    }
+
+    /// The sets and the serves follow the evaluations, each with its key:
+    /// the list scrolls to them.
+    #[tokio::test]
+    async fn set_and_serve_types_are_listed() {
+        let mut ui = shortcut(0).await;
+        let mut seen = String::new();
+        for _ in 0..serve_index(ServeTypeEnum::Spin) {
+            seen.push_str(&ui.screen());
+            ui.press(KeyCode::Down).await;
+        }
+        seen.push_str(&ui.screen());
+        let labels = current_labels();
+        for title in [labels.set_types, labels.serve_types] {
+            assert!(seen.contains(title), "{title}: {seen}");
+        }
+        let rows: Vec<String> = seen
+            .lines()
+            .flat_map(|l| {
+                l.split('│')
+                    .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
+            })
+            .collect();
+        for set in SetTypeEnum::ALL {
+            let expected = format!("{} {}", set.with_desc().1, set.to_string().to_lowercase());
+            assert!(rows.contains(&expected), "{expected}: {seen}");
+        }
+        for serve in ServeTypeEnum::ALL {
+            let expected = format!(
+                "{} {}",
+                serve.with_desc().1,
+                serve.to_string().to_lowercase()
+            );
+            assert!(rows.contains(&expected), "{expected}: {seen}");
+        }
     }
 
     #[tokio::test]
@@ -463,6 +527,216 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reset_to_defaults_restores_sets_and_serves() {
+        let mut ui = change_key_for(set_index(SetTypeEnum::High)).await;
+        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
+        for _ in set_index(SetTypeEnum::High)..serve_index(ServeTypeEnum::Spin) {
+            ui.press(KeyCode::Down).await;
+        }
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('z'), KeyCode::Enter])
+            .await;
+        let customized = saved(&ui).await;
+        assert_eq!(
+            customized.set_type_keybindings.key_for(&SetTypeEnum::High),
+            Some(key!(x))
+        );
+        assert_eq!(
+            customized
+                .serve_type_keybindings
+                .key_for(&ServeTypeEnum::Spin),
+            Some(key!(z))
+        );
+        ui.type_keys(&[KeyCode::Char('r'), KeyCode::Char('y')])
+            .await;
+        let reset = saved(&ui).await;
+        let defaults = Settings::default();
+        for set in SetTypeEnum::ALL {
+            assert_eq!(
+                reset.set_type_keybindings.keybindings_for(&set),
+                defaults.set_type_keybindings.keybindings_for(&set)
+            );
+        }
+        for serve in ServeTypeEnum::ALL {
+            assert_eq!(
+                reset.serve_type_keybindings.keybindings_for(&serve),
+                defaults.serve_type_keybindings.keybindings_for(&serve)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn set_key_is_changed() {
+        let mut ui = change_key_for(set_index(SetTypeEnum::High)).await;
+        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
+        let settings = saved(&ui).await;
+        assert_eq!(
+            settings
+                .set_type_keybindings
+                .keybindings_for(&SetTypeEnum::High),
+            keys(&[key!(x)])
+        );
+        // the others are the same
+        assert_eq!(
+            settings.set_type_keybindings.key_for(&SetTypeEnum::Five),
+            Some(key!('5'))
+        );
+        let selected = ui.selected().unwrap_or_default();
+        assert!(
+            selected.contains(&SetTypeEnum::High.with_desc().1) && selected.ends_with('x'),
+            "{selected}"
+        );
+    }
+
+    /// The digits choose the players, but sets are chosen once the player
+    /// is: they can have digits. Settings, undo and back stay reserved.
+    #[tokio::test]
+    async fn sets_and_serves_can_have_digits_not_fixed_keys() {
+        // the seven, then its digit for the high set
+        let mut ui = change_key_for(set_index(SetTypeEnum::Seven)).await;
+        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
+        for _ in set_index(SetTypeEnum::Seven)..set_index(SetTypeEnum::High) {
+            ui.press(KeyCode::Down).await;
+        }
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('7'), KeyCode::Enter])
+            .await;
+        assert_eq!(
+            saved(&ui)
+                .await
+                .set_type_keybindings
+                .key_for(&SetTypeEnum::High),
+            Some(key!('7'))
+        );
+        let mut ui = change_key_for(serve_index(ServeTypeEnum::Float)).await;
+        ui.type_keys(&[KeyCode::Char('3'), KeyCode::Enter]).await;
+        assert_eq!(
+            saved(&ui)
+                .await
+                .serve_type_keybindings
+                .key_for(&ServeTypeEnum::Float),
+            Some(key!('3'))
+        );
+        for (code, shown) in [(KeyCode::Char('u'), "u"), (KeyCode::F(2), "F2")] {
+            for index in [
+                set_index(SetTypeEnum::High),
+                serve_index(ServeTypeEnum::Spin),
+            ] {
+                let mut ui = change_key_for(index).await;
+                ui.press(code).await;
+                let message = current_labels().reserved_shortcut.replace("{}", shown);
+                assert!(ui.screen().contains(&message), "{shown}: {}", ui.screen());
+                ui.press(KeyCode::Enter).await;
+                assert!(ui.saved_settings().await.is_none(), "{shown}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn set_keys_do_not_conflict() {
+        let mut ui = change_key_for(set_index(SetTypeEnum::High)).await;
+        ui.press(KeyCode::Char('5')).await;
+        let message = assigned_message("5", &SetTypeEnum::Five.with_desc().1);
+        assert!(ui.screen().contains(&message), "{}", ui.screen());
+        ui.press(KeyCode::Enter).await;
+        assert!(ui.saved_settings().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn serve_keys_do_not_conflict() {
+        let mut ui = change_key_for(serve_index(ServeTypeEnum::Float)).await;
+        ui.press(KeyCode::Char('s')).await;
+        let message = assigned_message("s", &ServeTypeEnum::Spin.with_desc().1);
+        assert!(ui.screen().contains(&message), "{}", ui.screen());
+        ui.press(KeyCode::Enter).await;
+        assert!(ui.saved_settings().await.is_none());
+    }
+
+    /// Sets and serves are chosen along with the evaluation: a key can't be
+    /// both an evaluation and a set or a serve.
+    #[tokio::test]
+    async fn sets_and_serves_do_not_conflict_with_evaluations() {
+        let cases = [
+            (
+                set_index(SetTypeEnum::High),
+                '+',
+                EvalEnum::Positive.with_desc().1,
+            ),
+            (
+                serve_index(ServeTypeEnum::Spin),
+                '#',
+                EvalEnum::Perfect.with_desc().1,
+            ),
+            (
+                eval_index(EvalEnum::Perfect),
+                'a',
+                SetTypeEnum::High.with_desc().1,
+            ),
+            (
+                eval_index(EvalEnum::Negative),
+                'q',
+                SetTypeEnum::Quick.with_desc().1,
+            ),
+            // a key of the serves, not of the sets
+            (
+                eval_index(EvalEnum::Positive),
+                'f',
+                SetTypeEnum::Fast.with_desc().1,
+            ),
+        ];
+        for (index, key, other) in cases {
+            let mut ui = change_key_for(index).await;
+            ui.press(KeyCode::Char(key)).await;
+            let message = assigned_message(&key.to_string(), &other);
+            assert!(ui.screen().contains(&message), "{key}: {}", ui.screen());
+            ui.press(KeyCode::Enter).await;
+            assert!(ui.saved_settings().await.is_none(), "{key}");
+        }
+        // a key of a serve only
+        let mut ui = change_key_for(serve_index(ServeTypeEnum::Spin)).await;
+        ui.type_keys(&[KeyCode::Char('y'), KeyCode::Enter]).await;
+        for _ in eval_index(EvalEnum::Perfect)..serve_index(ServeTypeEnum::Spin) {
+            ui.press(KeyCode::Up).await;
+        }
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('y')]).await;
+        let message = assigned_message("y", &ServeTypeEnum::Spin.with_desc().1);
+        assert!(ui.screen().contains(&message), "{}", ui.screen());
+    }
+
+    /// Sets and serves are never chosen together, nor along with the events:
+    /// they can share their keys.
+    #[tokio::test]
+    async fn sets_serves_and_events_share_keys() {
+        let mut ui = change_key_for(serve_index(ServeTypeEnum::Float)).await;
+        ui.type_keys(&[KeyCode::Char('a'), KeyCode::Enter]).await;
+        assert_eq!(
+            saved(&ui)
+                .await
+                .serve_type_keybindings
+                .key_for(&ServeTypeEnum::Float),
+            Some(key!(a))
+        );
+        // the serve event on the key of the quick set
+        let mut ui = change_key_for(0).await;
+        ui.type_keys(&[KeyCode::Char('q'), KeyCode::Enter]).await;
+        assert_eq!(
+            saved(&ui)
+                .await
+                .scouting_keybindings
+                .key_for(&EventTypeEnum::S),
+            Some(key!(q))
+        );
+        // ...and the high set on the key of the block
+        let mut ui = change_key_for(set_index(SetTypeEnum::High)).await;
+        ui.type_keys(&[KeyCode::Char('d'), KeyCode::Enter]).await;
+        assert_eq!(
+            saved(&ui)
+                .await
+                .set_type_keybindings
+                .key_for(&SetTypeEnum::High),
+            Some(key!(d))
+        );
+    }
+
+    #[tokio::test]
     async fn panels_side_by_side_or_stacked() {
         fn title_rows(ui: &mut Ui) -> (usize, usize) {
             let lines = ui.lines();
@@ -502,6 +776,33 @@ mod tests {
         let settings = Settings::default();
         check(&settings.scouting_keybindings, &EventTypeEnum::ALL);
         check(&settings.eval_keybindings, &EvalEnum::ALL);
+        // sets and serves on their codes, apart from the evaluations: the
+        // digits are theirs too
+        let codes = |codes: Vec<(String, Option<KeyCombination>)>| {
+            for (code, ck) in codes {
+                let ck = ck.unwrap_or_else(|| panic!("{code} not bound"));
+                assert_eq!(ck.to_string(), code.to_lowercase(), "{code}");
+                assert!(!is_reserved_key(&ck), "{code} on reserved {ck}");
+                assert_eq!(settings.eval_keybindings.action_for(&ck), None, "{code}");
+            }
+        };
+        codes(
+            SetTypeEnum::ALL
+                .iter()
+                .map(|s| (s.to_string(), settings.set_type_keybindings.key_for(s)))
+                .collect(),
+        );
+        codes(
+            ServeTypeEnum::ALL
+                .iter()
+                .map(|s| (s.to_string(), settings.serve_type_keybindings.key_for(s)))
+                .collect(),
+        );
+        let set_keys: HashSet<_> = SetTypeEnum::ALL
+            .iter()
+            .filter_map(|s| settings.set_type_keybindings.key_for(s))
+            .collect();
+        assert_eq!(set_keys.len(), SetTypeEnum::ALL.len());
         assert_eq!(
             navigation_keybindings().keybindings_for(&ScreenActionEnum::Settings),
             keys(&[SETTINGS_KEY])
@@ -520,10 +821,13 @@ mod tests {
             fields.contains(&"scouting_keybindings".to_string()),
             "{fields:?}"
         );
-        assert!(
-            fields.contains(&"eval_keybindings".to_string()),
-            "{fields:?}"
-        );
+        for field in [
+            "eval_keybindings",
+            "set_type_keybindings",
+            "serve_type_keybindings",
+        ] {
+            assert!(fields.contains(&field.to_string()), "{field}: {fields:?}");
+        }
     }
 
     /// A settings file as saved up to v0.2.0: navigation keys customized
@@ -585,6 +889,98 @@ mod tests {
                 defaults.eval_keybindings.keybindings_for(&eval)
             );
         }
+        for set in SetTypeEnum::ALL {
+            assert_eq!(
+                settings.set_type_keybindings.keybindings_for(&set),
+                defaults.set_type_keybindings.keybindings_for(&set)
+            );
+        }
+        for serve in ServeTypeEnum::ALL {
+            assert_eq!(
+                settings.serve_type_keybindings.keybindings_for(&serve),
+                defaults.serve_type_keybindings.keybindings_for(&serve)
+            );
+        }
+    }
+
+    /// Up to v0.4.3 an evaluation could be on a letter that's now the key
+    /// of a set or a serve: the evaluation keeps it, the set has no key
+    /// until the scout gives it one.
+    #[tokio::test]
+    async fn evaluation_keys_of_v0_4_3_win_over_the_sets() {
+        let dir = TempDir::new().unwrap();
+        let old = r##"{
+            "language": "en",
+            "eval_keybindings": { "#": ["a"], "+": ["f"] }
+        }"##;
+        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
+        let settings = FileSystemSettingsReader::new(dir.path())
+            .read()
+            .await
+            .unwrap();
+        assert_eq!(
+            settings.eval_keybindings.key_for(&EvalEnum::Perfect),
+            Some(key!(a))
+        );
+        assert_eq!(
+            settings.set_type_keybindings.key_for(&SetTypeEnum::High),
+            None
+        );
+        assert_eq!(
+            settings.set_type_keybindings.key_for(&SetTypeEnum::Fast),
+            None
+        );
+        assert_eq!(
+            settings
+                .serve_type_keybindings
+                .key_for(&ServeTypeEnum::Float),
+            None
+        );
+        // the others on their codes
+        assert_eq!(
+            settings.set_type_keybindings.key_for(&SetTypeEnum::Super),
+            Some(key!(s))
+        );
+        assert_eq!(
+            settings
+                .serve_type_keybindings
+                .key_for(&ServeTypeEnum::Spin),
+            Some(key!(s))
+        );
+    }
+
+    /// Hand-edited sets and serves: reserved keys and the keys of the
+    /// evaluations are dropped, digits and more keys handled as for events.
+    #[tokio::test]
+    async fn hand_edited_sets_and_serves() {
+        let dir = TempDir::new().unwrap();
+        let old = r##"{
+            "language": "en",
+            "set_type_keybindings": {
+                "high": ["u"],
+                "five": ["+"],
+                "super": ["x", "w"],
+                "pipe": ["F2"],
+                "quick": []
+            },
+            "serve_type_keybindings": { "float": ["#"], "spin": ["9"] }
+        }"##;
+        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
+        let settings = FileSystemSettingsReader::new(dir.path())
+            .read()
+            .await
+            .unwrap();
+        let sets = &settings.set_type_keybindings;
+        // back to their codes
+        assert_eq!(sets.key_for(&SetTypeEnum::High), Some(key!(a)));
+        assert_eq!(sets.key_for(&SetTypeEnum::Five), Some(key!('5')));
+        assert_eq!(sets.key_for(&SetTypeEnum::Pipe), Some(key!('0')));
+        assert_eq!(sets.key_for(&SetTypeEnum::Quick), Some(key!(q)));
+        // one key only
+        assert_eq!(sets.keybindings_for(&SetTypeEnum::Super).len(), 1);
+        let serves = &settings.serve_type_keybindings;
+        assert_eq!(serves.key_for(&ServeTypeEnum::Float), Some(key!(f)));
+        assert_eq!(serves.key_for(&ServeTypeEnum::Spin), Some(key!('9')));
     }
 
     /// Up to v0.0.7 the settings were the language only.

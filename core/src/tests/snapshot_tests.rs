@@ -147,6 +147,7 @@ mod tests {
                 event_type: EventTypeEnum::S,
                 player: Some(setter),
                 target_player: None,
+                technique: None,
                 eval: Some(EvalEnum::Perfect),
                 timestamp: Utc::now(),
             }],
@@ -207,6 +208,7 @@ mod tests {
                     eval: Some(EvalEnum::Error),
                     player: Some(setter),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -233,6 +235,7 @@ mod tests {
                     eval: Some(EvalEnum::Perfect),
                     player: Some(oh1),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -259,6 +262,7 @@ mod tests {
                     eval: Some(EvalEnum::Perfect),
                     player: Some(opposite),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -297,6 +301,7 @@ mod tests {
                     eval: Some(EvalEnum::Positive),
                     player: Some(oh1),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -323,6 +328,7 @@ mod tests {
                     eval: None,
                     player: None,
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -348,6 +354,7 @@ mod tests {
                     event_type: EventTypeEnum::R,
                     eval: None,
                     target_player: Some(setter_replacement),
+                    technique: None,
                     player: Some(setter),
                     timestamp: Utc::now(),
                 },
@@ -379,6 +386,7 @@ mod tests {
                     event_type: EventTypeEnum::S,
                     player: Some(oh1),
                     target_player: None,
+                    technique: None,
                     eval: Some(EvalEnum::Negative),
                     timestamp: Utc::now(),
                 },
@@ -406,6 +414,7 @@ mod tests {
                     eval: Some(EvalEnum::Negative),
                     player: Some(mb2),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -432,6 +441,7 @@ mod tests {
                     eval: None,
                     player: None,
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -458,6 +468,7 @@ mod tests {
                     eval: Some(EvalEnum::Perfect),
                     player: Some(libero),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -484,6 +495,7 @@ mod tests {
                     eval: None,
                     player: Some(setter_replacement),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -519,6 +531,7 @@ mod tests {
                     eval: None,
                     player: None,
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -545,6 +558,7 @@ mod tests {
                     eval: Some(EvalEnum::Over),
                     player: Some(mb2),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -590,6 +604,7 @@ mod tests {
                     eval: Some(EvalEnum::Perfect),
                     player: Some(oh2),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(
@@ -630,6 +645,7 @@ mod tests {
                     // middle blocker 2 is still serving
                     player: Some(mb2),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -656,6 +672,7 @@ mod tests {
                     eval: Some(EvalEnum::Positive),
                     player: Some(libero),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -682,6 +699,7 @@ mod tests {
                     eval: Some(EvalEnum::Negative),
                     player: Some(oh1),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -720,6 +738,7 @@ mod tests {
                     eval: Some(EvalEnum::Positive),
                     player: Some(libero),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -746,6 +765,7 @@ mod tests {
                     eval: Some(EvalEnum::Perfect),
                     player: Some(opposite),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -772,6 +792,7 @@ mod tests {
                     eval: Some(EvalEnum::Positive),
                     player: Some(opposite),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -798,6 +819,7 @@ mod tests {
                     eval: Some(EvalEnum::Error),
                     player: Some(mb1),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -824,6 +846,7 @@ mod tests {
                     eval: Some(EvalEnum::Perfect),
                     player: Some(libero),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -850,6 +873,7 @@ mod tests {
                     eval: Some(EvalEnum::Over),
                     player: Some(opposite),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -876,6 +900,7 @@ mod tests {
                     eval: None,
                     player: None,
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -902,6 +927,7 @@ mod tests {
                     eval: Some(EvalEnum::Negative),
                     player: Some(oh2),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -928,6 +954,7 @@ mod tests {
                     eval: Some(EvalEnum::Positive),
                     player: Some(libero),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -954,6 +981,7 @@ mod tests {
                     eval: Some(EvalEnum::Error),
                     player: Some(oh1),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -980,6 +1008,7 @@ mod tests {
                     eval: None,
                     player: None,
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1006,6 +1035,7 @@ mod tests {
                     eval: Some(EvalEnum::Error),
                     player: Some(mb1),
                     target_player: None,
+                    technique: None,
                     timestamp: Utc::now(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1040,6 +1070,7 @@ mod tests {
                     event_type: EventTypeEnum::R,
                     eval: None,
                     target_player: Some(setter),
+                    technique: None,
                     player: Some(setter_replacement),
                     timestamp: Utc::now(),
                 },
@@ -1068,6 +1099,7 @@ mod tests {
                     event_type: EventTypeEnum::CL,
                     eval: None,
                     target_player: None,
+                    technique: None,
                     player: None,
                     timestamp: Utc::now(),
                 },
@@ -1099,6 +1131,7 @@ mod tests {
                     event_type: EventTypeEnum::CS,
                     eval: None,
                     target_player: None,
+                    technique: None,
                     player: Some(opposite),
                     timestamp: Utc::now(),
                 },
@@ -1128,6 +1161,7 @@ mod tests {
                     event_type: EventTypeEnum::P,
                     eval: Some(EvalEnum::Positive),
                     target_player: None,
+                    technique: None,
                     player: Some(oh1),
                     timestamp: Utc::now(),
                 },
@@ -1154,6 +1188,7 @@ mod tests {
                     event_type: EventTypeEnum::F,
                     eval: None,
                     target_player: None,
+                    technique: None,
                     player: Some(opposite),
                     timestamp: Utc::now(),
                 },
@@ -1189,6 +1224,7 @@ mod tests {
                     event_type: EventTypeEnum::OE,
                     eval: None,
                     target_player: None,
+                    technique: None,
                     player: None,
                     timestamp: Utc::now(),
                 },
@@ -1215,6 +1251,7 @@ mod tests {
                     event_type: EventTypeEnum::S,
                     eval: Some(EvalEnum::Positive),
                     target_player: None,
+                    technique: None,
                     // the setter, back on court, serves after the rotation
                     player: Some(setter),
                     timestamp: Utc::now(),
@@ -1270,6 +1307,7 @@ mod tests {
                 eval: None,
                 player: None,
                 target_player: None,
+                technique: None,
                 timestamp: Utc::now(),
             })
             .expect("expected their error to apply");
@@ -1277,8 +1315,9 @@ mod tests {
         let setter_already_replaced = snapshot.add_event(&EventEntry {
             event_type: EventTypeEnum::R,
             eval: None,
-            player: Some(setter),                    // out
-            target_player: Some(setter_replacement), // in
+            player: Some(setter), // out
+            target_player: Some(setter_replacement),
+            technique: None,
             timestamp: Utc::now(),
         });
         assert!(match setter_already_replaced {
@@ -1291,8 +1330,9 @@ mod tests {
         let setter_replacement_already_used = snapshot.add_event(&EventEntry {
             event_type: EventTypeEnum::R,
             eval: None,
-            player: Some(oh1),                       // out
-            target_player: Some(setter_replacement), // in
+            player: Some(oh1), // out
+            target_player: Some(setter_replacement),
+            technique: None,
             timestamp: Utc::now(),
         });
         assert!(match setter_replacement_already_used {
@@ -1305,8 +1345,9 @@ mod tests {
         let libero_cannot_be_replaced = snapshot.add_event(&EventEntry {
             event_type: EventTypeEnum::R,
             eval: None,
-            player: Some(fallback_libero),               // out
-            target_player: Some(some_other_replacement), // in
+            player: Some(fallback_libero), // out
+            target_player: Some(some_other_replacement),
+            technique: None,
             timestamp: Utc::now(),
         });
         assert!(match libero_cannot_be_replaced {
@@ -1320,8 +1361,9 @@ mod tests {
             .add_event(&EventEntry {
                 event_type: EventTypeEnum::R,
                 eval: None,
-                player: Some(oh1),                           // out
-                target_player: Some(some_other_replacement), // in
+                player: Some(oh1), // out
+                target_player: Some(some_other_replacement),
+                technique: None,
                 timestamp: Utc::now(),
             })
             .expect("should not throw");
@@ -1329,8 +1371,9 @@ mod tests {
         let unclosed_change_error = snapshot.add_event(&EventEntry {
             event_type: EventTypeEnum::R,
             eval: None,
-            player: Some(some_other_replacement),   // out
-            target_player: Some(some_other_player), // in
+            player: Some(some_other_replacement), // out
+            target_player: Some(some_other_player),
+            technique: None,
             timestamp: Utc::now(),
         });
         assert!(match unclosed_change_error {
@@ -1349,7 +1392,8 @@ mod tests {
                 event_type: EventTypeEnum::R,
                 eval: None,
                 player: Some(some_other_replacement), // out
-                target_player: Some(oh1),             // in
+                target_player: Some(oh1),
+                technique: None,
                 timestamp: Utc::now(),
             })
             .expect("should not throw");
