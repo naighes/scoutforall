@@ -1,5 +1,8 @@
 use crate::{
-    constants::{DEFAULT_SET_TARGET_SCORE, TIE_BREAK_SET_TARGET_SCORE},
+    constants::{
+        DEFAULT_SET_PARTIALS, DEFAULT_SET_TARGET_SCORE, TIE_BREAK_SET_PARTIALS,
+        TIE_BREAK_SET_TARGET_SCORE,
+    },
     errors::{AppError, SnapshotError},
     shapes::{
         enums::{
@@ -8,6 +11,7 @@ use crate::{
         lineup::Lineup,
         set::SetEntry,
         stats::{AttackKey, EventKey, FirstRallyKey, RallyKey, Stats},
+        technique::{SetTypeEnum, TechniqueEnum},
     },
 };
 use chrono::{DateTime, Utc};
@@ -19,20 +23,68 @@ use std::{
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "EventRecord", into = "EventRecord")]
 pub struct EventEntry {
     pub timestamp: DateTime<Utc>,
     pub event_type: EventTypeEnum,
     pub player: Option<Uuid>,
     pub eval: Option<EvalEnum>,
     pub target_player: Option<Uuid>,
+    pub technique: Option<TechniqueEnum>,
+}
+
+/// An event as it's saved, one row of the events file. The technique is
+/// the last column: the older versions, up to v0.4.3, don't write it and
+/// skip it when reading, as long as every row has it.
+#[derive(Serialize, Deserialize)]
+struct EventRecord {
+    timestamp: DateTime<Utc>,
+    event_type: EventTypeEnum,
+    player: Option<Uuid>,
+    eval: Option<EvalEnum>,
+    target_player: Option<Uuid>,
+    #[serde(default)]
+    technique: Option<String>,
+}
+
+impl TryFrom<EventRecord> for EventEntry {
+    type Error = AppError;
+    fn try_from(record: EventRecord) -> Result<Self, Self::Error> {
+        let technique = record
+            .technique
+            .filter(|code| !code.is_empty())
+            .map(|code| TechniqueEnum::parse(record.event_type, &code))
+            .transpose()?;
+        Ok(EventEntry {
+            timestamp: record.timestamp,
+            event_type: record.event_type,
+            player: record.player,
+            eval: record.eval,
+            target_player: record.target_player,
+            technique,
+        })
+    }
+}
+
+impl From<EventEntry> for EventRecord {
+    fn from(event: EventEntry) -> Self {
+        EventRecord {
+            timestamp: event.timestamp,
+            event_type: event.event_type,
+            player: event.player,
+            eval: event.eval,
+            target_player: event.target_player,
+            technique: event.technique.map(|t| t.to_string()),
+        }
+    }
 }
 
 impl Display for EventEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "event={:?} player={:?} eval={:?} target={:?}",
-            self.event_type, self.player, self.eval, self.target_player
+            "event={:?} player={:?} eval={:?} target={:?} technique={:?}",
+            self.event_type, self.player, self.eval, self.target_player, self.technique
         )
     }
 }
@@ -134,6 +186,7 @@ impl Snapshot {
             .sequence_issue(event)
             .or_else(|| Self::evaluation_issue(event))
             .or_else(|| self.player_issue(event))
+            .or_else(|| Self::technique_issue(event))
             .or_else(|| self.replacement_issue(event))
         {
             Some(reason) => Err(AppError::Snapshot(SnapshotError::InvalidEvent(format!(
@@ -164,6 +217,15 @@ impl Snapshot {
                 Some(format!("evaluation {eval} not allowed"))
             }
             (false, Some(_)) => Some("unexpected evaluation".to_string()),
+            _ => None,
+        }
+    }
+
+    fn technique_issue(event: &EventEntry) -> Option<String> {
+        match event.technique {
+            Some(technique) if !technique.fits(event.event_type) => {
+                Some(format!("technique {technique} not allowed"))
+            }
             _ => None,
         }
     }
@@ -232,6 +294,37 @@ impl Snapshot {
         }
     }
 
+    /// The sets the attacker can receive, told by their role and row (see
+    /// [`SetTypeEnum::available`]): none for a player not on court.
+    pub fn available_set_types(&self, attacker: &Uuid) -> Vec<SetTypeEnum> {
+        self.current_lineup
+            .get_role(attacker)
+            .map(|role| {
+                SetTypeEnum::available(role, self.current_lineup.is_back_row_player(attacker))
+            })
+            .unwrap_or_default()
+    }
+
+    /// The set chosen for the attacker before the scout picks one, told by
+    /// their role and row and by the touch before (see
+    /// [`SetTypeEnum::preselected`]).
+    pub fn preselected_set_type(&self, attacker: &Uuid) -> Option<SetTypeEnum> {
+        let previous = self
+            .last_event
+            .as_ref()
+            .and_then(|e| e.eval.map(|eval| (e.event_type, eval)));
+        self.current_lineup
+            .get_role(attacker)
+            .ok()
+            .and_then(|role| {
+                SetTypeEnum::preselected(
+                    role,
+                    self.current_lineup.is_back_row_player(attacker),
+                    previous,
+                )
+            })
+    }
+
     pub fn get_set_winner(&self, set_number: u8) -> Option<TeamSideEnum> {
         let target_score = if set_number == 5 {
             TIE_BREAK_SET_TARGET_SCORE
@@ -256,8 +349,13 @@ impl Snapshot {
                 TeamSideEnum::Them => (&mut self.score_them, self.score_us),
             };
             *score += 1;
-            // keep track of partials at 8, 16, 21
-            if [8, 16, 21].contains(score) && *score > opponent_score {
+            // keep track of the partials
+            let partials = if self.set_number == 5 {
+                TIE_BREAK_SET_PARTIALS
+            } else {
+                DEFAULT_SET_PARTIALS
+            };
+            if partials.contains(&*score) && *score > opponent_score {
                 self.partials.push((self.score_us, self.score_them));
             }
         }

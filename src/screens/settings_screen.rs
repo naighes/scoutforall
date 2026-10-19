@@ -30,7 +30,10 @@ use ratatui::{
 };
 use scout4all_core::{
     localization::current_labels,
-    shapes::enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum, WithDesc},
+    shapes::{
+        enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum},
+        technique::{ServeTypeEnum, SetTypeEnum},
+    },
 };
 
 /// below this width the two panels are stacked instead of side by side
@@ -57,6 +60,8 @@ const GENERAL_FIELDS: [GeneralField; 2] = [GeneralField::Language, GeneralField:
 enum Shortcut {
     Event(EventTypeEnum),
     Eval(EvalEnum),
+    SetType(SetTypeEnum),
+    ServeType(ServeTypeEnum),
 }
 
 fn shortcuts() -> Vec<Shortcut> {
@@ -64,7 +69,21 @@ fn shortcuts() -> Vec<Shortcut> {
         .into_iter()
         .map(Shortcut::Event)
         .chain(EvalEnum::ALL.into_iter().map(Shortcut::Eval))
+        .chain(SetTypeEnum::ALL.into_iter().map(Shortcut::SetType))
+        .chain(ServeTypeEnum::ALL.into_iter().map(Shortcut::ServeType))
         .collect()
+}
+
+/// The title of the group the shortcut opens, if it's the first of it.
+fn group_title(shortcut: Shortcut) -> Option<&'static str> {
+    let labels = current_labels();
+    match shortcut {
+        Shortcut::Event(event) if event == EventTypeEnum::ALL[0] => Some(labels.events),
+        Shortcut::Eval(eval) if eval == EvalEnum::ALL[0] => Some(labels.evaluations),
+        Shortcut::SetType(set) if set == SetTypeEnum::ALL[0] => Some(labels.set_types),
+        Shortcut::ServeType(serve) if serve == ServeTypeEnum::ALL[0] => Some(labels.serve_types),
+        _ => None,
+    }
 }
 
 /// The settings: general ones on a panel, the scouting key bindings on
@@ -91,22 +110,40 @@ where
     SR: SettingsReader + Send + Sync + 'static,
 {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        let panels = if body.width >= SIDE_BY_SIDE_MIN_WIDTH {
-            Layout::default()
+        // the fixed keys below the general settings: at the end of the
+        // shortcuts they would scroll out of sight
+        let general_and_fixed = [
+            Constraint::Length(GENERAL_FIELDS.len() as u16 + 2),
+            Constraint::Length(self.fixed_keys().len() as u16 + 2),
+        ];
+        let (general, fixed, shortcuts) = if body.width >= SIDE_BY_SIDE_MIN_WIDTH {
+            let panels = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-                .split(body)
-        } else {
-            Layout::default()
+                .split(body);
+            let left = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(GENERAL_FIELDS.len() as u16 + 2),
+                    general_and_fixed[0],
+                    general_and_fixed[1],
+                    Constraint::Min(0),
+                ])
+                .split(panels[0]);
+            (left[0], left[1], panels[1])
+        } else {
+            let panels = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    general_and_fixed[0],
+                    general_and_fixed[1],
                     Constraint::Min(1),
                 ])
-                .split(body)
+                .split(body);
+            (panels[0], panels[1], panels[2])
         };
-        self.render_general(f, panels[0]);
-        self.render_shortcuts(f, panels[1]);
+        self.render_general(f, general);
+        self.render_fixed_keys(f, fixed);
+        self.render_shortcuts(f, shortcuts);
         self.notifier.render(f, footer_right);
         self.footer.render(f, footer_left, self.footer_entries());
     }
@@ -161,6 +198,8 @@ where
                 let defaults = Settings {
                     scouting_keybindings: KeyBindings::default(),
                     eval_keybindings: KeyBindings::default(),
+                    set_type_keybindings: KeyBindings::default(),
+                    serve_type_keybindings: KeyBindings::default(),
                     ..self.settings.clone()
                 };
                 self.notifier
@@ -329,6 +368,8 @@ where
         match shortcuts()[self.shortcut] {
             Shortcut::Event(event) => screen(self, event),
             Shortcut::Eval(eval) => screen(self, eval),
+            Shortcut::SetType(set) => screen(self, set),
+            Shortcut::ServeType(serve) => screen(self, serve),
         }
     }
 
@@ -388,47 +429,65 @@ where
             .unwrap_or_else(|| current_labels().unassigned.to_string())
     }
 
-    fn render_shortcuts(&mut self, f: &mut Frame, area: Rect) {
+    fn shortcut_row<T: ScoutingShortcut>(&self, action: T) -> Row<'static> {
+        Row::new(vec![
+            format!("  {}", action.with_desc().1),
+            self.keys_of(&action),
+        ])
+    }
+
+    /// The keys scouting keeps for itself, with what they do.
+    fn fixed_keys(&self) -> Vec<(&'static str, String)> {
         let labels = current_labels();
         let fmt = KeyCombinationFormatExt::new(&self.format);
-        let header = |title: &str| {
-            Row::new(vec![title.to_string()])
-                .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED))
-        };
-        let mut rows = vec![header(labels.events)];
-        let mut selected_row = None;
-        for (i, shortcut) in shortcuts().into_iter().enumerate() {
-            if shortcut == Shortcut::Eval(EvalEnum::ALL[0]) {
-                rows.push(header(labels.evaluations));
-            }
-            if i == self.shortcut {
-                selected_row = Some(rows.len());
-            }
-            rows.push(match shortcut {
-                Shortcut::Event(event) => Row::new(vec![
-                    format!("  {}", event.with_desc().1),
-                    self.keys_of(&event),
-                ]),
-                Shortcut::Eval(eval) => Row::new(vec![
-                    format!("  {}", eval.with_desc().1),
-                    self.keys_of(&eval),
-                ]),
-            });
-        }
-        rows.push(header(labels.fixed_shortcuts));
-        let fixed = [
+        vec![
             (labels.settings, fmt.to_string(SETTINGS_KEY)),
             (labels.undo, fmt.to_string(UNDO_KEY)),
             (labels.back, fmt.to_string(BACK_KEY)),
             (labels.player_number, "0-9".to_string()),
-        ];
-        rows.extend(fixed.into_iter().map(|(action, key)| {
+        ]
+    }
+
+    fn render_fixed_keys(&self, f: &mut Frame, area: Rect) {
+        let labels = current_labels();
+        let rows = self.fixed_keys().into_iter().map(|(action, key)| {
             Row::new(vec![
                 format!("  {}", action),
                 format!("{} ({})", key, labels.fixed),
             ])
             .style(Style::default().fg(Color::DarkGray))
-        }));
+        });
+        let table = Table::new(
+            rows,
+            [Constraint::Percentage(60), Constraint::Percentage(40)],
+        )
+        .block(Block::default().borders(Borders::ALL).title(format!(
+            "{} – {}",
+            labels.key_bindings, labels.fixed_shortcuts
+        )));
+        f.render_widget(table, area);
+    }
+
+    fn render_shortcuts(&mut self, f: &mut Frame, area: Rect) {
+        let labels = current_labels();
+        let header = |title: &str| {
+            Row::new(vec![title.to_string()])
+                .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED))
+        };
+        let mut rows = vec![];
+        let mut selected_row = None;
+        for (i, shortcut) in shortcuts().into_iter().enumerate() {
+            rows.extend(group_title(shortcut).map(header));
+            if i == self.shortcut {
+                selected_row = Some(rows.len());
+            }
+            rows.push(match shortcut {
+                Shortcut::Event(event) => self.shortcut_row(event),
+                Shortcut::Eval(eval) => self.shortcut_row(eval),
+                Shortcut::SetType(set) => self.shortcut_row(set),
+                Shortcut::ServeType(serve) => self.shortcut_row(serve),
+            });
+        }
         self.shortcuts_state.select(match self.panel {
             SettingsPanel::Shortcuts => selected_row,
             SettingsPanel::General => None,

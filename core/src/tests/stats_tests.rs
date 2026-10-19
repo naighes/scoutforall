@@ -75,8 +75,18 @@ mod tests {
             positions: [Uuid; 6],
             events: Vec<EventEntry>,
         ) -> Snapshot {
+            self.replay_set(1, serving_team, positions, events)
+        }
+
+        fn replay_set(
+            &self,
+            set_number: u8,
+            serving_team: TeamSideEnum,
+            positions: [Uuid; 6],
+            events: Vec<EventEntry>,
+        ) -> Snapshot {
             let set = SetEntry {
-                set_number: 1,
+                set_number,
                 serving_team,
                 initial_positions: positions,
                 libero: self.libero,
@@ -107,6 +117,7 @@ mod tests {
             player,
             eval,
             target_player: None,
+            technique: None,
         }
     }
 
@@ -609,7 +620,7 @@ mod tests {
     // --- the attacks: distribution and counter-attacks --------------------
 
     /// The attacks of the distribution are the ones built by us; the
-    /// counter-attacks are the ones not after a reception nor a serve.
+    /// counter-attacks are the ones not after our reception.
     #[test]
     fn attacks_built_by_us() {
         let t = Team::new();
@@ -629,11 +640,11 @@ mod tests {
         assert_eq!(keys.len(), 1);
         assert_eq!((keys[0].prev_type, keys[0].prev_eval), (P, Negative));
         assert!(!keys[0].is_counter_attack());
-        // after their reception came straight back: not a counter-attack
+        // after their reception came straight back: a counter-attack
         let free_ball = t.serving(vec![act(S, t.setter, Over), act(A, t.oh1, Perfect)]);
         let keys = attacks(&free_ball);
         assert_eq!(keys.len(), 1);
-        assert!(!keys[0].is_counter_attack());
+        assert!(keys[0].is_counter_attack());
         // after a dig, and again after our attack they couldn't counter
         let transition = t.serving(vec![
             act(S, t.setter, Negative),
@@ -672,6 +683,38 @@ mod tests {
         assert!(attacks(&error).is_empty());
     }
 
+    /// Their reception coming straight back is played again by the serving
+    /// team: its attack is a counter-attack, as the one after a dig.
+    #[test]
+    fn attack_after_a_serve_coming_back_is_a_counter_attack() {
+        let t = Team::new();
+        let snapshot = t.serving(vec![act(S, t.setter, Over), act(A, t.oh1, Perfect)]);
+        assert_eq!(snapshot.stats.attacks.count(|k| k.is_counter_attack()), 1);
+        // the attack after our reception is not
+        let snapshot = t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Perfect)]);
+        assert_eq!(snapshot.stats.attacks.count(|k| k.is_counter_attack()), 0);
+    }
+
+    /// A team ahead at 8, 16 and 21 in a set to 25; at 5 and 10 in the fifth
+    /// set, to 15. A team behind or tied doesn't make a partial.
+    #[test]
+    fn partials_by_set() {
+        let t = Team::new();
+        let aces = |set_number, n| {
+            t.replay_set(
+                set_number,
+                TeamSideEnum::Us,
+                t.rotation_0(),
+                (0..n).map(|_| act(S, t.setter, Perfect)).collect(),
+            )
+            .partials
+        };
+        assert_eq!(aces(1, 22), vec![(8, 0), (16, 0), (21, 0)]);
+        assert_eq!(aces(5, 14), vec![(5, 0), (10, 0)]);
+        assert_eq!(aces(4, 10), vec![(8, 0)]);
+        assert_eq!(aces(5, 4), vec![]);
+    }
+
     #[test]
     fn counter_attack_conversion_by_zone() {
         let t = Team::new();
@@ -682,13 +725,13 @@ mod tests {
             act(A, t.opposite, Positive),
             // outside hitter in break: zone 4
             act(A, t.oh1, Perfect),
-            // not a counter-attack: after the serve came back
+            // a counter-attack too: after the serve came back
             act(S, t.setter, Over),
             act(A, t.oh1, Error),
         ]);
         let conversion = |zone| snapshot.stats.counter_attack_conversion(zone, &all());
         assert_eq!(conversion(ZoneEnum::Two), Some((0.0, 1, 0)));
-        assert_eq!(conversion(ZoneEnum::Four), Some((100.0, 1, 1)));
+        assert_eq!(conversion(ZoneEnum::Four), Some((50.0, 2, 1)));
         assert_eq!(conversion(ZoneEnum::Three), None);
     }
 

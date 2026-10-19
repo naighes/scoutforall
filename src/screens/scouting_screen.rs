@@ -13,8 +13,8 @@ use crate::shapes::settings::Settings;
 use crate::shapes::symbol::KeyCombinationFormatExt;
 use async_trait::async_trait;
 use chrono::Utc;
-use crokey::KeyCombinationFormat;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
+use crokey::{KeyCombination, KeyCombinationFormat};
 use ratatui::text::Line;
 use ratatui::{
     Frame,
@@ -27,11 +27,12 @@ use scout4all_core::{
     localization::current_labels,
     providers::set_writer::SetWriter,
     shapes::{
-        enums::{EventTypeEnum, FriendlyName},
+        enums::{EvalEnum, EventTypeEnum, FriendlyName},
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
+        technique::{ServeTypeEnum, TechniqueEnum},
     },
 };
 use std::sync::Arc;
@@ -49,6 +50,8 @@ pub struct ScoutingScreen<
     snapshot: Snapshot,
     current_event: EventTypeInput,
     player: Option<Uuid>,
+    /// the set or serve chosen along with the evaluation
+    technique: Option<TechniqueEnum>,
     state: ScoutingScreenState,
     notify_message: NotifyBanner,
     back_stack_count: Option<u8>,
@@ -105,17 +108,35 @@ impl<
                 Constraint::Percentage(40),
             ])
             .split(body);
+        // the sets or serves are listed below the evaluations
+        let techniques = match self.state {
+            ScoutingScreenState::Eval => self.available_techniques(),
+            _ => vec![],
+        };
         let left = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints(match techniques.len() {
+                0 => [
+                    Constraint::Percentage(50),
+                    Constraint::Length(0),
+                    Constraint::Percentage(50),
+                ],
+                n => [
+                    Constraint::Length(self.available_evals().len() as u16 + 2),
+                    Constraint::Length(n as u16 + 2),
+                    Constraint::Min(0),
+                ],
+            })
             .split(columns[0]);
-        let (left_top, left_bottom, center, right) = (left[0], left[1], columns[1], columns[2]);
+        let (left_top, left_middle, left_bottom, center, right) =
+            (left[0], left[1], left[2], columns[1], columns[2]);
         match self.state {
             ScoutingScreenState::Event => {
                 self.render_available_events(f, left_top);
             }
             ScoutingScreenState::Eval => {
                 self.render_eval_table(f, left_top);
+                self.render_technique_table(f, left_middle, &techniques);
             }
             ScoutingScreenState::Player => {
                 self.render_lineup_choices(f, left_top);
@@ -228,6 +249,7 @@ impl<
             snapshot,
             current_event: EventTypeInput::None,
             player: None,
+            technique: None,
             state: ScoutingScreenState::Event,
             notify_message: NotifyBanner::new(),
             back_stack_count,
@@ -324,6 +346,85 @@ impl<
             .collect()
     }
 
+    /// The events of the match up to now: the ones of the sets before, then
+    /// the ones of this set.
+    fn match_events(&self) -> impl DoubleEndedIterator<Item = &EventEntry> {
+        self.current_match
+            .sets
+            .iter()
+            .filter(|s| s.set_number < self.set.set_number)
+            .flat_map(|s| s.events.iter())
+            .chain(self.set.events.iter())
+    }
+
+    /// The sets or serves the scout chooses from along with the evaluation:
+    /// the sets the attacker can receive, or the serves.
+    fn available_techniques(&self) -> Vec<TechniqueEnum> {
+        match (self.current_event, self.player) {
+            (EventTypeInput::Some(EventTypeEnum::A), Some(attacker)) => self
+                .snapshot
+                .available_set_types(&attacker)
+                .into_iter()
+                .map(TechniqueEnum::Set)
+                .collect(),
+            (EventTypeInput::Some(EventTypeEnum::S), Some(_)) => ServeTypeEnum::ALL
+                .into_iter()
+                .map(TechniqueEnum::Serve)
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    /// The set or serve chosen before the scout picks one: the set told by
+    /// the attacker and the touch before, the last serve of the server in
+    /// the match.
+    fn preselected_technique(&self) -> Option<TechniqueEnum> {
+        match (self.current_event, self.player) {
+            (EventTypeInput::Some(EventTypeEnum::A), Some(attacker)) => self
+                .snapshot
+                .preselected_set_type(&attacker)
+                .map(TechniqueEnum::Set),
+            (EventTypeInput::Some(EventTypeEnum::S), Some(server)) => Some(TechniqueEnum::Serve(
+                ServeTypeEnum::preselected(&server, self.match_events()),
+            )),
+            _ => None,
+        }
+    }
+
+    /// The set or serve bound to the key, among the available ones.
+    fn technique_for(&self, ck: &KeyCombination) -> Option<TechniqueEnum> {
+        match self.current_event {
+            EventTypeInput::Some(EventTypeEnum::A) => self
+                .settings
+                .set_type_keybindings
+                .action_for(ck)
+                .copied()
+                .map(TechniqueEnum::Set),
+            EventTypeInput::Some(EventTypeEnum::S) => self
+                .settings
+                .serve_type_keybindings
+                .action_for(ck)
+                .copied()
+                .map(TechniqueEnum::Serve),
+            _ => None,
+        }
+        .filter(|technique| self.available_techniques().contains(technique))
+    }
+
+    fn technique_key(&self, technique: &TechniqueEnum) -> Option<KeyCombination> {
+        match technique {
+            TechniqueEnum::Set(set) => self.settings.set_type_keybindings.key_for(set),
+            TechniqueEnum::Serve(serve) => self.settings.serve_type_keybindings.key_for(serve),
+        }
+    }
+
+    fn available_evals(&self) -> Vec<EvalEnum> {
+        match self.current_event {
+            EventTypeInput::Some(event_type) => event_type.available_evals(),
+            EventTypeInput::None => vec![],
+        }
+    }
+
     async fn undo_last_event(&mut self) -> AppAction {
         use EventTypeEnum::*;
         use ScoutingScreenState::*;
@@ -370,6 +471,10 @@ impl<
             // be re-computed from scratch
             Ok(snapshot) => {
                 self.snapshot = snapshot;
+                // the set or serve of the removed event, if it was saved
+                self.technique = removed_event
+                    .technique
+                    .or_else(|| self.preselected_technique());
                 AppAction::None
             }
             Err(_) => {
@@ -400,6 +505,7 @@ impl<
                 // reset state
                 self.current_event = EventTypeInput::None;
                 self.player = None;
+                self.technique = None;
                 self.state = ScoutingScreenState::Event;
                 match self.snapshot.get_set_winner(self.set.set_number) {
                     None => AppAction::None,
@@ -470,6 +576,7 @@ impl<
                         self.player = self.snapshot.current_lineup.get_serving_player();
                         self.state = ScoutingScreenState::Eval;
                         self.current_event = EventTypeInput::Some(S);
+                        self.technique = self.preselected_technique();
                         AppAction::None
                     }
                     // these events require player selection
@@ -486,6 +593,7 @@ impl<
                             eval: None,
                             player: None,
                             target_player: None,
+                            technique: None,
                         };
                         self.add_event(&entry).await
                     }
@@ -541,6 +649,7 @@ impl<
                         eval: None,
                         player: Some(replaced_id),
                         target_player: Some(p.id),
+                        technique: None,
                     };
                     return self.add_event(&entry).await;
                 }
@@ -577,6 +686,7 @@ impl<
             {
                 self.player = Some(player.id);
                 self.state = ScoutingScreenState::Eval;
+                self.technique = self.preselected_technique();
                 AppAction::None
             }
             (Some(player), EventTypeInput::Some(EventTypeEnum::R)) => {
@@ -591,6 +701,7 @@ impl<
                     eval: None,
                     player: Some(player.id),
                     target_player: None,
+                    technique: None,
                 })
                 .await
             }
@@ -613,6 +724,7 @@ impl<
             // * the ScoutingScreenState::Player screen if it's not serving
             // * otherwise, so it's serving, go to the ScoutingScreenState::Event
             self.player = None;
+            self.technique = None;
             if self.current_event == EventTypeInput::Some(S) {
                 self.current_event = EventTypeInput::None;
                 self.state = ScoutingScreenState::Event;
@@ -622,37 +734,43 @@ impl<
             return AppAction::None;
         }
         use EventTypeEnum::*;
+        let ck = combination_of(key);
         // the evaluation bound to the key, if the event allows it
         let eval = match &self.current_event {
             EventTypeInput::Some(event_type) => self
                 .settings
                 .eval_keybindings
-                .action_for(&combination_of(key))
+                .action_for(&ck)
                 .copied()
                 .filter(|eval| event_type.available_evals().contains(eval)),
             EventTypeInput::None => None,
         };
-        if let (Some(eval), EventTypeInput::Some(event_type)) = (eval, &self.current_event) {
-            match event_type {
-                // ensure event type allows evaluation
-                A | B | P | D | S => {
-                    let entry = EventEntry {
-                        timestamp: Utc::now(),
-                        event_type: *event_type,
-                        eval: Some(eval),
-                        player: self.player,
-                        target_player: None,
-                    };
-                    return self.add_event(&entry).await;
-                }
-                _ => {
-                    let template = current_labels().evaluation_not_allowed_for_event;
-                    self.notify_message
-                        .set_error(template.replace("{}", &event_type.to_string()));
-                }
+        match (eval, self.technique_for(&ck), self.current_event) {
+            // ensure event type allows evaluation
+            (Some(eval), _, EventTypeInput::Some(event_type @ (A | B | P | D | S))) => {
+                let entry = EventEntry {
+                    timestamp: Utc::now(),
+                    event_type,
+                    eval: Some(eval),
+                    player: self.player,
+                    target_player: None,
+                    technique: self.technique,
+                };
+                self.add_event(&entry).await
             }
+            (Some(_), _, EventTypeInput::Some(event_type)) => {
+                let template = current_labels().evaluation_not_allowed_for_event;
+                self.notify_message
+                    .set_error(template.replace("{}", &event_type.to_string()));
+                AppAction::None
+            }
+            // the set or serve changes, the evaluation saves the event
+            (None, Some(technique), _) => {
+                self.technique = Some(technique);
+                AppAction::None
+            }
+            _ => AppAction::None,
         }
-        AppAction::None
     }
 
     /* rendering */
@@ -748,11 +866,45 @@ impl<
         f.render_widget(table, area);
     }
 
-    fn render_eval_table(&mut self, f: &mut Frame, area: Rect) {
-        let available_evals = match self.current_event {
-            EventTypeInput::Some(event_type) => event_type.available_evals(),
-            _ => vec![],
+    fn render_technique_table(&self, f: &mut Frame, area: Rect, techniques: &[TechniqueEnum]) {
+        let labels = current_labels();
+        let rows: Vec<Row> = techniques
+            .iter()
+            .map(|technique| {
+                let key = self
+                    .technique_key(technique)
+                    .map(|k| {
+                        KeyCombinationFormatExt::new(&KeyCombinationFormat::default()).to_string(k)
+                    })
+                    .unwrap_or_else(|| labels.unassigned.to_string());
+                let (check, style) = match self.technique == Some(*technique) {
+                    true => ("[X]", Style::default().add_modifier(Modifier::BOLD)),
+                    false => ("[ ]", Style::default()),
+                };
+                Row::new(vec![format!(
+                    "{} {} => {}",
+                    check,
+                    key,
+                    technique.description()
+                )])
+                .style(style)
+            })
+            .collect();
+        let title = match self.current_event {
+            EventTypeInput::Some(EventTypeEnum::S) => labels.serve_type,
+            _ => labels.set_type,
         };
+        let table = Table::new(rows, [Constraint::Percentage(100)]).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .style(Style::default().add_modifier(Modifier::REVERSED)),
+        );
+        f.render_widget(table, area);
+    }
+
+    fn render_eval_table(&mut self, f: &mut Frame, area: Rect) {
+        let available_evals = self.available_evals();
         let rows: Vec<Row> = available_evals
             .iter()
             .map(|ev| {
@@ -900,9 +1052,15 @@ impl<
             ),
             format!(
                 " {:<10}",
-                e.eval
-                    .map(|e1| e1.friendly_name(e.event_type, current_labels()))
-                    .unwrap_or("".to_string())
+                [
+                    e.eval
+                        .map(|e1| e1.friendly_name(e.event_type, current_labels())),
+                    e.technique.map(|t| t.to_string()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ")
             ),
         ])
         .style(if i == 0 {
@@ -1187,6 +1345,7 @@ mod tests {
             player,
             eval: None,
             target_player,
+            technique: None,
         };
         // a player who isn't on court is substituted
         screen

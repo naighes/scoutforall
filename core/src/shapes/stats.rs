@@ -160,13 +160,14 @@ pub struct AttackKey {
 }
 
 impl AttackKey {
-    /// A counter-attack: an attack built on a dig, or on our attack or block
-    /// they couldn't counter (attack `+` or `!`, block `+`), i.e. not after a reception (side out on first
-    /// rally) nor after a serve (their reception coming straight back).
+    /// A counter-attack: an attack built on a dig, on their reception coming
+    /// straight back (serve `/`), or on our attack or block they couldn't
+    /// counter (attack `+` or `!`, block `+`), i.e. everything but the attack
+    /// built on our reception (side out on first rally).
     pub fn is_counter_attack(&self) -> bool {
         matches!(
             self.prev_type,
-            EventTypeEnum::D | EventTypeEnum::A | EventTypeEnum::B
+            EventTypeEnum::S | EventTypeEnum::D | EventTypeEnum::A | EventTypeEnum::B
         )
     }
 }

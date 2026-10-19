@@ -112,6 +112,7 @@ mod tests {
             player,
             eval,
             target_player,
+            technique: None,
         }
     }
 

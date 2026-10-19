@@ -47,19 +47,27 @@ impl FileSystemSetReader {
 
     async fn parse_events(path: &Path) -> Result<Vec<EventEntry>, AppError> {
         let p = path.to_path_buf();
-        spawn_blocking(move || -> Result<Vec<EventEntry>, AppError> {
-            let file = File::open(&p).map_err(|e| AppError::IO(IOError::from(e)))?;
-            let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
-            // a row that can't be read makes the set unreadable: without it
-            // the set would replay to something else
-            reader
-                .deserialize()
-                .collect::<Result<Vec<EventEntry>, csv::Error>>()
-                .map_err(|e| AppError::IO(IOError::from(e)))
-        })
-        .await
-        .map_err(|e| AppError::IO(IOError::Msg(format!("tokio join error: {}", e))))?
+        spawn_blocking(move || read_events(&p))
+            .await
+            .map_err(|e| AppError::IO(IOError::Msg(format!("tokio join error: {}", e))))?
     }
+}
+
+/// The events saved in the file. Rows with and without the technique may be
+/// mixed, e.g. when v0.4.3 or older adds events to a set scouted by a later
+/// version.
+pub(crate) fn read_events(path: &Path) -> Result<Vec<EventEntry>, AppError> {
+    let file = File::open(path).map_err(|e| AppError::IO(IOError::from(e)))?;
+    let mut reader = ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(file);
+    // a row that can't be read makes the set unreadable: without it the set
+    // would replay to something else
+    reader
+        .deserialize()
+        .collect::<Result<Vec<EventEntry>, csv::Error>>()
+        .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
 #[async_trait]

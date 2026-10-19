@@ -7,3 +7,4 @@ pub mod set;
 pub mod snapshot;
 pub mod stats;
 pub mod team;
+pub mod technique;
