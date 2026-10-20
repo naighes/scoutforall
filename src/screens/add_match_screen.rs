@@ -24,7 +24,7 @@ use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
     localization::current_labels,
     providers::{match_writer::MatchWriter, set_writer::SetWriter},
-    shapes::team::TeamEntry,
+    shapes::{enums::EventTypeEnum, r#match::MatchEntry, team::TeamEntry},
 };
 
 #[derive(Debug)]
@@ -50,6 +50,7 @@ pub struct AddMatchScreen<
     footer: NavigationFooter,
     footer_entries: Vec<(String, String)>,
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
+    editing: Option<MatchEntry>,
 }
 
 impl<
@@ -147,7 +148,72 @@ impl<
             Some(&DEFAULT_MAX_SUBSTITUTIONS.to_string()),
             |current: &str, c: char| current.len() < 2 && c.is_ascii_digit(),
         );
+        Self::build(
+            settings_reader,
+            settings_writer,
+            settings,
+            team,
+            match_writer,
+            set_writer,
+            opponent,
+            date,
+            home,
+            max_substitutions,
+            None,
+        )
+    }
 
+    pub fn new_edit(
+        settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
+        settings: Settings,
+        match_writer: Arc<MW>,
+        set_writer: Arc<SSW>,
+        m: MatchEntry,
+    ) -> Self {
+        let max_sub_str = m.max_substitutions.to_string();
+        let opponent = TextBox::new(
+            current_labels().opponent.to_owned(),
+            true,
+            Some(&m.opponent),
+        );
+        let home = CheckBox::new(current_labels().home.to_owned(), false, m.home);
+        let date = DatePicker::with_date(current_labels().date.to_owned(), false, m.date);
+        let max_substitutions = TextBox::with_validator(
+            current_labels().max_substitutions.to_owned(),
+            false,
+            Some(&max_sub_str),
+            |current: &str, c: char| current.len() < 2 && c.is_ascii_digit(),
+        );
+        let team = m.team.clone();
+        Self::build(
+            settings_reader,
+            settings_writer,
+            settings,
+            team,
+            match_writer,
+            set_writer,
+            opponent,
+            date,
+            home,
+            max_substitutions,
+            Some(m),
+        )
+    }
+
+    fn build(
+        settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
+        settings: Settings,
+        team: TeamEntry,
+        match_writer: Arc<MW>,
+        set_writer: Arc<SSW>,
+        opponent: TextBox,
+        date: DatePicker,
+        home: CheckBox,
+        max_substitutions: TextBox,
+        editing: Option<MatchEntry>,
+    ) -> Self {
         let screen_actions = &[
             Sba::Simple(ScreenActionEnum::Next),
             Sba::Simple(ScreenActionEnum::Previous),
@@ -174,13 +240,16 @@ impl<
             match_writer,
             set_writer,
             screen_key_bindings,
+            editing,
         }
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(current_labels().new_match);
+        let title = match &self.editing {
+            Some(_) => current_labels().edit_match,
+            None => current_labels().new_match,
+        };
+        let block = Block::default().borders(Borders::ALL).title(title);
         f.render_widget(block, area);
     }
 
@@ -207,38 +276,92 @@ impl<
                     .set_error(current_labels().invalid_max_substitutions.to_string());
                 AppAction::None
             }
-            (Ok(date), Some(opponent), Some(max_substitutions)) => {
-                match self
-                    .match_writer
-                    .create(
-                        &self.team,
-                        opponent,
-                        date,
-                        self.home.get_selected_value(),
-                        max_substitutions,
-                    )
-                    .await
-                {
-                    Ok(m) => AppAction::SwitchScreen(Box::new(StartSetScreen::new(
-                        self.settings_reader.clone(),
-                        self.settings_writer.clone(),
-                        self.settings.clone(),
-                        m,
-                        1,
-                        None,
-                        Some(2),
-                        self.set_writer.clone(),
-                    ))),
-                    Err(_) => {
-                        self.notify_message
-                            .set_error(current_labels().could_not_create_match.to_string());
-                        AppAction::None
-                    }
+            (Ok(date), Some(opponent), Some(max_substitutions)) => match &self.editing {
+                Some(m) => {
+                    self.handle_update(m.clone(), opponent, date, max_substitutions)
+                        .await
                 }
-            }
+                None => self.handle_create(opponent, date, max_substitutions).await,
+            },
             _ => {
                 self.notify_message
                     .set_error(current_labels().invalid_date.to_string());
+                AppAction::None
+            }
+        }
+    }
+
+    async fn handle_create(
+        &mut self,
+        opponent: String,
+        date: chrono::DateTime<chrono::FixedOffset>,
+        max_substitutions: u8,
+    ) -> AppAction {
+        match self
+            .match_writer
+            .create(
+                &self.team,
+                opponent,
+                date,
+                self.home.get_selected_value(),
+                max_substitutions,
+            )
+            .await
+        {
+            Ok(m) => AppAction::SwitchScreen(Box::new(StartSetScreen::new(
+                self.settings_reader.clone(),
+                self.settings_writer.clone(),
+                self.settings.clone(),
+                m,
+                1,
+                None,
+                Some(2),
+                self.set_writer.clone(),
+            ))),
+            Err(_) => {
+                self.notify_message
+                    .set_error(current_labels().could_not_create_match.to_string());
+                AppAction::None
+            }
+        }
+    }
+
+    async fn handle_update(
+        &mut self,
+        m: MatchEntry,
+        opponent: String,
+        date: chrono::DateTime<chrono::FixedOffset>,
+        max_substitutions: u8,
+    ) -> AppAction {
+        let max_existing = m
+            .sets
+            .iter()
+            .map(|s| {
+                s.events
+                    .iter()
+                    .filter(|e| e.event_type == EventTypeEnum::R)
+                    .count() as u8
+            })
+            .max()
+            .unwrap_or(0);
+        let result = match max_substitutions < max_existing {
+            true => Err(current_labels().max_substitutions_below_existing_substitutions),
+            false => self
+                .match_writer
+                .update(
+                    &m,
+                    opponent,
+                    date,
+                    self.home.get_selected_value(),
+                    max_substitutions,
+                )
+                .await
+                .map_err(|_| current_labels().could_not_update_match),
+        };
+        match result {
+            Ok(()) => AppAction::Back(true, Some(1)),
+            Err(message) => {
+                self.notify_message.set_error(message.to_string());
                 AppAction::None
             }
         }

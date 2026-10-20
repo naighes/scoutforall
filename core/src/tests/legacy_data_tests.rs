@@ -8,10 +8,12 @@ mod tests {
         constants::LEGACY_MAX_SUBSTITUTIONS,
         providers::{
             fs::{
-                match_reader::FileSystemMatchReader, set_reader::FileSystemSetReader,
-                set_writer::FileSystemSetWriter, team_reader::FileSystemTeamReader,
+                match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
+                set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
+                team_reader::FileSystemTeamReader,
             },
             match_reader::MatchReader,
+            match_writer::MatchWriter,
             set_writer::SetWriter,
             team_reader::TeamReader,
         },
@@ -215,6 +217,59 @@ mod tests {
         assert_eq!(snapshot.score_them, 1);
         assert_eq!(snapshot.current_lineup.get_serving_player(), Some(p.mb2));
         assert_eq!(snapshot.current_lineup.get_setter(), Some(p.mb2));
+    }
+
+    /// Editing the match info of a match created before v0.3.0 saves the
+    /// substitutions: its sets still replay with the rules they were scouted
+    /// with.
+    #[tokio::test]
+    async fn editing_a_match_created_before_v0_3_0_keeps_its_sets_replaying() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), None);
+        legacy_set(dir.path(), &p, &events_scouted_up_to_v0_2_0(&p));
+        let m = edit(dir.path()).await;
+        assert_eq!(m.opponent, "Arezzo");
+        assert!(m.home);
+        assert_eq!(m.max_substitutions, LEGACY_MAX_SUBSTITUTIONS);
+        assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V1));
+        let snapshot = m
+            .get_set_snapshot(1)
+            .expect("expected the set to replay")
+            .unwrap();
+        assert_eq!(snapshot.current_lineup.get_setter(), Some(p.mb2));
+    }
+
+    /// The set of a match created before v0.3.0 that only the rules of
+    /// v0.3.0 replay keeps them once the match is edited.
+    #[tokio::test]
+    async fn editing_a_match_created_before_v0_3_0_keeps_the_rules_of_v0_3_0() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), None);
+        let mut events = events_scouted_up_to_v0_2_0(&p)[..4].to_vec();
+        events.push(row("S", Some(p.sub), "#", None));
+        events.push(row("CS", Some(p.sub), "", None));
+        legacy_set(dir.path(), &p, &events);
+        let m = edit(dir.path()).await;
+        assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
+        let snapshot = m
+            .get_set_snapshot(1)
+            .expect("expected the set to replay")
+            .unwrap();
+        assert_eq!(snapshot.current_lineup.get_setter(), Some(p.sub));
+    }
+
+    /// Edits the opponent and home of the only match, then loads it again.
+    async fn edit(base: &Path) -> MatchEntry {
+        let (_, m) = load(base).await;
+        FileSystemMatchWriter::new(base)
+            .update(&m, "Arezzo".into(), m.date, true, m.max_substitutions)
+            .await
+            .expect("expected the match to be updated");
+        load(base).await.1
     }
 
     /// With the rules of v0.3.0 the substitute serves instead.

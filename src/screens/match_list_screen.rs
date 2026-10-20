@@ -172,6 +172,7 @@ impl<
                 (Some(ScreenActionEnum::MatchStats), _, _) => self.handle_space_key(),
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
+                (Some(ScreenActionEnum::Edit), _, _) => self.handle_edit_key(),
                 (Some(ScreenActionEnum::New), _, _) => {
                     if self.team.players.len() >= 6 {
                         AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
@@ -463,6 +464,7 @@ impl<
                 if !status.match_finished {
                     actions.push(Sba::Simple(ScreenActionEnum::Select));
                 }
+                actions.push(Sba::Simple(ScreenActionEnum::Edit));
                 actions.push(Sba::Simple(ScreenActionEnum::Export));
                 actions.push(Sba::Simple(ScreenActionEnum::MatchStats));
                 actions.push(Sba::Simple(ScreenActionEnum::PrintReport));
@@ -529,6 +531,24 @@ impl<
             self.notify_message
                 .set_error(current_labels().no_match_selected.to_string());
             AppAction::None
+        }
+    }
+
+    fn handle_edit_key(&mut self) -> AppAction {
+        match self.get_selected_match().map(|(m, _)| m.clone()) {
+            Some(m) => AppAction::SwitchScreen(Box::new(AddMatchScreen::new_edit(
+                self.settings_reader.clone(),
+                self.settings_writer.clone(),
+                self.settings.clone(),
+                self.match_writer.clone(),
+                self.set_writer.clone(),
+                m,
+            ))),
+            None => {
+                self.notify_message
+                    .set_error(current_labels().no_match_selected.to_string());
+                AppAction::None
+            }
         }
     }
 

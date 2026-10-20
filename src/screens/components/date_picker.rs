@@ -28,6 +28,16 @@ impl DatePicker {
         }
     }
 
+    pub fn with_date(label: String, writing_mode: bool, date: DateTime<FixedOffset>) -> Self {
+        Self {
+            year: date.format("%Y").to_string(),
+            month: date.format("%m").to_string(),
+            day: date.format("%d").to_string(),
+            label,
+            writing_mode,
+        }
+    }
+
     pub fn render(&self, f: &mut Frame, container: Rect) {
         let text = if self.year.len() < 4 {
             let spaces = 4 - self.year.len();
