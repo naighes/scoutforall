@@ -93,19 +93,20 @@ impl SetTypeEnum {
 
     /// The set chosen before the scout picks one, told by the role and row
     /// of the attacker and by the touch before the attack (event and
-    /// evaluation):
+    /// evaluation, `None` for an event without one):
     ///
     /// - middle blockers: 1;
     /// - back row: pipe (0) for the outside hitters, 8 for the opposite;
     /// - front row, after a reception or a dig `#`: super; `+`: 5 for the
     ///   outside hitters, 6 for the opposite; `-` or `!`: high;
     /// - front row, after their reception coming straight back (serve `/`),
-    ///   an attack of ours `+` or `!` or a block `+`: super;
+    ///   their freeball (`OF`), an attack of ours `+` or `!` or a block `+`:
+    ///   super;
     /// - front row, after anything else: high.
     pub fn preselected(
         role: RoleEnum,
         back_row: bool,
-        previous: Option<(EventTypeEnum, EvalEnum)>,
+        previous: Option<(EventTypeEnum, Option<EvalEnum>)>,
     ) -> Option<SetTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -114,12 +115,18 @@ impl SetTypeEnum {
             (MiddleBlocker, _, _) => Some(SetTypeEnum::One),
             (OutsideHitter, true, _) => Some(SetTypeEnum::Pipe),
             (OppositeHitter, true, _) => Some(SetTypeEnum::Eight),
-            (OutsideHitter, false, Some((P | D, Positive))) => Some(SetTypeEnum::Five),
-            (OppositeHitter, false, Some((P | D, Positive))) => Some(SetTypeEnum::Six),
+            (OutsideHitter, false, Some((P | D, Some(Positive)))) => Some(SetTypeEnum::Five),
+            (OppositeHitter, false, Some((P | D, Some(Positive)))) => Some(SetTypeEnum::Six),
             (
                 OutsideHitter | OppositeHitter,
                 false,
-                Some((P | D, Perfect) | (S, Over) | (A, Positive | Exclamative) | (B, Positive)),
+                Some(
+                    (P | D, Some(Perfect))
+                    | (S, Some(Over))
+                    | (OF, _)
+                    | (A, Some(Positive | Exclamative))
+                    | (B, Some(Positive)),
+                ),
             ) => Some(SetTypeEnum::Super),
             (OutsideHitter | OppositeHitter, false, _) => Some(SetTypeEnum::High),
             (Setter | Libero, _, _) => None,

@@ -125,8 +125,8 @@ mod tests {
     #[tokio::test]
     async fn rebound_event_key_while_scouting() {
         let mut ui = scouting().await;
-        bind_from_scouting(&mut ui, 0, KeyCode::Char('x')).await;
-        ui.press(KeyCode::Char('x')).await;
+        bind_from_scouting(&mut ui, 0, KeyCode::Char('w')).await;
+        ui.press(KeyCode::Char('w')).await;
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         // the previous key is gone
         ui.type_keys(&[KeyCode::Char('u'), KeyCode::Char('s')])

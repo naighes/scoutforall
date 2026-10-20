@@ -638,7 +638,7 @@ mod tests {
         let side_out = t.receiving(vec![act(P, t.libero, Negative), act(A, t.oh1, Error)]);
         let keys = attacks(&side_out);
         assert_eq!(keys.len(), 1);
-        assert_eq!((keys[0].prev_type, keys[0].prev_eval), (P, Negative));
+        assert_eq!((keys[0].prev_type, keys[0].prev_eval), (P, Some(Negative)));
         assert!(!keys[0].is_counter_attack());
         // after their reception came straight back: a counter-attack
         let free_ball = t.serving(vec![act(S, t.setter, Over), act(A, t.oh1, Perfect)]);
@@ -667,7 +667,7 @@ mod tests {
         assert!(keys.iter().all(|k| k.is_counter_attack()));
         assert!(
             keys.iter()
-                .any(|k| (k.prev_type, k.prev_eval, k.eval) == (A, Exclamative, Perfect))
+                .any(|k| (k.prev_type, k.prev_eval, k.eval) == (A, Some(Exclamative), Perfect))
         );
         // after our overpass the ball is theirs: an attack then isn't built
         // by us (but it's still an attack)
@@ -748,7 +748,7 @@ mod tests {
                 zone,
                 eval,
                 prev_type: P,
-                prev_eval: Perfect,
+                prev_eval: Some(Perfect),
             })
         };
         attack(ZoneEnum::Four, Perfect);
@@ -973,7 +973,7 @@ mod tests {
         };
         let snapshot = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
         let options = snapshot.get_available_options();
-        assert_eq!(options, vec![OE, F, A]);
+        assert_eq!(options, vec![OE, F, A, FB]);
         let snapshot = t.serving(vec![
             act(S, t.setter, Negative),
             act(D, t.oh2, Positive),

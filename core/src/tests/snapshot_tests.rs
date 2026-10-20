@@ -288,7 +288,7 @@ mod tests {
                                     .count(|k| k.phase == PhaseEnum::SideOut
                                         && k.rotation == 0
                                         && k.zone == ZoneEnum::Four
-                                        && k.prev_eval == EvalEnum::Perfect
+                                        && k.prev_eval == Some(EvalEnum::Perfect)
                                         && k.eval == EvalEnum::Perfect)
                             );
                         },
@@ -628,7 +628,7 @@ mod tests {
                                     snapshot.stats.attacks.count(|k| k.phase == PhaseEnum::Break
                                         && k.rotation == 4
                                         && k.zone == ZoneEnum::Four
-                                        && k.prev_eval == EvalEnum::Over
+                                        && k.prev_eval == Some(EvalEnum::Over)
                                         && k.eval == EvalEnum::Perfect)
                                 );
                                 // next phase is serve, so a pass is not expected
@@ -725,7 +725,7 @@ mod tests {
                                     .count(|k| k.phase == PhaseEnum::SideOut
                                         && k.rotation == 4
                                         && k.zone == ZoneEnum::Eight
-                                        && k.prev_eval == EvalEnum::Positive
+                                        && k.prev_eval == Some(EvalEnum::Positive)
                                         && k.eval == EvalEnum::Negative)
                             );
                         },

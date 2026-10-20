@@ -254,7 +254,7 @@ mod tests {
     #[tokio::test]
     async fn changing_a_setting_keeps_the_others() {
         let mut ui = change_key_for(0).await;
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
+        ui.type_keys(&[KeyCode::Char('w'), KeyCode::Enter]).await;
         ui.press(KeyCode::BackTab).await;
         ui.press(KeyCode::Right).await;
         let settings = saved(&ui).await;
@@ -263,7 +263,7 @@ mod tests {
             settings
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(x)])
+            keys(&[key!(w)])
         );
     }
 
@@ -282,13 +282,13 @@ mod tests {
             let (_, desc) = action.with_desc();
             assert!(!footer.contains(&desc), "{desc}: {footer}");
         }
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
+        ui.type_keys(&[KeyCode::Char('w'), KeyCode::Enter]).await;
         assert_eq!(
             saved(&ui)
                 .await
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(x)])
+            keys(&[key!(w)])
         );
         // straight back on the settings
         let selected = ui.selected().unwrap_or_default();
@@ -296,7 +296,7 @@ mod tests {
             selected.contains(&EventTypeEnum::S.with_desc().1),
             "{selected}"
         );
-        assert!(selected.trim_end().ends_with('x'), "{selected}");
+        assert!(selected.trim_end().ends_with('w'), "{selected}");
     }
 
     #[tokio::test]
@@ -405,7 +405,7 @@ mod tests {
             .unwrap();
         let negative = eval_index(EvalEnum::Negative);
         let mut ui = change_key_for(0).await;
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
+        ui.type_keys(&[KeyCode::Char('w'), KeyCode::Enter]).await;
         for _ in 0..eval_index(EvalEnum::Perfect) {
             ui.press(KeyCode::Down).await;
         }
@@ -413,14 +413,14 @@ mod tests {
             .await;
         let before = saved(&ui).await;
 
-        // "x" is now the serve: not for the attack
+        // "w" is now the serve: not for the attack
         for _ in attack..eval_index(EvalEnum::Perfect) {
             ui.press(KeyCode::Up).await;
         }
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('x')]).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('w')]).await;
         let message = current_labels()
             .shortcut_already_assigned
-            .replacen("{}", "x", 1)
+            .replacen("{}", "w", 1)
             .replacen("{}", &EventTypeEnum::S.with_desc().1, 1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
         ui.type_keys(&[KeyCode::Enter, KeyCode::Esc]).await;
@@ -467,7 +467,7 @@ mod tests {
     #[tokio::test]
     async fn reset_to_defaults_asks_for_confirmation() {
         let mut ui = change_key_for(0).await;
-        ui.type_keys(&[KeyCode::Char('x'), KeyCode::Enter]).await;
+        ui.type_keys(&[KeyCode::Char('w'), KeyCode::Enter]).await;
         for _ in 0..eval_index(EvalEnum::Perfect) {
             ui.press(KeyCode::Down).await;
         }
@@ -496,7 +496,7 @@ mod tests {
             after_no
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S),
-            keys(&[key!(x)])
+            keys(&[key!(w)])
         );
         // the dialog is gone: "y" alone does nothing
         ui.press(KeyCode::Char('y')).await;
@@ -505,7 +505,7 @@ mod tests {
                 .await
                 .scouting_keybindings
                 .keybindings_for(&EventTypeEnum::S)
-                .contains(&key!(x))
+                .contains(&key!(w))
         );
 
         ui.type_keys(&[KeyCode::Char('r'), KeyCode::Char('y')])
@@ -946,6 +946,129 @@ mod tests {
                 .serve_type_keybindings
                 .key_for(&ServeTypeEnum::Spin),
             Some(key!(s))
+        );
+    }
+
+    // --- the freeballs, added after v0.5.0 -------------------------------------
+
+    fn event_index(event: EventTypeEnum) -> usize {
+        EventTypeEnum::ALL.iter().position(|e| *e == event).unwrap()
+    }
+
+    /// Listed among the events, on "x" and Shift-x.
+    #[tokio::test]
+    async fn freeballs_listed_on_x() {
+        for (event, key) in [(EventTypeEnum::FB, "x"), (EventTypeEnum::OF, "⇧-x")] {
+            let mut ui = shortcut(event_index(event)).await;
+            let selected = ui.selected().unwrap_or_default();
+            assert!(selected.contains(&event.with_desc().1), "{selected}");
+            assert!(selected.trim_end().ends_with(key), "{selected}");
+        }
+    }
+
+    /// The settings of v0.5.0 have no freeballs: they get their default
+    /// keys, unless another event took them.
+    #[tokio::test]
+    async fn settings_of_v0_5_0_get_the_freeball_keys() {
+        let read = |json: &'static str| async move {
+            let dir = TempDir::new().unwrap();
+            std::fs::write(get_config_file_path(dir.path()), json).unwrap();
+            FileSystemSettingsReader::new(dir.path())
+                .read()
+                .await
+                .unwrap()
+        };
+        let settings =
+            read(r##"{ "language": "en", "scouting_keybindings": { "S": ["s"] } }"##).await;
+        let events = &settings.scouting_keybindings;
+        assert_eq!(events.key_for(&EventTypeEnum::FB), Some(key!(x)));
+        assert_eq!(events.key_for(&EventTypeEnum::OF), Some(key!(shift - x)));
+        // the attack on "x", the opponent score on Shift-x: they keep them
+        let settings = read(
+            r##"{ "language": "en", "scouting_keybindings": { "A": ["x"], "OS": ["shift-x"] } }"##,
+        )
+        .await;
+        let events = &settings.scouting_keybindings;
+        assert_eq!(events.key_for(&EventTypeEnum::A), Some(key!(x)));
+        assert_eq!(events.key_for(&EventTypeEnum::OS), Some(key!(shift - x)));
+        assert_eq!(events.key_for(&EventTypeEnum::FB), None);
+        assert_eq!(events.key_for(&EventTypeEnum::OF), None);
+        // an evaluation or a set on "x" doesn't take it from the freeball
+        let settings = read(
+            r##"{ "language": "en", "eval_keybindings": { "+": ["x"] }, "set_type_keybindings": { "high": ["x"] } }"##,
+        )
+        .await;
+        assert_eq!(
+            settings.scouting_keybindings.key_for(&EventTypeEnum::FB),
+            Some(key!(x))
+        );
+    }
+
+    /// The freeball keys are events': not for another event, and the
+    /// freeballs don't take another event's key.
+    #[tokio::test]
+    async fn freeball_keys_conflict_with_the_events() {
+        let conflict = |key: &str, event: EventTypeEnum| {
+            current_labels()
+                .shortcut_already_assigned
+                .replacen("{}", key, 1)
+                .replacen("{}", &event.with_desc().1, 1)
+        };
+        let cases = [
+            (0, KeyCode::Char('x'), conflict("x", EventTypeEnum::FB)),
+            (0, KeyCode::Char('X'), conflict("⇧-x", EventTypeEnum::OF)),
+            (
+                event_index(EventTypeEnum::FB),
+                KeyCode::Char('a'),
+                conflict("a", EventTypeEnum::A),
+            ),
+            (
+                event_index(EventTypeEnum::OF),
+                KeyCode::Char('S'),
+                conflict("⇧-s", EventTypeEnum::OS),
+            ),
+            (
+                event_index(EventTypeEnum::FB),
+                KeyCode::Char('X'),
+                conflict("⇧-x", EventTypeEnum::OF),
+            ),
+        ];
+        for (index, code, message) in cases {
+            let mut ui = change_key_for(index).await;
+            ui.press(code).await;
+            assert!(ui.screen().contains(&message), "{message}: {}", ui.screen());
+            ui.press(KeyCode::Enter).await;
+            assert!(ui.saved_settings().await.is_none(), "{message}");
+        }
+        // nor a reserved key
+        let mut ui = change_key_for(event_index(EventTypeEnum::FB)).await;
+        ui.press(KeyCode::Char('u')).await;
+        let message = current_labels().reserved_shortcut.replace("{}", "u");
+        assert!(ui.screen().contains(&message), "{}", ui.screen());
+    }
+
+    /// The reset gives them back their keys.
+    #[tokio::test]
+    async fn reset_gives_the_freeballs_their_keys() {
+        let mut ui = change_key_for(event_index(EventTypeEnum::FB)).await;
+        ui.type_keys(&[KeyCode::Char('w'), KeyCode::Enter]).await;
+        assert_eq!(
+            saved(&ui)
+                .await
+                .scouting_keybindings
+                .key_for(&EventTypeEnum::FB),
+            Some(key!(w))
+        );
+        ui.type_keys(&[KeyCode::Char('r'), KeyCode::Char('y')])
+            .await;
+        let settings = saved(&ui).await;
+        assert_eq!(
+            settings.scouting_keybindings.key_for(&EventTypeEnum::FB),
+            Some(key!(x))
+        );
+        assert_eq!(
+            settings.scouting_keybindings.key_for(&EventTypeEnum::OF),
+            Some(key!(shift - x))
         );
     }
 

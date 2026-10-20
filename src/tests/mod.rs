@@ -1,3 +1,4 @@
+mod freeball_tests;
 mod max_substitutions_tests;
 mod navigation_tests;
 mod scouting_tests;

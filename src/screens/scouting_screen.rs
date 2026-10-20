@@ -586,7 +586,7 @@ impl<
                         AppAction::None
                     }
                     // these events do not require player nor evaluation selection
-                    (true, evt) if *evt == OE || *evt == OS || *evt == CL => {
+                    (true, evt) if matches!(evt, OE | OS | OF | CL) => {
                         let entry = EventEntry {
                             timestamp: Utc::now(),
                             event_type: *evt,
@@ -1086,10 +1086,11 @@ impl<
             .map(|(i, e)| self.recent_event_row(i, e));
         let table = Table::new(
             rows,
+            // the event wide enough for "freeball received"
             [
-                Constraint::Percentage(26),
                 Constraint::Percentage(44),
-                Constraint::Percentage(30),
+                Constraint::Percentage(24),
+                Constraint::Percentage(32),
             ],
         )
         .block(
