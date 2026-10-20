@@ -537,6 +537,156 @@ mod tests {
         assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 4);
     }
 
+    // --- the freeball events, added after v0.5.0 ------------------------------
+
+    /// The event types up to v0.5.0: no freeballs.
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "UPPERCASE")]
+    #[allow(dead_code, clippy::upper_case_acronyms)]
+    enum EventTypeUpToV0_5_0 {
+        S,
+        P,
+        A,
+        D,
+        B,
+        F,
+        OS,
+        OE,
+        R,
+        CL,
+        CS,
+    }
+
+    /// An event as v0.5.0 reads it: the technique last, the rows with
+    /// fewer or more columns accepted.
+    #[derive(Debug, Deserialize)]
+    #[allow(dead_code)]
+    struct EventUpToV0_5_0 {
+        timestamp: DateTime<Utc>,
+        event_type: EventTypeUpToV0_5_0,
+        player: Option<Uuid>,
+        eval: Option<EvalEnum>,
+        target_player: Option<Uuid>,
+    }
+
+    fn read_as_v0_5_0(path: &Path) -> Result<Vec<EventUpToV0_5_0>, csv::Error> {
+        ReaderBuilder::new()
+            .has_headers(false)
+            .flexible(true)
+            .from_path(path)?
+            .deserialize()
+            .collect()
+    }
+
+    fn freeball(event_type: EventTypeEnum, player: Option<Uuid>) -> EventEntry {
+        EventEntry {
+            timestamp: Utc::now(),
+            event_type,
+            player,
+            eval: None,
+            target_player: None,
+            technique: None,
+        }
+    }
+
+    /// The freeballs are saved with their code in the event column, ours
+    /// with the player sending it, and load back as they were.
+    #[tokio::test]
+    async fn freeballs_are_saved_and_load() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), None);
+        let (_, m) = load(dir.path()).await;
+        let writer = FileSystemSetWriter::new(dir.path());
+        writer
+            .create(
+                &m,
+                1,
+                TeamSideEnum::Them,
+                [p.setter, p.oh1, p.mb2, p.opposite, p.oh2, p.mb1],
+                p.libero,
+                None,
+                p.setter,
+                vec![event(EventTypeEnum::P, p.libero, EvalEnum::Positive, None)],
+            )
+            .await
+            .expect("expected a new set");
+        let events = [
+            freeball(EventTypeEnum::FB, Some(p.setter)),
+            freeball(EventTypeEnum::OF, None),
+            event(
+                EventTypeEnum::A,
+                p.oh1,
+                EvalEnum::Perfect,
+                Some(TechniqueEnum::Set(SetTypeEnum::Super)),
+            ),
+        ];
+        for e in &events {
+            writer.append_event(&m, 1, e).await.unwrap();
+        }
+        let rows = std::fs::read_to_string(events_path(dir.path())).unwrap();
+        let rows: Vec<_> = rows.lines().collect();
+        assert!(
+            rows[1].ends_with(&format!(",FB,{},,,", p.setter)),
+            "{}",
+            rows[1]
+        );
+        assert!(rows[2].ends_with(",OF,,,,"), "{}", rows[2]);
+        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6, 6]);
+        let (_, m) = load(dir.path()).await;
+        let loaded: Vec<_> = m.sets[0].events.iter().map(known_fields).collect();
+        assert_eq!(
+            loaded,
+            vec![
+                (EventTypeEnum::P, Some(p.libero), Some(EvalEnum::Positive)),
+                (EventTypeEnum::FB, Some(p.setter), None),
+                (EventTypeEnum::OF, None, None),
+                (EventTypeEnum::A, Some(p.oh1), Some(EvalEnum::Perfect)),
+            ]
+        );
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
+        assert_eq!((snapshot.score_us, snapshot.score_them), (1, 0));
+        // the undo takes them back one by one
+        let removed = writer.remove_last_event(&m, 1).await.unwrap().unwrap();
+        assert_eq!(removed.event_type, EventTypeEnum::A);
+        let removed = writer.remove_last_event(&m, 1).await.unwrap().unwrap();
+        assert_eq!(known_fields(&removed), (EventTypeEnum::OF, None, None));
+        let removed = writer.remove_last_event(&m, 1).await.unwrap().unwrap();
+        assert_eq!(
+            known_fields(&removed),
+            (EventTypeEnum::FB, Some(p.setter), None)
+        );
+    }
+
+    /// The versions up to v0.5.0 don't know the freeballs: a set with one
+    /// is unreadable for them (agreed, they update themselves). A set
+    /// without one they still read.
+    #[tokio::test]
+    async fn set_with_a_freeball_is_unreadable_up_to_v0_5_0() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
+        let (_, m) = load(dir.path()).await;
+        let writer = FileSystemSetWriter::new(dir.path());
+        writer.append_event(&m, 1, &float_serve(&p)).await.unwrap();
+        assert_eq!(read_as_v0_5_0(&events_path(dir.path())).unwrap().len(), 3);
+        assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 3);
+        writer
+            .append_event(&m, 1, &freeball(EventTypeEnum::OF, None))
+            .await
+            .unwrap();
+        // (v0.4.3 knows the same event types as v0.5.0)
+        assert!(read_as_v0_5_0(&events_path(dir.path())).is_err());
+        // this version reads it, and the undo makes it readable again
+        let (_, m) = load(dir.path()).await;
+        assert_eq!(m.sets[0].events.len(), 4);
+        writer.remove_last_event(&m, 1).await.unwrap();
+        assert_eq!(read_as_v0_5_0(&events_path(dir.path())).unwrap().len(), 3);
+    }
+
     /// The undo rewrites the file: the techniques stay, and the rows of
     /// v0.4.3 get the column.
     #[tokio::test]

@@ -77,13 +77,14 @@ mod tests {
                 "{set:?} never available"
             );
         }
-        let previous_touches: Vec<Option<(EventTypeEnum, EvalEnum)>> = std::iter::once(None)
-            .chain(
-                EventTypeEnum::ALL
-                    .iter()
-                    .flat_map(|event| EvalEnum::ALL.iter().map(move |eval| Some((*event, *eval)))),
-            )
-            .collect();
+        let previous_touches: Vec<Option<(EventTypeEnum, Option<EvalEnum>)>> =
+            std::iter::once(None)
+                .chain(EventTypeEnum::ALL.iter().flat_map(|event| {
+                    std::iter::once(None)
+                        .chain(EvalEnum::ALL.iter().copied().map(Some))
+                        .map(move |eval| Some((*event, eval)))
+                }))
+                .collect();
         for (role, back) in &combos {
             for previous in &previous_touches {
                 let available = SetTypeEnum::available(*role, *back);
@@ -105,11 +106,11 @@ mod tests {
     fn preselected_set_of_the_middle_blockers() {
         for previous in [
             None,
-            Some((P, Perfect)),
-            Some((P, Negative)),
-            Some((D, Positive)),
-            Some((S, Over)),
-            Some((A, Exclamative)),
+            Some((P, Some(Perfect))),
+            Some((P, Some(Negative))),
+            Some((D, Some(Positive))),
+            Some((S, Some(Over))),
+            Some((A, Some(Exclamative))),
         ] {
             assert_eq!(
                 SetTypeEnum::preselected(MiddleBlocker, false, previous),
@@ -126,11 +127,11 @@ mod tests {
     fn preselected_set_in_the_back_row() {
         for previous in [
             None,
-            Some((P, Perfect)),
-            Some((P, Positive)),
-            Some((D, Negative)),
-            Some((S, Over)),
-            Some((B, Positive)),
+            Some((P, Some(Perfect))),
+            Some((P, Some(Positive))),
+            Some((D, Some(Negative))),
+            Some((S, Some(Over))),
+            Some((B, Some(Positive))),
         ] {
             assert_eq!(
                 SetTypeEnum::preselected(OutsideHitter, true, previous),
@@ -157,12 +158,12 @@ mod tests {
         for touch in [P, D] {
             for (eval, outside, opposite) in cases {
                 assert_eq!(
-                    SetTypeEnum::preselected(OutsideHitter, false, Some((touch, eval))),
+                    SetTypeEnum::preselected(OutsideHitter, false, Some((touch, Some(eval)))),
                     Some(outside),
                     "outside hitter after {touch} {eval}"
                 );
                 assert_eq!(
-                    SetTypeEnum::preselected(OppositeHitter, false, Some((touch, eval))),
+                    SetTypeEnum::preselected(OppositeHitter, false, Some((touch, Some(eval)))),
                     Some(opposite),
                     "opposite after {touch} {eval}"
                 );
@@ -170,11 +171,17 @@ mod tests {
         }
     }
 
-    /// After a free ball (their reception coming straight back), an attack
-    /// of ours `+` or `!`, or a block `+`: the super.
+    /// After their reception coming straight back, their freeball, an
+    /// attack of ours `+` or `!`, or a block `+`: the super.
     #[test]
     fn preselected_set_in_the_front_row_after_a_ball_coming_back() {
-        for previous in [(S, Over), (A, Positive), (A, Exclamative), (B, Positive)] {
+        for previous in [
+            (S, Some(Over)),
+            (A, Some(Positive)),
+            (A, Some(Exclamative)),
+            (B, Some(Positive)),
+            (OF, None),
+        ] {
             for role in [OutsideHitter, OppositeHitter] {
                 assert_eq!(
                     SetTypeEnum::preselected(role, false, Some(previous)),
@@ -190,9 +197,11 @@ mod tests {
     fn preselected_set_in_the_front_row_otherwise() {
         for previous in [
             None,
-            Some((A, Negative)),
-            Some((B, Negative)),
-            Some((S, Positive)),
+            Some((A, Some(Negative))),
+            Some((B, Some(Negative))),
+            Some((S, Some(Positive))),
+            // their first touch coming over after our freeball
+            Some((FB, None)),
         ] {
             for role in [OutsideHitter, OppositeHitter] {
                 assert_eq!(
@@ -208,7 +217,7 @@ mod tests {
     fn no_preselected_set_for_the_setter_and_the_libero() {
         for (role, back) in [(Setter, false), (Setter, true), (Libero, true)] {
             assert_eq!(
-                SetTypeEnum::preselected(role, back, Some((P, Perfect))),
+                SetTypeEnum::preselected(role, back, Some((P, Some(Perfect)))),
                 None
             );
         }

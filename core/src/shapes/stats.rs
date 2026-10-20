@@ -136,11 +136,12 @@ pub struct EventKey {
     pub event_type: EventTypeEnum,
     pub phase: PhaseEnum,
     pub rotation: u8,
-    /// `None` for the opponent events (`OS`, `OE`)
+    /// `None` for the opponent events (`OS`, `OE`, `OF`)
     pub player: Option<Uuid>,
     /// the zone of an attack, when the role of the attacker tells it
     pub zone: Option<ZoneEnum>,
-    /// `None` for the events with no evaluation (`F`, `OS`, `OE`)
+    /// `None` for the events with no evaluation (`F`, `OS`, `OE`, `FB`,
+    /// `OF`)
     pub eval: Option<EvalEnum>,
 }
 
@@ -154,21 +155,32 @@ pub struct AttackKey {
     pub zone: ZoneEnum,
     pub eval: EvalEnum,
     /// the event before the attack: the reception, dig, serve, attack or
-    /// block the attack was built on
+    /// block the attack was built on, or their freeball
     pub prev_type: EventTypeEnum,
-    pub prev_eval: EvalEnum,
+    /// `None` after their freeball (`OF`)
+    pub prev_eval: Option<EvalEnum>,
 }
 
 impl AttackKey {
-    /// A counter-attack: an attack built on a dig, on their reception coming
-    /// straight back (serve `/`), or on our attack or block they couldn't
-    /// counter (attack `+` or `!`, block `+`), i.e. everything but the attack
-    /// built on our reception (side out on first rally).
+    /// A counter-attack: an attack built on a dig, on their freeball, on
+    /// their reception coming straight back (serve `/`), or on our attack or
+    /// block they couldn't counter (attack `+` or `!`, block `+`), i.e.
+    /// everything but the attack built on our reception (side out on first
+    /// rally).
     pub fn is_counter_attack(&self) -> bool {
         matches!(
             self.prev_type,
-            EventTypeEnum::S | EventTypeEnum::D | EventTypeEnum::A | EventTypeEnum::B
+            EventTypeEnum::S
+                | EventTypeEnum::D
+                | EventTypeEnum::OF
+                | EventTypeEnum::A
+                | EventTypeEnum::B
         )
+    }
+
+    /// An attack on their freeball.
+    pub fn is_freeball_attack(&self) -> bool {
+        self.prev_type == EventTypeEnum::OF
     }
 }
 

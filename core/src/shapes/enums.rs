@@ -160,6 +160,19 @@ impl FromStr for TeamSideEnum {
 /// - **OE**: Opponent Error  
 ///   A point gained because of an opponent's mistake.
 ///
+/// - **FB**: Freeball  
+///   Our player sends the opponent an easy ball, on our second or third
+///   touch instead of an attack: never a first touch (a reception or dig
+///   going straight over is `P/` or `D/`). No evaluation: a freeball out or
+///   into the net is a fault (`F`) of that player.
+///
+/// - **OF**: Opponent Freeball  
+///   The opponent sends us an easy ball, on their second or third touch.
+///   It isn't a dig: what comes next is what comes after one keeping the
+///   ball (our attack, another freeball, their error, our fault), or their
+///   point when it falls on our court untouched (`OS`). An attack on it is
+///   a counter-attack.
+///
 /// - **R**: Substitution  
 ///   A player change performed by either team.
 ///
@@ -179,6 +192,8 @@ pub enum EventTypeEnum {
     F,
     OS,
     OE,
+    FB,
+    OF,
     R,
     CL,
     CS,
@@ -196,6 +211,8 @@ impl fmt::Display for EventTypeEnum {
             F => "F",
             OS => "OS",
             OE => "OE",
+            FB => "FB",
+            OF => "OF",
             R => "R",
             CL => "CL",
             CS => "CS",
@@ -213,18 +230,20 @@ impl WithDesc<EventTypeEnum> for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub const ALL: [EventTypeEnum; 11] = [
-        EventTypeEnum::S,
-        EventTypeEnum::P,
-        EventTypeEnum::A,
-        EventTypeEnum::D,
-        EventTypeEnum::B,
-        EventTypeEnum::F,
-        EventTypeEnum::OS,
-        EventTypeEnum::OE,
-        EventTypeEnum::R,
-        EventTypeEnum::CL,
-        EventTypeEnum::CS,
+    pub const ALL: [EventTypeEnum; 13] = [
+        EventTypeEnum::S,  // serve
+        EventTypeEnum::P,  // pass/reception
+        EventTypeEnum::A,  // attack
+        EventTypeEnum::D,  // dig
+        EventTypeEnum::B,  // block
+        EventTypeEnum::F,  // fault
+        EventTypeEnum::OS, // opponent score
+        EventTypeEnum::OE, // opponent error
+        EventTypeEnum::FB, // freeball, sent by us
+        EventTypeEnum::OF, // opponent freeball, sent to us
+        EventTypeEnum::R,  // substitution/replacement
+        EventTypeEnum::CL, // change libero
+        EventTypeEnum::CS, // change setter
     ];
 
     pub fn requires_evaluation(&self) -> bool {
@@ -234,7 +253,7 @@ impl EventTypeEnum {
 
     pub fn requires_player(&self) -> bool {
         use EventTypeEnum::*;
-        matches!(self, A | B | P | F | D | R | S | CS)
+        matches!(self, A | B | P | F | D | FB | R | S | CS)
     }
 
     pub fn available_evals(&self) -> Vec<EvalEnum> {
@@ -302,6 +321,8 @@ impl FriendlyName for EventTypeEnum {
             F => labels.fault,
             OS => labels.opponent_score,
             OE => labels.opponent_error,
+            FB => labels.freeball,
+            OF => labels.opponent_freeball,
             R => labels.substitution,
             CL => labels.change_libero,
             CS => labels.change_setter,
@@ -322,6 +343,8 @@ impl FromStr for EventTypeEnum {
             "F" => Ok(F),
             "OS" => Ok(OS),
             "OE" => Ok(OE),
+            "FB" => Ok(FB),
+            "OF" => Ok(OF),
             "R" => Ok(R),
             "CL" => Ok(CL),
             "CS" => Ok(CS),
