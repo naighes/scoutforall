@@ -16,6 +16,8 @@ import global_settings_en from '../data/en/global_settings.json';
 import global_settings_it from '../data/it/global_settings.json';
 const global_settings = lang === 'it' ? global_settings_it : global_settings_en;
 
+import version_data from '../data/version.json';
+
 import FooterMain from "../components/FooterMain.astro"
 import HeaderMain from "../components/HeaderMain.astro"
 
@@ -43,7 +45,15 @@ const { title, description } = Astro.props
     <meta property="og:type" content="website" />
     <meta property="og:url" content={`https://naighes.github.io/scoutforall/${lang === 'en' ? '' : lang + '/'}`} />
     <meta property="og:image" content="https://naighes.github.io/scoutforall/1200x630.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:locale" content={ lang === 'it' ? 'it_IT' : 'en_US' } />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={ title ?? global_settings.title } />
+    <meta name="twitter:description" content={ description ?? global_settings.description } />
+    <meta name="twitter:image" content="https://naighes.github.io/scoutforall/1200x630.jpg" />
     <meta name="google-site-verification" content="bKdeAtfwmVXhzaUofyWon1aIpsOL0egnqXIeN8dfS7k" />
 
     <Font cssVariable="--font-inter" preload />
@@ -76,10 +86,18 @@ const { title, description } = Astro.props
           "@context": "https://schema.org",
           "@type": "SoftwareApplication",
           "name": "scout4all",
-          "applicationCategory": "Sports Analytics",
+          "applicationCategory": "SportsApplication",
+          "operatingSystem": "macOS, Windows, Linux",
+          "softwareVersion": version_data.version,
           "url": "https://naighes.github.io/scoutforall/",
           "inLanguage": lang,
           "description": description ?? global_settings.description,
+          "image": "https://naighes.github.io/scoutforall/1200x630.jpg",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
           "creator": {
             "@type": "Person",
             "name": "Nicola Baldi"
