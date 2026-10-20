@@ -1,3 +1,4 @@
+mod edit_match_tests;
 mod freeball_tests;
 mod max_substitutions_tests;
 mod navigation_tests;

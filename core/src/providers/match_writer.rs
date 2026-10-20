@@ -15,4 +15,13 @@ pub trait MatchWriter {
         home: bool,
         max_substitutions: u8,
     ) -> Result<MatchEntry, AppError>;
+
+    async fn update(
+        &self,
+        m: &MatchEntry,
+        opponent: String,
+        date: DateTime<FixedOffset>,
+        home: bool,
+        max_substitutions: u8,
+    ) -> Result<(), AppError>;
 }

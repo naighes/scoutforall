@@ -251,6 +251,9 @@ pub struct Labels {
     pub pipe_set: &'static str,
     pub float_serve: &'static str,
     pub spin_serve: &'static str,
+    pub edit_match: &'static str,
+    pub could_not_update_match: &'static str,
+    pub max_substitutions_below_existing_substitutions: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -501,6 +504,9 @@ const EN: Labels = Labels {
     spin_serve: "spin",
     updated_to_version: "updated to version",
     update_check_failed: "update check failed",
+    edit_match: "edit match",
+    could_not_update_match: "could not update match",
+    max_substitutions_below_existing_substitutions: "substitutions per set cannot be less than the number already used in a set",
 };
 
 const IT: Labels = Labels {
@@ -751,6 +757,9 @@ const IT: Labels = Labels {
     spin_serve: "spin",
     updated_to_version: "aggiornato alla versione",
     update_check_failed: "impossibile controllare la presenza di aggiornamenti",
+    edit_match: "modifica partita",
+    could_not_update_match: "impossibile aggiornare la partita",
+    max_substitutions_below_existing_substitutions: "le sostituzioni per set non possono essere inferiori al numero già utilizzato in un set",
 };
 
 static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {

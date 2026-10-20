@@ -71,6 +71,21 @@ impl SetEntry {
         }
     }
 
+    /// The rules the set replays with, found as `compute_snapshot` does: to
+    /// save them with the sets saved without.
+    pub fn find_lineup_rules(&self, max_substitutions: u8) -> Result<LineupRulesEnum, AppError> {
+        match self.lineup_rules {
+            Some(rules) => Ok(rules),
+            None => self
+                .replay(max_substitutions, LineupRulesEnum::V1)
+                .map(|_| LineupRulesEnum::V1)
+                .or_else(|_| {
+                    self.replay(max_substitutions, LineupRulesEnum::V2)
+                        .map(|_| LineupRulesEnum::V2)
+                }),
+        }
+    }
+
     /// Replays the events with the lineup rules: every event is validated,
     /// as when it's scouted.
     fn replay(&self, max_substitutions: u8, rules: LineupRulesEnum) -> Result<Snapshot, AppError> {
