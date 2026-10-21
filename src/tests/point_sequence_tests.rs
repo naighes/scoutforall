@@ -110,4 +110,17 @@ mod tests {
         assert!(first > 1, "{home}");
         assert_eq!(shown, (first..=20).collect::<Vec<_>>(), "{home}");
     }
+
+    #[tokio::test]
+    async fn widening_the_terminal_shows_the_first_points_again() {
+        let mut ui = scouting().await;
+        keys(&mut ui, &"s#".repeat(20)).await;
+        ui.resize(60, 40);
+        let (home, _) = point_rows(&mut ui);
+        assert!(!scores(&home).contains(&1), "{home}");
+        // back to a wide terminal: room for all the points
+        ui.resize(120, 40);
+        let (home, _) = point_rows(&mut ui);
+        assert_eq!(scores(&home), (1..=20).collect::<Vec<_>>(), "{home}");
+    }
 }
