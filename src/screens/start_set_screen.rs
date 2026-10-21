@@ -4,7 +4,9 @@ use crate::{
     screens::{
         components::notify_banner::NotifyBanner,
         scouting_screen::ScoutingScreen,
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{
+            AppAction, Renderable, Sba, ScreenAsync, change_value_entry, get_keybinding_actions,
+        },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
@@ -809,14 +811,21 @@ impl<
             .borders(Borders::NONE)
             .padding(Padding::new(1, 0, 0, 0));
 
+        // left and right change the team, as the values of a form
         let serving_team_actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Hidden(ScreenActionEnum::Next),
+            Sba::Hidden(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
         self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(serving_team_actions));
-        let footer_entries = get_keybinding_actions(navigation_keybindings(), serving_team_actions);
+        let footer_entries: Vec<(String, String)> = [change_value_entry()]
+            .into_iter()
+            .chain(get_keybinding_actions(
+                navigation_keybindings(),
+                serving_team_actions,
+            ))
+            .collect();
         let paragraph = Paragraph::new(
             footer_entries
                 .iter()

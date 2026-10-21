@@ -118,6 +118,18 @@ impl SetWriter for FileSystemSetWriter {
         .await
         .map_err(|e| AppError::IO(IOError::Msg(format!("tokio join error: {}", e))))?
     }
+
+    async fn update(&self, m: &MatchEntry, set: &SetEntry) -> Result<(), AppError> {
+        // the descriptor first: it gets the rules the events replay with
+        let descriptor_path =
+            get_set_descriptor_file_path(&self.0, &m.team.id, &m.id, set.set_number)?;
+        Self::save_set_file(set, &descriptor_path).await?;
+        let events_path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set.set_number)?;
+        let events = set.events.clone();
+        spawn_blocking(move || write_events(&events_path, &events))
+            .await
+            .map_err(|e| AppError::IO(IOError::Msg(format!("tokio join error: {}", e))))?
+    }
 }
 
 /// The columns of a saved event, the technique included.

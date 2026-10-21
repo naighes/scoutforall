@@ -1,9 +1,12 @@
 use async_trait::async_trait;
-use crokey::crossterm::event::KeyEvent;
+use crokey::{
+    KeyCombination, KeyCombinationFormat,
+    crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
+};
 use ratatui::{Frame, layout::Rect};
 
 use crate::shapes::{keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
-use scout4all_core::shapes::enums::WithDesc;
+use scout4all_core::{localization::current_labels, shapes::enums::WithDesc};
 
 pub enum AppAction {
     None,
@@ -64,6 +67,68 @@ where
         })
         .map_while(|f| f)
         .collect()
+}
+
+/// How a key moves between the fields of a form: up and shift tab to the
+/// previous one, down and tab to the next one. Left and right change the
+/// value of the field instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKey {
+    Previous,
+    Next,
+    Change { back: bool },
+}
+
+impl FieldKey {
+    pub fn of(code: KeyCode) -> Option<FieldKey> {
+        match code {
+            KeyCode::Up | KeyCode::BackTab => Some(FieldKey::Previous),
+            KeyCode::Down | KeyCode::Tab => Some(FieldKey::Next),
+            KeyCode::Left => Some(FieldKey::Change { back: true }),
+            KeyCode::Right => Some(FieldKey::Change { back: false }),
+            _ => None,
+        }
+    }
+}
+
+/// The footer entries moving between the fields of a form, both keys of
+/// each direction listed.
+pub fn field_navigation_entries() -> Vec<(String, String)> {
+    let format = KeyCombinationFormat::default();
+    let fmt = KeyCombinationFormatExt::new(&format);
+    let shift_tab = KeyCombination::one_key(KeyCode::Tab, KeyModifiers::SHIFT);
+    vec![
+        (
+            format!(
+                "{}/{}",
+                fmt.to_string(KeyCode::Up),
+                fmt.to_string(shift_tab)
+            ),
+            current_labels().previous.to_string(),
+        ),
+        (
+            format!(
+                "{}/{}",
+                fmt.to_string(KeyCode::Down),
+                fmt.to_string(KeyCode::Tab)
+            ),
+            current_labels().next.to_string(),
+        ),
+    ]
+}
+
+/// The footer entry changing the value of a field.
+pub fn change_value_entry() -> (String, String) {
+    let format = KeyCombinationFormat::default();
+    let fmt = KeyCombinationFormatExt::new(&format);
+    (
+        format!(
+            "{}/{}",
+            fmt.to_string(KeyCode::Left),
+            fmt.to_string(KeyCode::Right)
+        ),
+        current_labels().change.to_string(),
+    )
 }
 
 #[derive(Clone)]

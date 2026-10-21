@@ -7,7 +7,10 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             team_header::TeamHeader, text_box::TextBox,
         },
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{
+            AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
+            field_navigation_entries, get_keybinding_actions,
+        },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
@@ -78,17 +81,18 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditPlayerScreen<TW> {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
+                FieldKey::of(key.code),
                 &self.notify_message.has_value(),
             ) {
-                (_, _, true) => self.handle_error_reset(),
-                (None, KeyCode::Char(c), _) => self.handle_char(c),
-                (None, KeyCode::Backspace, _) => self.handle_backspace(),
-                (Some(ScreenActionEnum::Up), _, _) => self.handle_up(),
-                (Some(ScreenActionEnum::Down), _, _) => self.handle_down(),
-                (Some(ScreenActionEnum::Next), _, _) => self.handle_next(),
-                (Some(ScreenActionEnum::Previous), _, _) => self.handle_previous(),
-                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
-                (Some(ScreenActionEnum::Confirm), _, _) => self.handle_confirm().await,
+                (_, _, _, true) => self.handle_error_reset(),
+                (_, _, Some(FieldKey::Next), _) => self.handle_next(),
+                (_, _, Some(FieldKey::Previous), _) => self.handle_previous(),
+                (_, _, Some(FieldKey::Change { back: true }), _) => self.handle_up(),
+                (_, _, Some(FieldKey::Change { back: false }), _) => self.handle_down(),
+                (None, KeyCode::Char(c), _, _) => self.handle_char(c),
+                (None, KeyCode::Backspace, _, _) => self.handle_backspace(),
+                (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Confirm), _, _, _) => self.handle_confirm().await,
                 _ => AppAction::None,
             }
         } else {
@@ -116,13 +120,15 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         );
 
         let actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, actions);
+        let footer_entries = field_navigation_entries()
+            .into_iter()
+            .chain([change_value_entry()])
+            .chain(get_keybinding_actions(kb, actions))
+            .collect();
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditPlayerScreen {
@@ -158,13 +164,15 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         );
 
         let actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, actions);
+        let footer_entries = field_navigation_entries()
+            .into_iter()
+            .chain([change_value_entry()])
+            .chain(get_keybinding_actions(kb, actions))
+            .collect();
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditPlayerScreen {

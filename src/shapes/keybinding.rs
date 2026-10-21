@@ -292,6 +292,7 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::Select, key!(enter));
         bindings.set(ScreenActionEnum::Reset, key!(r));
         bindings.set(ScreenActionEnum::Undo, UNDO_KEY);
+        bindings.set(ScreenActionEnum::EditEvents, key!(v));
         bindings
     }
 }

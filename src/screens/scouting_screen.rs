@@ -3,7 +3,7 @@ use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
 use crate::screens::{
-    components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+    components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, set_board},
     screen::{AppAction, Renderable, ScreenAsync},
 };
 use crate::shapes::actions::ScreenActionEnum;
@@ -18,9 +18,9 @@ use crokey::{KeyCombination, KeyCombinationFormat};
 use ratatui::text::Line;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    widgets::{Block, Borders, Row, Table},
 };
 use scout4all_core::analytics::global::{enqueue_match_for_upload, uploads_enabled};
 use scout4all_core::{
@@ -29,7 +29,6 @@ use scout4all_core::{
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName},
         r#match::MatchEntry,
-        player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
         technique::{ServeTypeEnum, TechniqueEnum},
@@ -775,67 +774,13 @@ impl<
 
     /* rendering */
     fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!("set {}", self.set.set_number))
-            .border_style(Style::default().fg(Color::Yellow))
-            .style(
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            );
-        let inner_area = block.inner(area);
-        f.render_widget(block, area);
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(40),
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
-            ])
-            .split(inner_area);
-        let (us_wins, them_wins) = self
-            .current_match
-            .get_status()
-            .map(|s| (s.us_wins.to_string(), s.them_wins.to_string()))
-            .unwrap_or(("-".into(), "-".into()));
-        let (left_name, left_wins, right_name, right_wins, score) = if self.current_match.home {
-            (
-                &self.current_match.team.name,
-                &us_wins,
-                &self.current_match.opponent,
-                &them_wins,
-                format!("{} – {}", self.snapshot.score_us, self.snapshot.score_them),
-            )
-        } else {
-            (
-                &self.current_match.opponent,
-                &them_wins,
-                &self.current_match.team.name,
-                &us_wins,
-                format!("{} – {}", self.snapshot.score_them, self.snapshot.score_us),
-            )
-        };
-        let left = Paragraph::new(format!("[{left_wins}] {left_name}"))
-            .alignment(Alignment::Left)
-            .style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            );
-        f.render_widget(left, chunks[0]);
-        let middle = Paragraph::new(score)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White));
-        f.render_widget(middle, chunks[1]);
-        let right = Paragraph::new(format!("{right_name} [{right_wins}]"))
-            .alignment(Alignment::Right)
-            .style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            );
-        f.render_widget(right, chunks[2]);
+        set_board::render_score_header(
+            f,
+            area,
+            &self.current_match,
+            self.set.set_number,
+            &self.snapshot,
+        );
     }
 
     fn render_available_events(&mut self, f: &mut Frame, area: Rect) {
@@ -944,100 +889,8 @@ impl<
         f.render_widget(table, area);
     }
 
-    fn format_court_cell(
-        &self,
-        player: Option<&PlayerEntry>,
-        position_index: usize,
-        is_serving: bool,
-        is_libero: bool,
-        is_setter: bool,
-    ) -> String {
-        player
-            .map(|player| {
-                let arrow = (if is_serving {
-                    "\n\n\n\n\n\n .\n / \\\n /   \\\n/_   _\\\n | |"
-                } else {
-                    ""
-                })
-                .to_string();
-                if is_setter {
-                    format!(
-                        "{}\n{}\n({}){}",
-                        player.number,
-                        current_labels().setter_prefix,
-                        player.name,
-                        arrow
-                    )
-                } else if is_libero {
-                    format!("{}\n{}\n(L){}", player.number, player.name, arrow)
-                } else {
-                    format!("{}\n{}{}", player.number, player.name, arrow)
-                }
-            })
-            .unwrap_or_else(|| format!("pos {}", position_index + 1))
-    }
-
-    fn render_court_cell(
-        &self,
-        f: &mut Frame,
-        area: &Rect,
-        player_id: Uuid,
-        position_index: usize,
-    ) {
-        let is_setter = self
-            .snapshot
-            .current_lineup
-            .has_setter_at_pos(position_index);
-        let is_libero = self
-            .snapshot
-            .current_lineup
-            .has_libero_at_pos(position_index);
-        let is_serving = self
-            .snapshot
-            .get_available_options()
-            .contains(&EventTypeEnum::S)
-            && position_index == 0;
-        let player = self.current_match.team.find_player(player_id);
-        let content =
-            self.format_court_cell(player, position_index, is_serving, is_libero, is_setter);
-        let cell = Paragraph::new(content)
-            .alignment(ratatui::layout::Alignment::Center)
-            .block(if is_setter {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::LightBlue))
-            } else if is_libero {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(Style::default().add_modifier(Modifier::REVERSED))
-            } else {
-                Block::default().borders(Borders::ALL)
-            });
-        f.render_widget(cell, *area);
-    }
-
     fn render_court(&self, f: &mut Frame, area: Rect) {
-        let court_rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area);
-        let position_map: [usize; 6] = [3, 2, 1, 4, 5, 0];
-        for (row_index, row_area) in court_rows.iter().enumerate() {
-            let columns = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(33),
-                    Constraint::Percentage(34),
-                    Constraint::Percentage(33),
-                ])
-                .split(*row_area);
-            for (column_index, cell_area) in columns.iter().enumerate() {
-                let position_index = position_map[row_index * 3 + column_index];
-                if let Some(player_id) = self.snapshot.current_lineup.get(position_index) {
-                    self.render_court_cell(f, cell_area, player_id, position_index);
-                }
-            }
-        }
+        set_board::render_court(f, area, &self.current_match.team, &self.snapshot);
     }
 
     fn recent_event_row(&'_ self, i: usize, e: &EventEntry) -> Row<'_> {
@@ -1186,74 +1039,15 @@ impl<
     }
 
     fn render_set_status(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Length(5),
-                Constraint::Min(0),
-            ])
-            .split(area);
-        let cells: Vec<(Rect, Option<String>, Color, Color)> = vec![
-            (
-                chunks[0],
-                Some(self.snapshot.current_lineup.get_current_phase().to_string()),
-                Color::Yellow,
-                Color::Black,
-            ),
-            (
-                chunks[1],
-                self.snapshot
-                    .current_lineup
-                    .get_current_rotation()
-                    .ok()
-                    .map(|r| format!("{}{}", current_labels().setter_prefix, r + 1)),
-                Color::Cyan,
-                Color::Black,
-            ),
-            (
-                chunks[2],
-                match &self.current_event {
-                    EventTypeInput::Some(ev) => {
-                        Some(ev.friendly_name(current_labels()).to_string())
-                    }
-                    _ => None,
-                },
-                Color::LightGreen,
-                Color::Black,
-            ),
-            (
-                chunks[3],
-                self.player
-                    .and_then(|p| self.current_match.team.find_player(p))
-                    .map(|p| p.name.clone()),
-                Color::Magenta,
-                Color::Black,
-            ),
-            (
-                chunks[4],
-                Some(format!(
-                    "{} {}/{}",
-                    current_labels().substitutions,
-                    self.snapshot.current_lineup.get_substitutions().len(),
-                    self.snapshot.current_lineup.get_max_substitutions()
-                )),
-                Color::Gray,
-                Color::Black,
-            ),
-        ];
-        for cell in cells {
-            if let (area, Some(text), bg, fg) = cell {
-                let paragraph = Paragraph::new(format!("\n{}\n", text))
-                    .style(Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD))
-                    .alignment(Alignment::Center);
-                f.render_widget(paragraph, area);
-            }
-        }
+        let event = match &self.current_event {
+            EventTypeInput::Some(ev) => Some(ev.friendly_name(current_labels()).to_string()),
+            _ => None,
+        };
+        let player = self
+            .player
+            .and_then(|p| self.current_match.team.find_player(p))
+            .map(|p| p.name.clone());
+        set_board::render_set_status(f, area, &self.snapshot, event, player);
     }
 }
 

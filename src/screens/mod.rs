@@ -1,6 +1,7 @@
 pub mod add_match_screen;
 pub mod components;
 pub mod edit_player_screen;
+pub mod edit_set_events_screen;
 pub mod edit_team_screen;
 pub mod export_match_screen;
 pub mod export_team_screen;
@@ -13,6 +14,7 @@ pub mod match_stats_screen;
 pub mod report_an_issue_screen;
 pub mod scouting_screen;
 pub mod screen;
+pub mod set_list_screen;
 pub mod settings_screen;
 pub mod start_set_screen;
 pub mod team_details_screen;

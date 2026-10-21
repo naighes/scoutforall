@@ -5,7 +5,10 @@ use crate::{
         components::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, text_box::TextBox,
         },
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{
+            AppAction, FieldKey, Renderable, Sba, ScreenAsync, field_navigation_entries,
+            get_keybinding_actions,
+        },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
@@ -87,8 +90,10 @@ impl ScreenAsync for ReportAnIssueScreen {
                 (_, _, true) => self.handle_error_reset(),
                 (None, KeyCode::Backspace, _) => self.handle_backspace(),
                 (None, KeyCode::Char(c), _) => self.handle_char(c),
-                (Some(&ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
-                (Some(&ScreenActionEnum::Next), _, _) => self.handle_tab(),
+                (_, code, _) if FieldKey::of(code) == Some(FieldKey::Previous) => {
+                    self.handle_backtab()
+                }
+                (_, code, _) if FieldKey::of(code) == Some(FieldKey::Next) => self.handle_tab(),
                 (Some(&ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(&ScreenActionEnum::Confirm), _, _) => {
                     if self.field == 1 {
@@ -122,14 +127,15 @@ impl ReportAnIssueScreen {
             email_validator,
         );
         let screen_actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
             Sba::Simple(ScreenActionEnum::Quit),
         ];
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let footer_entries = field_navigation_entries()
+            .into_iter()
+            .chain(get_keybinding_actions(kb, screen_actions))
+            .collect();
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         ReportAnIssueScreen {
             title,

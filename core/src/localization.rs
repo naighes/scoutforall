@@ -254,6 +254,16 @@ pub struct Labels {
     pub edit_match: &'static str,
     pub could_not_update_match: &'static str,
     pub max_substitutions_below_existing_substitutions: &'static str,
+    pub edit_events: &'static str,
+    pub choose_the_set: &'static str,
+    pub event: &'static str,
+    pub evaluation: &'static str,
+    pub technique: &'static str,
+    pub cancel: &'static str,
+    pub event_cannot_be_edited: &'static str,
+    pub edit_does_not_fit_the_set: &'static str,
+    pub edit_changes_the_set_result: &'static str,
+    pub could_not_save_set: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -507,6 +517,16 @@ const EN: Labels = Labels {
     edit_match: "edit match",
     could_not_update_match: "could not update match",
     max_substitutions_below_existing_substitutions: "substitutions per set cannot be less than the number already used in a set",
+    edit_events: "edit events",
+    choose_the_set: "choose the set",
+    event: "event",
+    evaluation: "evaluation",
+    technique: "technique",
+    cancel: "cancel",
+    event_cannot_be_edited: "substitutions and libero or setter changes can't be edited",
+    edit_does_not_fit_the_set: "the change doesn't fit the events after it",
+    edit_changes_the_set_result: "the change would alter the set result",
+    could_not_save_set: "could not save the set",
 };
 
 const IT: Labels = Labels {
@@ -760,6 +780,16 @@ const IT: Labels = Labels {
     edit_match: "modifica partita",
     could_not_update_match: "impossibile aggiornare la partita",
     max_substitutions_below_existing_substitutions: "le sostituzioni per set non possono essere inferiori al numero già utilizzato in un set",
+    edit_events: "modifica eventi",
+    choose_the_set: "scegli il set",
+    event: "evento",
+    evaluation: "valutazione",
+    technique: "tecnica",
+    cancel: "annulla",
+    event_cannot_be_edited: "sostituzioni e cambi di libero o palleggiatore non sono modificabili",
+    edit_does_not_fit_the_set: "la modifica non è compatibile con gli eventi successivi",
+    edit_changes_the_set_result: "la modifica cambierebbe il risultato del set",
+    could_not_save_set: "impossibile salvare il set",
 };
 
 static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {
