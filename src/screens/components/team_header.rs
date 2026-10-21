@@ -1,9 +1,10 @@
+use crate::screens::components::panel;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 use scout4all_core::{
     localization::current_labels,
@@ -73,11 +74,7 @@ impl TeamHeader {
             )])
         };
         let header = Paragraph::new(header_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().team),
-            )
+            .block(panel::section(current_labels().team))
             .alignment(Alignment::Center);
 
         f.render_widget(header, area);

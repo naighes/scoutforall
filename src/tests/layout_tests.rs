@@ -1,12 +1,14 @@
 //! The screens adapt to the size of the terminal: whatever the size, the
 //! footer lists all the keys of the screen, the scouting shows all the
 //! entries to choose from (the point sequence only when they still fit),
-//! and the tables size their columns on their texts.
+//! and the tables size their columns on their texts. The titles of the
+//! panels look the same on every screen.
 
 #[cfg(test)]
 mod tests {
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
+    use ratatui::style::{Color, Modifier};
     use scout4all_core::localization::current_labels;
 
     const TEAM: &[TeamFixture] = &[TeamFixture {
@@ -96,6 +98,71 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// The titles of the panels, the text on their top border after the
+    /// corner, each with whether it's in bold and whether it's in yellow.
+    fn titles(ui: &mut Ui) -> Vec<(String, bool, bool)> {
+        let buffer = ui.render();
+        let area = buffer.area;
+        (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| buffer[(x, y)].symbol() == "┌")
+            .map(|(x, y)| {
+                let cells: Vec<_> = (x + 1..area.width)
+                    .map(|x| &buffer[(x, y)])
+                    .take_while(|cell| !matches!(cell.symbol(), "─" | "┐"))
+                    .collect();
+                let letters: Vec<_> = cells
+                    .iter()
+                    .filter(|cell| !cell.symbol().trim().is_empty())
+                    .collect();
+                (
+                    cells.iter().map(|cell| cell.symbol()).collect::<String>(),
+                    letters
+                        .iter()
+                        .all(|cell| cell.modifier.contains(Modifier::BOLD)),
+                    letters.iter().all(|cell| cell.fg == Color::Yellow),
+                )
+            })
+            .filter(|(title, _, _)| !title.is_empty())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn every_panel_title_is_in_bold() {
+        for (name, started, keys) in screens() {
+            let mut ui = open(started, &keys).await;
+            for (title, bold, _) in titles(&mut ui) {
+                assert!(bold, "{name}: \"{title}\" not in bold\n{}", ui.screen());
+            }
+        }
+    }
+
+    /// The panel naming the screen, the only one in yellow: the stats are
+    /// a set of charts with nothing naming them, the import of a team
+    /// opens on an empty folder.
+    #[tokio::test]
+    async fn every_screen_has_its_title_in_yellow() {
+        let untitled = ["match stats", "import team"];
+        for (name, started, keys) in screens() {
+            let mut ui = open(started, &keys).await;
+            let yellow: Vec<String> = titles(&mut ui)
+                .into_iter()
+                .filter(|(_, _, yellow)| *yellow)
+                .map(|(title, _, _)| title)
+                .collect();
+            let expected = match untitled.contains(&name) {
+                true => 0,
+                false => 1,
+            };
+            assert_eq!(
+                yellow.len(),
+                expected,
+                "{name}: {yellow:?}\n{}",
+                ui.screen()
+            );
         }
     }
 

@@ -1,9 +1,10 @@
+use crate::screens::components::panel;
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
 };
 use scout4all_core::{localization::current_labels, shapes::enums::FriendlyName};
 
@@ -79,10 +80,7 @@ impl<T: FriendlyName + Clone + PartialEq> Select<T> {
             .map(|entry| ListItem::new(entry.friendly_name(current_labels())))
             .collect();
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(Span::styled(
-                self.label.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            )))
+            .block(panel::section(self.label.clone()))
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)

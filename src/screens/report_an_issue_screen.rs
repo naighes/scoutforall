@@ -3,7 +3,8 @@ use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, text_box::TextBox,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
+            text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, field_navigation_entries,
@@ -20,7 +21,6 @@ use crokey::{
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders},
 };
 use regex::Regex;
 use scout4all_core::{localization::current_labels, util::config_var};
@@ -255,9 +255,7 @@ impl ReportAnIssueScreen {
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(current_labels().report_an_issue);
+        let block = panel::screen(current_labels().report_an_issue);
         f.render_widget(block, area);
     }
 

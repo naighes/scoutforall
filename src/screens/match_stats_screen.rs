@@ -1,7 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
@@ -14,8 +14,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{
-        Bar, BarChart, BarGroup, Block, Borders, Cell, Gauge, List, ListItem, ListState, Padding,
-        Row, Table, canvas::Canvas,
+        Bar, BarChart, BarGroup, Cell, Gauge, List, ListItem, ListState, Padding, Row, Table,
+        canvas::Canvas,
     },
 };
 use scout4all_core::{
@@ -90,12 +90,7 @@ where
             })
             .collect();
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(self.title.as_str())
-                    .style(block_style),
-            )
+            .block(panel::section(self.title.as_str()).style(block_style))
             .highlight_style(
                 Style::default()
                     .bg(Color::Yellow)
@@ -482,7 +477,7 @@ impl MatchStatsScreen {
             };
             let field_side: f64 = 9.0;
             let canvas = Canvas::default()
-                .block(Block::default().borders(Borders::ALL).title(label))
+                .block(panel::section(label))
                 .x_bounds([0.0, field_side])
                 .y_bounds([0.0, field_side])
                 .paint(|ctx| {
@@ -572,12 +567,7 @@ impl MatchStatsScreen {
         }
         let group = BarGroup::default().bars(&bars);
         let evals_barchart = BarChart::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().evaluations)
-                    .padding(Padding::new(2, 2, 1, 1)),
-            )
+            .block(panel::section(current_labels().evaluations).padding(Padding::new(2, 2, 1, 1)))
             .data(group)
             .bar_width(5)
             .bar_gap(1)
@@ -608,11 +598,7 @@ impl MatchStatsScreen {
                 .constraints([Constraint::Length(3), Constraint::Min(0)])
                 .split(area);
             let gauge = Gauge::default()
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().efficiency),
-                )
+                .block(panel::section(current_labels().efficiency))
                 .gauge_style(Style::default().fg(color).bg(Color::Black))
                 .percent(normalized)
                 .label(Span::styled(
@@ -646,11 +632,7 @@ impl MatchStatsScreen {
                 .constraints([Constraint::Length(3), Constraint::Min(0)])
                 .split(area);
             let gauge = Gauge::default()
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(current_labels().positiveness),
-                )
+                .block(panel::section(current_labels().positiveness))
                 .gauge_style(Style::default().fg(color).bg(Color::Black))
                 .percent(normalized)
                 .label(Span::styled(
@@ -712,11 +694,7 @@ impl MatchStatsScreen {
             ]));
         }
         let summary_box = Table::new(rows, [Constraint::Length(16), Constraint::Length(5)])
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().summary),
-            )
+            .block(panel::section(current_labels().summary))
             .widths([Constraint::Percentage(70), Constraint::Percentage(30)]);
         f.render_widget(summary_box, area);
     }
@@ -777,11 +755,7 @@ impl MatchStatsScreen {
             rows,
             [Constraint::Percentage(60), Constraint::Percentage(40)],
         )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(labels.freeballs),
-        );
+        .block(panel::section(labels.freeballs));
         f.render_widget(table, area);
     }
 

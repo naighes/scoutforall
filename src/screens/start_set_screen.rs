@@ -2,7 +2,7 @@ use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         scouting_screen::ScoutingScreen,
         screen::{
             AppAction, Renderable, Sba, ScreenAsync, change_value_entry, get_keybinding_actions,
@@ -549,9 +549,7 @@ impl<
             (_, Some(_), Some(_)) => current_labels().lineup_selection_fallback_libero,
             _ => &format!("pos {}", position_index + 1),
         };
-        Block::default()
-            .borders(Borders::ALL)
-            .title(title.to_string())
+        panel::section(title.to_string())
     }
 
     fn render_lineup_selection_row(p: &PlayerEntry) -> Row<'static> {
@@ -579,10 +577,8 @@ impl<
                 let hint = Paragraph::new(current_labels().skip_fallback_libero_hint)
                     .style(Style::default().fg(Color::Cyan))
                     .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(Color::Cyan))
-                            .title(current_labels().hint),
+                        panel::section(current_labels().hint)
+                            .border_style(Style::default().fg(Color::Cyan)),
                     );
                 f.render_widget(hint, chunks[0]);
                 chunks[1]
@@ -749,11 +745,7 @@ impl<
                     .add_modifier(Modifier::BOLD),
             )
             .alignment(ratatui::layout::Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!("set {:?}", self.set_number)),
-            );
+            .block(panel::screen(format!("set {:?}", self.set_number)));
         f.render_widget(content, area);
     }
 
@@ -778,9 +770,7 @@ impl<
     }
 
     fn render_serving_team(&mut self, f: &mut Frame, area: Rect, footer_area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(current_labels().serving_team);
+        let block = panel::section(current_labels().serving_team);
         f.render_widget(block, area);
         let v = Layout::default()
             .direction(Direction::Vertical)

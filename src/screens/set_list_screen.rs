@@ -1,7 +1,7 @@
 use crate::{
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
             team_header::TeamHeader,
         },
         edit_set_events_screen::EditSetEventsScreen,
@@ -18,7 +18,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Row, Table},
+    widgets::{Row, Table},
 };
 use scout4all_core::{
     localization::current_labels,
@@ -82,7 +82,7 @@ impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
                 Constraint::Length(20),
             ],
         )
-        .block(Block::default().borders(Borders::ALL).title(format!(
+        .block(panel::screen(format!(
             "{} - {}",
             current_labels().choose_the_set,
             self.current_match.opponent

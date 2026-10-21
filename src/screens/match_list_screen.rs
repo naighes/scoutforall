@@ -6,7 +6,7 @@ use crate::{
     screens::{
         add_match_screen::AddMatchScreen,
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
             team_header::TeamHeader,
         },
         export_match_screen::ExportMatchAction,
@@ -31,10 +31,9 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, ListState, Paragraph},
+    widgets::ListState,
 };
 use ratatui::{
-    layout::Alignment,
     text::Span,
     widgets::{Row, Table},
 };
@@ -115,13 +114,10 @@ impl<
             .map(|(i, m)| self.get_match_row(m, i, match_index))
             .collect();
         if let Ok(rows) = rows {
-            let table = Table::new(rows, Self::column_widths()).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().match_list),
-            );
+            let table = Table::new(rows, Self::column_widths())
+                .block(panel::screen(current_labels().match_list));
             if self.matches.is_empty() {
-                self.render_no_matches_yet(f, container[1]);
+                panel::render_empty(f, container[1], current_labels().no_matches_yet);
             } else {
                 f.render_widget(table, container[1]);
             }
@@ -496,21 +492,6 @@ impl<
         actions.push(Sba::Simple(ScreenActionEnum::Back));
         actions.push(Sba::Simple(ScreenActionEnum::Quit));
         actions
-    }
-
-    fn render_no_matches_yet(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(40),
-                Constraint::Length(3),
-                Constraint::Percentage(40),
-            ])
-            .split(area);
-        let paragraph = Paragraph::new(current_labels().no_matches_yet)
-            .block(Block::default().borders(Borders::NONE))
-            .alignment(Alignment::Center);
-        f.render_widget(paragraph, chunks[1]);
     }
 
     fn handle_space_key(&mut self) -> AppAction {

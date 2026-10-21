@@ -2,6 +2,7 @@
 //! the points, the phase and rotation, the substitutions and the players on
 //! court.
 
+use crate::screens::components::panel;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -106,9 +107,7 @@ pub fn render_point_sequence(
     current_match: &MatchEntry,
     snapshot: &Snapshot,
 ) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(current_labels().point_sequence);
+    let block = panel::section(current_labels().point_sequence);
     let inner_area = block.inner(area);
     f.render_widget(block, area);
     let teams = match current_match.home {

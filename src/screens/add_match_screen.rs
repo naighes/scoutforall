@@ -6,7 +6,7 @@ use crate::{
     screens::{
         components::{
             checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
-            notify_banner::NotifyBanner, team_header::TeamHeader, text_box::TextBox,
+            notify_banner::NotifyBanner, panel, team_header::TeamHeader, text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
@@ -21,7 +21,6 @@ use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders},
 };
 use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
@@ -264,7 +263,7 @@ impl<
             Some(_) => current_labels().edit_match,
             None => current_labels().new_match,
         };
-        let block = Block::default().borders(Borders::ALL).title(title);
+        let block = panel::screen(title);
         f.render_widget(block, area);
     }
 

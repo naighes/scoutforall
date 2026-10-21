@@ -4,7 +4,7 @@ use std::{fmt::Debug, path::PathBuf, sync::Arc};
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
@@ -18,9 +18,9 @@ use async_trait::async_trait;
 use crokey::crossterm::event::KeyEvent;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{List, ListItem, ListState},
 };
 use scout4all_core::{
     localization::current_labels,
@@ -215,7 +215,7 @@ impl<
             })
             .collect();
         if items.is_empty() {
-            self.render_no_teams_yet(f, body);
+            panel::render_empty(f, body, current_labels().no_teams_yet);
         } else {
             self.render_list(f, body, items);
         }
@@ -318,31 +318,12 @@ impl<
         }
     }
 
-    fn render_no_teams_yet(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(40),
-                Constraint::Length(3),
-                Constraint::Percentage(40),
-            ])
-            .split(area);
-        let paragraph = Paragraph::new(current_labels().no_teams_yet)
-            .block(Block::default().borders(Borders::NONE))
-            .alignment(Alignment::Center);
-        f.render_widget(paragraph, chunks[1]);
-    }
-
     fn render_list(&mut self, f: &mut Frame, area: Rect, items: Vec<ListItem>) {
         if self.list_state.selected().is_none() {
             self.list_state.select(Some(0));
         }
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().teams),
-            )
+            .block(panel::screen(current_labels().teams))
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)

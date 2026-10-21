@@ -3,7 +3,9 @@ use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
 use crate::screens::{
-    components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, set_board},
+    components::{
+        navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel, set_board,
+    },
     screen::{AppAction, Renderable, ScreenAsync},
 };
 use crate::shapes::actions::ScreenActionEnum;
@@ -20,7 +22,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Row, Table},
+    widgets::{Row, Table},
 };
 use scout4all_core::analytics::global::{enqueue_match_for_upload, uploads_enabled};
 use scout4all_core::{
@@ -882,9 +884,7 @@ impl<
             })
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(60), Constraint::Min(2)]).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().choose_the_event)
+            panel::section(current_labels().choose_the_event)
                 .style(Style::default().add_modifier(Modifier::REVERSED)),
         );
         f.render_widget(table, area);
@@ -918,12 +918,8 @@ impl<
             EventTypeInput::Some(EventTypeEnum::S) => labels.serve_type,
             _ => labels.set_type,
         };
-        let table = Table::new(rows, [Constraint::Percentage(100)]).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .style(Style::default().add_modifier(Modifier::REVERSED)),
-        );
+        let table = Table::new(rows, [Constraint::Percentage(100)])
+            .block(panel::section(title).style(Style::default().add_modifier(Modifier::REVERSED)));
         f.render_widget(table, area);
     }
 
@@ -960,9 +956,7 @@ impl<
             })
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(100)]).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().choose_the_evaluation)
+            panel::section(current_labels().choose_the_evaluation)
                 .style(Style::default().add_modifier(Modifier::REVERSED)),
         );
         f.render_widget(table, area);
@@ -1025,11 +1019,7 @@ impl<
                 Constraint::Percentage(32),
             ],
         )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().latest_events),
-        );
+        .block(panel::section(current_labels().latest_events));
         f.render_widget(table, area);
     }
 
@@ -1094,12 +1084,7 @@ impl<
                 Constraint::Percentage(28),
             ],
         )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .style(Style::default().add_modifier(Modifier::REVERSED)),
-        );
+        .block(panel::section(title).style(Style::default().add_modifier(Modifier::REVERSED)));
         f.render_widget(table, area);
     }
 

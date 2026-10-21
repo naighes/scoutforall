@@ -4,7 +4,7 @@ use std::{fmt::Debug, sync::Arc};
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue},
+        components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue, panel},
         keybindings_change_screen::ChangeKeyBindingScreen,
         report_an_issue_screen::ReportAnIssueScreen,
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
@@ -25,8 +25,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
-    widgets::{Block, Borders, Row, Table, TableState},
+    widgets::{Block, Row, Table, TableState},
 };
 use scout4all_core::{
     localization::current_labels,
@@ -373,18 +372,14 @@ where
         }
     }
 
-    fn panel_block(&self, panel: SettingsPanel, title: &str) -> Block<'static> {
-        let style = if self.panel == panel {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(style)
-            .title(Line::styled(title.to_string(), style))
+    fn panel_block(&self, shown: SettingsPanel, title: &str) -> Block<'static> {
+        let block = panel::section(title.to_string());
+        match self.panel == shown {
+            true => block
+                .border_style(panel::SCREEN_TITLE)
+                .title_style(panel::SCREEN_TITLE),
+            false => block,
+        }
     }
 
     fn selected_style() -> Style {
@@ -461,7 +456,7 @@ where
             rows,
             [Constraint::Percentage(60), Constraint::Percentage(40)],
         )
-        .block(Block::default().borders(Borders::ALL).title(format!(
+        .block(panel::section(format!(
             "{} – {}",
             labels.key_bindings, labels.fixed_shortcuts
         )));

@@ -3,6 +3,7 @@ pub mod date_picker;
 pub mod navigation_footer;
 pub mod notify_banner;
 pub mod notify_dialogue;
+pub mod panel;
 pub mod select;
 pub mod set_board;
 pub mod team_header;

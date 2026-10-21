@@ -1,6 +1,8 @@
 use crate::{
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, set_board},
+        components::{
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel, set_board,
+        },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
             field_navigation_entries, get_keybinding_actions,
@@ -18,7 +20,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, Row, Table, TableState},
+    widgets::{Row, Table, TableState},
 };
 use scout4all_core::{
     analytics::global::{enqueue_match_for_upload, uploads_enabled},
@@ -475,11 +477,7 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
             ],
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().events),
-        );
+        .block(panel::section(current_labels().events));
         f.render_stateful_widget(table, area, &mut self.table_state);
     }
 
@@ -515,11 +513,7 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
             })
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(40), Constraint::Min(10)]).block(
-            Block::default().borders(Borders::ALL).title(format!(
-                "{} {}",
-                labels.edit,
-                self.selected() + 1
-            )),
+            panel::section(format!("{} {}", labels.edit, self.selected() + 1)),
         );
         f.render_widget(table, area);
     }
