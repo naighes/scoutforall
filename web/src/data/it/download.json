@@ -1,6 +1,7 @@
 {
   "version": "Versione",
   "other_systems": "Usi un altro computer?",
+  "hide_other_systems": "Nascondi gli altri computer",
   "all_versions": "Altre versioni (per esperti)",
   "phone": "Scout4All funziona su computer: apri questa pagina dal PC o dal Mac.",
   "platforms": {
