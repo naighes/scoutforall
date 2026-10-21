@@ -270,6 +270,7 @@ pub struct Labels {
     pub freeballs_exploited: &'static str,
     pub fb: &'static str,
     pub fb_given: &'static str,
+    pub opp: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -539,6 +540,7 @@ const EN: Labels = Labels {
     freeballs_exploited: "exploited",
     fb: "fb",
     fb_given: "giv",
+    opp: "opp",
 };
 
 const IT: Labels = Labels {
@@ -808,6 +810,7 @@ const IT: Labels = Labels {
     freeballs_exploited: "sfruttate",
     fb: "fb",
     fb_given: "conc",
+    opp: "avv",
 };
 
 static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {

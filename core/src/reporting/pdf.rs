@@ -448,12 +448,13 @@ fn set_player_initial_position(
 const GROUP_STROKE: &str = "(right: (thickness: 1pt, dash: \"dashed\"))";
 
 /// The widths of the columns of the statistics (see `stats_cells`).
-const STATS_COLUMNS: [&str; 20] = [
+const STATS_COLUMNS: [&str; 21] = [
     "2fr", "1fr", "3fr", // points
     "2fr", "2fr", "1fr", // serve
     "2fr", "2fr", "3fr", "2fr", "3fr", // reception
     "1fr", "2fr", "2fr", "2fr", "3fr", "2fr", // attack
     "1fr", "2fr", "2fr", // block, faults, freeballs given
+    "2fr", // opponent errors
 ];
 
 /// The statistics shown for a player, a rotation, a set or the match:
@@ -463,7 +464,8 @@ const STATS_COLUMNS: [&str; 20] = [
 /// - reception: total, errors, positiveness, perfect, efficiency;
 /// - attack: total, errors (out or net), blocked, kills, kills %, efficiency;
 /// - block points, faults, freeballs given (the ones received are in
-///   `render_freeball_stats`).
+///   `render_freeball_stats`);
+/// - opponent errors: they have no player, a player row shows none.
 fn stats_cells(stats: &Stats, filter: &StatsFilter, bg_color: &'static str) -> Vec<Cell> {
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -495,9 +497,13 @@ fn stats_cells(stats: &Stats, filter: &StatsFilter, bg_color: &'static str) -> V
         count(B, Some(Perfect)),
         count(F, None),
         count(FB, None),
+        match filter.player {
+            Some(_) => "-".to_string(),
+            None => count(OE, None),
+        },
     ];
     // the last column of each group
-    let group_ends = [2, 5, 10, 16, 18, 19];
+    let group_ends = [2, 5, 10, 16, 18, 19, 20];
     data.into_iter()
         .enumerate()
         .map(|(i, text)| {
@@ -534,6 +540,7 @@ fn create_stats_headers(
         header_cell(labels.blk, 1),
         header_cell(labels.flt, 1),
         header_cell(labels.fb, 1),
+        header_cell(labels.opp, 1),
     ]);
     sub_header_cells.extend([
         sub_header(labels.tot, false),
@@ -555,7 +562,8 @@ fn create_stats_headers(
         sub_header(labels.eff_perc, true),
         sub_header(labels.pt, false),
         sub_header(labels.tot, true),
-        sub_header(labels.fb_given, false),
+        sub_header(labels.fb_given, true),
+        sub_header(labels.err, false),
     ]);
     (
         Row::new(header_cells).render(),
