@@ -13,6 +13,7 @@ permissions:
   contents: write
   attestations: write
   pull-requests: write
+  actions: write
 
 on:
   workflow_dispatch:
@@ -45,8 +46,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      # a draft until every asset is uploaded: the website and the self update
+      # follow the latest release, which must never lack an asset
       - name: create github release
-        run: gh release create "v${VERSION}" --generate-notes
+        run: gh release create "v${VERSION}" --generate-notes --draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -61,6 +64,9 @@ jobs:
         platforms:
           - os: macos-14
             target: aarch64-apple-darwin
+            features: "--features self-update"
+          - os: macos-14
+            target: x86_64-apple-darwin
             features: "--features self-update"
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -148,6 +154,9 @@ jobs:
           NAME: ${{ steps.variables.outputs.name }}
           ARCHIVE: ${{ steps.variables.outputs.archive }}
           BINARY: ${{ steps.variables.outputs.binaryName }}
+      - name: install rosetta to run the intel binary
+        if: matrix.platforms.target == 'x86_64-apple-darwin'
+        run: /usr/bin/pgrep -q oahd || sudo softwareupdate --install-rosetta --agree-to-license
       - name: check release assets
         shell: bash
         working-directory: ./dist
@@ -179,3 +188,51 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
           ARCHIVE: ${{ steps.variables.outputs.archive }}
+
+  # a single macOS download for both apple silicon and intel, so that nobody has
+  # to know which chip their mac has: its name carries no target, so that the
+  # self update of older clients never picks it
+  macos-universal:
+    needs: [version, build-and-publish]
+    name: build and publish the universal macOS binary
+    runs-on: macos-14
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: download the binaries of both architectures
+        run: |
+          gh release download "v${VERSION}" --dir parts \
+            --pattern scout4all-aarch64-apple-darwin \
+            --pattern scout4all-x86_64-apple-darwin
+      - name: merge them into a universal binary
+        run: |
+          mkdir -p package dist
+          lipo -create parts/scout4all-aarch64-apple-darwin parts/scout4all-x86_64-apple-darwin -output package/scout4all
+          chmod +x package/scout4all
+          lipo package/scout4all -verify_arch arm64 x86_64 || { echo "unexpected architectures: $(lipo -archs package/scout4all)"; exit 1; }
+          package/scout4all --version | grep -q "^scout4all ${VERSION}$" || { echo "the universal binary does not report scout4all ${VERSION}"; exit 1; }
+          tar cvzf dist/scout4all-macos.tar.gz -C package scout4all
+      - name: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: package/scout4all
+          subject-name: "scout4all-macos-${{ needs.version.outputs.version }}"
+      - name: upload archive
+        run: gh release upload "v${VERSION}" dist/scout4all-macos.tar.gz --clobber
+
+  publish-release:
+    needs: [version, build-and-publish, macos-universal]
+    name: publish release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: publish github release
+        run: gh release edit "v${VERSION}" --draft=false --latest
+      # the website shows the version and the sizes of the latest release
+      - name: redeploy website
+        run: gh workflow run deploy-pages.yml --ref master

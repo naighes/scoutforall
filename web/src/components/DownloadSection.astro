@@ -1,39 +1,115 @@
 ---
 
-const { title, download } = Astro.props
+import { downloadUrl, latestRelease, releasesUrl, resolveAsset } from "../lib/release.js"
+
+const { title, download, labels } = Astro.props
+
+const release = await latestRelease()
+
+const meta = asset => [
+  release && `${labels.version} ${release.version}`,
+  release?.sizes.has(asset) && `${Math.max(1, Math.round(release.sizes.get(asset) / 1e6))} MB`,
+].filter(Boolean).join(" · ")
 
 ---
 
-<section class="bs-container bs-mt-lg" id="download">
+<section class="bs-container bs-mt-lg" id="download" data-download>
 
   <!-- Header -->
   { title && <h2 class="bs-h2 text-center">{ title }</h2>}
 
-  <!-- download -->
-  <div class="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-0">
+  <!-- shown on phones and tablets only -->
+  <p class="mt-6 text-center text-bs-foreground-dark" data-phone hidden>{ labels.phone }</p>
 
-    <!-- Item -->
+  <!-- Platforms: the one of the visitor comes first, the others behind a button -->
+  <ul class="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6 data-[detected]:lg:grid-cols-1 data-[detected]:max-w-xl data-[detected]:mx-auto" data-platforms>
 
-    { download.map( (item, index) => 
-      <a
-        href={item.href}
-        class="@container p-6 xl:p-16 flex flex-col gap-6 h-full w-full rounded-xl overflow-hidden
-              lg:scale-90 @xl:justify-end
-              bg-gray-100 text-black/90
-              cursor-pointer transition-colors duration-300
-              hover:bg-gray-300
-              no-underline">
-        
-        <div class="relative">
-          <h2 class="bs-h3 flex flex-col gap-4 items-center text-center">
-            <img height="64" width="64" src={ item.image } alt="" />
-            <span>{ item.title }</span>
-          </h2>
-        </div>
-      </a>
-    )}
+    { download.map( platform => {
+      const text = labels.platforms[platform.id]
+      return (
+        <li class="p-6 xl:p-10 flex flex-col gap-5 rounded-xl bg-bs-surface-3 text-center" data-platform={ platform.id }>
 
+          <h3 class="bs-h3 flex flex-col gap-3 items-center">
+            <img height="56" width="56" src={ platform.image } alt="" class="h-14 w-14 object-contain invert opacity-90" />
+            <span>{ text.title }</span>
+          </h3>
+
+          <p class="text-bs-foreground-dark">{ text.requirements }</p>
+
+          <div class="flex flex-col gap-4">
+            { platform.files.map( file => {
+              const asset = resolveAsset(release, file)
+              const details = meta(asset)
+              return (
+                <div class="flex flex-col gap-1">
+                  <a
+                    href={ downloadUrl(asset) }
+                    class="block px-5 py-4 rounded-md font-semibold no-underline
+                          bg-bs-foreground-light text-bs-surface-0
+                          transition-colors duration-200 hover:bg-white
+                          focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/60">
+                    { text.files[file.id] }
+                  </a>
+                  { details && <span class="text-sm text-bs-foreground-dark">{ details }</span> }
+                </div>
+              )
+            })}
+          </div>
+
+          <details class="text-left mt-auto">
+            <summary class="cursor-pointer text-center text-bs-foreground-dark hover:text-bs-foreground-light">{ text.help_title }</summary>
+            <p class="mt-3" set:html={ text.help } />
+          </details>
+
+        </li>
+      )
+    })}
+
+  </ul>
+
+  <div class="mt-6 flex flex-col gap-4 items-center">
+    <button
+      type="button"
+      class="bs-btn"
+      aria-expanded="false"
+      data-other-systems
+      hidden>
+      { labels.other_systems }
+    </button>
+    <a href={ releasesUrl } class="text-sm text-bs-foreground-dark hover:text-bs-foreground-light">{ labels.all_versions }</a>
   </div>
 
 </section>
 
+<script>
+  // without javascript, or on an unknown system, every platform stays visible
+  const section = document.querySelector("[data-download]")
+  const list = section.querySelector("[data-platforms]")
+  const toggle = section.querySelector("[data-other-systems]")
+
+  const ua = navigator.userAgent
+  const touchMac = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1
+  const phone = /Android|iPhone|iPad|iPod/.test(ua) || touchMac
+  const os =
+    phone ? null :
+    /Windows/.test(ua) ? "windows" :
+    /Mac/.test(ua) ? "macos" :
+    /Linux|X11|CrOS/.test(ua) ? "linux" :
+    null
+
+  section.querySelector("[data-phone]").hidden = !phone
+
+  const mine = os && list.querySelector(`[data-platform="${os}"]`)
+  if (mine) {
+    const others = [...list.children].filter(item => item !== mine)
+    const showOthers = show => {
+      others.forEach(item => item.hidden = !show)
+      toggle.setAttribute("aria-expanded", String(show))
+      list.toggleAttribute("data-detected", !show)
+    }
+    list.prepend(mine)
+    showOthers(false)
+    toggle.hidden = false
+    toggle.addEventListener("click", () => showOthers(toggle.getAttribute("aria-expanded") !== "true"))
+  }
+</script>

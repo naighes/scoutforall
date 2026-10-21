@@ -16,7 +16,8 @@ import global_settings_en from '../data/en/global_settings.json';
 import global_settings_it from '../data/it/global_settings.json';
 const global_settings = lang === 'it' ? global_settings_it : global_settings_en;
 
-import version_data from '../data/version.json';
+import { latestRelease } from '../lib/release.js';
+const release = await latestRelease();
 
 import FooterMain from "../components/FooterMain.astro"
 import HeaderMain from "../components/HeaderMain.astro"
@@ -82,15 +83,14 @@ const { title, description } = Astro.props
 
     <script data-goatcounter="https://scout4all.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 
-    <script type="application/ld+json">
-      {
+    <script type="application/ld+json" is:inline set:html={
         JSON.stringify({
           "@context": "https://schema.org",
           "@type": "SoftwareApplication",
           "name": "scout4all",
           "applicationCategory": "SportsApplication",
           "operatingSystem": "macOS, Windows, Linux",
-          "softwareVersion": version_data.version,
+          "softwareVersion": release?.version,
           "url": "https://naighes.github.io/scoutforall/",
           "inLanguage": lang,
           "description": description ?? global_settings.description,
@@ -110,8 +110,7 @@ const { title, description } = Astro.props
             "url": "https://naighes.github.io/scoutforall/"
           }
         })
-      }
-    </script>
+      } />
     <!-- the home page is english: move to the language picked in the
          selector, or else to the one of the browser; inline, so that it
          runs before the page renders -->
