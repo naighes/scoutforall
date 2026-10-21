@@ -218,6 +218,10 @@ impl<A: Send + Sync, SR: SettingsReader + Send + Sync, SW: SettingsWriter + Send
 where
     A: FileSystemAction,
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.get_footer_actions())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -255,8 +259,7 @@ where
 
         self.notify_message.render(f, footer_right);
         let kb = navigation_keybindings();
-        self.footer
-            .render(f, footer_left, get_keybinding_actions(kb, actions));
+        self.footer.render(f, footer_left, self.footer_entries());
 
         self.screen_key_bindings = kb.slice(Sba::keys(actions));
     }

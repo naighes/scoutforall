@@ -11,6 +11,7 @@ use ratatui::{
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
+        components::navigation_footer::NavigationFooter,
         screen::{AppAction, ScreenAsync},
         team_list_screen::TeamListScreen,
     },
@@ -101,20 +102,36 @@ impl App {
     /// |----------------------------|
     /// | footer_left | footer_right |
     /// |----------------------------|
+    ///
+    /// The footer is as tall as the keys it lists take in its width, at
+    /// least `MIN_FOOTER_HEIGHT` for the notifications on the right.
     pub fn draw(&mut self, f: &mut Frame) {
+        const MIN_FOOTER_HEIGHT: u16 = 3;
         let size = f.area();
+        let columns = [Constraint::Percentage(50), Constraint::Percentage(50)];
+        let footer_width = Layout::default()
+            .direction(Direction::Horizontal)
+            .margin(1)
+            .constraints(columns)
+            .split(size)[0]
+            .width;
+        let footer_height = self
+            .current_screen()
+            .map(|screen| NavigationFooter::height(&screen.footer_entries(), footer_width))
+            .unwrap_or(0)
+            .max(MIN_FOOTER_HEIGHT);
         let container = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
                 Constraint::Length(1),
                 Constraint::Min(1),
-                Constraint::Length(3),
+                Constraint::Length(footer_height),
             ])
             .split(size);
         let footer = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints(columns)
             .split(container[2]);
         let header =
             Paragraph::new("🏐 scout4all").style(Style::default().add_modifier(Modifier::BOLD));

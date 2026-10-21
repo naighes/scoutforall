@@ -181,6 +181,10 @@ impl<
     SR: SettingsReader + Send + Sync + 'static,
 > Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.screen_actions())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notify_message.render(f, footer_right);
         let items: Vec<ListItem> = self
@@ -216,10 +220,7 @@ impl<
             self.render_list(f, body, items);
         }
         let screen_actions = &self.screen_actions();
-        let kb = navigation_keybindings();
-
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
-        self.footer.render(f, footer_left, footer_entries);
+        self.footer.render(f, footer_left, self.footer_entries());
 
         self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(screen_actions));
     }

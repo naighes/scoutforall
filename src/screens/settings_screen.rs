@@ -109,6 +109,40 @@ where
     SW: SettingsWriter + Send + Sync + 'static,
     SR: SettingsReader + Send + Sync + 'static,
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        let actions = match self.panel {
+            SettingsPanel::General => vec![
+                Sba::Simple(ScreenActionEnum::Up),
+                Sba::Simple(ScreenActionEnum::Down),
+                Sba::Redacted(ScreenActionEnum::Confirm, |_| {
+                    current_labels().change.to_string()
+                }),
+            ],
+            SettingsPanel::Shortcuts => vec![
+                Sba::Simple(ScreenActionEnum::Up),
+                Sba::Simple(ScreenActionEnum::Down),
+                Sba::Redacted(ScreenActionEnum::Edit, |_| {
+                    current_labels().change.to_string()
+                }),
+                Sba::Simple(ScreenActionEnum::Reset),
+            ],
+        };
+        let mut entries = get_keybinding_actions(navigation_keybindings(), &actions);
+        entries.push((
+            KeyCombinationFormatExt::new(&self.format).to_string(KeyCode::Tab),
+            current_labels().switch_panel.to_string(),
+        ));
+        entries.extend(get_keybinding_actions(
+            navigation_keybindings(),
+            &[
+                Sba::Simple(ScreenActionEnum::ReportAnIssue),
+                Sba::Simple(ScreenActionEnum::Back),
+                Sba::Simple(ScreenActionEnum::Quit),
+            ],
+        ));
+        entries
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         // the fixed keys below the general settings: at the end of the
         // shortcuts they would scroll out of sight
@@ -258,40 +292,6 @@ where
             screen_key_bindings,
             format: KeyCombinationFormat::default(),
         }
-    }
-
-    fn footer_entries(&self) -> Vec<(String, String)> {
-        let actions = match self.panel {
-            SettingsPanel::General => vec![
-                Sba::Simple(ScreenActionEnum::Up),
-                Sba::Simple(ScreenActionEnum::Down),
-                Sba::Redacted(ScreenActionEnum::Confirm, |_| {
-                    current_labels().change.to_string()
-                }),
-            ],
-            SettingsPanel::Shortcuts => vec![
-                Sba::Simple(ScreenActionEnum::Up),
-                Sba::Simple(ScreenActionEnum::Down),
-                Sba::Redacted(ScreenActionEnum::Edit, |_| {
-                    current_labels().change.to_string()
-                }),
-                Sba::Simple(ScreenActionEnum::Reset),
-            ],
-        };
-        let mut entries = get_keybinding_actions(navigation_keybindings(), &actions);
-        entries.push((
-            KeyCombinationFormatExt::new(&self.format).to_string(KeyCode::Tab),
-            current_labels().switch_panel.to_string(),
-        ));
-        entries.extend(get_keybinding_actions(
-            navigation_keybindings(),
-            &[
-                Sba::Simple(ScreenActionEnum::ReportAnIssue),
-                Sba::Simple(ScreenActionEnum::Back),
-                Sba::Simple(ScreenActionEnum::Quit),
-            ],
-        ));
-        entries
     }
 
     fn switch_panel(&mut self) {

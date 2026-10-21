@@ -310,6 +310,14 @@ impl Ui {
             .collect()
     }
 
+    /// The keys the footer of the current screen lists, `(key, description)`.
+    pub fn footer_entries(&mut self) -> Vec<(String, String)> {
+        self.app
+            .current_screen()
+            .map(|screen| screen.footer_entries())
+            .unwrap_or_default()
+    }
+
     pub fn footer(&mut self) -> String {
         let lines = self.lines();
         lines[lines.len() - 5..].join("\n")

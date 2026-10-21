@@ -93,6 +93,10 @@ impl<
     SR: SettingsReader + Send + Sync,
 > Renderable for ScoutingScreen<SSW, SW, SR>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.get_screen_actions())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
@@ -150,12 +154,11 @@ impl<
         }
         let screen_actions = &self.get_screen_actions();
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
 
         self.render_header(f, header);
         set_board::render_point_sequence(f, point_sequence, &self.current_match, &self.snapshot);
-        self.footer.render(f, footer_left, footer_entries);
+        self.footer.render(f, footer_left, self.footer_entries());
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
         self.render_court(f, right);

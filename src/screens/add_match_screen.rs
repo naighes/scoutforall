@@ -63,6 +63,10 @@ impl<
     SW: SettingsWriter + Send + Sync + 'static,
 > Renderable for AddMatchScreen<MW, SSW, SR, SW>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_entries.clone()
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
             .direction(Direction::Vertical)

@@ -83,6 +83,10 @@ impl<
     SW: SettingsWriter + Send + Sync + 'static,
 > Renderable for MatchListScreen<MR, MW, SSW, SR, SW>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.screen_actions())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -138,8 +142,7 @@ impl<
         let kb: &KeyBindings<ScreenActionEnum> = navigation_keybindings();
         let screen_actions = &self.screen_actions();
         let screen_key_bindings = &kb.slice(Sba::keys(screen_actions));
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
-        self.footer.render(f, footer_left, footer_entries);
+        self.footer.render(f, footer_left, self.footer_entries());
         self.screen_key_bindings = screen_key_bindings.to_owned()
     }
 }

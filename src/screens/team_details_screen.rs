@@ -236,6 +236,10 @@ impl<
     SW: SettingsWriter + Send + Sync,
 > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR, SW>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.get_footer_entries())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notifier.render(f, footer_right);
         let container = Layout::default()
@@ -280,11 +284,7 @@ impl<
 
         let screen_actions = &self.get_footer_entries();
 
-        self.footer.render(
-            f,
-            footer_left,
-            get_keybinding_actions(navigation_keybindings(), screen_actions),
-        );
+        self.footer.render(f, footer_left, self.footer_entries());
         self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(screen_actions));
     }
 }

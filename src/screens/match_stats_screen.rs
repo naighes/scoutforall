@@ -264,6 +264,10 @@ impl ScreenAsync for MatchStatsScreen {
 }
 
 impl Renderable for MatchStatsScreen {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_entries.clone()
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, _: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)

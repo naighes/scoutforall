@@ -67,6 +67,10 @@ struct EventForm {
 }
 
 impl<SSW: SetWriter + Send + Sync> Renderable for EditSetEventsScreen<SSW> {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_actions().1
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)

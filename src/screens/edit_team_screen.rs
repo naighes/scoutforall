@@ -49,6 +49,10 @@ pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
 }
 
 impl<TW: TeamWriter + Send + Sync> Renderable for EditTeamScreen<TW> {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_entries.clone()
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let area = Layout::default()
             .direction(Direction::Vertical)

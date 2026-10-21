@@ -48,6 +48,10 @@ pub struct ChangeKeyBindingScreen<SW: SettingsWriter + Send + Sync, T: ScoutingS
 impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> Renderable
     for ChangeKeyBindingScreen<SW, T>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_entries.clone()
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let area = Layout::default()
             .direction(Direction::Vertical)
