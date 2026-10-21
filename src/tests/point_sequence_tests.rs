@@ -92,7 +92,7 @@ mod tests {
         let mut ui = scouting().await;
         keys(&mut ui, "s#s=").await;
         // back to the evaluation of their point, our serve error
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         let (home, away) = point_rows(&mut ui);
         assert_eq!(scores(&home), [1], "{home}");
         assert_eq!(scores(&away), Vec::<u8>::new(), "{away}");

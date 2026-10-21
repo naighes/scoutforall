@@ -142,7 +142,7 @@ mod tests {
         let mut ui = settings().await;
         let screen = ui.screen();
         let fixed = current_labels().fixed;
-        for key in ["F2", "u", "Esc", "0-9"] {
+        for key in ["F2", "⇧-u", "Esc", "0-9"] {
             assert!(
                 screen.contains(&format!("{key} ({fixed})")),
                 "{key}: {screen}"
@@ -354,7 +354,7 @@ mod tests {
     #[tokio::test]
     async fn fixed_keys_are_reserved() {
         for (code, shown) in [
-            (KeyCode::Char('u'), "u"),
+            (KeyCode::Char('U'), "⇧-u"),
             (KeyCode::F(2), "F2"),
             (KeyCode::Char('0'), "0"),
             (KeyCode::Char('7'), "7"),
@@ -615,7 +615,7 @@ mod tests {
                 .key_for(&ServeTypeEnum::Float),
             Some(key!('3'))
         );
-        for (code, shown) in [(KeyCode::Char('u'), "u"), (KeyCode::F(2), "F2")] {
+        for (code, shown) in [(KeyCode::Char('U'), "⇧-u"), (KeyCode::F(2), "F2")] {
             for index in [
                 set_index(SetTypeEnum::High),
                 serve_index(ServeTypeEnum::Spin),
@@ -847,7 +847,7 @@ mod tests {
             "scouting_keybindings": {
                 "S": ["x", "s"],
                 "P": [],
-                "A": ["a", "u"],
+                "A": ["a", "shift-u"],
                 "B": ["b", "F2"]
             }
         }"#;
@@ -1042,8 +1042,8 @@ mod tests {
         }
         // nor a reserved key
         let mut ui = change_key_for(event_index(EventTypeEnum::FB)).await;
-        ui.press(KeyCode::Char('u')).await;
-        let message = current_labels().reserved_shortcut.replace("{}", "u");
+        ui.press(KeyCode::Char('U')).await;
+        let message = current_labels().reserved_shortcut.replace("{}", "⇧-u");
         assert!(ui.screen().contains(&message), "{}", ui.screen());
     }
 
@@ -1080,7 +1080,7 @@ mod tests {
         let old = r##"{
             "language": "en",
             "set_type_keybindings": {
-                "high": ["u"],
+                "high": ["shift-u"],
                 "five": ["+"],
                 "super": ["x", "w"],
                 "pipe": ["F2"],

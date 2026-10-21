@@ -292,14 +292,14 @@ mod tests {
         let mut ui = scouting().await;
         keys(&mut ui, "s-d7+a2q#").await;
         assert!(!is_choosing_the_evaluation(&mut ui));
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         assert_chosen(&mut ui, &set_desc(SetTypeEnum::Quick));
         // back to the player, then the same attacker again
-        keys(&mut ui, "u2").await;
+        keys(&mut ui, "U2").await;
         assert_chosen(&mut ui, &set_desc(SetTypeEnum::Five));
         // another attacker
-        keys(&mut ui, "u4").await;
+        keys(&mut ui, "U4").await;
         assert_chosen(&mut ui, &set_desc(SetTypeEnum::Six));
     }
 
@@ -307,11 +307,11 @@ mod tests {
     async fn undo_brings_back_the_serve() {
         let mut ui = scouting().await;
         keys(&mut ui, "ss+").await;
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         assert_chosen(&mut ui, &serve_desc(ServeTypeEnum::Spin));
         // back to the events, then the serve again: nothing to remember
-        keys(&mut ui, "us").await;
+        keys(&mut ui, "Us").await;
         assert_chosen(&mut ui, &serve_desc(ServeTypeEnum::Float));
     }
 
@@ -441,7 +441,7 @@ mod tests {
         assert!(events[0].ends_with(",-,,"), "{events:?}");
         // undo the dig (back to its evaluation, its player, the events),
         // then the serve saved without technique: it gets the float
-        keys(&mut ui, "uuuu").await;
+        keys(&mut ui, "UUUU").await;
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         assert_chosen(&mut ui, &serve_desc(ServeTypeEnum::Float));
         keys(&mut ui, "-").await;

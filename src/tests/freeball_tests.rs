@@ -287,7 +287,7 @@ mod tests {
         let mut ui = scouting().await;
         keys(&mut ui, "s-d7+x1").await;
         let saved = saved_count(&ui);
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(choosing_the_player(&mut ui), "{}", ui.screen());
         assert_eq!(saved_count(&ui), saved - 1);
         // another player sent it
@@ -295,14 +295,14 @@ mod tests {
         assert_eq!(last_saved(&ui).0, "FB");
         assert_eq!(saved_count(&ui), saved);
         keys(&mut ui, "X").await;
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(choosing_the_event(&mut ui), "{}", ui.screen());
         assert_eq!(saved_count(&ui), saved);
         assert!(event_row(&mut ui, EventTypeEnum::OF).is_some());
         // back to the event choice from the player choice
         let mut ui = scouting().await;
         keys(&mut ui, "s-d7+x").await;
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(choosing_the_event(&mut ui), "{}", ui.screen());
         assert!(event_row(&mut ui, EventTypeEnum::FB).is_some());
     }

@@ -11,4 +11,5 @@ mod settings_tests;
 mod team_list_tests;
 mod technique_tests;
 mod ui;
+mod undo_tests;
 mod unreadable_data_tests;
