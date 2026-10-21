@@ -21,6 +21,8 @@ pub enum MatchError {
     SetEntryError(String),
     #[error("match already exists: {0}")]
     MatchAlreadyExists(String),
+    #[error("set outcome changed: {0}")]
+    SetOutcomeChanged(String),
 }
 
 #[derive(Debug, Error)]

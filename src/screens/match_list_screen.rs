@@ -15,6 +15,7 @@ use crate::{
         match_stats_screen::MatchStatsScreen,
         scouting_screen::ScoutingScreen,
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        set_list_screen::SetListScreen,
         start_set_screen::StartSetScreen,
     },
     shapes::{
@@ -173,6 +174,7 @@ impl<
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (Some(ScreenActionEnum::Edit), _, _) => self.handle_edit_key(),
+                (Some(ScreenActionEnum::EditEvents), _, _) => self.handle_edit_events_key(),
                 (Some(ScreenActionEnum::New), _, _) => {
                     if self.team.players.len() >= 6 {
                         AppAction::SwitchScreen(Box::new(AddMatchScreen::new(
@@ -460,11 +462,14 @@ impl<
             actions.push(Sba::Hidden(ScreenActionEnum::Next));
         }
         match self.get_selected() {
-            Some(Ok((_, status))) => {
+            Some(Ok((m, status))) => {
                 if !status.match_finished {
                     actions.push(Sba::Simple(ScreenActionEnum::Select));
                 }
                 actions.push(Sba::Simple(ScreenActionEnum::Edit));
+                if !m.sets.is_empty() {
+                    actions.push(Sba::Simple(ScreenActionEnum::EditEvents));
+                }
                 actions.push(Sba::Simple(ScreenActionEnum::Export));
                 actions.push(Sba::Simple(ScreenActionEnum::MatchStats));
                 actions.push(Sba::Simple(ScreenActionEnum::PrintReport));
@@ -543,6 +548,21 @@ impl<
                 self.match_writer.clone(),
                 self.set_writer.clone(),
                 m,
+            ))),
+            None => {
+                self.notify_message
+                    .set_error(current_labels().no_match_selected.to_string());
+                AppAction::None
+            }
+        }
+    }
+
+    fn handle_edit_events_key(&mut self) -> AppAction {
+        match self.get_selected_match().map(|(m, _)| m.clone()) {
+            Some(m) => AppAction::SwitchScreen(Box::new(SetListScreen::new(
+                m,
+                self.match_reader.clone(),
+                self.set_writer.clone(),
             ))),
             None => {
                 self.notify_message

@@ -228,6 +228,26 @@ impl Ui {
         }
     }
 
+    /// The descriptors of the first set of each match, as saved on disk.
+    pub fn saved_first_sets(&self) -> Vec<serde_json::Value> {
+        self.match_descriptor_paths()
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p.with_file_name("set_1.json")).ok())
+            .map(|json| serde_json::from_str(&json).unwrap())
+            .collect()
+    }
+
+    /// Changes the descriptors of the first sets on disk, e.g. to save them
+    /// as an older version did.
+    pub fn edit_saved_first_sets(&self, edit: impl Fn(&mut serde_json::Value)) {
+        for path in self.match_descriptor_paths() {
+            let path = path.with_file_name("set_1.json");
+            let mut value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            edit(&mut value);
+            std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        }
+    }
+
     /// The events saved for the first set of each match, as CSV rows.
     pub fn saved_first_set_events(&self) -> Vec<String> {
         self.match_descriptor_paths()

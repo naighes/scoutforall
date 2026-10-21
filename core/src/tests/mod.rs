@@ -1,4 +1,5 @@
 mod config_tests;
+mod edit_event_tests;
 mod event_validation_tests;
 mod freeball_tests;
 mod legacy_data_tests;

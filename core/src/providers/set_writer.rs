@@ -31,4 +31,8 @@ pub trait SetWriter {
         m: &MatchEntry,
         set_number: u8,
     ) -> Result<Option<EventEntry>, AppError>;
+
+    /// Saves the set, its descriptor and its events, in place of the one
+    /// saved.
+    async fn update(&self, m: &MatchEntry, set: &SetEntry) -> Result<(), AppError>;
 }

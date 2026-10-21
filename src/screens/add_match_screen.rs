@@ -8,7 +8,10 @@ use crate::{
             checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
             notify_banner::NotifyBanner, team_header::TeamHeader, text_box::TextBox,
         },
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{
+            AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
+            field_navigation_entries, get_keybinding_actions,
+        },
         start_set_screen::StartSetScreen,
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
@@ -102,18 +105,24 @@ impl<
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
+                FieldKey::of(key.code),
                 &self.notify_message.has_value(),
             ) {
-                (_, _, true) => {
+                (_, _, _, true) => {
                     self.notify_message.reset();
                     AppAction::None
                 }
-                (None, KeyCode::Char(c), _) => self.handle_char(c),
-                (None, KeyCode::Backspace, _) => self.handle_backspace(),
-                (Some(ScreenActionEnum::Next), _, _) => self.handle_next(),
-                (Some(ScreenActionEnum::Previous), _, _) => self.handle_previous(),
-                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
-                (Some(ScreenActionEnum::Confirm), _, _) => self.handle_confirm().await,
+                (_, _, Some(FieldKey::Next), _) => self.handle_next(),
+                (_, _, Some(FieldKey::Previous), _) => self.handle_previous(),
+                (_, _, Some(FieldKey::Change { .. }), _) => {
+                    // the only field with values to choose from
+                    self.home.handle_char(' ');
+                    AppAction::None
+                }
+                (None, KeyCode::Char(c), _, _) => self.handle_char(c),
+                (None, KeyCode::Backspace, _, _) => self.handle_backspace(),
+                (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Confirm), _, _, _) => self.handle_confirm().await,
                 _ => AppAction::None,
             }
         } else {
@@ -215,13 +224,15 @@ impl<
         editing: Option<MatchEntry>,
     ) -> Self {
         let screen_actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let footer_entries = field_navigation_entries()
+            .into_iter()
+            .chain([change_value_entry()])
+            .chain(get_keybinding_actions(kb, screen_actions))
+            .collect();
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
         AddMatchScreen {
             settings_reader,

@@ -34,6 +34,7 @@ pub enum ScreenActionEnum {
     ScrollDown,
     Reset,
     Undo,
+    EditEvents,
 }
 
 impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
@@ -68,6 +69,7 @@ impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
             Delete => (Delete, current_labels().delete.to_string()),
             Reset => (Reset, current_labels().reset.to_string()),
             Undo => (Undo, current_labels().undo.to_string()),
+            EditEvents => (EditEvents, current_labels().edit_events.to_string()),
         }
     }
 }
@@ -104,6 +106,7 @@ impl fmt::Display for ScreenActionEnum {
             Delete => "delete",
             Reset => "reset",
             Undo => "undo",
+            EditEvents => "edit-events",
         };
         write!(f, "{}", label)
     }

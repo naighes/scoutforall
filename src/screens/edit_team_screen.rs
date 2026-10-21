@@ -7,7 +7,10 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
             text_box::TextBox,
         },
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{
+            AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
+            field_navigation_entries, get_keybinding_actions,
+        },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
@@ -78,17 +81,18 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditTeamScreen<TW> {
             match (
                 self.screen_key_bindings.get(key_combination),
                 key.code,
+                FieldKey::of(key.code),
                 &self.notify_message.has_value(),
             ) {
-                (_, _, true) => self.handle_error_reset(),
-                (_, KeyCode::Char(c), _) => self.handle_char(c),
-                (_, KeyCode::Backspace, _) => self.handle_backspace(),
-                (_, KeyCode::Up, _) => self.handle_up(),
-                (_, KeyCode::Down, _) => self.handle_down(),
-                (Some(ScreenActionEnum::Next), _, _) => self.handle_tab(),
-                (Some(ScreenActionEnum::Previous), _, _) => self.handle_backtab(),
-                (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
-                (Some(ScreenActionEnum::Confirm), _, _) => self.handle_enter().await,
+                (_, _, _, true) => self.handle_error_reset(),
+                (_, _, Some(FieldKey::Next), _) => self.handle_tab(),
+                (_, _, Some(FieldKey::Previous), _) => self.handle_backtab(),
+                (_, _, Some(FieldKey::Change { back: true }), _) => self.handle_up(),
+                (_, _, Some(FieldKey::Change { back: false }), _) => self.handle_down(),
+                (_, KeyCode::Char(c), _, _) => self.handle_char(c),
+                (_, KeyCode::Backspace, _, _) => self.handle_backspace(),
+                (Some(ScreenActionEnum::Back), _, _, _) => AppAction::Back(true, Some(1)),
+                (Some(ScreenActionEnum::Confirm), _, _, _) => self.handle_enter().await,
                 _ => AppAction::None,
             }
         } else {
@@ -122,14 +126,16 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         );
 
         let actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
 
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, actions);
+        let footer_entries = field_navigation_entries()
+            .into_iter()
+            .chain([change_value_entry()])
+            .chain(get_keybinding_actions(kb, actions))
+            .collect();
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditTeamScreen {
@@ -170,14 +176,16 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         );
 
         let actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
         ];
 
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, actions);
+        let footer_entries = field_navigation_entries()
+            .into_iter()
+            .chain([change_value_entry()])
+            .chain(get_keybinding_actions(kb, actions))
+            .collect();
         let screen_key_bindings = kb.slice(Sba::keys(actions));
 
         EditTeamScreen {
@@ -225,14 +233,14 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
     }
 
     fn handle_up(&mut self) -> AppAction {
-        self.gender.handle_down();
+        self.gender.handle_up();
         self.classification.handle_up();
         AppAction::None
     }
 
     fn handle_down(&mut self) -> AppAction {
         self.gender.handle_down();
-        self.classification.handle_up();
+        self.classification.handle_down();
         AppAction::None
     }
 
