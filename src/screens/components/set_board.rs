@@ -12,7 +12,7 @@ use ratatui::{
 use scout4all_core::{
     localization::current_labels,
     shapes::{
-        enums::{EventTypeEnum, TeamSideEnum},
+        enums::{EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
         snapshot::Snapshot,
@@ -162,6 +162,31 @@ fn point_style(side: TeamSideEnum) -> Style {
     .add_modifier(Modifier::BOLD)
 }
 
+/// The substitutions made and allowed, as the set status shows them.
+fn substitutions_text(snapshot: &Snapshot) -> String {
+    format!(
+        "{} {}/{}",
+        current_labels().substitutions,
+        snapshot.current_lineup.get_substitutions().len(),
+        snapshot.current_lineup.get_max_substitutions()
+    )
+}
+
+/// The width the set status takes to show its texts in full, the same
+/// all along the set: the substitutions, any phase and any event (the
+/// player is shortened when the screen is narrow).
+pub fn set_status_width(snapshot: &Snapshot) -> u16 {
+    let labels = current_labels();
+    let phases = PhaseEnum::ALL.map(|phase| phase.to_string());
+    let events = EventTypeEnum::ALL.map(|event| event.friendly_name(labels).to_string());
+    std::iter::once(substitutions_text(snapshot))
+        .chain(phases)
+        .chain(events)
+        .map(|text| Span::raw(text).width() as u16)
+        .max()
+        .unwrap_or(0)
+}
+
 /// The phase, the rotation and the substitutions, with the event and the
 /// player being scouted, if any.
 pub fn render_set_status(
@@ -204,12 +229,7 @@ pub fn render_set_status(
         (chunks[3], player, Color::Magenta, Color::Black),
         (
             chunks[4],
-            Some(format!(
-                "{} {}/{}",
-                current_labels().substitutions,
-                snapshot.current_lineup.get_substitutions().len(),
-                snapshot.current_lineup.get_max_substitutions()
-            )),
+            Some(substitutions_text(snapshot)),
             Color::Gray,
             Color::Black,
         ),

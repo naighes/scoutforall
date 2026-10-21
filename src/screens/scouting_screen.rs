@@ -147,12 +147,15 @@ impl<
             ])
             .split(body);
         let (header, point_sequence, body) = (rows[0], rows[1], rows[2]);
+        // the set status as wide as its texts on a narrow screen, the court
+        // what's left
+        let center_width = (body.width / 5).max(set_board::set_status_width(&self.snapshot));
         let columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(40),
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
+                Constraint::Length(center_width),
+                Constraint::Fill(1),
             ])
             .split(body);
         // the sets or serves are listed below the evaluations

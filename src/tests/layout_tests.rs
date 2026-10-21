@@ -1,6 +1,7 @@
 //! The screens adapt to the size of the terminal: whatever the size, the
-//! footer lists all the keys of the screen, and the scouting shows all the
-//! entries to choose from, the point sequence only when they still fit.
+//! footer lists all the keys of the screen, the scouting shows all the
+//! entries to choose from (the point sequence only when they still fit),
+//! and the tables size their columns on their texts.
 
 #[cfg(test)]
 mod tests {
@@ -190,5 +191,80 @@ mod tests {
         assert!(!shows_point_sequence(&mut ui), "{}", ui.screen());
         ui.resize(120, 40);
         assert!(shows_point_sequence(&mut ui), "{}", ui.screen());
+    }
+
+    /// The first row of the panel with the title.
+    fn first_row(ui: &mut Ui, title: &str) -> String {
+        let lines = ui.lines();
+        lines
+            .iter()
+            .position(|l| l.contains(&format!("┌{title}")))
+            .map(|row| lines[row + 1].clone())
+            .unwrap_or_else(|| panic!("\"{title}\" not shown\n{}", ui.screen()))
+    }
+
+    #[tokio::test]
+    async fn the_match_list_shows_the_score_the_date_and_the_status_in_full() {
+        let mut ui = open(true, "\nm").await;
+        for (width, height) in SIZES {
+            ui.resize(width, height);
+            let row = first_row(&mut ui, current_labels().match_list);
+            for text in ["0-0", "Mon Sep 01, 2025", current_labels().in_progress] {
+                assert!(row.contains(text), "{width}x{height}: \"{text}\" in {row}");
+            }
+        }
+        // the teams in full when there's room for them, the score not far
+        // from them on a wide screen
+        for (width, height) in SIZES.into_iter().filter(|(width, _)| *width >= 80) {
+            ui.resize(width, height);
+            let row = first_row(&mut ui, current_labels().match_list);
+            let (team, score) = (row.find("Cortona Volley"), row.find("0-0"));
+            assert!(
+                matches!((team, score), (Some(team), Some(score)) if score - team <= 31),
+                "{width}x{height}: {row}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_set_events_show_their_texts_in_full() {
+        let mut ui = open(true, &format!("\nm\n{SCOUTED}\x1bv\n")).await;
+        // the events of SCOUTED, a row each: number, event, player,
+        // evaluation, serve or set
+        let expected = [
+            "1 serve Anna ace F",
+            "2 serve Anna ace F",
+            "3 serve Anna error F",
+            "4 reception Gina error -",
+            "5 reception Gina perfect -",
+        ];
+        for (width, height) in SIZES.into_iter().filter(|(width, _)| *width >= 80) {
+            ui.resize(width, height);
+            let rows: Vec<String> = panel(&mut ui, current_labels().events)
+                .expect("expected the events")
+                .iter()
+                .map(|row| row.split_whitespace().collect::<Vec<_>>().join(" "))
+                .collect();
+            assert!(
+                rows.starts_with(&expected.map(String::from)),
+                "{width}x{height}: {rows:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_substitutions_are_shown_in_full() {
+        let substitutions = format!("{} 0/8", current_labels().substitutions);
+        for keys in ["\nm\n".to_string(), format!("\nm\n{SCOUTED}\x1bv\n")] {
+            let mut ui = open(true, &keys).await;
+            for (width, height) in SIZES {
+                ui.resize(width, height);
+                assert!(
+                    ui.screen().contains(&substitutions),
+                    "{keys:?} at {width}x{height}\n{}",
+                    ui.screen()
+                );
+            }
+        }
     }
 }
