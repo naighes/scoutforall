@@ -1,10 +1,12 @@
 //! The screens adapt to the size of the terminal: whatever the size, the
-//! footer lists all the keys of the screen.
+//! footer lists all the keys of the screen, and the scouting shows all the
+//! entries to choose from, the point sequence only when they still fit.
 
 #[cfg(test)]
 mod tests {
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
+    use scout4all_core::localization::current_labels;
 
     const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",
@@ -94,5 +96,99 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The entries of the panel with the title, a line each, if it's
+    /// shown: the text between its borders, down to its bottom border.
+    fn panel(ui: &mut Ui, title: &str) -> Option<Vec<String>> {
+        let lines: Vec<Vec<char>> = ui.lines().iter().map(|l| l.chars().collect()).collect();
+        let top = format!("┌{title}");
+        let (row, x) = lines.iter().enumerate().find_map(|(row, line)| {
+            String::from_iter(line)
+                .find(&top)
+                .map(|byte| (row, String::from_iter(line)[..byte].chars().count()))
+        })?;
+        Some(
+            lines[row + 1..]
+                .iter()
+                .take_while(|line| line.get(x) != Some(&'└'))
+                .map(|line| {
+                    String::from_iter(line[x + 1..].iter().take_while(|c| **c != '│'))
+                        .trim()
+                        .to_string()
+                })
+                .filter(|entry| !entry.is_empty())
+                .collect(),
+        )
+    }
+
+    fn shows_point_sequence(ui: &mut Ui) -> bool {
+        ui.screen().contains(current_labels().point_sequence)
+    }
+
+    /// After our serve error they serve, and our reception goes straight
+    /// over: the longest list of events, 7 (their point or error, our
+    /// fault, attack, dig or block, their freeball).
+    const SEVEN_EVENTS: &str = "s=p7/";
+    /// Carla, the middle blocker in the front row, attacks after the dig of
+    /// Gina the libero: the tallest panel, 6 evaluations and 8 sets.
+    const MIDDLE_BLOCKER_ATTACK: &str = "s-d7+a3";
+
+    #[tokio::test]
+    async fn all_the_events_are_listed_at_every_height() {
+        let mut ui = open(true, &format!("\nm\n{SEVEN_EVENTS}")).await;
+        for height in 20..=60 {
+            ui.resize(100, height);
+            let events = panel(&mut ui, current_labels().choose_the_event);
+            assert_eq!(
+                events.as_ref().map(Vec::len),
+                Some(7),
+                "at 100x{height}: {events:?}\n{}",
+                ui.screen()
+            );
+        }
+    }
+
+    /// The evaluations and the sets are all listed from the height where
+    /// they fit (with the footer, the score and the borders: 27), and
+    /// whenever the point sequence is shown.
+    #[tokio::test]
+    async fn the_tallest_panel_is_listed_whenever_it_fits() {
+        let mut ui = open(true, &format!("\nm\n{MIDDLE_BLOCKER_ATTACK}")).await;
+        for height in 27..=60 {
+            ui.resize(100, height);
+            let evals = panel(&mut ui, current_labels().choose_the_evaluation);
+            let sets = panel(&mut ui, current_labels().set_type);
+            assert_eq!(
+                (evals.as_ref().map(Vec::len), sets.as_ref().map(Vec::len)),
+                (Some(6), Some(8)),
+                "at 100x{height}: {evals:?} {sets:?}\n{}",
+                ui.screen()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_point_sequence_is_shown_only_when_the_lists_still_fit() {
+        for keys in [SEVEN_EVENTS, MIDDLE_BLOCKER_ATTACK] {
+            let mut ui = open(true, &format!("\nm\n{keys}")).await;
+            let shown: Vec<u16> = (20..=60)
+                .filter(|height| {
+                    ui.resize(100, *height);
+                    shows_point_sequence(&mut ui)
+                })
+                .collect();
+            // from a height on, and the same whatever is being chosen
+            assert_eq!(shown, (31..=60).collect::<Vec<_>>(), "{keys}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_point_sequence_comes_back_when_the_terminal_grows() {
+        let mut ui = open(true, "\nm\n").await;
+        ui.resize(80, 24);
+        assert!(!shows_point_sequence(&mut ui), "{}", ui.screen());
+        ui.resize(120, 40);
+        assert!(shows_point_sequence(&mut ui), "{}", ui.screen());
     }
 }

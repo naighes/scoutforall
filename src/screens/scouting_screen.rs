@@ -27,11 +27,11 @@ use scout4all_core::{
     localization::current_labels,
     providers::set_writer::SetWriter,
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, FriendlyName},
+        enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        technique::{ServeTypeEnum, TechniqueEnum},
+        technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
 };
 use std::sync::Arc;
@@ -87,6 +87,38 @@ enum ScoutingScreenState {
     Replacement,
 }
 
+/// The score of the set, on top.
+const SCORE_HEADER_HEIGHT: u16 = 3;
+/// The point sequence, below the score: a row per team and the borders.
+const POINT_SEQUENCE_HEIGHT: u16 = 4;
+
+/// The rows the tallest panel of the left column takes: the evaluations
+/// of an event with, below, the sets or serves to choose from (the attack
+/// of a middle blocker), each list with its borders.
+fn tallest_left_column() -> u16 {
+    let most_sets = RoleEnum::ALL
+        .into_iter()
+        .flat_map(|role| [false, true].map(|back_row| SetTypeEnum::available(role, back_row).len()))
+        .max()
+        .unwrap_or(0);
+    EventTypeEnum::ALL
+        .into_iter()
+        .map(|event| {
+            let techniques = match event {
+                EventTypeEnum::A => most_sets,
+                EventTypeEnum::S => ServeTypeEnum::ALL.len(),
+                _ => 0,
+            };
+            let evals = event.available_evals().len() + 2;
+            match techniques {
+                0 => evals,
+                n => evals + n + 2,
+            }
+        })
+        .max()
+        .unwrap_or(0) as u16
+}
+
 impl<
     SSW: SetWriter + Send + Sync,
     SW: SettingsWriter + Send + Sync,
@@ -98,11 +130,19 @@ impl<
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
+        // the point sequence only when the tallest panel of the left column
+        // still fits below it
+        let point_sequence_height = match body.height
+            >= SCORE_HEADER_HEIGHT + POINT_SEQUENCE_HEIGHT + tallest_left_column()
+        {
+            true => POINT_SEQUENCE_HEIGHT,
+            false => 0,
+        };
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),
-                Constraint::Length(4),
+                Constraint::Length(SCORE_HEADER_HEIGHT),
+                Constraint::Length(point_sequence_height),
                 Constraint::Min(1),
             ])
             .split(body);
@@ -120,13 +160,18 @@ impl<
             ScoutingScreenState::Eval => self.available_techniques(),
             _ => vec![],
         };
+        // the list to choose from takes half of the column, or all it needs
+        // when it's longer, the latest events the rest
+        let list_height = (columns[0].height / 2)
+            .max(self.left_list_len() as u16 + 2)
+            .min(columns[0].height);
         let left = Layout::default()
             .direction(Direction::Vertical)
             .constraints(match techniques.len() {
                 0 => [
-                    Constraint::Percentage(50),
+                    Constraint::Length(list_height),
                     Constraint::Length(0),
-                    Constraint::Percentage(50),
+                    Constraint::Min(0),
                 ],
                 n => [
                     Constraint::Length(self.available_evals().len() as u16 + 2),
@@ -157,7 +202,14 @@ impl<
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
 
         self.render_header(f, header);
-        set_board::render_point_sequence(f, point_sequence, &self.current_match, &self.snapshot);
+        if point_sequence_height > 0 {
+            set_board::render_point_sequence(
+                f,
+                point_sequence,
+                &self.current_match,
+                &self.snapshot,
+            );
+        }
         self.footer.render(f, footer_left, self.footer_entries());
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
@@ -422,6 +474,22 @@ impl<
         match technique {
             TechniqueEnum::Set(set) => self.settings.set_type_keybindings.key_for(set),
             TechniqueEnum::Serve(serve) => self.settings.serve_type_keybindings.key_for(serve),
+        }
+    }
+
+    /// The entries of the list the scout chooses from in the left column:
+    /// the events, the evaluations, the players or their replacements.
+    fn left_list_len(&self) -> usize {
+        match (&self.state, self.player) {
+            (ScoutingScreenState::Event, _) => self.snapshot.get_available_options().len(),
+            (ScoutingScreenState::Eval, _) => self.available_evals().len(),
+            (ScoutingScreenState::Player, _) => self.get_lineup_choices().len(),
+            (ScoutingScreenState::Replacement, Some(replaced)) => self
+                .snapshot
+                .current_lineup
+                .get_available_replacements(&self.current_match.team, replaced)
+                .len(),
+            (ScoutingScreenState::Replacement, None) => 0,
         }
     }
 
