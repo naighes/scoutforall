@@ -10,7 +10,7 @@ use crate::{
         },
         lineup::Lineup,
         set::SetEntry,
-        stats::{AttackKey, EventKey, FirstRallyKey, RallyKey, Stats},
+        stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, RallyKey, Stats},
         technique::{SetTypeEnum, TechniqueEnum},
     },
 };
@@ -100,6 +100,8 @@ pub struct Snapshot {
     set_number: u8,
     // the events that can come next
     available_options: Vec<EventTypeEnum>,
+    // their freeball (`OF`) not yet known to be exploited or not
+    pending_freeball: bool,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -138,6 +140,7 @@ impl Snapshot {
             partials: vec![],
             set_number: set_entry.set_number,
             available_options: vec![],
+            pending_freeball: false,
         };
         // the events available before the first serve: also the ones after a
         // substitution, setter or libero change opening the set
@@ -446,7 +449,42 @@ impl Snapshot {
             });
         }
         self.record_first_rally(event, rotation);
+        self.record_freeball(event, phase, rotation);
         Ok(())
+    }
+
+    /// Their freeball (`OF`) is exploited when we win the rally before they
+    /// attack again, whoever scores the point (our kill, their error, their
+    /// fault). It isn't when they win the rally, when they attack again (our
+    /// dig or block comes next, even a block point) or when they send us
+    /// another freeball, which is counted on its own. Their error after
+    /// digging our attack (`A-`, `OE`) counts as exploited: the scouting
+    /// doesn't tell whether they attacked.
+    fn record_freeball(&mut self, event: &EventEntry, phase: PhaseEnum, rotation: u8) {
+        use EventTypeEnum::*;
+        let exploited = match (
+            self.pending_freeball,
+            event.event_type,
+            event.event_type.rally_winner(event.eval),
+        ) {
+            (false, _, _) => None,
+            // even our block point comes after their attack
+            (true, D | B | OF, _) => Some(false),
+            (true, _, Some(winner)) => Some(winner == TeamSideEnum::Us),
+            (true, _, None) => None,
+        };
+        if let Some(exploited) = exploited {
+            self.stats.freeballs.add(FreeballKey {
+                phase,
+                rotation,
+                exploited,
+            });
+        }
+        self.pending_freeball = match (event.event_type, exploited) {
+            (OF, _) => true,
+            (_, Some(_)) => false,
+            (_, None) => self.pending_freeball,
+        };
     }
 
     /// The first rally of a side out goes from their serve to the end of

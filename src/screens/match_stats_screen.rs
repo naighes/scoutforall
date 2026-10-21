@@ -335,6 +335,11 @@ impl MatchStatsScreen {
                     event_type: A,
                     label: A.friendly_name(current_labels()).to_string(),
                 },
+                // the freeballs, given and received
+                EventSelection {
+                    event_type: FB,
+                    label: current_labels().freeballs.to_string(),
+                },
             ]
             .into_iter()
             .map(Some)
@@ -713,9 +718,67 @@ impl MatchStatsScreen {
     }
 
     fn render_center(&mut self, f: &mut Frame, area: Rect) {
-        if let Some(selection) = self.event_filter.selected() {
-            self.render_event_stats(f, selection, area)
+        match self.event_filter.selected() {
+            Some(EventSelection {
+                event_type: EventTypeEnum::FB,
+                ..
+            }) => self.render_freeball_stats(f, area),
+            Some(selection) => self.render_event_stats(f, selection, area),
+            None => {}
         }
+    }
+
+    /// The freeballs we gave (`FB`), the ones they gave us (`OF`) and how
+    /// many of these we exploited. Theirs have no player: with a player
+    /// selected, only the ones given.
+    fn render_freeball_stats(&self, f: &mut Frame, area: Rect) {
+        let Some(stats) = self.get_current_stats(self.set_filter.selected().copied()) else {
+            return;
+        };
+        let filter = self.current_filter();
+        let labels = current_labels();
+        let count = |n: u32| match n {
+            0 => "-".to_string(),
+            n => n.to_string(),
+        };
+        let given = Row::new(vec![
+            Cell::from(labels.freeballs_given),
+            Cell::from(count(stats.event_count(EventTypeEnum::FB, None, &filter))),
+        ]);
+        let received = [
+            Row::new(vec![
+                Cell::from(labels.freeballs_received),
+                Cell::from(count(stats.event_count(EventTypeEnum::OF, None, &filter))),
+            ]),
+            Row::new(vec![
+                Cell::from(labels.freeballs_exploited),
+                Cell::from(match stats.freeball_exploitation(&filter) {
+                    Some((p, total, exploited)) => format!("{:.0}%({}/{})", p, exploited, total),
+                    None => "-".to_string(),
+                }),
+            ]),
+        ];
+        let rows: Vec<Row> = match filter.player {
+            Some(_) => vec![given],
+            None => once(given).chain(received).collect(),
+        };
+        let area = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(rows.len() as u16 + 2),
+                Constraint::Min(0),
+            ])
+            .split(area)[0];
+        let table = Table::new(
+            rows,
+            [Constraint::Percentage(60), Constraint::Percentage(40)],
+        )
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(labels.freeballs),
+        );
+        f.render_widget(table, area);
     }
 
     fn render_left(&mut self, f: &mut Frame, area: Rect) {

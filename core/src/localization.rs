@@ -264,6 +264,12 @@ pub struct Labels {
     pub edit_does_not_fit_the_set: &'static str,
     pub edit_changes_the_set_result: &'static str,
     pub could_not_save_set: &'static str,
+    pub freeballs: &'static str,
+    pub freeballs_given: &'static str,
+    pub freeballs_received: &'static str,
+    pub freeballs_exploited: &'static str,
+    pub fb: &'static str,
+    pub fb_given: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -527,6 +533,12 @@ const EN: Labels = Labels {
     edit_does_not_fit_the_set: "the change doesn't fit the events after it",
     edit_changes_the_set_result: "the change would alter the set result",
     could_not_save_set: "could not save the set",
+    freeballs: "freeball",
+    freeballs_given: "given",
+    freeballs_received: "received",
+    freeballs_exploited: "exploited",
+    fb: "fb",
+    fb_given: "giv",
 };
 
 const IT: Labels = Labels {
@@ -790,6 +802,12 @@ const IT: Labels = Labels {
     edit_does_not_fit_the_set: "la modifica non è compatibile con gli eventi successivi",
     edit_changes_the_set_result: "la modifica cambierebbe il risultato del set",
     could_not_save_set: "impossibile salvare il set",
+    freeballs: "freeball",
+    freeballs_given: "concesse",
+    freeballs_received: "ricevute",
+    freeballs_exploited: "sfruttate",
+    fb: "fb",
+    fb_given: "conc",
 };
 
 static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {

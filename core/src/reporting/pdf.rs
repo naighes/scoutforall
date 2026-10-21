@@ -9,7 +9,7 @@ use crate::reporting::text::Text;
 use crate::reporting::typst_content::TypstContent;
 use crate::reporting::typst_world::ReportWorld;
 use crate::reporting::util::escape_text;
-use crate::shapes::enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum};
+use crate::shapes::enums::{EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum};
 use crate::shapes::r#match::{MatchEntry, MatchStatus};
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::set::SetEntry;
@@ -139,6 +139,7 @@ fn typst_error(context: &str, diagnostics: &[typst::diag::SourceDiagnostic]) -> 
 
 fn render_bottom_stats(aggregated_stats: &Stats) -> String {
     let sideout_stats = render_phase_stats(aggregated_stats);
+    let freeball_stats = render_freeball_stats(aggregated_stats);
     let counter_attack_stats = render_counter_attack(aggregated_stats);
     let distribution_sideout_stats =
         render_distribution(aggregated_stats, Some(PhaseEnum::SideOut));
@@ -153,7 +154,11 @@ fn render_bottom_stats(aggregated_stats: &Stats) -> String {
   text(""),
   {distribution_break_stats}
   text(""),
-  {sideout_stats}
+  stack(
+    spacing: 4pt,
+    {sideout_stats}
+    {freeball_stats}
+  ),
 )
 "#
     )
@@ -443,12 +448,12 @@ fn set_player_initial_position(
 const GROUP_STROKE: &str = "(right: (thickness: 1pt, dash: \"dashed\"))";
 
 /// The widths of the columns of the statistics (see `stats_cells`).
-const STATS_COLUMNS: [&str; 19] = [
+const STATS_COLUMNS: [&str; 20] = [
     "2fr", "1fr", "3fr", // points
     "2fr", "2fr", "1fr", // serve
     "2fr", "2fr", "3fr", "2fr", "3fr", // reception
     "1fr", "2fr", "2fr", "2fr", "3fr", "2fr", // attack
-    "1fr", "2fr", // block, faults
+    "1fr", "2fr", "2fr", // block, faults, freeballs given
 ];
 
 /// The statistics shown for a player, a rotation, a set or the match:
@@ -457,7 +462,8 @@ const STATS_COLUMNS: [&str; 19] = [
 /// - serve: total, errors, aces;
 /// - reception: total, errors, positiveness, perfect, efficiency;
 /// - attack: total, errors (out or net), blocked, kills, kills %, efficiency;
-/// - block points, faults.
+/// - block points, faults, freeballs given (the ones received are in
+///   `render_freeball_stats`).
 fn stats_cells(stats: &Stats, filter: &StatsFilter, bg_color: &'static str) -> Vec<Cell> {
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -488,9 +494,10 @@ fn stats_cells(stats: &Stats, filter: &StatsFilter, bg_color: &'static str) -> V
         fmt_pct(stats.metric_percentage(A, Metric::Efficiency, filter)),
         count(B, Some(Perfect)),
         count(F, None),
+        count(FB, None),
     ];
     // the last column of each group
-    let group_ends = [2, 5, 10, 16, 18];
+    let group_ends = [2, 5, 10, 16, 18, 19];
     data.into_iter()
         .enumerate()
         .map(|(i, text)| {
@@ -526,6 +533,7 @@ fn create_stats_headers(
         header_cell(labels.attack, 6),
         header_cell(labels.blk, 1),
         header_cell(labels.flt, 1),
+        header_cell(labels.fb, 1),
     ]);
     sub_header_cells.extend([
         sub_header(labels.tot, false),
@@ -546,7 +554,8 @@ fn create_stats_headers(
         sub_header(labels.pt_perc, false),
         sub_header(labels.eff_perc, true),
         sub_header(labels.pt, false),
-        sub_header(labels.tot, false),
+        sub_header(labels.tot, true),
+        sub_header(labels.fb_given, false),
     ]);
     (
         Row::new(header_cells).render(),
@@ -846,6 +855,77 @@ block(
     stroke: 1pt,
     table(
         columns: (1fr, 1fr, 1fr, 1fr, 1fr, 1fr, 1fr),
+        inset: 3pt,
+        stroke: none,
+        {header_row}
+        {table_rows}
+    )
+),
+"#,
+    )
+}
+
+/// The freeballs, in all the rallies and by phase: the ones we gave
+/// (`FB`), the ones they gave us (`OF`), and how many of these we exploited
+/// (see `Snapshot::record_freeball`).
+fn render_freeball_stats(aggregated_stats: &Stats) -> String {
+    let labels = current_labels();
+    let phases = [
+        (None, labels.global),
+        (
+            Some(PhaseEnum::Break),
+            PhaseEnum::Break.friendly_name(labels),
+        ),
+        (
+            Some(PhaseEnum::SideOut),
+            PhaseEnum::SideOut.friendly_name(labels),
+        ),
+    ];
+    let table_rows = phases
+        .iter()
+        .enumerate()
+        .map(|(i, (phase, label))| {
+            let bg_color = if i % 2 == 0 { WHITE } else { ALTERNATE_COLOR };
+            let filter = StatsFilter::new(*phase, None, None);
+            let exploitation = aggregated_stats.freeball_exploitation(&filter);
+            let texts = [
+                fmt_count(aggregated_stats.event_count(EventTypeEnum::FB, None, &filter)),
+                fmt_count(aggregated_stats.event_count(EventTypeEnum::OF, None, &filter)),
+                fmt_count(exploitation.map_or(0, |(_, _, exploited)| exploited)),
+                fmt_pct(exploitation.map(|(perc, _, _)| perc)),
+            ];
+            let mut cells = vec![
+                Cell::new(Text::new(escape_text(label)))
+                    .fill(bg_color)
+                    .align(Align::Left),
+            ];
+            cells.extend(texts.into_iter().map(|text| {
+                Cell::new(Text::new(text))
+                    .fill(bg_color)
+                    .align(Align::Center)
+            }));
+            Row::new(cells).render()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let header_row = Row::new(vec![
+        Cell::new(Text::new(escape_text(labels.freeballs)).bold())
+            .align(Align::Left)
+            .fill(LIGHT_GRAY)
+            .colspan(5),
+        Cell::new(Text::new("")).align(Align::Left).fill(LIGHT_GRAY),
+        sub_header(labels.freeballs_given, false),
+        sub_header(labels.freeballs_received, false),
+        sub_header(labels.freeballs_exploited, false),
+        sub_header("%", false),
+    ])
+    .render();
+    format!(
+        r#"
+block(
+    stroke: 1pt,
+    table(
+        columns: (2fr, 1fr, 1fr, 1fr, 1fr),
         inset: 3pt,
         stroke: none,
         {header_row}

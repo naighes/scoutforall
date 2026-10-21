@@ -419,4 +419,78 @@ mod tests {
         keys(&mut ui, "x1").await;
         assert_eq!(last_saved(&ui).0, "FB");
     }
+
+    // --- the statistics -------------------------------------------------------------
+
+    /// The match statistics list the freeballs: the ones given, by player
+    /// too, the ones received and how many of these we exploited.
+    #[tokio::test]
+    async fn match_stats_show_the_freeballs() {
+        let mut ui = scouting().await;
+        // their freeball exploited: our kill
+        keys(&mut ui, "s-Xa2#").await;
+        // their freeball not exploited: they dig and attack again; then our
+        // freeball, and their point
+        keys(&mut ui, "s-Xa2-d7+x1S").await;
+        let labels = current_labels();
+        while !ui.screen().contains(labels.match_list) {
+            ui.press(KeyCode::Esc).await;
+        }
+        ui.press(KeyCode::Char(' ')).await;
+        // the stat filter, its last entry
+        ui.type_keys(&[KeyCode::Tab, KeyCode::Tab, KeyCode::Tab, KeyCode::Down])
+            .await;
+        // the rows of the freeball table, label and value
+        let rows = |ui: &mut Ui| {
+            let names = [
+                labels.freeballs_given,
+                labels.freeballs_received,
+                labels.freeballs_exploited,
+            ];
+            ui.lines()
+                .iter()
+                .flat_map(|l| {
+                    l.split('│')
+                        .map(str::trim)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .filter(|c| names.iter().any(|n| c.starts_with(n)))
+                .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rows(&mut ui),
+            [
+                [labels.freeballs_given, "1"],
+                [labels.freeballs_received, "2"],
+                [labels.freeballs_exploited, "50%(1/2)"],
+            ],
+            "{}",
+            ui.screen()
+        );
+        // with a player: only the ones given, theirs have no player. Anna
+        // sent it, Bea didn't
+        ui.press(KeyCode::Tab).await;
+        for (player, given) in [("Anna", "1"), ("Bea", "-")] {
+            for _ in 0..8 {
+                // the player selected: the highlighted one in the list
+                let selected = ui
+                    .lines()
+                    .into_iter()
+                    .skip_while(|l| !l.contains(&format!("┌{}", labels.player)))
+                    .find(|l| l.contains(">>"));
+                match selected {
+                    Some(p) if p.contains(player) => break,
+                    _ => ui.press(KeyCode::Up).await,
+                };
+            }
+            assert_eq!(
+                rows(&mut ui),
+                [[labels.freeballs_given, given]],
+                "{player}: {}",
+                ui.screen()
+            );
+        }
+    }
 }
