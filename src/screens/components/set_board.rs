@@ -1,16 +1,21 @@
-//! The state of a set as the scouting shows it: the score, the phase and
-//! rotation, the substitutions and the players on court.
+//! The state of a set as the scouting shows it: the score, the sequence of
+//! the points, the phase and rotation, the substitutions and the players on
+//! court.
 
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 use scout4all_core::{
     localization::current_labels,
     shapes::{
-        enums::EventTypeEnum, r#match::MatchEntry, player::PlayerEntry, snapshot::Snapshot,
+        enums::{EventTypeEnum, TeamSideEnum},
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        snapshot::Snapshot,
         team::TeamEntry,
     },
 };
@@ -85,6 +90,76 @@ pub fn render_score_header(
                 .add_modifier(Modifier::BOLD),
         );
     f.render_widget(right, chunks[2]);
+}
+
+/// The widest team name in the point sequence.
+const POINT_SEQUENCE_MAX_NAME_WIDTH: usize = 16;
+/// The width of a point in the point sequence: two digits and a space.
+const POINT_WIDTH: usize = 3;
+
+/// The latest points of the set, one column per point, as many as fit: a
+/// row per team, the home team on top, with the score reached by the team
+/// scoring the point in its row.
+pub fn render_point_sequence(
+    f: &mut Frame,
+    area: Rect,
+    current_match: &MatchEntry,
+    snapshot: &Snapshot,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(current_labels().point_sequence);
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+    let teams = match current_match.home {
+        true => [
+            (TeamSideEnum::Us, current_match.team.name.as_str()),
+            (TeamSideEnum::Them, current_match.opponent.as_str()),
+        ],
+        false => [
+            (TeamSideEnum::Them, current_match.opponent.as_str()),
+            (TeamSideEnum::Us, current_match.team.name.as_str()),
+        ],
+    };
+    let name_width = teams
+        .iter()
+        .map(|(_, name)| name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(POINT_SEQUENCE_MAX_NAME_WIDTH);
+    let visible = (inner_area.width as usize).saturating_sub(name_width + 2) / POINT_WIDTH;
+    let points = snapshot.point_sequence();
+    let latest = &points[points.len().saturating_sub(visible)..];
+    let lines: Vec<Line> = teams
+        .iter()
+        .map(|(team, name)| {
+            let name: String = name.chars().take(name_width).collect();
+            let label = Span::styled(
+                format!(" {name:<name_width$} "),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let cells = latest.iter().flat_map(|(side, score)| match side == team {
+                true => [
+                    Span::styled(format!("{score:>2}"), point_style(*side)),
+                    Span::raw(" "),
+                ],
+                false => [Span::raw("  "), Span::raw(" ")],
+            });
+            Line::from(std::iter::once(label).chain(cells).collect::<Vec<_>>())
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner_area);
+}
+
+/// The color of the points of a team: ours as the team names, theirs in red.
+fn point_style(side: TeamSideEnum) -> Style {
+    match side {
+        TeamSideEnum::Us => Style::default().bg(Color::Yellow).fg(Color::Black),
+        TeamSideEnum::Them => Style::default().bg(Color::Red).fg(Color::White),
+    }
+    .add_modifier(Modifier::BOLD)
 }
 
 /// The phase, the rotation and the substitutions, with the event and the

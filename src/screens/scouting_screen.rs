@@ -96,9 +96,13 @@ impl<
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(4),
+                Constraint::Min(1),
+            ])
             .split(body);
-        let (header, body) = (rows[0], rows[1]);
+        let (header, point_sequence, body) = (rows[0], rows[1], rows[2]);
         let columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -150,6 +154,7 @@ impl<
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
 
         self.render_header(f, header);
+        set_board::render_point_sequence(f, point_sequence, &self.current_match, &self.snapshot);
         self.footer.render(f, footer_left, footer_entries);
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);

@@ -4,6 +4,7 @@ mod form_navigation_tests;
 mod freeball_tests;
 mod max_substitutions_tests;
 mod navigation_tests;
+mod point_sequence_tests;
 mod scouting_tests;
 mod settings_tests;
 mod team_list_tests;

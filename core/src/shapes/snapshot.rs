@@ -97,6 +97,8 @@ pub struct Snapshot {
     pub current_lineup: Lineup,
     pub last_event: Option<EventEntry>,
     pub partials: Vec<(u8, u8)>, // (us, them)
+    /// the team winning each rally, in order
+    pub points: Vec<TeamSideEnum>,
     set_number: u8,
     // the events that can come next
     available_options: Vec<EventTypeEnum>,
@@ -138,6 +140,7 @@ impl Snapshot {
             current_lineup,
             last_event: None,
             partials: vec![],
+            points: vec![],
             set_number: set_entry.set_number,
             available_options: vec![],
             pending_freeball: false,
@@ -342,6 +345,27 @@ impl Snapshot {
         }
     }
 
+    /// The points of the set in order: the team scoring each one, with the
+    /// score it reaches.
+    pub fn point_sequence(&self) -> Vec<(TeamSideEnum, u8)> {
+        self.points
+            .iter()
+            .scan((0u8, 0u8), |(us, them), side| {
+                let score = match side {
+                    TeamSideEnum::Us => {
+                        *us += 1;
+                        *us
+                    }
+                    TeamSideEnum::Them => {
+                        *them += 1;
+                        *them
+                    }
+                };
+                Some((*side, score))
+            })
+            .collect()
+    }
+
     fn set_score(&mut self, event: &EventEntry) {
         if let Some(side) = event.event_type.rally_winner(event.eval) {
             let (score, opponent_score) = match side {
@@ -349,6 +373,7 @@ impl Snapshot {
                 TeamSideEnum::Them => (&mut self.score_them, self.score_us),
             };
             *score += 1;
+            self.points.push(side);
             // keep track of the partials
             let partials = if self.set_number == 5 {
                 TIE_BREAK_SET_PARTIALS

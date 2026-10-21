@@ -29,6 +29,9 @@ pub const BLACK: &str = "#000000";
 pub const LIGHT_GRAY: &str = "#cccccc";
 pub const GRAY: &str = "#666666";
 pub const ALTERNATE_COLOR: &str = "#efefef";
+/// the points scored by us and by them in the point sequence
+pub const US_POINT_COLOR: &str = "#f2d16b";
+pub const THEM_POINT_COLOR: &str = "#e8a0a0";
 
 pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
     let pdf = render_match_pdf(m)?;
@@ -129,6 +132,7 @@ pub fn render_match_typst(m: &MatchEntry) -> Result<String, AppError> {
     content.push_str(&render_global_stats_table(&aggregated_stats));
     content.push_str(&render_sets_stats_table(&sets));
     content.push_str(&render_bottom_stats(&aggregated_stats));
+    content.push_str(&render_point_sequences(m, &sets));
     Ok(content)
 }
 
@@ -261,6 +265,84 @@ fn render_header(m: &MatchEntry, match_status: &MatchStatus) -> String {
   {rows}
 )
 "#
+    )
+}
+
+/// The points of every set in order, a column per point wrapping after
+/// `POINTS_PER_ROW`: a row per team, the home team on top, with the score
+/// reached by the team scoring the point in its row. At the end of the
+/// report, so that the stats stay on the first page, and in one piece: on
+/// the next page if it doesn't fit.
+fn render_point_sequences(m: &MatchEntry, sets: &[(&SetEntry, Snapshot)]) -> String {
+    const POINTS_PER_ROW: usize = 40;
+    const TABLE_INSET: f32 = 1.5;
+    const FONT_SIZE: u8 = 7;
+    let teams = match m.home {
+        true => [
+            (TeamSideEnum::Us, m.team.name.as_str()),
+            (TeamSideEnum::Them, m.opponent.as_str()),
+        ],
+        false => [
+            (TeamSideEnum::Them, m.opponent.as_str()),
+            (TeamSideEnum::Us, m.team.name.as_str()),
+        ],
+    };
+    let rows: String = sets
+        .iter()
+        .map(|(set, snapshot)| {
+            let header = Row::new(vec![
+                Cell::new(
+                    Text::new(format!("set {}", set.set_number))
+                        .size(FONT_SIZE)
+                        .bold(),
+                )
+                .colspan(POINTS_PER_ROW as u8 + 1)
+                .align(Align::Left)
+                .fill(LIGHT_GRAY),
+            ])
+            .render();
+            let points = snapshot.point_sequence();
+            let chunks: String = points
+                .chunks(POINTS_PER_ROW)
+                .flat_map(|chunk| {
+                    teams.iter().map(move |(team, name)| {
+                        let label =
+                            Cell::new(Text::new(*name).size(FONT_SIZE).bold()).align(Align::Left);
+                        let cells = (0..POINTS_PER_ROW).map(|i| match chunk.get(i) {
+                            Some((side, score)) if side == team => {
+                                Cell::new(Text::new(score.to_string()).size(FONT_SIZE).bold())
+                                    .align(Align::Center)
+                                    .fill(match side {
+                                        TeamSideEnum::Us => US_POINT_COLOR,
+                                        TeamSideEnum::Them => THEM_POINT_COLOR,
+                                    })
+                            }
+                            Some(_) => Cell::new(Text::new("")),
+                            // past the end of the set
+                            None => Cell::new(Text::new("")).stroke("none"),
+                        });
+                        Row::new(std::iter::once(label).chain(cells).collect()).render()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{header}\n{chunks}\n")
+        })
+        .collect();
+    format!(
+        r#"
+#v(4pt)
+#block(breakable: false)[
+  #text(weight: "bold", "{title}")
+  #table(
+    columns: (auto, ..range({POINTS_PER_ROW}).map(_ => 1fr)),
+    inset: {TABLE_INSET}pt,
+    stroke: 0.5pt + rgb("{LIGHT_GRAY}"),
+    {rows}
+  )
+]
+"#,
+        title = escape_text(current_labels().point_sequence),
     )
 }
 

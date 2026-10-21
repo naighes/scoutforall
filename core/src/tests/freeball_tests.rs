@@ -917,9 +917,13 @@ mod tests {
         };
         let typst = render_match_typst(&m).expect("expected the report source");
         let labels = current_labels();
-        // the texts of the freeball table, the last one: the header, then
-        // a row for all the rallies and one per phase
-        let table = &typst[typst
+        // the texts of the freeball table, the last one before the point
+        // sequence: the header, then a row for all the rallies and one per
+        // phase
+        let table = &typst[..typst
+            .find(&format!("\"{}\"", labels.point_sequence))
+            .expect("expected the point sequence")];
+        let table = &table[table
             .rfind(&format!("text(\"{}\"", labels.freeballs))
             .expect("expected the freeball table")..];
         let texts: Vec<&str> = table
