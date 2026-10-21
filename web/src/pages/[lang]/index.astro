@@ -27,6 +27,9 @@ import home_it from '../../data/it/home.json';
 const home = lang === 'it' ? home_it : home_en;
 
 import download from "../../data/download.json"
+import download_labels_en from "../../data/en/download.json"
+import download_labels_it from "../../data/it/download.json"
+const download_labels = lang === 'it' ? download_labels_it : download_labels_en
 
 import global_settings_en from '../../data/en/global_settings.json';
 import global_settings_it from '../../data/it/global_settings.json';
@@ -50,6 +53,7 @@ const global_settings = lang === 'it' ? global_settings_it : global_settings_en;
 
   <DownloadSection
     download={ download }
+    labels={ download_labels }
     title={ home.download_title }
   />
 

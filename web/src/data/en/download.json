@@ -1,0 +1,32 @@
+{
+  "version": "Version",
+  "other_systems": "Using another computer?",
+  "all_versions": "Other versions (for experts)",
+  "phone": "Scout4All runs on computers: open this page on your PC or Mac.",
+  "platforms": {
+    "windows": {
+      "title": "Windows",
+      "requirements": "Windows 10 and 11",
+      "files": { "default": "Download for Windows" },
+      "help_title": "Does Windows show a warning?",
+      "help": "Click <strong>More info</strong>, then <strong>Run anyway</strong>."
+    },
+    "macos": {
+      "title": "Mac",
+      "requirements": "Every Mac, with Apple or Intel chip",
+      "files": { "default": "Download for Mac" },
+      "help_title": "Does your Mac block it?",
+      "help": "Open <strong>System Settings → Privacy &amp; Security</strong> and click <strong>Open Anyway</strong>."
+    },
+    "linux": {
+      "title": "Linux",
+      "requirements": "Not sure which one? It's almost always Intel or AMD.",
+      "files": {
+        "x86_64": "Intel or AMD",
+        "aarch64": "ARM (e.g. Raspberry Pi)"
+      },
+      "help_title": "How do I start it?",
+      "help": "Extract the archive and run <code>./scout4all</code> from a terminal."
+    }
+  }
+}
