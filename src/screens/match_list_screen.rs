@@ -6,7 +6,7 @@ use crate::{
     screens::{
         add_match_screen::AddMatchScreen,
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
             team_header::TeamHeader,
         },
         export_match_screen::ExportMatchAction,
@@ -31,10 +31,10 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, ListState, Paragraph},
+    widgets::ListState,
 };
 use ratatui::{
-    layout::Alignment,
+    text::Span,
     widgets::{Row, Table},
 };
 use scout4all_core::{
@@ -75,6 +75,14 @@ pub struct MatchListScreen<
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
+/// A team in the match list, on a wide screen.
+const MATCH_TEAM_MAX_WIDTH: u16 = 30;
+/// The sets won, as `3-1`.
+const MATCH_SCORE_WIDTH: u16 = 3;
+/// The date of the match, as `Mon Sep 01, 2025`.
+const MATCH_DATE_FORMAT: &str = "%a %b %d, %Y";
+const MATCH_DATE_WIDTH: u16 = 16;
+
 impl<
     MR: MatchReader + Send + Sync + 'static,
     MW: MatchWriter + Send + Sync + 'static,
@@ -83,6 +91,10 @@ impl<
     SW: SettingsWriter + Send + Sync + 'static,
 > Renderable for MatchListScreen<MR, MW, SSW, SR, SW>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.screen_actions())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -102,30 +114,10 @@ impl<
             .map(|(i, m)| self.get_match_row(m, i, match_index))
             .collect();
         if let Ok(rows) = rows {
-            let table = Table::new(
-                rows,
-                vec![
-                    Constraint::Length(14),
-                    Constraint::Length(30),
-                    Constraint::Length(30),
-                    Constraint::Length(17),
-                    Constraint::Length(20),
-                ],
-            )
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(current_labels().match_list),
-            )
-            .widths([
-                Constraint::Length(14),
-                Constraint::Length(30),
-                Constraint::Length(30),
-                Constraint::Length(17),
-                Constraint::Length(20),
-            ]);
+            let table = Table::new(rows, Self::column_widths())
+                .block(panel::screen(current_labels().match_list));
             if self.matches.is_empty() {
-                self.render_no_matches_yet(f, container[1]);
+                panel::render_empty(f, container[1], current_labels().no_matches_yet);
             } else {
                 f.render_widget(table, container[1]);
             }
@@ -138,8 +130,7 @@ impl<
         let kb: &KeyBindings<ScreenActionEnum> = navigation_keybindings();
         let screen_actions = &self.screen_actions();
         let screen_key_bindings = &kb.slice(Sba::keys(screen_actions));
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
-        self.footer.render(f, footer_left, footer_entries);
+        self.footer.render(f, footer_left, self.footer_entries());
         self.screen_key_bindings = screen_key_bindings.to_owned()
     }
 }
@@ -327,6 +318,24 @@ impl<
         })
     }
 
+    /// The teams share the width the score, the date and the status leave,
+    /// up to `MATCH_TEAM_MAX_WIDTH` each: these take what their text takes.
+    fn column_widths() -> [Constraint; 5] {
+        let labels = current_labels();
+        let status = [labels.in_progress, labels.unreadable]
+            .iter()
+            .map(|label| Span::raw(*label).width())
+            .max()
+            .unwrap_or(0) as u16;
+        [
+            Constraint::Max(MATCH_TEAM_MAX_WIDTH),
+            Constraint::Max(MATCH_TEAM_MAX_WIDTH),
+            Constraint::Length(MATCH_SCORE_WIDTH),
+            Constraint::Length(MATCH_DATE_WIDTH),
+            Constraint::Length(status),
+        ]
+    }
+
     fn get_match_row(
         &self,
         m: &Listed<(MatchEntry, MatchStatus)>,
@@ -373,7 +382,7 @@ impl<
             name_left,
             name_right,
             format!("{:?}-{:?}", score_left, score_right),
-            m.date.format("%a %b %d, %Y").to_string(),
+            m.date.format(MATCH_DATE_FORMAT).to_string(),
             (if status.match_finished {
                 ""
             } else {
@@ -483,21 +492,6 @@ impl<
         actions.push(Sba::Simple(ScreenActionEnum::Back));
         actions.push(Sba::Simple(ScreenActionEnum::Quit));
         actions
-    }
-
-    fn render_no_matches_yet(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(40),
-                Constraint::Length(3),
-                Constraint::Percentage(40),
-            ])
-            .split(area);
-        let paragraph = Paragraph::new(current_labels().no_matches_yet)
-            .block(Block::default().borders(Borders::NONE))
-            .alignment(Alignment::Center);
-        f.render_widget(paragraph, chunks[1]);
     }
 
     fn handle_space_key(&mut self) -> AppAction {

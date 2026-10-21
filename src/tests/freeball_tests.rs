@@ -287,7 +287,7 @@ mod tests {
         let mut ui = scouting().await;
         keys(&mut ui, "s-d7+x1").await;
         let saved = saved_count(&ui);
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(choosing_the_player(&mut ui), "{}", ui.screen());
         assert_eq!(saved_count(&ui), saved - 1);
         // another player sent it
@@ -295,14 +295,14 @@ mod tests {
         assert_eq!(last_saved(&ui).0, "FB");
         assert_eq!(saved_count(&ui), saved);
         keys(&mut ui, "X").await;
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(choosing_the_event(&mut ui), "{}", ui.screen());
         assert_eq!(saved_count(&ui), saved);
         assert!(event_row(&mut ui, EventTypeEnum::OF).is_some());
         // back to the event choice from the player choice
         let mut ui = scouting().await;
         keys(&mut ui, "s-d7+x").await;
-        keys(&mut ui, "u").await;
+        keys(&mut ui, "U").await;
         assert!(choosing_the_event(&mut ui), "{}", ui.screen());
         assert!(event_row(&mut ui, EventTypeEnum::FB).is_some());
     }
@@ -418,5 +418,79 @@ mod tests {
         );
         keys(&mut ui, "x1").await;
         assert_eq!(last_saved(&ui).0, "FB");
+    }
+
+    // --- the statistics -------------------------------------------------------------
+
+    /// The match statistics list the freeballs: the ones given, by player
+    /// too, the ones received and how many of these we exploited.
+    #[tokio::test]
+    async fn match_stats_show_the_freeballs() {
+        let mut ui = scouting().await;
+        // their freeball exploited: our kill
+        keys(&mut ui, "s-Xa2#").await;
+        // their freeball not exploited: they dig and attack again; then our
+        // freeball, and their point
+        keys(&mut ui, "s-Xa2-d7+x1S").await;
+        let labels = current_labels();
+        while !ui.screen().contains(labels.match_list) {
+            ui.press(KeyCode::Esc).await;
+        }
+        ui.press(KeyCode::Char(' ')).await;
+        // the stat filter, its last entry
+        ui.type_keys(&[KeyCode::Tab, KeyCode::Tab, KeyCode::Tab, KeyCode::Down])
+            .await;
+        // the rows of the freeball table, label and value
+        let rows = |ui: &mut Ui| {
+            let names = [
+                labels.freeballs_given,
+                labels.freeballs_received,
+                labels.freeballs_exploited,
+            ];
+            ui.lines()
+                .iter()
+                .flat_map(|l| {
+                    l.split('│')
+                        .map(str::trim)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .filter(|c| names.iter().any(|n| c.starts_with(n)))
+                .map(|c| c.split_whitespace().map(str::to_string).collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rows(&mut ui),
+            [
+                [labels.freeballs_given, "1"],
+                [labels.freeballs_received, "2"],
+                [labels.freeballs_exploited, "50%(1/2)"],
+            ],
+            "{}",
+            ui.screen()
+        );
+        // with a player: only the ones given, theirs have no player. Anna
+        // sent it, Bea didn't
+        ui.press(KeyCode::Tab).await;
+        for (player, given) in [("Anna", "1"), ("Bea", "-")] {
+            for _ in 0..8 {
+                // the player selected: the highlighted one in the list
+                let selected = ui
+                    .lines()
+                    .into_iter()
+                    .skip_while(|l| !l.contains(&format!("┌{}", labels.player)))
+                    .find(|l| l.contains(">>"));
+                match selected {
+                    Some(p) if p.contains(player) => break,
+                    _ => ui.press(KeyCode::Up).await,
+                };
+            }
+            assert_eq!(
+                rows(&mut ui),
+                [[labels.freeballs_given, given]],
+                "{player}: {}",
+                ui.screen()
+            );
+        }
     }
 }

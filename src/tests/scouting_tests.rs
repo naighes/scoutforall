@@ -100,7 +100,10 @@ mod tests {
             footer.contains(&format!("F2 = {}", labels.settings)),
             "{footer}"
         );
-        assert!(footer.contains(&format!("u = {}", labels.undo)), "{footer}");
+        assert!(
+            footer.contains(&format!("⇧-u = {}", labels.undo)),
+            "{footer}"
+        );
         assert!(
             footer.contains(&format!("Esc = {}", labels.back)),
             "{footer}"
@@ -129,7 +132,7 @@ mod tests {
         ui.press(KeyCode::Char('w')).await;
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         // the previous key is gone
-        ui.type_keys(&[KeyCode::Char('u'), KeyCode::Char('s')])
+        ui.type_keys(&[KeyCode::Char('U'), KeyCode::Char('s')])
             .await;
         assert!(!is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         assert!(ui.screen().contains(current_labels().choose_the_event));

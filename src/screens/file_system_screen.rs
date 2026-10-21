@@ -2,7 +2,7 @@ use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
@@ -10,10 +10,10 @@ use crate::{
 use async_trait::async_trait;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Borders, List, ListItem, ListState, Paragraph},
 };
 use scout4all_core::{errors::AppError, localization::current_labels};
 use std::{
@@ -151,21 +151,6 @@ where
         }
     }
 
-    fn render_empty_directory(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(40),
-                Constraint::Length(3),
-                Constraint::Percentage(40),
-            ])
-            .split(area);
-        let paragraph = Paragraph::new(current_labels().empty_directory)
-            .block(Block::default().borders(Borders::NONE))
-            .alignment(Alignment::Center);
-        f.render_widget(paragraph, chunks[1]);
-    }
-
     fn get_footer_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         let actions = &mut vec![];
 
@@ -202,7 +187,7 @@ where
         title_label: &str,
     ) {
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(title_label))
+            .block(panel::screen(title_label))
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)
@@ -218,17 +203,17 @@ impl<A: Send + Sync, SR: SettingsReader + Send + Sync, SW: SettingsWriter + Send
 where
     A: FileSystemAction,
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.get_footer_actions())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(body);
         let header = Paragraph::new(self.current_folder.to_string_lossy().to_string())
-            .block(
-                Block::default()
-                    .borders(Borders::BOTTOM)
-                    .title(current_labels().current_directory.to_string()),
-            )
+            .block(panel::section(current_labels().current_directory).borders(Borders::BOTTOM))
             .style(Style::default().fg(Color::Cyan));
         f.render_widget(header, chunks[0]);
         let items: Vec<ListItem> = self
@@ -246,7 +231,7 @@ where
             .collect();
 
         if items.is_empty() {
-            self.render_empty_directory(f, chunks[1]);
+            panel::render_empty(f, chunks[1], current_labels().empty_directory);
         } else {
             self.render_directory_content(f, chunks[1], items, &self.title.clone());
         }
@@ -255,8 +240,7 @@ where
 
         self.notify_message.render(f, footer_right);
         let kb = navigation_keybindings();
-        self.footer
-            .render(f, footer_left, get_keybinding_actions(kb, actions));
+        self.footer.render(f, footer_left, self.footer_entries());
 
         self.screen_key_bindings = kb.slice(Sba::keys(actions));
     }

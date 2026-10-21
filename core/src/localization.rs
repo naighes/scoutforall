@@ -63,6 +63,7 @@ pub struct Labels {
     pub unknown: &'static str,
     pub choose_the_evaluation: &'static str,
     pub latest_events: &'static str,
+    pub point_sequence: &'static str,
     pub player_selection: &'static str,
     pub select_replacement: &'static str,
     pub undo: &'static str,
@@ -264,6 +265,13 @@ pub struct Labels {
     pub edit_does_not_fit_the_set: &'static str,
     pub edit_changes_the_set_result: &'static str,
     pub could_not_save_set: &'static str,
+    pub freeballs: &'static str,
+    pub freeballs_given: &'static str,
+    pub freeballs_received: &'static str,
+    pub freeballs_exploited: &'static str,
+    pub fb: &'static str,
+    pub fb_given: &'static str,
+    pub opp: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -326,6 +334,7 @@ const EN: Labels = Labels {
     unknown: "unknown",
     choose_the_evaluation: "choose the evaluation",
     latest_events: "latest events",
+    point_sequence: "point sequence",
     player_selection: "player selection",
     select_replacement: "select replacement",
     undo: "undo",
@@ -527,6 +536,13 @@ const EN: Labels = Labels {
     edit_does_not_fit_the_set: "the change doesn't fit the events after it",
     edit_changes_the_set_result: "the change would alter the set result",
     could_not_save_set: "could not save the set",
+    freeballs: "freeball",
+    freeballs_given: "given",
+    freeballs_received: "received",
+    freeballs_exploited: "exploited",
+    fb: "fb",
+    fb_given: "giv",
+    opp: "opp",
 };
 
 const IT: Labels = Labels {
@@ -589,6 +605,7 @@ const IT: Labels = Labels {
     unknown: "sconosciuto",
     choose_the_evaluation: "scegli la valutazione",
     latest_events: "ultimi eventi",
+    point_sequence: "sequenza punti",
     player_selection: "selezione giocatore",
     select_replacement: "seleziona sostituto",
     undo: "annulla",
@@ -790,6 +807,13 @@ const IT: Labels = Labels {
     edit_does_not_fit_the_set: "la modifica non è compatibile con gli eventi successivi",
     edit_changes_the_set_result: "la modifica cambierebbe il risultato del set",
     could_not_save_set: "impossibile salvare il set",
+    freeballs: "freeball",
+    freeballs_given: "concesse",
+    freeballs_received: "ricevute",
+    freeballs_exploited: "sfruttate",
+    fb: "fb",
+    fb_given: "conc",
+    opp: "avv",
 };
 
 static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {

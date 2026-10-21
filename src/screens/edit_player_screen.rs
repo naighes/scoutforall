@@ -4,8 +4,8 @@ use std::sync::Arc;
 use crate::{
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
-            team_header::TeamHeader, text_box::TextBox,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
+            select::Select, team_header::TeamHeader, text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
@@ -19,7 +19,6 @@ use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders},
 };
 use scout4all_core::{
     localization::current_labels,
@@ -48,6 +47,10 @@ pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
 }
 
 impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_entries.clone()
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -308,12 +311,10 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(match self.existing_player {
-                Some(_) => current_labels().edit_player,
-                None => current_labels().new_player,
-            });
+        let block = panel::screen(match self.existing_player {
+            Some(_) => current_labels().edit_player,
+            None => current_labels().new_player,
+        });
         f.render_widget(block, area);
     }
 }

@@ -2,7 +2,7 @@ use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
-        components::notify_banner::NotifyBanner,
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         scouting_screen::ScoutingScreen,
         screen::{
             AppAction, Renderable, Sba, ScreenAsync, change_value_entry, get_keybinding_actions,
@@ -16,7 +16,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Padding, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Paragraph, Row, Table, TableState},
 };
 use scout4all_core::{
     localization::current_labels,
@@ -60,12 +60,44 @@ pub enum StartSetScreenState {
     SelectLineupPlayers(usize, Option<Uuid>, Option<Uuid>),
 }
 
+/// The keys choosing the serving team: left and right change the team, as
+/// the values of a form.
+const SERVING_TEAM_ACTIONS: [Sba<ScreenActionEnum>; 4] = [
+    Sba::Hidden(ScreenActionEnum::Next),
+    Sba::Hidden(ScreenActionEnum::Previous),
+    Sba::Simple(ScreenActionEnum::Confirm),
+    Sba::Simple(ScreenActionEnum::Back),
+];
+
+/// The keys choosing the players of the lineup.
+const LINEUP_SELECTION_ACTIONS: [Sba<ScreenActionEnum>; 4] = [
+    Sba::Simple(ScreenActionEnum::Up),
+    Sba::Simple(ScreenActionEnum::Down),
+    Sba::Simple(ScreenActionEnum::Select),
+    Sba::Simple(ScreenActionEnum::Back),
+];
+
 impl<
     SSW: SetWriter + Send + Sync + 'static,
     SW: SettingsWriter + Send + Sync + 'static,
     SR: SettingsReader + Send + Sync + 'static,
 > Renderable for StartSetScreen<SSW, SW, SR>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        match self.state {
+            StartSetScreenState::SelectServingTeam => [change_value_entry()]
+                .into_iter()
+                .chain(get_keybinding_actions(
+                    navigation_keybindings(),
+                    &SERVING_TEAM_ACTIONS,
+                ))
+                .collect(),
+            StartSetScreenState::SelectLineupPlayers(..) => {
+                get_keybinding_actions(navigation_keybindings(), &LINEUP_SELECTION_ACTIONS)
+            }
+        }
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         use StartSetScreenState::*;
         let rows = Layout::default()
@@ -517,9 +549,7 @@ impl<
             (_, Some(_), Some(_)) => current_labels().lineup_selection_fallback_libero,
             _ => &format!("pos {}", position_index + 1),
         };
-        Block::default()
-            .borders(Borders::ALL)
-            .title(title.to_string())
+        panel::section(title.to_string())
     }
 
     fn render_lineup_selection_row(p: &PlayerEntry) -> Row<'static> {
@@ -547,10 +577,8 @@ impl<
                 let hint = Paragraph::new(current_labels().skip_fallback_libero_hint)
                     .style(Style::default().fg(Color::Cyan))
                     .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(Color::Cyan))
-                            .title(current_labels().hint),
+                        panel::section(current_labels().hint)
+                            .border_style(Style::default().fg(Color::Cyan)),
                     );
                 f.render_widget(hint, chunks[0]);
                 chunks[1]
@@ -612,29 +640,9 @@ impl<
     }
 
     fn render_lineup_selection_footer(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-
-        let lineup_selection_actions = &[
-            Sba::Simple(ScreenActionEnum::Up),
-            Sba::Simple(ScreenActionEnum::Down),
-            Sba::Simple(ScreenActionEnum::Select),
-            Sba::Simple(ScreenActionEnum::Back),
-        ];
         self.screen_key_bindings =
-            navigation_keybindings().slice(Sba::keys(lineup_selection_actions));
-        let footer_entries =
-            get_keybinding_actions(navigation_keybindings(), lineup_selection_actions);
-        let paragraph = Paragraph::new(
-            footer_entries
-                .iter()
-                .map(|(key, desc)| format!("{} = {}", key, desc))
-                .collect::<Vec<_>>()
-                .join(" | "),
-        )
-        .block(block);
-        f.render_widget(paragraph, area);
+            navigation_keybindings().slice(Sba::keys(&LINEUP_SELECTION_ACTIONS));
+        NavigationFooter::new().render(f, area, self.footer_entries());
     }
 
     fn render_lineup_selection_court(
@@ -737,11 +745,7 @@ impl<
                     .add_modifier(Modifier::BOLD),
             )
             .alignment(ratatui::layout::Alignment::Center)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!("set {:?}", self.set_number)),
-            );
+            .block(panel::screen(format!("set {:?}", self.set_number)));
         f.render_widget(content, area);
     }
 
@@ -766,9 +770,7 @@ impl<
     }
 
     fn render_serving_team(&mut self, f: &mut Frame, area: Rect, footer_area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(current_labels().serving_team);
+        let block = panel::section(current_labels().serving_team);
         f.render_widget(block, area);
         let v = Layout::default()
             .direction(Direction::Vertical)
@@ -807,33 +809,7 @@ impl<
     }
 
     fn render_serving_team_footer(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(1, 0, 0, 0));
-
-        // left and right change the team, as the values of a form
-        let serving_team_actions = &[
-            Sba::Hidden(ScreenActionEnum::Next),
-            Sba::Hidden(ScreenActionEnum::Previous),
-            Sba::Simple(ScreenActionEnum::Confirm),
-            Sba::Simple(ScreenActionEnum::Back),
-        ];
-        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(serving_team_actions));
-        let footer_entries: Vec<(String, String)> = [change_value_entry()]
-            .into_iter()
-            .chain(get_keybinding_actions(
-                navigation_keybindings(),
-                serving_team_actions,
-            ))
-            .collect();
-        let paragraph = Paragraph::new(
-            footer_entries
-                .iter()
-                .map(|(key, desc)| format!("{} = {}", key, desc))
-                .collect::<Vec<_>>()
-                .join(" | "),
-        )
-        .block(block);
-        f.render_widget(paragraph, area);
+        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(&SERVING_TEAM_ACTIONS));
+        NavigationFooter::new().render(f, area, self.footer_entries());
     }
 }

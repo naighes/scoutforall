@@ -1,8 +1,9 @@
+use crate::screens::components::panel;
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 
 use scout4all_core::localization::current_labels;
@@ -62,7 +63,7 @@ impl NotifyBanner {
                         })
                         .add_modifier(Modifier::BOLD),
                 )
-                .block(Block::default().borders(Borders::ALL).title(match message {
+                .block(panel::section(match message {
                     NotifyMessage::Info(_) => current_labels().info,
                     NotifyMessage::Error(_) => current_labels().error,
                     NotifyMessage::Warning(_) => current_labels().warning,

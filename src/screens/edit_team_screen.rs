@@ -4,8 +4,8 @@ use std::sync::Arc;
 use crate::{
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, select::Select,
-            text_box::TextBox,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
+            select::Select, text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
@@ -19,9 +19,8 @@ use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, Borders, Paragraph},
+    style::{Color, Style},
+    widgets::Paragraph,
 };
 use scout4all_core::{
     localization::current_labels,
@@ -49,6 +48,10 @@ pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
 }
 
 impl<TW: TeamWriter + Send + Sync> Renderable for EditTeamScreen<TW> {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_entries.clone()
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let area = Layout::default()
             .direction(Direction::Vertical)
@@ -323,12 +326,10 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(match self.existing_team {
-                Some(_) => current_labels().edit_team,
-                None => current_labels().new_team,
-            });
+        let block = panel::screen(match self.existing_team {
+            Some(_) => current_labels().edit_team,
+            None => current_labels().new_team,
+        });
         f.render_widget(block, area);
     }
 
@@ -339,14 +340,9 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         ) {
             let paragraph = Paragraph::new(classification.friendly_description(current_labels()))
                 .style(Style::default().fg(Color::Cyan))
-                .block(
-                    Block::default().borders(Borders::ALL).title(Span::styled(
-                        classification.friendly_name(current_labels()),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    )),
-                )
+                .block(panel::section(
+                    classification.friendly_name(current_labels()),
+                ))
                 .alignment(Alignment::Left);
             f.render_widget(paragraph, area);
         }

@@ -23,8 +23,8 @@ pub fn navigation_keybindings() -> &'static KeyBindings<ScreenActionEnum> {
 
 /// Opens the settings, from home and while scouting.
 pub const SETTINGS_KEY: KeyCombination = key!(f2);
-/// Undoes the last scouting step.
-pub const UNDO_KEY: KeyCombination = key!(u);
+/// Undoes the last scouting step: with shift, not to press it by mistake.
+pub const UNDO_KEY: KeyCombination = key!(shift - u);
 /// Leaves the scouting.
 pub const BACK_KEY: KeyCombination = key!(esc);
 
@@ -404,16 +404,10 @@ fn test_normalized_symbols() {
 
 #[test]
 fn test_fixed_keys() {
-    for ck in [key!(u), key!(esc), key!(f2), key!('0'), key!('9')] {
+    for ck in [key!(shift - u), key!(esc), key!(f2), key!('0'), key!('9')] {
         assert!(is_fixed_key(&ck), "{ck}");
     }
-    for ck in [
-        key!(a),
-        key!(shift - u),
-        key!(f3),
-        key!('+'),
-        key!(ctrl - '1'),
-    ] {
+    for ck in [key!(a), key!(u), key!(f3), key!('+'), key!(ctrl - '1')] {
         assert!(!is_fixed_key(&ck), "{ck}");
     }
 }
@@ -421,7 +415,7 @@ fn test_fixed_keys() {
 #[test]
 fn test_without_fixed_keys_and_action_for() {
     let mut kb = KeyBindings::<EventTypeEnum>::default();
-    kb.set(EventTypeEnum::A, key!(u));
+    kb.set(EventTypeEnum::A, key!(shift - u));
     kb.set(EventTypeEnum::A, key!('3'));
     let kb = kb.without_fixed_keys();
     assert_eq!(
@@ -429,7 +423,7 @@ fn test_without_fixed_keys_and_action_for() {
         HashSet::from([key!(a)])
     );
     assert_eq!(kb.action_for(&key!(b)), Some(&EventTypeEnum::B));
-    assert_eq!(kb.action_for(&key!(u)), None);
+    assert_eq!(kb.action_for(&key!(shift - u)), None);
 }
 
 #[test]
@@ -480,10 +474,10 @@ fn test_without_keys() {
 
 #[test]
 fn test_reserved_and_fixed_keys() {
-    for ck in [key!(u), key!(esc), key!(f2)] {
+    for ck in [key!(shift - u), key!(esc), key!(f2)] {
         assert!(is_reserved_key(&ck), "{ck}");
     }
-    for ck in [key!('0'), key!('9'), key!(a)] {
+    for ck in [key!('0'), key!('9'), key!(a), key!(u)] {
         assert!(!is_reserved_key(&ck), "{ck}");
     }
 }

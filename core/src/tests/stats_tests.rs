@@ -1091,4 +1091,75 @@ mod tests {
         }
         render_match_pdf(&m).expect("expected the report");
     }
+
+    /// The report shows the opponent errors in the statistics tables, by
+    /// rotation and in the whole match; a player row shows none, since they
+    /// have no player.
+    #[test]
+    fn report_shows_the_opponent_errors() {
+        use crate::localization::current_labels;
+        use crate::reporting::pdf::{render_match_pdf, render_match_typst};
+        use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
+        let t = Team::new();
+        let players = [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.mb1, t.libero]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| PlayerEntry {
+                id: *id,
+                name: format!("player {}", i + 1),
+                number: i as u8 + 1,
+                ..PlayerEntry::default()
+            })
+            .collect();
+        // an error in side out, setter in 1, then one in break, setter in 6
+        let set = SetEntry {
+            set_number: 1,
+            serving_team: TeamSideEnum::Them,
+            initial_positions: t.rotation_0(),
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events: vec![act(P, t.libero, Positive), opp(OE), opp(OE)],
+        };
+        let m = MatchEntry {
+            opponent: "them".to_string(),
+            date: Utc::now().fixed_offset(),
+            id: "match".to_string(),
+            team: TeamEntry {
+                name: "us".to_string(),
+                players,
+                ..TeamEntry::default()
+            },
+            home: true,
+            max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
+            sets: vec![set],
+        };
+        let typst = render_match_typst(&m).expect("expected the report source");
+        let labels = current_labels();
+        let texts: Vec<&str> = typst
+            .split("text(\"")
+            .skip(1)
+            .map(|t| &t[..t.find('"').unwrap()])
+            .collect();
+        // the opponent errors, the last statistic: after the label of the
+        // row and the cells before the statistics, the 21st one
+        let opponent_errors = |label: &str, leading_cells: usize| {
+            let start = texts
+                .iter()
+                .position(|t| *t == label)
+                .unwrap_or_else(|| panic!("expected the row {label}"));
+            texts[start + leading_cells + 21]
+        };
+        let rotation = |r: u8| format!("{}{}", labels.setter_prefix, r);
+        // the player rows: the name, then the positions in the 5 sets
+        assert_eq!(opponent_errors("player 7", 5), "-");
+        // the rotation and match rows: the label, then the rallies per
+        // break point and per side out
+        assert_eq!(opponent_errors(&rotation(1), 2), "1");
+        assert_eq!(opponent_errors(&rotation(6), 2), "1");
+        assert_eq!(opponent_errors(&rotation(2), 2), "-");
+        assert_eq!(opponent_errors(labels.global, 2), "2");
+        render_match_pdf(&m).expect("expected the report");
+    }
 }

@@ -192,6 +192,15 @@ pub struct RallyKey {
     pub winner: TeamSideEnum,
 }
 
+/// Their freeball (`OF`), with the phase and rotation it was played in and
+/// whether we exploited it (see `Snapshot::record_freeball`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FreeballKey {
+    pub phase: PhaseEnum,
+    pub rotation: u8,
+    pub exploited: bool,
+}
+
 /// The first rally of a side out, from their serve to the end of our first
 /// attack (see `Snapshot::record_first_rally`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -246,6 +255,7 @@ pub struct Stats {
     pub attacks: Counter<AttackKey>,
     pub rallies: Counter<RallyKey>,
     pub first_rallies: Counter<FirstRallyKey>,
+    pub freeballs: Counter<FreeballKey>,
 }
 
 impl Stats {
@@ -258,6 +268,7 @@ impl Stats {
         self.attacks.merge(&other.attacks);
         self.rallies.merge(&other.rallies);
         self.first_rallies.merge(&other.first_rallies);
+        self.freeballs.merge(&other.freeballs);
     }
 
     fn events<'a>(
@@ -451,5 +462,15 @@ impl Stats {
             }
         }
         (summary.total > 0).then_some(summary)
+    }
+
+    /// Their freeballs we exploited: `(percentage, freeballs, exploited)`,
+    /// or `None` with no freeballs. They have no player: a player filter
+    /// leaves none.
+    pub fn freeball_exploitation(&self, filter: &StatsFilter) -> Option<(f64, u32, u32)> {
+        let matches = |k: &FreeballKey| filter.matches(k.phase, k.rotation, None);
+        let total = self.freeballs.count(matches);
+        let exploited = self.freeballs.count(|k| matches(k) && k.exploited);
+        (total > 0).then(|| (percentage(exploited as i32, total), total, exploited))
     }
 }

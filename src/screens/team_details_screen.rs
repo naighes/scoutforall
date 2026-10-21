@@ -5,7 +5,7 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue,
+            navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue, panel,
             team_header::TeamHeader,
         },
         edit_player_screen::EditPlayerScreen,
@@ -20,13 +20,13 @@ use crate::{
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use dirs::home_dir;
+use ratatui::widgets::Table;
 use ratatui::widgets::*;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
 };
-use ratatui::{layout::Alignment, widgets::Table};
 use scout4all_core::{
     localization::current_labels,
     providers::{
@@ -236,6 +236,10 @@ impl<
     SW: SettingsWriter + Send + Sync,
 > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR, SW>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.get_footer_entries())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         self.notifier.render(f, footer_right);
         let container = Layout::default()
@@ -262,29 +266,21 @@ impl<
             Row::new(vec!["#", current_labels().name, current_labels().role])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().players),
-        )
+        .block(panel::screen(current_labels().players))
         .widths([
             Constraint::Length(7),
             Constraint::Length(30),
             Constraint::Length(20),
         ]);
         if self.team.active_players().is_empty() {
-            self.render_no_players_yet(f, container[1]);
+            panel::render_empty(f, container[1], current_labels().no_players_yet);
         } else {
             f.render_widget(table, container[1]);
         }
 
         let screen_actions = &self.get_footer_entries();
 
-        self.footer.render(
-            f,
-            footer_left,
-            get_keybinding_actions(navigation_keybindings(), screen_actions),
-        );
+        self.footer.render(f, footer_left, self.footer_entries());
         self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(screen_actions));
     }
 }
@@ -394,21 +390,6 @@ impl<
                 AppAction::None
             }
         }
-    }
-
-    fn render_no_players_yet(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(40),
-                Constraint::Length(3),
-                Constraint::Percentage(40),
-            ])
-            .split(area);
-        let paragraph = Paragraph::new(current_labels().no_players_yet)
-            .block(Block::default().borders(Borders::NONE))
-            .alignment(Alignment::Center);
-        f.render_widget(paragraph, chunks[1]);
     }
 
     fn get_rows(&self, selected_player: usize) -> Vec<Row<'_>> {

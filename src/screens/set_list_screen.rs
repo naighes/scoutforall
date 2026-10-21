@@ -1,7 +1,7 @@
 use crate::{
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
             team_header::TeamHeader,
         },
         edit_set_events_screen::EditSetEventsScreen,
@@ -18,7 +18,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Row, Table},
+    widgets::{Row, Table},
 };
 use scout4all_core::{
     localization::current_labels,
@@ -40,9 +40,24 @@ pub struct SetListScreen<MR: MatchReader + Send + Sync, SSW: SetWriter + Send + 
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
+/// The keys of the set list.
+const SET_LIST_ACTIONS: [Sba<ScreenActionEnum>; 5] = [
+    Sba::Simple(ScreenActionEnum::Up),
+    Sba::Simple(ScreenActionEnum::Down),
+    Sba::Redacted(ScreenActionEnum::Select, |_| {
+        current_labels().edit_events.to_string()
+    }),
+    Sba::Simple(ScreenActionEnum::Back),
+    Sba::Simple(ScreenActionEnum::Quit),
+];
+
 impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> Renderable
     for SetListScreen<MR, SSW>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &SET_LIST_ACTIONS)
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let container = Layout::default()
             .direction(Direction::Vertical)
@@ -67,7 +82,7 @@ impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
                 Constraint::Length(20),
             ],
         )
-        .block(Block::default().borders(Borders::ALL).title(format!(
+        .block(panel::screen(format!(
             "{} - {}",
             current_labels().choose_the_set,
             self.current_match.opponent
@@ -76,19 +91,8 @@ impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
         self.header
             .render(f, container[0], Some(&self.current_match.team));
         self.notify_message.render(f, footer_right);
-        let actions = [
-            Sba::Simple(ScreenActionEnum::Up),
-            Sba::Simple(ScreenActionEnum::Down),
-            Sba::Redacted(ScreenActionEnum::Select, |_| {
-                current_labels().edit_events.to_string()
-            }),
-            Sba::Simple(ScreenActionEnum::Back),
-            Sba::Simple(ScreenActionEnum::Quit),
-        ];
-        let kb = navigation_keybindings();
-        self.footer
-            .render(f, footer_left, get_keybinding_actions(kb, &actions));
-        self.screen_key_bindings = kb.slice(Sba::keys(&actions));
+        self.footer.render(f, footer_left, self.footer_entries());
+        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(&SET_LIST_ACTIONS));
     }
 }
 

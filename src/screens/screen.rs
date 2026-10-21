@@ -17,6 +17,10 @@ pub enum AppAction {
 
 pub trait Renderable {
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect);
+
+    /// The keys the footer lists, `(key, description)`: the app makes the
+    /// footer tall enough to list them all before rendering the screen.
+    fn footer_entries(&self) -> Vec<(String, String)>;
 }
 
 #[async_trait]

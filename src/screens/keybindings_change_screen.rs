@@ -4,7 +4,7 @@ use std::{fmt::Debug, sync::Arc};
 use crate::{
     providers::settings_writer::SettingsWriter,
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner},
+        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
@@ -24,7 +24,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 use scout4all_core::localization::current_labels;
 
@@ -48,6 +48,10 @@ pub struct ChangeKeyBindingScreen<SW: SettingsWriter + Send + Sync, T: ScoutingS
 impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> Renderable
     for ChangeKeyBindingScreen<SW, T>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_entries.clone()
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let area = Layout::default()
             .direction(Direction::Vertical)
@@ -64,11 +68,7 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> Renderable
                 Style::default().add_modifier(Modifier::BOLD),
             )),
         ])
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(self.action.with_desc().1),
-        );
+        .block(panel::screen(self.action.with_desc().1));
         f.render_widget(widget, area[0]);
         self.notify_message.render(f, footer_right);
         self.footer

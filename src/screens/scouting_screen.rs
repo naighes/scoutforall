@@ -3,7 +3,9 @@ use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
 use crate::screens::{
-    components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, set_board},
+    components::{
+        navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel, set_board,
+    },
     screen::{AppAction, Renderable, ScreenAsync},
 };
 use crate::shapes::actions::ScreenActionEnum;
@@ -20,18 +22,18 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Row, Table},
+    widgets::{Row, Table},
 };
 use scout4all_core::analytics::global::{enqueue_match_for_upload, uploads_enabled};
 use scout4all_core::{
     localization::current_labels,
     providers::set_writer::SetWriter,
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, FriendlyName},
+        enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        technique::{ServeTypeEnum, TechniqueEnum},
+        technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
 };
 use std::sync::Arc;
@@ -87,24 +89,75 @@ enum ScoutingScreenState {
     Replacement,
 }
 
+/// The score of the set, on top.
+const SCORE_HEADER_HEIGHT: u16 = 3;
+/// The point sequence, below the score: a row per team and the borders.
+const POINT_SEQUENCE_HEIGHT: u16 = 4;
+
+/// The rows the tallest panel of the left column takes: the evaluations
+/// of an event with, below, the sets or serves to choose from (the attack
+/// of a middle blocker), each list with its borders.
+fn tallest_left_column() -> u16 {
+    let most_sets = RoleEnum::ALL
+        .into_iter()
+        .flat_map(|role| [false, true].map(|back_row| SetTypeEnum::available(role, back_row).len()))
+        .max()
+        .unwrap_or(0);
+    EventTypeEnum::ALL
+        .into_iter()
+        .map(|event| {
+            let techniques = match event {
+                EventTypeEnum::A => most_sets,
+                EventTypeEnum::S => ServeTypeEnum::ALL.len(),
+                _ => 0,
+            };
+            let evals = event.available_evals().len() + 2;
+            match techniques {
+                0 => evals,
+                n => evals + n + 2,
+            }
+        })
+        .max()
+        .unwrap_or(0) as u16
+}
+
 impl<
     SSW: SetWriter + Send + Sync,
     SW: SettingsWriter + Send + Sync,
     SR: SettingsReader + Send + Sync,
 > Renderable for ScoutingScreen<SSW, SW, SR>
 {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        get_keybinding_actions(navigation_keybindings(), &self.get_screen_actions())
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
+        // the point sequence only when the tallest panel of the left column
+        // still fits below it
+        let point_sequence_height = match body.height
+            >= SCORE_HEADER_HEIGHT + POINT_SEQUENCE_HEIGHT + tallest_left_column()
+        {
+            true => POINT_SEQUENCE_HEIGHT,
+            false => 0,
+        };
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .constraints([
+                Constraint::Length(SCORE_HEADER_HEIGHT),
+                Constraint::Length(point_sequence_height),
+                Constraint::Min(1),
+            ])
             .split(body);
-        let (header, body) = (rows[0], rows[1]);
+        let (header, point_sequence, body) = (rows[0], rows[1], rows[2]);
+        // the set status as wide as its texts on a narrow screen, the court
+        // what's left
+        let center_width = (body.width / 5).max(set_board::set_status_width(&self.snapshot));
         let columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(40),
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
+                Constraint::Length(center_width),
+                Constraint::Fill(1),
             ])
             .split(body);
         // the sets or serves are listed below the evaluations
@@ -112,13 +165,18 @@ impl<
             ScoutingScreenState::Eval => self.available_techniques(),
             _ => vec![],
         };
+        // the list to choose from takes half of the column, or all it needs
+        // when it's longer, the latest events the rest
+        let list_height = (columns[0].height / 2)
+            .max(self.left_list_len() as u16 + 2)
+            .min(columns[0].height);
         let left = Layout::default()
             .direction(Direction::Vertical)
             .constraints(match techniques.len() {
                 0 => [
-                    Constraint::Percentage(50),
+                    Constraint::Length(list_height),
                     Constraint::Length(0),
-                    Constraint::Percentage(50),
+                    Constraint::Min(0),
                 ],
                 n => [
                     Constraint::Length(self.available_evals().len() as u16 + 2),
@@ -146,11 +204,18 @@ impl<
         }
         let screen_actions = &self.get_screen_actions();
         let kb = navigation_keybindings();
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
 
         self.render_header(f, header);
-        self.footer.render(f, footer_left, footer_entries);
+        if point_sequence_height > 0 {
+            set_board::render_point_sequence(
+                f,
+                point_sequence,
+                &self.current_match,
+                &self.snapshot,
+            );
+        }
+        self.footer.render(f, footer_left, self.footer_entries());
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
         self.render_court(f, right);
@@ -414,6 +479,22 @@ impl<
         match technique {
             TechniqueEnum::Set(set) => self.settings.set_type_keybindings.key_for(set),
             TechniqueEnum::Serve(serve) => self.settings.serve_type_keybindings.key_for(serve),
+        }
+    }
+
+    /// The entries of the list the scout chooses from in the left column:
+    /// the events, the evaluations, the players or their replacements.
+    fn left_list_len(&self) -> usize {
+        match (&self.state, self.player) {
+            (ScoutingScreenState::Event, _) => self.snapshot.get_available_options().len(),
+            (ScoutingScreenState::Eval, _) => self.available_evals().len(),
+            (ScoutingScreenState::Player, _) => self.get_lineup_choices().len(),
+            (ScoutingScreenState::Replacement, Some(replaced)) => self
+                .snapshot
+                .current_lineup
+                .get_available_replacements(&self.current_match.team, replaced)
+                .len(),
+            (ScoutingScreenState::Replacement, None) => 0,
         }
     }
 
@@ -803,9 +884,7 @@ impl<
             })
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(60), Constraint::Min(2)]).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().choose_the_event)
+            panel::section(current_labels().choose_the_event)
                 .style(Style::default().add_modifier(Modifier::REVERSED)),
         );
         f.render_widget(table, area);
@@ -839,12 +918,8 @@ impl<
             EventTypeInput::Some(EventTypeEnum::S) => labels.serve_type,
             _ => labels.set_type,
         };
-        let table = Table::new(rows, [Constraint::Percentage(100)]).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .style(Style::default().add_modifier(Modifier::REVERSED)),
-        );
+        let table = Table::new(rows, [Constraint::Percentage(100)])
+            .block(panel::section(title).style(Style::default().add_modifier(Modifier::REVERSED)));
         f.render_widget(table, area);
     }
 
@@ -881,9 +956,7 @@ impl<
             })
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(100)]).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().choose_the_evaluation)
+            panel::section(current_labels().choose_the_evaluation)
                 .style(Style::default().add_modifier(Modifier::REVERSED)),
         );
         f.render_widget(table, area);
@@ -946,11 +1019,7 @@ impl<
                 Constraint::Percentage(32),
             ],
         )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().latest_events),
-        );
+        .block(panel::section(current_labels().latest_events));
         f.render_widget(table, area);
     }
 
@@ -1015,12 +1084,7 @@ impl<
                 Constraint::Percentage(28),
             ],
         )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .style(Style::default().add_modifier(Modifier::REVERSED)),
-        );
+        .block(panel::section(title).style(Style::default().add_modifier(Modifier::REVERSED)));
         f.render_widget(table, area);
     }
 

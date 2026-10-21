@@ -1,6 +1,8 @@
 use crate::{
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, set_board},
+        components::{
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel, set_board,
+        },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
             field_navigation_entries, get_keybinding_actions,
@@ -17,7 +19,8 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Row, Table, TableState},
+    text::Span,
+    widgets::{Row, Table, TableState},
 };
 use scout4all_core::{
     analytics::global::{enqueue_match_for_upload, uploads_enabled},
@@ -66,19 +69,33 @@ struct EventForm {
     event: EventEntry,
 }
 
+/// The player in the list of the events, shortened when the screen is
+/// narrow.
+const PLAYER_MIN_WIDTH: u16 = 10;
+
 impl<SSW: SetWriter + Send + Sync> Renderable for EditSetEventsScreen<SSW> {
+    fn footer_entries(&self) -> Vec<(String, String)> {
+        self.footer_actions().1
+    }
+
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(body);
         let (header, body) = (rows[0], rows[1]);
+        // the events and the set status at least as wide as their texts on
+        // a narrow screen, the court what's left
+        let events_width = (body.width * 2 / 5).max(Self::events_table_width(
+            &Self::column_widths(&self.event_cells()),
+        ));
+        let center_width = (body.width / 5).max(set_board::set_status_width(&self.before));
         let columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(40),
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
+                Constraint::Length(events_width),
+                Constraint::Length(center_width),
+                Constraint::Fill(1),
             ])
             .split(body);
         let form_height = self
@@ -402,14 +419,15 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
             .unwrap_or_else(|| "-".to_string())
     }
 
-    fn render_events(&mut self, f: &mut Frame, area: Rect) {
-        let rows: Vec<Row> = self
-            .set
+    /// The texts of the events, a row each: the number, the event, the
+    /// player, the evaluation and the set or serve.
+    fn event_cells(&self) -> Vec<[String; 5]> {
+        self.set
             .events
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                Row::new(vec![
+                [
                     format!("{:>3}", i + 1),
                     e.event_type.friendly_name(current_labels()).to_string(),
                     e.player
@@ -418,25 +436,48 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
                         .unwrap_or_else(|| "-".to_string()),
                     Self::eval_name(e, e.eval),
                     Self::technique_name(e.technique),
-                ])
+                ]
             })
-            .collect();
+            .collect()
+    }
+
+    /// The width of each column: the widest of its texts.
+    fn column_widths(cells: &[[String; 5]]) -> [u16; 5] {
+        std::array::from_fn(|column| {
+            cells
+                .iter()
+                .map(|row| Span::raw(row[column].as_str()).width() as u16)
+                .max()
+                .unwrap_or(0)
+        })
+    }
+
+    /// The width the table takes to show the texts, the player shortened
+    /// to `PLAYER_MIN_WIDTH`: with the space between the columns and the
+    /// borders.
+    fn events_table_width(widths: &[u16; 5]) -> u16 {
+        let [number, event, player, eval, technique] = *widths;
+        number + event + player.min(PLAYER_MIN_WIDTH) + eval + technique + 4 + 2
+    }
+
+    fn render_events(&mut self, f: &mut Frame, area: Rect) {
+        let cells = self.event_cells();
+        let [number, event, _, eval, technique] = Self::column_widths(&cells);
+        let rows: Vec<Row> = cells.into_iter().map(Row::new).collect();
+        // the player takes the width left: the column is wide enough for
+        // at least `PLAYER_MIN_WIDTH` (see `events_table_width`)
         let table = Table::new(
             rows,
             [
-                Constraint::Length(4),
-                Constraint::Percentage(36),
-                Constraint::Percentage(28),
-                Constraint::Percentage(20),
-                Constraint::Percentage(10),
+                Constraint::Length(number),
+                Constraint::Length(event),
+                Constraint::Fill(1),
+                Constraint::Length(eval),
+                Constraint::Length(technique),
             ],
         )
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(current_labels().events),
-        );
+        .block(panel::section(current_labels().events));
         f.render_stateful_widget(table, area, &mut self.table_state);
     }
 
@@ -472,11 +513,7 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
             })
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(40), Constraint::Min(10)]).block(
-            Block::default().borders(Borders::ALL).title(format!(
-                "{} {}",
-                labels.edit,
-                self.selected() + 1
-            )),
+            panel::section(format!("{} {}", labels.edit, self.selected() + 1)),
         );
         f.render_widget(table, area);
     }

@@ -711,4 +711,231 @@ mod tests {
         let snapshot = t.serving(vec![t.serve(Negative), opp(OF), fb(t.setter), opp(OS)]);
         assert!(snapshot.stats.first_rallies(None, &all()).is_none());
     }
+
+    // --- the freeballs we exploited -------------------------------------------------
+
+    /// Whether we exploited their freeball, for each one in the rally.
+    fn exploited(snapshot: &Snapshot) -> Vec<bool> {
+        let mut keys: Vec<_> = snapshot
+            .stats
+            .freeballs
+            .iter(|_| true)
+            .flat_map(|(k, v)| std::iter::repeat_n(k.exploited, v as usize))
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    /// Their freeball is exploited when we win the rally before they attack
+    /// again, whoever scores the point.
+    #[test]
+    fn freeball_exploited_when_we_win_before_they_attack_again() {
+        let t = Team::new();
+        let cases = [
+            ("our kill", vec![act(A, t.oh1, Perfect)]),
+            ("their error", vec![opp(OE)]),
+            (
+                "their error after digging our attack",
+                vec![act(A, t.oh1, Negative), opp(OE)],
+            ),
+            (
+                "our attack they couldn't counter, then our kill",
+                vec![act(A, t.oh1, Positive), act(A, t.oh1, Perfect)],
+            ),
+            (
+                "our attack blocked but covered, then our kill",
+                vec![act(A, t.oh1, Exclamative), act(A, t.oh1, Perfect)],
+            ),
+            (
+                "our attack on their overpass",
+                vec![act(A, t.oh1, Negative), act(A, t.mb2, Perfect)],
+            ),
+            (
+                "our freeball back, their error",
+                vec![fb(t.setter), opp(OE)],
+            ),
+        ];
+        for (case, after) in cases {
+            let events = [vec![t.serve(Negative), opp(OF)], after].concat();
+            let snapshot = t.serving(events);
+            assert_eq!(snapshot.score_us, 1, "{case}");
+            assert_eq!(exploited(&snapshot), vec![true], "{case}");
+            assert_eq!(
+                snapshot.stats.freeball_exploitation(&all()),
+                Some((100.0, 1, 1)),
+                "{case}"
+            );
+        }
+    }
+
+    /// Their freeball isn't exploited when they win the rally, or when they
+    /// attack again (our dig or block comes next), even if we win it later.
+    #[test]
+    fn freeball_not_exploited_when_they_win_or_attack_again() {
+        let t = Team::new();
+        let cases = [
+            ("untouched, their point", vec![opp(OS)]),
+            ("our fault", vec![ev(F, Some(t.oh1), None)]),
+            ("our attack error", vec![act(A, t.oh1, Error)]),
+            ("our attack blocked", vec![act(A, t.oh1, Over)]),
+            (
+                "they dig and attack again, we win later",
+                vec![
+                    act(A, t.oh1, Negative),
+                    act(D, t.libero, Positive),
+                    act(A, t.oh1, Perfect),
+                ],
+            ),
+            (
+                "they dig and attack again, our block point",
+                vec![act(A, t.oh1, Negative), act(B, t.mb2, Perfect)],
+            ),
+            (
+                "they dig and attack again, our dig error",
+                vec![act(A, t.oh1, Negative), act(D, t.libero, Error)],
+            ),
+        ];
+        for (case, after) in cases {
+            let events = [vec![t.serve(Negative), opp(OF)], after].concat();
+            let snapshot = t.serving(events);
+            assert_eq!(exploited(&snapshot), vec![false], "{case}");
+            assert_eq!(
+                snapshot.stats.freeball_exploitation(&all()),
+                Some((0.0, 1, 0)),
+                "{case}"
+            );
+        }
+    }
+
+    /// Another freeball of theirs in the same rally: the first one wasn't
+    /// exploited, the second one counts on its own.
+    #[test]
+    fn freeball_followed_by_another_one() {
+        let t = Team::new();
+        let snapshot = t.serving(vec![
+            t.serve(Negative),
+            opp(OF),
+            act(A, t.oh1, Negative),
+            opp(OF),
+            act(A, t.oh1, Perfect),
+        ]);
+        assert_eq!(exploited(&snapshot), vec![false, true]);
+        assert_eq!(
+            snapshot.stats.freeball_exploitation(&all()),
+            Some((50.0, 2, 1))
+        );
+        assert_eq!(snapshot.stats.event_count(OF, None, &all()), 2);
+    }
+
+    /// The freeballs exploited, by the phase and rotation they were played
+    /// in; they have no player. A freeball in the rally being played isn't
+    /// counted yet.
+    #[test]
+    fn freeball_exploitation_filters() {
+        let t = Team::new();
+        let snapshot = t.receiving(vec![
+            act(P, t.libero, Over),
+            opp(OF),
+            act(A, t.oh1, Perfect),
+            // break: outside hitter 1 serves, in the new rotation
+            act(S, t.oh1, Negative),
+            opp(OF),
+        ]);
+        let stats = &snapshot.stats;
+        let side_out = StatsFilter::new(Some(PhaseEnum::SideOut), Some(0), None);
+        assert_eq!(stats.freeball_exploitation(&side_out), Some((100.0, 1, 1)));
+        assert_eq!(
+            stats.freeball_exploitation(&StatsFilter::new(Some(PhaseEnum::Break), None, None)),
+            None,
+            "the rally isn't over"
+        );
+        assert_eq!(stats.freeball_exploitation(&by(t.oh1)), None);
+        assert_eq!(stats.freeball_exploitation(&all()), Some((100.0, 1, 1)));
+        assert_eq!(stats.event_count(OF, None, &all()), 2);
+    }
+
+    /// The freeballs of the sets add up in the match.
+    #[test]
+    fn freeball_exploitation_merges() {
+        let t = Team::new();
+        let won = t.serving(vec![t.serve(Negative), opp(OF), act(A, t.oh1, Perfect)]);
+        let lost = t.serving(vec![t.serve(Negative), opp(OF), opp(OS)]);
+        let mut stats = won.stats.clone();
+        stats.merge(&lost.stats);
+        assert_eq!(stats.freeball_exploitation(&all()), Some((50.0, 2, 1)));
+    }
+
+    /// The report shows the freeballs: the ones we gave in the statistics
+    /// tables (by player too), and a table with the ones received and
+    /// exploited, in all the rallies and by phase.
+    #[test]
+    fn report_shows_the_freeballs() {
+        use crate::localization::current_labels;
+        use crate::reporting::pdf::{render_match_pdf, render_match_typst};
+        use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
+        let t = Team::new();
+        let players = t
+            .players()
+            .iter()
+            .enumerate()
+            .map(|(i, id)| PlayerEntry {
+                id: *id,
+                name: format!("player {}", i + 1),
+                number: i as u8 + 1,
+                ..PlayerEntry::default()
+            })
+            .collect();
+        // break: their freeball exploited, our freeball, their freeball
+        // not exploited (they attack again)
+        let set = t.set(
+            TeamSideEnum::Us,
+            vec![
+                t.serve(Negative),
+                opp(OF),
+                act(A, t.oh1, Perfect),
+                t.serve(Negative),
+                act(D, t.libero, Positive),
+                fb(t.setter),
+                opp(OF),
+                act(A, t.oh1, Negative),
+                act(D, t.libero, Positive),
+                act(A, t.oh1, Perfect),
+            ],
+        );
+        let m = MatchEntry {
+            opponent: "them".to_string(),
+            date: Utc::now().fixed_offset(),
+            id: "match".to_string(),
+            team: TeamEntry {
+                name: "us".to_string(),
+                players,
+                ..TeamEntry::default()
+            },
+            home: true,
+            max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
+            sets: vec![set],
+        };
+        let typst = render_match_typst(&m).expect("expected the report source");
+        let labels = current_labels();
+        // the texts of the freeball table, the last one before the point
+        // sequence: the header, then a row for all the rallies and one per
+        // phase
+        let table = &typst[..typst
+            .find(&format!("\"{}\"", labels.point_sequence))
+            .expect("expected the point sequence")];
+        let table = &table[table
+            .rfind(&format!("text(\"{}\"", labels.freeballs))
+            .expect("expected the freeball table")..];
+        let texts: Vec<&str> = table
+            .split("text(\"")
+            .skip(1)
+            .map(|t| &t[..t.find('"').unwrap()])
+            .collect();
+        let rows: Vec<&[&str]> = texts[6..].chunks(5).collect();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0], [labels.global, "1", "2", "1", "50.0%"]);
+        assert_eq!(rows[1], ["break", "1", "2", "1", "50.0%"]);
+        assert_eq!(rows[2], [labels.sideout, "-", "-", "-", "-"]);
+        render_match_pdf(&m).expect("expected the report");
+    }
 }

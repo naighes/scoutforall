@@ -1,16 +1,22 @@
-//! The state of a set as the scouting shows it: the score, the phase and
-//! rotation, the substitutions and the players on court.
+//! The state of a set as the scouting shows it: the score, the sequence of
+//! the points, the phase and rotation, the substitutions and the players on
+//! court.
 
+use crate::screens::components::panel;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 use scout4all_core::{
     localization::current_labels,
     shapes::{
-        enums::EventTypeEnum, r#match::MatchEntry, player::PlayerEntry, snapshot::Snapshot,
+        enums::{EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum},
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        snapshot::Snapshot,
         team::TeamEntry,
     },
 };
@@ -87,6 +93,99 @@ pub fn render_score_header(
     f.render_widget(right, chunks[2]);
 }
 
+/// The widest team name in the point sequence.
+const POINT_SEQUENCE_MAX_NAME_WIDTH: usize = 16;
+/// The width of a point in the point sequence: two digits and a space.
+const POINT_WIDTH: usize = 3;
+
+/// The latest points of the set, one column per point, as many as fit: a
+/// row per team, the home team on top, with the score reached by the team
+/// scoring the point in its row.
+pub fn render_point_sequence(
+    f: &mut Frame,
+    area: Rect,
+    current_match: &MatchEntry,
+    snapshot: &Snapshot,
+) {
+    let block = panel::section(current_labels().point_sequence);
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+    let teams = match current_match.home {
+        true => [
+            (TeamSideEnum::Us, current_match.team.name.as_str()),
+            (TeamSideEnum::Them, current_match.opponent.as_str()),
+        ],
+        false => [
+            (TeamSideEnum::Them, current_match.opponent.as_str()),
+            (TeamSideEnum::Us, current_match.team.name.as_str()),
+        ],
+    };
+    let name_width = teams
+        .iter()
+        .map(|(_, name)| name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(POINT_SEQUENCE_MAX_NAME_WIDTH);
+    let visible = (inner_area.width as usize).saturating_sub(name_width + 2) / POINT_WIDTH;
+    let points = snapshot.point_sequence();
+    let latest = &points[points.len().saturating_sub(visible)..];
+    let lines: Vec<Line> = teams
+        .iter()
+        .map(|(team, name)| {
+            let name: String = name.chars().take(name_width).collect();
+            let label = Span::styled(
+                format!(" {name:<name_width$} "),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let cells = latest.iter().flat_map(|(side, score)| match side == team {
+                true => [
+                    Span::styled(format!("{score:>2}"), point_style(*side)),
+                    Span::raw(" "),
+                ],
+                false => [Span::raw("  "), Span::raw(" ")],
+            });
+            Line::from(std::iter::once(label).chain(cells).collect::<Vec<_>>())
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner_area);
+}
+
+/// The color of the points of a team: ours as the team names, theirs in red.
+fn point_style(side: TeamSideEnum) -> Style {
+    match side {
+        TeamSideEnum::Us => Style::default().bg(Color::Yellow).fg(Color::Black),
+        TeamSideEnum::Them => Style::default().bg(Color::Red).fg(Color::White),
+    }
+    .add_modifier(Modifier::BOLD)
+}
+
+/// The substitutions made and allowed, as the set status shows them.
+fn substitutions_text(snapshot: &Snapshot) -> String {
+    format!(
+        "{} {}/{}",
+        current_labels().substitutions,
+        snapshot.current_lineup.get_substitutions().len(),
+        snapshot.current_lineup.get_max_substitutions()
+    )
+}
+
+/// The width the set status takes to show its texts in full, the same
+/// all along the set: the substitutions, any phase and any event (the
+/// player is shortened when the screen is narrow).
+pub fn set_status_width(snapshot: &Snapshot) -> u16 {
+    let labels = current_labels();
+    let phases = PhaseEnum::ALL.map(|phase| phase.to_string());
+    let events = EventTypeEnum::ALL.map(|event| event.friendly_name(labels).to_string());
+    std::iter::once(substitutions_text(snapshot))
+        .chain(phases)
+        .chain(events)
+        .map(|text| Span::raw(text).width() as u16)
+        .max()
+        .unwrap_or(0)
+}
+
 /// The phase, the rotation and the substitutions, with the event and the
 /// player being scouted, if any.
 pub fn render_set_status(
@@ -129,12 +228,7 @@ pub fn render_set_status(
         (chunks[3], player, Color::Magenta, Color::Black),
         (
             chunks[4],
-            Some(format!(
-                "{} {}/{}",
-                current_labels().substitutions,
-                snapshot.current_lineup.get_substitutions().len(),
-                snapshot.current_lineup.get_max_substitutions()
-            )),
+            Some(substitutions_text(snapshot)),
             Color::Gray,
             Color::Black,
         ),

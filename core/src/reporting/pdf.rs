@@ -9,7 +9,7 @@ use crate::reporting::text::Text;
 use crate::reporting::typst_content::TypstContent;
 use crate::reporting::typst_world::ReportWorld;
 use crate::reporting::util::escape_text;
-use crate::shapes::enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum};
+use crate::shapes::enums::{EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum};
 use crate::shapes::r#match::{MatchEntry, MatchStatus};
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::set::SetEntry;
@@ -29,6 +29,9 @@ pub const BLACK: &str = "#000000";
 pub const LIGHT_GRAY: &str = "#cccccc";
 pub const GRAY: &str = "#666666";
 pub const ALTERNATE_COLOR: &str = "#efefef";
+/// the points scored by us and by them in the point sequence
+pub const US_POINT_COLOR: &str = "#f2d16b";
+pub const THEM_POINT_COLOR: &str = "#e8a0a0";
 
 pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
     let pdf = render_match_pdf(m)?;
@@ -129,6 +132,7 @@ pub fn render_match_typst(m: &MatchEntry) -> Result<String, AppError> {
     content.push_str(&render_global_stats_table(&aggregated_stats));
     content.push_str(&render_sets_stats_table(&sets));
     content.push_str(&render_bottom_stats(&aggregated_stats));
+    content.push_str(&render_point_sequences(m, &sets));
     Ok(content)
 }
 
@@ -139,6 +143,7 @@ fn typst_error(context: &str, diagnostics: &[typst::diag::SourceDiagnostic]) -> 
 
 fn render_bottom_stats(aggregated_stats: &Stats) -> String {
     let sideout_stats = render_phase_stats(aggregated_stats);
+    let freeball_stats = render_freeball_stats(aggregated_stats);
     let counter_attack_stats = render_counter_attack(aggregated_stats);
     let distribution_sideout_stats =
         render_distribution(aggregated_stats, Some(PhaseEnum::SideOut));
@@ -153,7 +158,11 @@ fn render_bottom_stats(aggregated_stats: &Stats) -> String {
   text(""),
   {distribution_break_stats}
   text(""),
-  {sideout_stats}
+  stack(
+    spacing: 4pt,
+    {sideout_stats}
+    {freeball_stats}
+  ),
 )
 "#
     )
@@ -256,6 +265,84 @@ fn render_header(m: &MatchEntry, match_status: &MatchStatus) -> String {
   {rows}
 )
 "#
+    )
+}
+
+/// The points of every set in order, a column per point wrapping after
+/// `POINTS_PER_ROW`: a row per team, the home team on top, with the score
+/// reached by the team scoring the point in its row. At the end of the
+/// report, so that the stats stay on the first page, and in one piece: on
+/// the next page if it doesn't fit.
+fn render_point_sequences(m: &MatchEntry, sets: &[(&SetEntry, Snapshot)]) -> String {
+    const POINTS_PER_ROW: usize = 40;
+    const TABLE_INSET: f32 = 1.5;
+    const FONT_SIZE: u8 = 7;
+    let teams = match m.home {
+        true => [
+            (TeamSideEnum::Us, m.team.name.as_str()),
+            (TeamSideEnum::Them, m.opponent.as_str()),
+        ],
+        false => [
+            (TeamSideEnum::Them, m.opponent.as_str()),
+            (TeamSideEnum::Us, m.team.name.as_str()),
+        ],
+    };
+    let rows: String = sets
+        .iter()
+        .map(|(set, snapshot)| {
+            let header = Row::new(vec![
+                Cell::new(
+                    Text::new(format!("set {}", set.set_number))
+                        .size(FONT_SIZE)
+                        .bold(),
+                )
+                .colspan(POINTS_PER_ROW as u8 + 1)
+                .align(Align::Left)
+                .fill(LIGHT_GRAY),
+            ])
+            .render();
+            let points = snapshot.point_sequence();
+            let chunks: String = points
+                .chunks(POINTS_PER_ROW)
+                .flat_map(|chunk| {
+                    teams.iter().map(move |(team, name)| {
+                        let label =
+                            Cell::new(Text::new(*name).size(FONT_SIZE).bold()).align(Align::Left);
+                        let cells = (0..POINTS_PER_ROW).map(|i| match chunk.get(i) {
+                            Some((side, score)) if side == team => {
+                                Cell::new(Text::new(score.to_string()).size(FONT_SIZE).bold())
+                                    .align(Align::Center)
+                                    .fill(match side {
+                                        TeamSideEnum::Us => US_POINT_COLOR,
+                                        TeamSideEnum::Them => THEM_POINT_COLOR,
+                                    })
+                            }
+                            Some(_) => Cell::new(Text::new("")),
+                            // past the end of the set
+                            None => Cell::new(Text::new("")).stroke("none"),
+                        });
+                        Row::new(std::iter::once(label).chain(cells).collect()).render()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{header}\n{chunks}\n")
+        })
+        .collect();
+    format!(
+        r#"
+#v(4pt)
+#block(breakable: false)[
+  #text(weight: "bold", "{title}")
+  #table(
+    columns: (auto, ..range({POINTS_PER_ROW}).map(_ => 1fr)),
+    inset: {TABLE_INSET}pt,
+    stroke: 0.5pt + rgb("{LIGHT_GRAY}"),
+    {rows}
+  )
+]
+"#,
+        title = escape_text(current_labels().point_sequence),
     )
 }
 
@@ -443,12 +530,13 @@ fn set_player_initial_position(
 const GROUP_STROKE: &str = "(right: (thickness: 1pt, dash: \"dashed\"))";
 
 /// The widths of the columns of the statistics (see `stats_cells`).
-const STATS_COLUMNS: [&str; 19] = [
+const STATS_COLUMNS: [&str; 21] = [
     "2fr", "1fr", "3fr", // points
     "2fr", "2fr", "1fr", // serve
     "2fr", "2fr", "3fr", "2fr", "3fr", // reception
     "1fr", "2fr", "2fr", "2fr", "3fr", "2fr", // attack
-    "1fr", "2fr", // block, faults
+    "1fr", "2fr", "2fr", // block, faults, freeballs given
+    "2fr", // opponent errors
 ];
 
 /// The statistics shown for a player, a rotation, a set or the match:
@@ -457,7 +545,9 @@ const STATS_COLUMNS: [&str; 19] = [
 /// - serve: total, errors, aces;
 /// - reception: total, errors, positiveness, perfect, efficiency;
 /// - attack: total, errors (out or net), blocked, kills, kills %, efficiency;
-/// - block points, faults.
+/// - block points, faults, freeballs given (the ones received are in
+///   `render_freeball_stats`);
+/// - opponent errors: they have no player, a player row shows none.
 fn stats_cells(stats: &Stats, filter: &StatsFilter, bg_color: &'static str) -> Vec<Cell> {
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -488,9 +578,14 @@ fn stats_cells(stats: &Stats, filter: &StatsFilter, bg_color: &'static str) -> V
         fmt_pct(stats.metric_percentage(A, Metric::Efficiency, filter)),
         count(B, Some(Perfect)),
         count(F, None),
+        count(FB, None),
+        match filter.player {
+            Some(_) => "-".to_string(),
+            None => count(OE, None),
+        },
     ];
     // the last column of each group
-    let group_ends = [2, 5, 10, 16, 18];
+    let group_ends = [2, 5, 10, 16, 18, 19, 20];
     data.into_iter()
         .enumerate()
         .map(|(i, text)| {
@@ -526,6 +621,8 @@ fn create_stats_headers(
         header_cell(labels.attack, 6),
         header_cell(labels.blk, 1),
         header_cell(labels.flt, 1),
+        header_cell(labels.fb, 1),
+        header_cell(labels.opp, 1),
     ]);
     sub_header_cells.extend([
         sub_header(labels.tot, false),
@@ -546,7 +643,9 @@ fn create_stats_headers(
         sub_header(labels.pt_perc, false),
         sub_header(labels.eff_perc, true),
         sub_header(labels.pt, false),
-        sub_header(labels.tot, false),
+        sub_header(labels.tot, true),
+        sub_header(labels.fb_given, true),
+        sub_header(labels.err, false),
     ]);
     (
         Row::new(header_cells).render(),
@@ -846,6 +945,77 @@ block(
     stroke: 1pt,
     table(
         columns: (1fr, 1fr, 1fr, 1fr, 1fr, 1fr, 1fr),
+        inset: 3pt,
+        stroke: none,
+        {header_row}
+        {table_rows}
+    )
+),
+"#,
+    )
+}
+
+/// The freeballs, in all the rallies and by phase: the ones we gave
+/// (`FB`), the ones they gave us (`OF`), and how many of these we exploited
+/// (see `Snapshot::record_freeball`).
+fn render_freeball_stats(aggregated_stats: &Stats) -> String {
+    let labels = current_labels();
+    let phases = [
+        (None, labels.global),
+        (
+            Some(PhaseEnum::Break),
+            PhaseEnum::Break.friendly_name(labels),
+        ),
+        (
+            Some(PhaseEnum::SideOut),
+            PhaseEnum::SideOut.friendly_name(labels),
+        ),
+    ];
+    let table_rows = phases
+        .iter()
+        .enumerate()
+        .map(|(i, (phase, label))| {
+            let bg_color = if i % 2 == 0 { WHITE } else { ALTERNATE_COLOR };
+            let filter = StatsFilter::new(*phase, None, None);
+            let exploitation = aggregated_stats.freeball_exploitation(&filter);
+            let texts = [
+                fmt_count(aggregated_stats.event_count(EventTypeEnum::FB, None, &filter)),
+                fmt_count(aggregated_stats.event_count(EventTypeEnum::OF, None, &filter)),
+                fmt_count(exploitation.map_or(0, |(_, _, exploited)| exploited)),
+                fmt_pct(exploitation.map(|(perc, _, _)| perc)),
+            ];
+            let mut cells = vec![
+                Cell::new(Text::new(escape_text(label)))
+                    .fill(bg_color)
+                    .align(Align::Left),
+            ];
+            cells.extend(texts.into_iter().map(|text| {
+                Cell::new(Text::new(text))
+                    .fill(bg_color)
+                    .align(Align::Center)
+            }));
+            Row::new(cells).render()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let header_row = Row::new(vec![
+        Cell::new(Text::new(escape_text(labels.freeballs)).bold())
+            .align(Align::Left)
+            .fill(LIGHT_GRAY)
+            .colspan(5),
+        Cell::new(Text::new("")).align(Align::Left).fill(LIGHT_GRAY),
+        sub_header(labels.freeballs_given, false),
+        sub_header(labels.freeballs_received, false),
+        sub_header(labels.freeballs_exploited, false),
+        sub_header("%", false),
+    ])
+    .render();
+    format!(
+        r#"
+block(
+    stroke: 1pt,
+    table(
+        columns: (2fr, 1fr, 1fr, 1fr, 1fr),
         inset: 3pt,
         stroke: none,
         {header_row}
