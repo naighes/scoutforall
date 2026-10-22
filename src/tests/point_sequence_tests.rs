@@ -4,9 +4,9 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::current_labels;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::localization::current_labels;
 
     // we play at home and serve: Gina the libero (7) receives
     const TEAM: &[TeamFixture] = &[TeamFixture {
@@ -39,7 +39,7 @@ mod tests {
         let lines = ui.lines();
         let title = lines
             .iter()
-            .position(|l| l.contains(current_labels().point_sequence))
+            .position(|l| l.contains(current_labels().domain.point_sequence))
             .expect("expected the point sequence");
         let row = |i: usize| lines[title + i].trim_matches(['│', ' ']).to_string();
         (row(1), row(2))

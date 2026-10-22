@@ -5,12 +5,13 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::current_labels;
     use crate::{
         shapes::settings::{Settings, TERMS_VERSION},
         tests::ui::{TeamFixture, Ui},
     };
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::{localization::current_labels, shapes::enums::LanguageEnum};
+    use scout4all_core::shapes::enums::LanguageEnum;
 
     const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",

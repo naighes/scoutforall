@@ -6,10 +6,10 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::current_labels;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
     use ratatui::style::{Color, Modifier};
-    use scout4all_core::localization::current_labels;
 
     const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",
@@ -203,7 +203,7 @@ mod tests {
     }
 
     fn shows_point_sequence(ui: &mut Ui) -> bool {
-        ui.screen().contains(current_labels().point_sequence)
+        ui.screen().contains(current_labels().domain.point_sequence)
     }
 
     /// After our serve error they serve, and our reception goes straight
@@ -333,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_substitutions_are_shown_in_full() {
-        let substitutions = format!("{} 0/8", current_labels().substitutions);
+        let substitutions = format!("{} 0/8", current_labels().domain.substitutions);
         for keys in ["\nm\n".to_string(), format!("\nm\n{SCOUTED}\x1bv\n")] {
             let mut ui = open(true, &keys).await;
             for (width, height) in SIZES {

@@ -5,12 +5,10 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::current_labels;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::{
-        localization::current_labels,
-        shapes::enums::{FriendlyName, RoleEnum, TeamClassificationEnum},
-    };
+    use scout4all_core::shapes::enums::{FriendlyName, RoleEnum, TeamClassificationEnum};
 
     const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",
@@ -95,8 +93,8 @@ mod tests {
         ui.type_keys(&[KeyCode::Enter, KeyCode::Char('e')]).await;
         assert_form_footer(&mut ui);
         ui.press(KeyCode::Down).await;
-        let first = TeamClassificationEnum::ALL[0].friendly_name(current_labels());
-        let second = TeamClassificationEnum::ALL[1].friendly_name(current_labels());
+        let first = TeamClassificationEnum::ALL[0].friendly_name(current_labels().domain);
+        let second = TeamClassificationEnum::ALL[1].friendly_name(current_labels().domain);
         assert_eq!(ui.selected().as_deref(), Some(first));
         ui.press(KeyCode::Right).await;
         assert_eq!(ui.selected().as_deref(), Some(second));

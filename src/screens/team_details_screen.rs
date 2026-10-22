@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
+use crate::localization::current_labels;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -28,7 +29,6 @@ use ratatui::{
     style::{Modifier, Style},
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -37,6 +37,7 @@ use scout4all_core::{
         team_writer::{PlayerInput, TeamWriter},
     },
     shapes::{player::PlayerEntry, team::TeamEntry},
+    storage::Store,
 };
 
 #[derive(Debug)]
@@ -55,7 +56,7 @@ pub struct TeamDetailsScreen<
     notifier: NotifyDialogue<PlayerEntry>,
     header: TeamHeader,
     footer: NavigationFooter,
-    base_path: PathBuf,
+    store: Arc<dyn Store>,
     team_reader: Arc<TR>,
     team_writer: Arc<TW>,
     match_reader: Arc<MR>,
@@ -157,7 +158,7 @@ impl<
                             self.settings.clone(),
                             self.team.clone(),
                             ml,
-                            self.base_path.clone(),
+                            Arc::clone(&self.store),
                             self.match_reader.clone(),
                             self.match_writer.clone(),
                             self.set_writer.clone(),
@@ -170,7 +171,7 @@ impl<
                     Some(path) => AppAction::SwitchScreen(Box::new(FileSystemScreen::new(
                         path,
                         current_labels().export,
-                        ExportTeamAction::new(self.team.id, self.base_path.clone()),
+                        ExportTeamAction::new(self.team.id, Arc::clone(&self.store)),
                         self.settings_reader.clone(),
                         self.settings_writer.clone(),
                     ))),
@@ -266,7 +267,7 @@ impl<
             Row::new(vec!["#", current_labels().name, current_labels().role])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
-        .block(panel::screen(current_labels().players))
+        .block(panel::screen(current_labels().domain.players))
         .widths([
             Constraint::Length(7),
             Constraint::Length(30),
@@ -298,7 +299,7 @@ impl<
     pub fn new(
         settings: Settings,
         team: &TeamEntry,
-        base_path: PathBuf,
+        store: Arc<dyn Store>,
         team_reader: Arc<TR>,
         team_writer: Arc<TW>,
         match_reader: Arc<MR>,
@@ -314,7 +315,7 @@ impl<
             list_state: ListState::default(),
             header,
             footer: NavigationFooter::new(),
-            base_path,
+            store,
             team_reader,
             team_writer,
             match_reader,

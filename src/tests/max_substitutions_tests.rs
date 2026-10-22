@@ -4,22 +4,23 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::{current_labels, language};
     use crate::{
         screens::{file_system_screen::FileSystemAction, import_match_screen::ImportMatchAction},
+        tests::fs_store,
         tests::ui::{TeamFixture, Ui},
     };
     use chrono::Utc;
     use crokey::crossterm::event::KeyCode;
     use scout4all_core::{
         constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
-        localization::current_labels,
         providers::{
-            fs::{
-                match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
-                set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-                team_writer::FileSystemTeamWriter,
-            },
             match_reader::MatchReader,
+            store::{
+                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
+                set_reader::StoreSetReader, set_writer::StoreSetWriter,
+                team_writer::StoreTeamWriter,
+            },
             team_writer::{PlayerInput, TeamInput, TeamWriter},
         },
         shapes::{
@@ -143,7 +144,7 @@ mod tests {
     /* importing */
 
     async fn team(base: &Path) -> TeamEntry {
-        let writer = FileSystemTeamWriter::new(base);
+        let writer = StoreTeamWriter::new(fs_store(base));
         let mut team = writer
             .save(TeamInput::New {
                 id: None,
@@ -194,15 +195,16 @@ mod tests {
         let team = team(&base).await;
         let zip_path = dir.path().join(file_name);
         exported_match(&zip_path, &team, descriptor);
-        let reader = Arc::new(FileSystemMatchReader::new(
-            &base,
-            Arc::new(FileSystemSetReader::new(&base)),
+        let reader = Arc::new(StoreMatchReader::new(
+            fs_store(&base),
+            Arc::new(StoreSetReader::new(fs_store(&base), language())),
+            language(),
         ));
         let mut action = ImportMatchAction::new(
             team.clone(),
             reader.clone(),
-            Arc::new(FileSystemMatchWriter::new(&base)),
-            Arc::new(FileSystemSetWriter::new(&base)),
+            Arc::new(StoreMatchWriter::new(fs_store(&base))),
+            Arc::new(StoreSetWriter::new(fs_store(&base), language())),
         );
         action
             .on_selected(&zip_path)
@@ -374,7 +376,7 @@ mod tests {
     }
 
     fn counter(used: u8, max: u8) -> String {
-        format!("{} {}/{}", current_labels().substitutions, used, max)
+        format!("{} {}/{}", current_labels().domain.substitutions, used, max)
     }
 
     /// The player at `replaced` in the lineup choices out, the first
@@ -422,7 +424,7 @@ mod tests {
         ui.press(KeyCode::Char('r')).await;
         let screen = ui.screen();
         assert!(
-            screen.contains(current_labels().max_substitutions_reached),
+            screen.contains(current_labels().domain.max_substitutions_reached),
             "{screen}"
         );
         assert!(

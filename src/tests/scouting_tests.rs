@@ -5,12 +5,10 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::{Describe, current_labels};
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::{KeyCode, KeyModifiers};
-    use scout4all_core::{
-        localization::current_labels,
-        shapes::enums::{EvalEnum, EventTypeEnum, WithDesc},
-    };
+    use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum};
 
     pub const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",
@@ -66,7 +64,7 @@ mod tests {
             screen.contains(current_labels().player_selection),
             "block did not ask for the player: {screen}"
         );
-        assert!(screen.contains(current_labels().block), "{screen}");
+        assert!(screen.contains(current_labels().domain.block), "{screen}");
     }
 
     /// Each event is listed by its name, with its key on the right: no event
@@ -77,7 +75,7 @@ mod tests {
         ui.type_keys(&[KeyCode::Char('s'), KeyCode::Char('+')])
             .await;
         let lines = ui.lines();
-        let block = current_labels().block;
+        let block = current_labels().domain.block;
         let line = lines
             .iter()
             .find(|l| l.contains(block))
@@ -117,7 +115,7 @@ mod tests {
         ui.press(KeyCode::F(2)).await;
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&EventTypeEnum::S.with_desc().1),
+            selected.contains(&EventTypeEnum::S.describe().1),
             "{selected}: {}",
             ui.screen()
         );
@@ -196,7 +194,7 @@ mod tests {
             screen.contains(current_labels().player_selection),
             "{screen}"
         );
-        assert!(screen.contains(current_labels().defense), "{screen}");
+        assert!(screen.contains(current_labels().domain.defense), "{screen}");
     }
 
     #[tokio::test]
@@ -235,8 +233,8 @@ mod tests {
         assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
         let covered = format!(
             "! => {} ({})",
-            current_labels().covered,
-            current_labels().kept_alive_by_our_coverage
+            current_labels().domain.covered,
+            current_labels().domain.kept_alive_by_our_coverage
         );
         assert!(ui.screen().contains(&covered), "{}", ui.screen());
         ui.press(KeyCode::Char('!')).await;
@@ -256,9 +254,21 @@ mod tests {
                     .any(|c| c.starts_with(event) && c.ends_with(key))
             })
         };
-        assert!(listed(&mut ui, labels.attack, 'a'), "{}", ui.screen());
-        assert!(!listed(&mut ui, labels.defense, 'd'), "{}", ui.screen());
-        assert!(!listed(&mut ui, labels.block, 'b'), "{}", ui.screen());
+        assert!(
+            listed(&mut ui, labels.domain.attack, 'a'),
+            "{}",
+            ui.screen()
+        );
+        assert!(
+            !listed(&mut ui, labels.domain.defense, 'd'),
+            "{}",
+            ui.screen()
+        );
+        assert!(
+            !listed(&mut ui, labels.domain.block, 'b'),
+            "{}",
+            ui.screen()
+        );
         ui.press(KeyCode::Char('a')).await;
         assert!(
             ui.screen().contains(current_labels().player_selection),

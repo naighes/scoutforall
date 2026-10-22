@@ -870,9 +870,9 @@ mod tests {
     /// exploited, in all the rallies and by phase.
     #[test]
     fn report_shows_the_freeballs() {
-        use crate::localization::current_labels;
         use crate::reporting::model::build_report;
         use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
+        use crate::tests::EN;
         let t = Team::new();
         let players = t
             .players()
@@ -915,9 +915,9 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
         };
-        let labels = current_labels();
+        let labels = EN;
         // a row for all the rallies, then one per phase
-        let rows = build_report(&m)
+        let rows = build_report(&m, EN)
             .expect("expected the report")
             .freeballs
             .rows;

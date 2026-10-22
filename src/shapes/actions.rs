@@ -1,4 +1,4 @@
-use scout4all_core::{localization::current_labels, shapes::enums::WithDesc};
+use crate::localization::{Describe, current_labels};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -37,8 +37,8 @@ pub enum ScreenActionEnum {
     EditEvents,
 }
 
-impl WithDesc<ScreenActionEnum> for ScreenActionEnum {
-    fn with_desc(self) -> (ScreenActionEnum, String) {
+impl Describe for ScreenActionEnum {
+    fn describe(self) -> (ScreenActionEnum, String) {
         use ScreenActionEnum::*;
         match self {
             Back => (Back, current_labels().back.to_string()),

@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::{fmt::Debug, sync::Arc};
 
+use crate::localization::current_labels;
 use crate::{
     providers::settings_writer::SettingsWriter,
     screens::{
@@ -26,7 +27,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::Paragraph,
 };
-use scout4all_core::localization::current_labels;
 
 /// Changes the key of a scouting shortcut, which always has exactly one: the
 /// current key is shown first, the key pressed takes its place (enter confirms
@@ -68,7 +68,7 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> Renderable
                 Style::default().add_modifier(Modifier::BOLD),
             )),
         ])
-        .block(panel::screen(self.action.with_desc().1));
+        .block(panel::screen(self.action.describe().1));
         f.render_widget(widget, area[0]);
         self.notify_message.render(f, footer_right);
         self.footer
@@ -138,7 +138,7 @@ impl<SW: SettingsWriter + Send + Sync, T: ScoutingShortcut + Debug> ChangeKeyBin
         let other = T::bindings(&self.settings)
             .action_for(ck)
             .filter(|other| **other != self.action)
-            .map(|other| other.with_desc().1)
+            .map(|other| other.describe().1)
             .or_else(|| T::rival(&self.settings, ck));
         match (T::is_reserved(ck), other) {
             (true, _) => Some(current_labels().reserved_shortcut.replace("{}", &key)),

@@ -1,30 +1,32 @@
+use crate::localization::current_labels;
 use crate::screens::{file_system_screen::FileSystemAction, screen::AppAction};
 use async_trait::async_trait;
 use hf::is_hidden;
 use scout4all_core::{
+    archive::export_match,
     errors::{AppError, IOError},
-    localization::current_labels,
-    providers::fs::path::get_match_folder_path,
     shapes::team::TeamEntry,
+    storage::Store,
 };
-use std::{fs, io::Write, path::PathBuf};
-use std::{fs::File, path::Path};
-use zip::ZipWriter;
-use zip::write::FileOptions;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 pub struct ExportMatchAction {
     team: TeamEntry,
     match_id: String,
-    base_path: PathBuf,
+    store: Arc<dyn Store>,
     exported_file_path: Option<PathBuf>,
 }
 
 impl ExportMatchAction {
-    pub fn new(team: TeamEntry, match_id: String, base_path: PathBuf) -> Self {
+    pub fn new(team: TeamEntry, match_id: String, store: Arc<dyn Store>) -> Self {
         Self {
             team,
             match_id,
-            base_path,
+            store,
             exported_file_path: None,
         }
     }
@@ -47,36 +49,14 @@ impl FileSystemAction for ExportMatchAction {
     }
 
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
-        let match_folder_path =
-            get_match_folder_path(&self.base_path, &self.team.id, &self.match_id)?;
         let zip_file_path = path.join(format!("{}.zip", self.match_id));
         if zip_file_path.exists() {
             return Err(AppError::IO(IOError::Msg(
                 current_labels().file_already_exists.to_string(),
             )));
         }
-        let file = File::create(&zip_file_path).map_err(|e| AppError::IO(IOError::from(e)))?;
-        let mut zip = ZipWriter::new(file);
-        for entry in fs::read_dir(&match_folder_path).map_err(|e| AppError::IO(IOError::from(e)))? {
-            let entry = entry.map_err(|e| AppError::IO(IOError::from(e)))?;
-            let path = entry.path();
-            if path.is_file() {
-                let file_name = path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .ok_or_else(|| AppError::IO(IOError::Msg("invalid file name".into())))?;
-                let data = fs::read(&path).map_err(|e| AppError::IO(IOError::from(e)))?;
-
-                zip.start_file::<_, ()>(
-                    file_name,
-                    FileOptions::default().compression_method(zip::CompressionMethod::Deflated),
-                )
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-                zip.write_all(&data)
-                    .map_err(|e| AppError::IO(IOError::from(e)))?;
-            }
-        }
-        zip.finish().map_err(|e| AppError::IO(IOError::from(e)))?;
+        let archive = export_match(&*self.store, &self.team.id, &self.match_id).await?;
+        fs::write(&zip_file_path, archive).map_err(|e| AppError::IO(IOError::from(e)))?;
         self.exported_file_path = Some(zip_file_path);
         Ok(AppAction::Back(true, Some(1)))
     }

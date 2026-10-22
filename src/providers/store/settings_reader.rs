@@ -1,5 +1,5 @@
 use crate::{
-    providers::settings_reader::SettingsReader,
+    providers::{settings_reader::SettingsReader, store::CONFIG},
     shapes::{
         keybinding::{KeyBindings, is_reserved_key},
         settings::Settings,
@@ -9,29 +9,29 @@ use async_trait::async_trait;
 use crokey::KeyCombination;
 use scout4all_core::{
     errors::{AppError, IOError},
-    providers::fs::path::get_config_file_path,
+    storage::Store,
 };
-use serde_json::from_str;
-use std::path::{Path, PathBuf};
-use tokio::fs::read_to_string;
+use serde_json::from_slice;
+use std::sync::Arc;
 
-pub struct FileSystemSettingsReader(PathBuf);
+pub struct StoreSettingsReader(Arc<dyn Store>);
 
-impl FileSystemSettingsReader {
-    pub fn new(base_path: &Path) -> Self {
-        Self(base_path.to_path_buf())
+impl StoreSettingsReader {
+    pub fn new(store: Arc<dyn Store>) -> Self {
+        Self(store)
     }
 }
 
 #[async_trait]
-impl SettingsReader for FileSystemSettingsReader {
+impl SettingsReader for StoreSettingsReader {
     async fn read(&self) -> Result<Settings, AppError> {
-        let path = get_config_file_path(&self.0);
-        let content = read_to_string(&path)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
+        let content = self
+            .0
+            .read(CONFIG)
+            .await?
+            .ok_or_else(|| AppError::IO(IOError::Msg(format!("not found: {}", CONFIG))))?;
         let settings =
-            from_str::<Settings>(&content).map_err(|e| AppError::IO(IOError::from(e)))?;
+            from_slice::<Settings>(&content).map_err(|e| AppError::IO(IOError::from(e)))?;
         // fixed keys, and more keys for the same action, may come from older
         // versions or hand-edited files
         let eval_keybindings = settings

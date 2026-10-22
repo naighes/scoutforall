@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     screens::{
@@ -23,7 +24,6 @@ use ratatui::{
 };
 use scout4all_core::{
     errors::AppError,
-    localization::current_labels,
     shapes::{
         enums::{
             ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum,
@@ -269,13 +269,13 @@ impl MatchStatsScreen {
         );
         set_filter.enable_writing_mode();
         let rotation_filter = Selection::new(
-            current_labels().rotation.into(),
+            current_labels().domain.rotation.into(),
             once(None)
                 .chain(RotationEnum::ALL.iter().copied().map(Some))
                 .collect(),
         );
         let phase_filter = Selection::new(
-            current_labels().phase.into(),
+            current_labels().domain.phase.into(),
             once(None)
                 .chain(PhaseEnum::ALL.iter().copied().map(Some))
                 .collect(),
@@ -285,28 +285,28 @@ impl MatchStatsScreen {
             vec![
                 EventSelection {
                     event_type: S,
-                    label: S.friendly_name(current_labels()).to_string(),
+                    label: S.friendly_name(current_labels().domain).to_string(),
                 },
                 EventSelection {
                     event_type: P,
-                    label: P.friendly_name(current_labels()).to_string(),
+                    label: P.friendly_name(current_labels().domain).to_string(),
                 },
                 EventSelection {
                     event_type: D,
-                    label: D.friendly_name(current_labels()).to_string(),
+                    label: D.friendly_name(current_labels().domain).to_string(),
                 },
                 EventSelection {
                     event_type: B,
-                    label: B.friendly_name(current_labels()).to_string(),
+                    label: B.friendly_name(current_labels().domain).to_string(),
                 },
                 EventSelection {
                     event_type: A,
-                    label: A.friendly_name(current_labels()).to_string(),
+                    label: A.friendly_name(current_labels().domain).to_string(),
                 },
                 // the freeballs, given and received
                 EventSelection {
                     event_type: FB,
-                    label: current_labels().freeballs.to_string(),
+                    label: current_labels().domain.freeballs.to_string(),
                 },
             ]
             .into_iter()
@@ -337,7 +337,10 @@ impl MatchStatsScreen {
             Sba::Simple(ScreenActionEnum::Quit),
         ];
         let kb = navigation_keybindings();
-        let player_filter = Selection::new(current_labels().player.to_string(), players.collect());
+        let player_filter = Selection::new(
+            current_labels().domain.player.to_string(),
+            players.collect(),
+        );
         let footer_entries = panel_navigation_entries()
             .into_iter()
             .chain(get_keybinding_actions(kb, screen_actions))
@@ -417,7 +420,12 @@ impl MatchStatsScreen {
             .selected()
             .map(|selection| selection.event_type)
         {
-            self.render_court_canvas(f, chunks[0], current_labels().distribution, |(p, _)| p);
+            self.render_court_canvas(
+                f,
+                chunks[0],
+                current_labels().domain.distribution,
+                |(p, _)| p,
+            );
             self.render_court_canvas(f, chunks[1], current_labels().conversion_rate, |(_, s)| s);
         }
     }
@@ -627,7 +635,7 @@ impl MatchStatsScreen {
             n => n.to_string(),
         };
         let mut rows: Vec<Row> = vec![Row::new(vec![
-            Cell::from(current_labels().total),
+            Cell::from(current_labels().domain.total),
             Cell::from(count(stats.event_count(event_type, None, filter))),
         ])];
         let errors = stats.errors(event_type, None, filter);
@@ -635,7 +643,7 @@ impl MatchStatsScreen {
         rows.push(Row::new(vec![
             Cell::from(format!(
                 "{}({})",
-                current_labels().errors,
+                current_labels().domain.errors,
                 current_labels().unforced
             )),
             Cell::from(match (errors, unforced_errors) {
@@ -655,13 +663,13 @@ impl MatchStatsScreen {
             ]));
         }
         rows.push(Row::new(vec![
-            Cell::from(current_labels().faults),
+            Cell::from(current_labels().domain.faults),
             Cell::from(count(stats.event_count(EventTypeEnum::F, None, filter))),
         ]));
         if event_type.provides_direct_points() {
             let points = stats.event_count(event_type, Some(EvalEnum::Perfect), filter);
             rows.push(Row::new(vec![
-                Cell::from(current_labels().points),
+                Cell::from(current_labels().domain.points),
                 Cell::from(count(points)),
             ]));
         }
@@ -696,16 +704,16 @@ impl MatchStatsScreen {
             n => n.to_string(),
         };
         let given = Row::new(vec![
-            Cell::from(labels.freeballs_given),
+            Cell::from(labels.domain.freeballs_given),
             Cell::from(count(stats.event_count(EventTypeEnum::FB, None, &filter))),
         ]);
         let received = [
             Row::new(vec![
-                Cell::from(labels.freeballs_received),
+                Cell::from(labels.domain.freeballs_received),
                 Cell::from(count(stats.event_count(EventTypeEnum::OF, None, &filter))),
             ]),
             Row::new(vec![
-                Cell::from(labels.freeballs_exploited),
+                Cell::from(labels.domain.freeballs_exploited),
                 Cell::from(match stats.freeball_exploitation(&filter) {
                     Some((p, total, exploited)) => format!("{:.0}%({}/{})", p, exploited, total),
                     None => "-".to_string(),
@@ -727,7 +735,7 @@ impl MatchStatsScreen {
             rows,
             [Constraint::Percentage(60), Constraint::Percentage(40)],
         )
-        .block(panel::section(labels.freeballs));
+        .block(panel::section(labels.domain.freeballs));
         f.render_widget(table, area);
     }
 

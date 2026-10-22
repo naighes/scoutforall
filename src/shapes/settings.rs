@@ -1,12 +1,12 @@
+use crate::localization::{Describe, set_language};
 use crate::shapes::keybinding::{KeyBindings, is_fixed_key, is_reserved_key};
 use crokey::KeyCombination;
 use dirs::home_dir;
 use scout4all_core::{
     analytics::global::set_uploads_enabled,
     constants::DEFAULT_LANGUAGE,
-    localization::set_language,
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
+        enums::{EvalEnum, EventTypeEnum, LanguageEnum},
         technique::{ServeTypeEnum, SetTypeEnum},
     },
 };
@@ -81,9 +81,7 @@ impl Settings {
 
 /// What users can bind while scouting: events, evaluations, sets and serves,
 /// each with its own bindings in the settings.
-pub trait ScoutingShortcut:
-    Copy + Eq + std::hash::Hash + WithDesc<Self> + Send + Sync + 'static
-{
+pub trait ScoutingShortcut: Copy + Eq + std::hash::Hash + Describe + Send + Sync + 'static {
     fn bindings(settings: &Settings) -> KeyBindings<Self>;
     fn with_bindings(settings: &Settings, bindings: &KeyBindings<Self>) -> Settings;
 
@@ -114,7 +112,7 @@ impl ScoutingShortcut for EventTypeEnum {
 
 /// The description of the shortcut bound to the key, if any.
 fn bound_to<T: ScoutingShortcut>(bindings: &KeyBindings<T>, ck: &KeyCombination) -> Option<String> {
-    bindings.action_for(ck).map(|action| action.with_desc().1)
+    bindings.action_for(ck).map(|action| action.describe().1)
 }
 
 impl ScoutingShortcut for EvalEnum {

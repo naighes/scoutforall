@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
+use crate::localization::current_labels;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -39,7 +40,6 @@ use ratatui::{
 };
 use scout4all_core::{
     errors::AppError,
-    localization::current_labels,
     providers::{match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter},
     reporting::pdf::open_match_pdf,
     shapes::{
@@ -49,6 +49,7 @@ use scout4all_core::{
         set::SetEntry,
         team::TeamEntry,
     },
+    storage::Store,
 };
 
 #[derive(Debug)]
@@ -66,7 +67,7 @@ pub struct MatchListScreen<
     notify_message: NotifyBanner,
     header: TeamHeader,
     footer: NavigationFooter,
-    base_path: PathBuf,
+    store: Arc<dyn Store>,
     match_reader: Arc<MR>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
@@ -214,7 +215,7 @@ impl<
                                 ExportMatchAction::new(
                                     self.team.clone(),
                                     match_id,
-                                    self.base_path.clone(),
+                                    Arc::clone(&self.store),
                                 ),
                                 self.settings_reader.clone(),
                                 self.settings_writer.clone(),
@@ -275,7 +276,7 @@ impl<
         settings: Settings,
         team: TeamEntry,
         matches: Vec<Listed<MatchEntry>>,
-        base_path: PathBuf,
+        store: Arc<dyn Store>,
         match_reader: Arc<MR>,
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
@@ -287,7 +288,7 @@ impl<
             matches: with_status(matches),
             team,
             list_state: ListState::default(),
-            base_path,
+            store,
             notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
             footer: NavigationFooter::new(),
@@ -435,8 +436,12 @@ impl<
                 self.set_writer.clone(),
             ))),
             Err(_) => {
-                self.notify_message
-                    .set_error(current_labels().could_not_compute_snapshot.to_string());
+                self.notify_message.set_error(
+                    current_labels()
+                        .domain
+                        .could_not_compute_snapshot
+                        .to_string(),
+                );
                 AppAction::None
             }
         }
@@ -566,7 +571,7 @@ impl<
     fn handle_print(&mut self) -> AppAction {
         let selected = self.get_selected_match().map(|(m, s)| (m.clone(), s));
         if let Some((match_entry, _)) = selected {
-            match open_match_pdf(&match_entry) {
+            match open_match_pdf(&match_entry, current_labels().domain) {
                 Ok(_) => AppAction::None,
                 Err(_) => {
                     self.notify_message

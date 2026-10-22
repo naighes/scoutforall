@@ -1,30 +1,30 @@
+use crate::localization::current_labels;
 use crate::screens::{file_system_screen::FileSystemAction, screen::AppAction};
 use async_trait::async_trait;
 use hf::is_hidden;
 use scout4all_core::{
-    constants::TEAM_DESCRIPTOR_FILE_NAME,
+    archive::export_team,
     errors::{AppError, IOError},
-    localization::current_labels,
-    providers::fs::path::get_team_folder_path,
+    storage::Store,
 };
-use std::{fs::File, io::Read, path::Path};
-use std::{io::Write, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use uuid::Uuid;
-use zip::CompressionMethod::*;
-use zip::ZipWriter;
-use zip::write::FileOptions;
 
 pub struct ExportTeamAction {
     team_id: Uuid,
-    base_path: PathBuf,
+    store: Arc<dyn Store>,
     exported_file_path: Option<PathBuf>,
 }
 
 impl ExportTeamAction {
-    pub fn new(team_id: Uuid, base_path: PathBuf) -> Self {
+    pub fn new(team_id: Uuid, store: Arc<dyn Store>) -> Self {
         Self {
             team_id,
-            base_path,
+            store,
             exported_file_path: None,
         }
     }
@@ -47,30 +47,14 @@ impl FileSystemAction for ExportTeamAction {
     }
 
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
-        let team_descriptor_file_path =
-            get_team_folder_path(&self.base_path, &self.team_id)?.join(TEAM_DESCRIPTOR_FILE_NAME);
         let zip_file_path = path.join(format!("{}.zip", self.team_id));
         if zip_file_path.exists() {
             return Err(AppError::IO(IOError::Msg(
                 current_labels().file_already_exists.to_string(),
             )));
         }
-        let file = File::create(&zip_file_path).map_err(|e| AppError::IO(IOError::from(e)))?;
-        let mut zip = ZipWriter::new(file);
-        let mut team_file =
-            File::open(&team_descriptor_file_path).map_err(|e| AppError::IO(IOError::from(e)))?;
-        let mut team_json = String::new();
-        team_file
-            .read_to_string(&mut team_json)
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        zip.start_file::<_, ()>(
-            TEAM_DESCRIPTOR_FILE_NAME,
-            FileOptions::default().compression_method(Stored),
-        )
-        .map_err(|e| AppError::IO(IOError::from(e)))?;
-        zip.write_all(team_json.as_bytes())
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        zip.finish().map_err(|e| AppError::IO(IOError::from(e)))?;
+        let archive = export_team(&*self.store, &self.team_id).await?;
+        fs::write(&zip_file_path, archive).map_err(|e| AppError::IO(IOError::from(e)))?;
         self.exported_file_path = Some(zip_file_path);
         Ok(AppAction::Back(true, Some(1)))
     }

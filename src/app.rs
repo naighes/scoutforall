@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use crokey::crossterm::event::{KeyEvent, KeyEventKind};
 use ratatui::{
@@ -24,6 +24,7 @@ use scout4all_core::{
         team_reader::TeamReader, team_writer::TeamWriter,
     },
     shapes::{listed::Listed, team::TeamEntry},
+    storage::Store,
 };
 
 pub struct App {
@@ -42,7 +43,7 @@ impl App {
     >(
         settings: Settings,
         teams: Vec<Listed<TeamEntry>>,
-        base_path: PathBuf,
+        store: Arc<dyn Store>,
         team_reader: Arc<TR>,
         team_writer: Arc<TW>,
         settings_writer: Arc<SW>,
@@ -62,7 +63,7 @@ impl App {
         let teams: Box<dyn ScreenAsync> = Box::new(TeamListScreen::new(
             settings,
             teams,
-            base_path,
+            store,
             team_reader,
             team_writer,
             settings_writer,

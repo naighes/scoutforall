@@ -1,28 +1,24 @@
 use crate::{
-    errors::{AppError, IOError, MatchError},
-    providers::{
-        fs::path::{get_match_descriptor_file_path, get_set_descriptor_file_path},
-        match_writer::MatchWriter,
-    },
+    errors::{AppError, MatchError},
+    providers::{match_writer::MatchWriter, store::write_json},
     shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
+    storage::{Store, layout},
     util::sanitize_filename,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
-use serde_json::to_vec_pretty;
-use std::path::{Path, PathBuf};
-use tokio::fs::{try_exists, write};
+use std::sync::Arc;
 
-pub struct FileSystemMatchWriter(PathBuf);
+pub struct StoreMatchWriter(Arc<dyn Store>);
 
-impl FileSystemMatchWriter {
-    pub fn new(base_path: &Path) -> Self {
-        Self(base_path.to_path_buf())
+impl StoreMatchWriter {
+    pub fn new(store: Arc<dyn Store>) -> Self {
+        Self(store)
     }
 }
 
 #[async_trait]
-impl MatchWriter for FileSystemMatchWriter {
+impl MatchWriter for StoreMatchWriter {
     async fn create(
         &self,
         team: &TeamEntry,
@@ -43,18 +39,11 @@ impl MatchWriter for FileSystemMatchWriter {
             max_substitutions,
             sets: vec![],
         };
-        let path = get_match_descriptor_file_path(&self.0, &team.id, &match_id)?;
-        if try_exists(&path)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?
-        {
+        let key = layout::match_descriptor(&team.id, &match_id);
+        if self.0.exists(&key).await? {
             return Err(AppError::Match(MatchError::MatchAlreadyExists(match_id)));
         }
-        let json = to_vec_pretty(&m).map_err(|e| AppError::IO(IOError::from(e)))?;
-        // written when awaited: a tokio file isn't, unless flushed
-        write(&path, json)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
+        write_json(&*self.0, &key, &m).await?;
         Ok(m)
     }
 
@@ -75,11 +64,8 @@ impl MatchWriter for FileSystemMatchWriter {
                 lineup_rules: Some(rules),
                 ..set.clone()
             };
-            let path = get_set_descriptor_file_path(&self.0, &m.team.id, &m.id, set.set_number)?;
-            let json = to_vec_pretty(&with_rules).map_err(|e| AppError::IO(IOError::from(e)))?;
-            write(&path, json)
-                .await
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
+            let key = layout::set_descriptor(&m.team.id, &m.id, set.set_number);
+            write_json(&*self.0, &key, &with_rules).await?;
         }
         let updated = MatchEntry {
             opponent,
@@ -90,11 +76,11 @@ impl MatchWriter for FileSystemMatchWriter {
             team: m.team.clone(),
             sets: m.sets.clone(),
         };
-        let path = get_match_descriptor_file_path(&self.0, &m.team.id, &m.id)?;
-        let json = to_vec_pretty(&updated).map_err(|e| AppError::IO(IOError::from(e)))?;
-        write(&path, json)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        Ok(())
+        write_json(
+            &*self.0,
+            &layout::match_descriptor(&m.team.id, &m.id),
+            &updated,
+        )
+        .await
     }
 }

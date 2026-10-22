@@ -17,6 +17,11 @@ It helps coaches and analysts track match events and generate useful reports for
 - terminal compatible with [crossterm](https://github.com/crossterm-rs/crossterm)
 - Linux, macOS, or Windows
 
+## data folder
+
+Teams, matches and settings are saved in the `.scout4all` folder of your home directory. To keep
+them somewhere else, set the `SCOUT4ALL_DATA_DIR` environment variable to another folder.
+
 ## contributing
 
 Pull requests and bug reports are welcome!

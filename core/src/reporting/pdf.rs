@@ -1,4 +1,5 @@
 use crate::errors::{AppError, IOError};
+use crate::localization::Labels;
 use crate::reporting::model::{Report, build_report};
 use crate::reporting::typst_world::ReportWorld;
 use crate::shapes::r#match::MatchEntry;
@@ -16,8 +17,8 @@ use uuid::Uuid;
 /// as `sys.inputs.report`.
 const TEMPLATE: &str = include_str!("report.typ");
 
-pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
-    let pdf = render_match_pdf(m)?;
+pub fn open_match_pdf(m: &MatchEntry, labels: &Labels) -> Result<(), AppError> {
+    let pdf = render_match_pdf(m, labels)?;
     let mut path: PathBuf = env::temp_dir();
     let uid = Uuid::new_v4().to_string();
     path.push(format!("{}_{}.pdf", m.id, uid));
@@ -25,8 +26,8 @@ pub fn open_match_pdf(m: &MatchEntry) -> Result<(), AppError> {
     open_with_system_viewer(&path)
 }
 
-pub fn render_match_pdf(m: &MatchEntry) -> Result<Vec<u8>, AppError> {
-    render_report_pdf(&build_report(m)?)
+pub fn render_match_pdf(m: &MatchEntry, labels: &Labels) -> Result<Vec<u8>, AppError> {
+    render_report_pdf(&build_report(m, labels)?)
 }
 
 pub fn render_report_pdf(report: &Report) -> Result<Vec<u8>, AppError> {

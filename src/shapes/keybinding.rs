@@ -1,11 +1,11 @@
 use {
-    crate::shapes::actions::ScreenActionEnum,
+    crate::{localization::Describe, shapes::actions::ScreenActionEnum},
     crokey::{
         crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
         *,
     },
     scout4all_core::shapes::{
-        enums::{EvalEnum, EventTypeEnum, WithDesc},
+        enums::{EvalEnum, EventTypeEnum},
         technique::{ServeTypeEnum, SetTypeEnum},
     },
     serde::{Deserialize, Serialize},
@@ -161,7 +161,7 @@ where
     /// the one with the shortest Display representation.
     pub fn shortest_key_for(&self, action: &T) -> Option<(KeyCombination, String)>
     where
-        T: Clone + std::hash::Hash + Eq + WithDesc<T>,
+        T: Clone + std::hash::Hash + Eq + Describe,
     {
         let mut shortest: Option<(KeyCombination, String, T)> = None;
         if let Some(cks) = self.default_bindings.get(action) {
@@ -174,7 +174,7 @@ where
                     }
                 }
             }
-            shortest.map(|o| (o.0, o.2.with_desc().1))
+            shortest.map(|o| (o.0, o.2.describe().1))
         } else {
             None
         }

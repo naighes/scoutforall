@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::{
     errors::{AppError, IOError},
-    localization::{Labels, current_labels},
+    localization::Labels,
 };
 
 pub trait FriendlyName {
@@ -222,8 +222,7 @@ impl fmt::Display for EventTypeEnum {
 }
 
 impl WithDesc<EventTypeEnum> for EventTypeEnum {
-    fn with_desc(self) -> (EventTypeEnum, String) {
-        let labels = current_labels();
+    fn with_desc(self, labels: &Labels) -> (EventTypeEnum, String) {
         let desc = self.friendly_name(labels).to_string();
         (self, desc)
     }
@@ -481,8 +480,7 @@ impl FromStr for EvalEnum {
 
 impl WithDesc<EvalEnum> for EvalEnum {
     /// the evaluation regardless of the event, e.g. "# (perfect)"
-    fn with_desc(self) -> (EvalEnum, String) {
-        let labels = current_labels();
+    fn with_desc(self, labels: &Labels) -> (EvalEnum, String) {
         use EvalEnum::*;
         let name = match self {
             Perfect => labels.perfect,
@@ -881,7 +879,7 @@ impl FriendlyName for LanguageEnum {
 }
 
 pub trait WithDesc<T> {
-    fn with_desc(self) -> (T, String);
+    fn with_desc(self, labels: &Labels) -> (T, String);
 }
 
 /// Global classification system that categorizes teams by their performance model, competitive context and level of professionalism.

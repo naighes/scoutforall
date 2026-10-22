@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
@@ -21,7 +22,6 @@ use ratatui::{
     widgets::{Row, Table},
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::{match_reader::MatchReader, set_writer::SetWriter},
     shapes::r#match::MatchEntry,
 };
@@ -210,8 +210,12 @@ impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
         }) {
             Some(Ok(screen)) => AppAction::SwitchScreen(Box::new(screen)),
             Some(Err(_)) | None => {
-                self.notify_message
-                    .set_error(current_labels().could_not_compute_snapshot.to_string());
+                self.notify_message.set_error(
+                    current_labels()
+                        .domain
+                        .could_not_compute_snapshot
+                        .to_string(),
+                );
                 AppAction::None
             }
         }

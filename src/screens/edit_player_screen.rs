@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
+use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
@@ -21,7 +22,6 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::team_writer::{PlayerInput, TeamWriter},
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
 };

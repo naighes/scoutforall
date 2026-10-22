@@ -4,14 +4,12 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::{Describe, current_labels};
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::{
-        localization::current_labels,
-        shapes::{
-            enums::{EvalEnum, EventTypeEnum, WithDesc},
-            technique::SetTypeEnum,
-        },
+    use scout4all_core::shapes::{
+        enums::{EvalEnum, EventTypeEnum},
+        technique::SetTypeEnum,
     };
 
     // the lineup: Anna the setter (1 in the player choice), Bea outside
@@ -46,7 +44,7 @@ mod tests {
     /// The row of the events panel listing the event, if it's listed: the
     /// panel is above the latest events, which list them too.
     fn event_row(ui: &mut Ui, event: EventTypeEnum) -> Option<String> {
-        let name = event.with_desc().1;
+        let name = event.describe().1;
         ui.lines()
             .iter()
             .take_while(|l| !l.contains(current_labels().latest_events))
@@ -115,6 +113,7 @@ mod tests {
 
     fn not_available(event: EventTypeEnum) -> String {
         current_labels()
+            .domain
             .event_is_not_available
             .replace("{}", &event.to_string())
     }
@@ -255,7 +254,7 @@ mod tests {
             .find(|c| c.starts_with("[X]"))
             .unwrap_or_else(|| panic!("{}", ui.screen()));
         assert!(
-            selected.ends_with(&SetTypeEnum::Super.with_desc().1),
+            selected.ends_with(&SetTypeEnum::Super.describe().1),
             "{selected}"
         );
         keys(&mut ui, "#").await;
@@ -315,11 +314,13 @@ mod tests {
         let lines = ui.lines();
         let ours = lines
             .iter()
-            .find(|l| l.contains(labels.freeball) && l.contains("Bea"))
+            .find(|l| l.contains(labels.domain.freeball) && l.contains("Bea"))
             .unwrap_or_else(|| panic!("{}", ui.screen()));
-        assert!(!ours.contains(labels.opponent_freeball), "{ours}");
+        assert!(!ours.contains(labels.domain.opponent_freeball), "{ours}");
         assert!(
-            lines.iter().any(|l| l.contains(labels.opponent_freeball)),
+            lines
+                .iter()
+                .any(|l| l.contains(labels.domain.opponent_freeball)),
             "{}",
             ui.screen()
         );
@@ -443,9 +444,9 @@ mod tests {
         // the rows of the freeball table, label and value
         let rows = |ui: &mut Ui| {
             let names = [
-                labels.freeballs_given,
-                labels.freeballs_received,
-                labels.freeballs_exploited,
+                labels.domain.freeballs_given,
+                labels.domain.freeballs_received,
+                labels.domain.freeballs_exploited,
             ];
             ui.lines()
                 .iter()
@@ -462,9 +463,9 @@ mod tests {
         assert_eq!(
             rows(&mut ui),
             [
-                [labels.freeballs_given, "1"],
-                [labels.freeballs_received, "2"],
-                [labels.freeballs_exploited, "50%(1/2)"],
+                [labels.domain.freeballs_given, "1"],
+                [labels.domain.freeballs_received, "2"],
+                [labels.domain.freeballs_exploited, "50%(1/2)"],
             ],
             "{}",
             ui.screen()
@@ -478,7 +479,7 @@ mod tests {
                 let selected = ui
                     .lines()
                     .into_iter()
-                    .skip_while(|l| !l.contains(&format!("┌{}", labels.player)))
+                    .skip_while(|l| !l.contains(&format!("┌{}", labels.domain.player)))
                     .find(|l| l.contains(">>"));
                 match selected {
                     Some(p) if p.contains(player) => break,
@@ -487,7 +488,7 @@ mod tests {
             }
             assert_eq!(
                 rows(&mut ui),
-                [[labels.freeballs_given, given]],
+                [[labels.domain.freeballs_given, given]],
                 "{player}: {}",
                 ui.screen()
             );

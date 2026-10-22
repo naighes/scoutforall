@@ -3,26 +3,26 @@ use crate::{
     errors::{AppError, IOError},
     logging::logger::{log_error, log_info},
     providers::{
-        fs::path::{get_set_descriptor_file_path, get_set_events_file_path},
-        match_reader::MatchReader,
-        queue_reader::QueueReader,
-        queue_writer::QueueWriter,
+        match_reader::MatchReader, queue_reader::QueueReader, queue_writer::QueueWriter,
         team_reader::TeamReader,
     },
     shapes::{
         enums::{GenderEnum, TeamClassificationEnum},
         r#match::MatchEntry,
     },
+    storage::{Store, layout},
     util::config_var,
 };
 use futures::TryFutureExt;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string_pretty;
-use std::{env::temp_dir, fs::remove_file, io::Write, path::Path, time::Duration};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    io::{Cursor, Write},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::time::interval;
-use tokio::{fs::File, io::AsyncReadExt};
 use tokio::{spawn, task::JoinHandle};
 use uuid::Uuid;
 use zip::{CompressionMethod, ZipWriter, write::FileOptions};
@@ -69,19 +69,12 @@ pub(crate) fn without_token(signed_url: &str) -> &str {
     signed_url.split('?').next().unwrap_or(signed_url)
 }
 
-// upload file to signed URL using PUT
-async fn upload_file_to_signed_url(signed_url: &str, file_path: &Path) -> Result<(), AppError> {
-    let mut file = File::open(file_path)
-        .await
-        .map_err(|e| AppError::IO(IOError::from(e)))?;
-    let mut contents = Vec::new();
-    file.read_to_end(&mut contents)
-        .await
-        .map_err(|e| AppError::IO(IOError::from(e)))?;
+// upload the archive to the signed URL using PUT
+async fn upload_to_signed_url(signed_url: &str, archive: Vec<u8>) -> Result<(), AppError> {
     let response = http_client()?
         .put(signed_url)
         .header("Content-Type", "application/zip")
-        .body(contents)
+        .body(archive)
         .send()
         .await
         .map_err(|e| AppError::IO(IOError::from(e)))?;
@@ -107,11 +100,9 @@ async fn upload_file_to_signed_url(signed_url: &str, file_path: &Path) -> Result
 // create a ZIP archive with match data and set files
 pub(crate) async fn create_match_archive(
     m: &MatchEntry,
-    base_path: &Path,
-    zip_path: &Path,
-) -> Result<(), AppError> {
-    let file = std::fs::File::create(zip_path).map_err(|e| AppError::IO(IOError::from(e)))?;
-    let mut zip = ZipWriter::new(file);
+    store: &dyn Store,
+) -> Result<Vec<u8>, AppError> {
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let metadata = MatchMetadata {
         date: m.date.to_string(),
         home: m.home,
@@ -122,58 +113,36 @@ pub(crate) async fn create_match_archive(
         max_substitutions: m.max_substitutions,
     };
     let metadata_json = to_string_pretty(&metadata).map_err(|e| AppError::IO(IOError::from(e)))?;
-    zip.start_file::<_, ()>(
-        "match.json",
-        FileOptions::default().compression_method(CompressionMethod::Deflated),
-    )
-    .map_err(|e| AppError::IO(IOError::from(e)))?;
-    zip.write_all(metadata_json.as_bytes())
-        .map_err(|e| AppError::IO(IOError::from(e)))?;
-    // add set files
-    for set in &m.sets {
-        let set_descriptor_path =
-            get_set_descriptor_file_path(base_path, &m.team.id, &m.id, set.set_number)?;
-        let set_events_path =
-            get_set_events_file_path(base_path, &m.team.id, &m.id, set.set_number)?;
-        // descriptor
-        if set_descriptor_path.exists() {
-            let mut file = File::open(&set_descriptor_path)
-                .await
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let mut contents = Vec::new();
-            file.read_to_end(&mut contents)
-                .await
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let filename = format!("set_{}_descriptor.json", set.set_number);
-            zip.start_file::<_, ()>(
-                &filename,
-                FileOptions::default().compression_method(CompressionMethod::Deflated),
-            )
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-            zip.write_all(&contents)
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-        }
-        // events
-        if set_events_path.exists() {
-            let mut file = File::open(&set_events_path)
-                .await
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let mut contents = Vec::new();
-            file.read_to_end(&mut contents)
-                .await
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
-            let filename = format!("set_{}_events.csv", set.set_number);
-            zip.start_file::<_, ()>(
-                &filename,
-                FileOptions::default().compression_method(CompressionMethod::Deflated),
-            )
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-            zip.write_all(&contents)
-                .map_err(|e| AppError::IO(IOError::from(e)))?;
+    let set_files = m.sets.iter().flat_map(|set| {
+        [
+            (
+                layout::set_descriptor(&m.team.id, &m.id, set.set_number),
+                format!("set_{}_descriptor.json", set.set_number),
+            ),
+            (
+                layout::set_events(&m.team.id, &m.id, set.set_number),
+                format!("set_{}_events.csv", set.set_number),
+            ),
+        ]
+    });
+    let mut files = vec![("match.json".to_string(), metadata_json.into_bytes())];
+    for (key, name) in set_files {
+        if let Some(contents) = store.read(&key).await? {
+            files.push((name, contents));
         }
     }
-    zip.finish().map_err(|e| AppError::IO(IOError::from(e)))?;
-    Ok(())
+    for (name, contents) in files {
+        zip.start_file::<_, ()>(
+            name,
+            FileOptions::default().compression_method(CompressionMethod::Deflated),
+        )
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+        zip.write_all(&contents)
+            .map_err(|e| AppError::IO(IOError::from(e)))?;
+    }
+    zip.finish()
+        .map(Cursor::into_inner)
+        .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
 // retrieve signed URL for sending analytics data
@@ -225,7 +194,7 @@ pub struct AnalyticsUploadWorker<
     QR: QueueReader + Send + Sync + 'static,
     QW: QueueWriter + Send + Sync + 'static,
 > {
-    base_path: PathBuf,
+    store: Arc<dyn Store>,
     team_reader: Arc<TR>,
     match_reader: Arc<MR>,
     queue_manager: Arc<QueueManager<QR, QW>>,
@@ -240,7 +209,7 @@ impl<
 > AnalyticsUploadWorker<TR, MR, QR, QW>
 {
     pub fn new(
-        base_path: PathBuf,
+        store: Arc<dyn Store>,
         team_reader: Arc<TR>,
         match_reader: Arc<MR>,
         queue_reader: Arc<QR>,
@@ -249,7 +218,7 @@ impl<
     ) -> Self {
         let queue_manager = Arc::new(QueueManager::new(queue_reader, queue_writer));
         Self {
-            base_path,
+            store,
             team_reader,
             match_reader,
             queue_manager,
@@ -264,7 +233,7 @@ impl<
 
     // start background worker that processes upload queue
     pub fn start(&self) -> JoinHandle<()> {
-        let base_path = self.base_path.clone();
+        let store = Arc::clone(&self.store);
         let polling_interval = self.polling_interval;
         let team_reader = self.team_reader.clone();
         let match_reader = self.match_reader.clone();
@@ -292,10 +261,7 @@ impl<
                     {
                         Ok(match_entry) => {
                             // upload attempt
-                            if process_single_upload(&match_entry, &base_path)
-                                .await
-                                .is_ok()
-                            {
+                            if process_single_upload(&match_entry, &*store).await.is_ok() {
                                 // success
                                 let _ = queue_manager
                                     .dequeue(&pending.team_id, &pending.match_id)
@@ -323,14 +289,9 @@ impl<
 }
 
 // process a single upload
-async fn process_single_upload(m: &MatchEntry, base_path: &Path) -> Result<(), AppError> {
-    let (signed_url, uuid) = get_signed_url(m).await?;
-    let temp_dir = temp_dir();
-    let zip_path = temp_dir.join(format!("{}.zip", uuid));
-    create_match_archive(m, base_path, &zip_path).await?;
-    let result = upload_file_to_signed_url(&signed_url, &zip_path).await;
-    let _ = remove_file(&zip_path);
-    result
+async fn process_single_upload(m: &MatchEntry, store: &dyn Store) -> Result<(), AppError> {
+    let (signed_url, _) = get_signed_url(m).await?;
+    upload_to_signed_url(&signed_url, create_match_archive(m, store).await?).await
 }
 
 // helper to load match from disk

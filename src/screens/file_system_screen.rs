@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
@@ -15,7 +16,7 @@ use ratatui::{
     text::Span,
     widgets::{Borders, List, ListItem, ListState, Paragraph},
 };
-use scout4all_core::{errors::AppError, localization::current_labels};
+use scout4all_core::errors::AppError;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -290,14 +291,15 @@ where
                                 }
                             },
                             _ => {
-                                self.notify_message
-                                    .set_error(current_labels().invalid_selection.to_string());
+                                self.notify_message.set_error(
+                                    current_labels().domain.invalid_selection.to_string(),
+                                );
                                 AppAction::None
                             }
                         }
                     } else {
                         self.notify_message
-                            .set_error(current_labels().invalid_selection.to_string());
+                            .set_error(current_labels().domain.invalid_selection.to_string());
                         AppAction::None
                     }
                 }

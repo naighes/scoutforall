@@ -5,25 +5,24 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::{Describe, current_labels};
     use crate::{
         providers::{
-            fs::settings_reader::FileSystemSettingsReader, settings_reader::SettingsReader,
+            settings_reader::SettingsReader,
+            store::{CONFIG, settings_reader::StoreSettingsReader},
         },
         shapes::{
             actions::ScreenActionEnum,
             keybinding::{KeyBindings, SETTINGS_KEY, is_reserved_key, navigation_keybindings},
             settings::Settings,
         },
+        tests::fs_store,
         tests::ui::{TeamFixture, Ui},
     };
     use crokey::{KeyCombination, crossterm::event::KeyCode, key};
-    use scout4all_core::{
-        localization::current_labels,
-        providers::fs::path::get_config_file_path,
-        shapes::{
-            enums::{EvalEnum, EventTypeEnum, LanguageEnum, WithDesc},
-            technique::{ServeTypeEnum, SetTypeEnum},
-        },
+    use scout4all_core::shapes::{
+        enums::{EvalEnum, EventTypeEnum, LanguageEnum},
+        technique::{ServeTypeEnum, SetTypeEnum},
     };
     use std::collections::HashSet;
     use tempfile::TempDir;
@@ -129,10 +128,10 @@ mod tests {
             assert!(screen.contains(text), "{text}: {screen}");
         }
         for event in EventTypeEnum::ALL {
-            assert!(screen.contains(&event.with_desc().1), "{event}: {screen}");
+            assert!(screen.contains(&event.describe().1), "{event}: {screen}");
         }
         for eval in EvalEnum::ALL {
-            assert!(screen.contains(&eval.with_desc().1), "{eval}: {screen}");
+            assert!(screen.contains(&eval.describe().1), "{eval}: {screen}");
         }
         assert!(!screen.contains("Hyphen"), "{screen}");
     }
@@ -154,7 +153,7 @@ mod tests {
         }
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&ServeTypeEnum::ALL.last().unwrap().with_desc().1),
+            selected.contains(&ServeTypeEnum::ALL.last().unwrap().describe().1),
             "{selected}"
         );
         // still shown at the end of the list
@@ -185,13 +184,13 @@ mod tests {
             })
             .collect();
         for set in SetTypeEnum::ALL {
-            let expected = format!("{} {}", set.with_desc().1, set.to_string().to_lowercase());
+            let expected = format!("{} {}", set.describe().1, set.to_string().to_lowercase());
             assert!(rows.contains(&expected), "{expected}: {seen}");
         }
         for serve in ServeTypeEnum::ALL {
             let expected = format!(
                 "{} {}",
-                serve.with_desc().1,
+                serve.describe().1,
                 serve.to_string().to_lowercase()
             );
             assert!(rows.contains(&expected), "{expected}: {seen}");
@@ -204,7 +203,7 @@ mod tests {
         ui.press(KeyCode::Tab).await;
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&EventTypeEnum::S.with_desc().1),
+            selected.contains(&EventTypeEnum::S.describe().1),
             "{selected}"
         );
         let footer = ui.footer();
@@ -279,7 +278,7 @@ mod tests {
         );
         let footer = ui.footer();
         for action in [ScreenActionEnum::New, ScreenActionEnum::Delete] {
-            let (_, desc) = action.with_desc();
+            let (_, desc) = action.describe();
             assert!(!footer.contains(&desc), "{desc}: {footer}");
         }
         ui.type_keys(&[KeyCode::Char('w'), KeyCode::Enter]).await;
@@ -293,7 +292,7 @@ mod tests {
         // straight back on the settings
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&EventTypeEnum::S.with_desc().1),
+            selected.contains(&EventTypeEnum::S.describe().1),
             "{selected}"
         );
         assert!(selected.trim_end().ends_with('w'), "{selected}");
@@ -377,7 +376,7 @@ mod tests {
         let message = current_labels()
             .shortcut_already_assigned
             .replacen("{}", "b", 1)
-            .replacen("{}", &EventTypeEnum::B.with_desc().1, 1);
+            .replacen("{}", &EventTypeEnum::B.describe().1, 1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
         assert!(ui.saved_settings().await.is_none());
@@ -390,7 +389,7 @@ mod tests {
         let message = current_labels()
             .shortcut_already_assigned
             .replacen("{}", "#", 1)
-            .replacen("{}", &EvalEnum::Perfect.with_desc().1, 1);
+            .replacen("{}", &EvalEnum::Perfect.describe().1, 1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
         assert!(ui.saved_settings().await.is_none());
@@ -421,7 +420,7 @@ mod tests {
         let message = current_labels()
             .shortcut_already_assigned
             .replacen("{}", "w", 1)
-            .replacen("{}", &EventTypeEnum::S.with_desc().1, 1);
+            .replacen("{}", &EventTypeEnum::S.describe().1, 1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
         ui.type_keys(&[KeyCode::Enter, KeyCode::Esc]).await;
 
@@ -433,7 +432,7 @@ mod tests {
         let message = current_labels()
             .shortcut_already_assigned
             .replacen("{}", "z", 1)
-            .replacen("{}", &EvalEnum::Perfect.with_desc().1, 1);
+            .replacen("{}", &EvalEnum::Perfect.describe().1, 1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
 
@@ -459,7 +458,7 @@ mod tests {
         assert!(ui.saved_settings().await.is_none());
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&EventTypeEnum::S.with_desc().1),
+            selected.contains(&EventTypeEnum::S.describe().1),
             "{selected}"
         );
     }
@@ -582,7 +581,7 @@ mod tests {
         );
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&SetTypeEnum::High.with_desc().1) && selected.ends_with('x'),
+            selected.contains(&SetTypeEnum::High.describe().1) && selected.ends_with('x'),
             "{selected}"
         );
     }
@@ -634,7 +633,7 @@ mod tests {
     async fn set_keys_do_not_conflict() {
         let mut ui = change_key_for(set_index(SetTypeEnum::High)).await;
         ui.press(KeyCode::Char('5')).await;
-        let message = assigned_message("5", &SetTypeEnum::Five.with_desc().1);
+        let message = assigned_message("5", &SetTypeEnum::Five.describe().1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
         assert!(ui.saved_settings().await.is_none());
@@ -644,7 +643,7 @@ mod tests {
     async fn serve_keys_do_not_conflict() {
         let mut ui = change_key_for(serve_index(ServeTypeEnum::Float)).await;
         ui.press(KeyCode::Char('s')).await;
-        let message = assigned_message("s", &ServeTypeEnum::Spin.with_desc().1);
+        let message = assigned_message("s", &ServeTypeEnum::Spin.describe().1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
         assert!(ui.saved_settings().await.is_none());
@@ -658,28 +657,28 @@ mod tests {
             (
                 set_index(SetTypeEnum::High),
                 '+',
-                EvalEnum::Positive.with_desc().1,
+                EvalEnum::Positive.describe().1,
             ),
             (
                 serve_index(ServeTypeEnum::Spin),
                 '#',
-                EvalEnum::Perfect.with_desc().1,
+                EvalEnum::Perfect.describe().1,
             ),
             (
                 eval_index(EvalEnum::Perfect),
                 'a',
-                SetTypeEnum::High.with_desc().1,
+                SetTypeEnum::High.describe().1,
             ),
             (
                 eval_index(EvalEnum::Negative),
                 'q',
-                SetTypeEnum::Quick.with_desc().1,
+                SetTypeEnum::Quick.describe().1,
             ),
             // a key of the serves, not of the sets
             (
                 eval_index(EvalEnum::Positive),
                 'f',
-                SetTypeEnum::Fast.with_desc().1,
+                SetTypeEnum::Fast.describe().1,
             ),
         ];
         for (index, key, other) in cases {
@@ -697,7 +696,7 @@ mod tests {
             ui.press(KeyCode::Up).await;
         }
         ui.type_keys(&[KeyCode::Enter, KeyCode::Char('y')]).await;
-        let message = assigned_message("y", &ServeTypeEnum::Spin.with_desc().1);
+        let message = assigned_message("y", &ServeTypeEnum::Spin.describe().1);
         assert!(ui.screen().contains(&message), "{}", ui.screen());
     }
 
@@ -851,8 +850,8 @@ mod tests {
                 "B": ["b", "F2"]
             }
         }"#;
-        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), old).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .unwrap();
@@ -913,8 +912,8 @@ mod tests {
             "language": "en",
             "eval_keybindings": { "#": ["a"], "+": ["f"] }
         }"##;
-        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), old).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .unwrap();
@@ -961,7 +960,7 @@ mod tests {
         for (event, key) in [(EventTypeEnum::FB, "x"), (EventTypeEnum::OF, "⇧-x")] {
             let mut ui = shortcut(event_index(event)).await;
             let selected = ui.selected().unwrap_or_default();
-            assert!(selected.contains(&event.with_desc().1), "{selected}");
+            assert!(selected.contains(&event.describe().1), "{selected}");
             assert!(selected.trim_end().ends_with(key), "{selected}");
         }
     }
@@ -972,8 +971,8 @@ mod tests {
     async fn settings_of_v0_5_0_get_the_freeball_keys() {
         let read = |json: &'static str| async move {
             let dir = TempDir::new().unwrap();
-            std::fs::write(get_config_file_path(dir.path()), json).unwrap();
-            FileSystemSettingsReader::new(dir.path())
+            std::fs::write(dir.path().join(CONFIG), json).unwrap();
+            StoreSettingsReader::new(fs_store(dir.path()))
                 .read()
                 .await
                 .unwrap()
@@ -1012,7 +1011,7 @@ mod tests {
             current_labels()
                 .shortcut_already_assigned
                 .replacen("{}", key, 1)
-                .replacen("{}", &event.with_desc().1, 1)
+                .replacen("{}", &event.describe().1, 1)
         };
         let cases = [
             (0, KeyCode::Char('x'), conflict("x", EventTypeEnum::FB)),
@@ -1088,8 +1087,8 @@ mod tests {
             },
             "serve_type_keybindings": { "float": ["#"], "spin": ["9"] }
         }"##;
-        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), old).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .unwrap();
@@ -1110,8 +1109,8 @@ mod tests {
     #[tokio::test]
     async fn settings_saved_by_v0_0_x_load() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(get_config_file_path(dir.path()), r#"{ "language": "it" }"#).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), r#"{ "language": "it" }"#).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .expect("expected the settings");

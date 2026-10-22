@@ -12,6 +12,7 @@ mod tests {
         stats::Counter,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     };
+    use crate::tests::EN;
     use EvalEnum::*;
     use EventTypeEnum::*;
     use RoleEnum::*;
@@ -341,14 +342,14 @@ mod tests {
 
     #[test]
     fn technique_descriptions() {
-        let labels = crate::localization::current_labels();
+        let labels = EN;
         assert_eq!(
-            TechniqueEnum::Set(High).description(),
+            TechniqueEnum::Set(High).description(EN),
             format!("A ({})", labels.high_set)
         );
-        assert_eq!(TechniqueEnum::Set(Five).description(), "5");
+        assert_eq!(TechniqueEnum::Set(Five).description(EN), "5");
         assert_eq!(
-            TechniqueEnum::Serve(Spin).description(),
+            TechniqueEnum::Serve(Spin).description(EN),
             format!("S ({})", labels.spin_serve)
         );
     }
