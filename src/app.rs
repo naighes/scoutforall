@@ -14,6 +14,7 @@ use crate::{
         components::navigation_footer::NavigationFooter,
         screen::{AppAction, ScreenAsync},
         team_list_screen::TeamListScreen,
+        terms_screen::TermsScreen,
     },
     shapes::settings::Settings,
 };
@@ -50,19 +51,28 @@ impl App {
         match_writer: Arc<MW>,
         settings_reader: Arc<SR>,
     ) -> Self {
+        // the terms of use over the teams, until the user has seen them
+        let terms: Option<Box<dyn ScreenAsync>> = match settings.terms_seen() {
+            true => None,
+            false => Some(Box::new(TermsScreen::new(
+                settings.clone(),
+                settings_writer.clone(),
+            ))),
+        };
+        let teams: Box<dyn ScreenAsync> = Box::new(TeamListScreen::new(
+            settings,
+            teams,
+            base_path,
+            team_reader,
+            team_writer,
+            settings_writer,
+            match_reader,
+            match_writer,
+            set_writer,
+            settings_reader,
+        ));
         Self {
-            screens: vec![Box::new(TeamListScreen::new(
-                settings,
-                teams,
-                base_path,
-                team_reader,
-                team_writer,
-                settings_writer,
-                match_reader,
-                match_writer,
-                set_writer,
-                settings_reader,
-            ))],
+            screens: std::iter::once(teams).chain(terms).collect(),
         }
     }
 

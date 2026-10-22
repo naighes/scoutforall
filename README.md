@@ -37,6 +37,15 @@ Get help, share insights and stay updated on the latest releases!
 
 ## license
 
-This project is licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0).  
-You are free to use, modify and distribute this software under the same license.
+Copyright (C) 2025-2026 Nicola Baldi and contributors.
+
+This project is licensed under the **GNU Affero General Public License v3.0 only** (AGPL-3.0-only).  
+You are free to use, modify and distribute this software, as long as you keep the copyright notice
+and release your changes under the same license, with their source code: also when you offer them
+as an online service.
 See the [LICENSE](./LICENSE) file for details.
+
+## data and privacy
+
+Unless you turn it off in the settings, the matches you scout are sent to the developer, without
+names, for statistics and to diagnose bugs. See the [DATA-PRIVACY](./DATA-PRIVACY) file for details.

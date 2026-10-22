@@ -29,7 +29,15 @@ pub struct Settings {
     pub analytics_enabled: bool,
     #[serde(default = "default_last_used_dir")]
     pub last_used_dir: Option<PathBuf>,
+    /// the version of the terms of use shown to the user: older than
+    /// `TERMS_VERSION` (0 if never shown), the app shows them at startup
+    #[serde(default)]
+    pub terms_version: u8,
 }
+
+/// The version of the terms of use (license and data collection): raise it
+/// when they change, to show them again to every user.
+pub const TERMS_VERSION: u8 = 1;
 
 fn default_analytics_enabled() -> bool {
     true
@@ -49,11 +57,23 @@ impl Default for Settings {
             serve_type_keybindings: KeyBindings::default(),
             analytics_enabled: true,
             last_used_dir: None,
+            terms_version: 0,
         }
     }
 }
 
 impl Settings {
+    /// Whether the user has seen the current terms of use.
+    pub fn terms_seen(&self) -> bool {
+        self.terms_version >= TERMS_VERSION
+    }
+
+    /// Whether analytics are uploaded: only once the user has seen the terms
+    /// telling about them.
+    pub fn uploads_enabled(&self) -> bool {
+        self.analytics_enabled && self.terms_seen()
+    }
+
     pub fn get_default_path(&self) -> Option<PathBuf> {
         self.last_used_dir.clone().or_else(home_dir)
     }
@@ -157,7 +177,7 @@ pub fn init_settings(default: Settings) {
     // once at startup: a second call changes the settings all the same
     let _ = INITIALIZED.set(());
     set_language(default.language);
-    set_uploads_enabled(default.analytics_enabled);
+    set_uploads_enabled(default.uploads_enabled());
 }
 
 /// Change the current language and whether analytics uploads run: only once
@@ -165,6 +185,6 @@ pub fn init_settings(default: Settings) {
 pub fn set_settings(settings: Settings) {
     if let Some(()) = INITIALIZED.get() {
         set_language(settings.language);
-        set_uploads_enabled(settings.analytics_enabled);
+        set_uploads_enabled(settings.uploads_enabled());
     }
 }

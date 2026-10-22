@@ -231,6 +231,11 @@ pub struct Labels {
     pub invalid_email_address: &'static str,
     pub y: &'static char,
     pub enable_send_analytics: &'static str,
+    /// the terms of use shown at the first startup: license and data
+    pub terms_of_use: &'static str,
+    pub terms_text: &'static str,
+    pub proceed: &'static str,
+    pub send_statistics: &'static str,
     pub file_already_exists: &'static str,
     pub unassigned: &'static str,
     pub scroll_up: &'static str,
@@ -515,7 +520,17 @@ const EN: Labels = Labels {
     failed_to_report_issue: "failed to report issue (check your internet connection)",
     invalid_email_address: "invalid email address",
     y: &'y',
-    enable_send_analytics: "enable sending anonymous analytics data",
+    enable_send_analytics: "send match statistics (no names)",
+    terms_of_use: "terms of use",
+    terms_text: "Scout4all is free software, free of charge: you don't have to pay to use it.
+
+License. Scout4all is released under the GNU Affero General Public License v3.0 (AGPL-3.0-only). You can use, copy, modify and distribute it, even for a fee, as long as you keep the copyright notice and release your changes under the same license, with their source code: also when you offer them as an online service. The program comes with NO WARRANTY.
+
+Data. Unless you turn it off below, the matches you scout are sent to the developer to compute statistics and diagnose bugs; aggregate statistics can be used in future services of the project. They hold no names: teams and players appear only as random identifiers, along with the date, the category, the gender and the events of the match. The server records your IP address in its logs. Data controller: Nicola Baldi. You can change your choice at any time in the settings (F2).
+
+Full texts: the LICENSE and DATA-PRIVACY files, on https://github.com/naighes/scoutforall. Contact: nic.baldi@gmail.com",
+    proceed: "continue",
+    send_statistics: "send statistics",
     file_already_exists: "file already exists",
     unassigned: "Unassigned",
     scroll_up: "scroll up",
@@ -801,7 +816,17 @@ const IT: Labels = Labels {
     failed_to_report_issue: "segnalazione del problema non riuscita (controlla la tua connessione a internet)",
     invalid_email_address: "indirizzo email non valido",
     y: &'s',
-    enable_send_analytics: "abilita l'invio di dati analitici anonimi",
+    enable_send_analytics: "invia le statistiche delle partite (senza nomi)",
+    terms_of_use: "termini di utilizzo",
+    terms_text: "Scout4all è software libero e gratuito: non devi pagare per usarlo.
+
+Licenza. Scout4all è distribuito con la licenza GNU Affero General Public License v3.0 (AGPL-3.0-only). Puoi usarlo, copiarlo, modificarlo e distribuirlo, anche a pagamento, purché mantenga la nota di copyright e distribuisca le tue modifiche con la stessa licenza, insieme al loro codice sorgente: anche quando le offri come servizio online. Il programma è fornito SENZA ALCUNA GARANZIA.
+
+Dati. Se non lo disattivi qui sotto, le partite che registri vengono inviate allo sviluppatore per calcolare statistiche e diagnosticare bug; le statistiche aggregate possono essere usate in futuri servizi del progetto. Non contengono nomi: squadre e atleti compaiono solo come identificativi casuali, insieme a data, categoria, genere ed eventi della partita. Il server registra il tuo indirizzo IP nei suoi log. Titolare del trattamento: Nicola Baldi. Puoi cambiare la tua scelta in qualsiasi momento nelle impostazioni (F2).
+
+Testi completi: i file LICENSE e DATA-PRIVACY, su https://github.com/naighes/scoutforall. Contatto: nic.baldi@gmail.com",
+    proceed: "continua",
+    send_statistics: "invia statistiche",
     file_already_exists: "il file esiste già",
     unassigned: "Non assegnato",
     scroll_up: "scorri su",

@@ -76,7 +76,7 @@ crokey = "1.3.0"
 csv.workspace = true
 dirs.workspace = true
 hf = "0.6"
-ratatui = "0.30"
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 reqwest.workspace = true
 self_update = { version = "1", optional = true, features = ["checksums"] }
 serde.workspace = true

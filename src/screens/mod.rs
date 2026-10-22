@@ -19,3 +19,4 @@ pub mod settings_screen;
 pub mod start_set_screen;
 pub mod team_details_screen;
 pub mod team_list_screen;
+pub mod terms_screen;
