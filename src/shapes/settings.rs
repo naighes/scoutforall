@@ -152,9 +152,10 @@ impl ScoutingShortcut for ServeTypeEnum {
 
 static INITIALIZED: OnceLock<()> = OnceLock::new();
 
-/// Default settings initialization (should be called once at startup).
+/// Default settings initialization (called once at startup).
 pub fn init_settings(default: Settings) {
-    INITIALIZED.set(()).ok().unwrap();
+    // once at startup: a second call changes the settings all the same
+    let _ = INITIALIZED.set(());
     set_language(default.language);
     set_uploads_enabled(default.analytics_enabled);
 }

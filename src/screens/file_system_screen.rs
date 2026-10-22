@@ -3,7 +3,7 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
-        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, cycle, list_entries},
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
@@ -86,34 +86,19 @@ where
         self.current_folder.parent().is_none()
     }
 
-    fn move_selection<F>(&mut self, f: F)
-    where
-        F: Fn(usize, usize) -> usize,
-    {
+    fn move_selection(&mut self, forward: bool) {
         if let Some(selected) = self.list_state.selected() {
-            if self.entries.is_empty() {
-                self.list_state.select(None);
-            } else {
-                let new_index = f(selected, self.entries.len());
-                self.list_state.select(Some(new_index));
-            }
+            self.list_state
+                .select(cycle(selected, self.entries.len(), forward));
         }
     }
 
     fn next(&mut self) {
-        self.move_selection(
-            |selected, len| {
-                if selected < len - 1 { selected + 1 } else { 0 }
-            },
-        );
+        self.move_selection(true);
     }
 
     fn previous(&mut self) {
-        self.move_selection(
-            |selected, len| {
-                if selected > 0 { selected - 1 } else { len - 1 }
-            },
-        );
+        self.move_selection(false);
     }
 
     fn enter_directory(&mut self, path: &Path) -> AppAction {

@@ -3,7 +3,7 @@ use crate::{
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         screen::{
-            AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions,
+            AppAction, Renderable, Sba, ScreenAsync, cycle, get_keybinding_actions,
             panel_navigation_entries,
         },
     },
@@ -107,14 +107,12 @@ where
     /// Selects the item after (`forward`) or before the selected one,
     /// going round, when the filter has the focus.
     fn step(&mut self, forward: bool) {
-        let count = self.items.len();
-        match (self.writing_mode, self.state.selected(), count) {
-            (false, _, _) | (_, _, 0) => {}
-            (true, None, _) => self.state.select(Some(0)),
-            (true, Some(i), count) => self.state.select(Some(match forward {
-                true => (i + 1) % count,
-                false => (i + count - 1) % count,
-            })),
+        let target = match self.state.selected() {
+            Some(i) => cycle(i, self.items.len(), forward),
+            None => Some(0),
+        };
+        if self.writing_mode && !self.items.is_empty() {
+            self.state.select(target);
         }
     }
 
@@ -247,11 +245,7 @@ impl MatchStatsScreen {
     /// having it, going round.
     fn move_focus(&mut self, forward: bool) {
         let count = self.filters().len();
-        let current = self.state.selected().unwrap_or(0);
-        let target = match forward {
-            true => (current + 1) % count,
-            false => (current + count - 1) % count,
-        };
+        let target = cycle(self.state.selected().unwrap_or(0), count, forward).unwrap_or(0);
         self.state.select(Some(target));
         self.filters()
             .into_iter()

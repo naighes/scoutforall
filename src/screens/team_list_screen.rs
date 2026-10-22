@@ -8,7 +8,7 @@ use crate::{
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
-        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries, step},
         settings_screen::{SettingsPanel, SettingsScreen},
         team_details_screen::TeamDetailsScreen,
     },
@@ -274,16 +274,17 @@ impl<
     }
 
     fn next_team(&mut self) {
-        if let Some(selected) = self.list_state.selected() {
-            let new_selected = (selected + 1).min(self.teams.len() - 1);
-            self.list_state.select(Some(new_selected));
-        }
+        self.move_selection(true);
     }
 
     fn previous_team(&mut self) {
+        self.move_selection(false);
+    }
+
+    fn move_selection(&mut self, forward: bool) {
         if let Some(selected) = self.list_state.selected() {
-            let new_selected = if selected == 0 { 0 } else { selected - 1 };
-            self.list_state.select(Some(new_selected));
+            self.list_state
+                .select(step(selected, self.teams.len(), forward));
         }
     }
 

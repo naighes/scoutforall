@@ -99,7 +99,9 @@ pub fn check_update() {
     }
 }
 
-#[cfg(all(test, unix))]
+// apart, so that clippy sees a test module (see clippy.toml)
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use std::{

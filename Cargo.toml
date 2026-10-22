@@ -50,6 +50,14 @@ zip = "9"
 type_complexity = "allow"
 too_many_arguments = "allow"
 match_str_case_mismatch = "allow"
+# the app never panics on the user: errors are handled, not unwrapped (the
+# tests may, see clippy.toml)
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
 
 [profile.release]
 opt-level = 3
@@ -69,7 +77,6 @@ csv.workspace = true
 dirs.workspace = true
 hf = "0.6"
 ratatui = "0.30"
-regex.workspace = true
 reqwest.workspace = true
 self_update = { version = "1", optional = true, features = ["checksums"] }
 serde.workspace = true

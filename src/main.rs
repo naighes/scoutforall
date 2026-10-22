@@ -5,7 +5,9 @@ mod shapes;
 #[cfg(feature = "self-update")]
 mod updater;
 
+// the tests may panic on what they don't expect (see clippy.toml)
 #[cfg(test)]
+#[allow(clippy::unreachable)]
 mod tests;
 
 use crate::{
@@ -23,7 +25,7 @@ use ratatui::{Terminal, backend::Backend};
 use scout4all_core::{
     analytics::{global::init_global_queue_manager, upload::AnalyticsUploadWorker},
     constants,
-    logging::logger::init_logger,
+    logging::logger::{init_logger, log_error},
     providers::{
         fs::{
             match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
@@ -35,7 +37,7 @@ use scout4all_core::{
         team_reader::TeamReader,
     },
 };
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{panic, process::ExitCode, sync::Arc, time::Duration};
 
 #[cfg(feature = "self-update")]
 async fn maybe_check_update() {
@@ -48,14 +50,36 @@ async fn maybe_check_update() {
 #[cfg(not(feature = "self-update"))]
 async fn maybe_check_update() {}
 
+/// The app never panics on the user: what can go wrong at startup ends it
+/// with a message, and a panic left anyway (a bug) is logged.
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("{}: {message}", env!("CARGO_PKG_NAME"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Logs a panic with where it happened, so that the bug can be reported:
+/// the terminal is restored by the hook of ratatui, installed after.
+fn log_panics() {
+    let previous = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        log_error(&format!("panic: {info}"));
+        previous(info);
+    }));
+}
+
+async fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    let base_dir = get_base_path().expect("cannot get app directory");
+    let base_dir = get_base_path().map_err(|e| e.to_string())?;
 
     // init logger
     let log_path = base_dir.join("scout4all.log");
@@ -99,10 +123,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::clone(&queue_writer_arc),
         Duration::from_secs(30), // poll every 30 seconds
     );
-    init_global_queue_manager(worker.queue_manager())?;
+    // without the queue the analytics aren't uploaded: the app still works
+    if let Err(e) = init_global_queue_manager(worker.queue_manager()) {
+        log_error(&format!("analytics queue not initialized: {e}"));
+    }
     let worker_handle = worker.start();
+    log_panics();
     // also installs a panic hook restoring the terminal state
-    let mut terminal = ratatui::init();
+    let mut terminal = ratatui::try_init().map_err(|e| {
+        ratatui::restore();
+        format!("cannot use the terminal: {e}")
+    })?;
     let res = run_app(
         &mut terminal,
         App::new(
@@ -122,10 +153,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // graceful shutdown
     worker_handle.abort();
     ratatui::restore();
-    if let Err(err) = res {
-        println!("{:?}", err)
-    }
-    Ok(())
+    res.map_err(|e| e.to_string())
 }
 
 async fn run_app<B: Backend<Error = std::io::Error>>(

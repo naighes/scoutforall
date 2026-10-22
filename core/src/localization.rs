@@ -1,7 +1,6 @@
 use crate::{constants::DEFAULT_LANGUAGE, shapes::enums::LanguageEnum};
-use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::{LazyLock, RwLock};
+use std::sync::{LazyLock, PoisonError, RwLock};
 
 pub struct Labels {
     pub could_not_recognize_home_directory: &'static str,
@@ -28,6 +27,7 @@ pub struct Labels {
     pub number: &'static str,
     pub name_cannot_be_empty: &'static str,
     pub description_cannot_be_empty: &'static str,
+    pub title_cannot_be_empty: &'static str,
     pub role_is_required: &'static str,
     pub could_not_create_player: &'static str,
     pub could_not_remove_player: &'static str,
@@ -314,6 +314,7 @@ const EN: Labels = Labels {
     number: "number",
     name_cannot_be_empty: "name cannot be empty",
     description_cannot_be_empty: "description cannot be empty",
+    title_cannot_be_empty: "title cannot be empty",
     role_is_required: "role is required",
     could_not_create_player: "could not create player",
     could_not_remove_player: "could not remove player",
@@ -599,6 +600,7 @@ const IT: Labels = Labels {
     number: "numero",
     name_cannot_be_empty: "il nome è obbligatorio",
     description_cannot_be_empty: "la descrizione è obbligatoria",
+    title_cannot_be_empty: "il titolo è obbligatorio",
     role_is_required: "il ruolo è obbligatorio",
     could_not_create_player: "impossibile creare il giocatore",
     could_not_remove_player: "impossibile rimuovere il giocatore",
@@ -859,23 +861,25 @@ const IT: Labels = Labels {
     report_legend: "tot totale · err errori · pt punti · bp punti in break · v-p punti meno errori · pos positività · prf perfette · eff efficienza · mur murati · toc tocchi a muro · fal falli · fb freeball concesse · avv errori avversari · CP% cambi palla vinti · BP% break vinti · percentuali arrotondate",
 };
 
-static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {
-    let mut m = HashMap::new();
-    m.insert(LanguageEnum::En, &EN);
-    m.insert(LanguageEnum::It, &IT);
-    m
-});
-
 static CURRENT_LANGUAGE: LazyLock<RwLock<LanguageEnum>> = LazyLock::new(|| {
     RwLock::new(LanguageEnum::from_str(DEFAULT_LANGUAGE).unwrap_or(LanguageEnum::En))
 });
 
-/// Changes the language of the labels.
+/// Changes the language of the labels. The lock only guards a value
+/// written at once: it's still good after a panic elsewhere.
 pub fn set_language(language: LanguageEnum) {
-    *CURRENT_LANGUAGE.write().unwrap() = language;
+    *CURRENT_LANGUAGE
+        .write()
+        .unwrap_or_else(PoisonError::into_inner) = language;
 }
 
 /// Returns the labels for the current language.
 pub fn current_labels() -> &'static Labels {
-    DICTIONARY.get(&*CURRENT_LANGUAGE.read().unwrap()).unwrap()
+    match *CURRENT_LANGUAGE
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+    {
+        LanguageEnum::En => &EN,
+        LanguageEnum::It => &IT,
+    }
 }

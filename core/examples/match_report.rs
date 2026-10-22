@@ -1,6 +1,8 @@
 //! Writes the PDF report (and the data it lays out) of every match found in the
 //! data folder to the given output folder, to look at the layout:
 //! `cargo run -p scout4all-core --example match_report -- <out dir>`.
+// a development tool, not the app: it stops at the first error
+#![allow(clippy::expect_used)]
 use scout4all_core::providers::fs::{
     match_reader::FileSystemMatchReader, path::get_base_path, set_reader::FileSystemSetReader,
     team_reader::FileSystemTeamReader,

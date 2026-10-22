@@ -1,0 +1,5 @@
+# the tests may unwrap and panic: the app code may not (see the lints in
+# Cargo.toml)
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

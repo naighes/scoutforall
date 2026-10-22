@@ -1,4 +1,4 @@
-use crate::screens::components::panel;
+use crate::screens::{components::panel, screen::cycle};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -92,35 +92,27 @@ impl<T: FriendlyName + Clone + PartialEq> Select<T> {
     }
 
     pub fn handle_up(&mut self) {
-        match (self.writing_mode, &self.selection.selected()) {
-            (true, Some(selected)) => {
-                self.select_value(if *selected == 0 {
-                    self.values.len() - 1
-                } else {
-                    selected - 1
-                });
-            }
-            (true, None) => {
-                self.select_value(0);
-            }
-            _ => {}
-        };
+        self.move_selection(false);
     }
 
     pub fn handle_down(&mut self) {
-        match (self.writing_mode, self.selection.selected()) {
-            (true, Some(selected)) => {
-                self.select_value((selected + 1) % self.values.len());
-            }
-            (true, None) => {
-                self.select_value(0);
-            }
-            _ => {}
-        };
+        self.move_selection(true);
     }
 
-    fn select_value(&mut self, new_selected: usize) {
-        self.value = Some(self.values[new_selected].clone());
-        self.selection.select(Some(new_selected));
+    /// Selects the value after (`forward`) or before the selected one,
+    /// going round, or the first one with none selected.
+    fn move_selection(&mut self, forward: bool) {
+        let target = match self.selection.selected() {
+            Some(selected) => cycle(selected, self.values.len(), forward),
+            None => Some(0),
+        };
+        if let (true, Some(i), Some(value)) = (
+            self.writing_mode,
+            target,
+            target.and_then(|i| self.values.get(i)),
+        ) {
+            self.value = Some(value.clone());
+            self.selection.select(Some(i));
+        }
     }
 }

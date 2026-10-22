@@ -13,7 +13,7 @@ use crate::{
         export_team_screen::ExportTeamAction,
         file_system_screen::FileSystemScreen,
         match_list_screen::MatchListScreen,
-        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries, step},
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
@@ -328,16 +328,17 @@ impl<
     }
 
     fn next_player(&mut self) {
-        if let Some(selected) = self.list_state.selected() {
-            let new_selected = (selected + 1).min(self.team.active_players().len() - 1);
-            self.list_state.select(Some(new_selected));
-        }
+        self.move_selection(true);
     }
 
     fn previous_player(&mut self) {
+        self.move_selection(false);
+    }
+
+    fn move_selection(&mut self, forward: bool) {
         if let Some(selected) = self.list_state.selected() {
-            let new_selected = if selected == 0 { 0 } else { selected - 1 };
-            self.list_state.select(Some(new_selected));
+            self.list_state
+                .select(step(selected, self.team.active_players().len(), forward));
         }
     }
 
