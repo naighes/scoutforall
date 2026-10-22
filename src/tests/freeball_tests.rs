@@ -113,6 +113,7 @@ mod tests {
 
     fn not_available(event: EventTypeEnum) -> String {
         current_labels()
+            .domain
             .event_is_not_available
             .replace("{}", &event.to_string())
     }

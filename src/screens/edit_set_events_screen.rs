@@ -233,9 +233,12 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
             .snapshot_before(self.selected(), self.current_match.max_substitutions)
         {
             Ok(snapshot) => self.before = snapshot,
-            Err(_) => self
-                .notify_message
-                .set_error(current_labels().could_not_compute_snapshot.to_string()),
+            Err(_) => self.notify_message.set_error(
+                current_labels()
+                    .domain
+                    .could_not_compute_snapshot
+                    .to_string(),
+            ),
         }
     }
 

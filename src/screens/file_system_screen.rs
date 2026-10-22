@@ -291,14 +291,15 @@ where
                                 }
                             },
                             _ => {
-                                self.notify_message
-                                    .set_error(current_labels().invalid_selection.to_string());
+                                self.notify_message.set_error(
+                                    current_labels().domain.invalid_selection.to_string(),
+                                );
                                 AppAction::None
                             }
                         }
                     } else {
                         self.notify_message
-                            .set_error(current_labels().invalid_selection.to_string());
+                            .set_error(current_labels().domain.invalid_selection.to_string());
                         AppAction::None
                     }
                 }

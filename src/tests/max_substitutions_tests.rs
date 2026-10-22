@@ -424,7 +424,7 @@ mod tests {
         ui.press(KeyCode::Char('r')).await;
         let screen = ui.screen();
         assert!(
-            screen.contains(current_labels().max_substitutions_reached),
+            screen.contains(current_labels().domain.max_substitutions_reached),
             "{screen}"
         );
         assert!(

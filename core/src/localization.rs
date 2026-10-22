@@ -135,6 +135,15 @@ pub struct Labels {
     pub set_score: &'static str,
     pub team_already_exists: &'static str,
     pub import_match_error: &'static str,
+    pub event_is_not_available: &'static str,
+    pub max_substitutions_reached: &'static str,
+    pub no_player_selected: &'static str,
+    pub invalid_player_selection: &'static str,
+    pub evaluation_not_allowed_for_event: &'static str,
+    pub invalid_selection: &'static str,
+    pub could_not_add_event: &'static str,
+    pub could_not_compute_snapshot: &'static str,
+    pub could_not_undo: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -262,6 +271,15 @@ const EN: Labels = Labels {
     report_legend: "tot total · err errors · pt points · bp break points · w-l points minus errors · pos positive · prf perfect · eff efficiency · blk blocked · tch block touches · flt faults · fb freeballs given · opp opponent errors · SO% side outs won · BP% break points won · percentages are rounded",
     team_already_exists: "team already exists",
     import_match_error: "could not import match",
+    event_is_not_available: "event {} is not available",
+    max_substitutions_reached: "no substitutions left in this set",
+    no_player_selected: "no player selected",
+    invalid_player_selection: "invalid player selection",
+    evaluation_not_allowed_for_event: "evaluation not allowed for this event {}",
+    invalid_selection: "invalid selection",
+    could_not_add_event: "could not add event",
+    could_not_compute_snapshot: "could not compute the snapshot",
+    could_not_undo: "could not undo the last event",
 };
 
 const IT: Labels = Labels {
@@ -389,6 +407,15 @@ const IT: Labels = Labels {
     report_legend: "tot totale · err errori · pt punti · bp punti in break · v-p punti meno errori · pos positività · prf perfette · eff efficienza · mur murati · toc tocchi a muro · fal falli · fb freeball concesse · avv errori avversari · CP% cambi palla vinti · BP% break vinti · percentuali arrotondate",
     team_already_exists: "squadra già esistente",
     import_match_error: "impossibile importare la partita",
+    event_is_not_available: "l'evento {} non è disponibile",
+    max_substitutions_reached: "sostituzioni esaurite in questo set",
+    no_player_selected: "nessun giocatore selezionato",
+    invalid_player_selection: "selezione del giocatore non valida",
+    evaluation_not_allowed_for_event: "valutazione non consentita per l'evento {}",
+    invalid_selection: "selezione non valida",
+    could_not_add_event: "impossibile aggiungere l'evento",
+    could_not_compute_snapshot: "impossibile calcolare l'istantanea",
+    could_not_undo: "impossibile annullare l'ultimo evento",
 };
 
 /// Returns the labels of a language.

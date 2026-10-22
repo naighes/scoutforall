@@ -322,8 +322,12 @@ impl<
                         )))
                     }
                     Err(_) => {
-                        self.notify_message
-                            .set_error(current_labels().could_not_compute_snapshot.to_string());
+                        self.notify_message.set_error(
+                            current_labels()
+                                .domain
+                                .could_not_compute_snapshot
+                                .to_string(),
+                        );
                         AppAction::None
                     }
                 }

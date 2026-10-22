@@ -9,6 +9,7 @@ pub mod localization;
 pub mod logging;
 pub mod providers;
 pub mod reporting;
+pub mod scouting;
 pub mod shapes;
 pub mod storage;
 pub mod util;
