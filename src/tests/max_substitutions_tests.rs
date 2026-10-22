@@ -7,6 +7,7 @@ mod tests {
     use crate::localization::{current_labels, language};
     use crate::{
         screens::{file_system_screen::FileSystemAction, import_match_screen::ImportMatchAction},
+        tests::fs_store,
         tests::ui::{TeamFixture, Ui},
     };
     use chrono::Utc;
@@ -14,12 +15,12 @@ mod tests {
     use scout4all_core::{
         constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
         providers::{
-            fs::{
-                match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
-                set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-                team_writer::FileSystemTeamWriter,
-            },
             match_reader::MatchReader,
+            store::{
+                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
+                set_reader::StoreSetReader, set_writer::StoreSetWriter,
+                team_writer::StoreTeamWriter,
+            },
             team_writer::{PlayerInput, TeamInput, TeamWriter},
         },
         shapes::{
@@ -143,7 +144,7 @@ mod tests {
     /* importing */
 
     async fn team(base: &Path) -> TeamEntry {
-        let writer = FileSystemTeamWriter::new(base, language());
+        let writer = StoreTeamWriter::new(fs_store(base));
         let mut team = writer
             .save(TeamInput::New {
                 id: None,
@@ -194,16 +195,16 @@ mod tests {
         let team = team(&base).await;
         let zip_path = dir.path().join(file_name);
         exported_match(&zip_path, &team, descriptor);
-        let reader = Arc::new(FileSystemMatchReader::new(
-            &base,
-            Arc::new(FileSystemSetReader::new(&base, language())),
+        let reader = Arc::new(StoreMatchReader::new(
+            fs_store(&base),
+            Arc::new(StoreSetReader::new(fs_store(&base), language())),
             language(),
         ));
         let mut action = ImportMatchAction::new(
             team.clone(),
             reader.clone(),
-            Arc::new(FileSystemMatchWriter::new(&base, language())),
-            Arc::new(FileSystemSetWriter::new(&base, language())),
+            Arc::new(StoreMatchWriter::new(fs_store(&base))),
+            Arc::new(StoreSetWriter::new(fs_store(&base), language())),
         );
         action
             .on_selected(&zip_path)

@@ -8,22 +8,21 @@ mod tests {
     use crate::localization::{Describe, current_labels};
     use crate::{
         providers::{
-            fs::settings_reader::FileSystemSettingsReader, settings_reader::SettingsReader,
+            settings_reader::SettingsReader,
+            store::{CONFIG, settings_reader::StoreSettingsReader},
         },
         shapes::{
             actions::ScreenActionEnum,
             keybinding::{KeyBindings, SETTINGS_KEY, is_reserved_key, navigation_keybindings},
             settings::Settings,
         },
+        tests::fs_store,
         tests::ui::{TeamFixture, Ui},
     };
     use crokey::{KeyCombination, crossterm::event::KeyCode, key};
-    use scout4all_core::{
-        providers::fs::path::get_config_file_path,
-        shapes::{
-            enums::{EvalEnum, EventTypeEnum, LanguageEnum},
-            technique::{ServeTypeEnum, SetTypeEnum},
-        },
+    use scout4all_core::shapes::{
+        enums::{EvalEnum, EventTypeEnum, LanguageEnum},
+        technique::{ServeTypeEnum, SetTypeEnum},
     };
     use std::collections::HashSet;
     use tempfile::TempDir;
@@ -851,8 +850,8 @@ mod tests {
                 "B": ["b", "F2"]
             }
         }"#;
-        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), old).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .unwrap();
@@ -913,8 +912,8 @@ mod tests {
             "language": "en",
             "eval_keybindings": { "#": ["a"], "+": ["f"] }
         }"##;
-        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), old).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .unwrap();
@@ -972,8 +971,8 @@ mod tests {
     async fn settings_of_v0_5_0_get_the_freeball_keys() {
         let read = |json: &'static str| async move {
             let dir = TempDir::new().unwrap();
-            std::fs::write(get_config_file_path(dir.path()), json).unwrap();
-            FileSystemSettingsReader::new(dir.path())
+            std::fs::write(dir.path().join(CONFIG), json).unwrap();
+            StoreSettingsReader::new(fs_store(dir.path()))
                 .read()
                 .await
                 .unwrap()
@@ -1088,8 +1087,8 @@ mod tests {
             },
             "serve_type_keybindings": { "float": ["#"], "spin": ["9"] }
         }"##;
-        std::fs::write(get_config_file_path(dir.path()), old).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), old).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .unwrap();
@@ -1110,8 +1109,8 @@ mod tests {
     #[tokio::test]
     async fn settings_saved_by_v0_0_x_load() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(get_config_file_path(dir.path()), r#"{ "language": "it" }"#).unwrap();
-        let settings = FileSystemSettingsReader::new(dir.path())
+        std::fs::write(dir.path().join(CONFIG), r#"{ "language": "it" }"#).unwrap();
+        let settings = StoreSettingsReader::new(fs_store(dir.path()))
             .read()
             .await
             .expect("expected the settings");

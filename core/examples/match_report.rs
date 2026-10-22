@@ -1,16 +1,17 @@
 //! Writes the PDF report (and the data it lays out) of every match found in the
 //! data folder to the given output folder, to look at the layout:
-//! `cargo run -p scout4all-core --example match_report -- <out dir> [en|it]`.
+//! `cargo run -p scout4all-core --example match_report -- <out dir> [en|it] [data dir]`,
+//! the data in `~/.scout4all` unless given.
 // a development tool, not the app: it stops at the first error
 #![allow(clippy::expect_used)]
 use scout4all_core::localization::Language;
-use scout4all_core::providers::fs::{
-    match_reader::FileSystemMatchReader, path::get_base_path, set_reader::FileSystemSetReader,
-    team_reader::FileSystemTeamReader,
+use scout4all_core::providers::store::{
+    match_reader::StoreMatchReader, set_reader::StoreSetReader, team_reader::StoreTeamReader,
 };
 use scout4all_core::providers::{match_reader::MatchReader, team_reader::TeamReader};
 use scout4all_core::reporting::{model::build_report, pdf::render_report_pdf};
 use scout4all_core::shapes::enums::LanguageEnum;
+use scout4all_core::storage::{Store, fs::FsStore};
 use std::{env, fs, path::PathBuf, str::FromStr, sync::Arc};
 
 #[tokio::main]
@@ -27,11 +28,16 @@ async fn main() {
             .unwrap_or(LanguageEnum::En),
     );
     let labels = language.labels();
-    let base = get_base_path(labels).expect("expected the data folder");
-    let teams = FileSystemTeamReader::new(&base, language.clone());
-    let matches = FileSystemMatchReader::new(
-        &base,
-        Arc::new(FileSystemSetReader::new(&base, language.clone())),
+    let base: PathBuf = env::args()
+        .nth(3)
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".scout4all")))
+        .expect("expected the data folder");
+    let store: Arc<dyn Store> = Arc::new(FsStore::new(&base));
+    let teams = StoreTeamReader::new(Arc::clone(&store), language.clone());
+    let matches = StoreMatchReader::new(
+        Arc::clone(&store),
+        Arc::new(StoreSetReader::new(store, language.clone())),
         language,
     );
     for team in teams

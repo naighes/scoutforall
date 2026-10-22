@@ -1124,19 +1124,20 @@ impl<
 mod tests {
     use super::*;
     use crate::localization::language;
-    use crate::providers::fs::{
-        settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
+    use crate::providers::store::{
+        settings_reader::StoreSettingsReader, settings_writer::StoreSettingsWriter,
     };
+    use crate::tests::fs_store;
     use scout4all_core::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         providers::{
-            fs::{
-                match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
-                set_reader::FileSystemSetReader, set_writer::FileSystemSetWriter,
-                team_writer::FileSystemTeamWriter,
-            },
             match_reader::MatchReader,
             match_writer::MatchWriter,
+            store::{
+                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
+                set_reader::StoreSetReader, set_writer::StoreSetWriter,
+                team_writer::StoreTeamWriter,
+            },
             team_writer::{TeamInput, TeamWriter},
         },
         shapes::{enums::TeamSideEnum, player::PlayerEntry},
@@ -1157,7 +1158,7 @@ mod tests {
             })
             .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
-        let team = FileSystemTeamWriter::new(base, language())
+        let team = StoreTeamWriter::new(fs_store(base))
             .save(TeamInput::New {
                 id: None,
                 name: "Volley Club".into(),
@@ -1168,7 +1169,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let m = FileSystemMatchWriter::new(base, language())
+        let m = StoreMatchWriter::new(fs_store(base))
             .create(
                 &team,
                 "Cortona Volley".into(),
@@ -1178,7 +1179,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let set_writer = Arc::new(FileSystemSetWriter::new(base, language()));
+        let set_writer = Arc::new(StoreSetWriter::new(fs_store(base), language()));
         let positions: [Uuid; 6] = ids[..6].try_into().unwrap();
         let set = set_writer
             .create(
@@ -1195,8 +1196,8 @@ mod tests {
             .unwrap();
         let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
         let mut screen = ScoutingScreen::new(
-            Arc::new(FileSystemSettingsReader::new(base)),
-            Arc::new(FileSystemSettingsWriter::new(base)),
+            Arc::new(StoreSettingsReader::new(fs_store(base))),
+            Arc::new(StoreSettingsWriter::new(fs_store(base))),
             Settings::default(),
             m.clone(),
             set,
@@ -1227,9 +1228,9 @@ mod tests {
             .await;
         assert_eq!(screen.snapshot.score_us, 1);
         // the set opens with the event that applied only
-        let reader = FileSystemMatchReader::new(
-            base,
-            Arc::new(FileSystemSetReader::new(base, language())),
+        let reader = StoreMatchReader::new(
+            fs_store(base),
+            Arc::new(StoreSetReader::new(fs_store(base), language())),
             language(),
         );
         let m = reader

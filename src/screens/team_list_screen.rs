@@ -1,5 +1,5 @@
 use crate::shapes::keybinding::navigation_keybindings;
-use std::{fmt::Debug, path::PathBuf, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use crate::localization::current_labels;
 use crate::{
@@ -29,6 +29,7 @@ use scout4all_core::{
         team_reader::TeamReader, team_writer::TeamWriter,
     },
     shapes::{enums::FriendlyName, listed::Listed, team::TeamEntry},
+    storage::Store,
 };
 
 #[derive(Debug)]
@@ -46,7 +47,7 @@ pub struct TeamListScreen<
     settings: Settings,
     notify_message: NotifyBanner,
     footer: NavigationFooter,
-    base_path: PathBuf,
+    store: Arc<dyn Store>,
     team_reader: Arc<TR>,
     team_writer: Arc<TW>,
     settings_writer: Arc<SW>,
@@ -117,7 +118,7 @@ impl<
                     Some(team) => AppAction::SwitchScreen(Box::new(TeamDetailsScreen::new(
                         self.settings.clone(),
                         team,
-                        self.base_path.clone(),
+                        Arc::clone(&self.store),
                         self.team_reader.clone(),
                         self.team_writer.clone(),
                         self.match_reader.clone(),
@@ -147,7 +148,6 @@ impl<
                         None => {
                             self.notify_message.set_error(
                                 current_labels()
-                                    .domain
                                     .could_not_recognize_home_directory
                                     .to_string(),
                             );
@@ -240,7 +240,7 @@ impl<
     pub fn new(
         settings: Settings,
         teams: Vec<Listed<TeamEntry>>,
-        base_path: PathBuf,
+        store: Arc<dyn Store>,
         team_reader: Arc<TR>,
         team_writer: Arc<TW>,
         settings_writer: Arc<SW>,
@@ -255,7 +255,7 @@ impl<
             notify_message: NotifyBanner::new(),
             settings: settings.clone(),
             footer: NavigationFooter::new(),
-            base_path,
+            store,
             team_reader,
             team_writer,
             settings_writer,

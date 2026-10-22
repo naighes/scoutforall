@@ -15,10 +15,8 @@ use crate::{
     app::App,
     localization::{current_labels, language},
     providers::{
-        fs::{
-            settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
-        },
         settings_reader::SettingsReader,
+        store::{settings_reader::StoreSettingsReader, settings_writer::StoreSettingsWriter},
     },
     shapes::settings::{Settings, init_settings},
 };
@@ -26,20 +24,24 @@ use crokey::crossterm::event::{self, Event};
 use ratatui::{Terminal, backend::Backend};
 use scout4all_core::{
     analytics::{global::init_global_queue_manager, upload::AnalyticsUploadWorker},
-    constants,
     logging::logger::{init_logger, log_error},
     providers::{
-        fs::{
-            match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
-            path::get_base_path, queue_reader::FileSystemQueueReader,
-            queue_writer::FileSystemQueueWriter, set_reader::FileSystemSetReader,
-            set_writer::FileSystemSetWriter, team_reader::FileSystemTeamReader,
-            team_writer::FileSystemTeamWriter,
+        store::{
+            match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
+            queue_reader::StoreQueueReader, queue_writer::StoreQueueWriter,
+            set_reader::StoreSetReader, set_writer::StoreSetWriter, team_reader::StoreTeamReader,
+            team_writer::StoreTeamWriter,
         },
         team_reader::TeamReader,
     },
+    storage::{Store, fs::FsStore},
 };
-use std::{panic, process::ExitCode, sync::Arc, time::Duration};
+use std::{
+    env, fs::create_dir_all, panic, path::PathBuf, process::ExitCode, sync::Arc, time::Duration,
+};
+
+/// The variable naming the folder of the data, `~/.scout4all` if unset.
+const DATA_DIR_VAR: &str = "SCOUT4ALL_DATA_DIR";
 
 #[cfg(feature = "self-update")]
 async fn maybe_check_update() {
@@ -75,29 +77,48 @@ fn log_panics() {
     }));
 }
 
+/// The folder of the data, made if missing: the one in `SCOUT4ALL_DATA_DIR`,
+/// or `.scout4all` in the home folder.
+fn data_dir() -> Result<PathBuf, String> {
+    let labels = current_labels();
+    let dir = env::var_os(DATA_DIR_VAR)
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".scout4all")))
+        .ok_or_else(|| labels.could_not_recognize_home_directory.to_string())?;
+    create_dir_all(&dir).map_err(|e| {
+        format!(
+            "{}: {} ({e})",
+            labels.could_not_create_app_directory,
+            dir.display()
+        )
+    })?;
+    Ok(dir)
+}
+
 async fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    let base_dir = get_base_path(current_labels().domain).map_err(|e| e.to_string())?;
+    let data_dir = data_dir()?;
 
     // init logger
-    let log_path = base_dir.join("scout4all.log");
+    let log_path = data_dir.join("scout4all.log");
     init_logger(log_path);
 
-    let queue_path = base_dir.join(constants::UPLOAD_QUEUE_FILE_NAME);
-    let settings_reader = FileSystemSettingsReader::new(&base_dir);
-    let team_reader = FileSystemTeamReader::new(&base_dir, language());
-    let team_writer = FileSystemTeamWriter::new(&base_dir, language());
-    let settings_writer = FileSystemSettingsWriter::new(&base_dir);
-    let set_reader = FileSystemSetReader::new(&base_dir, language());
-    let match_reader = FileSystemMatchReader::new(&base_dir, Arc::new(set_reader), language());
-    let match_writer = FileSystemMatchWriter::new(&base_dir, language());
-    let set_writer = FileSystemSetWriter::new(&base_dir, language());
-    let queue_reader = FileSystemQueueReader::new(&queue_path);
-    let queue_writer = FileSystemQueueWriter::new(&queue_path);
+    let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
+    let settings_reader = StoreSettingsReader::new(Arc::clone(&store));
+    let team_reader = StoreTeamReader::new(Arc::clone(&store), language());
+    let team_writer = StoreTeamWriter::new(Arc::clone(&store));
+    let settings_writer = StoreSettingsWriter::new(Arc::clone(&store));
+    let set_reader = StoreSetReader::new(Arc::clone(&store), language());
+    let match_reader = StoreMatchReader::new(Arc::clone(&store), Arc::new(set_reader), language());
+    let match_writer = StoreMatchWriter::new(Arc::clone(&store));
+    let set_writer = StoreSetWriter::new(Arc::clone(&store), language());
+    let queue_reader = StoreQueueReader::new(Arc::clone(&store));
+    let queue_writer = StoreQueueWriter::new(Arc::clone(&store));
     let teams = team_reader.read_all().await.unwrap_or_else(|_| vec![]);
     let settings = settings_reader
         .read()
@@ -118,7 +139,7 @@ async fn run() -> Result<(), String> {
     // the analytics upload worker always runs: it uploads only while
     // analytics is enabled, which can change from the settings
     let worker = AnalyticsUploadWorker::new(
-        base_dir.clone(),
+        Arc::clone(&store),
         Arc::clone(&team_reader_arc),
         Arc::clone(&match_reader_arc),
         Arc::clone(&queue_reader_arc),
@@ -141,7 +162,7 @@ async fn run() -> Result<(), String> {
         App::new(
             settings,
             teams,
-            base_dir,
+            store,
             team_reader_arc,
             team_writer_arc,
             settings_writer_arc,

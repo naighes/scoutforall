@@ -1,53 +1,30 @@
-use std::path::{Path, PathBuf};
-
 use crate::{
-    constants::TEAM_DESCRIPTOR_FILE_NAME,
-    errors::{AppError, IOError},
-    localization::{Labels, Language},
+    errors::AppError,
     providers::{
-        fs::path::get_team_folder_path,
+        store::write_json,
         team_writer::{PlayerInput, TeamInput, TeamWriter},
     },
     shapes::{player::PlayerEntry, team::TeamEntry},
+    storage::{Store, layout},
 };
 use async_trait::async_trait;
-use serde_json::to_vec_pretty;
-use tokio::fs::{create_dir_all, write};
+use std::sync::Arc;
 use uuid::Uuid;
 
-pub struct FileSystemTeamWriter {
-    base_path: PathBuf,
-    language: Language,
-}
+pub struct StoreTeamWriter(Arc<dyn Store>);
 
-impl FileSystemTeamWriter {
-    pub fn new(base_path: &Path, language: Language) -> Self {
-        Self {
-            base_path: base_path.to_path_buf(),
-            language,
-        }
+impl StoreTeamWriter {
+    pub fn new(store: Arc<dyn Store>) -> Self {
+        Self(store)
     }
 
-    async fn save_team_file(
-        team: &TeamEntry,
-        base_path: &Path,
-        labels: &Labels,
-    ) -> Result<(), AppError> {
-        let folder = get_team_folder_path(base_path, &team.id, labels)?;
-        create_dir_all(&folder)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        let path = folder.join(TEAM_DESCRIPTOR_FILE_NAME);
-        let json = to_vec_pretty(team).map_err(|e| AppError::IO(IOError::from(e)))?;
-        write(&path, json)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        Ok(())
+    async fn save_team_file(&self, team: &TeamEntry) -> Result<(), AppError> {
+        write_json(&*self.0, &layout::team_descriptor(&team.id), team).await
     }
 }
 
 #[async_trait]
-impl TeamWriter for FileSystemTeamWriter {
+impl TeamWriter for StoreTeamWriter {
     async fn save(&self, input: TeamInput) -> Result<TeamEntry, AppError> {
         let team = match input {
             TeamInput::New {
@@ -72,7 +49,7 @@ impl TeamWriter for FileSystemTeamWriter {
             TeamInput::Existing(team) => team,
         };
 
-        Self::save_team_file(&team, &self.base_path, self.language.labels()).await?;
+        self.save_team_file(&team).await?;
         Ok(team)
     }
 
@@ -95,7 +72,7 @@ impl TeamWriter for FileSystemTeamWriter {
         } else {
             team.players.push(player.clone());
         }
-        Self::save_team_file(team, &self.base_path, self.language.labels()).await?;
+        self.save_team_file(team).await?;
         Ok(player)
     }
 }

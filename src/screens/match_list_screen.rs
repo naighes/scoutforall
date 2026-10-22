@@ -1,5 +1,5 @@
 use crate::shapes::keybinding::navigation_keybindings;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use crate::localization::current_labels;
 use crate::{
@@ -49,6 +49,7 @@ use scout4all_core::{
         set::SetEntry,
         team::TeamEntry,
     },
+    storage::Store,
 };
 
 #[derive(Debug)]
@@ -66,7 +67,7 @@ pub struct MatchListScreen<
     notify_message: NotifyBanner,
     header: TeamHeader,
     footer: NavigationFooter,
-    base_path: PathBuf,
+    store: Arc<dyn Store>,
     match_reader: Arc<MR>,
     match_writer: Arc<MW>,
     set_writer: Arc<SSW>,
@@ -196,7 +197,6 @@ impl<
                     None => {
                         self.notify_message.set_error(
                             current_labels()
-                                .domain
                                 .could_not_recognize_home_directory
                                 .to_string(),
                         );
@@ -215,7 +215,7 @@ impl<
                                 ExportMatchAction::new(
                                     self.team.clone(),
                                     match_id,
-                                    self.base_path.clone(),
+                                    Arc::clone(&self.store),
                                 ),
                                 self.settings_reader.clone(),
                                 self.settings_writer.clone(),
@@ -224,7 +224,6 @@ impl<
                         (None, _) => {
                             self.notify_message.set_error(
                                 current_labels()
-                                    .domain
                                     .could_not_recognize_home_directory
                                     .to_string(),
                             );
@@ -277,7 +276,7 @@ impl<
         settings: Settings,
         team: TeamEntry,
         matches: Vec<Listed<MatchEntry>>,
-        base_path: PathBuf,
+        store: Arc<dyn Store>,
         match_reader: Arc<MR>,
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
@@ -289,7 +288,7 @@ impl<
             matches: with_status(matches),
             team,
             list_state: ListState::default(),
-            base_path,
+            store,
             notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
             footer: NavigationFooter::new(),

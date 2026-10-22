@@ -7,17 +7,19 @@ mod tests {
     use crate::{
         analytics::upload::create_match_archive,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
-        localization::Language,
         providers::{
-            fs::{match_writer::FileSystemMatchWriter, team_writer::FileSystemTeamWriter},
             match_writer::MatchWriter,
+            store::{match_writer::StoreMatchWriter, team_writer::StoreTeamWriter},
             team_writer::{TeamInput, TeamWriter},
         },
+        storage::{Store, memory::MemoryStore},
         util::config_var,
     };
     use chrono::Utc;
-    use std::io::Read;
-    use tempfile::TempDir;
+    use std::{
+        io::{Cursor, Read},
+        sync::Arc,
+    };
 
     // a name per test: tests run in parallel and share the environment
     #[test]
@@ -50,10 +52,8 @@ mod tests {
 
     #[tokio::test]
     async fn uploaded_metadata_has_the_substitutions() {
-        let dir = TempDir::new().unwrap();
-        let base = dir.path().join("data");
-        std::fs::create_dir_all(&base).unwrap();
-        let team = FileSystemTeamWriter::new(&base, Language::default())
+        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
+        let team = StoreTeamWriter::new(Arc::clone(&store))
             .save(TeamInput::New {
                 id: None,
                 name: "Volley Club".to_string(),
@@ -64,7 +64,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let m = FileSystemMatchWriter::new(&base, Language::default())
+        let m = StoreMatchWriter::new(Arc::clone(&store))
             .create(
                 &team,
                 "Cortona Volley".to_string(),
@@ -74,9 +74,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let zip_path = dir.path().join("upload.zip");
-        create_match_archive(&m, &base, &zip_path).await.unwrap();
-        let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+        let zip = create_match_archive(&m, &*store).await.unwrap();
+        let mut archive = zip::ZipArchive::new(Cursor::new(zip)).unwrap();
         let mut content = String::new();
         archive
             .by_name("match.json")

@@ -14,3 +14,11 @@ mod terms_tests;
 mod ui;
 mod undo_tests;
 mod unreadable_data_tests;
+
+use scout4all_core::storage::{Store, fs::FsStore};
+use std::{path::Path, sync::Arc};
+
+/// The data in a folder, as the app saves it.
+pub(crate) fn fs_store(root: impl AsRef<Path>) -> Arc<dyn Store> {
+    Arc::new(FsStore::new(root.as_ref()))
+}

@@ -111,11 +111,9 @@ pub struct Labels {
     pub empty_directory: &'static str,
     pub up_one_level: &'static str,
     pub invalid_file_name: &'static str,
-    pub team_already_exists: &'static str,
     pub export: &'static str,
     pub operation_successful: &'static str,
     pub set_over: &'static str,
-    pub import_match_error: &'static str,
     pub import_match: &'static str,
     pub match_word: &'static str,
     pub import: &'static str,
@@ -173,6 +171,8 @@ pub struct Labels {
     pub could_not_save_set: &'static str,
     /// the name of the space bar in the footers
     pub space_key: &'static str,
+    pub could_not_recognize_home_directory: &'static str,
+    pub could_not_create_app_directory: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -273,11 +273,9 @@ const EN: Labels = Labels {
     empty_directory: "the directory is empty",
     up_one_level: "up one level",
     invalid_file_name: "invalid file name",
-    team_already_exists: "team already exists",
     export: "export",
     operation_successful: "operation successful",
     set_over: "set over",
-    import_match_error: "could not import match",
     import_match: "import match",
     match_word: "match",
     import: "import {}",
@@ -341,6 +339,8 @@ Full texts: the LICENSE and DATA-PRIVACY files, on https://github.com/naighes/sc
     edit_changes_the_set_result: "the change would alter the set result",
     could_not_save_set: "could not save the set",
     space_key: "space",
+    could_not_recognize_home_directory: "could not recognize home directory",
+    could_not_create_app_directory: "could not create app directory",
 };
 
 const IT: Labels = Labels {
@@ -441,11 +441,9 @@ const IT: Labels = Labels {
     empty_directory: "la directory è vuota",
     up_one_level: "su di un livello",
     invalid_file_name: "nome file non valido",
-    team_already_exists: "squadra già esistente",
     export: "esporta",
     operation_successful: "operazione completata",
     set_over: "set terminato",
-    import_match_error: "impossibile importare la partita",
     import_match: "importazione partita",
     match_word: "partita",
     import: "importazione {}",
@@ -509,6 +507,8 @@ Testi completi: i file LICENSE e DATA-PRIVACY, su https://github.com/naighes/sco
     edit_changes_the_set_result: "la modifica cambierebbe il risultato del set",
     could_not_save_set: "impossibile salvare il set",
     space_key: "spazio",
+    could_not_recognize_home_directory: "impossibile riconoscere la directory home",
+    could_not_create_app_directory: "impossibile creare la directory dell'applicazione",
 };
 
 static LANGUAGE: LazyLock<Language> = LazyLock::new(Language::default);

@@ -11,10 +11,6 @@ use std::str::FromStr;
 use std::sync::{Arc, PoisonError, RwLock};
 
 pub struct Labels {
-    pub could_not_recognize_home_directory: &'static str,
-    pub could_not_create_app_directory: &'static str,
-    pub could_not_create_team_directory: &'static str,
-    pub could_not_create_match_directory: &'static str,
     pub error: &'static str,
     pub point_sequence: &'static str,
     pub setter_prefix: &'static str,
@@ -86,7 +82,6 @@ pub struct Labels {
     pub errors: &'static str,
     pub points: &'static str,
     pub match_descriptor_file_not_found: &'static str,
-    pub invalid_match_folder_name: &'static str,
     pub could_not_read_folder: &'static str,
     pub invalid_set: &'static str,
     pub found_more_than_5_sets_in_match: &'static str,
@@ -138,13 +133,11 @@ pub struct Labels {
     pub from_the_bench: &'static str,
     pub report_legend: &'static str,
     pub set_score: &'static str,
+    pub team_already_exists: &'static str,
+    pub import_match_error: &'static str,
 }
 
 const EN: Labels = Labels {
-    could_not_recognize_home_directory: "could not recognize home directory",
-    could_not_create_app_directory: "could not create app directory",
-    could_not_create_team_directory: "could not create team directory",
-    could_not_create_match_directory: "could not create match directory",
     error: "error",
     point_sequence: "point sequence",
     setter_prefix: "S",
@@ -216,7 +209,6 @@ const EN: Labels = Labels {
     errors: "errors",
     points: "points",
     match_descriptor_file_not_found: "match descriptor file not found",
-    invalid_match_folder_name: "invalid match folder name",
     could_not_read_folder: "could not read folder {}",
     invalid_set: "invalid set",
     found_more_than_5_sets_in_match: "found more than 5 sets in match {}",
@@ -268,13 +260,11 @@ const EN: Labels = Labels {
     starting_position: "starting position",
     from_the_bench: "from the bench",
     report_legend: "tot total · err errors · pt points · bp break points · w-l points minus errors · pos positive · prf perfect · eff efficiency · blk blocked · tch block touches · flt faults · fb freeballs given · opp opponent errors · SO% side outs won · BP% break points won · percentages are rounded",
+    team_already_exists: "team already exists",
+    import_match_error: "could not import match",
 };
 
 const IT: Labels = Labels {
-    could_not_recognize_home_directory: "impossibile riconoscere la directory home",
-    could_not_create_app_directory: "impossibile creare la directory dell'applicazione",
-    could_not_create_team_directory: "impossibile creare la directory della squadra",
-    could_not_create_match_directory: "impossibile creare la directory della partita",
     error: "errore",
     point_sequence: "sequenza punti",
     setter_prefix: "P",
@@ -346,7 +336,6 @@ const IT: Labels = Labels {
     errors: "errori",
     points: "punti",
     match_descriptor_file_not_found: "file di descrizione della partita non trovato",
-    invalid_match_folder_name: "nome della cartella della partita non valido",
     could_not_read_folder: "impossibile leggere la cartella {}",
     invalid_set: "set non valido",
     found_more_than_5_sets_in_match: "trovati più di 5 set nella partita {}",
@@ -398,6 +387,8 @@ const IT: Labels = Labels {
     starting_position: "posizione di partenza",
     from_the_bench: "dalla panchina",
     report_legend: "tot totale · err errori · pt punti · bp punti in break · v-p punti meno errori · pos positività · prf perfette · eff efficienza · mur murati · toc tocchi a muro · fal falli · fb freeball concesse · avv errori avversari · CP% cambi palla vinti · BP% break vinti · percentuali arrotondate",
+    team_already_exists: "squadra già esistente",
+    import_match_error: "impossibile importare la partita",
 };
 
 /// Returns the labels of a language.
