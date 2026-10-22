@@ -133,7 +133,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: run cargo clippy
-        run: cargo clippy --all-targets --all-features -- --deny warnings
+        run: cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
   format:
     needs: check
@@ -181,7 +181,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-nextest --locked
-      - run: cargo nextest run --locked --all-features
+      - run: cargo nextest run --workspace --locked --all-features
         env:
           RUST_BACKTRACE: full
           CI: "true"
