@@ -115,14 +115,10 @@ impl DatePicker {
                 }
                 _ => {}
             },
-            1 => {
-                let first = self.month.chars().next().unwrap();
-                match first {
-                    '0' if ('1'..='9').contains(&c) => self.month.push(c),
-                    '1' if ('0'..='2').contains(&c) => self.month.push(c),
-                    _ => {}
-                }
-            }
+            1 => match (self.month.chars().next(), c) {
+                (Some('0'), '1'..='9') | (Some('1'), '0'..='2') => self.month.push(c),
+                _ => {}
+            },
             _ => {}
         }
     }

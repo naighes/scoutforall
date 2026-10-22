@@ -11,5 +11,7 @@ pub mod reporting;
 pub mod shapes;
 pub mod util;
 
+// the tests may panic on what they don't expect (see clippy.toml)
 #[cfg(test)]
+#[allow(clippy::unreachable)]
 mod tests;

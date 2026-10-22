@@ -871,7 +871,7 @@ mod tests {
     #[test]
     fn report_shows_the_freeballs() {
         use crate::localization::current_labels;
-        use crate::reporting::pdf::{render_match_pdf, render_match_typst};
+        use crate::reporting::model::build_report;
         use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
         let t = Team::new();
         let players = t
@@ -915,27 +915,15 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
         };
-        let typst = render_match_typst(&m).expect("expected the report source");
         let labels = current_labels();
-        // the texts of the freeball table, the last one before the point
-        // sequence: the header, then a row for all the rallies and one per
-        // phase
-        let table = &typst[..typst
-            .find(&format!("\"{}\"", labels.point_sequence))
-            .expect("expected the point sequence")];
-        let table = &table[table
-            .rfind(&format!("text(\"{}\"", labels.freeballs))
-            .expect("expected the freeball table")..];
-        let texts: Vec<&str> = table
-            .split("text(\"")
-            .skip(1)
-            .map(|t| &t[..t.find('"').unwrap()])
-            .collect();
-        let rows: Vec<&[&str]> = texts[6..].chunks(5).collect();
+        // a row for all the rallies, then one per phase
+        let rows = build_report(&m)
+            .expect("expected the report")
+            .freeballs
+            .rows;
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0], [labels.global, "1", "2", "1", "50.0%"]);
-        assert_eq!(rows[1], ["break", "1", "2", "1", "50.0%"]);
-        assert_eq!(rows[2], [labels.sideout, "-", "-", "-", "-"]);
-        render_match_pdf(&m).expect("expected the report");
+        assert_eq!(rows[0], [labels.global, "1", "2", "1", "50"]);
+        assert_eq!(rows[1], [labels.sideout, "-", "-", "-", "-"]);
+        assert_eq!(rows[2], ["break", "1", "2", "1", "50"]);
     }
 }

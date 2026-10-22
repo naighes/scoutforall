@@ -1,5 +1,5 @@
 use typst::diag::{FileError, FileResult};
-use typst::foundations::{Bytes, Datetime, Duration};
+use typst::foundations::{Bytes, Datetime, Dict, Duration};
 use typst::syntax::{FileId, Source};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
@@ -7,11 +7,19 @@ use typst::{Library, LibraryExt, World};
 use typst_kit::datetime::Time;
 use typst_kit::fonts::{self, FontStore};
 
-/// A minimal typst environment that compiles a single in-memory source.
+/// The fonts of the report, embedded so that it looks the same everywhere
+/// (SIL Open Font License, see `assets/fonts/LICENSE.md`).
+const REPORT_FONTS: [&[u8]; 2] = [
+    include_bytes!("../../assets/fonts/SourceSans3-Regular.ttf"),
+    include_bytes!("../../assets/fonts/SourceSans3-Semibold.ttf"),
+];
+
+/// A minimal typst environment that compiles a single in-memory source,
+/// with the data it lays out in `sys.inputs`.
 ///
-/// The generated report does not import packages nor read files, so any
-/// file access is denied: this also prevents user-provided content (e.g.
-/// team or player names) from reaching the file system.
+/// The report does not import packages nor read files, so any file access
+/// is denied; the user-provided content (e.g. team or player names) is data,
+/// never part of the source.
 pub struct ReportWorld {
     library: LazyHash<Library>,
     fonts: FontStore,
@@ -20,16 +28,27 @@ pub struct ReportWorld {
 }
 
 impl ReportWorld {
-    pub fn new(content: String) -> Self {
+    pub fn new(content: &str, inputs: Dict) -> Self {
         let mut fonts = FontStore::new();
+        fonts.extend(REPORT_FONTS.iter().flat_map(|data| {
+            Font::iter(Bytes::new(*data)).map(|font| {
+                let info = font.info().clone();
+                (font, info)
+            })
+        }));
+        // the fallback for the characters the report fonts miss
         fonts.extend(fonts::embedded());
         fonts.extend(fonts::system());
         Self {
-            library: LazyHash::new(Library::default()),
+            library: LazyHash::new(Library::builder().with_inputs(inputs).build()),
             fonts,
             source: Source::detached(content),
             time: Time::system(),
         }
+    }
+
+    pub fn main_source(&self) -> &Source {
+        &self.source
     }
 }
 

@@ -10,7 +10,7 @@ use crate::{
         },
         settings_reader::SettingsReader,
     },
-    shapes::settings::Settings,
+    shapes::settings::{Settings, TERMS_VERSION},
 };
 use chrono::{Duration, TimeZone, Utc};
 use crokey::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -59,6 +59,17 @@ impl Ui {
         Self::start_with(teams, browse_dirs, false, |_| {}).await
     }
 
+    /// Starts the app as the first time, the terms of use not seen yet:
+    /// with the default settings, saved nowhere.
+    pub async fn first_startup(teams: &[TeamFixture]) -> Self {
+        Self::start_as(teams, Settings::default()).await
+    }
+
+    /// Starts the app with the settings read at startup, not saved.
+    pub async fn start_as(teams: &[TeamFixture], settings: Settings) -> Self {
+        Self::start_with_settings(teams, &[], false, |_| {}, |_| settings).await
+    }
+
     /// Starts the app on the team list, with the first set of every match
     /// already started and serving: the first six players of the team are on
     /// court, the seventh is the libero.
@@ -72,11 +83,28 @@ impl Ui {
         Self::start_with(teams, &[], true, edit).await
     }
 
+    /// The terms of use are already seen: the app opens on the team list.
     async fn start_with(
         teams: &[TeamFixture],
         browse_dirs: &[&str],
         start_sets: bool,
         edit: impl FnOnce(&Path),
+    ) -> Self {
+        let settings = |browse| Settings {
+            last_used_dir: Some(browse),
+            terms_version: TERMS_VERSION,
+            ..Settings::default()
+        };
+        Self::start_with_settings(teams, browse_dirs, start_sets, edit, settings).await
+    }
+
+    /// `settings` gets the folder the file system screens open on.
+    async fn start_with_settings(
+        teams: &[TeamFixture],
+        browse_dirs: &[&str],
+        start_sets: bool,
+        edit: impl FnOnce(&Path),
+        settings: impl FnOnce(PathBuf) -> Settings,
     ) -> Self {
         let dir = TempDir::new().unwrap();
         let base = dir.path().join("data");
@@ -141,12 +169,8 @@ impl Ui {
         edit(&base);
         let team_reader = FileSystemTeamReader::new(&base);
         let teams = team_reader.read_all().await.unwrap();
-        let settings = Settings {
-            last_used_dir: Some(browse),
-            ..Settings::default()
-        };
         let app = App::new(
-            settings,
+            settings(browse),
             teams,
             base.clone(),
             Arc::new(team_reader),

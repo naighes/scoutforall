@@ -8,7 +8,7 @@ use crate::{
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries, step},
         settings_screen::{SettingsPanel, SettingsScreen},
         team_details_screen::TeamDetailsScreen,
     },
@@ -182,7 +182,7 @@ impl<
 > Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &self.screen_actions())
+        list_entries(navigation_keybindings(), &self.screen_actions())
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
@@ -274,16 +274,17 @@ impl<
     }
 
     fn next_team(&mut self) {
-        if let Some(selected) = self.list_state.selected() {
-            let new_selected = (selected + 1).min(self.teams.len() - 1);
-            self.list_state.select(Some(new_selected));
-        }
+        self.move_selection(true);
     }
 
     fn previous_team(&mut self) {
+        self.move_selection(false);
+    }
+
+    fn move_selection(&mut self, forward: bool) {
         if let Some(selected) = self.list_state.selected() {
-            let new_selected = if selected == 0 { 0 } else { selected - 1 };
-            self.list_state.select(Some(new_selected));
+            self.list_state
+                .select(step(selected, self.teams.len(), forward));
         }
     }
 
@@ -298,23 +299,22 @@ impl<
                 Sba::Simple(ScreenActionEnum::Quit),
             ]
         } else {
-            vec![
-                Sba::Simple(ScreenActionEnum::Up),
-                Sba::Simple(ScreenActionEnum::Down),
-                Sba::Hidden(ScreenActionEnum::Previous),
-                Sba::Hidden(ScreenActionEnum::Next),
-                Sba::Simple(ScreenActionEnum::New),
-                if self.get_selected_team().is_some() {
-                    Sba::Simple(ScreenActionEnum::Select)
-                } else {
-                    Sba::Hidden(ScreenActionEnum::Select)
-                },
-                Sba::Simple(ScreenActionEnum::Settings),
-                Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
-                    lbl.replace("{}", current_labels().team)
-                }),
-                Sba::Simple(ScreenActionEnum::Quit),
-            ]
+            LIST_NAVIGATION
+                .into_iter()
+                .chain([
+                    Sba::Simple(ScreenActionEnum::New),
+                    if self.get_selected_team().is_some() {
+                        Sba::Simple(ScreenActionEnum::Select)
+                    } else {
+                        Sba::Hidden(ScreenActionEnum::Select)
+                    },
+                    Sba::Simple(ScreenActionEnum::Settings),
+                    Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
+                        lbl.replace("{}", current_labels().team)
+                    }),
+                    Sba::Simple(ScreenActionEnum::Quit),
+                ])
+                .collect()
         }
     }
 

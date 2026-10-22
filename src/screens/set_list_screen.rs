@@ -5,7 +5,7 @@ use crate::{
             team_header::TeamHeader,
         },
         edit_set_events_screen::EditSetEventsScreen,
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
     },
     shapes::{
         actions::ScreenActionEnum,
@@ -41,21 +41,24 @@ pub struct SetListScreen<MR: MatchReader + Send + Sync, SSW: SetWriter + Send + 
 }
 
 /// The keys of the set list.
-const SET_LIST_ACTIONS: [Sba<ScreenActionEnum>; 5] = [
-    Sba::Simple(ScreenActionEnum::Up),
-    Sba::Simple(ScreenActionEnum::Down),
-    Sba::Redacted(ScreenActionEnum::Select, |_| {
-        current_labels().edit_events.to_string()
-    }),
-    Sba::Simple(ScreenActionEnum::Back),
-    Sba::Simple(ScreenActionEnum::Quit),
-];
+fn set_list_actions() -> Vec<Sba<ScreenActionEnum>> {
+    LIST_NAVIGATION
+        .into_iter()
+        .chain([
+            Sba::Redacted(ScreenActionEnum::Select, |_| {
+                current_labels().edit_events.to_string()
+            }),
+            Sba::Simple(ScreenActionEnum::Back),
+            Sba::Simple(ScreenActionEnum::Quit),
+        ])
+        .collect()
+}
 
 impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'static> Renderable
     for SetListScreen<MR, SSW>
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &SET_LIST_ACTIONS)
+        list_entries(navigation_keybindings(), &set_list_actions())
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
@@ -92,7 +95,7 @@ impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
             .render(f, container[0], Some(&self.current_match.team));
         self.notify_message.render(f, footer_right);
         self.footer.render(f, footer_left, self.footer_entries());
-        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(&SET_LIST_ACTIONS));
+        self.screen_key_bindings = navigation_keybindings().slice(Sba::keys(&set_list_actions()));
     }
 }
 
@@ -112,11 +115,11 @@ impl<MR: MatchReader + Send + Sync + 'static, SSW: SetWriter + Send + Sync + 'st
                 self.notify_message.reset();
                 AppAction::None
             }
-            (_, Some(ScreenActionEnum::Up)) => {
+            (_, Some(ScreenActionEnum::Up | ScreenActionEnum::Previous)) => {
                 self.selected = self.selected.saturating_sub(1);
                 AppAction::None
             }
-            (_, Some(ScreenActionEnum::Down)) => {
+            (_, Some(ScreenActionEnum::Down | ScreenActionEnum::Next)) => {
                 self.selected = (self.selected + 1).min(self.sets_count().saturating_sub(1));
                 AppAction::None
             }

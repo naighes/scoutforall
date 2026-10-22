@@ -7,8 +7,8 @@ use crate::{
             text_box::TextBox,
         },
         screen::{
-            AppAction, FieldKey, Renderable, Sba, ScreenAsync, field_navigation_entries,
-            get_keybinding_actions,
+            AppAction, FieldKey, Renderable, Sba, ScreenAsync, get_keybinding_actions,
+            navigation_entries,
         },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
@@ -22,13 +22,60 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
 };
-use regex::Regex;
 use scout4all_core::{localization::current_labels, util::config_var};
 use serde_json::json;
-use std::sync::LazyLock;
 
-static EMAIL_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^[a-z0-9._%+-]+@[a-z0-9.-]*$").unwrap());
+/// An e-mail address: a name of letters, digits and `._%+-`, then `@` and
+/// a domain of letters, digits, dots and hyphens, with a dot in it.
+fn is_valid_email(email: &str) -> bool {
+    let name_char = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
+    let domain_char = |c: char| c.is_ascii_alphanumeric() || ".-".contains(c);
+    match email.split_once('@') {
+        Some((name, domain)) => {
+            !name.is_empty()
+                && name.chars().all(name_char)
+                && domain.chars().all(domain_char)
+                && domain
+                    .split_once('.')
+                    .is_some_and(|(host, top)| !host.is_empty() && !top.is_empty())
+        }
+        None => false,
+    }
+}
+
+/// The title and the text of the issue: the description, then the name and
+/// the e-mail address when given. The error is the label to show: the title
+/// or the description missing, or the e-mail address not valid.
+fn issue(
+    title: &str,
+    description: &str,
+    name: &str,
+    email: &str,
+) -> Result<(String, String), &'static str> {
+    let labels = current_labels();
+    let [title, description, name, email] = [title, description, name, email].map(str::trim);
+    match (
+        title.is_empty(),
+        description.is_empty(),
+        email.is_empty() || is_valid_email(email),
+    ) {
+        (true, _, _) => Err(labels.title_cannot_be_empty),
+        (_, true, _) => Err(labels.description_cannot_be_empty),
+        (_, _, false) => Err(labels.invalid_email_address),
+        (false, false, true) => {
+            let contacts: Vec<String> = [("name", name), ("e-mail", email)]
+                .iter()
+                .filter(|(_, value)| !value.is_empty())
+                .map(|(key, value)| format!("{key}: {value}"))
+                .collect();
+            let text = match contacts.is_empty() {
+                true => description.to_string(),
+                false => format!("{description}\n\n{}", contacts.join("\n")),
+            };
+            Ok((title.to_string(), text))
+        }
+    }
+}
 
 fn email_validator(current: &str, c: char) -> bool {
     if !c.is_ascii_alphanumeric() && !"@._%+-".contains(c) {
@@ -136,7 +183,7 @@ impl ReportAnIssueScreen {
             Sba::Simple(ScreenActionEnum::Quit),
         ];
         let kb = navigation_keybindings();
-        let footer_entries = field_navigation_entries()
+        let footer_entries = navigation_entries()
             .into_iter()
             .chain(get_keybinding_actions(kb, screen_actions))
             .collect();
@@ -193,44 +240,21 @@ impl ReportAnIssueScreen {
     }
 
     async fn handle_enter(&mut self) -> AppAction {
-        match (
-            self.field,
-            self.title.get_selected_value(),
-            self.description.get_selected_value(),
-            self.name.get_selected_value(),
-            self.email.get_selected_value(),
-        ) {
-            (0, _, _, _, _) => AppAction::None,
-            (_, None, _, _, _) => {
-                self.notify_message
-                    .set_error(current_labels().name_cannot_be_empty.to_string());
+        let text = |field: &TextBox| field.get_selected_value().unwrap_or_default();
+        let issue = issue(
+            &text(&self.title),
+            &text(&self.description),
+            &text(&self.name),
+            &text(&self.email),
+        );
+        match (self.field, issue) {
+            (0, _) => AppAction::None,
+            (_, Err(label)) => {
+                self.notify_message.set_error(label.to_string());
                 AppAction::None
             }
-            (_, _, None, _, _) => {
-                self.notify_message
-                    .set_error(current_labels().description_cannot_be_empty.to_string());
-                AppAction::None
-            }
-            (_, Some(title), Some(description), _, _) => {
-                let mut full_description = description.to_string();
-                if let Some(name) = self.name.get_selected_value()
-                    && !name.is_empty()
-                {
-                    full_description.push_str(&format!("\n\nname: {}", name));
-                }
-                if let Some(email) = self.email.get_selected_value() {
-                    if !email.is_empty() {
-                        full_description.push_str(&format!("\ne-mail: {}", email));
-                    } else if !EMAIL_RE.is_match(&email) {
-                        self.notify_message
-                            .set_error(current_labels().invalid_email_address.to_string());
-                        return AppAction::None;
-                    }
-                }
-                let result = self
-                    .send_issue(title.as_str(), full_description.as_str())
-                    .await;
-                match result {
+            (_, Ok((title, text))) => {
+                match self.send_issue(&title, &text).await {
                     Ok(_) => {
                         self.notify_message
                             .set_info(current_labels().issue_reported_successfully.to_string());
@@ -308,5 +332,79 @@ impl ReportAnIssueScreen {
         } else {
             Err(format!("failed to create issue: {}", json))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_email_addresses() {
+        for email in [
+            "anna@club.it",
+            "Anna.Rossi+volley@mail.club-a.com",
+            "a_b%c@x.io",
+        ] {
+            assert!(is_valid_email(email), "{email}");
+        }
+        for email in [
+            "",
+            "anna",
+            "@club.it",
+            "anna@",
+            "anna@club",
+            "anna@.it",
+            "anna@club.",
+            "an na@club.it",
+            "anna@club@it",
+            "annà@club.it",
+        ] {
+            assert!(!is_valid_email(email), "{email}");
+        }
+    }
+
+    /// The e-mail address is optional: an issue without it is sent; one
+    /// not valid isn't.
+    #[test]
+    fn the_email_address_is_optional_but_valid() {
+        let labels = current_labels();
+        assert_eq!(
+            issue("crash", "on start", "", ""),
+            Ok(("crash".to_string(), "on start".to_string()))
+        );
+        assert_eq!(
+            issue("crash", "on start", "", "anna"),
+            Err(labels.invalid_email_address)
+        );
+        assert_eq!(
+            issue(" crash ", "on start", "Anna", "anna@club.it"),
+            Ok((
+                "crash".to_string(),
+                "on start\n\nname: Anna\ne-mail: anna@club.it".to_string()
+            ))
+        );
+        assert_eq!(
+            issue("crash", "on start", "", "anna@club.it").map(|(_, text)| text),
+            Ok("on start\n\ne-mail: anna@club.it".to_string())
+        );
+    }
+
+    /// The title and the description are required, blanks aren't enough.
+    #[test]
+    fn the_title_and_the_description_are_required() {
+        let labels = current_labels();
+        assert_eq!(
+            issue("", "on start", "", ""),
+            Err(labels.title_cannot_be_empty)
+        );
+        assert_eq!(
+            issue("  ", "on start", "", ""),
+            Err(labels.title_cannot_be_empty)
+        );
+        assert_eq!(
+            issue("crash", " ", "", ""),
+            Err(labels.description_cannot_be_empty)
+        );
     }
 }

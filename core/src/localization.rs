@@ -1,7 +1,6 @@
 use crate::{constants::DEFAULT_LANGUAGE, shapes::enums::LanguageEnum};
-use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::{LazyLock, RwLock};
+use std::sync::{LazyLock, PoisonError, RwLock};
 
 pub struct Labels {
     pub could_not_recognize_home_directory: &'static str,
@@ -28,6 +27,7 @@ pub struct Labels {
     pub number: &'static str,
     pub name_cannot_be_empty: &'static str,
     pub description_cannot_be_empty: &'static str,
+    pub title_cannot_be_empty: &'static str,
     pub role_is_required: &'static str,
     pub could_not_create_player: &'static str,
     pub could_not_remove_player: &'static str,
@@ -205,7 +205,6 @@ pub struct Labels {
     pub invalid_team_folder_name: &'static str,
     pub partials: &'static str,
     pub substitutions: &'static str,
-    pub finals: &'static str,
     pub tot: &'static str,
     pub pt: &'static str,
     pub won_lost: &'static str,
@@ -217,8 +216,6 @@ pub struct Labels {
     pub blk: &'static str,
     pub unf: &'static str,
     pub flt: &'static str,
-    pub breaks_per_point: &'static str,
-    pub sideouts_per_point: &'static str,
     pub counter_attack_conversion_rate: &'static str,
     pub sideout: &'static str,
     pub sideout_on_first_rally: &'static str,
@@ -234,6 +231,11 @@ pub struct Labels {
     pub invalid_email_address: &'static str,
     pub y: &'static char,
     pub enable_send_analytics: &'static str,
+    /// the terms of use shown at the first startup: license and data
+    pub terms_of_use: &'static str,
+    pub terms_text: &'static str,
+    pub proceed: &'static str,
+    pub send_statistics: &'static str,
     pub file_already_exists: &'static str,
     pub unassigned: &'static str,
     pub scroll_up: &'static str,
@@ -272,6 +274,24 @@ pub struct Labels {
     pub fb: &'static str,
     pub fb_given: &'static str,
     pub opp: &'static str,
+    pub so_perc: &'static str,
+    pub bp_perc: &'static str,
+    pub tch: &'static str,
+    pub longest_run: &'static str,
+    pub max_lead: &'static str,
+    pub opponent_errors: &'static str,
+    pub attack_by_phase: &'static str,
+    pub after_reception: &'static str,
+    pub counter_attack: &'static str,
+    pub points_won: &'static str,
+    pub points_lost: &'static str,
+    pub attack_blocked: &'static str,
+    pub starting_position: &'static str,
+    pub from_the_bench: &'static str,
+    pub report_legend: &'static str,
+    pub set_score: &'static str,
+    /// the name of the space bar in the footers
+    pub space_key: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -299,6 +319,7 @@ const EN: Labels = Labels {
     number: "number",
     name_cannot_be_empty: "name cannot be empty",
     description_cannot_be_empty: "description cannot be empty",
+    title_cannot_be_empty: "title cannot be empty",
     role_is_required: "role is required",
     could_not_create_player: "could not create player",
     could_not_remove_player: "could not remove player",
@@ -474,7 +495,6 @@ const EN: Labels = Labels {
     invalid_team_folder_name: "invalid team folder name",
     partials: "partials",
     substitutions: "substitutions",
-    finals: "finals",
     tot: "tot",
     pt: "pt",
     won_lost: "w-l",
@@ -486,8 +506,6 @@ const EN: Labels = Labels {
     blk: "blk",
     unf: "unf",
     flt: "flt",
-    breaks_per_point: "br per pt",
-    sideouts_per_point: "so per pt",
     counter_attack_conversion_rate: "counter attack conv. rate",
     sideout: "side-out",
     sideout_on_first_rally: "side-out on first rally",
@@ -502,7 +520,17 @@ const EN: Labels = Labels {
     failed_to_report_issue: "failed to report issue (check your internet connection)",
     invalid_email_address: "invalid email address",
     y: &'y',
-    enable_send_analytics: "enable sending anonymous analytics data",
+    enable_send_analytics: "send match statistics (no names)",
+    terms_of_use: "terms of use",
+    terms_text: "Scout4all is free software, free of charge: you don't have to pay to use it.
+
+License. Scout4all is released under the GNU Affero General Public License v3.0 (AGPL-3.0-only). You can use, copy, modify and distribute it, even for a fee, as long as you keep the copyright notice and release your changes under the same license, with their source code: also when you offer them as an online service. The program comes with NO WARRANTY.
+
+Data. Unless you turn it off below, the matches you scout are sent to the developer to compute statistics and diagnose bugs; aggregate statistics can be used in future services of the project. They hold no names: teams and players appear only as random identifiers, along with the date, the category, the gender and the events of the match. The server records your IP address in its logs. Data controller: Nicola Baldi. You can change your choice at any time in the settings (F2).
+
+Full texts: the LICENSE and DATA-PRIVACY files, on https://github.com/naighes/scoutforall. Contact: nic.baldi@gmail.com",
+    proceed: "continue",
+    send_statistics: "send statistics",
     file_already_exists: "file already exists",
     unassigned: "Unassigned",
     scroll_up: "scroll up",
@@ -543,6 +571,23 @@ const EN: Labels = Labels {
     fb: "fb",
     fb_given: "giv",
     opp: "opp",
+    so_perc: "SO%",
+    bp_perc: "BP%",
+    tch: "tch",
+    longest_run: "longest run",
+    max_lead: "max lead",
+    opponent_errors: "opponent errors",
+    set_score: "score",
+    space_key: "space",
+    attack_by_phase: "attack by phase",
+    after_reception: "after reception",
+    counter_attack: "counter-attack",
+    points_won: "points won",
+    points_lost: "points lost",
+    attack_blocked: "attack blocked",
+    starting_position: "starting position",
+    from_the_bench: "from the bench",
+    report_legend: "tot total · err errors · pt points · bp break points · w-l points minus errors · pos positive · prf perfect · eff efficiency · blk blocked · tch block touches · flt faults · fb freeballs given · opp opponent errors · SO% side outs won · BP% break points won · percentages are rounded",
 };
 
 const IT: Labels = Labels {
@@ -570,6 +615,7 @@ const IT: Labels = Labels {
     number: "numero",
     name_cannot_be_empty: "il nome è obbligatorio",
     description_cannot_be_empty: "la descrizione è obbligatoria",
+    title_cannot_be_empty: "il titolo è obbligatorio",
     role_is_required: "il ruolo è obbligatorio",
     could_not_create_player: "impossibile creare il giocatore",
     could_not_remove_player: "impossibile rimuovere il giocatore",
@@ -745,7 +791,6 @@ const IT: Labels = Labels {
     invalid_team_folder_name: "nome della cartella della squadra non valido",
     partials: "parziali",
     substitutions: "sostituzioni",
-    finals: "finali",
     tot: "tot",
     pt: "pt",
     won_lost: "v-p",
@@ -757,8 +802,6 @@ const IT: Labels = Labels {
     blk: "mur",
     unf: "dir",
     flt: "fal",
-    breaks_per_point: "br per pt",
-    sideouts_per_point: "cp per pt",
     counter_attack_conversion_rate: "tasso conv. contrattacco",
     sideout: "cambio palla",
     sideout_on_first_rally: "cambio palla al primo attacco",
@@ -773,7 +816,17 @@ const IT: Labels = Labels {
     failed_to_report_issue: "segnalazione del problema non riuscita (controlla la tua connessione a internet)",
     invalid_email_address: "indirizzo email non valido",
     y: &'s',
-    enable_send_analytics: "abilita l'invio di dati analitici anonimi",
+    enable_send_analytics: "invia le statistiche delle partite (senza nomi)",
+    terms_of_use: "termini di utilizzo",
+    terms_text: "Scout4all è software libero e gratuito: non devi pagare per usarlo.
+
+Licenza. Scout4all è distribuito con la licenza GNU Affero General Public License v3.0 (AGPL-3.0-only). Puoi usarlo, copiarlo, modificarlo e distribuirlo, anche a pagamento, purché mantenga la nota di copyright e distribuisca le tue modifiche con la stessa licenza, insieme al loro codice sorgente: anche quando le offri come servizio online. Il programma è fornito SENZA ALCUNA GARANZIA.
+
+Dati. Se non lo disattivi qui sotto, le partite che registri vengono inviate allo sviluppatore per calcolare statistiche e diagnosticare bug; le statistiche aggregate possono essere usate in futuri servizi del progetto. Non contengono nomi: squadre e atleti compaiono solo come identificativi casuali, insieme a data, categoria, genere ed eventi della partita. Il server registra il tuo indirizzo IP nei suoi log. Titolare del trattamento: Nicola Baldi. Puoi cambiare la tua scelta in qualsiasi momento nelle impostazioni (F2).
+
+Testi completi: i file LICENSE e DATA-PRIVACY, su https://github.com/naighes/scoutforall. Contatto: nic.baldi@gmail.com",
+    proceed: "continua",
+    send_statistics: "invia statistiche",
     file_already_exists: "il file esiste già",
     unassigned: "Non assegnato",
     scroll_up: "scorri su",
@@ -814,25 +867,44 @@ const IT: Labels = Labels {
     fb: "fb",
     fb_given: "conc",
     opp: "avv",
+    so_perc: "CP%",
+    bp_perc: "BP%",
+    tch: "toc",
+    longest_run: "serie max",
+    max_lead: "vantaggio max",
+    opponent_errors: "errori avversari",
+    set_score: "risultato",
+    space_key: "spazio",
+    attack_by_phase: "attacco per fase",
+    after_reception: "su ricezione",
+    counter_attack: "contrattacco",
+    points_won: "punti fatti",
+    points_lost: "punti concessi",
+    attack_blocked: "attacco murato",
+    starting_position: "posizione di partenza",
+    from_the_bench: "dalla panchina",
+    report_legend: "tot totale · err errori · pt punti · bp punti in break · v-p punti meno errori · pos positività · prf perfette · eff efficienza · mur murati · toc tocchi a muro · fal falli · fb freeball concesse · avv errori avversari · CP% cambi palla vinti · BP% break vinti · percentuali arrotondate",
 };
-
-static DICTIONARY: LazyLock<HashMap<LanguageEnum, &'static Labels>> = LazyLock::new(|| {
-    let mut m = HashMap::new();
-    m.insert(LanguageEnum::En, &EN);
-    m.insert(LanguageEnum::It, &IT);
-    m
-});
 
 static CURRENT_LANGUAGE: LazyLock<RwLock<LanguageEnum>> = LazyLock::new(|| {
     RwLock::new(LanguageEnum::from_str(DEFAULT_LANGUAGE).unwrap_or(LanguageEnum::En))
 });
 
-/// Changes the language of the labels.
+/// Changes the language of the labels. The lock only guards a value
+/// written at once: it's still good after a panic elsewhere.
 pub fn set_language(language: LanguageEnum) {
-    *CURRENT_LANGUAGE.write().unwrap() = language;
+    *CURRENT_LANGUAGE
+        .write()
+        .unwrap_or_else(PoisonError::into_inner) = language;
 }
 
 /// Returns the labels for the current language.
 pub fn current_labels() -> &'static Labels {
-    DICTIONARY.get(&*CURRENT_LANGUAGE.read().unwrap()).unwrap()
+    match *CURRENT_LANGUAGE
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+    {
+        LanguageEnum::En => &EN,
+        LanguageEnum::It => &IT,
+    }
 }

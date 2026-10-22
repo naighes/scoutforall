@@ -44,6 +44,7 @@ mod tests {
     /// whether the match is already started (its first set).
     fn screens() -> Vec<(&'static str, bool, String)> {
         vec![
+            (TERMS, false, "".into()),
             ("team list", true, "".into()),
             ("new team", true, "n".into()),
             ("import team", true, "i".into()),
@@ -70,6 +71,17 @@ mod tests {
         ]
     }
 
+    /// The terms of use, shown at the first startup.
+    const TERMS: &str = "terms of use";
+
+    /// The screen of `screens()` with the name.
+    async fn open_screen(name: &str, started: bool, keys: &str) -> Ui {
+        match name {
+            TERMS => Ui::first_startup(TEAM).await,
+            _ => open(started, keys).await,
+        }
+    }
+
     async fn open(started: bool, keys: &str) -> Ui {
         let mut ui = match started {
             true => Ui::start_with_sets(TEAM).await,
@@ -84,7 +96,7 @@ mod tests {
     #[tokio::test]
     async fn the_footer_lists_all_the_keys_at_every_size() {
         for (name, started, keys) in screens() {
-            let mut ui = open(started, &keys).await;
+            let mut ui = open_screen(name, started, &keys).await;
             let entries = ui.footer_entries();
             assert!(!entries.is_empty(), "{name}: no keys\n{}", ui.screen());
             for (width, height) in SIZES {
@@ -133,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn every_panel_title_is_in_bold() {
         for (name, started, keys) in screens() {
-            let mut ui = open(started, &keys).await;
+            let mut ui = open_screen(name, started, &keys).await;
             for (title, bold, _) in titles(&mut ui) {
                 assert!(bold, "{name}: \"{title}\" not in bold\n{}", ui.screen());
             }
@@ -147,7 +159,7 @@ mod tests {
     async fn every_screen_has_its_title_in_yellow() {
         let untitled = ["match stats", "import team"];
         for (name, started, keys) in screens() {
-            let mut ui = open(started, &keys).await;
+            let mut ui = open_screen(name, started, &keys).await;
             let yellow: Vec<String> = titles(&mut ui)
                 .into_iter()
                 .filter(|(_, _, yellow)| *yellow)
@@ -331,6 +343,43 @@ mod tests {
                     "{keys:?} at {width}x{height}\n{}",
                     ui.screen()
                 );
+            }
+        }
+    }
+
+    /// Wherever the footer lists the keys moving to the previous and the
+    /// next row, field or panel, it lists tab and shift tab too, which move
+    /// the same way, next to the arrows. Not on the settings, where tab
+    /// switches panel, nor on the lineup, where it skips the fallback
+    /// libero.
+    #[tokio::test]
+    async fn tab_and_shift_tab_are_listed_with_the_arrows() {
+        let labels = current_labels();
+        for (name, started, keys) in screens() {
+            let mut ui = open_screen(name, started, &keys).await;
+            let entries = ui.footer_entries();
+            let key_of = |description: &str| {
+                entries
+                    .iter()
+                    .find(|(_, d)| d == description)
+                    .map(|(k, _)| k.clone())
+            };
+            let exception = matches!(name, "settings" | "settings shortcuts" | "lineup");
+            match (key_of(labels.previous), key_of(labels.next), exception) {
+                (_, _, true) | (None, None, _) => {}
+                (Some(previous), Some(next), false) => {
+                    let keys = |k: &str| k.split('/').map(str::to_string).collect::<Vec<_>>();
+                    let (previous, next) = (keys(&previous), keys(&next));
+                    assert!(
+                        previous.contains(&"⇧-⇥".to_string()),
+                        "{name}: {previous:?}"
+                    );
+                    assert!(next.contains(&"⇥".to_string()), "{name}: {next:?}");
+                    assert_eq!((previous.len(), next.len()), (2, 2), "{name}: {entries:?}");
+                }
+                (previous, next, false) => {
+                    panic!("{name}: previous {previous:?}, next {next:?}")
+                }
             }
         }
     }

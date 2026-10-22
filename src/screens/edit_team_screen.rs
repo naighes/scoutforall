@@ -9,7 +9,7 @@ use crate::{
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
-            field_navigation_entries, get_keybinding_actions,
+            get_keybinding_actions, navigation_entries,
         },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
@@ -134,7 +134,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         ];
 
         let kb = navigation_keybindings();
-        let footer_entries = field_navigation_entries()
+        let footer_entries = navigation_entries()
             .into_iter()
             .chain([change_value_entry()])
             .chain(get_keybinding_actions(kb, actions))
@@ -184,7 +184,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         ];
 
         let kb = navigation_keybindings();
-        let footer_entries = field_navigation_entries()
+        let footer_entries = navigation_entries()
             .into_iter()
             .chain([change_value_entry()])
             .chain(get_keybinding_actions(kb, actions))

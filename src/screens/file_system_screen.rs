@@ -3,7 +3,7 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, cycle, list_entries},
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
@@ -86,34 +86,19 @@ where
         self.current_folder.parent().is_none()
     }
 
-    fn move_selection<F>(&mut self, f: F)
-    where
-        F: Fn(usize, usize) -> usize,
-    {
+    fn move_selection(&mut self, forward: bool) {
         if let Some(selected) = self.list_state.selected() {
-            if self.entries.is_empty() {
-                self.list_state.select(None);
-            } else {
-                let new_index = f(selected, self.entries.len());
-                self.list_state.select(Some(new_index));
-            }
+            self.list_state
+                .select(cycle(selected, self.entries.len(), forward));
         }
     }
 
     fn next(&mut self) {
-        self.move_selection(
-            |selected, len| {
-                if selected < len - 1 { selected + 1 } else { 0 }
-            },
-        );
+        self.move_selection(true);
     }
 
     fn previous(&mut self) {
-        self.move_selection(
-            |selected, len| {
-                if selected > 0 { selected - 1 } else { len - 1 }
-            },
-        );
+        self.move_selection(false);
     }
 
     fn enter_directory(&mut self, path: &Path) -> AppAction {
@@ -155,10 +140,7 @@ where
         let actions = &mut vec![];
 
         if !self.entries.is_empty() {
-            actions.push(Sba::Simple(ScreenActionEnum::Up));
-            actions.push(Sba::Simple(ScreenActionEnum::Down));
-            actions.push(Sba::Hidden(ScreenActionEnum::Previous));
-            actions.push(Sba::Hidden(ScreenActionEnum::Next));
+            actions.extend(LIST_NAVIGATION);
         }
         if let Some(true) = self
             .list_state
@@ -204,7 +186,7 @@ where
     A: FileSystemAction,
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &self.get_footer_actions())
+        list_entries(navigation_keybindings(), &self.get_footer_actions())
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {

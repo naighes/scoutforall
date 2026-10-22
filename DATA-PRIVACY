@@ -1,12 +1,85 @@
-Scout4all Data Collection / Privacy
+Scout4all - Data collection and privacy
 
-This software may collect anonymous match statistics to improve features and analytics.
+Last updated: 2026-10-22
 
-- No personal data is collected (player names, team names, locations are never transmitted).  
-- Player identifiers are local to your computer and cannot be linked to real individuals.  
-- Data is used only for software improvement and analytics.  
+Data controller: Nicola Baldi, nic.baldi@gmail.com
 
-You can disable data collection at any time from the program settings.  
-By using this software, you acknowledge that anonymous statistics may be collected automatically.
 
-This software complies with EU GDPR (Regulation 2016/679) principles, even though no personal data is collected.
+1. What is collected
+
+Match data. Unless you turn it off (see 4), when you scout a match the
+program uploads an archive with:
+
+- the match: date, home or away, gender, year and classification of the
+  team, maximum number of substitutions;
+- each set: the lineup and the scouted events (time, type, evaluation);
+- the identifier of the team.
+
+Teams and players appear only as random identifiers, generated on your
+computer. The names of players, teams and opponents, and any other text you
+type, are never sent. Without the files on your computer the identifiers
+cannot be linked to real people: this is pseudonymous data, not anonymous.
+
+Technical data. The upload server records the IP address and the version of
+the program in its logs, and keeps the IP address in memory for a short time
+to limit the number of requests.
+
+Issue reports. When you send a report from "report an issue", its title and
+description, and your name and e-mail address if you type them, are sent to
+Linear, the issue tracker of the project.
+
+
+2. Why
+
+- Statistics on the use of the program and on volleyball scouting.
+- Diagnosis of bugs and improvement of the program.
+- Aggregate statistics, which can be used in future services of the
+  project, also paid ones (e.g. a cloud version).
+
+The data is never sold, nor used to identify you.
+
+Issue reports are used only to handle the report and to answer you.
+
+
+3. Legal basis
+
+Match and technical data: the legitimate interest of the developer in
+improving the program and diagnosing its bugs (Art. 6(1)(f) GDPR), on
+pseudonymous data, with your right to object at any time (see 4).
+
+Issue reports: your request. You send them yourself; name and e-mail are
+optional.
+
+
+4. Your choice
+
+The program shows this notice when it starts for the first time. You can
+turn the upload of match data off there, or at any time in the settings
+(F2, "send match statistics"). Turned off, nothing more is uploaded; to
+delete what was already sent, see 7.
+
+
+5. Where
+
+- Upload server: Render, Frankfurt (EU).
+- Match archives: Supabase Storage, Ireland (EU).
+- Issue reports: Linear (USA), under its data protection terms.
+
+
+6. How long
+
+Match archives are kept with no time limit, for statistical purposes
+(Art. 5(1)(e) and 89 GDPR): they are pseudonymous and hold no names.
+Server logs are kept for the limited time the hosting provider keeps them.
+Issue reports are kept as long as needed to handle them.
+
+
+7. Your rights
+
+You can ask to access, correct or delete your data, or object to its
+processing, by writing to nic.baldi@gmail.com. Since the data holds no
+names, to find it we need the identifier of your team: the name of its
+folder in the ".scout4all" folder of your home directory.
+
+You can also lodge a complaint with a data protection authority (in Italy,
+the Garante per la protezione dei dati personali).

@@ -64,9 +64,12 @@ impl SetWriter for FileSystemSetWriter {
                 current_labels().match_already_exists.to_string(),
             )));
         }
-        create_dir_all(descriptor_path.parent().unwrap())
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
+        // the descriptor is always in the folder of the set
+        if let Some(folder) = descriptor_path.parent() {
+            create_dir_all(folder)
+                .await
+                .map_err(|e| AppError::IO(IOError::from(e)))?;
+        }
         Self::save_set_file(&set, &descriptor_path).await?;
         let events_path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set_number)?;
         File::create(events_path)

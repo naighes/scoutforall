@@ -5,7 +5,9 @@ use crokey::{
 };
 use ratatui::{Frame, layout::Rect};
 
-use crate::shapes::{keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
+use crate::shapes::{
+    actions::ScreenActionEnum, keybinding::KeyBindings, symbol::KeyCombinationFormatExt,
+};
 use scout4all_core::{localization::current_labels, shapes::enums::WithDesc};
 
 pub enum AppAction {
@@ -95,44 +97,97 @@ impl FieldKey {
     }
 }
 
-/// The footer entries moving between the fields of a form, both keys of
-/// each direction listed.
-pub fn field_navigation_entries() -> Vec<(String, String)> {
+/// A footer entry listing every key of an action, e.g. "⬆/⇧-⇥".
+fn keys_entry(keys: &[KeyCombination], description: &str) -> (String, String) {
     let format = KeyCombinationFormat::default();
     let fmt = KeyCombinationFormatExt::new(&format);
-    let shift_tab = KeyCombination::one_key(KeyCode::Tab, KeyModifiers::SHIFT);
+    (
+        keys.iter()
+            .map(|k| fmt.to_string(*k))
+            .collect::<Vec<_>>()
+            .join("/"),
+        description.to_string(),
+    )
+}
+
+fn shift_tab() -> KeyCombination {
+    KeyCombination::one_key(KeyCode::Tab, KeyModifiers::SHIFT)
+}
+
+/// The footer entries moving between the fields of a form or the rows of a
+/// list, both keys of each direction listed: up and shift tab to the
+/// previous one, down and tab to the next one.
+pub fn navigation_entries() -> Vec<(String, String)> {
+    let labels = current_labels();
     vec![
-        (
-            format!(
-                "{}/{}",
-                fmt.to_string(KeyCode::Up),
-                fmt.to_string(shift_tab)
-            ),
-            current_labels().previous.to_string(),
-        ),
-        (
-            format!(
-                "{}/{}",
-                fmt.to_string(KeyCode::Down),
-                fmt.to_string(KeyCode::Tab)
-            ),
-            current_labels().next.to_string(),
-        ),
+        keys_entry(&[KeyCode::Up.into(), shift_tab()], labels.previous),
+        keys_entry(&[KeyCode::Down.into(), KeyCode::Tab.into()], labels.next),
+    ]
+}
+
+/// The footer entries moving between panels laid side by side, whose rows
+/// the up and down arrows move through instead: left and shift tab to the
+/// previous one, right and tab to the next one.
+pub fn panel_navigation_entries() -> Vec<(String, String)> {
+    let labels = current_labels();
+    vec![
+        keys_entry(&[KeyCode::Left.into(), shift_tab()], labels.previous),
+        keys_entry(&[KeyCode::Right.into(), KeyCode::Tab.into()], labels.next),
     ]
 }
 
 /// The footer entry changing the value of a field.
 pub fn change_value_entry() -> (String, String) {
-    let format = KeyCombinationFormat::default();
-    let fmt = KeyCombinationFormatExt::new(&format);
-    (
-        format!(
-            "{}/{}",
-            fmt.to_string(KeyCode::Left),
-            fmt.to_string(KeyCode::Right)
-        ),
-        current_labels().change.to_string(),
+    keys_entry(
+        &[KeyCode::Left.into(), KeyCode::Right.into()],
+        current_labels().change,
     )
+}
+
+/// The actions moving through the rows of a list: up and shift tab (left
+/// too) to the previous one, down and tab (right too) to the next one. Not
+/// listed one by one: `list_entries` lists them as `navigation_entries`.
+pub const LIST_NAVIGATION: [Sba<ScreenActionEnum>; 4] = [
+    Sba::Hidden(ScreenActionEnum::Up),
+    Sba::Hidden(ScreenActionEnum::Down),
+    Sba::Hidden(ScreenActionEnum::Previous),
+    Sba::Hidden(ScreenActionEnum::Next),
+];
+
+/// The footer of a list: the keys moving through its rows when it has any
+/// (its actions include `LIST_NAVIGATION`), then the ones of the actions.
+pub fn list_entries(
+    kb: &KeyBindings<ScreenActionEnum>,
+    actions: &[Sba<ScreenActionEnum>],
+) -> Vec<(String, String)> {
+    let navigation = match actions.iter().any(|a| *a.key() == ScreenActionEnum::Up) {
+        true => navigation_entries(),
+        false => vec![],
+    };
+    navigation
+        .into_iter()
+        .chain(get_keybinding_actions(kb, actions))
+        .collect()
+}
+
+/// The row after (`forward`) or before the selected one in a list of
+/// `count` rows, stopping at the first and the last; `None` with no rows.
+pub fn step(selected: usize, count: usize, forward: bool) -> Option<usize> {
+    match (count, forward) {
+        (0, _) => None,
+        (count, true) => Some((selected + 1).min(count - 1)),
+        (_, false) => Some(selected.saturating_sub(1)),
+    }
+}
+
+/// The row after (`forward`) or before the selected one in a list of
+/// `count` rows, going round; `None` with no rows.
+pub fn cycle(selected: usize, count: usize, forward: bool) -> Option<usize> {
+    match (count, forward) {
+        (0, _) => None,
+        (count, true) => Some((selected + 1) % count),
+        (count, false) => Some((selected % count + count - 1) % count),
+    }
 }
 
 #[derive(Clone)]
@@ -152,6 +207,27 @@ impl<T> Sba<T> {
     }
     pub fn keys(slice: &[Sba<T>]) -> Vec<&T> {
         slice.iter().map(|f| f.key()).collect()
+    }
+}
+
+#[test]
+fn moving_through_a_list() {
+    // stopping at the ends
+    assert_eq!(step(0, 3, true), Some(1));
+    assert_eq!(step(2, 3, true), Some(2));
+    assert_eq!(step(0, 3, false), Some(0));
+    assert_eq!(step(2, 3, false), Some(1));
+    // going round
+    assert_eq!(cycle(2, 3, true), Some(0));
+    assert_eq!(cycle(0, 3, false), Some(2));
+    assert_eq!(cycle(1, 3, false), Some(0));
+    // a selection past the end, the rows having gone
+    assert_eq!(step(5, 3, true), Some(2));
+    assert_eq!(cycle(5, 3, false), Some(1));
+    // no rows: no selection, and no panic
+    for forward in [true, false] {
+        assert_eq!(step(0, 0, forward), None);
+        assert_eq!(cycle(0, 0, forward), None);
     }
 }
 

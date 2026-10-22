@@ -3851,7 +3851,6 @@ dependencies = [
  "dirs 7.0.0",
  "hf",
  "ratatui",
- "regex",
  "reqwest",
  "scout4all-core",
  "self_update",
