@@ -13,7 +13,7 @@ use crate::{
         export_team_screen::ExportTeamAction,
         file_system_screen::FileSystemScreen,
         match_list_screen::MatchListScreen,
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
@@ -237,7 +237,7 @@ impl<
 > Renderable for TeamDetailsScreen<TR, TW, MR, MW, SSW, SR, SW>
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &self.get_footer_entries())
+        list_entries(navigation_keybindings(), &self.get_footer_entries())
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
@@ -352,14 +352,11 @@ impl<
         if self.team.active_players().is_empty() {
             base_screen_actions.clone()
         } else {
-            let screen_actions = &mut vec![
-                Sba::Simple(ScreenActionEnum::Up),
-                Sba::Simple(ScreenActionEnum::Down),
-                Sba::Hidden(ScreenActionEnum::Previous),
-                Sba::Hidden(ScreenActionEnum::Next),
+            let screen_actions = &mut LIST_NAVIGATION.to_vec();
+            screen_actions.extend([
                 Sba::Simple(ScreenActionEnum::EditPlayer),
                 Sba::Simple(ScreenActionEnum::RemovePlayer),
-            ];
+            ]);
             screen_actions.append(base_screen_actions);
             screen_actions.clone()
         }

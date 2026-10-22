@@ -2,7 +2,10 @@ use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{
+            AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions,
+            panel_navigation_entries,
+        },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
@@ -101,44 +104,39 @@ where
         f.render_stateful_widget(list, area, &mut self.state);
     }
 
-    fn next(&mut self) {
-        if self.writing_mode {
-            let i = match self.state.selected() {
-                Some(i) => {
-                    if i >= self.items.len() - 1 {
-                        0
-                    } else {
-                        i + 1
-                    }
-                }
-                None => 0,
-            };
-            self.state.select(Some(i));
+    /// Selects the item after (`forward`) or before the selected one,
+    /// going round, when the filter has the focus.
+    fn step(&mut self, forward: bool) {
+        let count = self.items.len();
+        match (self.writing_mode, self.state.selected(), count) {
+            (false, _, _) | (_, _, 0) => {}
+            (true, None, _) => self.state.select(Some(0)),
+            (true, Some(i), count) => self.state.select(Some(match forward {
+                true => (i + 1) % count,
+                false => (i + count - 1) % count,
+            })),
         }
-    }
-
-    fn previous(&mut self) {
-        if self.writing_mode {
-            let i = match self.state.selected() {
-                Some(i) => {
-                    if i == 0 {
-                        self.items.len() - 1
-                    } else {
-                        i - 1
-                    }
-                }
-                None => 0,
-            };
-            self.state.select(Some(i));
-        }
-    }
-
-    fn disable_writing_mode(&mut self) {
-        self.writing_mode = false;
     }
 
     fn enable_writing_mode(&mut self) {
         self.writing_mode = true;
+    }
+}
+
+/// A filter of the statistics: the keys move the focus through the filters,
+/// and the selection in the one having it.
+trait Filter {
+    fn step(&mut self, forward: bool);
+    fn focus(&mut self, focused: bool);
+}
+
+impl<T: Display> Filter for Selection<T> {
+    fn step(&mut self, forward: bool) {
+        Selection::step(self, forward)
+    }
+
+    fn focus(&mut self, focused: bool) {
+        self.writing_mode = focused;
     }
 }
 
@@ -181,71 +179,21 @@ impl ScreenAsync for MatchStatsScreen {
                     AppAction::None
                 }
                 (Some(ScreenActionEnum::ScrollDown), _, _) => {
-                    self.set_filter.previous();
-                    self.rotation_filter.previous();
-                    self.phase_filter.previous();
-                    self.event_filter.previous();
-                    self.player_filter.previous();
+                    self.filters().into_iter().for_each(|f| f.step(true));
                     AppAction::None
                 }
                 (Some(ScreenActionEnum::ScrollUp), _, _) => {
-                    self.set_filter.next();
-                    self.rotation_filter.next();
-                    self.phase_filter.next();
-                    self.event_filter.next();
-                    self.player_filter.next();
+                    self.filters().into_iter().for_each(|f| f.step(false));
                     AppAction::None
                 }
                 (Some(ScreenActionEnum::Back), KeyCode::Esc, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::Quit), _, _) => AppAction::Quit(Ok(())),
                 (Some(ScreenActionEnum::Next), _, _) => {
-                    match self.state.selected() {
-                        Some(i) => {
-                            let next_index = if i >= 4 { 0 } else { i + 1 };
-                            self.state.select(Some(next_index));
-                            self.set_filter.disable_writing_mode();
-                            self.rotation_filter.disable_writing_mode();
-                            self.phase_filter.disable_writing_mode();
-                            self.event_filter.disable_writing_mode();
-                            self.player_filter.disable_writing_mode();
-                            match next_index {
-                                0 => self.set_filter.enable_writing_mode(),
-                                1 => self.rotation_filter.enable_writing_mode(),
-                                2 => self.phase_filter.enable_writing_mode(),
-                                3 => self.event_filter.enable_writing_mode(),
-                                4 => self.player_filter.enable_writing_mode(),
-                                _ => {}
-                            }
-                        }
-                        None => {
-                            self.state.select(Some(0));
-                        }
-                    }
+                    self.move_focus(true);
                     AppAction::None
                 }
                 (Some(ScreenActionEnum::Previous), _, _) => {
-                    match self.state.selected() {
-                        Some(i) => {
-                            let prev_index = if i == 0 { 4 } else { i - 1 };
-                            self.state.select(Some(prev_index));
-                            self.set_filter.disable_writing_mode();
-                            self.rotation_filter.disable_writing_mode();
-                            self.phase_filter.disable_writing_mode();
-                            self.event_filter.disable_writing_mode();
-                            self.player_filter.disable_writing_mode();
-                            match prev_index {
-                                0 => self.set_filter.enable_writing_mode(),
-                                1 => self.rotation_filter.enable_writing_mode(),
-                                2 => self.phase_filter.enable_writing_mode(),
-                                3 => self.event_filter.enable_writing_mode(),
-                                4 => self.player_filter.enable_writing_mode(),
-                                _ => {}
-                            }
-                        }
-                        None => {
-                            self.state.select(Some(0));
-                        }
-                    }
+                    self.move_focus(false);
                     AppAction::None
                 }
                 _ => AppAction::None,
@@ -284,6 +232,33 @@ impl Renderable for MatchStatsScreen {
 }
 
 impl MatchStatsScreen {
+    /// The filters, in the order the focus moves through them.
+    fn filters(&mut self) -> [&mut dyn Filter; 5] {
+        [
+            &mut self.set_filter,
+            &mut self.rotation_filter,
+            &mut self.phase_filter,
+            &mut self.event_filter,
+            &mut self.player_filter,
+        ]
+    }
+
+    /// Moves the focus to the filter after (`forward`) or before the one
+    /// having it, going round.
+    fn move_focus(&mut self, forward: bool) {
+        let count = self.filters().len();
+        let current = self.state.selected().unwrap_or(0);
+        let target = match forward {
+            true => (current + 1) % count,
+            false => (current + count - 1) % count,
+        };
+        self.state.select(Some(target));
+        self.filters()
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, f)| f.focus(i == target));
+    }
+
     pub fn new(current_match: MatchEntry) -> Result<Self, AppError> {
         use EventTypeEnum::*;
         let mut state = ListState::default();
@@ -360,8 +335,8 @@ impl MatchStatsScreen {
                 .map(|p| current_match.team.find_player(*p).cloned()),
         );
         let screen_actions = &[
-            Sba::Simple(ScreenActionEnum::Next),
-            Sba::Simple(ScreenActionEnum::Previous),
+            Sba::Hidden(ScreenActionEnum::Previous),
+            Sba::Hidden(ScreenActionEnum::Next),
             Sba::Simple(ScreenActionEnum::ScrollUp),
             Sba::Simple(ScreenActionEnum::ScrollDown),
             Sba::Simple(ScreenActionEnum::Back),
@@ -369,7 +344,10 @@ impl MatchStatsScreen {
         ];
         let kb = navigation_keybindings();
         let player_filter = Selection::new(current_labels().player.to_string(), players.collect());
-        let footer_entries = get_keybinding_actions(kb, screen_actions);
+        let footer_entries = panel_navigation_entries()
+            .into_iter()
+            .chain(get_keybinding_actions(kb, screen_actions))
+            .collect();
         let screen_key_bindings = kb.slice(Sba::keys(screen_actions));
 
         Ok(Self {

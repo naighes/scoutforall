@@ -14,7 +14,7 @@ use crate::{
         import_match_screen::ImportMatchAction,
         match_stats_screen::MatchStatsScreen,
         scouting_screen::ScoutingScreen,
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
         set_list_screen::SetListScreen,
         start_set_screen::StartSetScreen,
     },
@@ -92,7 +92,7 @@ impl<
 > Renderable for MatchListScreen<MR, MW, SSW, SR, SW>
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &self.screen_actions())
+        list_entries(navigation_keybindings(), &self.screen_actions())
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
@@ -465,10 +465,7 @@ impl<
         }));
 
         if !self.matches.is_empty() {
-            actions.push(Sba::Simple(ScreenActionEnum::Up));
-            actions.push(Sba::Simple(ScreenActionEnum::Down));
-            actions.push(Sba::Hidden(ScreenActionEnum::Previous));
-            actions.push(Sba::Hidden(ScreenActionEnum::Next));
+            actions.extend(LIST_NAVIGATION);
         }
         match self.get_selected() {
             Some(Ok((m, status))) => {

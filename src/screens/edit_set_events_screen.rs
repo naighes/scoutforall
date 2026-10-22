@@ -4,8 +4,8 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel, set_board,
         },
         screen::{
-            AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
-            field_navigation_entries, get_keybinding_actions,
+            AppAction, FieldKey, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, change_value_entry,
+            get_keybinding_actions, list_entries, navigation_entries,
         },
     },
     shapes::{
@@ -163,8 +163,12 @@ impl<SSW: SetWriter + Send + Sync> ScreenAsync for EditSetEventsScreen<SSW> {
                 self.form = None;
                 AppAction::None
             }
-            (_, false, _, Some(ScreenActionEnum::Up)) => self.select(false),
-            (_, false, _, Some(ScreenActionEnum::Down)) => self.select(true),
+            (_, false, _, Some(ScreenActionEnum::Up | ScreenActionEnum::Previous)) => {
+                self.select(false)
+            }
+            (_, false, _, Some(ScreenActionEnum::Down | ScreenActionEnum::Next)) => {
+                self.select(true)
+            }
             (_, false, _, Some(ScreenActionEnum::Select)) => self.edit_selected(),
             (_, false, _, Some(ScreenActionEnum::Back)) => AppAction::Back(true, Some(1)),
             (_, false, _, Some(ScreenActionEnum::Quit)) => AppAction::Quit(Ok(())),
@@ -529,7 +533,7 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
                         current_labels().cancel.to_string()
                     }),
                 ];
-                let entries = field_navigation_entries()
+                let entries = navigation_entries()
                     .into_iter()
                     .chain([change_value_entry()])
                     .chain(get_keybinding_actions(kb, &actions))
@@ -537,16 +541,15 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
                 (actions, entries)
             }
             None => {
-                let actions = vec![
-                    Sba::Simple(ScreenActionEnum::Up),
-                    Sba::Simple(ScreenActionEnum::Down),
+                let mut actions = LIST_NAVIGATION.to_vec();
+                actions.extend([
                     Sba::Redacted(ScreenActionEnum::Select, |_| {
                         current_labels().edit.to_string()
                     }),
                     Sba::Simple(ScreenActionEnum::Back),
                     Sba::Simple(ScreenActionEnum::Quit),
-                ];
-                let entries = get_keybinding_actions(kb, &actions);
+                ]);
+                let entries = list_entries(kb, &actions);
                 (actions, entries)
             }
         }

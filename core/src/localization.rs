@@ -285,6 +285,8 @@ pub struct Labels {
     pub from_the_bench: &'static str,
     pub report_legend: &'static str,
     pub set_score: &'static str,
+    /// the name of the space bar in the footers
+    pub space_key: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -560,6 +562,7 @@ const EN: Labels = Labels {
     max_lead: "max lead",
     opponent_errors: "opponent errors",
     set_score: "score",
+    space_key: "space",
     attack_by_phase: "attack by phase",
     after_reception: "after reception",
     counter_attack: "counter-attack",
@@ -844,6 +847,7 @@ const IT: Labels = Labels {
     max_lead: "vantaggio max",
     opponent_errors: "errori avversari",
     set_score: "risultato",
+    space_key: "spazio",
     attack_by_phase: "attacco per fase",
     after_reception: "su ricezione",
     counter_attack: "contrattacco",

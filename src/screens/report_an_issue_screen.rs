@@ -7,8 +7,8 @@ use crate::{
             text_box::TextBox,
         },
         screen::{
-            AppAction, FieldKey, Renderable, Sba, ScreenAsync, field_navigation_entries,
-            get_keybinding_actions,
+            AppAction, FieldKey, Renderable, Sba, ScreenAsync, get_keybinding_actions,
+            navigation_entries,
         },
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
@@ -136,7 +136,7 @@ impl ReportAnIssueScreen {
             Sba::Simple(ScreenActionEnum::Quit),
         ];
         let kb = navigation_keybindings();
-        let footer_entries = field_navigation_entries()
+        let footer_entries = navigation_entries()
             .into_iter()
             .chain(get_keybinding_actions(kb, screen_actions))
             .collect();

@@ -438,7 +438,7 @@ mod tests {
         }
         ui.press(KeyCode::Char(' ')).await;
         // the stat filter, its last entry
-        ui.type_keys(&[KeyCode::Tab, KeyCode::Tab, KeyCode::Tab, KeyCode::Down])
+        ui.type_keys(&[KeyCode::Tab, KeyCode::Tab, KeyCode::Tab, KeyCode::Up])
             .await;
         // the rows of the freeball table, label and value
         let rows = |ui: &mut Ui| {

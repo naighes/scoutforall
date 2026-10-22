@@ -5,7 +5,9 @@ use crokey::{
 };
 use ratatui::{Frame, layout::Rect};
 
-use crate::shapes::{keybinding::KeyBindings, symbol::KeyCombinationFormatExt};
+use crate::shapes::{
+    actions::ScreenActionEnum, keybinding::KeyBindings, symbol::KeyCombinationFormatExt,
+};
 use scout4all_core::{localization::current_labels, shapes::enums::WithDesc};
 
 pub enum AppAction {
@@ -95,44 +97,77 @@ impl FieldKey {
     }
 }
 
-/// The footer entries moving between the fields of a form, both keys of
-/// each direction listed.
-pub fn field_navigation_entries() -> Vec<(String, String)> {
+/// A footer entry listing every key of an action, e.g. "⬆/⇧-⇥".
+fn keys_entry(keys: &[KeyCombination], description: &str) -> (String, String) {
     let format = KeyCombinationFormat::default();
     let fmt = KeyCombinationFormatExt::new(&format);
-    let shift_tab = KeyCombination::one_key(KeyCode::Tab, KeyModifiers::SHIFT);
+    (
+        keys.iter()
+            .map(|k| fmt.to_string(*k))
+            .collect::<Vec<_>>()
+            .join("/"),
+        description.to_string(),
+    )
+}
+
+fn shift_tab() -> KeyCombination {
+    KeyCombination::one_key(KeyCode::Tab, KeyModifiers::SHIFT)
+}
+
+/// The footer entries moving between the fields of a form or the rows of a
+/// list, both keys of each direction listed: up and shift tab to the
+/// previous one, down and tab to the next one.
+pub fn navigation_entries() -> Vec<(String, String)> {
+    let labels = current_labels();
     vec![
-        (
-            format!(
-                "{}/{}",
-                fmt.to_string(KeyCode::Up),
-                fmt.to_string(shift_tab)
-            ),
-            current_labels().previous.to_string(),
-        ),
-        (
-            format!(
-                "{}/{}",
-                fmt.to_string(KeyCode::Down),
-                fmt.to_string(KeyCode::Tab)
-            ),
-            current_labels().next.to_string(),
-        ),
+        keys_entry(&[KeyCode::Up.into(), shift_tab()], labels.previous),
+        keys_entry(&[KeyCode::Down.into(), KeyCode::Tab.into()], labels.next),
+    ]
+}
+
+/// The footer entries moving between panels laid side by side, whose rows
+/// the up and down arrows move through instead: left and shift tab to the
+/// previous one, right and tab to the next one.
+pub fn panel_navigation_entries() -> Vec<(String, String)> {
+    let labels = current_labels();
+    vec![
+        keys_entry(&[KeyCode::Left.into(), shift_tab()], labels.previous),
+        keys_entry(&[KeyCode::Right.into(), KeyCode::Tab.into()], labels.next),
     ]
 }
 
 /// The footer entry changing the value of a field.
 pub fn change_value_entry() -> (String, String) {
-    let format = KeyCombinationFormat::default();
-    let fmt = KeyCombinationFormatExt::new(&format);
-    (
-        format!(
-            "{}/{}",
-            fmt.to_string(KeyCode::Left),
-            fmt.to_string(KeyCode::Right)
-        ),
-        current_labels().change.to_string(),
+    keys_entry(
+        &[KeyCode::Left.into(), KeyCode::Right.into()],
+        current_labels().change,
     )
+}
+
+/// The actions moving through the rows of a list: up and shift tab (left
+/// too) to the previous one, down and tab (right too) to the next one. Not
+/// listed one by one: `list_entries` lists them as `navigation_entries`.
+pub const LIST_NAVIGATION: [Sba<ScreenActionEnum>; 4] = [
+    Sba::Hidden(ScreenActionEnum::Up),
+    Sba::Hidden(ScreenActionEnum::Down),
+    Sba::Hidden(ScreenActionEnum::Previous),
+    Sba::Hidden(ScreenActionEnum::Next),
+];
+
+/// The footer of a list: the keys moving through its rows when it has any
+/// (its actions include `LIST_NAVIGATION`), then the ones of the actions.
+pub fn list_entries(
+    kb: &KeyBindings<ScreenActionEnum>,
+    actions: &[Sba<ScreenActionEnum>],
+) -> Vec<(String, String)> {
+    let navigation = match actions.iter().any(|a| *a.key() == ScreenActionEnum::Up) {
+        true => navigation_entries(),
+        false => vec![],
+    };
+    navigation
+        .into_iter()
+        .chain(get_keybinding_actions(kb, actions))
+        .collect()
 }
 
 #[derive(Clone)]

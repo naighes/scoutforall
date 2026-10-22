@@ -10,7 +10,7 @@ use crate::{
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
-            field_navigation_entries, get_keybinding_actions,
+            get_keybinding_actions, navigation_entries,
         },
         start_set_screen::StartSetScreen,
     },
@@ -231,7 +231,7 @@ impl<
             Sba::Simple(ScreenActionEnum::Back),
         ];
         let kb = navigation_keybindings();
-        let footer_entries = field_navigation_entries()
+        let footer_entries = navigation_entries()
             .into_iter()
             .chain([change_value_entry()])
             .chain(get_keybinding_actions(kb, screen_actions))

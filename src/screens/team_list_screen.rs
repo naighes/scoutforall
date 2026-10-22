@@ -8,7 +8,7 @@ use crate::{
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
         import_team_screen::ImportTeamAction,
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
         settings_screen::{SettingsPanel, SettingsScreen},
         team_details_screen::TeamDetailsScreen,
     },
@@ -182,7 +182,7 @@ impl<
 > Renderable for TeamListScreen<TR, TW, SW, MR, MW, SSW, SR>
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &self.screen_actions())
+        list_entries(navigation_keybindings(), &self.screen_actions())
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
@@ -298,23 +298,22 @@ impl<
                 Sba::Simple(ScreenActionEnum::Quit),
             ]
         } else {
-            vec![
-                Sba::Simple(ScreenActionEnum::Up),
-                Sba::Simple(ScreenActionEnum::Down),
-                Sba::Hidden(ScreenActionEnum::Previous),
-                Sba::Hidden(ScreenActionEnum::Next),
-                Sba::Simple(ScreenActionEnum::New),
-                if self.get_selected_team().is_some() {
-                    Sba::Simple(ScreenActionEnum::Select)
-                } else {
-                    Sba::Hidden(ScreenActionEnum::Select)
-                },
-                Sba::Simple(ScreenActionEnum::Settings),
-                Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
-                    lbl.replace("{}", current_labels().team)
-                }),
-                Sba::Simple(ScreenActionEnum::Quit),
-            ]
+            LIST_NAVIGATION
+                .into_iter()
+                .chain([
+                    Sba::Simple(ScreenActionEnum::New),
+                    if self.get_selected_team().is_some() {
+                        Sba::Simple(ScreenActionEnum::Select)
+                    } else {
+                        Sba::Hidden(ScreenActionEnum::Select)
+                    },
+                    Sba::Simple(ScreenActionEnum::Settings),
+                    Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {
+                        lbl.replace("{}", current_labels().team)
+                    }),
+                    Sba::Simple(ScreenActionEnum::Quit),
+                ])
+                .collect()
         }
     }
 

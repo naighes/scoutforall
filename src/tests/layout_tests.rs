@@ -334,4 +334,41 @@ mod tests {
             }
         }
     }
+
+    /// Wherever the footer lists the keys moving to the previous and the
+    /// next row, field or panel, it lists tab and shift tab too, which move
+    /// the same way, next to the arrows. Not on the settings, where tab
+    /// switches panel, nor on the lineup, where it skips the fallback
+    /// libero.
+    #[tokio::test]
+    async fn tab_and_shift_tab_are_listed_with_the_arrows() {
+        let labels = current_labels();
+        for (name, started, keys) in screens() {
+            let mut ui = open(started, &keys).await;
+            let entries = ui.footer_entries();
+            let key_of = |description: &str| {
+                entries
+                    .iter()
+                    .find(|(_, d)| d == description)
+                    .map(|(k, _)| k.clone())
+            };
+            let exception = matches!(name, "settings" | "settings shortcuts" | "lineup");
+            match (key_of(labels.previous), key_of(labels.next), exception) {
+                (_, _, true) | (None, None, _) => {}
+                (Some(previous), Some(next), false) => {
+                    let keys = |k: &str| k.split('/').map(str::to_string).collect::<Vec<_>>();
+                    let (previous, next) = (keys(&previous), keys(&next));
+                    assert!(
+                        previous.contains(&"⇧-⇥".to_string()),
+                        "{name}: {previous:?}"
+                    );
+                    assert!(next.contains(&"⇥".to_string()), "{name}: {next:?}");
+                    assert_eq!((previous.len(), next.len()), (2, 2), "{name}: {entries:?}");
+                }
+                (previous, next, false) => {
+                    panic!("{name}: previous {previous:?}, next {next:?}")
+                }
+            }
+        }
+    }
 }

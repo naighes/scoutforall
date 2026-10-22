@@ -3,7 +3,7 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
-        screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
+        screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries},
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
@@ -155,10 +155,7 @@ where
         let actions = &mut vec![];
 
         if !self.entries.is_empty() {
-            actions.push(Sba::Simple(ScreenActionEnum::Up));
-            actions.push(Sba::Simple(ScreenActionEnum::Down));
-            actions.push(Sba::Hidden(ScreenActionEnum::Previous));
-            actions.push(Sba::Hidden(ScreenActionEnum::Next));
+            actions.extend(LIST_NAVIGATION);
         }
         if let Some(true) = self
             .list_state
@@ -204,7 +201,7 @@ where
     A: FileSystemAction,
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &self.get_footer_actions())
+        list_entries(navigation_keybindings(), &self.get_footer_actions())
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
