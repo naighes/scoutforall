@@ -1041,7 +1041,8 @@ mod tests {
     /// The PDF report of a match builds, with every table of statistics.
     #[test]
     fn match_report_renders() {
-        use crate::reporting::pdf::{render_match_pdf, render_match_typst};
+        use crate::reporting::model::{Cell, build_report};
+        use crate::reporting::pdf::render_report_pdf;
         use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
         let t = Team::new();
         let players = [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.mb1, t.libero]
@@ -1085,11 +1086,14 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
         };
-        let typst = render_match_typst(&m).expect("expected the report source");
+        let report = build_report(&m).expect("expected the report data");
+        let names: Vec<&Cell> = report.players.rows.iter().map(|r| &r.lead[1]).collect();
         for player in 1..=7 {
-            assert!(typst.contains(&format!("player {}", player)));
+            assert!(names.contains(&&Cell::Text {
+                text: format!("player {}", player)
+            }));
         }
-        render_match_pdf(&m).expect("expected the report");
+        render_report_pdf(&report).expect("expected the report");
     }
 
     /// The report shows the opponent errors in the statistics tables, by
@@ -1098,7 +1102,7 @@ mod tests {
     #[test]
     fn report_shows_the_opponent_errors() {
         use crate::localization::current_labels;
-        use crate::reporting::pdf::{render_match_pdf, render_match_typst};
+        use crate::reporting::model::{Cell, StatsRow, build_report};
         use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
         let t = Team::new();
         let players = [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.mb1, t.libero]
@@ -1135,31 +1139,28 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
         };
-        let typst = render_match_typst(&m).expect("expected the report source");
+        let report = build_report(&m).expect("expected the report data");
         let labels = current_labels();
-        let texts: Vec<&str> = typst
-            .split("text(\"")
-            .skip(1)
-            .map(|t| &t[..t.find('"').unwrap()])
-            .collect();
-        // the opponent errors, the last statistic: after the label of the
-        // row and the cells before the statistics, the 21st one
-        let opponent_errors = |label: &str, leading_cells: usize| {
-            let start = texts
-                .iter()
-                .position(|t| *t == label)
-                .unwrap_or_else(|| panic!("expected the row {label}"));
-            texts[start + leading_cells + 21]
+        // the opponent errors, the last statistic of the row with this label
+        let opponent_errors = |rows: &[StatsRow], column: usize, label: &str| {
+            rows.iter()
+                .find(|r| {
+                    r.lead[column]
+                        == Cell::Text {
+                            text: label.to_string(),
+                        }
+                })
+                .and_then(|r| r.values.last().cloned())
+                .unwrap_or_else(|| panic!("expected the row {label}"))
         };
         let rotation = |r: u8| format!("{}{}", labels.setter_prefix, r);
-        // the player rows: the name, then the positions in the 5 sets
-        assert_eq!(opponent_errors("player 7", 5), "-");
-        // the rotation and match rows: the label, then the rallies per
-        // break point and per side out
-        assert_eq!(opponent_errors(&rotation(1), 2), "1");
-        assert_eq!(opponent_errors(&rotation(6), 2), "1");
-        assert_eq!(opponent_errors(&rotation(2), 2), "-");
-        assert_eq!(opponent_errors(labels.global, 2), "2");
-        render_match_pdf(&m).expect("expected the report");
+        let rotations = &report.rotations.rows;
+        // the player rows: the number, then the name
+        assert_eq!(opponent_errors(&report.players.rows, 1, "player 7"), "-");
+        assert_eq!(opponent_errors(&report.players.rows, 1, labels.total), "2");
+        assert_eq!(opponent_errors(rotations, 0, &rotation(1)), "1");
+        assert_eq!(opponent_errors(rotations, 0, &rotation(6)), "1");
+        assert_eq!(opponent_errors(rotations, 0, &rotation(2)), "-");
+        assert_eq!(opponent_errors(rotations, 0, labels.total), "2");
     }
 }

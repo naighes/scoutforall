@@ -6,6 +6,7 @@ mod legacy_data_tests;
 mod lineup_scenario_tests;
 mod lineup_tests;
 mod point_sequence_tests;
+mod report_tests;
 mod snapshot_tests;
 mod stats_tests;
 mod substitution_tests;

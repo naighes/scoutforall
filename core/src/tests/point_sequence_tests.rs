@@ -3,8 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
-    use crate::localization::current_labels;
-    use crate::reporting::pdf::{render_match_pdf, render_match_typst};
+    use crate::reporting::model::{Point, build_report};
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         r#match::MatchEntry,
@@ -71,8 +70,8 @@ mod tests {
         assert!(snapshot.point_sequence().is_empty());
     }
 
-    /// A row per team, the home team on top (them, playing away), a column
-    /// per point with the score in the row of the team scoring it.
+    /// The home team first (them, playing away), each point in the row of
+    /// the team scoring it.
     #[test]
     fn report_shows_the_point_sequence() {
         let m = MatchEntry {
@@ -87,21 +86,21 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set()],
         };
-        let typst = render_match_typst(&m).expect("expected the report source");
-        let section = &typst[typst
-            .find(&format!("\"{}\"", current_labels().point_sequence))
-            .expect("expected the point sequence")..];
-        let texts: Vec<&str> = section
-            .split("text(\"")
-            .skip(1)
-            .map(|t| &t[..t.find('"').unwrap()])
-            .collect();
-        assert_eq!(texts[0], "set 1");
-        let rows: Vec<&[&str]> = texts[1..].chunks(41).collect();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][..5], ["them", "", "1", "2", ""]);
-        assert_eq!(rows[1][..5], ["us", "1", "", "", "2"]);
-        assert!(rows.iter().all(|r| r[5..].iter().all(|t| t.is_empty())));
-        render_match_pdf(&m).expect("expected the report");
+        let sequence = build_report(&m)
+            .expect("expected the report")
+            .point_sequence;
+        assert_eq!(sequence.teams, ["them", "us"]);
+        assert_eq!(sequence.sets.len(), 1);
+        assert_eq!(sequence.sets[0].label, "set 1");
+        let point = |team, us, score| Point { team, us, score };
+        assert_eq!(
+            sequence.sets[0].points,
+            [
+                point(1, true, 1),
+                point(0, false, 1),
+                point(0, false, 2),
+                point(1, true, 2),
+            ]
+        );
     }
 }

@@ -245,6 +245,32 @@ impl FirstRallySummary {
     }
 }
 
+/// The attacks built by us, in a phase of the game (see
+/// `Stats::attack_summary`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AttackSummary {
+    pub total: u32,
+    /// out or in the net
+    pub errors: u32,
+    pub blocked: u32,
+    pub kills: u32,
+}
+
+impl AttackSummary {
+    pub fn kill_percentage(&self) -> f64 {
+        percentage(self.kills as i32, self.total)
+    }
+
+    /// The kills minus the errors and the attacks blocked, over all of them
+    /// (as `Metric::Efficiency`).
+    pub fn efficiency(&self) -> f64 {
+        percentage(
+            self.kills as i32 - self.errors as i32 - self.blocked as i32,
+            self.total,
+        )
+    }
+}
+
 fn percentage(count: i32, total: u32) -> f64 {
     count as f64 / total as f64 * 100.0
 }
@@ -383,12 +409,53 @@ impl Stats {
         (won > 0).then(|| (rallies as f64 / won as f64, won, rallies))
     }
 
+    /// The rallies we won: in break, the break points over our serves; in
+    /// side out, the side outs over their serves. Returns `(percentage, won,
+    /// rallies)`, or `None` with no rallies.
+    pub fn rallies_won(&self, filter: &StatsFilter) -> Option<(f64, u32, u32)> {
+        let matches = |k: &RallyKey| filter.matches(k.phase, k.rotation, None);
+        let rallies = self.rallies.count(matches);
+        let won = self
+            .rallies
+            .count(|k| matches(k) && k.winner == TeamSideEnum::Us);
+        (rallies > 0).then(|| (percentage(won as i32, rallies), won, rallies))
+    }
+
     fn attacks<'a>(
         &'a self,
         filter: &'a StatsFilter,
     ) -> impl Iterator<Item = (&'a AttackKey, u32)> {
         self.attacks
             .iter(move |k| filter.matches(k.phase, k.rotation, Some(k.player)))
+    }
+
+    /// The attacks built by us on our reception (`counter_attack` false) or
+    /// in counter-attack (see `AttackKey::is_counter_attack`), or `None` when
+    /// there are none. Only the attacks with a zone are counted: see
+    /// `Snapshot::record_stats`.
+    pub fn attack_summary(
+        &self,
+        counter_attack: bool,
+        filter: &StatsFilter,
+    ) -> Option<AttackSummary> {
+        let summary = self
+            .attacks(filter)
+            .filter(|(k, _)| k.is_counter_attack() == counter_attack)
+            .fold(AttackSummary::default(), |s, (k, v)| {
+                let (errors, blocked, kills) = match k.eval {
+                    EvalEnum::Error => (v, 0, 0),
+                    EvalEnum::Over => (0, v, 0),
+                    EvalEnum::Perfect => (0, 0, v),
+                    _ => (0, 0, 0),
+                };
+                AttackSummary {
+                    total: s.total + v,
+                    errors: s.errors + errors,
+                    blocked: s.blocked + blocked,
+                    kills: s.kills + kills,
+                }
+            });
+        (summary.total > 0).then_some(summary)
     }
 
     /// The share of the counter-attacks from this zone that were kills:
