@@ -2,6 +2,7 @@ use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
 use crate::localization::current_labels;
+use crate::pdf_viewer::open_match_pdf;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -41,7 +42,6 @@ use ratatui::{
 use scout4all_core::{
     errors::AppError,
     providers::{match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter},
-    reporting::pdf::open_match_pdf,
     shapes::{
         enums::TeamSideEnum,
         listed::{Listed, Unreadable},
