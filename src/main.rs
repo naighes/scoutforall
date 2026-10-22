@@ -1,5 +1,6 @@
 mod app;
 mod localization;
+mod pdf_viewer;
 mod providers;
 mod screens;
 mod shapes;
