@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::{path::PathBuf, sync::Arc};
 
+use crate::localization::current_labels;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -39,7 +40,6 @@ use ratatui::{
 };
 use scout4all_core::{
     errors::AppError,
-    localization::current_labels,
     providers::{match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter},
     reporting::pdf::open_match_pdf,
     shapes::{
@@ -196,6 +196,7 @@ impl<
                     None => {
                         self.notify_message.set_error(
                             current_labels()
+                                .domain
                                 .could_not_recognize_home_directory
                                 .to_string(),
                         );
@@ -223,6 +224,7 @@ impl<
                         (None, _) => {
                             self.notify_message.set_error(
                                 current_labels()
+                                    .domain
                                     .could_not_recognize_home_directory
                                     .to_string(),
                             );
@@ -566,7 +568,7 @@ impl<
     fn handle_print(&mut self) -> AppAction {
         let selected = self.get_selected_match().map(|(m, s)| (m.clone(), s));
         if let Some((match_entry, _)) = selected {
-            match open_match_pdf(&match_entry) {
+            match open_match_pdf(&match_entry, current_labels().domain) {
                 Ok(_) => AppAction::None,
                 Err(_) => {
                     self.notify_message

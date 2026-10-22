@@ -1044,6 +1044,7 @@ mod tests {
         use crate::reporting::model::{Cell, build_report};
         use crate::reporting::pdf::render_report_pdf;
         use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
+        use crate::tests::EN;
         let t = Team::new();
         let players = [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.mb1, t.libero]
             .iter()
@@ -1086,7 +1087,7 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
         };
-        let report = build_report(&m).expect("expected the report data");
+        let report = build_report(&m, EN).expect("expected the report data");
         let names: Vec<&Cell> = report.players.rows.iter().map(|r| &r.lead[1]).collect();
         for player in 1..=7 {
             assert!(names.contains(&&Cell::Text {
@@ -1101,9 +1102,9 @@ mod tests {
     /// have no player.
     #[test]
     fn report_shows_the_opponent_errors() {
-        use crate::localization::current_labels;
         use crate::reporting::model::{Cell, StatsRow, build_report};
         use crate::shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry};
+        use crate::tests::EN;
         let t = Team::new();
         let players = [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.mb1, t.libero]
             .iter()
@@ -1139,8 +1140,8 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
         };
-        let report = build_report(&m).expect("expected the report data");
-        let labels = current_labels();
+        let report = build_report(&m, EN).expect("expected the report data");
+        let labels = EN;
         // the opponent errors, the last statistic of the row with this label
         let opponent_errors = |rows: &[StatsRow], column: usize, label: &str| {
             rows.iter()

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::localization::current_labels;
 use crate::{
     providers::settings_writer::SettingsWriter,
     screens::{
@@ -24,8 +25,7 @@ use ratatui::{
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 use scout4all_core::{
-    localization::current_labels, logging::logger::log_error, shapes::enums::FriendlyName,
-    shapes::enums::LanguageEnum,
+    logging::logger::log_error, shapes::enums::FriendlyName, shapes::enums::LanguageEnum,
 };
 
 /// The terms of use, shown at startup until the user has seen them: the
@@ -213,7 +213,7 @@ where
             format!(
                 "{}: ◀ {} ▶",
                 labels.language,
-                self.settings.language.friendly_name(labels)
+                self.settings.language.friendly_name(labels.domain)
             )
             .into(),
             format!("{checkbox} {}", labels.enable_send_analytics).into(),

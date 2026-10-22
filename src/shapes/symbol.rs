@@ -1,4 +1,4 @@
-use scout4all_core::localization::current_labels;
+use crate::localization::current_labels;
 use std::collections::HashMap;
 
 use crokey::{KeyCombination, KeyCombinationFormat};

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::{
     constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
+    localization::{Labels, Language},
     providers::{
         fs::path::get_team_folder_path,
         team_writer::{PlayerInput, TeamInput, TeamWriter},
@@ -14,15 +15,25 @@ use serde_json::to_vec_pretty;
 use tokio::fs::{create_dir_all, write};
 use uuid::Uuid;
 
-pub struct FileSystemTeamWriter(PathBuf);
+pub struct FileSystemTeamWriter {
+    base_path: PathBuf,
+    language: Language,
+}
 
 impl FileSystemTeamWriter {
-    pub fn new(base_path: &Path) -> Self {
-        Self(base_path.to_path_buf())
+    pub fn new(base_path: &Path, language: Language) -> Self {
+        Self {
+            base_path: base_path.to_path_buf(),
+            language,
+        }
     }
 
-    async fn save_team_file(team: &TeamEntry, base_path: &Path) -> Result<(), AppError> {
-        let folder = get_team_folder_path(base_path, &team.id)?;
+    async fn save_team_file(
+        team: &TeamEntry,
+        base_path: &Path,
+        labels: &Labels,
+    ) -> Result<(), AppError> {
+        let folder = get_team_folder_path(base_path, &team.id, labels)?;
         create_dir_all(&folder)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))?;
@@ -61,7 +72,7 @@ impl TeamWriter for FileSystemTeamWriter {
             TeamInput::Existing(team) => team,
         };
 
-        Self::save_team_file(&team, &self.0).await?;
+        Self::save_team_file(&team, &self.base_path, self.language.labels()).await?;
         Ok(team)
     }
 
@@ -84,7 +95,7 @@ impl TeamWriter for FileSystemTeamWriter {
         } else {
             team.players.push(player.clone());
         }
-        Self::save_team_file(team, &self.0).await?;
+        Self::save_team_file(team, &self.base_path, self.language.labels()).await?;
         Ok(player)
     }
 }

@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::{fmt::Debug, sync::Arc};
 
+use crate::localization::current_labels;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -27,12 +28,9 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::{Block, Row, Table, TableState},
 };
-use scout4all_core::{
-    localization::current_labels,
-    shapes::{
-        enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum},
-        technique::{ServeTypeEnum, SetTypeEnum},
-    },
+use scout4all_core::shapes::{
+    enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum},
+    technique::{ServeTypeEnum, SetTypeEnum},
 };
 
 /// below this width the two panels are stacked instead of side by side
@@ -393,7 +391,7 @@ where
                 GeneralField::Language => format!(
                     "{}: ◀ {} ▶",
                     labels.language,
-                    self.settings.language.friendly_name(labels)
+                    self.settings.language.friendly_name(labels.domain)
                 ),
                 GeneralField::Analytics => format!(
                     "{} {}",
@@ -426,7 +424,7 @@ where
 
     fn shortcut_row<T: ScoutingShortcut>(&self, action: T) -> Row<'static> {
         Row::new(vec![
-            format!("  {}", action.with_desc().1),
+            format!("  {}", action.describe().1),
             self.keys_of(&action),
         ])
     }

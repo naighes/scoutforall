@@ -6,7 +6,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use scout4all_core::localization::current_labels;
+use crate::localization::current_labels;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotifyMessage {
@@ -65,7 +65,7 @@ impl NotifyBanner {
                 )
                 .block(panel::section(match message {
                     NotifyMessage::Info(_) => current_labels().info,
-                    NotifyMessage::Error(_) => current_labels().error,
+                    NotifyMessage::Error(_) => current_labels().domain.error,
                     NotifyMessage::Warning(_) => current_labels().warning,
                 }));
             f.render_widget(widget, area);

@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::screens::{file_system_screen::FileSystemAction, screen::AppAction};
 use async_trait::async_trait;
 use csv::ReaderBuilder;
@@ -5,7 +6,6 @@ use hf::is_hidden;
 use scout4all_core::{
     constants::MATCH_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
-    localization::current_labels,
     providers::{match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter},
     shapes::{r#match::MatchEntry, set::SetEntry, snapshot::EventEntry, team::TeamEntry},
 };
@@ -72,7 +72,7 @@ impl<
         let exists = self.match_reader.exists(&self.team, match_id).await?;
         if exists {
             return Err(AppError::IO(IOError::Msg(
-                current_labels().match_already_exists.to_string(),
+                current_labels().domain.match_already_exists.to_string(),
             )));
         }
         let match_entry = path

@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::screens::components::panel;
 use ratatui::{
     Frame,
@@ -6,10 +7,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::Paragraph,
 };
-use scout4all_core::{
-    localization::current_labels,
-    shapes::{enums::FriendlyName, team::TeamEntry},
-};
+use scout4all_core::shapes::{enums::FriendlyName, team::TeamEntry};
 
 #[derive(Debug, Clone)]
 pub struct TeamHeader {
@@ -45,7 +43,7 @@ impl TeamHeader {
                     ),
                     Span::raw(
                         team.classification
-                            .map(|c| c.friendly_name(current_labels()))
+                            .map(|c| c.friendly_name(current_labels().domain))
                             .unwrap_or_default(),
                     ),
                 ]),
@@ -56,7 +54,7 @@ impl TeamHeader {
                     ),
                     Span::raw(
                         team.gender
-                            .map(|g| g.friendly_name(current_labels()))
+                            .map(|g| g.friendly_name(current_labels().domain))
                             .unwrap_or_default(),
                     ),
                 ]),

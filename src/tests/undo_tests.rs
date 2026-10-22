@@ -4,9 +4,9 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::current_labels;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::{KeyCode, KeyModifiers};
-    use scout4all_core::localization::current_labels;
 
     // the lineup: the first six on court, Gina the libero, Hana on the
     // bench. We serve.

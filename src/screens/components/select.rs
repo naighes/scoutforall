@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::screens::{components::panel, screen::cycle};
 use ratatui::{
     Frame,
@@ -6,7 +7,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{List, ListItem, ListState, Paragraph},
 };
-use scout4all_core::{localization::current_labels, shapes::enums::FriendlyName};
+use scout4all_core::shapes::enums::FriendlyName;
 
 #[derive(Debug)]
 pub struct Select<T>
@@ -61,7 +62,7 @@ impl<T: FriendlyName + Clone + PartialEq> Select<T> {
                     format!("{}: ", self.label),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(value.friendly_name(current_labels())),
+                Span::raw(value.friendly_name(current_labels().domain)),
             ])
         } else {
             Line::from(vec![Span::styled(
@@ -77,7 +78,7 @@ impl<T: FriendlyName + Clone + PartialEq> Select<T> {
         let items: Vec<ListItem> = self
             .values
             .iter()
-            .map(|entry| ListItem::new(entry.friendly_name(current_labels())))
+            .map(|entry| ListItem::new(entry.friendly_name(current_labels().domain)))
             .collect();
         let list = List::new(items)
             .block(panel::section(self.label.clone()))

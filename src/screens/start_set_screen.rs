@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
@@ -19,7 +20,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Row, Table, TableState},
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::set_writer::SetWriter,
     shapes::{
         enums::{RoleEnum, TeamSideEnum},
@@ -688,7 +688,7 @@ impl<
                     "{}\n{}\n({})",
                     player.number,
                     player.name,
-                    current_labels().setter_prefix
+                    current_labels().domain.setter_prefix
                 )
             } else {
                 format!("{}\n{}", player.number, player.name)

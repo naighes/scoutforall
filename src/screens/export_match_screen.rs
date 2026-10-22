@@ -1,9 +1,9 @@
+use crate::localization::current_labels;
 use crate::screens::{file_system_screen::FileSystemAction, screen::AppAction};
 use async_trait::async_trait;
 use hf::is_hidden;
 use scout4all_core::{
     errors::{AppError, IOError},
-    localization::current_labels,
     providers::fs::path::get_match_folder_path,
     shapes::team::TeamEntry,
 };
@@ -47,8 +47,12 @@ impl FileSystemAction for ExportMatchAction {
     }
 
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
-        let match_folder_path =
-            get_match_folder_path(&self.base_path, &self.team.id, &self.match_id)?;
+        let match_folder_path = get_match_folder_path(
+            &self.base_path,
+            &self.team.id,
+            &self.match_id,
+            current_labels().domain,
+        )?;
         let zip_file_path = path.join(format!("{}.zip", self.match_id));
         if zip_file_path.exists() {
             return Err(AppError::IO(IOError::Msg(

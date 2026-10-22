@@ -7,6 +7,7 @@ mod tests {
     use crate::{
         analytics::upload::create_match_archive,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
+        localization::Language,
         providers::{
             fs::{match_writer::FileSystemMatchWriter, team_writer::FileSystemTeamWriter},
             match_writer::MatchWriter,
@@ -52,7 +53,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let base = dir.path().join("data");
         std::fs::create_dir_all(&base).unwrap();
-        let team = FileSystemTeamWriter::new(&base)
+        let team = FileSystemTeamWriter::new(&base, Language::default())
             .save(TeamInput::New {
                 id: None,
                 name: "Volley Club".to_string(),
@@ -63,7 +64,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let m = FileSystemMatchWriter::new(&base)
+        let m = FileSystemMatchWriter::new(&base, Language::default())
             .create(
                 &team,
                 "Cortona Volley".to_string(),

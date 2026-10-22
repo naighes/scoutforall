@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
+use crate::localization::current_labels;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -24,7 +25,6 @@ use ratatui::{
 };
 use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
-    localization::current_labels,
     providers::{match_writer::MatchWriter, set_writer::SetWriter},
     shapes::{enums::EventTypeEnum, r#match::MatchEntry, team::TeamEntry},
 };

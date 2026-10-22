@@ -4,6 +4,7 @@
 
 use crate::{
     app::App,
+    localization::language,
     providers::{
         fs::{
             settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
@@ -114,8 +115,8 @@ impl Ui {
             std::fs::create_dir_all(browse.join(d)).unwrap();
         }
 
-        let team_writer = FileSystemTeamWriter::new(&base);
-        let match_writer = FileSystemMatchWriter::new(&base);
+        let team_writer = FileSystemTeamWriter::new(&base, language());
+        let match_writer = FileSystemMatchWriter::new(&base, language());
         let first_match = Utc
             .with_ymd_and_hms(2025, 9, 1, 18, 0, 0)
             .unwrap()
@@ -149,7 +150,7 @@ impl Ui {
                 if start_sets {
                     let ids: Vec<_> = team.players.iter().map(|p| p.id).collect();
                     let positions: [_; 6] = ids[..6].try_into().unwrap();
-                    FileSystemSetWriter::new(&base)
+                    FileSystemSetWriter::new(&base, language())
                         .create(
                             &m,
                             1,
@@ -167,7 +168,7 @@ impl Ui {
         }
 
         edit(&base);
-        let team_reader = FileSystemTeamReader::new(&base);
+        let team_reader = FileSystemTeamReader::new(&base, language());
         let teams = team_reader.read_all().await.unwrap();
         let app = App::new(
             settings(browse),
@@ -176,10 +177,11 @@ impl Ui {
             Arc::new(team_reader),
             Arc::new(team_writer),
             Arc::new(FileSystemSettingsWriter::new(&base)),
-            Arc::new(FileSystemSetWriter::new(&base)),
+            Arc::new(FileSystemSetWriter::new(&base, language())),
             Arc::new(FileSystemMatchReader::new(
                 &base,
-                Arc::new(FileSystemSetReader::new(&base)),
+                Arc::new(FileSystemSetReader::new(&base, language())),
+                language(),
             )),
             Arc::new(match_writer),
             Arc::new(FileSystemSettingsReader::new(&base)),

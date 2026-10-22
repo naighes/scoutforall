@@ -5,14 +5,12 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::{Describe, current_labels};
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::{
-        localization::current_labels,
-        shapes::{
-            enums::{EvalEnum, EventTypeEnum, WithDesc},
-            technique::{ServeTypeEnum, SetTypeEnum},
-        },
+    use scout4all_core::shapes::{
+        enums::{EvalEnum, EventTypeEnum},
+        technique::{ServeTypeEnum, SetTypeEnum},
     };
 
     // the lineup: Anna the setter (1 in the player choice), Bea outside
@@ -73,7 +71,7 @@ mod tests {
     fn set_rows(sets: &[SetTypeEnum], chosen: SetTypeEnum) -> Vec<String> {
         sets.iter()
             .map(|set| {
-                let (_, description) = set.with_desc();
+                let (_, description) = set.describe();
                 row(
                     *set == chosen,
                     &set.to_string().to_lowercase(),
@@ -98,11 +96,11 @@ mod tests {
     }
 
     fn set_desc(set: SetTypeEnum) -> String {
-        set.with_desc().1
+        set.describe().1
     }
 
     fn serve_desc(serve: ServeTypeEnum) -> String {
-        serve.with_desc().1
+        serve.describe().1
     }
 
     /// The technique column of the last event saved.
@@ -324,14 +322,14 @@ mod tests {
         let attack = ui
             .lines()
             .into_iter()
-            .find(|l| l.contains(labels.attack) && l.contains("Bea"))
+            .find(|l| l.contains(labels.domain.attack) && l.contains("Bea"))
             .unwrap_or_else(|| panic!("{}", ui.screen()));
-        let positive = EvalEnum::Positive.friendly_name(EventTypeEnum::A, labels);
+        let positive = EvalEnum::Positive.friendly_name(EventTypeEnum::A, labels.domain);
         assert!(attack.contains(&format!("{positive} Q")), "{attack}");
         let serve = ui
             .lines()
             .into_iter()
-            .find(|l| l.contains(labels.serve))
+            .find(|l| l.contains(labels.domain.serve))
             .unwrap_or_else(|| panic!("{}", ui.screen()));
         assert!(serve.contains(" F"), "{serve}");
     }

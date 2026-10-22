@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::{path::PathBuf, sync::Arc};
 
+use crate::localization::current_labels;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -28,7 +29,6 @@ use ratatui::{
     style::{Modifier, Style},
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -177,6 +177,7 @@ impl<
                     None => {
                         self.notifier.banner.set_error(
                             current_labels()
+                                .domain
                                 .could_not_recognize_home_directory
                                 .to_string(),
                         );
@@ -266,7 +267,7 @@ impl<
             Row::new(vec!["#", current_labels().name, current_labels().role])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
-        .block(panel::screen(current_labels().players))
+        .block(panel::screen(current_labels().domain.players))
         .widths([
             Constraint::Length(7),
             Constraint::Length(30),

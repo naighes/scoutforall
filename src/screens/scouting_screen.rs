@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::screen::{Sba, get_keybinding_actions};
@@ -26,7 +27,6 @@ use ratatui::{
 };
 use scout4all_core::analytics::global::{enqueue_match_for_upload, uploads_enabled};
 use scout4all_core::{
-    localization::current_labels,
     providers::set_writer::SetWriter,
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
@@ -873,7 +873,7 @@ impl<
             .iter()
             .map(|ev| {
                 Row::new(vec![
-                    Line::from(ev.friendly_name(current_labels())),
+                    Line::from(ev.friendly_name(current_labels().domain)),
                     Line::from(
                         se.key_for(ev)
                             .map(|kc| scf.to_string(kc))
@@ -909,7 +909,7 @@ impl<
                     "{} {} => {}",
                     check,
                     key,
-                    technique.description()
+                    technique.description(current_labels().domain)
                 )])
                 .style(style)
             })
@@ -940,14 +940,16 @@ impl<
                     "{} => {}",
                     key,
                     if let EventTypeInput::Some(last_event) = self.current_event {
-                        if let Some(desc) = ev.friendly_description(last_event, current_labels()) {
+                        if let Some(desc) =
+                            ev.friendly_description(last_event, current_labels().domain)
+                        {
                             format!(
                                 "{} ({})",
-                                ev.friendly_name(last_event, current_labels()),
+                                ev.friendly_name(last_event, current_labels().domain),
                                 desc
                             )
                         } else {
-                            ev.friendly_name(last_event, current_labels())
+                            ev.friendly_name(last_event, current_labels().domain)
                         }
                     } else {
                         current_labels().unknown.to_string()
@@ -968,7 +970,10 @@ impl<
 
     fn recent_event_row(&'_ self, i: usize, e: &EventEntry) -> Row<'_> {
         Row::new(vec![
-            format!(" {:<12}", e.event_type.friendly_name(current_labels())),
+            format!(
+                " {:<12}",
+                e.event_type.friendly_name(current_labels().domain)
+            ),
             format!(
                 " {:<20}",
                 e.player
@@ -980,7 +985,7 @@ impl<
                 " {:<10}",
                 [
                     e.eval
-                        .map(|e1| e1.friendly_name(e.event_type, current_labels())),
+                        .map(|e1| e1.friendly_name(e.event_type, current_labels().domain)),
                     e.technique.map(|t| t.to_string()),
                 ]
                 .into_iter()
@@ -1104,7 +1109,7 @@ impl<
 
     fn render_set_status(&self, f: &mut Frame, area: Rect) {
         let event = match &self.current_event {
-            EventTypeInput::Some(ev) => Some(ev.friendly_name(current_labels()).to_string()),
+            EventTypeInput::Some(ev) => Some(ev.friendly_name(current_labels().domain).to_string()),
             _ => None,
         };
         let player = self
@@ -1118,6 +1123,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::localization::language;
     use crate::providers::fs::{
         settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
     };
@@ -1151,7 +1157,7 @@ mod tests {
             })
             .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
-        let team = FileSystemTeamWriter::new(base)
+        let team = FileSystemTeamWriter::new(base, language())
             .save(TeamInput::New {
                 id: None,
                 name: "Volley Club".into(),
@@ -1162,7 +1168,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let m = FileSystemMatchWriter::new(base)
+        let m = FileSystemMatchWriter::new(base, language())
             .create(
                 &team,
                 "Cortona Volley".into(),
@@ -1172,7 +1178,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let set_writer = Arc::new(FileSystemSetWriter::new(base));
+        let set_writer = Arc::new(FileSystemSetWriter::new(base, language()));
         let positions: [Uuid; 6] = ids[..6].try_into().unwrap();
         let set = set_writer
             .create(
@@ -1221,7 +1227,11 @@ mod tests {
             .await;
         assert_eq!(screen.snapshot.score_us, 1);
         // the set opens with the event that applied only
-        let reader = FileSystemMatchReader::new(base, Arc::new(FileSystemSetReader::new(base)));
+        let reader = FileSystemMatchReader::new(
+            base,
+            Arc::new(FileSystemSetReader::new(base, language())),
+            language(),
+        );
         let m = reader
             .read_single(&team, &m.id)
             .await

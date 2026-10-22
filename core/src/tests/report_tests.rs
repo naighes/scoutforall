@@ -4,7 +4,6 @@
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
-    use crate::localization::current_labels;
     use crate::reporting::model::{Cell, Point, Report, build_report};
     use crate::reporting::pdf::{render_match_pdf, render_report_pdf};
     use crate::shapes::{
@@ -16,6 +15,7 @@ mod tests {
         stats::{AttackSummary, Stats, StatsFilter},
         team::TeamEntry,
     };
+    use crate::tests::EN;
     use EvalEnum::*;
     use EventTypeEnum::*;
     use chrono::Utc;
@@ -203,7 +203,7 @@ mod tests {
     fn away_report() -> Report {
         let t = Team::new();
         let m = match_entry(t.team("us"), "them", false, vec![t.rallies()]);
-        build_report(&m).expect("expected the report")
+        build_report(&m, EN).expect("expected the report")
     }
 
     fn row_of<'a>(rows: &'a [Vec<String>], label: &str) -> &'a [String] {
@@ -246,7 +246,7 @@ mod tests {
     /// serve error, none won.
     #[test]
     fn the_key_figures() {
-        let labels = current_labels();
+        let labels = EN;
         let report = away_report();
         let kpi = |label: &str| {
             report
@@ -267,7 +267,7 @@ mod tests {
     /// The points won add up to our score, the ones lost to theirs.
     #[test]
     fn where_the_points_come_from() {
-        let labels = current_labels();
+        let labels = EN;
         let report = away_report();
         let won = &report.points_won.rows;
         assert_eq!(row_of(won, labels.attack)[1..], ["1", "50"]);
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn the_attacks_on_the_reception_and_in_counter_attack() {
-        let labels = current_labels();
+        let labels = EN;
         let report = away_report();
         let rows = &report.attack_by_phase.rows;
         assert_eq!(
@@ -298,7 +298,7 @@ mod tests {
     /// (never from the bench), by number, then the total of the team.
     #[test]
     fn the_players_with_their_lineup_in_each_set() {
-        let labels = current_labels();
+        let labels = EN;
         let report = away_report();
         let rows = &report.players.rows;
         let cells = |number: &str| {
@@ -415,7 +415,7 @@ mod tests {
             let mut team = t.team(name);
             team.players[0].name = name.to_string();
             let m = match_entry(team, name, true, vec![t.rallies()]);
-            let report = build_report(&m).expect("expected the report");
+            let report = build_report(&m, EN).expect("expected the report");
             assert_eq!(report.header.teams[0].name, name);
             render_report_pdf(&report)
                 .unwrap_or_else(|e| panic!("expected the report of {name}: {e}"));
@@ -436,7 +436,7 @@ mod tests {
             })
             .collect();
         let m = match_entry(t.team("us"), "them", true, sets);
-        let report = build_report(&m).expect("expected the report");
+        let report = build_report(&m, EN).expect("expected the report");
         assert_eq!(
             [report.header.teams[0].sets, report.header.teams[1].sets],
             [3, 2]
@@ -452,10 +452,10 @@ mod tests {
     fn an_empty_match_renders() {
         let t = Team::new();
         let m = match_entry(t.team("us"), "them", true, vec![]);
-        let report = build_report(&m).expect("expected the report");
+        let report = build_report(&m, EN).expect("expected the report");
         assert!(report.sets.rows.is_empty());
         // only the total of the team
         assert_eq!(report.players.rows.len(), 1);
-        render_match_pdf(&m).expect("expected the report");
+        render_match_pdf(&m, EN).expect("expected the report");
     }
 }

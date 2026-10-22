@@ -9,7 +9,8 @@
 //! be published as `scout4all-<target>.cdx.json`, was installed in place of
 //! the executable.
 
-use scout4all_core::{localization::current_labels, logging::logger::log_error};
+use crate::localization::current_labels;
+use scout4all_core::logging::logger::log_error;
 use self_update::{
     Error, ReleaseAsset, VersionStatus, backends::github::UpdateBuilder, cargo_crate_version,
     errors::Result, restart,

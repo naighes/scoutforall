@@ -5,10 +5,10 @@ use crokey::{
 };
 use ratatui::{Frame, layout::Rect};
 
+use crate::localization::{Describe, current_labels};
 use crate::shapes::{
     actions::ScreenActionEnum, keybinding::KeyBindings, symbol::KeyCombinationFormatExt,
 };
-use scout4all_core::{localization::current_labels, shapes::enums::WithDesc};
 
 pub enum AppAction {
     None,
@@ -33,7 +33,7 @@ pub trait ScreenAsync: Renderable + Send + Sync {
 
 pub fn get_keybinding_actions<T>(kb: &KeyBindings<T>, actions: &[Sba<T>]) -> Vec<(String, String)>
 where
-    T: std::hash::Hash + Eq + Clone + WithDesc<T>,
+    T: std::hash::Hash + Eq + Clone + Describe,
 {
     use crokey::KeyCombinationFormat;
     let fmt = &KeyCombinationFormat::default();
@@ -52,7 +52,7 @@ where
                 }
             }
             Sba::Redacted(ae, description_fn) => {
-                fn map_screen_action<T: std::hash::Hash + Eq + Clone + WithDesc<T>>(
+                fn map_screen_action<T: std::hash::Hash + Eq + Clone + Describe>(
                     kb: &KeyBindings<T>,
                     action: &T,
                     description_fn: fn(String) -> String,

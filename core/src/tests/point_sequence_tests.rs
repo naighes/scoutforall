@@ -11,6 +11,7 @@ mod tests {
         snapshot::EventEntry,
         team::TeamEntry,
     };
+    use crate::tests::EN;
     use EventTypeEnum::*;
     use TeamSideEnum::*;
     use chrono::Utc;
@@ -86,7 +87,7 @@ mod tests {
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set()],
         };
-        let sequence = build_report(&m)
+        let sequence = build_report(&m, EN)
             .expect("expected the report")
             .point_sequence;
         assert_eq!(sequence.teams, ["them", "us"]);

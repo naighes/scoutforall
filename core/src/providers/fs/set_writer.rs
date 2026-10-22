@@ -1,6 +1,6 @@
 use crate::{
     errors::{AppError, IOError},
-    localization::current_labels,
+    localization::Language,
     providers::{
         fs::{
             path::{get_match_folder_path, get_set_descriptor_file_path, get_set_events_file_path},
@@ -21,11 +21,17 @@ use tokio::{
 };
 use uuid::Uuid;
 
-pub struct FileSystemSetWriter(PathBuf);
+pub struct FileSystemSetWriter {
+    base_path: PathBuf,
+    language: Language,
+}
 
 impl FileSystemSetWriter {
-    pub fn new(base_path: &Path) -> Self {
-        Self(base_path.to_path_buf())
+    pub fn new(base_path: &Path, language: Language) -> Self {
+        Self {
+            base_path: base_path.to_path_buf(),
+            language,
+        }
     }
 
     async fn save_set_file(set: &SetEntry, path: &PathBuf) -> Result<(), AppError> {
@@ -49,7 +55,7 @@ impl SetWriter for FileSystemSetWriter {
         setter: Uuid,
         events: Vec<EventEntry>,
     ) -> Result<SetEntry, AppError> {
-        get_match_folder_path(&self.0, &m.team.id, &m.id)?;
+        get_match_folder_path(&self.base_path, &m.team.id, &m.id, self.language.labels())?;
         let mut set = SetEntry::new(
             set_number,
             serving_team,
@@ -58,10 +64,16 @@ impl SetWriter for FileSystemSetWriter {
             fallback_libero,
             setter,
         )?;
-        let descriptor_path = get_set_descriptor_file_path(&self.0, &m.team.id, &m.id, set_number)?;
+        let descriptor_path = get_set_descriptor_file_path(
+            &self.base_path,
+            &m.team.id,
+            &m.id,
+            set_number,
+            self.language.labels(),
+        )?;
         if descriptor_path.exists() {
             return Err(AppError::IO(IOError::Msg(
-                current_labels().match_already_exists.to_string(),
+                self.language.labels().match_already_exists.to_string(),
             )));
         }
         // the descriptor is always in the folder of the set
@@ -71,7 +83,13 @@ impl SetWriter for FileSystemSetWriter {
                 .map_err(|e| AppError::IO(IOError::from(e)))?;
         }
         Self::save_set_file(&set, &descriptor_path).await?;
-        let events_path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set_number)?;
+        let events_path = get_set_events_file_path(
+            &self.base_path,
+            &m.team.id,
+            &m.id,
+            set_number,
+            self.language.labels(),
+        )?;
         File::create(events_path)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))?;
@@ -88,7 +106,13 @@ impl SetWriter for FileSystemSetWriter {
         set_number: u8,
         event: &EventEntry,
     ) -> Result<(), AppError> {
-        let events_path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set_number)?;
+        let events_path = get_set_events_file_path(
+            &self.base_path,
+            &m.team.id,
+            &m.id,
+            set_number,
+            self.language.labels(),
+        )?;
         let event = event.clone();
         spawn_blocking(move || {
             // the older versions read a file only when all its rows have the
@@ -110,7 +134,13 @@ impl SetWriter for FileSystemSetWriter {
         m: &MatchEntry,
         set_number: u8,
     ) -> Result<Option<EventEntry>, AppError> {
-        let path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set_number)?;
+        let path = get_set_events_file_path(
+            &self.base_path,
+            &m.team.id,
+            &m.id,
+            set_number,
+            self.language.labels(),
+        )?;
         let path_clone = path.clone();
         spawn_blocking(move || {
             read_events(&path_clone).and_then(|mut events| {
@@ -124,10 +154,21 @@ impl SetWriter for FileSystemSetWriter {
 
     async fn update(&self, m: &MatchEntry, set: &SetEntry) -> Result<(), AppError> {
         // the descriptor first: it gets the rules the events replay with
-        let descriptor_path =
-            get_set_descriptor_file_path(&self.0, &m.team.id, &m.id, set.set_number)?;
+        let descriptor_path = get_set_descriptor_file_path(
+            &self.base_path,
+            &m.team.id,
+            &m.id,
+            set.set_number,
+            self.language.labels(),
+        )?;
         Self::save_set_file(set, &descriptor_path).await?;
-        let events_path = get_set_events_file_path(&self.0, &m.team.id, &m.id, set.set_number)?;
+        let events_path = get_set_events_file_path(
+            &self.base_path,
+            &m.team.id,
+            &m.id,
+            set.set_number,
+            self.language.labels(),
+        )?;
         let events = set.events.clone();
         spawn_blocking(move || write_events(&events_path, &events))
             .await

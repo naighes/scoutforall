@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::sync::Arc;
 
+use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
@@ -23,7 +24,6 @@ use ratatui::{
     widgets::Paragraph,
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::team_writer::{TeamInput, TeamWriter},
     shapes::{
         enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
@@ -338,12 +338,13 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             self.classification.get_selected_value(),
             self.classification.writing_mode,
         ) {
-            let paragraph = Paragraph::new(classification.friendly_description(current_labels()))
-                .style(Style::default().fg(Color::Cyan))
-                .block(panel::section(
-                    classification.friendly_name(current_labels()),
-                ))
-                .alignment(Alignment::Left);
+            let paragraph =
+                Paragraph::new(classification.friendly_description(current_labels().domain))
+                    .style(Style::default().fg(Color::Cyan))
+                    .block(panel::section(
+                        classification.friendly_name(current_labels().domain),
+                    ))
+                    .alignment(Alignment::Left);
             f.render_widget(paragraph, area);
         }
     }

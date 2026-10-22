@@ -4,9 +4,9 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::current_labels;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::localization::current_labels;
 
     // Anna serves (1 in the player choice), Bea (2) is in the front row,
     // Ilaria is on the bench.

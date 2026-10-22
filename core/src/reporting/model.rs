@@ -5,7 +5,7 @@
 //! The teams are always in the order of the scoresheet, the home team first
 //! (see `sides`).
 use crate::errors::AppError;
-use crate::localization::{Labels, current_labels};
+use crate::localization::Labels;
 use crate::shapes::enums::{
     EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
@@ -190,8 +190,7 @@ impl<'a> Replay<'a> {
     }
 }
 
-pub fn build_report(m: &MatchEntry) -> Result<Report, AppError> {
-    let labels = current_labels();
+pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError> {
     let replay = Replay::new(m)?;
     let status = m.get_status()?;
     let [left, right] = sides(
@@ -569,8 +568,7 @@ fn set_cell(set: &SetEntry, snapshot: &Snapshot, player: &Uuid) -> Cell {
 
 /// The leading groups of a table of the rallies won by phase, then the
 /// statistics (see `phase_row`).
-fn phases_lead(title: &str) -> Vec<Group> {
-    let labels = current_labels();
+fn phases_lead(labels: &Labels, title: &str) -> Vec<Group> {
     vec![
         Group {
             label: String::new(),
@@ -628,7 +626,7 @@ fn rotations_table(labels: &Labels, stats: &Stats) -> StatsTable {
         .collect();
     StatsTable {
         title: labels.rotation.to_string(),
-        lead: phases_lead(labels.rotation),
+        lead: phases_lead(labels, labels.rotation),
         rows,
     }
 }
@@ -654,7 +652,7 @@ fn set_stats_table(labels: &Labels, replay: &Replay) -> StatsTable {
         .collect();
     StatsTable {
         title: "set".to_string(),
-        lead: phases_lead("set"),
+        lead: phases_lead(labels, "set"),
         rows,
     }
 }
@@ -947,6 +945,7 @@ fn fmt_count(count: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{localization::labels, shapes::enums::LanguageEnum};
     use TeamSideEnum::*;
 
     #[test]
@@ -985,7 +984,7 @@ mod tests {
 
     #[test]
     fn every_statistics_row_fills_the_groups() {
-        let columns: usize = stats_groups(current_labels())
+        let columns: usize = stats_groups(labels(LanguageEnum::En))
             .iter()
             .map(|g| g.columns.len())
             .sum();

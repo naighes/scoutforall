@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
@@ -25,7 +26,6 @@ use ratatui::{
 use scout4all_core::{
     analytics::global::{enqueue_match_for_upload, uploads_enabled},
     errors::{AppError, MatchError},
-    localization::current_labels,
     providers::set_writer::SetWriter,
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName},
@@ -120,7 +120,11 @@ impl<SSW: SetWriter + Send + Sync> Renderable for EditSetEventsScreen<SSW> {
             f,
             columns[1],
             &self.before,
-            shown.map(|e| e.event_type.friendly_name(current_labels()).to_string()),
+            shown.map(|e| {
+                e.event_type
+                    .friendly_name(current_labels().domain)
+                    .to_string()
+            }),
             shown
                 .and_then(|e| e.player)
                 .and_then(|p| self.current_match.team.find_player(p))
@@ -413,7 +417,7 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
     }
 
     fn eval_name(event: &EventEntry, eval: Option<EvalEnum>) -> String {
-        eval.map(|e| e.friendly_name(event.event_type, current_labels()))
+        eval.map(|e| e.friendly_name(event.event_type, current_labels().domain))
             .unwrap_or_else(|| "-".to_string())
     }
 
@@ -433,7 +437,9 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
             .map(|(i, e)| {
                 [
                     format!("{:>3}", i + 1),
-                    e.event_type.friendly_name(current_labels()).to_string(),
+                    e.event_type
+                        .friendly_name(current_labels().domain)
+                        .to_string(),
                     e.player
                         .and_then(|p| self.current_match.team.find_player(p))
                         .map(|p| p.name.clone())
@@ -497,7 +503,7 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
                 let (label, value) = match field {
                     FormField::EventType => (
                         labels.event,
-                        event.event_type.friendly_name(labels).to_string(),
+                        event.event_type.friendly_name(labels.domain).to_string(),
                     ),
                     FormField::Eval => (labels.evaluation, Self::eval_name(event, event.eval)),
                     FormField::Technique => (

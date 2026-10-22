@@ -6,6 +6,7 @@
 mod tests {
     use crate::{
         constants::LEGACY_MAX_SUBSTITUTIONS,
+        localization::Language,
         providers::{
             fs::{
                 match_reader::FileSystemMatchReader, match_writer::FileSystemMatchWriter,
@@ -158,12 +159,15 @@ mod tests {
     }
 
     async fn load(base: &Path) -> (TeamEntry, MatchEntry) {
-        let team = FileSystemTeamReader::new(base)
+        let team = FileSystemTeamReader::new(base, Language::default())
             .read_single(&Uuid::parse_str(TEAM_ID).unwrap())
             .await
             .expect("expected the team");
-        let reader =
-            FileSystemMatchReader::new(base, std::sync::Arc::new(FileSystemSetReader::new(base)));
+        let reader = FileSystemMatchReader::new(
+            base,
+            std::sync::Arc::new(FileSystemSetReader::new(base, Language::default())),
+            Language::default(),
+        );
         let matches = reader.read_all(&team).await.expect("expected the matches");
         assert_eq!(matches.len(), 1);
         let m = matches.into_iter().next().unwrap();
@@ -175,7 +179,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let p = Players::new();
         legacy_team(dir.path(), &p);
-        let teams = FileSystemTeamReader::new(dir.path())
+        let teams = FileSystemTeamReader::new(dir.path(), Language::default())
             .read_all()
             .await
             .expect("expected the teams");
@@ -265,7 +269,7 @@ mod tests {
     /// Edits the opponent and home of the only match, then loads it again.
     async fn edit(base: &Path) -> MatchEntry {
         let (_, m) = load(base).await;
-        FileSystemMatchWriter::new(base)
+        FileSystemMatchWriter::new(base, Language::default())
             .update(&m, "Arezzo".into(), m.date, true, m.max_substitutions)
             .await
             .expect("expected the match to be updated");
@@ -335,7 +339,7 @@ mod tests {
         legacy_team(dir.path(), &p);
         match_descriptor(dir.path(), None);
         let (_, m) = load(dir.path()).await;
-        FileSystemSetWriter::new(dir.path())
+        FileSystemSetWriter::new(dir.path(), Language::default())
             .create(
                 &m,
                 1,
@@ -456,7 +460,7 @@ mod tests {
         let (_, m) = load(dir.path()).await;
         let before = m.sets[0].events.clone();
         assert_eq!(columns(&events_path(dir.path())), vec![5, 5]);
-        FileSystemSetWriter::new(dir.path())
+        FileSystemSetWriter::new(dir.path(), Language::default())
             .append_event(&m, 1, &float_serve(&p))
             .await
             .expect("expected the event to be saved");
@@ -478,7 +482,7 @@ mod tests {
         let old_reader = read_as_v0_4_3(&events_path(dir.path())).expect("v0.4.3 can't read");
         assert_eq!(old_reader.len(), 3);
         // the next events are appended
-        FileSystemSetWriter::new(dir.path())
+        FileSystemSetWriter::new(dir.path(), Language::default())
             .append_event(
                 &m,
                 1,
@@ -503,7 +507,7 @@ mod tests {
         legacy_team(dir.path(), &p);
         match_descriptor(dir.path(), None);
         let (_, m) = load(dir.path()).await;
-        let writer = FileSystemSetWriter::new(dir.path());
+        let writer = FileSystemSetWriter::new(dir.path(), Language::default());
         let reception = event(EventTypeEnum::P, p.libero, EvalEnum::Positive, None);
         writer
             .create(
@@ -580,7 +584,7 @@ mod tests {
             vec![None, Some(TechniqueEnum::Set(SetTypeEnum::Five)), None]
         );
         // and saving again makes it readable by v0.4.3 too
-        FileSystemSetWriter::new(dir.path())
+        FileSystemSetWriter::new(dir.path(), Language::default())
             .append_event(
                 &m,
                 1,
@@ -653,7 +657,7 @@ mod tests {
         legacy_team(dir.path(), &p);
         match_descriptor(dir.path(), None);
         let (_, m) = load(dir.path()).await;
-        let writer = FileSystemSetWriter::new(dir.path());
+        let writer = FileSystemSetWriter::new(dir.path(), Language::default());
         writer
             .create(
                 &m,
@@ -725,7 +729,7 @@ mod tests {
         match_descriptor(dir.path(), Some(6));
         legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
         let (_, m) = load(dir.path()).await;
-        let writer = FileSystemSetWriter::new(dir.path());
+        let writer = FileSystemSetWriter::new(dir.path(), Language::default());
         writer.append_event(&m, 1, &float_serve(&p)).await.unwrap();
         assert_eq!(read_as_v0_5_0(&events_path(dir.path())).unwrap().len(), 3);
         assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 3);
@@ -752,7 +756,7 @@ mod tests {
         match_descriptor(dir.path(), Some(6));
         legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
         let (_, m) = load(dir.path()).await;
-        let writer = FileSystemSetWriter::new(dir.path());
+        let writer = FileSystemSetWriter::new(dir.path(), Language::default());
         writer.append_event(&m, 1, &float_serve(&p)).await.unwrap();
         let spin = EventEntry {
             technique: Some(TechniqueEnum::Serve(ServeTypeEnum::Spin)),
@@ -779,7 +783,7 @@ mod tests {
         match_descriptor(dir.path(), Some(6));
         legacy_set(dir.path(), &p, &events_scouted_up_to_v0_4_3(&p));
         let (_, m) = load(dir.path()).await;
-        let removed = FileSystemSetWriter::new(dir.path())
+        let removed = FileSystemSetWriter::new(dir.path(), Language::default())
             .remove_last_event(&m, 1)
             .await
             .unwrap()

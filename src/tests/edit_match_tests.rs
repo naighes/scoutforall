@@ -4,9 +4,9 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::localization::current_labels;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::localization::current_labels;
     use std::path::{Path, PathBuf};
 
     /// Six on court, the libero and two on the bench.

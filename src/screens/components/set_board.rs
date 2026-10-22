@@ -2,6 +2,7 @@
 //! the points, the phase and rotation, the substitutions and the players on
 //! court.
 
+use crate::localization::current_labels;
 use crate::screens::components::panel;
 use ratatui::{
     Frame,
@@ -10,15 +11,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use scout4all_core::{
-    localization::current_labels,
-    shapes::{
-        enums::{EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum},
-        r#match::MatchEntry,
-        player::PlayerEntry,
-        snapshot::Snapshot,
-        team::TeamEntry,
-    },
+use scout4all_core::shapes::{
+    enums::{EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum},
+    r#match::MatchEntry,
+    player::PlayerEntry,
+    snapshot::Snapshot,
+    team::TeamEntry,
 };
 use uuid::Uuid;
 
@@ -107,7 +105,7 @@ pub fn render_point_sequence(
     current_match: &MatchEntry,
     snapshot: &Snapshot,
 ) {
-    let block = panel::section(current_labels().point_sequence);
+    let block = panel::section(current_labels().domain.point_sequence);
     let inner_area = block.inner(area);
     f.render_widget(block, area);
     let teams = match current_match.home {
@@ -165,7 +163,7 @@ fn point_style(side: TeamSideEnum) -> Style {
 fn substitutions_text(snapshot: &Snapshot) -> String {
     format!(
         "{} {}/{}",
-        current_labels().substitutions,
+        current_labels().domain.substitutions,
         snapshot.current_lineup.get_substitutions().len(),
         snapshot.current_lineup.get_max_substitutions()
     )
@@ -177,7 +175,7 @@ fn substitutions_text(snapshot: &Snapshot) -> String {
 pub fn set_status_width(snapshot: &Snapshot) -> u16 {
     let labels = current_labels();
     let phases = PhaseEnum::ALL.map(|phase| phase.to_string());
-    let events = EventTypeEnum::ALL.map(|event| event.friendly_name(labels).to_string());
+    let events = EventTypeEnum::ALL.map(|event| event.friendly_name(labels.domain).to_string());
     std::iter::once(substitutions_text(snapshot))
         .chain(phases)
         .chain(events)
@@ -220,7 +218,7 @@ pub fn render_set_status(
                 .current_lineup
                 .get_current_rotation()
                 .ok()
-                .map(|r| format!("{}{}", current_labels().setter_prefix, r + 1)),
+                .map(|r| format!("{}{}", current_labels().domain.setter_prefix, r + 1)),
             Color::Cyan,
             Color::Black,
         ),
@@ -287,7 +285,7 @@ fn format_court_cell(
                 format!(
                     "{}\n{}\n({}){}",
                     player.number,
-                    current_labels().setter_prefix,
+                    current_labels().domain.setter_prefix,
                     player.name,
                     arrow
                 )

@@ -1,4 +1,5 @@
 mod app;
+mod localization;
 mod providers;
 mod screens;
 mod shapes;
@@ -12,6 +13,7 @@ mod tests;
 
 use crate::{
     app::App,
+    localization::{current_labels, language},
     providers::{
         fs::{
             settings_reader::FileSystemSettingsReader, settings_writer::FileSystemSettingsWriter,
@@ -79,7 +81,7 @@ async fn run() -> Result<(), String> {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    let base_dir = get_base_path().map_err(|e| e.to_string())?;
+    let base_dir = get_base_path(current_labels().domain).map_err(|e| e.to_string())?;
 
     // init logger
     let log_path = base_dir.join("scout4all.log");
@@ -87,13 +89,13 @@ async fn run() -> Result<(), String> {
 
     let queue_path = base_dir.join(constants::UPLOAD_QUEUE_FILE_NAME);
     let settings_reader = FileSystemSettingsReader::new(&base_dir);
-    let team_reader = FileSystemTeamReader::new(&base_dir);
-    let team_writer = FileSystemTeamWriter::new(&base_dir);
+    let team_reader = FileSystemTeamReader::new(&base_dir, language());
+    let team_writer = FileSystemTeamWriter::new(&base_dir, language());
     let settings_writer = FileSystemSettingsWriter::new(&base_dir);
-    let set_reader = FileSystemSetReader::new(&base_dir);
-    let match_reader = FileSystemMatchReader::new(&base_dir, Arc::new(set_reader));
-    let match_writer = FileSystemMatchWriter::new(&base_dir);
-    let set_writer = FileSystemSetWriter::new(&base_dir);
+    let set_reader = FileSystemSetReader::new(&base_dir, language());
+    let match_reader = FileSystemMatchReader::new(&base_dir, Arc::new(set_reader), language());
+    let match_writer = FileSystemMatchWriter::new(&base_dir, language());
+    let set_writer = FileSystemSetWriter::new(&base_dir, language());
     let queue_reader = FileSystemQueueReader::new(&queue_path);
     let queue_writer = FileSystemQueueWriter::new(&queue_path);
     let teams = team_reader.read_all().await.unwrap_or_else(|_| vec![]);

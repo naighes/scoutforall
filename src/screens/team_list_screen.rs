@@ -1,6 +1,7 @@
 use crate::shapes::keybinding::navigation_keybindings;
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
+use crate::localization::current_labels;
 use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
@@ -23,7 +24,6 @@ use ratatui::{
     widgets::{List, ListItem, ListState},
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::{
         match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
         team_reader::TeamReader, team_writer::TeamWriter,
@@ -147,6 +147,7 @@ impl<
                         None => {
                             self.notify_message.set_error(
                                 current_labels()
+                                    .domain
                                     .could_not_recognize_home_directory
                                     .to_string(),
                             );
@@ -194,8 +195,8 @@ impl<
                 Ok(t) => {
                     let labels = current_labels();
                     let details = [
-                        t.classification.map(|c| c.friendly_name(labels)),
-                        t.gender.map(|g| g.friendly_name(labels)),
+                        t.classification.map(|c| c.friendly_name(labels.domain)),
+                        t.gender.map(|g| g.friendly_name(labels.domain)),
                     ]
                     .into_iter()
                     .flatten()

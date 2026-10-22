@@ -1,7 +1,7 @@
 use crate::{
     constants::MATCH_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError},
-    localization::current_labels,
+    localization::Language,
     logging::logger::log_error,
     providers::{fs::path::get_team_folder_path, match_reader::MatchReader, set_reader::SetReader},
     shapes::{
@@ -26,12 +26,13 @@ use tokio_stream::wrappers::ReadDirStream;
 pub struct FileSystemMatchReader {
     base_path: PathBuf,
     set_reader: Arc<dyn SetReader + Send + Sync>,
+    language: Language,
 }
 
 #[async_trait]
 impl MatchReader for FileSystemMatchReader {
     async fn read_all(&self, team: &TeamEntry) -> Result<Vec<Listed<MatchEntry>>, AppError> {
-        let team_path = get_team_folder_path(&self.base_path, &team.id)?;
+        let team_path = get_team_folder_path(&self.base_path, &team.id, self.language.labels())?;
         let dir: ReadDir = read_dir(&team_path)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))?;
@@ -66,12 +67,14 @@ impl MatchReader for FileSystemMatchReader {
     }
 
     async fn read_single(&self, team: &TeamEntry, match_id: &str) -> Result<MatchEntry, AppError> {
-        let path = get_team_folder_path(&self.base_path, &team.id)?.join(match_id);
+        let path =
+            get_team_folder_path(&self.base_path, &team.id, self.language.labels())?.join(match_id);
         self.map_entry(&path, team).await
     }
 
     async fn exists(&self, team: &TeamEntry, match_id: &str) -> Result<bool, AppError> {
-        let team_path = get_team_folder_path(&self.base_path, &team.id)?.join(match_id);
+        let team_path =
+            get_team_folder_path(&self.base_path, &team.id, self.language.labels())?.join(match_id);
         try_exists(&team_path)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))
@@ -79,10 +82,15 @@ impl MatchReader for FileSystemMatchReader {
 }
 
 impl FileSystemMatchReader {
-    pub fn new(base_path: &Path, set_reader: Arc<dyn SetReader + Send + Sync>) -> Self {
+    pub fn new(
+        base_path: &Path,
+        set_reader: Arc<dyn SetReader + Send + Sync>,
+        language: Language,
+    ) -> Self {
         Self {
             base_path: base_path.to_path_buf(),
             set_reader,
+            language,
         }
     }
 
@@ -90,7 +98,10 @@ impl FileSystemMatchReader {
         let descriptor_path = path.join(MATCH_DESCRIPTOR_FILE_NAME);
         if !descriptor_path.exists() {
             return Err(AppError::IO(IOError::Msg(
-                current_labels().match_descriptor_file_not_found.to_string(),
+                self.language
+                    .labels()
+                    .match_descriptor_file_not_found
+                    .to_string(),
             )));
         }
         let content = read_to_string(&descriptor_path)
@@ -106,7 +117,7 @@ impl FileSystemMatchReader {
             .and_then(|s| s.to_str())
             .ok_or_else(|| {
                 AppError::IO(IOError::Msg(
-                    current_labels().invalid_match_folder_name.to_string(),
+                    self.language.labels().invalid_match_folder_name.to_string(),
                 ))
             })?
             .into();

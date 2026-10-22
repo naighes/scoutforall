@@ -1,3 +1,4 @@
+use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
@@ -21,7 +22,6 @@ use ratatui::{
     widgets::{Row, Table},
 };
 use scout4all_core::{
-    localization::current_labels,
     providers::{match_reader::MatchReader, set_writer::SetWriter},
     shapes::r#match::MatchEntry,
 };

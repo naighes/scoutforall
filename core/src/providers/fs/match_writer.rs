@@ -1,5 +1,6 @@
 use crate::{
     errors::{AppError, IOError, MatchError},
+    localization::Language,
     providers::{
         fs::path::{get_match_descriptor_file_path, get_set_descriptor_file_path},
         match_writer::MatchWriter,
@@ -13,11 +14,17 @@ use serde_json::to_vec_pretty;
 use std::path::{Path, PathBuf};
 use tokio::fs::{try_exists, write};
 
-pub struct FileSystemMatchWriter(PathBuf);
+pub struct FileSystemMatchWriter {
+    base_path: PathBuf,
+    language: Language,
+}
 
 impl FileSystemMatchWriter {
-    pub fn new(base_path: &Path) -> Self {
-        Self(base_path.to_path_buf())
+    pub fn new(base_path: &Path, language: Language) -> Self {
+        Self {
+            base_path: base_path.to_path_buf(),
+            language,
+        }
     }
 }
 
@@ -43,7 +50,12 @@ impl MatchWriter for FileSystemMatchWriter {
             max_substitutions,
             sets: vec![],
         };
-        let path = get_match_descriptor_file_path(&self.0, &team.id, &match_id)?;
+        let path = get_match_descriptor_file_path(
+            &self.base_path,
+            &team.id,
+            &match_id,
+            self.language.labels(),
+        )?;
         if try_exists(&path)
             .await
             .map_err(|e| AppError::IO(IOError::from(e)))?
@@ -75,7 +87,13 @@ impl MatchWriter for FileSystemMatchWriter {
                 lineup_rules: Some(rules),
                 ..set.clone()
             };
-            let path = get_set_descriptor_file_path(&self.0, &m.team.id, &m.id, set.set_number)?;
+            let path = get_set_descriptor_file_path(
+                &self.base_path,
+                &m.team.id,
+                &m.id,
+                set.set_number,
+                self.language.labels(),
+            )?;
             let json = to_vec_pretty(&with_rules).map_err(|e| AppError::IO(IOError::from(e)))?;
             write(&path, json)
                 .await
@@ -90,7 +108,12 @@ impl MatchWriter for FileSystemMatchWriter {
             team: m.team.clone(),
             sets: m.sets.clone(),
         };
-        let path = get_match_descriptor_file_path(&self.0, &m.team.id, &m.id)?;
+        let path = get_match_descriptor_file_path(
+            &self.base_path,
+            &m.team.id,
+            &m.id,
+            self.language.labels(),
+        )?;
         let json = to_vec_pretty(&updated).map_err(|e| AppError::IO(IOError::from(e)))?;
         write(&path, json)
             .await

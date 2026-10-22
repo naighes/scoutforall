@@ -1,6 +1,6 @@
 use crate::{
     errors::{AppError, IOError, MatchError},
-    localization::current_labels,
+    localization::Language,
     providers::{fs::path::get_match_folder_path, set_reader::SetReader},
     shapes::{r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
 };
@@ -16,11 +16,17 @@ use tokio::{
     task::spawn_blocking,
 };
 
-pub struct FileSystemSetReader(PathBuf);
+pub struct FileSystemSetReader {
+    base_path: PathBuf,
+    language: Language,
+}
 
 impl FileSystemSetReader {
-    pub fn new(base_path: &Path) -> Self {
-        Self(base_path.to_path_buf())
+    pub fn new(base_path: &Path, language: Language) -> Self {
+        Self {
+            base_path: base_path.to_path_buf(),
+            language,
+        }
     }
 
     async fn parse_set(
@@ -73,9 +79,10 @@ pub(crate) fn read_events(path: &Path) -> Result<Vec<EventEntry>, AppError> {
 #[async_trait]
 impl SetReader for FileSystemSetReader {
     async fn read_all(&self, m: &MatchEntry) -> Result<Vec<SetEntry>, AppError> {
-        let match_path = get_match_folder_path(&self.0, &m.team.id, &m.id)?;
+        let match_path =
+            get_match_folder_path(&self.base_path, &m.team.id, &m.id, self.language.labels())?;
         let mut dir = read_dir(&match_path).await.map_err(|_| {
-            let template = current_labels().could_not_read_folder;
+            let template = self.language.labels().could_not_read_folder;
             AppError::Match(MatchError::LoadSetError(
                 template.replace("{}", match_path.to_str().unwrap_or("")),
             ))
@@ -106,14 +113,14 @@ impl SetReader for FileSystemSetReader {
                     result
                 } else {
                     Err(AppError::IO(IOError::Msg(
-                        current_labels().invalid_set.into(),
+                        self.language.labels().invalid_set.into(),
                     )))
                 }
             });
         }
         let mut sets: Vec<SetEntry> = try_join_all(tasks).await?;
         if sets.len() > 5 {
-            let template = current_labels().found_more_than_5_sets_in_match;
+            let template = self.language.labels().found_more_than_5_sets_in_match;
             return Err(AppError::Match(MatchError::LoadSetError(
                 template.replace("{}", &m.id),
             )));
@@ -122,7 +129,7 @@ impl SetReader for FileSystemSetReader {
         for (i, set) in sets.iter().enumerate() {
             if set.set_number as usize != i + 1 {
                 return Err(AppError::Match(MatchError::LoadSetError(
-                    current_labels().wrong_set_numbering.into(),
+                    self.language.labels().wrong_set_numbering.into(),
                 )));
             }
         }

@@ -1,6 +1,6 @@
 use crate::{
     errors::{AppError, IOError},
-    localization::{Labels, current_labels},
+    localization::Labels,
     shapes::{
         enums::{EvalEnum, EventTypeEnum, RoleEnum, WithDesc},
         snapshot::EventEntry,
@@ -184,8 +184,8 @@ impl FromStr for SetTypeEnum {
 
 impl WithDesc<SetTypeEnum> for SetTypeEnum {
     /// the set with its name, if it has one, e.g. "A (high)" or "5"
-    fn with_desc(self) -> (SetTypeEnum, String) {
-        let desc = match self.friendly_name(current_labels()) {
+    fn with_desc(self, labels: &Labels) -> (SetTypeEnum, String) {
+        let desc = match self.friendly_name(labels) {
             Some(name) => format!("{} ({})", self, name),
             None => self.to_string(),
         };
@@ -245,11 +245,8 @@ impl FromStr for ServeTypeEnum {
 
 impl WithDesc<ServeTypeEnum> for ServeTypeEnum {
     /// the serve with its name, e.g. "F (float)"
-    fn with_desc(self) -> (ServeTypeEnum, String) {
-        (
-            self,
-            format!("{} ({})", self, self.friendly_name(current_labels())),
-        )
+    fn with_desc(self, labels: &Labels) -> (ServeTypeEnum, String) {
+        (self, format!("{} ({})", self, self.friendly_name(labels)))
     }
 }
 
@@ -277,10 +274,10 @@ impl TechniqueEnum {
     }
 
     /// e.g. "A (high)" or "F (float)"
-    pub fn description(&self) -> String {
+    pub fn description(&self, labels: &Labels) -> String {
         match self {
-            TechniqueEnum::Set(set) => set.with_desc().1,
-            TechniqueEnum::Serve(serve) => serve.with_desc().1,
+            TechniqueEnum::Set(set) => set.with_desc(labels).1,
+            TechniqueEnum::Serve(serve) => serve.with_desc(labels).1,
         }
     }
 }

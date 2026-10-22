@@ -1,6 +1,7 @@
 use crate::{
     analytics::{global::uploads_enabled, queue_manager::QueueManager},
     errors::{AppError, IOError},
+    localization::labels,
     logging::logger::{log_error, log_info},
     providers::{
         fs::path::{get_set_descriptor_file_path, get_set_events_file_path},
@@ -10,7 +11,7 @@ use crate::{
         team_reader::TeamReader,
     },
     shapes::{
-        enums::{GenderEnum, TeamClassificationEnum},
+        enums::{GenderEnum, LanguageEnum, TeamClassificationEnum},
         r#match::MatchEntry,
     },
     util::config_var,
@@ -129,12 +130,14 @@ pub(crate) async fn create_match_archive(
     .map_err(|e| AppError::IO(IOError::from(e)))?;
     zip.write_all(metadata_json.as_bytes())
         .map_err(|e| AppError::IO(IOError::from(e)))?;
+    // the errors of the upload aren't shown: the labels in English
+    let labels = labels(LanguageEnum::En);
     // add set files
     for set in &m.sets {
         let set_descriptor_path =
-            get_set_descriptor_file_path(base_path, &m.team.id, &m.id, set.set_number)?;
+            get_set_descriptor_file_path(base_path, &m.team.id, &m.id, set.set_number, labels)?;
         let set_events_path =
-            get_set_events_file_path(base_path, &m.team.id, &m.id, set.set_number)?;
+            get_set_events_file_path(base_path, &m.team.id, &m.id, set.set_number, labels)?;
         // descriptor
         if set_descriptor_path.exists() {
             let mut file = File::open(&set_descriptor_path)

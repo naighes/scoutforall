@@ -1,5 +1,6 @@
 use crate::shapes::keybinding::navigation_keybindings;
 
+use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
@@ -22,7 +23,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
 };
-use scout4all_core::{localization::current_labels, util::config_var};
+use scout4all_core::util::config_var;
 use serde_json::json;
 
 /// An e-mail address: a name of letters, digits and `._%+-`, then `@` and
