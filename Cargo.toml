@@ -12,7 +12,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [workspace]
-members = ["core"]
+members = ["core", "mobile"]
 
 # the version of the release: shared by all the crates
 [workspace.package]
