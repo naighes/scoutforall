@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">scout4all</string>
+    <string name="teams">Teams</string>
+    <string name="no_teams">No teams yet</string>
+    <string name="unreadable_team">Unreadable team</string>
+    <plurals name="players">
+        <item quantity="one">%d player</item>
+        <item quantity="other">%d players</item>
+    </plurals>
+</resources>

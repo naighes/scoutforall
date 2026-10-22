@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="teams">Squadre</string>
+    <string name="no_teams">Ancora nessuna squadra</string>
+    <string name="unreadable_team">Squadra illeggibile</string>
+    <plurals name="players">
+        <item quantity="one">%d giocatore</item>
+        <item quantity="other">%d giocatori</item>
+    </plurals>
+</resources>
