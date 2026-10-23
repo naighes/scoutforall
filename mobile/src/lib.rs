@@ -25,7 +25,7 @@ use scout4all_core::{
         team_reader::TeamReader,
         team_writer::TeamWriter,
     },
-    scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
+    scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
     shapes::{
         enums::{
@@ -518,6 +518,8 @@ pub struct CourtPlayer {
     pub number: u8,
     pub setter: bool,
     pub libero: bool,
+    /// whether the scout can choose the player now
+    pub selectable: bool,
 }
 
 /// A player to choose for the event, or as a replacement.
@@ -590,8 +592,9 @@ pub struct ScoutingState {
     pub events: Vec<ScoutedEvent>,
 }
 
-/// Scouting the set in progress of a match: every complete event is saved
-/// at once.
+/// Scouting the set in progress of a match, the player first (see
+/// `ChoiceOrder::PlayerFirst` in the core): every complete event is saved at
+/// once.
 #[derive(uniffi::Object)]
 pub struct Scouting {
     runtime: Arc<Runtime>,
@@ -610,6 +613,12 @@ impl Scouting {
         let (won, lost) = current_match
             .get_status()
             .map_or((0, 0), |s| (s.us_wins, s.them_wins));
+        let choices = session.player_choices();
+        let selectable = |id: &Uuid| match (session.step(), session.player()) {
+            (ScoutingStep::Event, None) => !session.player_events(id).is_empty(),
+            (ScoutingStep::Player, _) => choices.iter().any(|c| c.id == *id),
+            _ => false,
+        };
         let court = (0..6)
             .filter_map(|position| {
                 lineup
@@ -621,6 +630,7 @@ impl Scouting {
                         number: p.number,
                         setter: lineup.has_setter_at_pos(position),
                         libero: lineup.has_libero_at_pos(position),
+                        selectable: selectable(&p.id),
                     })
             })
             .collect();
@@ -673,6 +683,35 @@ impl Scouting {
             .iter()
             .map(|e| self.event_choice(*e))
             .collect()
+    }
+
+    /// The events the player can play now, before an event is chosen.
+    pub fn player_events(&self, player: String) -> Result<Vec<EventChoice>, MobileError> {
+        let player = parse_id(&player)?;
+        Ok(self
+            .session()
+            .player_events(&player)
+            .into_iter()
+            .map(|e| self.event_choice(e))
+            .collect())
+    }
+
+    /// The events that come before their player: the opponent's, the
+    /// faults, the changes of the lineup.
+    pub fn other_events(&self) -> Vec<EventChoice> {
+        self.session()
+            .other_events()
+            .into_iter()
+            .map(|e| self.event_choice(e))
+            .collect()
+    }
+
+    /// The player who touches the ball: then the event, if the player can
+    /// play more than one, or the evaluation.
+    pub fn choose_player_first(&self, player: String) -> Result<Progress, MobileError> {
+        let player = parse_id(&player)?;
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_player_first(player)))
     }
 
     /// The players who can play the event, or be replaced: setter, outside
@@ -989,7 +1028,7 @@ impl Scout4All {
                 .map(|session| {
                     Arc::new(Scouting {
                         runtime: self.runtime.clone(),
-                        session: Mutex::new(session),
+                        session: Mutex::new(session.with_order(ChoiceOrder::PlayerFirst)),
                         labels: self.language.labels(),
                     })
                 })
@@ -1573,25 +1612,21 @@ mod tests {
             (1, 0, 0)
         );
         assert_eq!(state.serving_team, TeamSideEnum::Us);
-        assert_eq!(state.step, ScoutingStep::Event);
         assert_eq!(state.court.len(), 6);
         assert!(state.court[0].setter);
         assert_eq!(state.substitutions_left, 8);
+
+        // we serve: the server is known, the serve waits for its evaluation
+        assert_eq!(state.step, ScoutingStep::Eval);
+        assert_eq!(state.event.map(|e| e.value), Some(EventTypeEnum::S));
+        assert_eq!(state.player.map(|p| p.number), Some(1));
+        assert!(state.court.iter().all(|p| !p.selectable));
         assert!(
             scouting
-                .available_events()
+                .other_events()
                 .iter()
-                .any(|e| e.value == EventTypeEnum::S && e.name == "battuta")
+                .any(|e| e.value == EventTypeEnum::OE && e.name == "errore avversario")
         );
-
-        // the server is known: the serve is preselected, then the evaluation
-        assert_eq!(
-            scouting.choose_event(EventTypeEnum::S).unwrap(),
-            Progress::Choosing
-        );
-        let state = scouting.state();
-        assert_eq!(state.step, ScoutingStep::Eval);
-        assert_eq!(state.player.map(|p| p.number), Some(1));
         let serves = scouting.available_techniques();
         assert_eq!(serves.len(), 2);
         assert_eq!(serves.iter().filter(|t| t.chosen).count(), 1);
@@ -1610,7 +1645,8 @@ mod tests {
         );
         let state = scouting.state();
         assert_eq!((state.score_us, state.score_them), (1, 0));
-        assert_eq!(state.step, ScoutingStep::Event);
+        // serving again
+        assert_eq!(state.step, ScoutingStep::Eval);
         match state.events.as_slice() {
             [event] => {
                 assert_eq!(event.event, EventTypeEnum::S);
@@ -1620,16 +1656,37 @@ mod tests {
             other => unreachable!("expected the ace, got {other:?}"),
         }
         // a choice that doesn't fit the step says why
-        match scouting.choose_eval(EvalEnum::Perfect) {
+        match scouting.choose_player_first(state.court[1].id.clone()) {
             Err(MobileError::Scouting { .. }) => {}
             other => unreachable!("expected a scouting error, got {other:?}"),
         }
-
         // the ace is saved: a new scouting of the set starts from it
         let resumed = app.scouting(team.clone(), m.clone()).unwrap();
         assert_eq!(resumed.state().score_us, 1);
 
-        // undo removes the ace and resumes it from its evaluation
+        // they receive: the player who digs first, then the evaluation or
+        // the event
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        assert_eq!((state.step, state.player), (ScoutingStep::Event, None));
+        let digger = state.court.iter().find(|p| p.selectable).unwrap();
+        let events = scouting.player_events(digger.id.clone()).unwrap();
+        assert!(events.iter().any(|e| e.value == EventTypeEnum::D));
+        scouting.choose_player_first(digger.id.clone()).unwrap();
+        let state = scouting.state();
+        assert_eq!(state.player.map(|p| p.id), Some(digger.id.clone()));
+        match events.as_slice() {
+            [_] => assert_eq!(state.step, ScoutingStep::Eval),
+            _ => assert_eq!(state.step, ScoutingStep::Event),
+        }
+
+        // undo goes back to the players, then removes the serve and resumes
+        // it from its evaluation, then the ace
+        scouting.undo().unwrap();
+        let state = scouting.state();
+        assert_eq!((state.step, state.player), (ScoutingStep::Event, None));
+        scouting.undo().unwrap();
+        assert_eq!(scouting.state().events.len(), 1);
         scouting.undo().unwrap();
         let state = scouting.state();
         assert_eq!((state.score_us, state.step), (0, ScoutingStep::Eval));
@@ -1639,8 +1696,6 @@ mod tests {
                 .iter()
                 .any(|t| t.chosen && t.value == TechniqueEnum::Serve(ServeTypeEnum::Spin))
         );
-        scouting.undo().unwrap();
-        assert_eq!(scouting.state().step, ScoutingStep::Event);
         assert_eq!(app.scouting(team, m).unwrap().state().events, vec![]);
     }
 
@@ -1650,10 +1705,8 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
-        let ace = || {
-            scouting.choose_event(EventTypeEnum::S).unwrap();
-            scouting.choose_eval(EvalEnum::Perfect).unwrap()
-        };
+        // we serve: the serve waits for its evaluation
+        let ace = || scouting.choose_eval(EvalEnum::Perfect).unwrap();
         for _ in 1..25 {
             assert_eq!(ace(), Progress::Saved);
         }
