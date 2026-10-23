@@ -21,6 +21,12 @@
     <string name="remove_player_text">Il giocatore resta nelle partite già giocate.</string>
     <string name="remove">Rimuovi</string>
     <string name="cancel">Annulla</string>
+    <string name="matches">Partite</string>
+    <string name="no_matches">Ancora nessuna partita</string>
+    <string name="unreadable_match">Partita illeggibile</string>
+    <string name="home">in casa</string>
+    <string name="away">in trasferta</string>
+    <string name="in_progress">in corso</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>
         <item quantity="other">%d giocatori</item>
