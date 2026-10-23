@@ -155,6 +155,11 @@ pub struct Labels {
     pub invalid_date: &'static str,
     pub invalid_max_substitutions: &'static str,
     pub max_substitutions_below_existing_substitutions: &'static str,
+    pub serving_team_is_required: &'static str,
+    pub player_in_position_is_required: &'static str,
+    pub setter_is_required: &'static str,
+    pub libero_is_required: &'static str,
+    pub could_not_start_set: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -302,6 +307,11 @@ const EN: Labels = Labels {
     invalid_date: "invalid date",
     invalid_max_substitutions: "substitutions per set must be a number from 1 to 99",
     max_substitutions_below_existing_substitutions: "substitutions per set cannot be less than the number already used in a set",
+    serving_team_is_required: "serving team is required",
+    player_in_position_is_required: "player in position {} is required",
+    setter_is_required: "setter is required",
+    libero_is_required: "libero is required",
+    could_not_start_set: "could not start the set",
 };
 
 const IT: Labels = Labels {
@@ -449,6 +459,11 @@ const IT: Labels = Labels {
     invalid_date: "data non valida",
     invalid_max_substitutions: "le sostituzioni per set devono essere un numero da 1 a 99",
     max_substitutions_below_existing_substitutions: "le sostituzioni per set non possono essere inferiori al numero già utilizzato in un set",
+    serving_team_is_required: "la squadra al servizio è obbligatoria",
+    player_in_position_is_required: "il giocatore in posizione {} è obbligatorio",
+    setter_is_required: "il palleggiatore è obbligatorio",
+    libero_is_required: "il libero è obbligatorio",
+    could_not_start_set: "impossibile iniziare il set",
 };
 
 /// Returns the labels of a language.

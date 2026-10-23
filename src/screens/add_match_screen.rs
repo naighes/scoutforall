@@ -27,6 +27,7 @@ use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
     match_form::{MatchForm, MatchInput},
     providers::{match_writer::MatchWriter, set_writer::SetWriter},
+    set_start::SetStartForm,
     shapes::{r#match::MatchEntry, team::TeamEntry},
 };
 
@@ -306,8 +307,7 @@ impl<
                 self.settings_writer.clone(),
                 self.settings.clone(),
                 m,
-                1,
-                None,
+                SetStartForm::new(1, None),
                 Some(2),
                 self.set_writer.clone(),
             ))),

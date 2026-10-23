@@ -17,6 +17,7 @@ mod player_form_tests;
 mod point_sequence_tests;
 mod report_tests;
 mod scouting_tests;
+mod set_start_tests;
 mod snapshot_tests;
 mod stats_tests;
 mod storage_tests;
