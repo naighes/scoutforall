@@ -62,7 +62,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The screens: teams → team → its form, and the form of a new team. */
+/** The screens: teams → team → its form or a player, and the forms of
+ * a new team or player. */
 @Composable
 private fun Navigation(teams: TeamsViewModel) {
     val nav = rememberNavController()
@@ -79,11 +80,26 @@ private fun Navigation(teams: TeamsViewModel) {
         }
         composable("team/{id}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            TeamScreen(id, onBack = { nav.popBackStack() }, onEdit = { nav.navigate("team/$id/edit") })
+            TeamScreen(
+                id,
+                onBack = { nav.popBackStack() },
+                onEdit = { nav.navigate("team/$id/edit") },
+                onNewPlayer = { nav.navigate("team/$id/new-player") },
+                onPlayer = { player -> nav.navigate("team/$id/player/$player") },
+            )
         }
         composable("team/{id}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             TeamFormScreen(id, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
+        }
+        composable("team/{id}/new-player") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            PlayerFormScreen(id, null, onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
+        }
+        composable("team/{id}/player/{player}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val player = entry.arguments?.getString("player").orEmpty()
+            PlayerFormScreen(id, player, onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
         }
     }
 }

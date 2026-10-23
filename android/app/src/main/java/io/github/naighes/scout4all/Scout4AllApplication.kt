@@ -25,4 +25,5 @@ val MobileException.reason: String
     get() = when (this) {
         is MobileException.Failed -> reason
         is MobileException.InvalidTeam -> reason
+        is MobileException.InvalidPlayer -> reason
     }

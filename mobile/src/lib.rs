@@ -8,15 +8,17 @@
 
 use scout4all_core::{
     errors::AppError,
-    localization::Language,
+    localization::{Labels, Language},
     logging::logger::init_logger,
+    player_form::{PlayerForm, PlayerFormError, removal},
     providers::{
         store::{team_reader::StoreTeamReader, team_writer::StoreTeamWriter},
         team_reader::TeamReader,
         team_writer::TeamWriter,
     },
     shapes::{
-        enums::{FriendlyName, GenderEnum, LanguageEnum, TeamClassificationEnum},
+        enums::{FriendlyName, GenderEnum, LanguageEnum, RoleEnum, TeamClassificationEnum},
+        player::PlayerEntry,
         team::TeamEntry,
     },
     storage::{Store, fs::FsStore},
@@ -46,6 +48,22 @@ pub enum GenderEnum {
     Women,
 }
 
+#[uniffi::remote(Enum)]
+pub enum RoleEnum {
+    Libero,
+    OppositeHitter,
+    Setter,
+    OutsideHitter,
+    MiddleBlocker,
+}
+
+#[uniffi::remote(Record)]
+pub struct PlayerForm {
+    pub name: String,
+    pub role: Option<RoleEnum>,
+    pub number: String,
+}
+
 #[uniffi::remote(Record)]
 pub struct TeamForm {
     pub name: String,
@@ -61,6 +79,9 @@ pub enum MobileError {
     /// a field of the team form, which the app shows next to it
     #[error("{reason}")]
     InvalidTeam { field: TeamField, reason: String },
+    /// a field of the player form
+    #[error("{reason}")]
+    InvalidPlayer { field: PlayerField, reason: String },
 }
 
 impl From<AppError> for MobileError {
@@ -90,6 +111,41 @@ impl From<TeamFormError> for TeamField {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PlayerField {
+    Name,
+    Role,
+    Number,
+}
+
+impl From<PlayerFormError> for PlayerField {
+    fn from(e: PlayerFormError) -> Self {
+        match e {
+            PlayerFormError::EmptyName => PlayerField::Name,
+            PlayerFormError::MissingRole => PlayerField::Role,
+            PlayerFormError::InvalidNumber | PlayerFormError::NumberInUse => PlayerField::Number,
+        }
+    }
+}
+
+/// A role as the form offers it.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct RoleChoice {
+    pub value: RoleEnum,
+    pub name: String,
+}
+
+/// A player as the team page shows it.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct Player {
+    pub id: String,
+    pub name: String,
+    pub number: u8,
+    pub role: Option<String>,
+    /// what the form starts from, to edit the player
+    pub form: PlayerForm,
+}
+
 /// A classification as the form offers it.
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct ClassificationChoice {
@@ -113,7 +169,8 @@ pub struct TeamDetails {
     pub year: u16,
     pub classification: Option<String>,
     pub gender: Option<String>,
-    pub players: u32,
+    /// the active players, by number
+    pub players: Vec<Player>,
     /// what the form starts from, to edit the team
     pub form: TeamForm,
 }
@@ -202,7 +259,7 @@ impl Scout4All {
                 .classification
                 .map(|c| c.friendly_name(labels).to_string()),
             gender: team.gender.map(|g| g.friendly_name(labels).to_string()),
-            players: count(&team),
+            players: players(&team, labels),
             form: TeamForm::of(&team),
         })
     }
@@ -240,6 +297,48 @@ impl Scout4All {
             .collect()
     }
 
+    pub fn roles(&self) -> Vec<RoleChoice> {
+        let labels = self.language.labels();
+        RoleEnum::ALL
+            .iter()
+            .map(|r| RoleChoice {
+                value: *r,
+                name: r.friendly_name(labels).to_string(),
+            })
+            .collect()
+    }
+
+    /// Adds a player to the team (no `player_id`) or updates the one with
+    /// `player_id`; returns its id.
+    pub fn save_player(
+        &self,
+        team_id: String,
+        player_id: Option<String>,
+        form: PlayerForm,
+    ) -> Result<String, MobileError> {
+        let mut team = self.read_team(&team_id)?;
+        let existing = player_id.map(|id| find_player(&team, &id)).transpose()?;
+        let input =
+            form.validate(&team, existing.as_ref())
+                .map_err(|e| MobileError::InvalidPlayer {
+                    field: e.into(),
+                    reason: e.message(self.language.labels()),
+                })?;
+        let player = self
+            .runtime
+            .block_on(self.team_writer.save_player(input, &mut team))?;
+        Ok(player.id.to_string())
+    }
+
+    /// Removes a player, who stays for the matches already played.
+    pub fn remove_player(&self, team_id: String, player_id: String) -> Result<(), MobileError> {
+        let mut team = self.read_team(&team_id)?;
+        let player = find_player(&team, &player_id)?;
+        self.runtime
+            .block_on(self.team_writer.save_player(removal(&player), &mut team))?;
+        Ok(())
+    }
+
     /// Creates a team (no `id`) or updates the one with `id`; returns its id.
     pub fn save_team(&self, id: Option<String>, form: TeamForm) -> Result<String, MobileError> {
         let existing = id.map(|id| self.read_team(&id)).transpose()?;
@@ -256,11 +355,40 @@ impl Scout4All {
 
 impl Scout4All {
     fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
-        let id = Uuid::parse_str(id).map_err(|e| MobileError::Failed {
-            reason: e.to_string(),
-        })?;
+        let id = parse_id(id)?;
         Ok(self.runtime.block_on(self.team_reader.read_single(&id))?)
     }
+}
+
+fn parse_id(id: &str) -> Result<Uuid, MobileError> {
+    Uuid::parse_str(id).map_err(|e| MobileError::Failed {
+        reason: e.to_string(),
+    })
+}
+
+fn find_player(team: &TeamEntry, id: &str) -> Result<PlayerEntry, MobileError> {
+    let id = parse_id(id)?;
+    team.find_player(id)
+        .cloned()
+        .ok_or_else(|| MobileError::Failed {
+            reason: format!("no player {id} in the team"),
+        })
+}
+
+fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
+    let mut players: Vec<Player> = team
+        .active_players()
+        .into_iter()
+        .map(|p| Player {
+            id: p.id.to_string(),
+            name: p.name.clone(),
+            number: p.number,
+            role: p.role.map(|r| r.friendly_name(labels).to_string()),
+            form: PlayerForm::of(p),
+        })
+        .collect();
+    players.sort_by_key(|p| p.number);
+    players
 }
 
 /// The players still in the team: the deleted ones stay for the old matches.
@@ -358,5 +486,59 @@ mod tests {
             TeamClassificationEnum::ALL.len()
         );
         assert_eq!(app.genders()[0].name, "men");
+    }
+
+    fn player(name: &str, number: &str) -> PlayerForm {
+        PlayerForm {
+            name: name.into(),
+            role: Some(RoleEnum::Setter),
+            number: number.into(),
+        }
+    }
+
+    #[test]
+    fn players_are_added_edited_and_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let anna = app
+            .save_player(team.clone(), None, player("Anna", "9"))
+            .unwrap();
+        app.save_player(team.clone(), None, player("Bea", "3"))
+            .unwrap();
+        app.save_player(team.clone(), Some(anna.clone()), player("Anna", "12"))
+            .unwrap();
+
+        let players = app.team(team.clone()).unwrap().players;
+        let listed: Vec<(&str, u8)> = players
+            .iter()
+            .map(|p| (p.name.as_str(), p.number))
+            .collect();
+        assert_eq!(listed, vec![("Bea", 3), ("Anna", 12)]);
+        assert_eq!(players[1].id, anna);
+        assert_eq!(players[1].role.as_deref(), Some("palleggiatore"));
+        assert_eq!(players[1].form, player("Anna", "12"));
+
+        app.remove_player(team.clone(), anna).unwrap();
+        let players = app.team(team.clone()).unwrap().players;
+        assert_eq!(players.len(), 1);
+        // the number of a removed player is free again
+        app.save_player(team, None, player("Carla", "12")).unwrap();
+    }
+
+    #[test]
+    fn a_number_in_use_names_its_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        app.save_player(team.clone(), None, player("Anna", "9"))
+            .unwrap();
+        match app.save_player(team, None, player("Bea", "9")) {
+            Err(MobileError::InvalidPlayer { field, reason }) => {
+                assert_eq!(field, PlayerField::Number);
+                assert_eq!(reason, "number already in use");
+            }
+            other => unreachable!("expected a number in use, got {other:?}"),
+        }
     }
 }
