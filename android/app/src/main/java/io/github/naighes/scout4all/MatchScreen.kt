@@ -48,6 +48,7 @@ fun MatchScreen(
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onStartSet: () -> Unit,
+    onResumeSet: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<MatchState>(MatchState.Loading, teamId, matchId) {
@@ -76,13 +77,18 @@ fun MatchScreen(
         when (val s = state) {
             MatchState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is MatchState.Failed -> Centered(modifier) { Text(s.message) }
-            is MatchState.Loaded -> MatchContent(s.match, onStartSet, modifier)
+            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, modifier)
         }
     }
 }
 
 @Composable
-private fun MatchContent(m: MatchDetails, onStartSet: () -> Unit, modifier: Modifier) = Column(modifier) {
+private fun MatchContent(
+    m: MatchDetails,
+    onStartSet: () -> Unit,
+    onResumeSet: () -> Unit,
+    modifier: Modifier,
+) = Column(modifier) {
     val place = stringResource(if (m.home) R.string.home else R.string.away)
     Text(
         "${matchDate(m.date)} · $place",
@@ -110,16 +116,8 @@ private fun MatchContent(m: MatchDetails, onStartSet: () -> Unit, modifier: Modi
         is NextSetKind.Start -> Button(onClick = onStartSet, modifier = button) {
             Text(stringResource(R.string.start_set_n, next.setNumber.toInt()))
         }
-        // scouting comes with step 4e3
-        is NextSetKind.Resume -> Column {
-            Text(
-                stringResource(R.string.resume_soon),
-                modifier = Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(onClick = {}, enabled = false, modifier = button) {
-                Text(stringResource(R.string.resume_set_n, next.setNumber.toInt()))
-            }
+        is NextSetKind.Resume -> Button(onClick = onResumeSet, modifier = button) {
+            Text(stringResource(R.string.resume_set_n, next.setNumber.toInt()))
         }
         NextSetKind.Over -> {}
     }

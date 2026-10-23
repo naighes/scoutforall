@@ -39,7 +39,6 @@
     <string name="set_n">Set %d</string>
     <string name="start_set_n">Start set %d</string>
     <string name="resume_set_n">Resume set %d</string>
-    <string name="resume_soon">Scouting a set comes with the next version of the app.</string>
     <string name="no_sets">No sets yet</string>
     <string name="serving_team">Serving</string>
     <string name="us">Us</string>
@@ -56,6 +55,13 @@
     <string name="net">net</string>
     <string name="setter_short">S</string>
     <string name="close">Close</string>
+    <string name="libero_short">L</string>
+    <string name="undo">Undo</string>
+    <string name="touch_the_player">Touch the player on court</string>
+    <string name="who_comes_in">Who comes in?</string>
+    <string name="other_events">Other</string>
+    <string name="set_won">Set %d won</string>
+    <string name="set_lost">Set %d lost</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>

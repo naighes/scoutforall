@@ -1,7 +1,6 @@
 package io.github.naighes.scout4all
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -49,8 +46,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -244,7 +239,18 @@ private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewMo
         val court = @Composable { m: Modifier ->
             Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ServingTeam(lineup, model)
-                Court(lineup, pick, onPosition = { model.open(Pick.Position(it)) })
+                Court(
+                    slot = { position ->
+                        val player = lineup.positions.getOrNull(position - 1)
+                        CourtSlot(
+                            number = player?.number?.toInt(),
+                            name = player?.name,
+                            setter = player != null && player.id == lineup.setter?.id,
+                            highlighted = pick == Pick.Position(position),
+                        )
+                    },
+                    onPosition = { model.open(Pick.Position(it)) },
+                )
             }
         }
         val panel = @Composable { m: Modifier ->
@@ -310,105 +316,6 @@ private fun ServingTeam(lineup: Lineup, model: SetStartViewModel) {
                     enabled = lineup.choosesServingTeam,
                     shape = SegmentedButtonDefaults.itemShape(index, sides.size),
                 ) { Text(stringResource(name)) }
-            }
-        }
-    }
-}
-
-/** The court seen from the bench, the net at the top: front row 4 3 2,
- * back row 5 6 1. */
-@Composable
-private fun Court(lineup: Lineup, pick: Pick?, onPosition: (Int) -> Unit) = Column(
-    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Text(
-            stringResource(R.string.net),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    listOf(listOf(4, 3, 2), listOf(5, 6, 1)).forEach { row ->
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            row.forEach { position ->
-                val player = lineup.positions.getOrNull(position - 1)
-                CourtCell(
-                    position,
-                    player,
-                    setter = player != null && player.id == lineup.setter?.id,
-                    picking = pick == Pick.Position(position),
-                    modifier = Modifier.weight(1f),
-                ) { onPosition(position) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CourtCell(
-    position: Int,
-    player: LineupPlayer?,
-    setter: Boolean,
-    picking: Boolean,
-    modifier: Modifier,
-    onClick: () -> Unit,
-) = Surface(
-    // a bit wider than tall: room for the players to choose
-    modifier = modifier.aspectRatio(1.25f).clickable(onClick = onClick),
-    shape = MaterialTheme.shapes.medium,
-    color = MaterialTheme.colorScheme.surfaceVariant,
-    // the position being chosen, in the color of the actions
-    border = if (picking) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-) {
-    Box(Modifier.padding(8.dp)) {
-        Text(
-            stringResource(R.string.position_n, position),
-            modifier = Modifier.align(Alignment.TopStart),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (setter) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopEnd).width(20.dp).height(20.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        stringResource(R.string.setter_short),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-            }
-        }
-        when (player) {
-            // an empty position asks for a player, in the color of the actions
-            null -> Text(
-                "+",
-                modifier = Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            else -> Column(
-                Modifier.align(Alignment.Center).padding(top = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    player.number.toString(),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    player.name,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                )
             }
         }
     }
