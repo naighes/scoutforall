@@ -25,14 +25,18 @@ use scout4all_core::{
         team_reader::TeamReader,
         team_writer::TeamWriter,
     },
+    scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
     shapes::{
         enums::{
-            FriendlyName, GenderEnum, LanguageEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum,
+            EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
+            TeamClassificationEnum, TeamSideEnum,
         },
         r#match::MatchEntry,
         player::PlayerEntry,
+        snapshot::EventEntry,
         team::TeamEntry,
+        technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
     storage::{Store, fs::FsStore},
     team_form::{TeamForm, TeamFormError},
@@ -80,6 +84,80 @@ pub enum TeamSideEnum {
     Them,
 }
 
+#[uniffi::remote(Enum)]
+pub enum EventTypeEnum {
+    S,
+    P,
+    A,
+    D,
+    B,
+    F,
+    OS,
+    OE,
+    FB,
+    OF,
+    R,
+    CL,
+    CS,
+}
+
+#[uniffi::remote(Enum)]
+pub enum EvalEnum {
+    Perfect,
+    Positive,
+    Exclamative,
+    Over,
+    Error,
+    Negative,
+}
+
+#[uniffi::remote(Enum)]
+pub enum SetTypeEnum {
+    One,
+    Two,
+    Three,
+    Four,
+    C,
+    B,
+    Seven,
+    Fast,
+    High,
+    Five,
+    Six,
+    Super,
+    Nine,
+    Quick,
+    Pipe,
+    Eight,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ServeTypeEnum {
+    Float,
+    Spin,
+}
+
+#[uniffi::remote(Enum)]
+pub enum TechniqueEnum {
+    Set(SetTypeEnum),
+    Serve(ServeTypeEnum),
+}
+
+#[uniffi::remote(Enum)]
+pub enum ScoutingStep {
+    Event,
+    Player,
+    Eval,
+    Replacement,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Progress {
+    Choosing,
+    Saved,
+    SetOver,
+}
+
 #[uniffi::remote(Record)]
 pub struct PlayerForm {
     pub name: String,
@@ -125,6 +203,9 @@ pub enum MobileError {
     /// a field of the match form
     #[error("{reason}")]
     InvalidMatch { field: MatchField, reason: String },
+    /// a choice of the scout that doesn't apply, or an event not saved
+    #[error("{reason}")]
+    Scouting { reason: String },
 }
 
 impl From<AppError> for MobileError {
@@ -429,10 +510,303 @@ impl SetStart {
     }
 }
 
+/// A player on court while scouting.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CourtPlayer {
+    pub id: String,
+    pub name: String,
+    pub number: u8,
+    pub setter: bool,
+    pub libero: bool,
+}
+
+/// A player to choose for the event, or as a replacement.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ScoutingPlayer {
+    pub id: String,
+    pub name: String,
+    pub number: u8,
+    pub role: String,
+}
+
+/// An event as the scout chooses it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct EventChoice {
+    pub value: EventTypeEnum,
+    pub name: String,
+}
+
+/// An evaluation of the event being chosen, e.g. "ace" for a perfect serve.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct EvalChoice {
+    pub value: EvalEnum,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// A set or serve to save with the evaluation.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TechniqueChoice {
+    pub value: TechniqueEnum,
+    /// e.g. "A (high)" or "F (float)"
+    pub name: String,
+    /// what the evaluation saves now, chosen or preselected
+    pub chosen: bool,
+}
+
+/// An event saved in the set.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ScoutedEvent {
+    pub event: EventTypeEnum,
+    pub name: String,
+    pub player: Option<ScoutingPlayer>,
+    pub eval: Option<String>,
+    /// e.g. "A" or "F"
+    pub technique: Option<String>,
+}
+
+/// What the scouting screen shows.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ScoutingState {
+    pub set_number: u8,
+    pub team: String,
+    pub opponent: String,
+    pub home: bool,
+    /// the points of this set, the team's first
+    pub score_us: u8,
+    pub score_them: u8,
+    /// the sets won by the team and by the opponent
+    pub won: u8,
+    pub lost: u8,
+    pub serving_team: TeamSideEnum,
+    /// the players in positions 1 to 6
+    pub court: Vec<CourtPlayer>,
+    pub substitutions_left: u8,
+    pub step: ScoutingStep,
+    /// the event being chosen, and its player once chosen
+    pub event: Option<EventChoice>,
+    pub player: Option<ScoutingPlayer>,
+    /// the events of the set, the last first
+    pub events: Vec<ScoutedEvent>,
+}
+
+/// Scouting the set in progress of a match: every complete event is saved
+/// at once.
+#[derive(uniffi::Object)]
+pub struct Scouting {
+    runtime: Arc<Runtime>,
+    session: Mutex<ScoutingSession>,
+    labels: &'static Labels,
+}
+
+#[uniffi::export]
+impl Scouting {
+    pub fn state(&self) -> ScoutingState {
+        let session = self.session();
+        let snapshot = session.snapshot();
+        let lineup = &snapshot.current_lineup;
+        let current_match = session.current_match();
+        let team = &current_match.team;
+        let (won, lost) = current_match
+            .get_status()
+            .map_or((0, 0), |s| (s.us_wins, s.them_wins));
+        let court = (0..6)
+            .filter_map(|position| {
+                lineup
+                    .get(position)
+                    .and_then(|id| team.find_player(id))
+                    .map(|p| CourtPlayer {
+                        id: p.id.to_string(),
+                        name: p.name.clone(),
+                        number: p.number,
+                        setter: lineup.has_setter_at_pos(position),
+                        libero: lineup.has_libero_at_pos(position),
+                    })
+            })
+            .collect();
+        let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
+        events.sort_by_key(|e| e.timestamp);
+        ScoutingState {
+            set_number: session.set().set_number,
+            team: team.name.clone(),
+            opponent: current_match.opponent.clone(),
+            home: current_match.home,
+            score_us: snapshot.score_us,
+            score_them: snapshot.score_them,
+            won,
+            lost,
+            serving_team: match lineup.get_current_phase() {
+                PhaseEnum::Break => TeamSideEnum::Us,
+                PhaseEnum::SideOut => TeamSideEnum::Them,
+            },
+            court,
+            substitutions_left: lineup
+                .get_max_substitutions()
+                .saturating_sub(u8::try_from(lineup.get_substitutions().len()).unwrap_or(u8::MAX)),
+            step: session.step(),
+            event: session.event().map(|e| self.event_choice(e)),
+            player: session
+                .player()
+                .and_then(|id| team.find_player(id))
+                .map(|p| self.scouting_player(p)),
+            events: events
+                .into_iter()
+                .rev()
+                .map(|e| ScoutedEvent {
+                    event: e.event_type,
+                    name: e.event_type.friendly_name(self.labels).to_string(),
+                    player: e
+                        .player
+                        .and_then(|id| team.find_player(id))
+                        .map(|p| self.scouting_player(p)),
+                    eval: e.eval.map(|v| v.friendly_name(e.event_type, self.labels)),
+                    technique: e.technique.map(|t| t.to_string()),
+                })
+                .collect(),
+        }
+    }
+
+    /// The events that can follow.
+    pub fn available_events(&self) -> Vec<EventChoice> {
+        self.session()
+            .available_events()
+            .iter()
+            .map(|e| self.event_choice(*e))
+            .collect()
+    }
+
+    /// The players who can play the event, or be replaced: setter, outside
+    /// hitter 1, middle blocker 2, opposite, outside hitter 2, middle
+    /// blocker 1, libero.
+    pub fn player_choices(&self) -> Vec<ScoutingPlayer> {
+        let session = self.session();
+        self.choices(&session, session.player_choices())
+    }
+
+    /// The players who can replace the chosen one.
+    pub fn replacement_choices(&self) -> Vec<ScoutingPlayer> {
+        let session = self.session();
+        self.choices(&session, session.replacement_choices())
+    }
+
+    pub fn available_evals(&self) -> Vec<EvalChoice> {
+        let session = self.session();
+        session
+            .event()
+            .map(|event| {
+                session
+                    .available_evals()
+                    .into_iter()
+                    .map(|eval| EvalChoice {
+                        value: eval,
+                        name: eval.friendly_name(event, self.labels),
+                        description: eval.friendly_description(event, self.labels),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The sets the attacker can receive, or the serves.
+    pub fn available_techniques(&self) -> Vec<TechniqueChoice> {
+        let session = self.session();
+        session
+            .available_techniques()
+            .into_iter()
+            .map(|t| TechniqueChoice {
+                value: t,
+                name: t.description(self.labels),
+                chosen: session.technique() == Some(t),
+            })
+            .collect()
+    }
+
+    pub fn choose_event(&self, event: EventTypeEnum) -> Result<Progress, MobileError> {
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_event(event)))
+    }
+
+    pub fn choose_player(&self, player: String) -> Result<Progress, MobileError> {
+        let player = parse_id(&player)?;
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_player(player)))
+    }
+
+    pub fn choose_replacement(&self, player: String) -> Result<Progress, MobileError> {
+        let player = parse_id(&player)?;
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_replacement(player)))
+    }
+
+    pub fn choose_technique(&self, technique: TechniqueEnum) -> Result<(), MobileError> {
+        let chosen = self.session().choose_technique(technique);
+        self.scouted(chosen)
+    }
+
+    pub fn choose_eval(&self, eval: EvalEnum) -> Result<Progress, MobileError> {
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_eval(eval)))
+    }
+
+    /// Goes back a choice, or removes the last saved event.
+    pub fn undo(&self) -> Result<(), MobileError> {
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.undo()))
+    }
+}
+
+impl Scouting {
+    /// The session, even if a call panicked while holding it: each choice
+    /// leaves it whole.
+    fn session(&self) -> MutexGuard<'_, ScoutingSession> {
+        self.session
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn scouted<T>(&self, result: Result<T, ScoutingError>) -> Result<T, MobileError> {
+        result.map_err(|e| MobileError::Scouting {
+            reason: e.message(self.labels),
+        })
+    }
+
+    /// The players of the team, with their role in the language of the app.
+    fn choices(
+        &self,
+        session: &ScoutingSession,
+        choices: Vec<PlayerChoice>,
+    ) -> Vec<ScoutingPlayer> {
+        choices
+            .into_iter()
+            .filter_map(|c| session.current_match().team.find_player(c.id))
+            .map(|p| self.scouting_player(p))
+            .collect()
+    }
+
+    fn event_choice(&self, event: EventTypeEnum) -> EventChoice {
+        EventChoice {
+            value: event,
+            name: event.friendly_name(self.labels).to_string(),
+        }
+    }
+
+    fn scouting_player(&self, p: &PlayerEntry) -> ScoutingPlayer {
+        ScoutingPlayer {
+            id: p.id.to_string(),
+            name: p.name.clone(),
+            number: p.number,
+            role: p
+                .role
+                .map_or_else(String::new, |r| r.friendly_name(self.labels).to_string()),
+        }
+    }
+}
+
 /// The data of the app, in a folder with the same layout as `~/.scout4all`.
 #[derive(uniffi::Object)]
 pub struct Scout4All {
-    runtime: Runtime,
+    /// shared with the sets being scouted
+    runtime: Arc<Runtime>,
     language: Language,
     team_reader: StoreTeamReader,
     team_writer: StoreTeamWriter,
@@ -458,7 +832,7 @@ impl Scout4All {
                 reason: e.to_string(),
             })?;
         Ok(Arc::new(Self {
-            runtime,
+            runtime: Arc::new(runtime),
             team_reader: StoreTeamReader::new(store.clone(), language.clone()),
             team_writer: StoreTeamWriter::new(store.clone()),
             match_writer: StoreMatchWriter::new(store.clone()),
@@ -599,6 +973,31 @@ impl Scout4All {
             })),
             NextSet::Resume(_) | NextSet::Over => Err(MobileError::Failed {
                 reason: format!("no set to start in {match_id}"),
+            }),
+        }
+    }
+
+    /// Scouts the set in progress of the match.
+    pub fn scouting(
+        &self,
+        team_id: String,
+        match_id: String,
+    ) -> Result<Arc<Scouting>, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        match next_set(&m.get_status()?) {
+            NextSet::Resume(set) => set_start::resume(m, set, self.set_writer.clone())
+                .map(|session| {
+                    Arc::new(Scouting {
+                        runtime: self.runtime.clone(),
+                        session: Mutex::new(session),
+                        labels: self.language.labels(),
+                    })
+                })
+                .map_err(|e| MobileError::Failed {
+                    reason: e.message(self.language.labels()),
+                }),
+            NextSet::Start(_) | NextSet::Over => Err(MobileError::Failed {
+                reason: format!("no set in progress in {match_id}"),
             }),
         }
     }
@@ -1122,6 +1521,156 @@ mod tests {
             }]
         );
         assert!(app.set_start(team, m).is_err());
+    }
+
+    /// A team of seven, a match and its first set started, the team serving.
+    fn match_with_a_set(app: &Scout4All) -> (String, String) {
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        for n in 1..=7 {
+            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
+                .unwrap();
+        }
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8"),
+            )
+            .unwrap();
+        (team, m)
+    }
+
+    fn started_set(app: &Scout4All, team: &str, m: &str) -> Arc<Scouting> {
+        let ids: Vec<String> = app
+            .team(team.into())
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        let start = app.set_start(team.into(), m.into()).unwrap();
+        start.choose_serving_team(TeamSideEnum::Us);
+        for (position, id) in (1..=6).zip(&ids) {
+            start.place(position, Some(id.clone())).unwrap();
+        }
+        start.choose_setter(Some(ids[0].clone())).unwrap();
+        start.choose_libero(Some(ids[6].clone())).unwrap();
+        app.start_set(start).unwrap();
+        app.scouting(team.into(), m.into()).unwrap()
+    }
+
+    #[test]
+    fn a_set_in_progress_is_scouted_and_undone() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        // no set in progress yet
+        assert!(app.scouting(team.clone(), m.clone()).is_err());
+        let scouting = started_set(&app, &team, &m);
+        let state = scouting.state();
+        assert_eq!(
+            (state.set_number, state.score_us, state.score_them),
+            (1, 0, 0)
+        );
+        assert_eq!(state.serving_team, TeamSideEnum::Us);
+        assert_eq!(state.step, ScoutingStep::Event);
+        assert_eq!(state.court.len(), 6);
+        assert!(state.court[0].setter);
+        assert_eq!(state.substitutions_left, 8);
+        assert!(
+            scouting
+                .available_events()
+                .iter()
+                .any(|e| e.value == EventTypeEnum::S && e.name == "battuta")
+        );
+
+        // the server is known: the serve is preselected, then the evaluation
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::S).unwrap(),
+            Progress::Choosing
+        );
+        let state = scouting.state();
+        assert_eq!(state.step, ScoutingStep::Eval);
+        assert_eq!(state.player.map(|p| p.number), Some(1));
+        let serves = scouting.available_techniques();
+        assert_eq!(serves.len(), 2);
+        assert_eq!(serves.iter().filter(|t| t.chosen).count(), 1);
+        scouting
+            .choose_technique(TechniqueEnum::Serve(ServeTypeEnum::Spin))
+            .unwrap();
+        assert!(
+            scouting
+                .available_evals()
+                .iter()
+                .any(|e| e.value == EvalEnum::Perfect && e.name == "ace")
+        );
+        assert_eq!(
+            scouting.choose_eval(EvalEnum::Perfect).unwrap(),
+            Progress::Saved
+        );
+        let state = scouting.state();
+        assert_eq!((state.score_us, state.score_them), (1, 0));
+        assert_eq!(state.step, ScoutingStep::Event);
+        match state.events.as_slice() {
+            [event] => {
+                assert_eq!(event.event, EventTypeEnum::S);
+                assert_eq!(event.eval.as_deref(), Some("ace"));
+                assert_eq!(event.technique.as_deref(), Some("S"));
+            }
+            other => unreachable!("expected the ace, got {other:?}"),
+        }
+        // a choice that doesn't fit the step says why
+        match scouting.choose_eval(EvalEnum::Perfect) {
+            Err(MobileError::Scouting { .. }) => {}
+            other => unreachable!("expected a scouting error, got {other:?}"),
+        }
+
+        // the ace is saved: a new scouting of the set starts from it
+        let resumed = app.scouting(team.clone(), m.clone()).unwrap();
+        assert_eq!(resumed.state().score_us, 1);
+
+        // undo removes the ace and resumes it from its evaluation
+        scouting.undo().unwrap();
+        let state = scouting.state();
+        assert_eq!((state.score_us, state.step), (0, ScoutingStep::Eval));
+        assert!(
+            scouting
+                .available_techniques()
+                .iter()
+                .any(|t| t.chosen && t.value == TechniqueEnum::Serve(ServeTypeEnum::Spin))
+        );
+        scouting.undo().unwrap();
+        assert_eq!(scouting.state().step, ScoutingStep::Event);
+        assert_eq!(app.scouting(team, m).unwrap().state().events, vec![]);
+    }
+
+    #[test]
+    fn the_point_that_wins_the_set_ends_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let ace = || {
+            scouting.choose_event(EventTypeEnum::S).unwrap();
+            scouting.choose_eval(EvalEnum::Perfect).unwrap()
+        };
+        for _ in 1..25 {
+            assert_eq!(ace(), Progress::Saved);
+        }
+        assert_eq!(ace(), Progress::SetOver);
+        assert_eq!(scouting.state().won, 1);
+
+        let details = app.match_details(team.clone(), m.clone()).unwrap();
+        assert_eq!(details.next, NextSetKind::Start { set_number: 2 });
+        assert_eq!(
+            details.sets,
+            vec![SetScore {
+                number: 1,
+                us: 25,
+                them: 0
+            }]
+        );
+        assert!(app.scouting(team, m).is_err());
     }
 
     #[test]
