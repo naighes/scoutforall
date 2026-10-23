@@ -1,11 +1,36 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Animatable
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.sp
+import io.github.naighes.scout4all.core.EventTypeEnum
+import io.github.naighes.scout4all.core.TeamSideEnum
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +64,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -228,6 +255,9 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
             Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Score(view.state)
                 val players = view.state.court
+                // the serve waits for its evaluation: the server is in the
+                // serve zone
+                val serving = view.state.step == ScoutingStep.EVAL && view.state.event?.value == EventTypeEnum.S
                 Court(
                     slot = { position ->
                         val player = players.getOrNull(position - 1)
@@ -237,10 +267,12 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                             setter = player?.setter == true,
                             libero = player?.libero == true,
                             highlighted = player != null && player.id == view.state.player?.id,
-                            enabled = player?.selectable == true,
+                            enabled = player?.selectable == true || (serving && position == 1),
+                            serving = serving && position == 1,
                         )
                     },
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },
+                    serveZone = true,
                 )
             }
         }
@@ -270,36 +302,114 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
         }
     }
 
-/** The teams and the points of the set, the home team on the left. */
+/** The teams and the points of the set, the home team on the left; the
+ * ball by the team serving, and the phase: break when we serve, side-out
+ * when they do. A point stands out: the score turns, in green for ours, in
+ * red for theirs, and the phone vibrates. */
 @Composable
 private fun Score(state: ScoutingState) {
-    val (left, right) = if (state.home) state.team to state.opponent else state.opponent to state.team
-    val (leftPoints, rightPoints) = if (state.home) {
-        state.scoreUs to state.scoreThem
-    } else {
-        state.scoreThem to state.scoreUs
+    val weServe = state.servingTeam == TeamSideEnum.US
+    val us = Side(state.team, state.scoreUs.toInt(), weServe, Won)
+    val them = Side(state.opponent, state.scoreThem.toInt(), !weServe, Lost)
+    val (left, right) = if (state.home) us to them else them to us
+    val haptic = LocalHapticFeedback.current
+    val points = state.scoreUs.toInt() + state.scoreThem.toInt()
+    var previous by remember { mutableIntStateOf(points) }
+    LaunchedEffect(points) {
+        if (points > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        previous = points
     }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        TeamName(left, TextAlign.Start, Modifier.weight(1f))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TeamName(left, TextAlign.Start, Modifier.weight(1f))
+            Points(left)
+            Text(
+                "–",
+                modifier = Modifier.padding(horizontal = 8.dp),
+                style = MaterialTheme.typography.headlineLarge,
+            )
+            Points(right)
+            TeamName(right, TextAlign.End, Modifier.weight(1f))
+        }
+        Crossfade(weServe, label = "phase") { serving ->
+            Text(
+                stringResource(if (serving) R.string.break_phase else R.string.side_out_phase),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+                color = if (serving) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private data class Side(val name: String, val points: Int, val serving: Boolean, val scored: Color)
+
+/** The points of a team: a new one comes in from below and flashes in the
+ * color of who scored; an undone one goes back. */
+@Composable
+private fun Points(side: Side) {
+    val base = MaterialTheme.colorScheme.onSurface
+    val color = remember { Animatable(base) }
+    val scale = remember { Animatable(1f) }
+    var previous by remember { mutableIntStateOf(side.points) }
+    LaunchedEffect(side.points) {
+        if (side.points > previous) {
+            launch {
+                scale.animateTo(1.35f, tween(120))
+                scale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
+            }
+            color.snapTo(side.scored)
+            color.animateTo(base, tween(1200))
+        }
+        previous = side.points
+    }
+    AnimatedContent(
+        side.points,
+        transitionSpec = {
+            val up = targetState > initialState
+            (slideInVertically { if (up) it else -it } + fadeIn()) togetherWith
+                (slideOutVertically { if (up) -it else it } + fadeOut())
+        },
+        label = "points",
+    ) { points ->
         Text(
-            "$leftPoints – $rightPoints",
-            modifier = Modifier.padding(horizontal = 12.dp),
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.SemiBold,
+            points.toString(),
+            modifier = Modifier.scale(scale.value),
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Bold,
+            color = color.value,
         )
-        TeamName(right, TextAlign.End, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun TeamName(name: String, align: TextAlign, modifier: Modifier) = Text(
-    name,
-    modifier = modifier,
-    style = MaterialTheme.typography.titleMedium,
-    textAlign = align,
-    maxLines = 2,
-    overflow = TextOverflow.Ellipsis,
-)
+private fun TeamName(side: Side, align: TextAlign, modifier: Modifier) = Row(
+    modifier,
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = if (align == TextAlign.End) Arrangement.End else Arrangement.Start,
+) {
+    val ball = @Composable {
+        if (side.serving) {
+            Icon(
+                painterResource(R.drawable.ic_ball),
+                contentDescription = stringResource(R.string.serving),
+                modifier = Modifier.padding(horizontal = 4.dp).size(16.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+    if (align == TextAlign.End) ball()
+    Text(
+        side.name,
+        modifier = Modifier.weight(1f, fill = false),
+        style = MaterialTheme.typography.titleMedium,
+        textAlign = align,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+    if (align == TextAlign.Start) ball()
+}
 
 /** What the scout chooses now: the player on the court (with the other
  * events), the event of the player, the evaluation, the replacement. */
@@ -319,7 +429,10 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
             }
         }
         ScoutingStep.EVAL -> {
-            Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
+            // the serve shows on the court, with the server in the serve zone
+            if (state.event?.value != EventTypeEnum.S) {
+                Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
+            }
             if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
             Evals(view.evals, model)
             // the serve waits for its evaluation, or gives way
@@ -369,28 +482,19 @@ private fun OtherEvents(events: List<EventChoice>, model: ScoutingViewModel) {
     Buttons(events.map { it.name to { model.event(it) } }, primary = false)
 }
 
-/** The evaluations, big: the name, and what it means for the event. */
+/** The evaluations in a row, by their symbol: the scouts know them. */
 @Composable
-private fun Evals(evals: List<EvalChoice>, model: ScoutingViewModel) = Column(
-    verticalArrangement = Arrangement.spacedBy(8.dp),
+private fun Evals(evals: List<EvalChoice>, model: ScoutingViewModel) = Row(
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
 ) {
-    evals.chunked(2).forEach { row ->
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            row.forEach { eval ->
-                Button(
-                    onClick = { model.eval(eval) },
-                    modifier = Modifier.weight(1f).heightIn(min = 64.dp),
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(eval.name, textAlign = TextAlign.Center)
-                        eval.description?.let {
-                            Text(it, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
-                        }
-                    }
-                }
-            }
-            // the last row keeps the width of the others
-            if (row.size == 1) Column(Modifier.weight(1f)) {}
+    evals.forEach { eval ->
+        Button(
+            onClick = { model.eval(eval) },
+            modifier = Modifier.weight(1f).heightIn(min = 52.dp)
+                .semantics { contentDescription = eval.name },
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Text(eval.symbol, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
     }
 }
