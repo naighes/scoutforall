@@ -12,6 +12,16 @@
     <string name="gender">Gender</string>
     <string name="classification">Classification</string>
     <string name="save">Save</string>
+    <string name="new_player">New player</string>
+    <string name="edit_player">Edit player</string>
+    <string name="no_players">No players yet</string>
+    <string name="number">Number</string>
+    <string name="role">Role</string>
+    <string name="remove_player">Remove player</string>
+    <string name="remove_player_title">Remove %s?</string>
+    <string name="remove_player_text">The player stays in the matches already played.</string>
+    <string name="remove">Remove</string>
+    <string name="cancel">Cancel</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>

@@ -213,7 +213,7 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
     }
 
 @Composable
-private fun FieldTitle(title: String, error: String?) = Column {
+fun FieldTitle(title: String, error: String?) = Column {
     Text(title, style = MaterialTheme.typography.titleSmall)
     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }

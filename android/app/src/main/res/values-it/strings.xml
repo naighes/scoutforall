@@ -11,6 +11,16 @@
     <string name="gender">Genere</string>
     <string name="classification">Classificazione</string>
     <string name="save">Salva</string>
+    <string name="new_player">Nuovo giocatore</string>
+    <string name="edit_player">Modifica giocatore</string>
+    <string name="no_players">Ancora nessun giocatore</string>
+    <string name="number">Numero</string>
+    <string name="role">Ruolo</string>
+    <string name="remove_player">Rimuovi giocatore</string>
+    <string name="remove_player_title">Rimuovere %s?</string>
+    <string name="remove_player_text">Il giocatore resta nelle partite già giocate.</string>
+    <string name="remove">Rimuovi</string>
+    <string name="cancel">Annulla</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>
         <item quantity="other">%d giocatori</item>
