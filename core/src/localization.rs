@@ -144,6 +144,10 @@ pub struct Labels {
     pub could_not_add_event: &'static str,
     pub could_not_compute_snapshot: &'static str,
     pub could_not_undo: &'static str,
+    pub name_cannot_be_empty: &'static str,
+    pub classification_is_required: &'static str,
+    pub gender_is_required: &'static str,
+    pub year_must_be_a_four_digit_number: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -280,6 +284,10 @@ const EN: Labels = Labels {
     could_not_add_event: "could not add event",
     could_not_compute_snapshot: "could not compute the snapshot",
     could_not_undo: "could not undo the last event",
+    name_cannot_be_empty: "name cannot be empty",
+    classification_is_required: "classification is required",
+    gender_is_required: "gender is required",
+    year_must_be_a_four_digit_number: "year must be a 4-digit number",
 };
 
 const IT: Labels = Labels {
@@ -416,6 +424,10 @@ const IT: Labels = Labels {
     could_not_add_event: "impossibile aggiungere l'evento",
     could_not_compute_snapshot: "impossibile calcolare l'istantanea",
     could_not_undo: "impossibile annullare l'ultimo evento",
+    name_cannot_be_empty: "il nome è obbligatorio",
+    classification_is_required: "la classificazione è obbligatoria",
+    gender_is_required: "il genere è obbligatorio",
+    year_must_be_a_four_digit_number: "l'anno deve essere un numero a 4 cifre",
 };
 
 /// Returns the labels of a language.

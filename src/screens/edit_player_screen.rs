@@ -229,7 +229,7 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         ) {
             (None, _, _) => {
                 self.notify_message
-                    .set_error(current_labels().name_cannot_be_empty.to_string());
+                    .set_error(current_labels().domain.name_cannot_be_empty.to_string());
                 AppAction::None
             }
             (_, None, _) => {

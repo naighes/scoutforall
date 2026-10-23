@@ -12,6 +12,7 @@ pub mod reporting;
 pub mod scouting;
 pub mod shapes;
 pub mod storage;
+pub mod team_form;
 pub mod util;
 
 // the tests may panic on what they don't expect (see clippy.toml)
