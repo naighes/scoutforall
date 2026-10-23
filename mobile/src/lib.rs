@@ -16,22 +16,32 @@ use scout4all_core::{
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
+        set_writer::SetWriter,
         store::{
             match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-            set_reader::StoreSetReader, team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
+            set_reader::StoreSetReader, set_writer::StoreSetWriter, team_reader::StoreTeamReader,
+            team_writer::StoreTeamWriter,
         },
         team_reader::TeamReader,
         team_writer::TeamWriter,
     },
+    set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
     shapes::{
-        enums::{FriendlyName, GenderEnum, LanguageEnum, RoleEnum, TeamClassificationEnum},
+        enums::{
+            FriendlyName, GenderEnum, LanguageEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum,
+        },
+        r#match::MatchEntry,
         player::PlayerEntry,
         team::TeamEntry,
     },
     storage::{Store, fs::FsStore},
     team_form::{TeamForm, TeamFormError},
 };
-use std::{path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    path::PathBuf,
+    str::FromStr,
+    sync::{Arc, Mutex, MutexGuard},
+};
 use tokio::runtime::{Builder, Runtime};
 use uuid::Uuid;
 
@@ -62,6 +72,12 @@ pub enum RoleEnum {
     Setter,
     OutsideHitter,
     MiddleBlocker,
+}
+
+#[uniffi::remote(Enum)]
+pub enum TeamSideEnum {
+    Us,
+    Them,
 }
 
 #[uniffi::remote(Record)]
@@ -256,6 +272,163 @@ pub enum MatchListing {
     },
 }
 
+/// The points of a set, the team's first.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct SetScore {
+    pub number: u8,
+    pub us: u8,
+    pub them: u8,
+}
+
+/// What scouting a match goes on with.
+#[derive(Debug, PartialEq, uniffi::Enum)]
+pub enum NextSetKind {
+    Start { set_number: u8 },
+    Resume { set_number: u8 },
+    Over,
+}
+
+/// A match as its page shows it.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct MatchDetails {
+    pub id: String,
+    pub opponent: String,
+    pub home: bool,
+    /// RFC 3339, as in `MatchListing`
+    pub date: String,
+    pub won: u8,
+    pub lost: u8,
+    pub finished: bool,
+    /// the sets played or in progress, by number
+    pub sets: Vec<SetScore>,
+    pub next: NextSetKind,
+}
+
+/// A player to choose when starting a set.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LineupPlayer {
+    pub id: String,
+    pub name: String,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
+    pub role_name: Option<String>,
+}
+
+/// What the scout chose so far to start a set.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct Lineup {
+    pub set_number: u8,
+    /// whether the scout chooses who serves: in the first set and in the
+    /// tie-break
+    pub chooses_serving_team: bool,
+    pub serving_team: Option<TeamSideEnum>,
+    /// the players in positions 1 to 6
+    pub positions: Vec<Option<LineupPlayer>>,
+    pub setter: Option<LineupPlayer>,
+    pub libero: Option<LineupPlayer>,
+    pub fallback_libero: Option<LineupPlayer>,
+    /// whether the team has enough players for a fallback libero
+    pub allows_fallback_libero: bool,
+    /// nothing missing: the set can start
+    pub complete: bool,
+}
+
+/// Starting a set of a match: the choices so far, which the core checks.
+/// Nothing is saved until `Scout4All::start_set`.
+#[derive(uniffi::Object)]
+pub struct SetStart {
+    team: TeamEntry,
+    match_id: String,
+    form: Mutex<SetStartForm>,
+    labels: &'static Labels,
+}
+
+#[uniffi::export]
+impl SetStart {
+    pub fn lineup(&self) -> Lineup {
+        let form = self.form();
+        let player = |id: Option<Uuid>| {
+            id.and_then(|id| self.team.find_player(id))
+                .map(|p| lineup_player(p, self.labels))
+        };
+        Lineup {
+            set_number: form.set_number,
+            chooses_serving_team: form.chooses_serving_team(),
+            serving_team: form.serving_team,
+            positions: form.positions.iter().map(|id| player(*id)).collect(),
+            setter: player(form.setter),
+            libero: player(form.libero),
+            fallback_libero: player(form.fallback_libero),
+            allows_fallback_libero: self.team.active_players().len()
+                >= MIN_PLAYERS_FOR_FALLBACK_LIBERO,
+            complete: form.clone().validate(&self.team).is_ok(),
+        }
+    }
+
+    pub fn choose_serving_team(&self, serving_team: TeamSideEnum) {
+        self.form().serving_team = Some(serving_team);
+    }
+
+    /// Puts the player in `position` (1 to 6), or empties it.
+    pub fn place(&self, position: u8, player: Option<String>) -> Result<(), MobileError> {
+        let player = player.as_deref().map(parse_id).transpose()?;
+        self.form().place(index(position), player);
+        Ok(())
+    }
+
+    pub fn choose_setter(&self, player: Option<String>) -> Result<(), MobileError> {
+        self.form().setter = player.as_deref().map(parse_id).transpose()?;
+        Ok(())
+    }
+
+    pub fn choose_libero(&self, player: Option<String>) -> Result<(), MobileError> {
+        self.form().libero = player.as_deref().map(parse_id).transpose()?;
+        Ok(())
+    }
+
+    pub fn choose_fallback_libero(&self, player: Option<String>) -> Result<(), MobileError> {
+        self.form().fallback_libero = player.as_deref().map(parse_id).transpose()?;
+        Ok(())
+    }
+
+    /// The players that can go in `position` (1 to 6), by number.
+    pub fn position_choices(&self, position: u8) -> Vec<LineupPlayer> {
+        self.choices(self.form().position_choices(&self.team, index(position)))
+    }
+
+    /// The players on court, by number.
+    pub fn setter_choices(&self) -> Vec<LineupPlayer> {
+        self.choices(self.form().setter_choices(&self.team))
+    }
+
+    pub fn libero_choices(&self) -> Vec<LineupPlayer> {
+        self.choices(self.form().libero_choices(&self.team))
+    }
+
+    pub fn fallback_libero_choices(&self) -> Vec<LineupPlayer> {
+        self.choices(self.form().fallback_libero_choices(&self.team))
+    }
+}
+
+impl SetStart {
+    /// The form, even if a call panicked while holding it: each change
+    /// leaves it whole.
+    fn form(&self) -> MutexGuard<'_, SetStartForm> {
+        self.form
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn choices(&self, players: Vec<&PlayerEntry>) -> Vec<LineupPlayer> {
+        let mut choices: Vec<LineupPlayer> = players
+            .into_iter()
+            .map(|p| lineup_player(p, self.labels))
+            .collect();
+        choices.sort_by_key(|p| p.number);
+        choices
+    }
+}
+
 /// The data of the app, in a folder with the same layout as `~/.scout4all`.
 #[derive(uniffi::Object)]
 pub struct Scout4All {
@@ -265,6 +438,7 @@ pub struct Scout4All {
     team_writer: StoreTeamWriter,
     match_reader: StoreMatchReader,
     match_writer: StoreMatchWriter,
+    set_writer: Arc<dyn SetWriter + Send + Sync>,
 }
 
 #[uniffi::export]
@@ -288,6 +462,7 @@ impl Scout4All {
             team_reader: StoreTeamReader::new(store.clone(), language.clone()),
             team_writer: StoreTeamWriter::new(store.clone()),
             match_writer: StoreMatchWriter::new(store.clone()),
+            set_writer: Arc::new(StoreSetWriter::new(store.clone(), language.clone())),
             match_reader: StoreMatchReader::new(
                 store.clone(),
                 Arc::new(StoreSetReader::new(store, language.clone())),
@@ -365,6 +540,82 @@ impl Scout4All {
             .collect())
     }
 
+    /// A match of the team, with its sets.
+    pub fn match_details(
+        &self,
+        team_id: String,
+        match_id: String,
+    ) -> Result<MatchDetails, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        let status = m.get_status()?;
+        let mut numbers: Vec<u8> = m.sets.iter().map(|s| s.set_number).collect();
+        numbers.sort_unstable();
+        let sets = numbers
+            .into_iter()
+            .map(|number| {
+                m.get_set_snapshot(number).map(|snapshot| SetScore {
+                    number,
+                    us: snapshot.as_ref().map_or(0, |s| s.score_us),
+                    them: snapshot.as_ref().map_or(0, |s| s.score_them),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let next = match next_set(&status) {
+            NextSet::Start(form) => NextSetKind::Start {
+                set_number: form.set_number,
+            },
+            NextSet::Resume(set) => NextSetKind::Resume {
+                set_number: set.set_number,
+            },
+            NextSet::Over => NextSetKind::Over,
+        };
+        Ok(MatchDetails {
+            date: m.date.to_rfc3339(),
+            id: m.id,
+            opponent: m.opponent,
+            home: m.home,
+            won: status.us_wins,
+            lost: status.them_wins,
+            finished: status.match_finished,
+            sets,
+            next,
+        })
+    }
+
+    /// The start of the next set of the match, to choose who serves and the
+    /// lineup.
+    pub fn set_start(
+        &self,
+        team_id: String,
+        match_id: String,
+    ) -> Result<Arc<SetStart>, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        match next_set(&m.get_status()?) {
+            NextSet::Start(form) => Ok(Arc::new(SetStart {
+                team: m.team,
+                match_id: m.id,
+                form: Mutex::new(form),
+                labels: self.language.labels(),
+            })),
+            NextSet::Resume(_) | NextSet::Over => Err(MobileError::Failed {
+                reason: format!("no set to start in {match_id}"),
+            }),
+        }
+    }
+
+    /// Saves the set that `set_start` starts.
+    pub fn start_set(&self, set_start: Arc<SetStart>) -> Result<(), MobileError> {
+        let m = self.read_match(&set_start.team.id.to_string(), &set_start.match_id)?;
+        let failed = |e: set_start::SetStartError| MobileError::Failed {
+            reason: e.message(self.language.labels()),
+        };
+        let input = set_start.form().clone().validate(&m.team).map_err(failed)?;
+        self.runtime
+            .block_on(set_start::start(m, input, self.set_writer.clone()))
+            .map(|_| ())
+            .map_err(failed)
+    }
+
     /// The form of a new match, on `date` (now, where it's played).
     pub fn new_match_form(&self, date: MatchDate) -> MatchForm {
         MatchForm::new(date)
@@ -372,11 +623,7 @@ impl Scout4All {
 
     /// The form of a match of the team, to edit it.
     pub fn match_form(&self, team_id: String, match_id: String) -> Result<MatchForm, MobileError> {
-        let team = self.read_team(&team_id)?;
-        let m = self
-            .runtime
-            .block_on(self.match_reader.read_single(&team, &match_id))?;
-        Ok(MatchForm::of(&m))
+        Ok(MatchForm::of(&self.read_match(&team_id, &match_id)?))
     }
 
     /// Creates a match of the team (no `match_id`) or updates the one with
@@ -518,6 +765,28 @@ impl Scout4All {
     fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
         let id = parse_id(id)?;
         Ok(self.runtime.block_on(self.team_reader.read_single(&id))?)
+    }
+
+    fn read_match(&self, team_id: &str, match_id: &str) -> Result<MatchEntry, MobileError> {
+        let team = self.read_team(team_id)?;
+        Ok(self
+            .runtime
+            .block_on(self.match_reader.read_single(&team, match_id))?)
+    }
+}
+
+/// The index of `position` (1 to 6) in the lineup; out of it for any other.
+fn index(position: u8) -> usize {
+    usize::from(position).wrapping_sub(1)
+}
+
+fn lineup_player(p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
+    LineupPlayer {
+        id: p.id.to_string(),
+        name: p.name.clone(),
+        number: p.number,
+        role: p.role,
+        role_name: p.role.map(|r| r.friendly_name(labels).to_string()),
     }
 }
 
@@ -796,6 +1065,63 @@ mod tests {
             other => unreachable!("expected invalid substitutions, got {other:?}"),
         }
         assert_eq!(app.matches(team).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_set_starts_from_the_lineup_and_then_resumes() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let ids: Vec<String> = (1..=7)
+            .map(|n| {
+                app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
+                    .unwrap()
+            })
+            .collect();
+        let date = "2026-10-24T18:00:00+02:00";
+        let m = app
+            .save_match(team.clone(), None, match_form("Arezzo", date, "8"))
+            .unwrap();
+        let details = app.match_details(team.clone(), m.clone()).unwrap();
+        assert_eq!(details.next, NextSetKind::Start { set_number: 1 });
+        assert_eq!(details.sets, vec![]);
+
+        let start = app.set_start(team.clone(), m.clone()).unwrap();
+        assert!(start.lineup().chooses_serving_team);
+        // seven players: no fallback libero
+        assert!(!start.lineup().allows_fallback_libero);
+        start.choose_serving_team(TeamSideEnum::Them);
+        for (position, id) in (1..=6).zip(&ids) {
+            start.place(position, Some(id.clone())).unwrap();
+        }
+        assert_eq!(start.position_choices(1).len(), 2);
+        assert_eq!(start.setter_choices().len(), 6);
+        start.choose_setter(Some(ids[0].clone())).unwrap();
+        assert!(!start.lineup().complete);
+        match app.start_set(start.clone()) {
+            Err(MobileError::Failed { reason }) => assert_eq!(reason, "libero is required"),
+            other => unreachable!("expected a missing libero, got {other:?}"),
+        }
+        let liberos = start.libero_choices();
+        assert_eq!(
+            liberos.iter().map(|p| p.number).collect::<Vec<_>>(),
+            vec![7]
+        );
+        start.choose_libero(Some(liberos[0].id.clone())).unwrap();
+        assert!(start.lineup().complete);
+        app.start_set(start).unwrap();
+
+        let details = app.match_details(team.clone(), m.clone()).unwrap();
+        assert_eq!(details.next, NextSetKind::Resume { set_number: 1 });
+        assert_eq!(
+            details.sets,
+            vec![SetScore {
+                number: 1,
+                us: 0,
+                them: 0
+            }]
+        );
+        assert!(app.set_start(team, m).is_err());
     }
 
     #[test]

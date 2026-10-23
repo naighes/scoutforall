@@ -76,8 +76,8 @@ sealed interface MatchFormState {
         val error: String? = null,
         val busy: Boolean = false,
     ) : MatchFormState
-    /** saved: the screen goes back */
-    data object Saved : MatchFormState
+    /** saved, with the id of the match: the screen goes on */
+    data class Saved(val matchId: String) : MatchFormState
 }
 
 /** A new match of the team (`matchId` null), today, or one being edited.
@@ -124,8 +124,7 @@ class MatchFormViewModel(
         mutableState.value = editing.copy(busy = true)
         viewModelScope.launch {
             mutableState.value = try {
-                app.core { it.saveMatch(teamId, matchId, editing.form) }
-                MatchFormState.Saved
+                MatchFormState.Saved(app.core { it.saveMatch(teamId, matchId, editing.form) })
             } catch (e: MobileException.InvalidMatch) {
                 editing.copy(invalid = e.field to e.reason, error = null)
             } catch (e: MobileException) {
@@ -137,12 +136,12 @@ class MatchFormViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MatchFormScreen(teamId: String, matchId: String?, onBack: () -> Unit, onSaved: () -> Unit) {
+fun MatchFormScreen(teamId: String, matchId: String?, onBack: () -> Unit, onSaved: (String) -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val model = viewModel { MatchFormViewModel(app, teamId, matchId) }
     val state by model.state.collectAsState()
     LaunchedEffect(state) {
-        if (state == MatchFormState.Saved) onSaved()
+        (state as? MatchFormState.Saved)?.let { onSaved(it.matchId) }
     }
     Scaffold(
         topBar = {
@@ -154,7 +153,7 @@ fun MatchFormScreen(teamId: String, matchId: String?, onBack: () -> Unit, onSave
     ) { padding ->
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
-            MatchFormState.Loading, MatchFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
+            MatchFormState.Loading, is MatchFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
             is MatchFormState.Failed -> Centered(modifier) { Text(s.message) }
             is MatchFormState.Editing -> MatchFormContent(s, model, modifier)
         }

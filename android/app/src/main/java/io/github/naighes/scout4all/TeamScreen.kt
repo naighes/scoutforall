@@ -221,7 +221,7 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
 
 /** The date in the language of the phone, as it was where the match was
  * played. */
-private fun matchDate(date: String): String = try {
+fun matchDate(date: String): String = try {
     OffsetDateTime.parse(date).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
 } catch (_: java.time.DateTimeException) {
     date
