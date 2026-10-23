@@ -1,8 +1,9 @@
 //! Scouting a set, whatever the user interface: the scout chooses the
 //! event, then the player, then the evaluation (with the set or serve) or
-//! the replacement. The event is saved once complete, and only when it
-//! applies: otherwise the set wouldn't replay anymore. Undo goes back a
-//! choice, or removes the last saved event and resumes it.
+//! the replacement; or the player first (see [`ChoiceOrder`]). The event is
+//! saved once complete, and only when it applies: otherwise the set
+//! wouldn't replay anymore. Undo goes back a choice, or removes the last
+//! saved event and resumes it.
 
 use crate::{
     analytics::global::{enqueue_match_for_upload, uploads_enabled},
@@ -38,6 +39,26 @@ pub struct PlayerChoice {
     pub name: String,
     pub number: u8,
     pub role: String,
+}
+
+/// The order of the choices of the scout.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ChoiceOrder {
+    /// the event, then the player: the TUI, with a key for each event
+    #[default]
+    EventFirst,
+    /// the player who touches the ball, then the event only if the player
+    /// can play more than one (`player_events`); our serve goes straight to
+    /// its evaluation. The other events (`other_events`: theirs, the
+    /// faults, the changes of the lineup) still come before their player.
+    PlayerFirst,
+}
+
+/// The events a player plays touching the ball, but the serve: with the
+/// player first, they're chosen after the player.
+fn played_by_the_player(event: EventTypeEnum) -> bool {
+    use EventTypeEnum::*;
+    matches!(event, P | A | D | B | FB)
 }
 
 /// How a choice went on.
@@ -95,6 +116,7 @@ pub struct ScoutingSession {
     player: Option<Uuid>,
     /// the set or serve chosen along with the evaluation
     technique: Option<TechniqueEnum>,
+    order: ChoiceOrder,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
 }
 
@@ -107,6 +129,7 @@ impl fmt::Debug for ScoutingSession {
             .field("event", &self.event)
             .field("player", &self.player)
             .field("technique", &self.technique)
+            .field("order", &self.order)
             .finish_non_exhaustive()
     }
 }
@@ -126,8 +149,20 @@ impl ScoutingSession {
             event: None,
             player: None,
             technique: None,
+            order: ChoiceOrder::EventFirst,
             set_writer,
         }
+    }
+
+    /// The session with the choices in `order`.
+    pub fn with_order(mut self, order: ChoiceOrder) -> Self {
+        self.order = order;
+        self.start_next();
+        self
+    }
+
+    pub fn order(&self) -> ChoiceOrder {
+        self.order
     }
 
     pub fn current_match(&self) -> &MatchEntry {
@@ -169,15 +204,19 @@ impl ScoutingSession {
     /// The players to choose for the event: the ones on court who can play
     /// it, or the ones who can be replaced.
     pub fn player_choices(&self) -> Vec<PlayerChoice> {
+        self.choices_for(self.event)
+    }
+
+    fn choices_for(&self, event: Option<EventTypeEnum>) -> Vec<PlayerChoice> {
         let lineup = &self.snapshot.current_lineup;
-        let choices = match self.event {
+        let choices = match event {
             Some(EventTypeEnum::R) => lineup.get_replaceable_lineup_choices(),
             _ => lineup.get_lineup_choices(),
         };
         choices
             .into_iter()
             .filter_map(|(index, (role, id))| {
-                id.filter(|id| match self.event {
+                id.filter(|id| match event {
                     Some(EventTypeEnum::R) | None => lineup.find_position(id).is_some(),
                     Some(event) => self.snapshot.can_play(event, id),
                 })
@@ -191,6 +230,46 @@ impl ScoutingSession {
                 })
             })
             .collect()
+    }
+
+    /// With the player first, the events the player can play now: none
+    /// once an event is chosen, nor while our serve waits for its
+    /// evaluation.
+    pub fn player_events(&self, player: &Uuid) -> Vec<EventTypeEnum> {
+        match (self.step, self.event) {
+            (ScoutingStep::Event, None) => self
+                .available_events()
+                .iter()
+                .copied()
+                .filter(|e| played_by_the_player(*e))
+                .filter(|e| self.choices_for(Some(*e)).iter().any(|c| c.id == *player))
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    /// With the player first, the events that come before their player,
+    /// if any: the ones of the opponent, the faults, the changes of the
+    /// lineup. Available before a player is chosen, and while our serve
+    /// waits for its evaluation.
+    pub fn other_events(&self) -> Vec<EventTypeEnum> {
+        match (self.step, self.player, self.serve_pending()) {
+            (ScoutingStep::Event, None, _) | (_, _, true) => self
+                .available_events()
+                .iter()
+                .copied()
+                .filter(|e| *e != EventTypeEnum::S && !played_by_the_player(*e))
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    /// With the player first, the serve chosen by itself: it waits for the
+    /// evaluation, or gives way to another event.
+    fn serve_pending(&self) -> bool {
+        self.order == ChoiceOrder::PlayerFirst
+            && self.step == ScoutingStep::Eval
+            && self.event == Some(EventTypeEnum::S)
     }
 
     /// The players who can replace the chosen one.
@@ -270,6 +349,59 @@ impl ScoutingSession {
     /// opponent and the change of libero are saved at once, the others need
     /// the player.
     pub async fn choose_event(&mut self, event: EventTypeEnum) -> Result<Progress, ScoutingError> {
+        match (self.serve_pending(), self.step, self.player) {
+            // the serve chosen by itself gives way, and comes back if the
+            // event isn't possible
+            (true, _, _) if event != EventTypeEnum::S => {
+                self.reset();
+                let chosen = self.choose_event_now(event).await;
+                if chosen.is_err() {
+                    self.start_next();
+                }
+                chosen
+            }
+            // the event of the player chosen first
+            (false, ScoutingStep::Event, Some(player))
+                if self.player_events(&player).contains(&event) =>
+            {
+                self.play(event, player).await
+            }
+            // another event, without the player
+            (false, ScoutingStep::Event, Some(_)) => {
+                self.player = None;
+                self.choose_event_now(event).await
+            }
+            _ => self.choose_event_now(event).await,
+        }
+    }
+
+    /// With the player first, the scout chooses the player who touches the
+    /// ball, among the players on court with `player_events`: then the
+    /// event, if the player can play more than one, or the evaluation, or
+    /// the event is saved.
+    pub async fn choose_player_first(&mut self, player: Uuid) -> Result<Progress, ScoutingError> {
+        match (self.step, self.player_events(&player).as_slice()) {
+            (ScoutingStep::Event, [event]) => self.play(*event, player).await,
+            (ScoutingStep::Event, [_, _, ..]) => {
+                self.player = Some(player);
+                Ok(Progress::Choosing)
+            }
+            _ => Err(ScoutingError::InvalidPlayerSelection),
+        }
+    }
+
+    /// The event of a player chosen first.
+    async fn play(
+        &mut self,
+        event: EventTypeEnum,
+        player: Uuid,
+    ) -> Result<Progress, ScoutingError> {
+        self.event = Some(event);
+        self.step = ScoutingStep::Player;
+        self.choose_player(player).await
+    }
+
+    async fn choose_event_now(&mut self, event: EventTypeEnum) -> Result<Progress, ScoutingError> {
         use EventTypeEnum::*;
         let available = self.available_events().contains(&event);
         let substitutions_left = !self
@@ -407,32 +539,69 @@ impl ScoutingSession {
     /// Goes back a choice: before the first one, removes the last saved
     /// event and resumes it from its last choice.
     pub async fn undo(&mut self) -> Result<(), ScoutingError> {
-        match (self.step, self.event) {
-            (ScoutingStep::Event, _) => self.undo_last_event().await,
-            (ScoutingStep::Player, _) => {
-                self.event = None;
-                self.step = ScoutingStep::Event;
+        use ChoiceOrder::*;
+        use ScoutingStep::*;
+        match (self.order, self.step, self.event, self.player) {
+            (_, Event, _, None) => self.undo_last_event().await,
+            // the serve chosen by itself: nothing to go back to
+            (PlayerFirst, Eval, Some(EventTypeEnum::S), _) => self.undo_last_event().await,
+            // the player chosen first; the server isn't chosen
+            (_, Event, _, Some(_))
+            | (_, Player, _, _)
+            | (EventFirst, Eval, Some(EventTypeEnum::S), _) => {
+                self.start_next();
                 Ok(())
             }
-            // the server isn't chosen
-            (ScoutingStep::Eval, Some(EventTypeEnum::S)) => {
-                self.event = None;
+            (PlayerFirst, Eval, _, Some(player)) => {
+                self.back_to_player(player);
+                Ok(())
+            }
+            (PlayerFirst, Eval, _, None) => {
+                self.start_next();
+                Ok(())
+            }
+            (EventFirst, Eval, _, _) => {
                 self.player = None;
                 self.technique = None;
-                self.step = ScoutingStep::Event;
+                self.step = Player;
                 Ok(())
             }
-            (ScoutingStep::Eval, _) => {
+            (_, Replacement, _, _) => {
                 self.player = None;
-                self.technique = None;
-                self.step = ScoutingStep::Player;
+                self.step = Player;
                 Ok(())
             }
-            (ScoutingStep::Replacement, _) => {
-                self.player = None;
-                self.step = ScoutingStep::Player;
-                Ok(())
-            }
+        }
+    }
+
+    /// Nothing chosen.
+    fn reset(&mut self) {
+        self.event = None;
+        self.player = None;
+        self.technique = None;
+        self.step = ScoutingStep::Event;
+    }
+
+    /// The next event, from its first choice: with the player first, our
+    /// serve goes straight to its evaluation.
+    fn start_next(&mut self) {
+        self.reset();
+        let serving = self.available_events().contains(&EventTypeEnum::S);
+        if self.order == ChoiceOrder::PlayerFirst && serving {
+            self.event = Some(EventTypeEnum::S);
+            self.player = self.snapshot.current_lineup.get_serving_player();
+            self.step = ScoutingStep::Eval;
+            self.technique = self.preselected_technique();
+        }
+    }
+
+    /// With the player first, back to the event of the player, or to the
+    /// player if there's no event to choose.
+    fn back_to_player(&mut self, player: Uuid) {
+        self.reset();
+        match self.player_events(&player).len() {
+            0 | 1 => self.start_next(),
+            _ => self.player = Some(player),
         }
     }
 
@@ -449,21 +618,34 @@ impl ScoutingSession {
             Err(_) => return Err(ScoutingError::CouldNotUndo),
         };
         self.set.events.pop();
-        self.player = removed.player;
-        (self.event, self.step) = match (removed.event_type, removed.player) {
-            (A | B | D | P | S, Some(_)) => (Some(removed.event_type), ScoutingStep::Eval),
-            (R, Some(_)) => (Some(removed.event_type), ScoutingStep::Replacement),
-            (_, Some(_)) => (Some(removed.event_type), ScoutingStep::Player),
-            _ => (None, ScoutingStep::Event),
-        };
         // the snapshot replays the events left
         let snapshot = self
             .set
             .compute_snapshot(self.current_match.max_substitutions)
             .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
         self.snapshot = snapshot;
-        // the set or serve of the removed event, if it was saved
-        self.technique = removed.technique.or_else(|| self.preselected_technique());
+        self.reset();
+        match (self.order, removed.event_type, removed.player) {
+            (_, A | B | D | P | S, Some(player)) => {
+                self.event = Some(removed.event_type);
+                self.player = Some(player);
+                self.step = ScoutingStep::Eval;
+                // the set or serve of the removed event, if it was saved
+                self.technique = removed.technique.or_else(|| self.preselected_technique());
+            }
+            (_, R, Some(player)) => {
+                self.event = Some(R);
+                self.player = Some(player);
+                self.step = ScoutingStep::Replacement;
+            }
+            (ChoiceOrder::PlayerFirst, FB, Some(player)) => self.back_to_player(player),
+            (_, _, Some(player)) => {
+                self.event = Some(removed.event_type);
+                self.player = Some(player);
+                self.step = ScoutingStep::Player;
+            }
+            _ => self.start_next(),
+        }
         Ok(())
     }
 
@@ -479,13 +661,13 @@ impl ScoutingSession {
             .map_err(|_| ScoutingError::CouldNotAddEvent)?;
         self.snapshot = snapshot;
         self.set.events.push(event);
-        self.event = None;
-        self.player = None;
-        self.technique = None;
-        self.step = ScoutingStep::Event;
         match self.snapshot.get_set_winner(self.set.set_number) {
-            None => Ok(Progress::Saved),
+            None => {
+                self.start_next();
+                Ok(Progress::Saved)
+            }
             Some(_) => {
+                self.reset();
                 self.end_set().await;
                 Ok(Progress::SetOver)
             }
