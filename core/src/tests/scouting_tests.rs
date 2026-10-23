@@ -17,7 +17,7 @@ mod tests {
             },
             team_writer::{TeamInput, TeamWriter},
         },
-        scouting::{Progress, ScoutingError, ScoutingSession, ScoutingStep},
+        scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
             player::PlayerEntry,
@@ -317,5 +317,145 @@ mod tests {
         assert_eq!(s.session.choose_event(OE).await, Ok(Progress::SetOver));
         assert_eq!(s.session.current_match().sets.len(), 1);
         assert_eq!(s.session.current_match().sets[0].events.len(), 25);
+    }
+
+    /// A set where we serve, the player chosen first.
+    async fn player_first() -> Scouting {
+        let s = scouting().await;
+        Scouting {
+            session: s.session.with_order(ChoiceOrder::PlayerFirst),
+            ..s
+        }
+    }
+
+    /// With the player first, our serve waits for its evaluation: the
+    /// server is known. The other events are there too.
+    #[tokio::test]
+    async fn with_the_player_first_the_serve_needs_its_evaluation_only() {
+        let mut s = player_first().await;
+        assert_eq!(
+            (s.session.step(), s.session.event(), s.session.player()),
+            (ScoutingStep::Eval, Some(S), Some(s.players[0]))
+        );
+        assert_eq!(s.session.other_events(), vec![OE, F, R, CS]);
+        assert_eq!(s.session.player_events(&s.players[0]), vec![]);
+        assert_eq!(
+            s.session.choose_eval(EvalEnum::Perfect).await,
+            Ok(Progress::Saved)
+        );
+        // still serving, again to evaluate
+        assert_eq!(
+            (s.session.step(), s.session.event()),
+            (ScoutingStep::Eval, Some(S))
+        );
+        // another event takes the place of the serve
+        assert_eq!(s.session.choose_event(OE).await, Ok(Progress::Saved));
+        assert_eq!(s.session.snapshot().score_us, 2);
+        assert_eq!(s.session.choose_event(F).await, Ok(Progress::Choosing));
+        assert_eq!(s.session.step(), ScoutingStep::Player);
+        // back to the serve
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.step(), s.session.event()),
+            (ScoutingStep::Eval, Some(S))
+        );
+        // an event not possible leaves the serve as it was
+        assert_eq!(
+            s.session.choose_event(P).await,
+            Err(ScoutingError::EventNotAvailable(P))
+        );
+        assert_eq!(s.session.event(), Some(S));
+        // nothing to go back to: the undo removes the last event, and we
+        // serve again
+        s.session.undo().await.unwrap();
+        assert_eq!(event_types(&saved_events(&s).await), vec![S]);
+        assert_eq!(
+            (s.session.step(), s.session.event()),
+            (ScoutingStep::Eval, Some(S))
+        );
+        // the ace is removed, to evaluate again
+        s.session.undo().await.unwrap();
+        assert!(saved_events(&s).await.is_empty());
+        assert_eq!(
+            (s.session.step(), s.session.event()),
+            (ScoutingStep::Eval, Some(S))
+        );
+        // nothing left to undo
+        assert_eq!(s.session.undo().await, Ok(()));
+    }
+
+    /// With the player first, the event is chosen only when the player can
+    /// play more than one.
+    #[tokio::test]
+    async fn with_the_player_first_the_event_comes_if_more_than_one() {
+        let mut s = player_first().await;
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        // they receive and attack: the setter is in the back row, a middle
+        // blocker in the front row
+        let setter = s.players[0];
+        let blocker = s.players[2];
+        assert_eq!(s.session.player_events(&setter), vec![D]);
+        assert_eq!(s.session.player_events(&blocker), vec![D, B]);
+        assert_eq!(s.session.other_events(), vec![OS, OE, F, OF]);
+
+        assert_eq!(
+            s.session.choose_player_first(blocker).await,
+            Ok(Progress::Choosing)
+        );
+        assert_eq!(
+            (s.session.step(), s.session.player()),
+            (ScoutingStep::Event, Some(blocker))
+        );
+        assert_eq!(s.session.other_events(), vec![]);
+        s.session.choose_event(B).await.unwrap();
+        assert_eq!(
+            (s.session.step(), s.session.event()),
+            (ScoutingStep::Eval, Some(B))
+        );
+        // back to the events of the player, then to the players
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.step(), s.session.event(), s.session.player()),
+            (ScoutingStep::Event, None, Some(blocker))
+        );
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.player(), None);
+
+        // one event: straight to the evaluation
+        assert_eq!(
+            s.session.choose_player_first(setter).await,
+            Ok(Progress::Choosing)
+        );
+        assert_eq!(
+            (s.session.step(), s.session.event()),
+            (ScoutingStep::Eval, Some(D))
+        );
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.step(), s.session.player()),
+            (ScoutingStep::Event, None)
+        );
+        s.session.choose_player_first(setter).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+
+        // a player not on court plays nothing
+        assert_eq!(
+            s.session.choose_player_first(s.players[7]).await,
+            Err(ScoutingError::InvalidPlayerSelection)
+        );
+        // the setter can attack or send a freeball: the freeball is saved
+        // with the player
+        assert_eq!(s.session.player_events(&setter), vec![A, FB]);
+        s.session.choose_player_first(setter).await.unwrap();
+        assert_eq!(s.session.choose_event(FB).await, Ok(Progress::Saved));
+        // undone, back to the events of the player
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.step(), s.session.player()),
+            (ScoutingStep::Event, Some(setter))
+        );
+        // another event drops the player
+        assert_eq!(s.session.choose_event(OE).await, Ok(Progress::Saved));
+        assert_eq!(event_types(&saved_events(&s).await), vec![S, D, OE]);
     }
 }
