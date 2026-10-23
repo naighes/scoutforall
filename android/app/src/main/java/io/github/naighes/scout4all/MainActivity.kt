@@ -63,8 +63,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The screens: teams → team → its form, a player or a match → its form
- * or the start of a set, and the forms of a new team, player or match (which
+/** The screens: teams → team → its form, a player or a match → its form,
+ * the start of a set or its scouting, and the forms of a new team, player or match (which
  * goes on with its first set). */
 @Composable
 private fun Navigation(teams: TeamsViewModel) {
@@ -125,6 +125,7 @@ private fun Navigation(teams: TeamsViewModel) {
                 onBack = { nav.popBackStack() },
                 onEdit = { nav.navigate("$match/edit") },
                 onStartSet = { nav.navigate("$match/start-set") },
+                onResumeSet = { nav.navigate("$match/scouting") },
             )
         }
         composable("team/{id}/match/{match}/edit") { entry ->
@@ -135,7 +136,18 @@ private fun Navigation(teams: TeamsViewModel) {
         composable("team/{id}/match/{match}/start-set") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
-            SetStartScreen(id, m, onBack = { nav.popBackStack() }, onStarted = { nav.popBackStack() })
+            // as the TUI, a set started goes on with its scouting; back from
+            // it, the page of the match
+            SetStartScreen(id, m, onBack = { nav.popBackStack() }, onStarted = {
+                nav.navigate("team/$id/match/${Uri.encode(m)}/scouting") {
+                    popUpTo("team/{id}/match/{match}/start-set") { inclusive = true }
+                }
+            })
+        }
+        composable("team/{id}/match/{match}/scouting") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val m = entry.arguments?.getString("match").orEmpty()
+            ScoutingScreen(id, m, onBack = { nav.popBackStack() })
         }
     }
 }

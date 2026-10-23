@@ -37,7 +37,6 @@
     <string name="set_n">Set %d</string>
     <string name="start_set_n">Inizia set %d</string>
     <string name="resume_set_n">Riprendi set %d</string>
-    <string name="resume_soon">Lo scouting di un set arriva con la prossima versione dell\'app.</string>
     <string name="no_sets">Ancora nessun set</string>
     <string name="serving_team">Al servizio</string>
     <string name="us">Noi</string>
@@ -54,6 +53,14 @@
     <string name="net">rete</string>
     <string name="setter_short">P</string>
     <string name="close">Chiudi</string>
+    <string name="libero_short">L</string>
+    <string name="undo">Annulla</string>
+    <string name="touch_the_player">Tocca il giocatore in campo</string>
+    <string name="who_comes_in">Chi entra?</string>
+    <string name="other_events">Altro</string>
+    <string name="set_won">Set %d vinto</string>
+    <string name="set_lost">Set %d perso</string>
+    <string name="ok">OK</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>
         <item quantity="other">%d giocatori</item>
