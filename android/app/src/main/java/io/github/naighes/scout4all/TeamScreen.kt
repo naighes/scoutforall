@@ -74,6 +74,8 @@ fun TeamScreen(
     onEdit: () -> Unit,
     onNewPlayer: () -> Unit,
     onPlayer: (String) -> Unit,
+    onNewMatch: () -> Unit,
+    onMatch: (String) -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<TeamState>(TeamState.Loading, id) {
@@ -108,9 +110,13 @@ fun TeamScreen(
             )
         },
         floatingActionButton = {
-            if (loaded && tab == PLAYERS_TAB) {
-                FloatingActionButton(onClick = onNewPlayer) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.new_player))
+            if (loaded) {
+                val (onNew, description) = when (tab) {
+                    PLAYERS_TAB -> onNewPlayer to R.string.new_player
+                    else -> onNewMatch to R.string.new_match
+                }
+                FloatingActionButton(onClick = onNew) {
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(description))
                 }
             }
         },
@@ -142,7 +148,7 @@ fun TeamScreen(
                 val content = Modifier.fillMaxSize()
                 when (tab) {
                     PLAYERS_TAB -> Players(s.team, onPlayer, content)
-                    else -> Matches(matches, content)
+                    else -> Matches(matches, onMatch, content)
                 }
             }
         }
@@ -159,18 +165,22 @@ private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, modifier: Mod
 }
 
 @Composable
-private fun Matches(state: MatchesState, modifier: Modifier) = when (state) {
+private fun Matches(state: MatchesState, onMatch: (String) -> Unit, modifier: Modifier) = when (state) {
     MatchesState.Loading -> Centered(modifier) { CircularProgressIndicator() }
     is MatchesState.Failed -> Centered(modifier) { Text(state.message) }
     is MatchesState.Loaded -> when {
         state.matches.isEmpty() -> Centered(modifier) { Text(stringResource(R.string.no_matches)) }
-        else -> LazyColumn(modifier) { items(state.matches) { MatchRow(it) } }
+        // room at the bottom: the button doesn't cover the last match
+        else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
+            items(state.matches) { MatchRow(it, onMatch) }
+        }
     }
 }
 
 @Composable
-private fun MatchRow(m: MatchListing) = when (m) {
+private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
     is MatchListing.Match -> ListItem(
+        modifier = Modifier.clickable { onMatch(m.id) },
         // home or away at a glance, in the grey of the secondary text
         leadingContent = {
             val place = stringResource(if (m.home) R.string.home else R.string.away)

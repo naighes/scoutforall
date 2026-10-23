@@ -26,4 +26,5 @@ val MobileException.reason: String
         is MobileException.Failed -> reason
         is MobileException.InvalidTeam -> reason
         is MobileException.InvalidPlayer -> reason
+        is MobileException.InvalidMatch -> reason
     }

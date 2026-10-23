@@ -25,6 +25,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+chrono.workspace = true
 scout4all-core.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -32,7 +33,6 @@ uuid.workspace = true
 uniffi = "0.32"
 
 [dev-dependencies]
-chrono.workspace = true
 tempfile.workspace = true
 
 [lints]
