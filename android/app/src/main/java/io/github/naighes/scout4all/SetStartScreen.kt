@@ -250,6 +250,7 @@ private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewMo
                         )
                     },
                     onPosition = { model.open(Pick.Position(it)) },
+                    showPositions = true,
                 )
             }
         }

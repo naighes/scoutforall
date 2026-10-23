@@ -62,6 +62,9 @@
     <string name="other_events">Other</string>
     <string name="set_won">Set %d won</string>
     <string name="set_lost">Set %d lost</string>
+    <string name="break_phase">BREAK</string>
+    <string name="side_out_phase">SIDE-OUT</string>
+    <string name="serving">Serving</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>
