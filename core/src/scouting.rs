@@ -618,6 +618,15 @@ impl ScoutingSession {
             Err(_) => return Err(ScoutingError::CouldNotUndo),
         };
         self.set.events.pop();
+        // the set ended by the event is open again
+        if let Some(ended) = self
+            .current_match
+            .sets
+            .iter_mut()
+            .find(|s| s.set_number == self.set.set_number)
+        {
+            *ended = self.set.clone();
+        }
         // the snapshot replays the events left
         let snapshot = self
             .set
