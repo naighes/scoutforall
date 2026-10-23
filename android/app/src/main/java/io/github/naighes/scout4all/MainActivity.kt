@@ -2,6 +2,7 @@ package io.github.naighes.scout4all
 
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.View
@@ -62,8 +63,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The screens: teams → team → its form or a player, and the forms of
- * a new team or player. */
+/** The screens: teams → team → its form, a player or a match, and the
+ * forms of a new team, player or match. */
 @Composable
 private fun Navigation(teams: TeamsViewModel) {
     val nav = rememberNavController()
@@ -86,6 +87,8 @@ private fun Navigation(teams: TeamsViewModel) {
                 onEdit = { nav.navigate("team/$id/edit") },
                 onNewPlayer = { nav.navigate("team/$id/new-player") },
                 onPlayer = { player -> nav.navigate("team/$id/player/$player") },
+                onNewMatch = { nav.navigate("team/$id/new-match") },
+                onMatch = { m -> nav.navigate("team/$id/match/${Uri.encode(m)}") },
             )
         }
         composable("team/{id}/edit") { entry ->
@@ -100,6 +103,15 @@ private fun Navigation(teams: TeamsViewModel) {
             val id = entry.arguments?.getString("id").orEmpty()
             val player = entry.arguments?.getString("player").orEmpty()
             PlayerFormScreen(id, player, onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
+        }
+        composable("team/{id}/new-match") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            MatchFormScreen(id, null, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
+        }
+        composable("team/{id}/match/{match}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val m = entry.arguments?.getString("match").orEmpty()
+            MatchFormScreen(id, m, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
         }
     }
 }

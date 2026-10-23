@@ -27,6 +27,13 @@
     <string name="home">in casa</string>
     <string name="away">in trasferta</string>
     <string name="in_progress">in corso</string>
+    <string name="new_match">Nuova partita</string>
+    <string name="edit_match">Modifica partita</string>
+    <string name="opponent">Avversario</string>
+    <string name="date">Data</string>
+    <string name="home_match">In casa</string>
+    <string name="away_match">In trasferta</string>
+    <string name="max_substitutions">Sostituzioni per set</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>
         <item quantity="other">%d giocatori</item>

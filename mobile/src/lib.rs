@@ -6,16 +6,19 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
+use chrono::{DateTime, FixedOffset};
 use scout4all_core::{
     errors::AppError,
     localization::{Labels, Language},
     logging::logger::init_logger,
+    match_form::{MatchForm, MatchFormError},
     player_form::{PlayerForm, PlayerFormError, removal},
     providers::{
         match_reader::MatchReader,
+        match_writer::MatchWriter,
         store::{
-            match_reader::StoreMatchReader, set_reader::StoreSetReader,
-            team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
+            match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
+            set_reader::StoreSetReader, team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
         },
         team_reader::TeamReader,
         team_writer::TeamWriter,
@@ -76,6 +79,23 @@ pub struct TeamForm {
     pub year: String,
 }
 
+#[uniffi::remote(Record)]
+pub struct MatchForm {
+    pub opponent: String,
+    pub date: Option<MatchDate>,
+    pub home: bool,
+    pub max_substitutions: String,
+}
+
+/// RFC 3339 text for the app, with the offset of where the match is played.
+pub type MatchDate = DateTime<FixedOffset>;
+
+uniffi::custom_type!(MatchDate, String, {
+    remote,
+    lower: |date| date.to_rfc3339(),
+    try_lift: |date| Ok(DateTime::parse_from_rfc3339(&date)?),
+});
+
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum MobileError {
     #[error("{reason}")]
@@ -86,6 +106,9 @@ pub enum MobileError {
     /// a field of the player form
     #[error("{reason}")]
     InvalidPlayer { field: PlayerField, reason: String },
+    /// a field of the match form
+    #[error("{reason}")]
+    InvalidMatch { field: MatchField, reason: String },
 }
 
 impl From<AppError> for MobileError {
@@ -128,6 +151,25 @@ impl From<PlayerFormError> for PlayerField {
             PlayerFormError::EmptyName => PlayerField::Name,
             PlayerFormError::MissingRole => PlayerField::Role,
             PlayerFormError::InvalidNumber | PlayerFormError::NumberInUse => PlayerField::Number,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MatchField {
+    Opponent,
+    Date,
+    MaxSubstitutions,
+}
+
+impl From<MatchFormError> for MatchField {
+    fn from(e: MatchFormError) -> Self {
+        match e {
+            MatchFormError::EmptyOpponent => MatchField::Opponent,
+            MatchFormError::InvalidDate => MatchField::Date,
+            MatchFormError::InvalidMaxSubstitutions | MatchFormError::MaxSubstitutionsBelowUsed => {
+                MatchField::MaxSubstitutions
+            }
         }
     }
 }
@@ -222,6 +264,7 @@ pub struct Scout4All {
     team_reader: StoreTeamReader,
     team_writer: StoreTeamWriter,
     match_reader: StoreMatchReader,
+    match_writer: StoreMatchWriter,
 }
 
 #[uniffi::export]
@@ -244,6 +287,7 @@ impl Scout4All {
             runtime,
             team_reader: StoreTeamReader::new(store.clone(), language.clone()),
             team_writer: StoreTeamWriter::new(store.clone()),
+            match_writer: StoreMatchWriter::new(store.clone()),
             match_reader: StoreMatchReader::new(
                 store.clone(),
                 Arc::new(StoreSetReader::new(store, language.clone())),
@@ -319,6 +363,66 @@ impl Scout4All {
                 },
             })
             .collect())
+    }
+
+    /// The form of a new match, on `date` (now, where it's played).
+    pub fn new_match_form(&self, date: MatchDate) -> MatchForm {
+        MatchForm::new(date)
+    }
+
+    /// The form of a match of the team, to edit it.
+    pub fn match_form(&self, team_id: String, match_id: String) -> Result<MatchForm, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let m = self
+            .runtime
+            .block_on(self.match_reader.read_single(&team, &match_id))?;
+        Ok(MatchForm::of(&m))
+    }
+
+    /// Creates a match of the team (no `match_id`) or updates the one with
+    /// `match_id`; returns its id.
+    pub fn save_match(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+    ) -> Result<String, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let existing = match_id
+            .map(|id| {
+                self.runtime
+                    .block_on(self.match_reader.read_single(&team, &id))
+            })
+            .transpose()?;
+        let input = form
+            .validate(existing.as_ref())
+            .map_err(|e| MobileError::InvalidMatch {
+                field: e.into(),
+                reason: e.message(self.language.labels()),
+            })?;
+        let saved = match existing {
+            Some(m) => self
+                .runtime
+                .block_on(self.match_writer.update(
+                    &m,
+                    input.opponent,
+                    input.date,
+                    input.home,
+                    input.max_substitutions,
+                ))
+                .map(|()| m.id),
+            None => self
+                .runtime
+                .block_on(self.match_writer.create(
+                    &team,
+                    input.opponent,
+                    input.date,
+                    input.home,
+                    input.max_substitutions,
+                ))
+                .map(|m| m.id),
+        };
+        Ok(saved?)
     }
 
     /// An empty form for a new team, with the year given.
@@ -457,10 +561,6 @@ fn count(team: &TeamEntry) -> u32 {
 #[allow(clippy::unwrap_used, clippy::unreachable)]
 mod tests {
     use super::*;
-    use chrono::DateTime;
-    use scout4all_core::providers::{
-        match_writer::MatchWriter, store::match_writer::StoreMatchWriter,
-    };
 
     #[test]
     fn an_empty_folder_has_no_teams() {
@@ -633,6 +733,69 @@ mod tests {
                 },
             ]
         );
+    }
+
+    fn match_form(opponent: &str, date: &str, max_substitutions: &str) -> MatchForm {
+        MatchForm {
+            opponent: opponent.into(),
+            date: DateTime::parse_from_rfc3339(date).ok(),
+            home: true,
+            max_substitutions: max_substitutions.into(),
+        }
+    }
+
+    #[test]
+    fn matches_are_created_and_edited() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let date = "2026-10-24T18:00:00+02:00";
+        let new = app.new_match_form(DateTime::parse_from_rfc3339(date).unwrap());
+        assert_eq!(new.max_substitutions, "8");
+
+        let id = app
+            .save_match(team.clone(), None, match_form(" Arezzo ", date, "8"))
+            .unwrap();
+        assert_eq!(id, "2026-10-24_arezzo");
+        let edited = match_form("Arezzo Volley", date, "6");
+        app.save_match(team.clone(), Some(id.clone()), edited.clone())
+            .unwrap();
+        assert_eq!(app.match_form(team.clone(), id.clone()).unwrap(), edited);
+        match app.matches(team).unwrap().as_slice() {
+            [
+                MatchListing::Match {
+                    id: listed,
+                    opponent,
+                    ..
+                },
+            ] => {
+                assert_eq!(listed, &id);
+                assert_eq!(opponent, "Arezzo Volley");
+            }
+            other => unreachable!("expected the match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_invalid_match_names_its_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        match app.save_match(
+            team.clone(),
+            None,
+            match_form("Arezzo", "2026-10-24T18:00:00+02:00", "0"),
+        ) {
+            Err(MobileError::InvalidMatch { field, reason }) => {
+                assert_eq!(field, MatchField::MaxSubstitutions);
+                assert_eq!(
+                    reason,
+                    "substitutions per set must be a number from 1 to 99"
+                );
+            }
+            other => unreachable!("expected invalid substitutions, got {other:?}"),
+        }
+        assert_eq!(app.matches(team).unwrap(), vec![]);
     }
 
     #[test]

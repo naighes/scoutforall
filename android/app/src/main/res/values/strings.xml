@@ -28,6 +28,14 @@
     <string name="home">home</string>
     <string name="away">away</string>
     <string name="in_progress">in progress</string>
+    <string name="new_match">New match</string>
+    <string name="edit_match">Edit match</string>
+    <string name="opponent">Opponent</string>
+    <string name="date">Date</string>
+    <string name="home_match">Home</string>
+    <string name="away_match">Away</string>
+    <string name="max_substitutions">Substitutions per set</string>
+    <string name="ok">OK</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>
