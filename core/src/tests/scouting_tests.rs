@@ -317,6 +317,15 @@ mod tests {
         assert_eq!(s.session.choose_event(OE).await, Ok(Progress::SetOver));
         assert_eq!(s.session.current_match().sets.len(), 1);
         assert_eq!(s.session.current_match().sets[0].events.len(), 25);
+        // undone, the set is open again
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.current_match().sets[0].events.len(), 24);
+        assert!(
+            s.session
+                .current_match()
+                .get_status()
+                .is_ok_and(|status| status.us_wins == 0)
+        );
     }
 
     /// A set where we serve, the player chosen first.
