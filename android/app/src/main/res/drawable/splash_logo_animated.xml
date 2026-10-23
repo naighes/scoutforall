@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The splash icon on Android 12 and later, which animate it. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/splash_logo">
+    <target
+        android:name="ball"
+        android:animation="@animator/splash_logo_spin" />
+</animated-vector>
