@@ -148,6 +148,9 @@ pub struct Labels {
     pub classification_is_required: &'static str,
     pub gender_is_required: &'static str,
     pub year_must_be_a_four_digit_number: &'static str,
+    pub role_is_required: &'static str,
+    pub number_must_be_between_0_and_99: &'static str,
+    pub number_already_in_use: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -288,6 +291,9 @@ const EN: Labels = Labels {
     classification_is_required: "classification is required",
     gender_is_required: "gender is required",
     year_must_be_a_four_digit_number: "year must be a 4-digit number",
+    role_is_required: "role is required",
+    number_must_be_between_0_and_99: "number must be between 0 and 99",
+    number_already_in_use: "number already in use",
 };
 
 const IT: Labels = Labels {
@@ -428,6 +434,9 @@ const IT: Labels = Labels {
     classification_is_required: "la classificazione è obbligatoria",
     gender_is_required: "il genere è obbligatorio",
     year_must_be_a_four_digit_number: "l'anno deve essere un numero a 4 cifre",
+    role_is_required: "il ruolo è obbligatorio",
+    number_must_be_between_0_and_99: "il numero deve essere compreso tra 0 e 99",
+    number_already_in_use: "numero già in uso",
 };
 
 /// Returns the labels of a language.
