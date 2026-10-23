@@ -125,6 +125,7 @@ mod tests {
         ui.press(KeyCode::Enter).await;
         // the banner cuts the message
         let error: String = current_labels()
+            .domain
             .max_substitutions_below_existing_substitutions
             .chars()
             .take(40)

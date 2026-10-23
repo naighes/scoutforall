@@ -12,6 +12,7 @@ mod freeball_tests;
 mod legacy_data_tests;
 mod lineup_scenario_tests;
 mod lineup_tests;
+mod match_form_tests;
 mod player_form_tests;
 mod point_sequence_tests;
 mod report_tests;

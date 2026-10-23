@@ -151,6 +151,10 @@ pub struct Labels {
     pub role_is_required: &'static str,
     pub number_must_be_between_0_and_99: &'static str,
     pub number_already_in_use: &'static str,
+    pub opponent_cannot_be_empty: &'static str,
+    pub invalid_date: &'static str,
+    pub invalid_max_substitutions: &'static str,
+    pub max_substitutions_below_existing_substitutions: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -294,6 +298,10 @@ const EN: Labels = Labels {
     role_is_required: "role is required",
     number_must_be_between_0_and_99: "number must be between 0 and 99",
     number_already_in_use: "number already in use",
+    opponent_cannot_be_empty: "opponent cannot be empty",
+    invalid_date: "invalid date",
+    invalid_max_substitutions: "substitutions per set must be a number from 1 to 99",
+    max_substitutions_below_existing_substitutions: "substitutions per set cannot be less than the number already used in a set",
 };
 
 const IT: Labels = Labels {
@@ -437,6 +445,10 @@ const IT: Labels = Labels {
     role_is_required: "il ruolo è obbligatorio",
     number_must_be_between_0_and_99: "il numero deve essere compreso tra 0 e 99",
     number_already_in_use: "numero già in uso",
+    opponent_cannot_be_empty: "l'avversario è obbligatorio",
+    invalid_date: "data non valida",
+    invalid_max_substitutions: "le sostituzioni per set devono essere un numero da 1 a 99",
+    max_substitutions_below_existing_substitutions: "le sostituzioni per set non possono essere inferiori al numero già utilizzato in un set",
 };
 
 /// Returns the labels of a language.

@@ -323,7 +323,7 @@ mod tests {
             ui.press(KeyCode::Enter).await;
             assert!(
                 ui.screen()
-                    .contains(current_labels().invalid_max_substitutions),
+                    .contains(current_labels().domain.invalid_max_substitutions),
                 "{value:?}: {}",
                 ui.screen()
             );
@@ -338,7 +338,7 @@ mod tests {
         ui.press(KeyCode::Enter).await;
         assert!(
             ui.screen()
-                .contains(current_labels().opponent_cannot_be_empty),
+                .contains(current_labels().domain.opponent_cannot_be_empty),
             "{}",
             ui.screen()
         );
