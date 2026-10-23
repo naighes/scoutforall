@@ -25,13 +25,10 @@ use ratatui::{
     widgets::{Row, Table},
 };
 use scout4all_core::{
-    providers::set_writer::SetWriter,
     scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     shapes::{
         enums::{EventTypeEnum, FriendlyName, RoleEnum},
-        r#match::MatchEntry,
-        set::SetEntry,
-        snapshot::{EventEntry, Snapshot},
+        snapshot::EventEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
 };
@@ -248,22 +245,19 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenA
 }
 
 impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScoutingScreen<SW, SR> {
-    pub fn new<SSW: SetWriter + Send + Sync + 'static>(
+    pub fn new(
         settings_reader: Arc<SR>,
         settings_writer: Arc<SW>,
         settings: Settings,
-        current_match: MatchEntry,
-        set: SetEntry,
-        snapshot: Snapshot,
+        session: ScoutingSession,
         back_stack_count: Option<u8>,
-        set_writer: Arc<SSW>,
     ) -> Self {
         let event_key_bindings = settings.scouting_keybindings.clone();
         ScoutingScreen {
             settings_reader,
             settings_writer,
             settings,
-            session: ScoutingSession::new(current_match, set, snapshot, set_writer),
+            session,
             notify_message: NotifyBanner::new(),
             back_stack_count,
             back: false,

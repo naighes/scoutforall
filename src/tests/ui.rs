@@ -85,6 +85,12 @@ impl Ui {
         Self::start_with(teams, &[], true, edit).await
     }
 
+    /// Like `start`, changing the saved files before the app starts, e.g.
+    /// to remove a player: `edit` gets the data folder.
+    pub async fn start_editing(teams: &[TeamFixture], edit: impl FnOnce(&Path)) -> Self {
+        Self::start_with(teams, &[], false, edit).await
+    }
+
     /// The terms of use are already seen: the app opens on the team list.
     async fn start_with(
         teams: &[TeamFixture],

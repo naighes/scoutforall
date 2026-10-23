@@ -42,8 +42,8 @@ use ratatui::{
 use scout4all_core::{
     errors::AppError,
     providers::{match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter},
+    set_start::{self, NextSet, SetStartForm, next_set},
     shapes::{
-        enums::TeamSideEnum,
         listed::{Listed, Unreadable},
         r#match::{MatchEntry, MatchStatus},
         set::SetEntry,
@@ -400,48 +400,30 @@ impl<
         Ok(row)
     }
 
-    fn new_set(
-        &mut self,
-        m: &MatchEntry,
-        next_set_number: u8,
-        last_serving_team: Option<TeamSideEnum>,
-    ) -> AppAction {
+    fn new_set(&mut self, m: &MatchEntry, form: SetStartForm) -> AppAction {
         AppAction::SwitchScreen(Box::new(StartSetScreen::new(
             self.settings_reader.clone(),
             self.settings_writer.clone(),
             self.settings.clone(),
             m.clone(),
-            next_set_number,
-            match (next_set_number, last_serving_team) {
-                (_, None) => None,
-                (1 | 5, _) => None,
-                (_, Some(TeamSideEnum::Them)) => Some(TeamSideEnum::Us),
-                (_, Some(TeamSideEnum::Us)) => Some(TeamSideEnum::Them),
-            },
+            form,
             Some(1),
             self.set_writer.clone(),
         )))
     }
 
     fn continue_set(&mut self, m: &MatchEntry, last_incomplete_set: SetEntry) -> AppAction {
-        match last_incomplete_set.compute_snapshot(m.max_substitutions) {
-            Ok(snapshot) => AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+        match set_start::resume(m.clone(), last_incomplete_set, self.set_writer.clone()) {
+            Ok(session) => AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
                 self.settings_reader.clone(),
                 self.settings_writer.clone(),
                 self.settings.clone(),
-                m.clone(),
-                last_incomplete_set,
-                snapshot,
+                session,
                 Some(1),
-                self.set_writer.clone(),
             ))),
-            Err(_) => {
-                self.notify_message.set_error(
-                    current_labels()
-                        .domain
-                        .could_not_compute_snapshot
-                        .to_string(),
-                );
+            Err(e) => {
+                self.notify_message
+                    .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
         }
@@ -517,16 +499,10 @@ impl<
     fn handle_enter_key(&mut self) -> AppAction {
         let selected = self.get_selected_match().map(|(m, s)| (m.clone(), s));
         if let Some((match_entry, status)) = selected {
-            match (
-                status.match_finished,
-                status.last_incomplete_set.clone(),
-                status.next_set_number,
-            ) {
-                (false, None, Some(next_set_number)) => {
-                    self.new_set(&match_entry, next_set_number, status.last_serving_team)
-                }
-                (false, Some(last_set), _) => self.continue_set(&match_entry, last_set),
-                _ => AppAction::None,
+            match next_set(status) {
+                NextSet::Start(form) => self.new_set(&match_entry, form),
+                NextSet::Resume(set) => self.continue_set(&match_entry, set),
+                NextSet::Over => AppAction::None,
             }
         } else {
             self.notify_message
