@@ -542,6 +542,8 @@ pub struct EventChoice {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct EvalChoice {
     pub value: EvalEnum,
+    /// what the scouts write: #, +, !, /, -, =
+    pub symbol: String,
     pub name: String,
     pub description: Option<String>,
 }
@@ -738,6 +740,7 @@ impl Scouting {
                     .into_iter()
                     .map(|eval| EvalChoice {
                         value: eval,
+                        symbol: eval.to_string(),
                         name: eval.friendly_name(event, self.labels),
                         description: eval.friendly_description(event, self.labels),
                     })
@@ -1637,7 +1640,7 @@ mod tests {
             scouting
                 .available_evals()
                 .iter()
-                .any(|e| e.value == EvalEnum::Perfect && e.name == "ace")
+                .any(|e| e.value == EvalEnum::Perfect && e.symbol == "#" && e.name == "ace")
         );
         assert_eq!(
             scouting.choose_eval(EvalEnum::Perfect).unwrap(),
