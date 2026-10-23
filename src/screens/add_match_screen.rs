@@ -25,8 +25,9 @@ use ratatui::{
 };
 use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
+    match_form::{MatchForm, MatchInput},
     providers::{match_writer::MatchWriter, set_writer::SetWriter},
-    shapes::{enums::EventTypeEnum, r#match::MatchEntry, team::TeamEntry},
+    shapes::{r#match::MatchEntry, team::TeamEntry},
 };
 
 #[derive(Debug)]
@@ -268,57 +269,35 @@ impl<
     }
 
     async fn handle_confirm(&mut self) -> AppAction {
-        let max_substitutions = self
-            .max_substitutions
-            .get_selected_value()
-            .and_then(|v| v.parse::<u8>().ok())
-            .filter(|v| *v > 0);
-        match (
-            self.date.get_selected_value(),
-            self.opponent
+        let form = MatchForm {
+            opponent: self.opponent.get_selected_value().unwrap_or_default(),
+            date: self.date.get_selected_value().ok(),
+            home: self.home.get_selected_value(),
+            max_substitutions: self
+                .max_substitutions
                 .get_selected_value()
-                .filter(|o| !o.trim().is_empty()),
-            max_substitutions,
-        ) {
-            (_, None, _) => {
+                .unwrap_or_default(),
+        };
+        match (form.validate(self.editing.as_ref()), self.editing.clone()) {
+            (Err(e), _) => {
                 self.notify_message
-                    .set_error(current_labels().opponent_cannot_be_empty.to_string());
+                    .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
-            (_, _, None) => {
-                self.notify_message
-                    .set_error(current_labels().invalid_max_substitutions.to_string());
-                AppAction::None
-            }
-            (Ok(date), Some(opponent), Some(max_substitutions)) => match &self.editing {
-                Some(m) => {
-                    self.handle_update(m.clone(), opponent, date, max_substitutions)
-                        .await
-                }
-                None => self.handle_create(opponent, date, max_substitutions).await,
-            },
-            _ => {
-                self.notify_message
-                    .set_error(current_labels().invalid_date.to_string());
-                AppAction::None
-            }
+            (Ok(input), Some(m)) => self.handle_update(m, input).await,
+            (Ok(input), None) => self.handle_create(input).await,
         }
     }
 
-    async fn handle_create(
-        &mut self,
-        opponent: String,
-        date: chrono::DateTime<chrono::FixedOffset>,
-        max_substitutions: u8,
-    ) -> AppAction {
+    async fn handle_create(&mut self, input: MatchInput) -> AppAction {
         match self
             .match_writer
             .create(
                 &self.team,
-                opponent,
-                date,
-                self.home.get_selected_value(),
-                max_substitutions,
+                input.opponent,
+                input.date,
+                input.home,
+                input.max_substitutions,
             )
             .await
         {
@@ -340,42 +319,22 @@ impl<
         }
     }
 
-    async fn handle_update(
-        &mut self,
-        m: MatchEntry,
-        opponent: String,
-        date: chrono::DateTime<chrono::FixedOffset>,
-        max_substitutions: u8,
-    ) -> AppAction {
-        let max_existing = m
-            .sets
-            .iter()
-            .map(|s| {
-                s.events
-                    .iter()
-                    .filter(|e| e.event_type == EventTypeEnum::R)
-                    .count() as u8
-            })
-            .max()
-            .unwrap_or(0);
-        let result = match max_substitutions < max_existing {
-            true => Err(current_labels().max_substitutions_below_existing_substitutions),
-            false => self
-                .match_writer
-                .update(
-                    &m,
-                    opponent,
-                    date,
-                    self.home.get_selected_value(),
-                    max_substitutions,
-                )
-                .await
-                .map_err(|_| current_labels().could_not_update_match),
-        };
-        match result {
+    async fn handle_update(&mut self, m: MatchEntry, input: MatchInput) -> AppAction {
+        match self
+            .match_writer
+            .update(
+                &m,
+                input.opponent,
+                input.date,
+                input.home,
+                input.max_substitutions,
+            )
+            .await
+        {
             Ok(()) => AppAction::Back(true, Some(1)),
-            Err(message) => {
-                self.notify_message.set_error(message.to_string());
+            Err(_) => {
+                self.notify_message
+                    .set_error(current_labels().could_not_update_match.to_string());
                 AppAction::None
             }
         }
