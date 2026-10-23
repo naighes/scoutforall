@@ -102,6 +102,22 @@ mod tests {
         assert_eq!(ui.selected().as_deref(), Some(first));
     }
 
+    /// The name was never checked: a team could be saved with a blank one.
+    #[tokio::test]
+    async fn edit_team_rejects_a_blank_name() {
+        let mut ui = Ui::start(TEAM, &[]).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('e')]).await;
+        ui.type_keys(&[KeyCode::Backspace; 20]).await;
+        ui.type_keys(&chars("  ")).await;
+        // a classification and a gender: only the name is wrong
+        ui.type_keys(&[KeyCode::Down, KeyCode::Down, KeyCode::Enter]).await;
+        let screen = ui.screen();
+        assert!(
+            screen.contains(current_labels().domain.name_cannot_be_empty),
+            "{screen}"
+        );
+    }
+
     #[tokio::test]
     async fn report_an_issue_moves_between_fields_up_and_down() {
         let mut ui = Ui::start(TEAM, &[]).await;

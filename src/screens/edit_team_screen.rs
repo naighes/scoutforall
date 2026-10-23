@@ -24,11 +24,12 @@ use ratatui::{
     widgets::Paragraph,
 };
 use scout4all_core::{
-    providers::team_writer::{TeamInput, TeamWriter},
+    providers::team_writer::TeamWriter,
     shapes::{
         enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
         team::TeamEntry,
     },
+    team_form::TeamForm,
 };
 
 #[derive(Debug)]
@@ -254,68 +255,31 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
     }
 
     async fn handle_enter(&mut self) -> AppAction {
-        match (
-            self.name.get_selected_value(),
-            self.classification.get_selected_value(),
-            self.gender.get_selected_value(),
-            self.year.get_selected_value().map(|y| y.parse::<u16>()),
-        ) {
-            (None, _, _, _) => {
+        let form = TeamForm {
+            name: self.name.get_selected_value().unwrap_or_default(),
+            classification: self.classification.get_selected_value(),
+            gender: self.gender.get_selected_value(),
+            year: self.year.get_selected_value().unwrap_or_default(),
+        };
+        match form.validate(self.existing_team.as_ref()) {
+            Err(e) => {
                 self.notify_message
-                    .set_error(current_labels().name_cannot_be_empty.to_string());
+                    .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
-            (_, None, _, _) => {
-                self.notify_message
-                    .set_error(current_labels().classification_is_required.to_string());
-                AppAction::None
-            }
-            (_, _, None, _) => {
-                self.notify_message
-                    .set_error(current_labels().gender_is_required.to_string());
-                AppAction::None
-            }
-            (Some(name), Some(classification), Some(gender), Some(Ok(year))) => {
-                let input = match &self.existing_team {
-                    Some(team) => {
-                        let mut updated = team.clone();
-                        updated.name = name;
-                        updated.year = year;
-                        updated.classification = Some(classification);
-                        updated.gender = Some(gender);
-                        TeamInput::Existing(updated)
-                    }
-                    None => TeamInput::New {
-                        id: None,
-                        name,
-                        year,
-                        classification: Some(classification),
-                        gender: Some(gender),
-                        players: vec![],
-                    },
-                };
-                match self.team_writer.save(input).await {
-                    Ok(_) => {
-                        self.notify_message
-                            .set_info(current_labels().operation_successful.to_string());
-                        self.back = true;
-                        AppAction::None
-                    }
-                    Err(_) => {
-                        self.notify_message
-                            .set_error(current_labels().could_not_create_team.to_string());
-                        AppAction::None
-                    }
+            Ok(input) => match self.team_writer.save(input).await {
+                Ok(_) => {
+                    self.notify_message
+                        .set_info(current_labels().operation_successful.to_string());
+                    self.back = true;
+                    AppAction::None
                 }
-            }
-            (_, _, _, None | Some(Err(_))) => {
-                self.notify_message.set_error(
-                    current_labels()
-                        .year_must_be_a_four_digit_number
-                        .to_string(),
-                );
-                AppAction::None
-            }
+                Err(_) => {
+                    self.notify_message
+                        .set_error(current_labels().could_not_create_team.to_string());
+                    AppAction::None
+                }
+            },
         }
     }
 
