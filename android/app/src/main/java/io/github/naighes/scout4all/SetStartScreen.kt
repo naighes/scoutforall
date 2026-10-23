@@ -1,12 +1,16 @@
 package io.github.naighes.scout4all
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,13 +22,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -224,16 +231,47 @@ fun SetStartScreen(teamId: String, matchId: String, onBack: () -> Unit, onStarte
     }
 }
 
+/** The court stays in sight while choosing: the players to choose take the
+ * place of the setter, the liberos and the button, below the court or, in
+ * landscape, beside it. */
 @Composable
-private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewModel, modifier: Modifier) =
+private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewModel, modifier: Modifier) {
+    val lineup = state.lineup
+    val pick = state.pick
+    // back closes the players to choose, before leaving the screen
+    BackHandler(enabled = pick != null) { model.open(null) }
+    BoxWithConstraints(modifier) {
+        val court = @Composable { m: Modifier ->
+            Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ServingTeam(lineup, model)
+                Court(lineup, pick, onPosition = { model.open(Pick.Position(it)) })
+            }
+        }
+        val panel = @Composable { m: Modifier ->
+            when (pick) {
+                null -> Choices(state, model, m)
+                else -> PlayerPicker(pick, lineup, model, m)
+            }
+        }
+        when {
+            maxWidth > maxHeight -> Row(Modifier.fillMaxSize()) {
+                court(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()))
+                panel(Modifier.weight(1f).fillMaxHeight())
+            }
+            else -> Column(Modifier.fillMaxSize()) {
+                court(Modifier.fillMaxWidth())
+                panel(Modifier.weight(1f).fillMaxWidth())
+            }
+        }
+    }
+}
+
+/** The setter, the liberos and the start of the set. */
+@Composable
+private fun Choices(state: SetStartState.Choosing, model: SetStartViewModel, modifier: Modifier) =
     Column(modifier) {
         val lineup = state.lineup
-        Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ServingTeam(lineup, model)
-            Court(lineup, onPosition = { model.open(Pick.Position(it)) })
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Choice(R.string.setter, lineup.setter) { model.open(Pick.Setter) }
             Choice(R.string.libero, lineup.libero) { model.open(Pick.Libero) }
             if (lineup.allowsFallbackLibero) {
@@ -251,7 +289,6 @@ private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewMo
             enabled = lineup.complete && !state.busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.start_set)) }
-        state.pick?.let { pick -> PlayerSheet(pick, lineup, model) }
     }
 
 /** Who serves: chosen in the first set and in the tie-break, else as the
@@ -281,7 +318,7 @@ private fun ServingTeam(lineup: Lineup, model: SetStartViewModel) {
 /** The court seen from the bench, the net at the top: front row 4 3 2,
  * back row 5 6 1. */
 @Composable
-private fun Court(lineup: Lineup, onPosition: (Int) -> Unit) = Column(
+private fun Court(lineup: Lineup, pick: Pick?, onPosition: (Int) -> Unit) = Column(
     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
 ) {
@@ -301,6 +338,7 @@ private fun Court(lineup: Lineup, onPosition: (Int) -> Unit) = Column(
                     position,
                     player,
                     setter = player != null && player.id == lineup.setter?.id,
+                    picking = pick == Pick.Position(position),
                     modifier = Modifier.weight(1f),
                 ) { onPosition(position) }
             }
@@ -313,12 +351,16 @@ private fun CourtCell(
     position: Int,
     player: LineupPlayer?,
     setter: Boolean,
+    picking: Boolean,
     modifier: Modifier,
     onClick: () -> Unit,
 ) = Surface(
-    modifier = modifier.aspectRatio(1f).clickable(onClick = onClick),
+    // a bit wider than tall: room for the players to choose
+    modifier = modifier.aspectRatio(1.25f).clickable(onClick = onClick),
     shape = MaterialTheme.shapes.medium,
     color = MaterialTheme.colorScheme.surfaceVariant,
+    // the position being chosen, in the color of the actions
+    border = if (picking) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
 ) {
     Box(Modifier.padding(8.dp)) {
         Text(
@@ -386,23 +428,30 @@ private fun Choice(name: Int, player: LineupPlayer?, optional: Boolean = false, 
     },
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** The players to choose for `pick`, scrolling on their own: the court
+ * stays where it is. */
 @Composable
-private fun PlayerSheet(pick: Pick, lineup: Lineup, model: SetStartViewModel) {
+private fun PlayerPicker(pick: Pick, lineup: Lineup, model: SetStartViewModel, modifier: Modifier) {
     val choices = remember(pick, lineup) { model.choices(pick) }
     val current = chosen(lineup, pick)
-    ModalBottomSheet(onDismissRequest = { model.open(null) }) {
-        Text(
-            when (pick) {
-                is Pick.Position -> stringResource(R.string.position_n, pick.position)
-                Pick.Setter -> stringResource(R.string.setter)
-                Pick.Libero -> stringResource(R.string.libero)
-                Pick.FallbackLibero -> stringResource(R.string.fallback_libero)
-            },
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.titleLarge,
-        )
-        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
+    Column(modifier) {
+        HorizontalDivider()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when (pick) {
+                    is Pick.Position -> stringResource(R.string.position_n, pick.position)
+                    Pick.Setter -> stringResource(R.string.setter)
+                    Pick.Libero -> stringResource(R.string.libero)
+                    Pick.FallbackLibero -> stringResource(R.string.fallback_libero)
+                },
+                modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            IconButton(onClick = { model.open(null) }) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close))
+            }
+        }
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
             // a choice made can be undone; the fallback libero can stay out
             if (current != null || pick == Pick.FallbackLibero) {
                 item {

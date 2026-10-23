@@ -55,6 +55,7 @@
     <string name="start_set">Start the set</string>
     <string name="net">net</string>
     <string name="setter_short">S</string>
+    <string name="close">Close</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>
