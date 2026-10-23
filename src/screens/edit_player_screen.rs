@@ -22,7 +22,8 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
 };
 use scout4all_core::{
-    providers::team_writer::{PlayerInput, TeamWriter},
+    player_form::PlayerForm,
+    providers::team_writer::TeamWriter,
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
 };
 
@@ -210,69 +211,31 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         AppAction::None
     }
 
-    fn is_player_number_available(&self, number: u8) -> bool {
-        let existing_id = self.existing_player.as_ref().map(|ep| ep.id);
-        !self
-            .team
-            .active_players()
-            .iter()
-            .any(|p| p.number == number && Some(p.id) != existing_id)
-    }
-
     async fn handle_confirm(&mut self) -> AppAction {
-        match (
-            self.name.get_selected_value(),
-            self.role.get_selected_value(),
-            self.number
-                .get_selected_value()
-                .and_then(|v| v.parse::<u8>().ok()),
-        ) {
-            (None, _, _) => {
+        let form = PlayerForm {
+            name: self.name.get_selected_value().unwrap_or_default(),
+            role: self.role.get_selected_value(),
+            number: self.number.get_selected_value().unwrap_or_default(),
+        };
+        match form.validate(&self.team, self.existing_player.as_ref()) {
+            Err(e) => {
                 self.notify_message
-                    .set_error(current_labels().domain.name_cannot_be_empty.to_string());
+                    .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
-            (_, None, _) => {
-                self.notify_message
-                    .set_error(current_labels().role_is_required.to_string());
-                AppAction::None
-            }
-            (Some(name), Some(role), Some(number)) => {
-                if self.is_player_number_available(number) {
-                    let input = match &self.existing_player {
-                        Some(player) => {
-                            let mut updated = player.clone();
-                            updated.name = name;
-                            updated.role = Some(role);
-                            updated.number = number;
-                            PlayerInput::Existing(updated)
-                        }
-                        None => PlayerInput::New { name, role, number },
-                    };
-                    match self.team_writer.save_player(input, &mut self.team).await {
-                        Ok(_) => {
-                            self.back = true;
-                            self.notify_message
-                                .set_info(current_labels().operation_successful.to_string());
-                            AppAction::None
-                        }
-                        Err(_) => {
-                            self.notify_message
-                                .set_error(current_labels().could_not_create_player.to_string());
-                            AppAction::None
-                        }
-                    }
-                } else {
+            Ok(input) => match self.team_writer.save_player(input, &mut self.team).await {
+                Ok(_) => {
+                    self.back = true;
                     self.notify_message
-                        .set_error(current_labels().number_already_in_use.to_string());
+                        .set_info(current_labels().operation_successful.to_string());
                     AppAction::None
                 }
-            }
-            (_, _, None) => {
-                self.notify_message
-                    .set_error(current_labels().number_must_be_between_0_and_99.to_string());
-                AppAction::None
-            }
+                Err(_) => {
+                    self.notify_message
+                        .set_error(current_labels().could_not_create_player.to_string());
+                    AppAction::None
+                }
+            },
         }
     }
 

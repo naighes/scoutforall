@@ -7,6 +7,7 @@ pub mod constants;
 pub mod errors;
 pub mod localization;
 pub mod logging;
+pub mod player_form;
 pub mod providers;
 pub mod reporting;
 pub mod scouting;

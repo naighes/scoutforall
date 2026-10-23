@@ -29,12 +29,10 @@ use ratatui::{
     style::{Modifier, Style},
 };
 use scout4all_core::{
+    player_form::removal,
     providers::{
-        match_reader::MatchReader,
-        match_writer::MatchWriter,
-        set_writer::SetWriter,
-        team_reader::TeamReader,
-        team_writer::{PlayerInput, TeamWriter},
+        match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
+        team_reader::TeamReader, team_writer::TeamWriter,
     },
     shapes::{player::PlayerEntry, team::TeamEntry},
     storage::Store,
@@ -370,10 +368,7 @@ impl<
         player: PlayerEntry,
         team_writer: Arc<TW>,
     ) -> AppAction {
-        let mut input = player.clone();
-        input.deleted = true;
-        let input = PlayerInput::Existing(input);
-        let player = team_writer.save_player(input, team).await;
+        let player = team_writer.save_player(removal(&player), team).await;
         match player {
             Ok(_) => {
                 self.notifier

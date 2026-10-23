@@ -110,7 +110,25 @@ mod tests {
         ui.type_keys(&[KeyCode::Backspace; 20]).await;
         ui.type_keys(&chars("  ")).await;
         // a classification and a gender: only the name is wrong
-        ui.type_keys(&[KeyCode::Down, KeyCode::Down, KeyCode::Enter]).await;
+        ui.type_keys(&[KeyCode::Down, KeyCode::Down, KeyCode::Enter])
+            .await;
+        let screen = ui.screen();
+        assert!(
+            screen.contains(current_labels().domain.name_cannot_be_empty),
+            "{screen}"
+        );
+    }
+
+    /// The name of a player was never checked either.
+    #[tokio::test]
+    async fn new_player_rejects_a_blank_name() {
+        let mut ui = Ui::start(TEAM, &[]).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('n')]).await;
+        ui.type_keys(&chars("  ")).await;
+        // a role and a number: only the name is wrong
+        ui.type_keys(&[KeyCode::Down, KeyCode::Down]).await;
+        ui.type_keys(&chars("42")).await;
+        ui.press(KeyCode::Enter).await;
         let screen = ui.screen();
         assert!(
             screen.contains(current_labels().domain.name_cannot_be_empty),
