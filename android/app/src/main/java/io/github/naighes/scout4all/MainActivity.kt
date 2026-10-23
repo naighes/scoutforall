@@ -63,8 +63,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The screens: teams → team → its form, a player or a match, and the
- * forms of a new team, player or match. */
+/** The screens: teams → team → its form, a player or a match → its form
+ * or the start of a set, and the forms of a new team, player or match (which
+ * goes on with its first set). */
 @Composable
 private fun Navigation(teams: TeamsViewModel) {
     val nav = rememberNavController()
@@ -106,12 +107,35 @@ private fun Navigation(teams: TeamsViewModel) {
         }
         composable("team/{id}/new-match") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            MatchFormScreen(id, null, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
+            MatchFormScreen(id, null, onBack = { nav.popBackStack() }, onSaved = { m ->
+                // as the TUI, a new match goes on with its first set; back
+                // from it, the page of the match
+                val match = "team/$id/match/${Uri.encode(m)}"
+                nav.navigate(match) { popUpTo("team/{id}/new-match") { inclusive = true } }
+                nav.navigate("$match/start-set")
+            })
         }
         composable("team/{id}/match/{match}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
+            val match = "team/$id/match/${Uri.encode(m)}"
+            MatchScreen(
+                id,
+                m,
+                onBack = { nav.popBackStack() },
+                onEdit = { nav.navigate("$match/edit") },
+                onStartSet = { nav.navigate("$match/start-set") },
+            )
+        }
+        composable("team/{id}/match/{match}/edit") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val m = entry.arguments?.getString("match").orEmpty()
             MatchFormScreen(id, m, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
+        }
+        composable("team/{id}/match/{match}/start-set") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val m = entry.arguments?.getString("match").orEmpty()
+            SetStartScreen(id, m, onBack = { nav.popBackStack() }, onStarted = { nav.popBackStack() })
         }
     }
 }
