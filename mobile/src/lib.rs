@@ -12,7 +12,11 @@ use scout4all_core::{
     logging::logger::init_logger,
     player_form::{PlayerForm, PlayerFormError, removal},
     providers::{
-        store::{team_reader::StoreTeamReader, team_writer::StoreTeamWriter},
+        match_reader::MatchReader,
+        store::{
+            match_reader::StoreMatchReader, set_reader::StoreSetReader,
+            team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
+        },
         team_reader::TeamReader,
         team_writer::TeamWriter,
     },
@@ -189,6 +193,27 @@ pub enum TeamListing {
     },
 }
 
+/// A match as the team page lists it: one that can't be read, or whose sets
+/// don't replay, keeps its folder.
+#[derive(Debug, PartialEq, uniffi::Enum)]
+pub enum MatchListing {
+    Match {
+        id: String,
+        opponent: String,
+        home: bool,
+        /// RFC 3339, with the offset of where it was played: the app formats
+        /// it in its language
+        date: String,
+        /// the sets won by the team and by the opponent
+        won: u8,
+        lost: u8,
+        finished: bool,
+    },
+    Unreadable {
+        folder: String,
+    },
+}
+
 /// The data of the app, in a folder with the same layout as `~/.scout4all`.
 #[derive(uniffi::Object)]
 pub struct Scout4All {
@@ -196,6 +221,7 @@ pub struct Scout4All {
     language: Language,
     team_reader: StoreTeamReader,
     team_writer: StoreTeamWriter,
+    match_reader: StoreMatchReader,
 }
 
 #[uniffi::export]
@@ -217,7 +243,12 @@ impl Scout4All {
         Ok(Arc::new(Self {
             runtime,
             team_reader: StoreTeamReader::new(store.clone(), language.clone()),
-            team_writer: StoreTeamWriter::new(store),
+            team_writer: StoreTeamWriter::new(store.clone()),
+            match_reader: StoreMatchReader::new(
+                store.clone(),
+                Arc::new(StoreSetReader::new(store, language.clone())),
+                language.clone(),
+            ),
             language,
         }))
     }
@@ -262,6 +293,32 @@ impl Scout4All {
             players: players(&team, labels),
             form: TeamForm::of(&team),
         })
+    }
+
+    /// The matches of the team, the most recent first, then the unreadable
+    /// ones.
+    pub fn matches(&self, team_id: String) -> Result<Vec<MatchListing>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        Ok(self
+            .runtime
+            .block_on(self.match_reader.read_all(&team))?
+            .into_iter()
+            .map(|listed| match listed.map(|m| (m.get_status(), m)) {
+                Ok((Ok(status), m)) => MatchListing::Match {
+                    date: m.date.to_rfc3339(),
+                    id: m.id,
+                    opponent: m.opponent,
+                    home: m.home,
+                    won: status.us_wins,
+                    lost: status.them_wins,
+                    finished: status.match_finished,
+                },
+                Ok((Err(_), m)) => MatchListing::Unreadable { folder: m.id },
+                Err(unreadable) => MatchListing::Unreadable {
+                    folder: unreadable.id,
+                },
+            })
+            .collect())
     }
 
     /// An empty form for a new team, with the year given.
@@ -400,6 +457,10 @@ fn count(team: &TeamEntry) -> u32 {
 #[allow(clippy::unwrap_used, clippy::unreachable)]
 mod tests {
     use super::*;
+    use chrono::DateTime;
+    use scout4all_core::providers::{
+        match_writer::MatchWriter, store::match_writer::StoreMatchWriter,
+    };
 
     #[test]
     fn an_empty_folder_has_no_teams() {
@@ -524,6 +585,54 @@ mod tests {
         assert_eq!(players.len(), 1);
         // the number of a removed player is free again
         app.save_player(team, None, player("Carla", "12")).unwrap();
+    }
+
+    #[test]
+    fn matches_are_listed_the_most_recent_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team_id = app.save_team(None, form("Cortona")).unwrap();
+        assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
+
+        let team = app.read_team(&team_id).unwrap();
+        let writer = StoreMatchWriter::new(Arc::new(FsStore::new(dir.path())));
+        for (opponent, date, home) in [
+            ("Arezzo", "2026-10-04T18:00:00+02:00", true),
+            ("Siena", "2026-10-11T21:00:00+02:00", false),
+        ] {
+            let date = DateTime::parse_from_rfc3339(date).unwrap();
+            app.runtime
+                .block_on(writer.create(&team, opponent.into(), date, home, 6))
+                .unwrap();
+        }
+        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+
+        assert_eq!(
+            app.matches(team_id).unwrap(),
+            vec![
+                MatchListing::Match {
+                    id: "2026-10-11_siena".into(),
+                    opponent: "Siena".into(),
+                    home: false,
+                    date: "2026-10-11T21:00:00+02:00".into(),
+                    won: 0,
+                    lost: 0,
+                    finished: false,
+                },
+                MatchListing::Match {
+                    id: "2026-10-04_arezzo".into(),
+                    opponent: "Arezzo".into(),
+                    home: true,
+                    date: "2026-10-04T18:00:00+02:00".into(),
+                    won: 0,
+                    lost: 0,
+                    finished: false,
+                },
+                MatchListing::Unreadable {
+                    folder: "not-a-match".into()
+                },
+            ]
+        );
     }
 
     #[test]

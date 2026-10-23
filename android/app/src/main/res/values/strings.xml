@@ -22,6 +22,12 @@
     <string name="remove_player_text">The player stays in the matches already played.</string>
     <string name="remove">Remove</string>
     <string name="cancel">Cancel</string>
+    <string name="matches">Matches</string>
+    <string name="no_matches">No matches yet</string>
+    <string name="unreadable_match">Unreadable match</string>
+    <string name="home">home</string>
+    <string name="away">away</string>
+    <string name="in_progress">in progress</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>
