@@ -4,6 +4,14 @@
     <string name="teams">Teams</string>
     <string name="no_teams">No teams yet</string>
     <string name="unreadable_team">Unreadable team</string>
+    <string name="new_team">New team</string>
+    <string name="edit_team">Edit team</string>
+    <string name="back">Back</string>
+    <string name="name">Name</string>
+    <string name="year">Year</string>
+    <string name="gender">Gender</string>
+    <string name="classification">Classification</string>
+    <string name="save">Save</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>

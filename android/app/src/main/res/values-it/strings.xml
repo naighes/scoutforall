@@ -3,6 +3,14 @@
     <string name="teams">Squadre</string>
     <string name="no_teams">Ancora nessuna squadra</string>
     <string name="unreadable_team">Squadra illeggibile</string>
+    <string name="new_team">Nuova squadra</string>
+    <string name="edit_team">Modifica squadra</string>
+    <string name="back">Indietro</string>
+    <string name="name">Nome</string>
+    <string name="year">Anno</string>
+    <string name="gender">Genere</string>
+    <string name="classification">Classificazione</string>
+    <string name="save">Salva</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>
         <item quantity="other">%d giocatori</item>
