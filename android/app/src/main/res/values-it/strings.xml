@@ -53,6 +53,7 @@
     <string name="start_set">Inizia il set</string>
     <string name="net">rete</string>
     <string name="setter_short">P</string>
+    <string name="close">Chiudi</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>
         <item quantity="other">%d giocatori</item>
