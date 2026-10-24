@@ -425,6 +425,28 @@ impl Snapshot {
         }
     }
 
+    /// The last touch of the rally being played, with the side of the net
+    /// it leaves the ball on (see `EventTypeEnum::ball_side_after`); `None`
+    /// before the serve.
+    pub fn get_last_touch(&self) -> Option<(&EventEntry, TeamSideEnum)> {
+        self.last_event
+            .as_ref()
+            .and_then(|e| e.event_type.ball_side_after(e.eval).map(|side| (e, side)))
+    }
+
+    /// The side of the net the ball is on: after the last touch while a
+    /// rally is played, before the serve with the team serving.
+    pub fn get_ball_side(&self) -> TeamSideEnum {
+        match (
+            self.get_last_touch(),
+            self.current_lineup.get_current_phase(),
+        ) {
+            (Some((_, side)), _) => side,
+            (None, PhaseEnum::Break) => TeamSideEnum::Us,
+            (None, PhaseEnum::SideOut) => TeamSideEnum::Them,
+        }
+    }
+
     /// The team serving next: the one serving the set at its start, then
     /// the one winning the last rally. `None` while a rally is being played.
     pub fn get_serving_team(&self) -> Option<TeamSideEnum> {
