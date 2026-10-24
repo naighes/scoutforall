@@ -15,7 +15,7 @@ mod tests {
         snapshot::{EventEntry, Snapshot},
         stats::{AttackKey, AttackSummary, EventKey, Metric, Stats, StatsFilter},
     };
-    use crate::trend::trend;
+    use crate::trend::{Replay, trend};
     use EvalEnum::*;
     use EventTypeEnum::*;
     use chrono::Utc;
@@ -1263,6 +1263,133 @@ mod tests {
                 (3, 6)
             ]
         );
+    }
+
+    /// The statistics since earlier ones of the same sets are the ones of
+    /// the events in between.
+    #[test]
+    fn stats_since_earlier_ones() {
+        let t = Team::new();
+        let first = t.serving(vec![act(S, t.setter, Perfect), act(S, t.setter, Error)]);
+        let later = t.serving(vec![
+            act(S, t.setter, Perfect),
+            act(S, t.setter, Error),
+            act(P, t.oh2, Positive),
+            act(A, t.oh1, Perfect),
+        ]);
+        let since = later.stats.since(&first.stats);
+        assert_eq!(since.event_count(S, None, &all()), 0);
+        assert_eq!(since.event_count(P, None, &all()), 1);
+        assert_eq!(since.event_count(A, Some(Perfect), &all()), 1);
+        assert_eq!(
+            since.attack_summary(false, &all()).map(|a| a.total),
+            Some(1)
+        );
+        assert_eq!(
+            since.rallies_won(&all()).map(|(_, w, r)| (w, r)),
+            Some((1, 1))
+        );
+        // since nothing: all of them; since themselves: none
+        assert_eq!(
+            later
+                .stats
+                .since(&Stats::new())
+                .event_count(S, None, &all()),
+            2
+        );
+        assert_eq!(later.stats.since(&later.stats).rallies_won(&all()), None);
+    }
+
+    fn side_out_entry(t: &Team, set_number: u8) -> SetEntry {
+        let mut events = side_out_set(t);
+        if let Some(fault) = events.last_mut() {
+            fault.eval = None;
+        }
+        SetEntry {
+            set_number,
+            serving_team: TeamSideEnum::Them,
+            initial_positions: t.rotation_0(),
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events,
+        }
+    }
+
+    fn reception(stats: &Stats) -> Option<f64> {
+        stats.metric_percentage(P, Metric::Efficiency, &all())
+    }
+
+    fn receptions(stats: &Stats) -> u32 {
+        stats.event_count(P, None, &all())
+    }
+
+    /// The last 2 receptions after each rally: # = + + - in the set.
+    #[test]
+    fn trend_of_the_last_touches() {
+        let t = Team::new();
+        let set = side_out_entry(&t, 1);
+        let replay =
+            Replay::new(&[&set], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
+        let last_two: Vec<Option<f64>> = replay
+            .window(2, receptions, reception)
+            .into_iter()
+            .map(|p| p.value)
+            .collect();
+        assert_eq!(
+            last_two,
+            vec![
+                // #, then the serve error: still #
+                Some(100.0),
+                Some(100.0),
+                // # =
+                Some(0.0),
+                // = +
+                Some(0.0),
+                // + +, then the untouched ace
+                Some(100.0),
+                Some(100.0),
+                // + -, then their error and our fault
+                Some(50.0),
+                Some(50.0),
+                Some(50.0),
+            ]
+        );
+        // a window larger than the touches: all of them
+        let all_of_them = replay.window(10, receptions, reception);
+        assert_eq!(all_of_them, replay.cumulative(reception));
+        assert_eq!(
+            replay.cumulative(reception),
+            trend(&[&set], DEFAULT_MAX_SUBSTITUTIONS, reception)
+                .expect("expected the set to replay")
+        );
+    }
+
+    /// The window goes on across the sets: the last 2 receptions of set 2
+    /// start with the last one of set 1.
+    #[test]
+    fn the_last_touches_across_the_sets() {
+        let t = Team::new();
+        let first = side_out_entry(&t, 1);
+        let second = side_out_entry(&t, 2);
+        let replay = Replay::new(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the sets to replay");
+        let points = replay.window(2, receptions, reception);
+        assert_eq!(points.len(), 18);
+        // the first rally of set 2: - (set 1) and # (set 2)
+        let first_of_second = points.iter().find(|p| p.set_number == 2).map(|p| p.value);
+        assert_eq!(first_of_second, Some(Some(50.0)));
+        // the last: as in set 1
+        assert_eq!(points.last().map(|p| p.value), Some(Some(50.0)));
+        // the window is always 2 receptions, once there are 2
+        let sizes: Vec<u32> = replay
+            .window(2, receptions, receptions)
+            .into_iter()
+            .map(|p| p.value)
+            .collect();
+        assert_eq!(&sizes[..2], &[1, 1]);
+        assert!(sizes[2..].iter().all(|n| *n == 2));
     }
 
     // --- the side out on first rally --------------------------------------
