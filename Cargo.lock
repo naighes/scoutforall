@@ -3984,6 +3984,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "unicode-width",
  "uuid",
  "winres",
  "zip",

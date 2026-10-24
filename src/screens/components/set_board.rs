@@ -18,6 +18,7 @@ use scout4all_core::shapes::{
     snapshot::Snapshot,
     team::TeamEntry,
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use uuid::Uuid;
 
 /// The teams with their sets won and the score of the set, the home team on
@@ -96,6 +97,23 @@ const POINT_SEQUENCE_MAX_NAME_WIDTH: usize = 16;
 /// The width of a point in the point sequence: two digits and a space.
 const POINT_WIDTH: usize = 3;
 
+/// The text cut to `width` columns, padded with spaces up to them: wide
+/// characters, like the Japanese ones, take two columns.
+fn fit(text: &str, width: usize) -> String {
+    let (cut, used) = text
+        .chars()
+        .scan(0, |used, c| {
+            *used += c.width().unwrap_or(0);
+            Some((c, *used))
+        })
+        .take_while(|(_, used)| *used <= width)
+        .fold((String::new(), 0), |(mut cut, _), (c, used)| {
+            cut.push(c);
+            (cut, used)
+        });
+    format!("{cut}{}", " ".repeat(width.saturating_sub(used)))
+}
+
 /// The latest points of the set, one column per point, as many as fit: a
 /// row per team, the home team on top, with the score reached by the team
 /// scoring the point in its row.
@@ -120,7 +138,7 @@ pub fn render_point_sequence(
     };
     let name_width = teams
         .iter()
-        .map(|(_, name)| name.chars().count())
+        .map(|(_, name)| name.width())
         .max()
         .unwrap_or(0)
         .min(POINT_SEQUENCE_MAX_NAME_WIDTH);
@@ -130,9 +148,8 @@ pub fn render_point_sequence(
     let lines: Vec<Line> = teams
         .iter()
         .map(|(team, name)| {
-            let name: String = name.chars().take(name_width).collect();
             let label = Span::styled(
-                format!(" {name:<name_width$} "),
+                format!(" {} ", fit(name, name_width)),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -174,7 +191,7 @@ fn substitutions_text(snapshot: &Snapshot) -> String {
 /// player is shortened when the screen is narrow).
 pub fn set_status_width(snapshot: &Snapshot) -> u16 {
     let labels = current_labels();
-    let phases = PhaseEnum::ALL.map(|phase| phase.to_string());
+    let phases = PhaseEnum::ALL.map(|phase| phase.friendly_name(labels.domain).to_string());
     let events = EventTypeEnum::ALL.map(|event| event.friendly_name(labels.domain).to_string());
     std::iter::once(substitutions_text(snapshot))
         .chain(phases)
@@ -208,7 +225,13 @@ pub fn render_set_status(
     let cells: Vec<(Rect, Option<String>, Color, Color)> = vec![
         (
             chunks[0],
-            Some(snapshot.current_lineup.get_current_phase().to_string()),
+            Some(
+                snapshot
+                    .current_lineup
+                    .get_current_phase()
+                    .friendly_name(current_labels().domain)
+                    .to_string(),
+            ),
             Color::Yellow,
             Color::Black,
         ),

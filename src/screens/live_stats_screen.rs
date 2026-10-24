@@ -42,6 +42,7 @@ use scout4all_core::{
     },
     trend::{Replay, Series},
 };
+use unicode_width::UnicodeWidthStr;
 
 /// The width from which the fundamentals, the points and the distribution
 /// stand side by side, the trend below them.
@@ -372,7 +373,7 @@ impl LiveStatsScreen {
             domain.opponent_errors,
         ]
         .iter()
-        .map(|n| n.chars().count())
+        .map(|n| n.width())
         .max()
         .unwrap_or(0) as u16;
         let table = Table::new(
@@ -411,28 +412,24 @@ impl LiveStatsScreen {
                 Cell::from(share(&counter_attack, *zone)),
             ])
         });
-        let header = Row::new([
+        let titles = [
             labels.zone,
             "%",
             domain.tot,
             domain.eff_perc,
             labels.reception_share,
             labels.counter_attack_share,
-        ])
-        .style(Style::new().add_modifier(Modifier::DIM));
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(4),
-                Constraint::Length(5),
-                Constraint::Length(4),
-                Constraint::Length(5),
-                Constraint::Length(7),
-                Constraint::Length(7),
-            ],
-        )
-        .header(header)
-        .block(panel::section(domain.distribution));
+        ];
+        // the values take up to 5 columns ("-100%"), the titles can take
+        // more: "ゾーン" takes 6
+        let widths = titles
+            .iter()
+            .zip([4, 5, 4, 5, 4, 4])
+            .map(|(title, values)| Constraint::Length((title.width() as u16).max(values)));
+        let header = Row::new(titles).style(Style::new().add_modifier(Modifier::DIM));
+        let table = Table::new(rows, widths)
+            .header(header)
+            .block(panel::section(domain.distribution));
         f.render_widget(table, area);
     }
 
@@ -441,7 +438,7 @@ impl LiveStatsScreen {
         let all: Vec<u8> = self.scopes.iter().filter_map(|s| s.set_number).collect();
         let name_width = Series::ALL
             .iter()
-            .map(|s| series_name(*s).chars().count())
+            .map(|s| series_name(*s).width())
             .max()
             .unwrap_or(0) as u16;
         let skipped = all.len() - trend_sets_shown(area.width, name_width, all.len());

@@ -1,0 +1,26 @@
+[
+  {
+    "question": "Posso registrar a direção do ataque ou do saque, ou indicar as zonas de recepção, com o programa?",
+    "answer": "No momento, não. O programa segue uma abordagem baseada no resultado: você define o tipo de ação (ataque, recepção, saque etc.) e dá uma avaliação (positiva, negativa, erro etc.), mas por enquanto não é possível indicar onde a bola caiu, a direção do saque ou as zonas de recepção. Se houver muita procura por esse recurso, ele poderá ser considerado em atualizações futuras."
+  },
+  {
+    "question": "O software é gratuito?",
+    "answer": "Sim! O programa é totalmente gratuito e open source. Contribuições da comunidade são bem-vindas: qualquer pessoa pode ajudar a melhorar o software, sugerir recursos ou relatar problemas."
+  },
+  {
+    "question": "Por que é um aplicativo de terminal e não um aplicativo gráfico?",
+    "answer": "O foco do software é a produtividade e a eficiência. Digitar pelo teclado permite registrar os dados mais rápido do que tocar na tela de um tablet ou smartphone. Isso ajuda a registrar as ações de forma rápida e sistemática, o que é especialmente útil no scout e na análise, quando a velocidade importa."
+  },
+  {
+    "question": "Todas as posições dos jogadores e as zonas de ataque são personalizáveis?",
+    "answer": "Não. O aplicativo faz algumas escolhas arbitrárias, mas coerentes, para simplificar o registro e manter a consistência das análises. Por exemplo, o central é sempre substituído pelo líbero no fundo de quadra (exceto quando o central está no saque). Isso significa que não é possível simular uma fase de side-out sem o líbero no fundo. Além disso, as zonas de ataque são definidas automaticamente a partir das posições dos jogadores e da posição do levantador. Por exemplo, se no rodízio atual o levantador está na posição 1, o oposto ataca pela zona 4. Esquemas como o rodízio invertido com o levantador na 1 não são suportados."
+  },
+  {
+    "question": "Com que frequência o software é atualizado? Preciso instalar as atualizações manualmente?",
+    "answer": "O software está em desenvolvimento ativo e em constante evolução. Novos recursos, melhorias e correções são lançados regularmente. Você não precisa baixar as atualizações manualmente: sempre que é iniciado, o aplicativo verifica se há uma nova versão e, depois de pedir sua confirmação, a instala e reinicia já atualizado. Assim você aproveita na hora as contribuições da comunidade e a melhoria contínua do projeto."
+  },
+  {
+    "question": "O aplicativo não inicia mais depois de uma atualização automática. O que aconteceu?",
+    "answer": "Até a versão 0.4.2, a atualização automática podia substituir o aplicativo por um arquivo de dados publicado junto com cada versão (a lista de materiais do software) em vez da nova versão: depois da atualização, o aplicativo não inicia. Isso foi corrigido a partir da versão 0.4.3. Para resolver, baixe novamente a versão mais recente na seção de <a href=\"#download\">downloads</a> e substitua o arquivo antigo. Suas equipes e partidas ficam guardadas separadamente e não são afetadas."
+  }
+]

@@ -80,6 +80,7 @@ self_update = { version = "1", optional = true, features = ["checksums"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+unicode-width = "0.2"
 uuid.workspace = true
 zip.workspace = true
 

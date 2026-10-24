@@ -1,0 +1,37 @@
+{
+  "version": "Wersja",
+  "other_systems": "Używasz innego komputera?",
+  "hide_other_systems": "Ukryj pozostałe komputery",
+  "all_versions": "Inne wersje (dla zaawansowanych)",
+  "phone": "Scout4All działa na komputerach: otwórz tę stronę na swoim PC lub Macu.",
+  "platforms": {
+    "windows": {
+      "title": "Windows",
+      "requirements": "Windows 10 i 11",
+      "files": {
+        "default": "Pobierz dla Windows"
+      },
+      "help_title": "Windows wyświetla ostrzeżenie?",
+      "help": "Kliknij <strong>Więcej informacji</strong>, a potem <strong>Uruchom mimo to</strong>."
+    },
+    "macos": {
+      "title": "Mac",
+      "requirements": "Każdy Mac, z procesorem Apple lub Intel",
+      "files": {
+        "default": "Pobierz dla Maca"
+      },
+      "help_title": "Mac blokuje program?",
+      "help": "Otwórz <strong>Ustawienia systemowe → Prywatność i ochrona</strong> i kliknij <strong>Otwórz mimo to</strong>."
+    },
+    "linux": {
+      "title": "Linux",
+      "requirements": "Nie wiesz, którą wybrać? Prawie zawsze jest to Intel lub AMD.",
+      "files": {
+        "x86_64": "Intel lub AMD",
+        "aarch64": "ARM (np. Raspberry Pi)"
+      },
+      "help_title": "Jak go uruchomić?",
+      "help": "Rozpakuj archiwum i uruchom <code>./scout4all</code> w terminalu."
+    }
+  }
+}

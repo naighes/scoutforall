@@ -1,0 +1,38 @@
+{
+  "title": "scout4all | narzędzie do analizy meczów siatkówki",
+  "description": "Narzędzie CLI do zbierania, zarządzania i raportowania danych z meczów siatkówki. Pomaga trenerom i analitykom śledzić zdarzenia meczu i tworzyć przydatne raporty do analizy pomeczowej.",
+  "base_url": "https://naighes.github.io/scoutforall/",
+  "github_url": "https://github.com/naighes/scoutforall",
+  "github_image": "/scoutforall/content-images/github-mark-white.svg",
+  "theme_color": "#18181b",
+  "nav": [
+    {
+      "title": "przegląd",
+      "link": "./#overview"
+    },
+    {
+      "title": "pobieranie",
+      "link": "./#download"
+    },
+    {
+      "title": "FAQ",
+      "link": "./#faq"
+    }
+  ],
+  "social_links": [
+    {
+      "title": "GitHub",
+      "link": "https://github.com/naighes/scoutforall"
+    }
+  ],
+  "labels": {
+    "skip_to_content": "Przejdź do treści",
+    "back_to_top": "Powrót na górę",
+    "license": "Licencja",
+    "made_with": "Stworzone z ❤️ przez",
+    "previous_slide": "Poprzedni slajd",
+    "next_slide": "Następny slajd",
+    "hero_image_alt": "Ekran statystyk scout4all na laptopie",
+    "language": "Język"
+  }
+}

@@ -60,7 +60,7 @@ impl FriendlyName for PhaseEnum {
     fn friendly_name(&self, labels: &Labels) -> &'static str {
         use PhaseEnum::*;
         match self {
-            Break => "break",
+            Break => labels.break_phase,
             SideOut => labels.sideout,
         }
     }
@@ -860,10 +860,20 @@ impl FromStr for RoleEnum {
 pub enum LanguageEnum {
     En,
     It,
+    /// Brazilian Portuguese
+    Pt,
+    Pl,
+    Ja,
 }
 
 impl LanguageEnum {
-    pub const ALL: [LanguageEnum; 2] = [LanguageEnum::En, LanguageEnum::It];
+    pub const ALL: [LanguageEnum; 5] = [
+        LanguageEnum::En,
+        LanguageEnum::It,
+        LanguageEnum::Pt,
+        LanguageEnum::Pl,
+        LanguageEnum::Ja,
+    ];
 }
 
 impl fmt::Display for LanguageEnum {
@@ -872,6 +882,9 @@ impl fmt::Display for LanguageEnum {
         let label = match self {
             En => "english",
             It => "italiano",
+            Pt => "português",
+            Pl => "polski",
+            Ja => "日本語",
         };
         write!(f, "{}", label)
     }
@@ -884,6 +897,9 @@ impl FromStr for LanguageEnum {
         match s.to_uppercase().as_str() {
             "EN" | "ENGLISH" => Ok(En),
             "IT" | "ITALIANO" | "ITALIAN" => Ok(It),
+            "PT" | "PT-BR" | "PT_BR" | "PORTUGUÊS" | "PORTUGUESE" => Ok(Pt),
+            "PL" | "POLSKI" | "POLISH" => Ok(Pl),
+            "JA" | "日本語" | "JAPANESE" => Ok(Ja),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid language: {}",
                 s
@@ -898,6 +914,9 @@ impl FriendlyName for LanguageEnum {
         match self {
             En => "english",
             It => "italiano",
+            Pt => "português",
+            Pl => "polski",
+            Ja => "日本語",
         }
     }
 }

@@ -1,0 +1,20 @@
+[
+  {
+    "title": "シンプルなバレーボールのスカウティング",
+    "content": "<strong>入力がすばやく、その場で検証されるので、試合のあらゆるイベントを手間なく記録できます</strong>。スカウティングが速く、正確で、直感的になります",
+    "image": "/scoutforall/content-images/scouting-anim.gif",
+    "image_alt": ""
+  },
+  {
+    "title": "役に立つ分析",
+    "content": "<strong>効果率、成功率、トス配分を分析。</strong>試合をひと目で把握し、より的確な戦術判断を下すために必要なものがすべてそろっています",
+    "image": "/scoutforall/content-images/stats_blur.png",
+    "image_alt": ""
+  },
+  {
+    "title": "コミュニティとともに",
+    "content": "<strong>オープンソースで、みんなで作るソフトウェア。</strong>scout4all は、バレーボールへの同じ情熱を持つコーチ、アナリスト、開発者の貢献によって成長しています。",
+    "image": "/scoutforall/content-images/community.png",
+    "image_alt": ""
+  }
+]

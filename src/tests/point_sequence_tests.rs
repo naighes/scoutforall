@@ -123,4 +123,33 @@ mod tests {
         let (home, _) = point_rows(&mut ui);
         assert_eq!(scores(&home), (1..=20).collect::<Vec<_>>(), "{home}");
     }
+
+    /// The column on screen of the first point in a row: a cell is a
+    /// character of the row, also the one hidden by a wide character.
+    fn first_point_column(row: &str) -> Option<usize> {
+        row.chars().position(|c| c.is_ascii_digit())
+    }
+
+    #[tokio::test]
+    async fn the_points_are_aligned_with_a_name_of_wide_characters() {
+        // twelve wide characters: twice the columns of their number, more
+        // than the widest name shown
+        const WIDE: &[TeamFixture] = &[TeamFixture {
+            opponents: &["東京ヴォレーボールクラブ"],
+            ..TEAM[0]
+        }];
+        let mut ui = Ui::start_with_sets(WIDE).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('m'), KeyCode::Enter])
+            .await;
+        // our ace, then our serve error
+        keys(&mut ui, "s#s=").await;
+        let (home, away) = point_rows(&mut ui);
+        // cut to the widest name: eight characters, each followed by the
+        // cell it hides
+        assert!(away.starts_with("東 京 ヴ ォ レ ー ボ ー "), "{away}");
+        assert!(!away.contains('ル'), "{away}");
+        let (ours, theirs) = (first_point_column(&home), first_point_column(&away));
+        // the second point is a point to the right of the first
+        assert_eq!(ours.map(|c| c + 3), theirs, "\n{home}\n{away}");
+    }
 }

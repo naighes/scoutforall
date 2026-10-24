@@ -4,10 +4,11 @@
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
+    use crate::localization::labels;
     use crate::reporting::model::{Cell, Point, Report, build_report};
     use crate::reporting::pdf::{render_match_pdf, render_report_pdf};
     use crate::shapes::{
-        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
+        enums::{EvalEnum, EventTypeEnum, LanguageEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
@@ -457,5 +458,16 @@ mod tests {
         // only the total of the team
         assert_eq!(report.players.rows.len(), 1);
         render_match_pdf(&m, EN).expect("expected the report");
+    }
+
+    /// The report in every language, with the names in the same one.
+    #[test]
+    fn every_language_renders() {
+        let t = Team::new();
+        for language in LanguageEnum::ALL {
+            let m = match_entry(t.team("東京"), "Łódź São", true, vec![t.rallies()]);
+            render_match_pdf(&m, labels(language))
+                .unwrap_or_else(|e| panic!("expected the report in {language}: {e}"));
+        }
     }
 }
