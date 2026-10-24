@@ -15,7 +15,7 @@ mod tests {
         snapshot::{EventEntry, Snapshot},
         stats::{AttackKey, AttackSummary, EventKey, Metric, Stats, StatsFilter},
     };
-    use crate::trend::{Replay, trend};
+    use crate::trend::{RECENT_TOUCHES, Replay, Series, trend};
     use EvalEnum::*;
     use EventTypeEnum::*;
     use chrono::Utc;
@@ -1390,6 +1390,83 @@ mod tests {
             .collect();
         assert_eq!(&sizes[..2], &[1, 1]);
         assert!(sizes[2..].iter().all(|n| *n == 2));
+    }
+
+    /// Each figure of the trend on the set played: its value, its touches
+    /// and its band.
+    #[test]
+    fn the_figures_of_the_trend() {
+        use crate::benchmark::Measure;
+        let t = Team::new();
+        let set = side_out_entry(&t, 1);
+        let stats = set
+            .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the set to replay")
+            .stats;
+        let figure = |s: Series| (s.value(&stats).map(f64::round), s.touches(&stats));
+        // receptions # = + + -: (1 + 2 - 1) / 5
+        assert_eq!(figure(Series::Reception), (Some(40.0), 5));
+        // attacks # / = + #: (2 - 2) / 5
+        assert_eq!(figure(Series::Attack), (Some(0.0), 5));
+        // one counter-attack, a kill
+        assert_eq!(figure(Series::CounterAttack), (Some(100.0), 1));
+        assert_eq!(figure(Series::Serve), (Some(-100.0), 1));
+        // side out 2 of 6, break point 1 of 3
+        assert_eq!(figure(Series::SideOut), (Some(33.0), 6));
+        assert_eq!(figure(Series::BreakPoint), (Some(33.0), 3));
+        let measures: Vec<Measure> = Series::ALL.iter().map(|s| s.measure()).collect();
+        assert_eq!(
+            measures,
+            vec![
+                Measure::Reception,
+                Measure::Attack,
+                Measure::Attack,
+                Measure::Serve,
+                Measure::SideOut,
+                Measure::BreakPoint
+            ]
+        );
+        // nothing yet: no value, no touches
+        for series in Series::ALL {
+            assert_eq!(
+                (series.value(&Stats::new()), series.touches(&Stats::new())),
+                (None, 0)
+            );
+        }
+    }
+
+    /// A figure after every rally: so far, or of its last 10 touches.
+    #[test]
+    fn the_series_so_far_and_recent() {
+        let t = Team::new();
+        let sets: Vec<SetEntry> = (1..=3).map(|n| side_out_entry(&t, n)).collect();
+        let refs: Vec<&SetEntry> = sets.iter().collect();
+        let replay =
+            Replay::new(&refs, DEFAULT_MAX_SUBSTITUTIONS).expect("expected the sets to replay");
+        let so_far = replay.series(Series::Reception, false);
+        assert_eq!(so_far, replay.cumulative(|s| Series::Reception.value(s)));
+        let recent = replay.series(Series::Reception, true);
+        assert_eq!(
+            recent,
+            replay.window(RECENT_TOUCHES, receptions, |s| Series::Reception.value(s))
+        );
+        // 15 receptions in three sets: the last 10 are the last two sets,
+        // as the whole match, the same
+        assert_eq!(
+            recent.last().map(|p| p.value),
+            so_far.last().map(|p| p.value)
+        );
+        // after set 2: the last 10 are sets 1 and 2 entirely, # = + + - twice
+        let end_of_two = recent.iter().rfind(|p| p.set_number <= 2);
+        assert_eq!(end_of_two.map(|p| p.value), Some(Some(40.0)));
+        // early in set 3: the last 10 drop set 1's first reception (#)
+        let third: Vec<Option<f64>> = recent
+            .iter()
+            .filter(|p| p.set_number == 3)
+            .map(|p| p.value.map(f64::round))
+            .collect();
+        // 1st rally: = + + - (set 1) # = + + - (set 2) # (set 3): 40%
+        assert_eq!(third.first(), Some(&Some(40.0)));
     }
 
     // --- the side out on first rally --------------------------------------
