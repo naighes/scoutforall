@@ -17,6 +17,7 @@ private val Amber = Color(0xFFFCD34D)
 // a match won or lost: Tailwind green and red 400, as the amber is Tailwind
 val Won = Color(0xFF4ADE80)
 val Lost = Color(0xFFF87171)
+val Fair = Color(0xFFFACC15)
 
 private val colors = darkColorScheme(
     primary = Amber,
