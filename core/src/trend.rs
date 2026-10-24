@@ -2,10 +2,88 @@
 //! every rally the statistics are sampled, to draw their trend. Either all
 //! of them so far, or only the last touches of a fundamental (e.g. the last
 //! 10 receptions), to see a drop as it comes.
+use crate::benchmark::Measure;
 use crate::errors::AppError;
+use crate::shapes::enums::{EventTypeEnum, PhaseEnum};
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::Snapshot;
-use crate::shapes::stats::Stats;
+use crate::shapes::stats::{Metric, Stats, StatsFilter};
+
+/// The touches the recent trend looks at: the last 10 of each fundamental.
+pub const RECENT_TOUCHES: u32 = 10;
+
+/// A figure the coach follows along the match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Series {
+    /// the efficiencies
+    Reception,
+    Attack,
+    CounterAttack,
+    Serve,
+    /// the share of the rallies won
+    SideOut,
+    BreakPoint,
+}
+
+impl Series {
+    pub const ALL: [Series; 6] = [
+        Series::Reception,
+        Series::Attack,
+        Series::CounterAttack,
+        Series::Serve,
+        Series::SideOut,
+        Series::BreakPoint,
+    ];
+
+    /// The figure, `None` with no touches.
+    pub fn value(&self, stats: &Stats) -> Option<f64> {
+        let all = StatsFilter::default();
+        let efficiency = |e| stats.metric_percentage(e, Metric::Efficiency, &all);
+        match self {
+            Series::Reception => efficiency(EventTypeEnum::P),
+            Series::Attack => efficiency(EventTypeEnum::A),
+            Series::CounterAttack => stats.attack_summary(true, &all).map(|a| a.efficiency()),
+            Series::Serve => efficiency(EventTypeEnum::S),
+            Series::SideOut | Series::BreakPoint => stats
+                .rallies_won(&self.phase_filter())
+                .map(|(v, _, _)| v),
+        }
+    }
+
+    /// The touches of the figure: the receptions, the attacks, the
+    /// counter-attacks, the serves, the rallies of the phase.
+    pub fn touches(&self, stats: &Stats) -> u32 {
+        let all = StatsFilter::default();
+        match self {
+            Series::Reception => stats.event_count(EventTypeEnum::P, None, &all),
+            Series::Attack => stats.event_count(EventTypeEnum::A, None, &all),
+            Series::CounterAttack => stats.attack_summary(true, &all).map_or(0, |a| a.total),
+            Series::Serve => stats.event_count(EventTypeEnum::S, None, &all),
+            Series::SideOut | Series::BreakPoint => stats
+                .rallies_won(&self.phase_filter())
+                .map_or(0, |(_, _, rallies)| rallies),
+        }
+    }
+
+    /// The band its color comes from (see `benchmark`).
+    pub fn measure(&self) -> Measure {
+        match self {
+            Series::Reception => Measure::Reception,
+            Series::Attack | Series::CounterAttack => Measure::Attack,
+            Series::Serve => Measure::Serve,
+            Series::SideOut => Measure::SideOut,
+            Series::BreakPoint => Measure::BreakPoint,
+        }
+    }
+
+    fn phase_filter(&self) -> StatsFilter {
+        let phase = match self {
+            Series::BreakPoint => PhaseEnum::Break,
+            _ => PhaseEnum::SideOut,
+        };
+        StatsFilter::new(Some(phase), None, None)
+    }
+}
 
 /// A sample taken after a rally: the set it was played in, the score it
 /// reached, and what the statistics gave.
@@ -96,6 +174,19 @@ impl Replay {
                 None => sample(now),
             })
         })
+    }
+
+    /// The figure after every rally: so far, or of its last
+    /// `RECENT_TOUCHES` touches.
+    pub fn series(&self, series: Series, recent: bool) -> Vec<TrendPoint<Option<f64>>> {
+        match recent {
+            true => self.window(
+                RECENT_TOUCHES,
+                |s| series.touches(s),
+                |s| series.value(s),
+            ),
+            false => self.cumulative(|s| series.value(s)),
+        }
     }
 
     fn points<T>(&self, value: impl Fn(&RallyEnd) -> Option<T>) -> Vec<TrendPoint<T>> {
