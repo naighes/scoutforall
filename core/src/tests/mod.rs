@@ -6,6 +6,7 @@ use crate::{
 use std::{path::Path, sync::Arc};
 
 mod ball_tests;
+mod benchmark_tests;
 mod config_tests;
 mod edit_event_tests;
 mod event_validation_tests;
