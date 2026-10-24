@@ -57,12 +57,22 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
             MatchStatsState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is MatchStatsState.Failed -> Centered(modifier) { Text(s.message) }
             is MatchStatsState.Loaded -> Column(modifier) {
-                StatsPages(s.stats) { scope ->
-                    shown = when (scope) {
-                        is StatsScope.Set -> scope.number.toInt()
-                        StatsScope.Match -> 0
-                    }
-                }
+                StatsPages(
+                    s.stats,
+                    onScope = { scope ->
+                        shown = when (scope) {
+                            is StatsScope.Set -> scope.number.toInt()
+                            StatsScope.Match -> 0
+                        }
+                    },
+                    loadDetail = { scope, event, filter ->
+                        try {
+                            app.core { it.matchDetail(teamId, matchId, scope, event, filter) }
+                        } catch (e: MobileException) {
+                            null
+                        }
+                    },
+                )
             }
         }
     }

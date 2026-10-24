@@ -112,4 +112,21 @@
     <string name="trend_so_far">これまで</string>
     <string name="trend_recent">直近10回のタッチ</string>
     <string name="set_team_level">色を表示するにはチームのレベルと性別を設定してください</string>
+    <string name="stats_detail">詳細</string>
+    <string name="rotations">ローテーション</string>
+    <string name="filter_player">選手</string>
+    <string name="filter_rotation">ローテ</string>
+    <string name="filter_phase">フェーズ</string>
+    <string name="filter_all">すべて</string>
+    <string name="positiveness">ポジティブ率</string>
+    <string name="total">合計</string>
+    <string name="unforced_detail">うち自滅 %1$d</string>
+    <string name="points">得点</string>
+    <string name="rallies_per_point">1得点あたりのラリー</string>
+    <string name="freeballs_given">与えた</string>
+    <string name="freeballs_received">受けた</string>
+    <string name="freeballs_exploited">得点化</string>
+    <string name="no_events">まだプレーなし</string>
+    <string name="players_title">選手</string>
+    <string name="kill_rate">決定 %1$s</string>
 </resources>

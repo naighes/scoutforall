@@ -87,6 +87,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.EvalChoice
+import io.github.naighes.scout4all.core.DetailFilter
+import io.github.naighes.scout4all.core.DetailStats
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.EventChoice
@@ -193,6 +195,18 @@ class ScoutingViewModel(
         }
     }
 
+    /** A fundamental in detail, off the main thread. */
+    suspend fun detail(scope: StatsScope, event: EventTypeEnum, filter: DetailFilter): DetailStats? {
+        val s = scouting ?: return null
+        return withContext(Dispatchers.IO) {
+            try {
+                s.detail(scope, event, filter)
+            } catch (e: MobileException) {
+                null
+            }
+        }
+    }
+
     fun errorShown() {
         val choosing = mutableState.value as? ScoutingUi.Choosing ?: return
         mutableState.value = choosing.copy(error = null)
@@ -291,6 +305,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                 stats = stats,
                 currentSet = view.state.setNumber.toInt(),
                 onScope = model::stats,
+                loadDetail = model::detail,
                 onDismiss = { statsOpen = false },
             )
         }

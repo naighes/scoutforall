@@ -114,4 +114,21 @@
     <string name="trend_so_far">So far</string>
     <string name="trend_recent">Last 10 touches</string>
     <string name="set_team_level">Set the level and gender of the team to see the colors</string>
+    <string name="stats_detail">Detail</string>
+    <string name="rotations">Rotations</string>
+    <string name="filter_player">Player</string>
+    <string name="filter_rotation">Rotation</string>
+    <string name="filter_phase">Phase</string>
+    <string name="filter_all">All</string>
+    <string name="positiveness">positiveness</string>
+    <string name="total">Total</string>
+    <string name="unforced_detail">%1$d unforced</string>
+    <string name="points">Points</string>
+    <string name="rallies_per_point">Rallies per point</string>
+    <string name="freeballs_given">Given</string>
+    <string name="freeballs_received">Received</string>
+    <string name="freeballs_exploited">Exploited</string>
+    <string name="no_events">No touches yet</string>
+    <string name="players_title">Players</string>
+    <string name="kill_rate">kill %1$s</string>
 </resources>

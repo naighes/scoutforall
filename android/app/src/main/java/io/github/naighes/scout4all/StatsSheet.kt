@@ -36,7 +36,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -47,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -67,11 +68,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.AttackStats
+import io.github.naighes.scout4all.core.DetailFilter
+import io.github.naighes.scout4all.core.DetailStats
 import io.github.naighes.scout4all.core.ErrorCount
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.FundamentalStats
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.PhaseStats
+import io.github.naighes.scout4all.core.RotationStats
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.TrendLine
 import io.github.naighes.scout4all.core.ZoneStats
@@ -136,7 +140,12 @@ private enum class StatsPage(val title: Int) {
     Distribution(R.string.stats_distribution),
     Errors(R.string.stats_errors),
     Trend(R.string.stats_trend),
+    Detail(R.string.stats_detail),
 }
+
+/** Reads a fundamental of the scope in detail, off the main thread; none
+ * when it can't. */
+typealias LoadDetail = suspend (StatsScope, EventTypeEnum, DetailFilter) -> DetailStats?
 
 /** The statistics while scouting, from below: the set being played at
  * first, any other set or the whole match on a chip; the essentials first,
@@ -147,6 +156,7 @@ fun StatsSheet(
     stats: LiveStats?,
     currentSet: Int,
     onScope: (StatsScope) -> Unit,
+    loadDetail: LoadDetail,
     onDismiss: () -> Unit,
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -155,7 +165,7 @@ fun StatsSheet(
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             when (stats) {
                 null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                else -> StatsPages(stats, onScope)
+                else -> StatsPages(stats, onScope, loadDetail)
             }
         }
     }
@@ -185,12 +195,18 @@ private fun Scopes(stats: LiveStats, onScope: (StatsScope) -> Unit) = Row(
 /** The pages, a swipe aside; the scope on top, but on the trend, which
  * shows every set. While scouting and on the page of a match. */
 @Composable
-fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit) {
+fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit, loadDetail: LoadDetail) {
     val pages = StatsPage.entries
     val pager = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
+    // the detail asked for stays while swiping, and the last one read while
+    // the next is
+    var query by remember { mutableStateOf(DetailQuery()) }
+    val detail by produceState<DetailStats?>(null, stats.scope, query) {
+        value = loadDetail(stats.scope, query.event, query.filter) ?: value
+    }
     if (pages[pager.currentPage] != StatsPage.Trend) Scopes(stats, onScope)
-    PrimaryTabRow(selectedTabIndex = pager.currentPage) {
+    PrimaryScrollableTabRow(selectedTabIndex = pager.currentPage, edgePadding = 0.dp) {
         pages.forEachIndexed { i, page ->
             Tab(
                 selected = pager.currentPage == i,
@@ -209,6 +225,7 @@ fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit) {
                 StatsPage.Distribution -> Distribution(stats)
                 StatsPage.Errors -> Errors(stats)
                 StatsPage.Trend -> Trend(stats)
+                StatsPage.Detail -> Detail(detail, query) { query = it }
             }
         }
     }
@@ -261,6 +278,47 @@ private fun Summary(stats: LiveStats) {
             Modifier.weight(1f),
         )
         Spacer(Modifier.weight(1f))
+    }
+    Rotations(stats.rotations)
+}
+
+/** The side out and the break points of each rotation, side by side. */
+@Composable
+private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(stringResource(R.string.rotations), style = MaterialTheme.typography.titleMedium)
+    Row {
+        Spacer(Modifier.width(48.dp))
+        listOf(R.string.side_out, R.string.break_points).forEach {
+            Text(
+                stringResource(it),
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+            )
+        }
+    }
+    rotations.forEach { r ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(r.name, Modifier.width(48.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            listOf(r.sideOut, r.breakPoints).forEach { p ->
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
+                    p?.let {
+                        Text(
+                            stringResource(R.string.rallies_detail, it.won.toInt(), it.rallies.toInt()) + "  ",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        pct(p?.percentage),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = p?.grade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -350,7 +408,7 @@ private fun Distribution(stats: LiveStats) {
     }
     when {
         zones.isEmpty() -> Text(stringResource(R.string.no_attacks), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else -> DistributionCourt(zones)
+        else -> DistributionCourt { z -> ZoneCell(z, zones.find { it.zone.toInt() == z }) }
     }
     summary?.let { AttackLine(stringResource(AttackKind.entries[kind].title), it) }
     if (AttackKind.entries[kind] == AttackKind.All) {
@@ -378,9 +436,9 @@ private fun AttackLine(label: String, attacks: AttackStats) = Row(verticalAlignm
 }
 
 /** Half a court, the net on top: 4 3 2 in the front row, 8 (pipe) and 9
- * (from 1) behind the attack line. */
+ * (from 1) behind the attack line; what each zone shows in its cell. */
 @Composable
-private fun DistributionCourt(zones: List<ZoneStats>) {
+fun DistributionCourt(cell: @Composable (zone: Int) -> Unit) {
     val line = MaterialTheme.colorScheme.outline
     Box(
         Modifier.fillMaxWidth().aspectRatio(1.4f)
@@ -402,7 +460,7 @@ private fun DistributionCourt(zones: List<ZoneStats>) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     row.forEach { zone ->
                         Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                            zone?.let { z -> ZoneCell(z, zones.find { it.zone.toInt() == z }) }
+                            zone?.let { cell(it) }
                         }
                     }
                 }

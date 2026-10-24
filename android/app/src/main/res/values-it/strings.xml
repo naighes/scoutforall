@@ -113,4 +113,21 @@
     <string name="trend_so_far">Fin qui</string>
     <string name="trend_recent">Ultimi 10 tocchi</string>
     <string name="set_team_level">Imposta livello e sesso della squadra per vedere i colori</string>
+    <string name="stats_detail">Dettaglio</string>
+    <string name="rotations">Rotazioni</string>
+    <string name="filter_player">Giocatore</string>
+    <string name="filter_rotation">Rotazione</string>
+    <string name="filter_phase">Fase</string>
+    <string name="filter_all">Tutti</string>
+    <string name="positiveness">positività</string>
+    <string name="total">Totale</string>
+    <string name="unforced_detail">%1$d non forzati</string>
+    <string name="points">Punti</string>
+    <string name="rallies_per_point">Scambi per punto</string>
+    <string name="freeballs_given">Date</string>
+    <string name="freeballs_received">Ricevute</string>
+    <string name="freeballs_exploited">Sfruttate</string>
+    <string name="no_events">Nessun tocco</string>
+    <string name="players_title">Giocatori</string>
+    <string name="kill_rate">punto %1$s</string>
 </resources>

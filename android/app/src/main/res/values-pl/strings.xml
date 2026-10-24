@@ -115,4 +115,21 @@
     <string name="trend_so_far">Dotąd</string>
     <string name="trend_recent">Ostatnie 10 kontaktów</string>
     <string name="set_team_level">Ustaw poziom i płeć drużyny, aby zobaczyć kolory</string>
+    <string name="stats_detail">Szczegóły</string>
+    <string name="rotations">Ustawienia</string>
+    <string name="filter_player">Zawodnik</string>
+    <string name="filter_rotation">Ustawienie</string>
+    <string name="filter_phase">Faza</string>
+    <string name="filter_all">Wszystkie</string>
+    <string name="positiveness">pozytywność</string>
+    <string name="total">Łącznie</string>
+    <string name="unforced_detail">%1$d niewymuszone</string>
+    <string name="points">Punkty</string>
+    <string name="rallies_per_point">Akcje na punkt</string>
+    <string name="freeballs_given">Oddane</string>
+    <string name="freeballs_received">Otrzymane</string>
+    <string name="freeballs_exploited">Wykorzystane</string>
+    <string name="no_events">Brak akcji</string>
+    <string name="players_title">Zawodnicy</string>
+    <string name="kill_rate">punkt %1$s</string>
 </resources>
