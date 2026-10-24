@@ -964,7 +964,7 @@ mod tests {
             // 1-4: the outside hitter 2 (front row, 4) out
             act(P, t.oh1, Positive),
             act(A, t.oh2, Error),
-            // 1-5: their point
+            // 1-5: their ace, untouched
             opp(OS),
             // 2-5: the outside hitter 2 can't put it away, the opposite
             // kills in counter-attack
@@ -976,6 +976,52 @@ mod tests {
             // 3-6: our fault
             act(F, t.oh1, Error),
         ]
+    }
+
+    /// Their ace is our reception `=`, or their point right after their
+    /// serve, before we touch the ball: not their point later in the rally,
+    /// nor one while we serve.
+    #[test]
+    fn their_aces_touched_or_not() {
+        let t = Team::new();
+        let snapshot = t.receiving(vec![
+            // 0-1: our fault before their serve, not an ace
+            ev(F, Some(t.oh1), None),
+            // 0-2: untouched
+            opp(OS),
+            // 0-3: their point after our attack
+            act(P, t.oh2, Positive),
+            act(A, t.oh1, Negative),
+            opp(OS),
+            // 0-4: touched
+            act(P, t.oh2, Error),
+            // 1-4: we side out, then serve; 1-5: their point in the rally
+            act(P, t.oh2, Positive),
+            act(A, t.oh1, Perfect),
+            act(S, t.oh1, Negative),
+            opp(OS),
+            // 1-6: untouched again
+            opp(OS),
+            // 2-6: their serve error, not an ace
+            opp(OE),
+        ]);
+        assert_eq!((snapshot.score_us, snapshot.score_them), (2, 6));
+        assert_eq!(snapshot.stats.untouched_aces(&all()), 2);
+        let overview = Overview::of(&snapshot.stats);
+        assert_eq!(overview.aces_against, 3);
+        assert_eq!(overview.opponent_points, 2);
+        assert_eq!(overview.opponent_errors, 1);
+        // each in the rotation it was served in
+        let rotations: u32 = (0..6)
+            .map(|r| {
+                snapshot
+                    .stats
+                    .untouched_aces(&StatsFilter::new(None, Some(r), None))
+            })
+            .sum();
+        assert_eq!(rotations, 2);
+        let player = StatsFilter::new(None, None, Some(t.oh2));
+        assert_eq!(snapshot.stats.untouched_aces(&player), 0);
     }
 
     /// The overview of a set played: every number counted by hand.
@@ -1020,8 +1066,8 @@ mod tests {
             }
         );
         assert_eq!(overview.block.total, 0);
-        // side out: won the first and the counter-attack, lost the ace, the
-        // block, the attack out and their point
+        // side out: won the first and the counter-attack, lost the two
+        // aces, the block and the attack out
         assert_eq!(overview.side_out.map(|(_, w, r)| (w, r)), Some((2, 6)));
         // break: lost the serve and the fault, won their error
         assert_eq!(overview.break_points.map(|(_, w, r)| (w, r)), Some((1, 3)));
@@ -1054,9 +1100,10 @@ mod tests {
             vec![(A, 1), (B, 0), (P, 1), (D, 0)]
         );
         assert_eq!(overview.aces, 0);
-        assert_eq!(overview.aces_against, 1);
+        // the reception `=` and the untouched one
+        assert_eq!(overview.aces_against, 2);
         assert_eq!(overview.opponent_errors, 1);
-        assert_eq!(overview.opponent_points, 1);
+        assert_eq!(overview.opponent_points, 0);
     }
 
     /// The distribution of the set: the share of each zone and its
@@ -1181,7 +1228,7 @@ mod tests {
             Some(&Overview::of(&snapshot.stats))
         );
         // the reception after each rally: #, then the serve (no
-        // reception), then = + + (OS: none) -, then none
+        // reception), then = + + (the untouched ace: none) -, then none
         let receptions: Vec<Option<f64>> = points
             .iter()
             .map(|p| p.value.reception.efficiency.map(f64::round))
