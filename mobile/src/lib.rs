@@ -11,6 +11,7 @@ use scout4all_core::{
     benchmark::{Measure, band, grade},
     detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
     errors::AppError,
+    event_edit::{EditField, EventEdit},
     localization::{Labels, Language},
     logging::logger::init_logger,
     match_form::{MatchForm, MatchFormError},
@@ -180,6 +181,13 @@ pub enum Tone {
     Fair,
     Poor,
     Bad,
+}
+
+#[uniffi::remote(Enum)]
+pub enum EditField {
+    EventType,
+    Eval,
+    Technique,
 }
 
 #[uniffi::remote(Enum)]
@@ -695,6 +703,49 @@ pub struct ScoutedEvent {
     pub technique: Option<String>,
 }
 
+/// An event of a set, in the list to correct it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SetEvent {
+    /// its place in the set, from 0
+    pub index: u32,
+    pub event: ScoutedEvent,
+    /// the score after it, the team's first
+    pub score_us: u8,
+    pub score_them: u8,
+    /// not a substitution, nor a libero or setter change
+    pub editable: bool,
+}
+
+/// The events of a set, the first first.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SetEvents {
+    pub set_number: u8,
+    pub team: String,
+    pub opponent: String,
+    pub events: Vec<SetEvent>,
+}
+
+/// An event being corrected, and what it can become.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CorrectionState {
+    pub index: u32,
+    pub event: ScoutedEvent,
+    /// the set before it: the score, the team's first, the rotation, the
+    /// phase
+    pub score_us: u8,
+    pub score_them: u8,
+    pub rotation: String,
+    pub phase: String,
+    /// what of the event can change
+    pub fields: Vec<EditField>,
+    pub event_types: Vec<EventChoice>,
+    pub evals: Vec<EvalChoice>,
+    pub eval: Option<EvalEnum>,
+    /// the sets the attacker can receive, or the serves; `chosen` marks the
+    /// one of the event, none when no technique is
+    pub techniques: Vec<TechniqueChoice>,
+}
+
 /// What the scouting screen shows.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ScoutingState {
@@ -1175,12 +1226,7 @@ impl Scouting {
                 session
                     .available_evals()
                     .into_iter()
-                    .map(|eval| EvalChoice {
-                        value: eval,
-                        symbol: eval.to_string(),
-                        name: eval.friendly_name(event, self.labels),
-                        description: eval.friendly_description(event, self.labels),
-                    })
+                    .map(|eval| eval_choice(eval, event, self.labels))
                     .collect()
             })
             .unwrap_or_default()
@@ -1192,17 +1238,7 @@ impl Scouting {
         session
             .available_techniques()
             .into_iter()
-            .map(|t| TechniqueChoice {
-                value: t,
-                code: t.to_string(),
-                short_name: match t {
-                    TechniqueEnum::Set(set) => set.friendly_name(self.labels),
-                    TechniqueEnum::Serve(serve) => Some(serve.friendly_name(self.labels)),
-                }
-                .map(str::to_string),
-                name: t.description(self.labels),
-                chosen: session.technique() == Some(t),
-            })
+            .map(|t| technique_choice(t, session.technique() == Some(t), self.labels))
             .collect()
     }
 
@@ -1532,6 +1568,43 @@ fn rotation_name(rotation: u8, labels: &Labels) -> String {
     format!("{}{}", labels.setter_prefix, rotation + 1)
 }
 
+fn eval_choice(eval: EvalEnum, event: EventTypeEnum, labels: &Labels) -> EvalChoice {
+    EvalChoice {
+        value: eval,
+        symbol: eval.to_string(),
+        name: eval.friendly_name(event, labels),
+        description: eval.friendly_description(event, labels),
+    }
+}
+
+fn technique_choice(t: TechniqueEnum, chosen: bool, labels: &Labels) -> TechniqueChoice {
+    TechniqueChoice {
+        value: t,
+        code: t.to_string(),
+        short_name: match t {
+            TechniqueEnum::Set(set) => set.friendly_name(labels),
+            TechniqueEnum::Serve(serve) => Some(serve.friendly_name(labels)),
+        }
+        .map(str::to_string),
+        name: t.description(labels),
+        chosen,
+    }
+}
+
+fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEvent {
+    ScoutedEvent {
+        event: e.event_type,
+        name: e.event_type.friendly_name(labels).to_string(),
+        player: e
+            .player
+            .and_then(|id| team.find_player(id))
+            .map(|p| scouting_player(p, labels)),
+        eval: e.eval.map(|v| v.friendly_name(e.event_type, labels)),
+        symbol: e.eval.map(|v| v.to_string()),
+        technique: e.technique.map(|t| t.to_string()),
+    }
+}
+
 fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
     ScoutingPlayer {
         id: p.id.to_string(),
@@ -1660,21 +1733,88 @@ impl Scouting {
     }
 
     fn scouted_event(&self, team: &TeamEntry, e: &EventEntry) -> ScoutedEvent {
-        ScoutedEvent {
-            event: e.event_type,
-            name: e.event_type.friendly_name(self.labels).to_string(),
-            player: e
-                .player
-                .and_then(|id| team.find_player(id))
-                .map(|p| self.scouting_player(p)),
-            eval: e.eval.map(|v| v.friendly_name(e.event_type, self.labels)),
-            symbol: e.eval.map(|v| v.to_string()),
-            technique: e.technique.map(|t| t.to_string()),
-        }
+        scouted_event(team, e, self.labels)
     }
 
     fn scouting_player(&self, p: &PlayerEntry) -> ScoutingPlayer {
         scouting_player(p, self.labels)
+    }
+}
+
+/// Correcting an event of a set (see `event_edit` in the core): saved
+/// with `Scout4All::save_correction`.
+#[derive(uniffi::Object)]
+pub struct Correction {
+    current_match: MatchEntry,
+    edit: Mutex<EventEdit>,
+    labels: &'static Labels,
+}
+
+#[uniffi::export]
+impl Correction {
+    pub fn state(&self) -> CorrectionState {
+        let edit = self.edit();
+        let labels = self.labels;
+        let team = &self.current_match.team;
+        let event = edit.event();
+        let before = edit.before();
+        CorrectionState {
+            index: u32::try_from(edit.index()).unwrap_or(u32::MAX),
+            event: scouted_event(team, event, labels),
+            score_us: before.score_us,
+            score_them: before.score_them,
+            rotation: before
+                .current_lineup
+                .get_current_rotation()
+                .map_or_else(|_| "-".to_string(), |r| rotation_name(r, labels)),
+            phase: before
+                .current_lineup
+                .get_current_phase()
+                .friendly_name(labels)
+                .to_string(),
+            fields: edit.fields(),
+            event_types: edit
+                .event_types()
+                .into_iter()
+                .map(|e| EventChoice {
+                    value: e,
+                    name: e.friendly_name(labels).to_string(),
+                })
+                .collect(),
+            evals: edit
+                .evals()
+                .into_iter()
+                .map(|eval| eval_choice(eval, event.event_type, labels))
+                .collect(),
+            eval: event.eval,
+            techniques: edit
+                .techniques()
+                .into_iter()
+                .flatten()
+                .map(|t| technique_choice(t, event.technique == Some(t), labels))
+                .collect(),
+        }
+    }
+
+    pub fn choose_event_type(&self, event: EventTypeEnum) {
+        self.edit().choose_event_type(event);
+    }
+
+    pub fn choose_eval(&self, eval: EvalEnum) {
+        self.edit().choose_eval(eval);
+    }
+
+    /// A set or serve, or none.
+    pub fn choose_technique(&self, technique: Option<TechniqueEnum>) {
+        self.edit().choose_technique(technique);
+    }
+}
+
+impl Correction {
+    fn edit(&self) -> MutexGuard<'_, EventEdit> {
+        self.edit
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -1874,6 +2014,77 @@ impl Scout4All {
             event,
             filter,
         )
+    }
+
+    /// The events of a set of the match, to correct them.
+    pub fn set_events(
+        &self,
+        team_id: String,
+        match_id: String,
+        set_number: u8,
+    ) -> Result<SetEvents, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        let labels = self.language.labels();
+        let set = find_set(&m, set_number)?;
+        let scores = set.scores(m.max_substitutions)?;
+        Ok(SetEvents {
+            set_number,
+            team: m.team.name.clone(),
+            opponent: m.opponent.clone(),
+            events: set
+                .events
+                .iter()
+                .zip(scores)
+                .enumerate()
+                .map(|(i, (e, (score_us, score_them)))| SetEvent {
+                    index: u32::try_from(i).unwrap_or(u32::MAX),
+                    event: scouted_event(&m.team, e, labels),
+                    score_us,
+                    score_them,
+                    editable: !matches!(
+                        e.event_type,
+                        EventTypeEnum::R | EventTypeEnum::CL | EventTypeEnum::CS
+                    ),
+                })
+                .collect(),
+        })
+    }
+
+    /// Starts correcting an event of a set of the match.
+    pub fn correction(
+        &self,
+        team_id: String,
+        match_id: String,
+        set_number: u8,
+        index: u32,
+    ) -> Result<Arc<Correction>, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        let labels = self.language.labels();
+        let edit = EventEdit::new(
+            find_set(&m, set_number)?,
+            usize::try_from(index).unwrap_or(usize::MAX),
+            m.max_substitutions,
+        )
+        .map_err(|e| MobileError::Failed {
+            reason: e.message(labels).to_string(),
+        })?;
+        Ok(Arc::new(Correction {
+            current_match: m,
+            edit: Mutex::new(edit),
+            labels,
+        }))
+    }
+
+    /// Saves the set with the event corrected, if the events after it still
+    /// fit and the set ends as it did.
+    pub fn save_correction(&self, correction: Arc<Correction>) -> Result<(), MobileError> {
+        let labels = self.language.labels();
+        let set = correction.edit().apply().map_err(|e| MobileError::Failed {
+            reason: e.message(labels).to_string(),
+        })?;
+        self.runtime
+            .block_on(self.set_writer.update(&correction.current_match, &set))
+            .map_err(MobileError::from)
     }
 
     /// The start of the next set of the match, to choose who serves and the
@@ -2107,6 +2318,16 @@ fn lineup_player(p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
         role: p.role,
         role_name: p.role.map(|r| r.friendly_name(labels).to_string()),
     }
+}
+
+/// A set of the match, by its number.
+fn find_set(m: &MatchEntry, set_number: u8) -> Result<&SetEntry, MobileError> {
+    m.sets
+        .iter()
+        .find(|s| s.set_number == set_number)
+        .ok_or_else(|| MobileError::Failed {
+            reason: format!("no set {set_number} in {}", m.id),
+        })
 }
 
 fn parse_id(id: &str) -> Result<Uuid, MobileError> {
@@ -2987,6 +3208,107 @@ mod tests {
         assert_eq!(played.len(), 2);
         assert_eq!(played[0], ("S1", Some((1, 1)), Some((25, 26))));
         assert_eq!((played[1].1, played[1].2), (None, Some((0, 1))));
+    }
+
+    #[test]
+    fn the_events_of_a_set_are_corrected() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        // two aces, a serve error, their error
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+
+        let events = app.set_events(team.clone(), m.clone(), 1).unwrap();
+        assert_eq!((events.set_number, events.opponent.as_str()), (1, "Arezzo"));
+        let listed: Vec<(u32, EventTypeEnum, Option<String>, u8, u8, bool)> = events
+            .events
+            .iter()
+            .map(|e| {
+                (
+                    e.index,
+                    e.event.event,
+                    e.event.symbol.clone(),
+                    e.score_us,
+                    e.score_them,
+                    e.editable,
+                )
+            })
+            .collect();
+        let symbol = |s: &str| Some(s.to_string());
+        assert_eq!(
+            listed,
+            vec![
+                (0, EventTypeEnum::S, symbol("#"), 1, 0, true),
+                (1, EventTypeEnum::S, symbol("#"), 2, 0, true),
+                (2, EventTypeEnum::S, symbol("="), 2, 1, true),
+                (3, EventTypeEnum::OE, None, 3, 1, true),
+            ]
+        );
+        assert!(app.set_events(team.clone(), m.clone(), 2).is_err());
+
+        // the second ace, at 1-0
+        let correction = app.correction(team.clone(), m.clone(), 1, 1).unwrap();
+        let state = correction.state();
+        assert_eq!((state.index, state.score_us, state.score_them), (1, 1, 0));
+        assert_eq!(
+            state.fields,
+            vec![EditField::EventType, EditField::Eval, EditField::Technique]
+        );
+        assert_eq!(state.eval, Some(EvalEnum::Perfect));
+        assert_eq!(state.evals.len(), 5);
+        // the serve type the scouting preselected
+        let chosen: Vec<String> = state
+            .techniques
+            .iter()
+            .filter(|t| t.chosen)
+            .map(|t| t.code.clone())
+            .collect();
+        assert_eq!(chosen.len(), 1);
+        assert_eq!(state.event.technique.as_ref(), chosen.first());
+        assert!(
+            state
+                .event_types
+                .iter()
+                .any(|e| e.value == EventTypeEnum::S)
+        );
+        // a serve in play: the serve after it doesn't fit
+        correction.choose_eval(EvalEnum::Positive);
+        assert_eq!(correction.state().eval, Some(EvalEnum::Positive));
+        let error = app.save_correction(correction.clone()).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "the change doesn't fit the events after it"
+        );
+        // still an ace, the other serve type: saved
+        let float = state
+            .techniques
+            .iter()
+            .find(|t| !t.chosen)
+            .map(|t| t.value)
+            .unwrap();
+        correction.choose_eval(EvalEnum::Perfect);
+        correction.choose_technique(Some(float));
+        assert!(
+            correction
+                .state()
+                .techniques
+                .iter()
+                .any(|t| t.chosen && t.value == float)
+        );
+        app.save_correction(correction).unwrap();
+        let saved = app.set_events(team.clone(), m.clone(), 1).unwrap();
+        assert_eq!(
+            saved.events[1].event.technique.as_deref(),
+            Some(float.to_string().as_str())
+        );
+        assert_eq!(saved.events.len(), 4);
+
+        assert!(app.correction(team.clone(), m.clone(), 1, 4).is_err());
+        assert!(app.correction(team, m, 2, 0).is_err());
     }
 
     #[test]
