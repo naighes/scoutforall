@@ -56,7 +56,13 @@
     <string name="undo">Annulla</string>
     <string name="touch_the_player">Tocca il giocatore in campo</string>
     <string name="who_comes_in">Chi entra?</string>
-    <string name="other_events">Altro</string>
+    <string name="their_point">Punto loro</string>
+    <string name="their_error">Errore loro</string>
+    <string name="their_freeball">Free loro</string>
+    <string name="fault">Fallo</string>
+    <string name="lineup">Formazione</string>
+    <string name="substitution_short">Sostituzione</string>
+    <string name="setter_change_short">Palleggiatore</string>
     <string name="set_won">Set %d vinto</string>
     <string name="set_lost">Set %d perso</string>
     <string name="ok">OK</string>
