@@ -12,6 +12,7 @@ use scout4all_core::{
     localization::{Labels, Language},
     logging::logger::init_logger,
     match_form::{MatchForm, MatchFormError},
+    overview::{Errors, Fundamental, Overview, distribution},
     player_form::{PlayerForm, PlayerFormError, removal},
     providers::{
         match_reader::MatchReader,
@@ -30,17 +31,19 @@ use scout4all_core::{
     shapes::{
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
-            TeamClassificationEnum, TeamSideEnum,
+            TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
         r#match::MatchEntry,
         player::PlayerEntry,
+        set::SetEntry,
         snapshot::{EventEntry, Formation},
-        stats::{Metric, StatsFilter},
+        stats::{AttackSummary, Metric, Stats, StatsFilter},
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
     storage::{Store, fs::FsStore},
     team_form::{TeamForm, TeamFormError},
+    trend::trend,
 };
 use std::{
     path::PathBuf,
@@ -697,6 +700,108 @@ pub struct ScoutingState {
     pub last_touch: Option<ScoutedEvent>,
 }
 
+/// The sets the statistics are of: one of the match, or all of them so
+/// far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum StatsScope {
+    Set { number: u8 },
+    Match,
+}
+
+/// The events scored in a fundamental (see `overview::Fundamental`).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct FundamentalStats {
+    pub event: EventTypeEnum,
+    pub name: String,
+    pub total: u32,
+    /// -100 to 100, none with no events
+    pub efficiency: Option<f64>,
+    pub perfect: u32,
+    pub errors: u32,
+}
+
+/// The rallies won in a phase.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PhaseStats {
+    pub percentage: f64,
+    pub won: u32,
+    pub rallies: u32,
+}
+
+/// Attacks built by us (see `AttackSummary` in the core).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AttackStats {
+    pub total: u32,
+    pub kills: u32,
+    pub errors: u32,
+    pub blocked: u32,
+    pub efficiency: f64,
+}
+
+/// The errors made in a fundamental, of a kind.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ErrorCount {
+    pub event: EventTypeEnum,
+    pub count: u32,
+}
+
+/// The attacks set to a zone: 4, 3, 2 in the front row, 8 (pipe) and 9
+/// (from 1) in the back row.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ZoneStats {
+    pub zone: u8,
+    /// of the attacks of the distribution, 0 to 100
+    pub share: f64,
+    pub attacks: AttackStats,
+}
+
+/// The statistics after a rally, so far in the scope.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TrendSample {
+    pub set_number: u8,
+    pub score_us: u8,
+    pub score_them: u8,
+    pub reception: Option<f64>,
+    pub attack: Option<f64>,
+    pub counter_attack: Option<f64>,
+    pub serve: Option<f64>,
+    pub side_out: Option<f64>,
+    pub break_points: Option<f64>,
+}
+
+/// What the coach wants to know while the match is played (see
+/// `overview::Overview` in the core).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LiveStats {
+    pub scope: StatsScope,
+    /// the sets of the match so far, this one included: the scopes to
+    /// choose from
+    pub sets: Vec<u8>,
+    /// reception, attack, serve, block, dig
+    pub fundamentals: Vec<FundamentalStats>,
+    pub side_out: Option<PhaseStats>,
+    pub break_points: Option<PhaseStats>,
+    pub first_attack: Option<AttackStats>,
+    pub counter_attack: Option<AttackStats>,
+    pub unforced_errors: u32,
+    /// serve, attack, block (invasion), fault
+    pub unforced_by_event: Vec<ErrorCount>,
+    pub forced_errors: u32,
+    /// attack (blocked), block, reception (their aces), dig
+    pub forced_by_event: Vec<ErrorCount>,
+    pub aces: u32,
+    pub aces_against: u32,
+    pub opponent_errors: u32,
+    pub opponent_points: u32,
+    /// the distribution of the setter: all the attacks, the ones on our
+    /// reception, the counter-attacks
+    pub distribution: Vec<ZoneStats>,
+    pub first_attack_distribution: Vec<ZoneStats>,
+    pub counter_attack_distribution: Vec<ZoneStats>,
+    /// one sample per rally
+    pub trend: Vec<TrendSample>,
+}
+
 /// Scouting the set in progress of a match, the player first (see
 /// `ChoiceOrder::PlayerFirst` in the core): every complete event is saved at
 /// once.
@@ -929,6 +1034,144 @@ impl Scouting {
     pub fn undo(&self) -> Result<(), MobileError> {
         let mut session = self.session();
         self.scouted(self.runtime.block_on(session.undo()))
+    }
+
+    /// The statistics of a set of the match so far, or of all of them,
+    /// with their trend rally by rally.
+    pub fn stats(&self, scope: StatsScope) -> Result<LiveStats, MobileError> {
+        let session = self.session();
+        let max_substitutions = session.current_match().max_substitutions;
+        let all = session.sets();
+        let sets: Vec<&SetEntry> = all
+            .iter()
+            .copied()
+            .filter(|s| match scope {
+                StatsScope::Set { number } => s.set_number == number,
+                StatsScope::Match => true,
+            })
+            .collect();
+        let stats = sets.iter().try_fold(Stats::new(), |mut stats, set| {
+            set.compute_snapshot(max_substitutions).map(|s| {
+                stats.merge(&s.stats);
+                stats
+            })
+        })?;
+        let trend = trend(&sets, max_substitutions, |stats| {
+            let all = StatsFilter::default();
+            let efficiency = |e| stats.metric_percentage(e, Metric::Efficiency, &all);
+            let phase = |p| {
+                stats
+                    .rallies_won(&StatsFilter::new(Some(p), None, None))
+                    .map(|(v, _, _)| v)
+            };
+            TrendSample {
+                set_number: 0,
+                score_us: 0,
+                score_them: 0,
+                reception: efficiency(EventTypeEnum::P),
+                attack: efficiency(EventTypeEnum::A),
+                counter_attack: stats.attack_summary(true, &all).map(|a| a.efficiency()),
+                serve: efficiency(EventTypeEnum::S),
+                side_out: phase(PhaseEnum::SideOut),
+                break_points: phase(PhaseEnum::Break),
+            }
+        })?
+        .into_iter()
+        .map(|p| TrendSample {
+            set_number: p.set_number,
+            score_us: p.score_us,
+            score_them: p.score_them,
+            ..p.value
+        })
+        .collect();
+        let o = Overview::of(&stats);
+        let fundamental = |event: EventTypeEnum, f: Fundamental| FundamentalStats {
+            event,
+            name: event.friendly_name(self.labels).to_string(),
+            total: f.total,
+            efficiency: f.efficiency,
+            perfect: f.perfect,
+            errors: f.errors,
+        };
+        let phase = |p: Option<(f64, u32, u32)>| {
+            p.map(|(percentage, won, rallies)| PhaseStats {
+                percentage,
+                won,
+                rallies,
+            })
+        };
+        let errors = |e: &Errors| {
+            e.by_event
+                .iter()
+                .map(|(event, count)| ErrorCount {
+                    event: *event,
+                    count: *count,
+                })
+                .collect()
+        };
+        let zones = |counter_attack| {
+            distribution(&stats, counter_attack)
+                .into_iter()
+                .map(|z| ZoneStats {
+                    zone: zone_number(z.zone),
+                    share: z.share,
+                    attacks: attack_stats(z.attacks),
+                })
+                .collect()
+        };
+        Ok(LiveStats {
+            scope,
+            sets: all.iter().map(|s| s.set_number).collect(),
+            fundamentals: vec![
+                fundamental(EventTypeEnum::P, o.reception),
+                fundamental(EventTypeEnum::A, o.attack),
+                fundamental(EventTypeEnum::S, o.serve),
+                fundamental(EventTypeEnum::B, o.block),
+                fundamental(EventTypeEnum::D, o.dig),
+            ],
+            side_out: phase(o.side_out),
+            break_points: phase(o.break_points),
+            first_attack: o.first_attack.map(attack_stats),
+            counter_attack: o.counter_attack.map(attack_stats),
+            unforced_errors: o.unforced_errors.total,
+            unforced_by_event: errors(&o.unforced_errors),
+            forced_errors: o.forced_errors.total,
+            forced_by_event: errors(&o.forced_errors),
+            aces: o.aces,
+            aces_against: o.aces_against,
+            opponent_errors: o.opponent_errors,
+            opponent_points: o.opponent_points,
+            distribution: zones(None),
+            first_attack_distribution: zones(Some(false)),
+            counter_attack_distribution: zones(Some(true)),
+            trend,
+        })
+    }
+}
+
+/// The number scouts call a zone by.
+fn zone_number(zone: ZoneEnum) -> u8 {
+    use ZoneEnum::*;
+    match zone {
+        One => 1,
+        Two => 2,
+        Three => 3,
+        Four => 4,
+        Five => 5,
+        Six => 6,
+        Seven => 7,
+        Eight => 8,
+        Nine => 9,
+    }
+}
+
+fn attack_stats(a: AttackSummary) -> AttackStats {
+    AttackStats {
+        total: a.total,
+        kills: a.kills,
+        errors: a.errors,
+        blocked: a.blocked,
+        efficiency: a.efficiency(),
     }
 }
 
@@ -1928,6 +2171,127 @@ mod tests {
             }]
         );
         assert!(app.scouting(team, m).is_err());
+    }
+
+    /// The statistics of each set and of the match, with their trend, as
+    /// the sets are scouted.
+    #[test]
+    fn the_statistics_of_a_set_and_of_the_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        // set 1: 25 aces
+        let scouting = started_set(&app, &team, &m);
+        for _ in 0..25 {
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        }
+        // set 2: a serve error, their error, a serve error
+        let scouting = started_set(&app, &team, &m);
+        assert_eq!(scouting.state().set_number, 2);
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+
+        let serve = |stats: &LiveStats| {
+            stats
+                .fundamentals
+                .iter()
+                .find(|f| f.event == EventTypeEnum::S)
+                .map(|f| (f.name.clone(), f.total, f.efficiency, f.perfect, f.errors))
+                .unwrap()
+        };
+        let phase = |p: &Option<PhaseStats>| p.as_ref().map(|p| (p.won, p.rallies));
+        let scores = |stats: &LiveStats| {
+            stats
+                .trend
+                .iter()
+                .map(|t| (t.set_number, t.score_us, t.score_them))
+                .collect::<Vec<_>>()
+        };
+
+        let set = scouting.stats(StatsScope::Set { number: 2 }).unwrap();
+        assert_eq!(set.scope, StatsScope::Set { number: 2 });
+        assert_eq!(set.sets, vec![1, 2]);
+        assert_eq!(
+            set.fundamentals.iter().map(|f| f.event).collect::<Vec<_>>(),
+            vec![
+                EventTypeEnum::P,
+                EventTypeEnum::A,
+                EventTypeEnum::S,
+                EventTypeEnum::B,
+                EventTypeEnum::D
+            ]
+        );
+        assert_eq!(serve(&set), ("battuta".into(), 2, Some(-100.0), 0, 2));
+        assert_eq!((set.aces, set.opponent_errors), (0, 1));
+        assert_eq!(set.unforced_errors, 2);
+        assert_eq!(
+            set.unforced_by_event,
+            vec![
+                ErrorCount {
+                    event: EventTypeEnum::S,
+                    count: 2
+                },
+                ErrorCount {
+                    event: EventTypeEnum::A,
+                    count: 0
+                },
+                ErrorCount {
+                    event: EventTypeEnum::B,
+                    count: 0
+                },
+                ErrorCount {
+                    event: EventTypeEnum::F,
+                    count: 0
+                },
+            ]
+        );
+        assert_eq!(set.forced_errors, 0);
+        assert_eq!(phase(&set.side_out), Some((1, 1)));
+        assert_eq!(phase(&set.break_points), Some((0, 2)));
+        assert_eq!(scores(&set), vec![(2, 0, 1), (2, 1, 1), (2, 1, 2)]);
+        assert_eq!(
+            set.trend.iter().map(|t| t.serve).collect::<Vec<_>>(),
+            vec![Some(-100.0), Some(-100.0), Some(-100.0)]
+        );
+        assert_eq!(
+            set.trend.iter().map(|t| t.side_out).collect::<Vec<_>>(),
+            vec![None, Some(100.0), Some(100.0)]
+        );
+        assert!(set.distribution.is_empty());
+
+        let first = scouting.stats(StatsScope::Set { number: 1 }).unwrap();
+        assert_eq!(serve(&first), ("battuta".into(), 25, Some(100.0), 25, 0));
+        assert_eq!(first.aces, 25);
+        assert_eq!(phase(&first.break_points), Some((25, 25)));
+        assert_eq!(first.side_out, None);
+        assert_eq!(first.trend.len(), 25);
+
+        // the match: the trend goes on across the sets
+        let all = scouting.stats(StatsScope::Match).unwrap();
+        assert_eq!(serve(&all).1, 27);
+        assert_eq!(serve(&all).3, 25);
+        assert_eq!(all.aces, 25);
+        assert_eq!(phase(&all.break_points), Some((25, 27)));
+        assert_eq!(all.trend.len(), 28);
+        assert_eq!(
+            all.trend.first().map(|t| (t.set_number, t.serve)),
+            Some((1, Some(100.0)))
+        );
+        let last = all.trend.last().unwrap();
+        assert_eq!((last.set_number, last.score_us, last.score_them), (2, 1, 2));
+        // (25 aces - 2 errors) / 27 serves
+        assert_eq!(last.serve.map(|s| (s * 100.0).round()), Some(8519.0));
+
+        // a set not played yet: nothing
+        let none = scouting.stats(StatsScope::Set { number: 3 }).unwrap();
+        assert!(
+            none.fundamentals
+                .iter()
+                .all(|f| f.total == 0 && f.efficiency.is_none())
+        );
+        assert!(none.trend.is_empty());
+        assert_eq!(none.sets, vec![1, 2]);
     }
 
     #[test]
