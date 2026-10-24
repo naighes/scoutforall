@@ -108,6 +108,7 @@
     <string name="error_block">Muro</string>
     <string name="error_reception">Ricezione (ace)</string>
     <string name="error_dig">Difesa</string>
-    <string name="trend_counter_attack">Contrattacco</string>
-    <string name="trend_note">Efficienza fin lì, scambio dopo scambio</string>
+    <string name="trend_so_far">Fin qui</string>
+    <string name="trend_recent">Ultimi 10 tocchi</string>
+    <string name="set_team_level">Imposta livello e sesso della squadra per vedere i colori</string>
 </resources>

@@ -322,6 +322,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                             touch = touch?.symbol.orEmpty().takeIf { player != null && player.id == touched },
                             spotlight = player?.spotlight == true,
                             efficiency = player?.efficiency,
+                            grade = player?.grade,
                         )
                     },
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },

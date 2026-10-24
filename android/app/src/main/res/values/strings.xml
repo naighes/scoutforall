@@ -109,6 +109,7 @@
     <string name="error_block">Block</string>
     <string name="error_reception">Reception (aces)</string>
     <string name="error_dig">Dig</string>
-    <string name="trend_counter_attack">Counter-attack</string>
-    <string name="trend_note">Efficiency so far, rally by rally</string>
+    <string name="trend_so_far">So far</string>
+    <string name="trend_recent">Last 10 touches</string>
+    <string name="set_team_level">Set the level and gender of the team to see the colors</string>
 </resources>
