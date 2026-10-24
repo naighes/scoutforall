@@ -8,6 +8,7 @@ pub mod errors;
 pub mod localization;
 pub mod logging;
 pub mod match_form;
+pub mod overview;
 pub mod player_form;
 pub mod providers;
 pub mod reporting;
