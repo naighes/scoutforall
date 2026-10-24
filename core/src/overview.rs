@@ -3,7 +3,9 @@
 //! the phases won, the errors (unforced first), the aces and the errors of
 //! the opponent, and the distribution of the setter with the efficiency of
 //! each target.
+use crate::errors::AppError;
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
+use crate::shapes::set::SetEntry;
 use crate::shapes::stats::{AttackSummary, Metric, Stats, StatsFilter};
 
 /// The zones the setter sets to: the front row (4, 3, 2), the pipe (8) and
@@ -139,6 +141,16 @@ impl Overview {
             opponent_points: stats.event_count(OS, None, &all) - stats.untouched_aces(&all),
         }
     }
+}
+
+/// The statistics of the sets together: a set, or the match so far.
+pub fn stats_of(sets: &[&SetEntry], max_substitutions: u8) -> Result<Stats, AppError> {
+    sets.iter().try_fold(Stats::new(), |mut stats, set| {
+        set.compute_snapshot(max_substitutions).map(|s| {
+            stats.merge(&s.stats);
+            stats
+        })
+    })
 }
 
 /// The distribution of the setter: the attacks set to each zone of
