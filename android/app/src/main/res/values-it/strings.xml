@@ -143,9 +143,8 @@
     <string name="license_name">GNU Affero General Public License v3.0</string>
     <string name="data_privacy">Dati e privacy</string>
     <string name="source_code">Codice sorgente</string>
-    <string name="report_on_github">Segnala un problema su GitHub</string>
-    <string name="report_on_github_detail">Con un account GitHub</string>
-    <string name="report_by_email">Segnala un problema via e-mail</string>
+    <string name="report_problem">Segnala un problema</string>
+    <string name="report_problem_detail">Apre un\'e-mail pronta da inviare</string>
     <string name="report_title">Problema nell\'app Android</string>
     <string name="report_body">Cosa è successo?\n\nCosa ti aspettavi invece?\n\n---\n%1$s</string>
     <string name="no_app_to_open">Nessuna app può aprirlo</string>

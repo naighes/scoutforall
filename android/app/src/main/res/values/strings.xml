@@ -144,9 +144,8 @@
     <string name="license_name">GNU Affero General Public License v3.0</string>
     <string name="data_privacy">Data and privacy</string>
     <string name="source_code">Source code</string>
-    <string name="report_on_github">Report a problem on GitHub</string>
-    <string name="report_on_github_detail">With a GitHub account</string>
-    <string name="report_by_email">Report a problem by e-mail</string>
+    <string name="report_problem">Report a problem</string>
+    <string name="report_problem_detail">Opens an e-mail ready to send</string>
     <string name="report_title">Problem in the Android app</string>
     <string name="report_body">What happened?\n\nWhat did you expect instead?\n\n---\n%1$s</string>
     <string name="no_app_to_open">No app can open it</string>

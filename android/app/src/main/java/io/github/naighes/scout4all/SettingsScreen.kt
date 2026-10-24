@@ -27,7 +27,8 @@ import androidx.compose.ui.res.stringResource
 import io.github.naighes.scout4all.core.version
 
 private const val REPOSITORY = "https://github.com/naighes/scoutforall"
-private const val CONTACT = "nic.baldi@gmail.com"
+// the e-mail address that opens an issue on Linear, the tracker of the project
+private const val REPORTS = "scout4all-0fd59357fbe3@intake.linear.app"
 
 /** The settings: the language of the app (the system chooses it), the terms
  * of use, the information on the app. */
@@ -67,7 +68,8 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit)
 }
 
 /** The version, the license, the data, the code, and how to report a
- * problem: on GitHub or by e-mail, both with the version and the device. */
+ * problem: an e-mail that opens an issue on Linear, with the version and
+ * the device. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
@@ -98,18 +100,10 @@ fun AboutScreen(onBack: () -> Unit) {
                 context.browse(REPOSITORY)
             }
             HorizontalDivider()
-            Row(stringResource(R.string.report_on_github), stringResource(R.string.report_on_github_detail)) {
-                context.browse(
-                    Uri.parse("$REPOSITORY/issues/new").buildUpon()
-                        .appendQueryParameter("title", reportTitle)
-                        .appendQueryParameter("body", reportBody)
-                        .build().toString(),
-                )
-            }
-            Row(stringResource(R.string.report_by_email), CONTACT) {
+            Row(stringResource(R.string.report_problem), stringResource(R.string.report_problem_detail)) {
                 context.open(
                     Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
-                        putExtra(Intent.EXTRA_EMAIL, arrayOf(CONTACT))
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORTS))
                         putExtra(Intent.EXTRA_SUBJECT, "scout4all $version: $reportTitle")
                         putExtra(Intent.EXTRA_TEXT, reportBody)
                     },

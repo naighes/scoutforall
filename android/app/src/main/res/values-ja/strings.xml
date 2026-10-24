@@ -142,9 +142,8 @@
     <string name="license_name">GNU Affero General Public License v3.0</string>
     <string name="data_privacy">データとプライバシー</string>
     <string name="source_code">ソースコード</string>
-    <string name="report_on_github">GitHub で問題を報告</string>
-    <string name="report_on_github_detail">GitHub アカウントが必要です</string>
-    <string name="report_by_email">メールで問題を報告</string>
+    <string name="report_problem">問題を報告</string>
+    <string name="report_problem_detail">送信できる状態のメールを開きます</string>
     <string name="report_title">Android アプリの問題</string>
     <string name="report_body">何が起きましたか？\n\n本来はどうなるはずでしたか？\n\n---\n%1$s</string>
     <string name="no_app_to_open">開けるアプリがありません</string>
