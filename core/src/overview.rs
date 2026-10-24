@@ -105,11 +105,13 @@ pub struct Overview {
     pub forced_errors: Errors,
     /// our serves `#`
     pub aces: u32,
-    /// their aces: our receptions `=`
+    /// their aces: our receptions `=`, and their points right after their
+    /// serve, untouched (see `Stats::untouched_aces`)
     pub aces_against: u32,
     /// their errors (`OE`): serves, attacks, faults, they aren't told apart
     pub opponent_errors: u32,
-    /// their points the scouting doesn't give to one of ours (`OS`)
+    /// their points the scouting doesn't give to one of ours (`OS`), but
+    /// their untouched aces, among `aces_against`
     pub opponent_points: u32,
 }
 
@@ -131,9 +133,10 @@ impl Overview {
             unforced_errors: Errors::of(stats, ErrorTypeEnum::Unforced),
             forced_errors: Errors::of(stats, ErrorTypeEnum::Forced),
             aces: stats.event_count(S, Some(EvalEnum::Perfect), &all),
-            aces_against: stats.event_count(P, Some(EvalEnum::Error), &all),
+            aces_against: stats.event_count(P, Some(EvalEnum::Error), &all)
+                + stats.untouched_aces(&all),
             opponent_errors: stats.event_count(OE, None, &all),
-            opponent_points: stats.event_count(OS, None, &all),
+            opponent_points: stats.event_count(OS, None, &all) - stats.untouched_aces(&all),
         }
     }
 }

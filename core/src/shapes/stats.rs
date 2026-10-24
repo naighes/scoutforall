@@ -549,6 +549,18 @@ impl Stats {
         (summary.total > 0).then_some(summary)
     }
 
+    /// Their aces with no touch of ours: their point (`OS`) right after
+    /// their serve. As every ace, a reception error of ours, of the team:
+    /// the scouting doesn't tell who should have received it. They have no
+    /// player: a player filter leaves none.
+    pub fn untouched_aces(&self, filter: &StatsFilter) -> u32 {
+        self.first_rallies.count(|k| {
+            filter.matches(PhaseEnum::SideOut, k.rotation, None)
+                && k.reception_eval.is_none()
+                && k.ending == EventTypeEnum::OS
+        })
+    }
+
     /// Their freeballs we exploited: `(percentage, freeballs, exploited)`,
     /// or `None` with no freeballs. They have no player: a player filter
     /// leaves none.
