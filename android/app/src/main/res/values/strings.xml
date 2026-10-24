@@ -74,4 +74,6 @@
         <item quantity="one">%d player</item>
         <item quantity="other">%d players</item>
     </plurals>
+    <string name="ball_ours">ball on our side</string>
+    <string name="ball_theirs">ball on their side</string>
 </resources>

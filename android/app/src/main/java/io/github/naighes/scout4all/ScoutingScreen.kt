@@ -90,6 +90,7 @@ import io.github.naighes.scout4all.core.EventChoice
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Progress
 import io.github.naighes.scout4all.core.Scouting
+import io.github.naighes.scout4all.core.ScoutedEvent
 import io.github.naighes.scout4all.core.ScoutingPlayer
 import io.github.naighes.scout4all.core.ScoutingState
 import io.github.naighes.scout4all.core.ScoutingStep
@@ -264,11 +265,13 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
 private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifier: Modifier) =
     BoxWithConstraints(modifier) {
         val court = @Composable { m: Modifier ->
-            Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Score(view.state)
                 // where they stand: spread to receive, then where they
                 // play once our serve is made or theirs received
                 val players = view.state.court
+                val touch = view.state.lastTouch
+                val touched = touch?.player?.id
                 // the serve waits for its evaluation: the server is in the
                 // serve zone
                 val serving = view.state.step == ScoutingStep.EVAL && view.state.event?.value == EventTypeEnum.S
@@ -286,10 +289,16 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                             x = player?.x,
                             y = player?.y,
                             key = player?.id,
+                            touch = touch?.symbol.orEmpty().takeIf { player != null && player.id == touched },
                         )
                     },
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },
                     serveZone = true,
+                    ball = CourtBall(
+                        ours = view.state.ball == TeamSideEnum.US,
+                        position = players.indexOfFirst { it.id == touched }.takeIf { it >= 0 }?.plus(1),
+                        freeball = touch?.event == EventTypeEnum.FB || touch?.event == EventTypeEnum.OF,
+                    ),
                 )
             }
         }
@@ -368,7 +377,27 @@ private fun Score(state: ScoutingState) {
                 color = if (serving) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        LastEvent(state.events.firstOrNull())
     }
+}
+
+/** The last event saved, what undo takes back: the event, its evaluation
+ * and its player. One line, kept also before the first. */
+@Composable
+private fun LastEvent(event: ScoutedEvent?) = AnimatedContent(
+    event,
+    transitionSpec = { fadeIn() togetherWith fadeOut() },
+    label = "last event",
+) { e ->
+    Text(
+        e?.let { listOfNotNull(listOfNotNull(it.name, it.symbol).joinToString(" "), it.player?.let { p -> "${p.number} · ${p.name}" }).joinToString(" · ") }
+            .orEmpty(),
+        modifier = Modifier.padding(top = 2.dp),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 private data class Side(val name: String, val points: Int, val serving: Boolean, val scored: Color)

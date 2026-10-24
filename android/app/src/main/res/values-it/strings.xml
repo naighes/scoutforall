@@ -73,4 +73,6 @@
         <item quantity="one">%d giocatore</item>
         <item quantity="other">%d giocatori</item>
     </plurals>
+    <string name="ball_ours">palla nel nostro campo</string>
+    <string name="ball_theirs">palla nel loro campo</string>
 </resources>
