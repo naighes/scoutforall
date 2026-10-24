@@ -5,6 +5,10 @@
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
+    use crate::detail::{
+        Breakdown, Detail, EvalShare, FUNDAMENTALS, Freeballs, PlayerLine, RotationLine, Tone,
+        ZoneDetail, by_player, by_rotation, evaluations,
+    };
     use crate::overview::{Errors, Fundamental, Overview, distribution, stats_of as sets_stats};
     use crate::shapes::{
         enums::{
@@ -1104,6 +1108,305 @@ mod tests {
         assert_eq!(overview.aces_against, 2);
         assert_eq!(overview.opponent_errors, 1);
         assert_eq!(overview.opponent_points, 0);
+    }
+
+    // --- the detail -------------------------------------------------------
+
+    /// `side_out_set` with the fault as the app saves it, with no
+    /// evaluation.
+    fn side_out_stats(t: &Team) -> Stats {
+        let mut events = side_out_set(t);
+        if let Some(fault) = events.last_mut() {
+            fault.eval = None;
+        }
+        t.receiving(events).stats
+    }
+
+    fn detail(stats: &Stats, event_type: EventTypeEnum, filter: &StatsFilter) -> Detail {
+        match Breakdown::of(stats, event_type, filter) {
+            Breakdown::Fundamental(d) => d,
+            Breakdown::Freeballs(f) => panic!("expected a fundamental, got {f:?}"),
+        }
+    }
+
+    fn share(eval: EvalEnum, tone: Tone, count: u32, share: f64) -> EvalShare {
+        EvalShare {
+            eval,
+            tone,
+            count,
+            share,
+        }
+    }
+
+    /// Every evaluation a fundamental can have is listed once, and only
+    /// those: the freeballs and the other events have none.
+    #[test]
+    fn the_evaluations_of_each_fundamental() {
+        for event_type in FUNDAMENTALS {
+            let mut listed: Vec<EvalEnum> =
+                evaluations(event_type).iter().map(|(e, _)| *e).collect();
+            let mut available = match event_type.requires_evaluation() {
+                true => event_type.available_evals(),
+                false => vec![],
+            };
+            listed.sort_by_key(|e| e.to_string());
+            available.sort_by_key(|e| e.to_string());
+            assert_eq!(listed, available, "{event_type:?}");
+        }
+        // the best first, the worst last
+        let tones = |event_type| {
+            evaluations(event_type)
+                .iter()
+                .map(|(e, t)| format!("{e}{t:?}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        assert_eq!(tones(S), "#Excellent /Excellent +Good -Poor =Bad");
+        assert_eq!(tones(P), "#Excellent +Good !Fair -Poor /Poor =Bad");
+        assert_eq!(tones(D), tones(P));
+        assert_eq!(tones(B), "#Excellent +Good -Poor =Bad /Bad");
+        assert_eq!(tones(A), "#Excellent +Good !Good -Poor /Bad =Bad");
+        assert!(evaluations(FB).is_empty());
+    }
+
+    /// The attacks of the set: # / = + #, the opposite and the outside
+    /// hitter 1 from 2, the outside hitter 2 from 4.
+    #[test]
+    fn detail_of_the_attack() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        assert_eq!(
+            detail(&stats, A, &all()),
+            Detail {
+                total: 5,
+                evals: vec![
+                    share(Perfect, Tone::Excellent, 2, 40.0),
+                    share(Positive, Tone::Good, 1, 20.0),
+                    share(Over, Tone::Bad, 1, 20.0),
+                    share(Error, Tone::Bad, 1, 20.0),
+                ],
+                // (2 - 2) / 5; # + good, / = bad
+                efficiency: Some(0.0),
+                // # + ! over 5
+                positiveness: Some(60.0),
+                // blocked (forced), out (unforced)
+                errors: 2,
+                unforced_errors: 1,
+                // 9 rallies, 3 won
+                phases_per_point: Some((3.0, 3, 9)),
+                faults: 1,
+                points: Some(2),
+                zones: vec![
+                    ZoneDetail {
+                        zone: ZoneEnum::Four,
+                        share: 40.0,
+                        conversion: 0.0,
+                    },
+                    ZoneDetail {
+                        zone: ZoneEnum::Two,
+                        share: 60.0,
+                        conversion: 2.0 / 3.0 * 100.0,
+                    },
+                ],
+            }
+        );
+    }
+
+    /// A player: only the events, the faults and the zones of the player;
+    /// the rallies have no player.
+    #[test]
+    fn detail_of_a_player() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        assert_eq!(
+            detail(&stats, A, &StatsFilter::new(None, None, Some(t.opposite))),
+            Detail {
+                total: 2,
+                evals: vec![
+                    share(Perfect, Tone::Excellent, 1, 50.0),
+                    share(Over, Tone::Bad, 1, 50.0),
+                ],
+                efficiency: Some(0.0),
+                positiveness: Some(50.0),
+                errors: 1,
+                unforced_errors: 0,
+                phases_per_point: None,
+                faults: 0,
+                points: Some(1),
+                zones: vec![ZoneDetail {
+                    zone: ZoneEnum::Two,
+                    share: 100.0,
+                    conversion: 50.0,
+                }],
+            }
+        );
+        // the fault of the outside hitter 1
+        assert_eq!(
+            detail(&stats, S, &StatsFilter::new(None, None, Some(t.oh1))).faults,
+            1
+        );
+    }
+
+    /// The receptions in side out: # = + + -; the fault, in break, is left
+    /// out, and so are the rallies in break.
+    #[test]
+    fn detail_of_the_reception_in_a_phase() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        let side_out = StatsFilter::new(Some(PhaseEnum::SideOut), None, None);
+        assert_eq!(
+            detail(&stats, P, &side_out),
+            Detail {
+                total: 5,
+                evals: vec![
+                    share(Perfect, Tone::Excellent, 1, 20.0),
+                    share(Positive, Tone::Good, 2, 40.0),
+                    share(Negative, Tone::Poor, 1, 20.0),
+                    share(Error, Tone::Bad, 1, 20.0),
+                ],
+                efficiency: Some(40.0),
+                positiveness: Some(60.0),
+                // their ace, forced
+                errors: 1,
+                unforced_errors: 0,
+                phases_per_point: Some((3.0, 2, 6)),
+                faults: 0,
+                // a reception scores no point
+                points: None,
+                zones: vec![],
+            }
+        );
+        let break_points = StatsFilter::new(Some(PhaseEnum::Break), None, None);
+        let none = detail(&stats, P, &break_points);
+        assert_eq!(
+            (none.total, none.efficiency, none.positiveness),
+            (0, None, None)
+        );
+        assert!(none.evals.is_empty());
+        assert_eq!(none.faults, 1);
+        assert_eq!(none.phases_per_point, Some((3.0, 1, 3)));
+    }
+
+    /// Their freeball after ours, exploited with a kill: with a player, only
+    /// the ones given.
+    #[test]
+    fn detail_of_the_freeballs() {
+        let t = Team::new();
+        let stats = t
+            .receiving(vec![
+                act(P, t.oh2, Positive),
+                ev(FB, Some(t.setter), None),
+                opp(OF),
+                act(A, t.oh1, Perfect),
+            ])
+            .stats;
+        let freeballs = |filter| match Breakdown::of(&stats, FB, &filter) {
+            Breakdown::Freeballs(f) => f,
+            Breakdown::Fundamental(d) => panic!("expected the freeballs, got {d:?}"),
+        };
+        assert_eq!(
+            freeballs(all()),
+            Freeballs {
+                given: 1,
+                received: Some(1),
+                exploited: Some((100.0, 1, 1)),
+            }
+        );
+        let player = |p| StatsFilter::new(None, None, Some(p));
+        assert_eq!(
+            freeballs(player(t.setter)),
+            Freeballs {
+                given: 1,
+                received: None,
+                exploited: None,
+            }
+        );
+        assert_eq!(freeballs(player(t.oh1)).given, 0);
+        assert!(by_player(&stats, FB, &all()).is_empty());
+    }
+
+    /// The players compared: the most involved first, then the most
+    /// efficient; only the ones who played the fundamental in the phase.
+    #[test]
+    fn players_compared() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        let line = |player, total, efficiency, positiveness, points, errors| PlayerLine {
+            player,
+            total,
+            efficiency,
+            positiveness,
+            points,
+            errors,
+        };
+        assert_eq!(
+            by_player(&stats, A, &all()),
+            vec![
+                // / #
+                line(t.opposite, 2, Some(0.0), Some(50.0), Some(1), 1),
+                // = +
+                line(t.oh2, 2, Some(-50.0), Some(50.0), Some(0), 1),
+                // #
+                line(t.oh1, 1, Some(100.0), Some(100.0), Some(1), 0),
+            ]
+        );
+        assert_eq!(
+            by_player(&stats, P, &all()),
+            vec![
+                // = + + -: (2 - 1) / 4
+                line(t.oh1, 4, Some(25.0), Some(50.0), None, 1),
+                line(t.oh2, 1, Some(100.0), Some(100.0), None, 0),
+            ]
+        );
+        // no reception in break; the filter of a player is ignored
+        let break_points = StatsFilter::new(Some(PhaseEnum::Break), None, None);
+        assert!(by_player(&stats, P, &break_points).is_empty());
+        assert_eq!(
+            by_player(&stats, A, &StatsFilter::new(None, None, Some(t.oh1))).len(),
+            3
+        );
+    }
+
+    /// The set from rotation 0: the side out at once, then we serve in the
+    /// next rotation and lose it, win one side out of five there, and
+    /// serve in the one after: their error, our fault.
+    #[test]
+    fn phases_by_rotation() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        let lines = by_rotation(&stats);
+        assert_eq!(
+            lines.iter().map(|l| l.rotation).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5]
+        );
+        let played: Vec<RotationLine> = lines
+            .into_iter()
+            .filter(|l| l.side_out.is_some() || l.break_points.is_some())
+            .collect();
+        let won = |p: Option<(f64, u32, u32)>| p.map(|(_, w, r)| (w, r));
+        let mut phases: Vec<_> = played
+            .iter()
+            .map(|l| (won(l.side_out), won(l.break_points)))
+            .collect();
+        phases.sort();
+        assert_eq!(
+            phases,
+            vec![
+                (None, Some((1, 2))),
+                (Some((1, 1)), None),
+                (Some((1, 5)), Some((0, 1))),
+            ]
+        );
+        assert_eq!(played[0].rotation, 0);
+        assert_eq!(won(played[0].side_out), Some((1, 1)));
+        // every rally once
+        let (side_out, break_points) = played.iter().fold((0, 0), |(s, b), l| {
+            (
+                s + l.side_out.map_or(0, |(_, _, r)| r),
+                b + l.break_points.map_or(0, |(_, _, r)| r),
+            )
+        });
+        assert_eq!((side_out, break_points), (6, 3));
     }
 
     /// The distribution of the set: the share of each zone and its

@@ -5,6 +5,7 @@ pub mod analytics;
 pub mod archive;
 pub mod benchmark;
 pub mod constants;
+pub mod detail;
 pub mod errors;
 pub mod localization;
 pub mod logging;
