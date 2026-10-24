@@ -633,6 +633,10 @@ pub struct EvalChoice {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct TechniqueChoice {
     pub value: TechniqueEnum,
+    /// what the scouts write, e.g. "A" or "F"
+    pub code: String,
+    /// the word for it, if any, e.g. "high" or "float"
+    pub short_name: Option<String>,
     /// e.g. "A (high)" or "F (float)"
     pub name: String,
     /// what the evaluation saves now, chosen or preselected
@@ -858,6 +862,12 @@ impl Scouting {
             .into_iter()
             .map(|t| TechniqueChoice {
                 value: t,
+                code: t.to_string(),
+                short_name: match t {
+                    TechniqueEnum::Set(set) => set.friendly_name(self.labels),
+                    TechniqueEnum::Serve(serve) => Some(serve.friendly_name(self.labels)),
+                }
+                .map(str::to_string),
                 name: t.description(self.labels),
                 chosen: session.technique() == Some(t),
             })

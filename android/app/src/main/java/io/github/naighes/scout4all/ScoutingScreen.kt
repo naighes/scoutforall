@@ -38,10 +38,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,8 +56,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -301,17 +300,22 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) { Choices(view, model) }
-                LineupChanges(
-                    view.otherEvents.filter { it.value in lineupChanges },
-                    model,
-                    Modifier.align(Alignment.End),
-                )
-                // always in the same place, where the thumb is
-                OutlinedButton(
-                    onClick = model::undo,
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)
-                        .heightIn(min = 56.dp),
-                ) { Text(stringResource(R.string.undo)) }
+                // always in the same place, where the thumb is: the undo on
+                // the left, the changes of the lineup on the right edge
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = model::undo, modifier = Modifier.size(56.dp)) {
+                        Icon(
+                            painterResource(R.drawable.ic_undo),
+                            contentDescription = stringResource(R.string.undo),
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    LineupChanges(view.otherEvents.filter { it.value in lineupChanges }, model, Modifier)
+                }
             }
         }
         when {
@@ -489,8 +493,14 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
     }
 }
 
+/** What is being scouted, on one line: the court shows the player too. */
 @Composable
-private fun Title(text: String) = Text(text, style = MaterialTheme.typography.titleLarge)
+private fun Title(text: String) = Text(
+    text,
+    style = MaterialTheme.typography.titleMedium,
+    maxLines = 1,
+    overflow = TextOverflow.Ellipsis,
+)
 
 @Composable
 private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -616,30 +626,55 @@ private fun Evals(evals: List<EvalChoice>, model: ScoutingViewModel) = Row(
     }
 }
 
-/** The set or serve the evaluation saves: the chosen one is marked. */
-@OptIn(ExperimentalLayoutApi::class)
+/** The set or serve the evaluation saves, in a row, never to scroll for:
+ * the code and the word for it, if any; the chosen one is filled. */
 @Composable
-private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewModel) = FlowRow(
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
+private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewModel) = Row(
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
 ) {
     techniques.forEach { t ->
-        FilterChip(selected = t.chosen, onClick = { model.technique(t) }, label = { Text(t.name) })
+        val modifier = Modifier.weight(1f).height(56.dp).semantics { contentDescription = t.name }
+        val padding = PaddingValues(0.dp)
+        val content = @Composable {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(t.code, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                t.shortName?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Clip)
+                }
+            }
+        }
+        when {
+            t.chosen -> FilledTonalButton(
+                onClick = { model.technique(t) },
+                modifier = modifier,
+                contentPadding = padding,
+                shape = MaterialTheme.shapes.medium,
+            ) { content() }
+            else -> OutlinedButton(
+                onClick = { model.technique(t) },
+                modifier = modifier,
+                contentPadding = padding,
+                shape = MaterialTheme.shapes.medium,
+            ) { content() }
+        }
     }
 }
 
-/** The events of the player, two by two. */
+/** The events of the player, two by two, three by three if more than
+ * four: never to scroll for. */
 @Composable
 private fun Buttons(buttons: List<Pair<String, () -> Unit>>) = Column(
     verticalArrangement = Arrangement.spacedBy(8.dp),
 ) {
-    buttons.chunked(2).forEach { row ->
+    val columns = if (buttons.size > 4) 3 else 2
+    buttons.chunked(columns).forEach { row ->
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             row.forEach { (name, onClick) ->
                 Button(onClick = onClick, modifier = Modifier.weight(1f).heightIn(min = 64.dp)) {
                     Text(name, textAlign = TextAlign.Center)
                 }
             }
-            if (row.size == 1) Column(Modifier.weight(1f)) {}
+            repeat(columns - row.size) { Column(Modifier.weight(1f)) {} }
         }
     }
 }
