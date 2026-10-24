@@ -34,7 +34,7 @@ use scout4all_core::{
         },
         r#match::MatchEntry,
         player::PlayerEntry,
-        snapshot::EventEntry,
+        snapshot::{EventEntry, Formation},
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
@@ -520,7 +520,88 @@ pub struct CourtPlayer {
     pub libero: bool,
     /// whether the scout can choose the player now
     pub selectable: bool,
+    /// where the player stands, in meters from the left sideline and from
+    /// the net, seen from the bench
+    pub x: f32,
+    pub y: f32,
 }
+
+/// The middle of the zone of each position, 1 to 6: the front row in the 3
+/// meters before the attack line, the back row in the 6 behind it.
+const ZONES: [(f32, f32); 6] = [
+    (7.5, 6.0),
+    (7.5, 1.5),
+    (4.5, 1.5),
+    (1.5, 1.5),
+    (1.5, 6.0),
+    (4.5, 6.0),
+];
+
+/// Where the players of each position, 1 to 6, stand to receive with three
+/// (the libero and the outside hitters), by rotation (the position of the
+/// setter less 1), in a 5-1 with the canonical P1. The setter hides near
+/// the net, or behind a receiver, to go to the net; the opposite in the
+/// back row hides; the positions respect the order of rotation at the
+/// serve. Validated by the user (2026-10-24), then laid out so that the
+/// players and their names don't overlap on a phone (360dp wide): on four
+/// lines (at the net, 3, 5 and 7.5 meters), side by side only 3 meters
+/// apart.
+const RECEPTION: [[(f32, f32); 6]; 6] = [
+    // P1: O 4, C2 3 at the net; S2, L, S1 receive; the setter behind S1
+    [
+        (7.5, 7.5),
+        (7.5, 5.0),
+        (4.5, 0.8),
+        (1.5, 0.8),
+        (1.5, 5.2),
+        (4.5, 5.3),
+    ],
+    // P2: C2 4, the setter 2 at the net; S1, S2, L receive; O hides left
+    [
+        (7.5, 5.3),
+        (7.5, 0.8),
+        (1.5, 5.0),
+        (1.2, 0.8),
+        (1.2, 7.6),
+        (4.5, 5.3),
+    ],
+    // P3: the setter 3, C1 2 at the net; S1, L, S2 receive; O hides right
+    [
+        (7.5, 5.2),
+        (7.5, 0.8),
+        (4.5, 0.8),
+        (1.5, 5.0),
+        (4.5, 5.2),
+        (6.0, 7.6),
+    ],
+    // P4: the setter 4, C1 3 at the net; S1, L, S2 receive; O hides right
+    [
+        (7.5, 7.5),
+        (7.5, 5.0),
+        (4.5, 0.8),
+        (1.5, 0.8),
+        (1.5, 5.2),
+        (4.5, 5.3),
+    ],
+    // P5: C1 4, O 2 at the net, the setter behind C1; S2, S1, L receive
+    [
+        (7.5, 5.5),
+        (7.5, 0.8),
+        (1.5, 5.4),
+        (1.2, 0.8),
+        (1.3, 3.1),
+        (4.5, 5.6),
+    ],
+    // P6: O 3, C2 2 at the net, the setter behind them; S2, L, S1 receive
+    [
+        (7.5, 5.4),
+        (7.5, 0.8),
+        (3.5, 0.8),
+        (1.5, 5.0),
+        (4.5, 5.4),
+        (6.0, 3.1),
+    ],
+];
 
 /// A player to choose for the event, or as a replacement.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -583,7 +664,13 @@ pub struct ScoutingState {
     pub won: u8,
     pub lost: u8,
     pub serving_team: TeamSideEnum,
-    /// the players in positions 1 to 6
+    /// the rotation, by the position of the setter: P1 to P6 in Italian,
+    /// S1 to S6 in English
+    pub rotation: String,
+    /// the players in positions 1 to 6, where they play: once our serve is
+    /// made or theirs received, the setter or the opposite in 2 and 1, the
+    /// middle blocker in 3 and 5, the outside hitter in 4 and 6, but the
+    /// front row of the canonical P1 (see `Snapshot::get_playing_positions`)
     pub court: Vec<CourtPlayer>,
     pub substitutions_left: u8,
     pub step: ScoutingStep,
@@ -621,19 +708,29 @@ impl Scouting {
             (ScoutingStep::Player, _) => choices.iter().any(|c| c.id == *id),
             _ => false,
         };
-        let court = (0..6)
-            .filter_map(|position| {
-                lineup
-                    .get(position)
-                    .and_then(|id| team.find_player(id))
-                    .map(|p| CourtPlayer {
-                        id: p.id.to_string(),
-                        name: p.name.clone(),
-                        number: p.number,
-                        setter: lineup.has_setter_at_pos(position),
-                        libero: lineup.has_libero_at_pos(position),
-                        selectable: selectable(&p.id),
-                    })
+        let setter = lineup.get_setter();
+        let libero = lineup.get_current_libero();
+        let spots = match (snapshot.get_formation(), lineup.get_current_rotation()) {
+            (Formation::Reception, Ok(rotation)) => RECEPTION
+                .get(usize::from(rotation))
+                .copied()
+                .unwrap_or(ZONES),
+            _ => ZONES,
+        };
+        let court = snapshot
+            .get_playing_positions()
+            .into_iter()
+            .zip(spots)
+            .filter_map(|(id, spot)| team.find_player(id).map(|p| (p, spot)))
+            .map(|(p, (x, y))| CourtPlayer {
+                id: p.id.to_string(),
+                name: p.name.clone(),
+                number: p.number,
+                setter: setter == Some(p.id),
+                libero: libero == p.id,
+                selectable: selectable(&p.id),
+                x,
+                y,
             })
             .collect();
         let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
@@ -651,6 +748,10 @@ impl Scouting {
                 PhaseEnum::Break => TeamSideEnum::Us,
                 PhaseEnum::SideOut => TeamSideEnum::Them,
             },
+            rotation: lineup.get_current_rotation().map_or_else(
+                |_| "-".to_string(),
+                |r| format!("{}{}", self.labels.setter_prefix, r + 1),
+            ),
             court,
             substitutions_left: lineup
                 .get_max_substitutions()
@@ -1617,6 +1718,9 @@ mod tests {
         assert_eq!(state.serving_team, TeamSideEnum::Us);
         assert_eq!(state.court.len(), 6);
         assert!(state.court[0].setter);
+        assert_eq!(state.rotation, "P1");
+        // we serve: in the middle of the zones
+        assert_eq!((state.court[0].x, state.court[0].y), (7.5, 6.0));
         assert_eq!(state.substitutions_left, 8);
 
         // we serve: the server is known, the serve waits for its evaluation
@@ -1669,9 +1773,13 @@ mod tests {
 
         // they receive: the player who digs first, then the evaluation or
         // the event
+        let outside_hitter = state.court[1].id.clone();
         scouting.choose_eval(EvalEnum::Positive).unwrap();
         let state = scouting.state();
         assert_eq!((state.step, state.player), (ScoutingStep::Event, None));
+        // the serve is made: the outside hitter in 2 plays in 4
+        assert_eq!(state.court[3].id, outside_hitter);
+        assert!(state.court[0].setter);
         let digger = state.court.iter().find(|p| p.selectable).unwrap();
         let events = scouting.player_events(digger.id.clone()).unwrap();
         assert!(events.iter().any(|e| e.value == EventTypeEnum::D));
@@ -1700,6 +1808,51 @@ mod tests {
                 .any(|t| t.chosen && t.value == TechniqueEnum::Serve(ServeTypeEnum::Spin))
         );
         assert_eq!(app.scouting(team, m).unwrap().state().events, vec![]);
+    }
+
+    #[test]
+    fn the_players_spread_to_receive() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        // our serve error: they serve, we receive in P1
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let state = scouting.state();
+        assert_eq!(
+            (state.serving_team, state.rotation.as_str()),
+            (TeamSideEnum::Them, "S1")
+        );
+        let spots: Vec<(f32, f32)> = state.court.iter().map(|p| (p.x, p.y)).collect();
+        assert_eq!(spots, RECEPTION[0].to_vec());
+        assert!(state.court[0].setter);
+    }
+
+    #[test]
+    fn the_reception_formations_respect_the_order_of_rotation() {
+        for (rotation, spots) in RECEPTION.iter().enumerate() {
+            let x = |position: usize| spots[position - 1].0;
+            let y = |position: usize| spots[position - 1].1;
+            // each front row player before the one behind, and from the left
+            // 4 3 2 and 5 6 1
+            assert!(
+                y(4) < y(5) && y(3) < y(6) && y(2) < y(1),
+                "P{}: {spots:?}",
+                rotation + 1
+            );
+            assert!(
+                x(4) < x(3) && x(3) < x(2) && x(5) < x(6) && x(6) < x(1),
+                "P{}: {spots:?}",
+                rotation + 1
+            );
+            assert!(
+                spots
+                    .iter()
+                    .all(|(x, y)| (0.0..=9.0).contains(x) && (0.0..=9.0).contains(y)),
+                "P{}: {spots:?}",
+                rotation + 1
+            );
+        }
     }
 
     #[test]
