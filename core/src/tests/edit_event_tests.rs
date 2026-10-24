@@ -95,6 +95,26 @@ mod tests {
     }
 
     #[test]
+    fn the_score_after_each_event() {
+        let team = Team::new();
+        assert_eq!(
+            side_out(&team).scores(DEFAULT_MAX_SUBSTITUTIONS).unwrap(),
+            vec![(0, 0), (1, 0), (1, 0)]
+        );
+        let mut set = side_out(&team);
+        set.events.push(event(OS, None, None));
+        set.events.push(event(OE, None, None));
+        assert_eq!(
+            set.scores(DEFAULT_MAX_SUBSTITUTIONS).unwrap()[3..],
+            [(1, 1), (2, 1)]
+        );
+        // a set that doesn't replay
+        set.events
+            .insert(0, event(S, Some(team.setter()), Some(Perfect)));
+        assert!(set.scores(DEFAULT_MAX_SUBSTITUTIONS).is_err());
+    }
+
+    #[test]
     fn edit_fitting_the_events_after_it_applies() {
         let team = Team::new();
         let set = side_out(&team);
