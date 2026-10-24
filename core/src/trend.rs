@@ -44,9 +44,9 @@ impl Series {
             Series::Attack => efficiency(EventTypeEnum::A),
             Series::CounterAttack => stats.attack_summary(true, &all).map(|a| a.efficiency()),
             Series::Serve => efficiency(EventTypeEnum::S),
-            Series::SideOut | Series::BreakPoint => stats
-                .rallies_won(&self.phase_filter())
-                .map(|(v, _, _)| v),
+            Series::SideOut | Series::BreakPoint => {
+                stats.rallies_won(&self.phase_filter()).map(|(v, _, _)| v)
+            }
         }
     }
 
@@ -180,11 +180,7 @@ impl Replay {
     /// `RECENT_TOUCHES` touches.
     pub fn series(&self, series: Series, recent: bool) -> Vec<TrendPoint<Option<f64>>> {
         match recent {
-            true => self.window(
-                RECENT_TOUCHES,
-                |s| series.touches(s),
-                |s| series.value(s),
-            ),
+            true => self.window(RECENT_TOUCHES, |s| series.touches(s), |s| series.value(s)),
             false => self.cumulative(|s| series.value(s)),
         }
     }
