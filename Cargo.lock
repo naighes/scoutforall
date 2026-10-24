@@ -4020,6 +4020,8 @@ version = "0.9.0"
 dependencies = [
  "chrono",
  "scout4all-core",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

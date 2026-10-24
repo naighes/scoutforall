@@ -13,7 +13,7 @@ use scout4all_core::{
     errors::AppError,
     event_edit::{EditField, EventEdit},
     localization::{Labels, Language},
-    logging::logger::init_logger,
+    logging::logger::{init_logger, log_error},
     match_form::{MatchForm, MatchFormError},
     overview::{Errors, Fundamental, Overview, distribution, stats_of},
     player_form::{PlayerForm, PlayerFormError, removal},
@@ -31,6 +31,7 @@ use scout4all_core::{
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
+    settings::Consent,
     shapes::{
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
@@ -44,10 +45,12 @@ use scout4all_core::{
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
-    storage::{Store, fs::FsStore},
+    storage::{Store, fs::FsStore, layout::CONFIG},
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
 };
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
 use std::{
     path::PathBuf,
     str::FromStr,
@@ -1829,6 +1832,8 @@ pub struct Scout4All {
     match_reader: StoreMatchReader,
     match_writer: StoreMatchWriter,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    /// for `config.json`
+    store: Arc<dyn Store>,
 }
 
 #[uniffi::export]
@@ -1855,9 +1860,10 @@ impl Scout4All {
             set_writer: Arc::new(StoreSetWriter::new(store.clone(), language.clone())),
             match_reader: StoreMatchReader::new(
                 store.clone(),
-                Arc::new(StoreSetReader::new(store, language.clone())),
+                Arc::new(StoreSetReader::new(store.clone(), language.clone())),
                 language.clone(),
             ),
+            store,
             language,
         }))
     }
@@ -2289,9 +2295,102 @@ impl Scout4All {
         let team = self.runtime.block_on(self.team_writer.save(input))?;
         Ok(team.id.to_string())
     }
+
+    /// The language of the labels from now on, a code like `"it"` (English
+    /// when it isn't supported): the app follows the language chosen for it
+    /// in the system.
+    pub fn set_language(&self, language: String) {
+        self.language
+            .set(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
+    }
+
+    /// Whether the user has seen the current terms of use: not when
+    /// `config.json` is missing or can't be read, so they're shown.
+    pub fn terms_seen(&self) -> bool {
+        match self.read_config() {
+            Ok(config) => config.consent.terms_seen(),
+            Err(e) => {
+                log_error(&format!("could not read the settings: {e}"));
+                false
+            }
+        }
+    }
+
+    /// The terms of use: this app sends no statistics yet.
+    pub fn terms(&self) -> Terms {
+        let labels = self.language.labels();
+        Terms {
+            title: labels.terms_of_use.to_string(),
+            paragraphs: labels
+                .terms(labels.terms_no_upload)
+                .map(String::from)
+                .to_vec(),
+        }
+    }
+
+    /// Saves the current terms of use as seen, keeping the other settings
+    /// (those of the TUI too). A new `config.json` has the language too,
+    /// which the TUI needs.
+    pub fn accept_terms(&self) -> Result<(), MobileError> {
+        let config = self.read_config()?;
+        let language = match config.other.contains_key(LANGUAGE) {
+            true => None,
+            false => Some(to_value(self.language.get()).map_err(failed)?),
+        };
+        let config = AppConfig {
+            consent: config.consent.with_terms_seen(),
+            other: config
+                .other
+                .into_iter()
+                .chain(language.map(|l| (LANGUAGE.to_string(), l)))
+                .collect(),
+        };
+        let bytes = to_vec_pretty(&config).map_err(failed)?;
+        Ok(self.runtime.block_on(self.store.write(CONFIG, &bytes))?)
+    }
+}
+
+/// The version of the app (the same as the core, the TUI, the CLI).
+#[uniffi::export]
+pub fn version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// The terms of use, to show a paragraph each.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct Terms {
+    pub title: String,
+    pub paragraphs: Vec<String>,
+}
+
+/// The key of the language in `config.json`.
+const LANGUAGE: &str = "language";
+
+/// `config.json`: the settings shared by the apps, and those of the others
+/// (the keys and the language of the TUI), kept as they are.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct AppConfig {
+    #[serde(flatten)]
+    consent: Consent,
+    #[serde(flatten)]
+    other: Map<String, Value>,
+}
+
+fn failed(e: impl std::fmt::Display) -> MobileError {
+    MobileError::Failed {
+        reason: e.to_string(),
+    }
 }
 
 impl Scout4All {
+    /// `config.json`, the defaults when missing.
+    fn read_config(&self) -> Result<AppConfig, MobileError> {
+        match self.runtime.block_on(self.store.read(CONFIG))? {
+            Some(bytes) => from_slice(&bytes).map_err(failed),
+            None => Ok(AppConfig::default()),
+        }
+    }
+
     fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
         let id = parse_id(id)?;
         Ok(self.runtime.block_on(self.team_reader.read_single(&id))?)
@@ -2370,6 +2469,7 @@ fn count(team: &TeamEntry) -> u32 {
 #[allow(clippy::unwrap_used, clippy::unreachable)]
 mod tests {
     use super::*;
+    use scout4all_core::{localization::labels, settings::TERMS_VERSION};
 
     #[test]
     fn an_empty_folder_has_no_teams() {
@@ -2389,6 +2489,86 @@ mod tests {
                 folder: "not-a-team".into()
             }]
         );
+    }
+
+    fn app(dir: &tempfile::TempDir, language: &str) -> Arc<Scout4All> {
+        Scout4All::new(dir.path().to_string_lossy().into_owned(), language.into()).unwrap()
+    }
+
+    fn config(dir: &tempfile::TempDir) -> Value {
+        from_slice(&std::fs::read(dir.path().join(CONFIG)).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn the_terms_are_seen_once_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        assert!(!app.terms_seen());
+        app.accept_terms().unwrap();
+        assert!(app.terms_seen());
+        // the language too, which the TUI needs
+        assert_eq!(
+            config(&dir),
+            serde_json::json!({
+                "analytics_enabled": true,
+                "terms_version": TERMS_VERSION,
+                "language": "it",
+            })
+        );
+    }
+
+    #[test]
+    fn accepting_the_terms_keeps_the_settings_of_the_tui() {
+        let dir = tempfile::tempdir().unwrap();
+        let tui = serde_json::json!({
+            "language": "en",
+            "scouting_keybindings": { "a": "Attack" },
+            "analytics_enabled": false,
+            "last_used_dir": "/home/coach",
+            "terms_version": 0,
+        });
+        std::fs::write(dir.path().join(CONFIG), tui.to_string()).unwrap();
+        let app = app(&dir, "it");
+        assert!(!app.terms_seen());
+        app.accept_terms().unwrap();
+        let mut expected = tui;
+        expected["terms_version"] = TERMS_VERSION.into();
+        assert_eq!(config(&dir), expected);
+    }
+
+    #[test]
+    fn unreadable_settings_show_the_terms_and_are_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(CONFIG), "{ not json").unwrap();
+        let app = app(&dir, "it");
+        assert!(!app.terms_seen());
+        assert!(app.accept_terms().is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(CONFIG)).unwrap(),
+            "{ not json"
+        );
+    }
+
+    #[test]
+    fn the_terms_say_nothing_is_sent_in_the_language_of_the_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let terms = app.terms();
+        assert_eq!(terms.title, "termini di utilizzo");
+        let it = labels(LanguageEnum::It);
+        assert_eq!(
+            terms.paragraphs,
+            vec![
+                it.terms_free,
+                it.terms_license,
+                it.terms_no_upload,
+                it.terms_full
+            ]
+        );
+        app.set_language("pl".into());
+        assert_eq!(app.terms().title, "warunki korzystania");
+        app.set_language("xx".into());
+        assert_eq!(app.terms().title, "terms of use");
     }
 
     fn form(name: &str) -> TeamForm {
