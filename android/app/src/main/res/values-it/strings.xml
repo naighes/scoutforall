@@ -133,4 +133,20 @@
     <string name="event_n">Evento %d</string>
     <string name="serve_type">Battuta</string>
     <string name="set_type">Alzata</string>
+    <string name="settings">Impostazioni</string>
+    <string name="language">Lingua</string>
+    <string name="terms_of_use">Termini di utilizzo</string>
+    <string name="accept_terms">Continua</string>
+    <string name="about">Informazioni</string>
+    <string name="version">Versione</string>
+    <string name="license">Licenza</string>
+    <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="data_privacy">Dati e privacy</string>
+    <string name="source_code">Codice sorgente</string>
+    <string name="report_on_github">Segnala un problema su GitHub</string>
+    <string name="report_on_github_detail">Con un account GitHub</string>
+    <string name="report_by_email">Segnala un problema via e-mail</string>
+    <string name="report_title">Problema nell\'app Android</string>
+    <string name="report_body">Cosa è successo?\n\nCosa ti aspettavi invece?\n\n---\n%1$s</string>
+    <string name="no_app_to_open">Nessuna app può aprirlo</string>
 </resources>

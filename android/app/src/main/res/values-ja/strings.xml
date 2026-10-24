@@ -132,4 +132,20 @@
     <string name="event_n">イベント %d</string>
     <string name="serve_type">サーブ</string>
     <string name="set_type">トス</string>
+    <string name="settings">設定</string>
+    <string name="language">言語</string>
+    <string name="terms_of_use">利用規約</string>
+    <string name="accept_terms">続ける</string>
+    <string name="about">アプリについて</string>
+    <string name="version">バージョン</string>
+    <string name="license">ライセンス</string>
+    <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="data_privacy">データとプライバシー</string>
+    <string name="source_code">ソースコード</string>
+    <string name="report_on_github">GitHub で問題を報告</string>
+    <string name="report_on_github_detail">GitHub アカウントが必要です</string>
+    <string name="report_by_email">メールで問題を報告</string>
+    <string name="report_title">Android アプリの問題</string>
+    <string name="report_body">何が起きましたか？\n\n本来はどうなるはずでしたか？\n\n---\n%1$s</string>
+    <string name="no_app_to_open">開けるアプリがありません</string>
 </resources>

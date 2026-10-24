@@ -10,10 +10,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -64,14 +66,28 @@ class TeamsViewModel(application: Application) : AndroidViewModel(application) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TeamsScreen(teams: TeamsViewModel, onTeam: (String) -> Unit, onNewTeam: () -> Unit) {
+fun TeamsScreen(
+    teams: TeamsViewModel,
+    onTeam: (String) -> Unit,
+    onNewTeam: () -> Unit,
+    onSettings: () -> Unit,
+) {
     val state by teams.state.collectAsState()
     // back from a team, which may have changed
     LaunchedEffect(Unit) {
         if (state !is TeamsState.Loading) teams.refresh()
     }
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.teams)) }) },
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.teams)) },
+                actions = {
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
+                    }
+                },
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = onNewTeam) {
                 Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.new_team))

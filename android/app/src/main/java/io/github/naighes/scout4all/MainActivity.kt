@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.core.animation.doOnEnd
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.splashscreen.SplashScreenViewProvider
@@ -22,12 +23,18 @@ import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
     private val teams: TeamsViewModel by viewModels()
+    private val terms: TermsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
-        // the logo stays until the teams are there: no empty screen after it
-        splash.setKeepOnScreenCondition { teams.state.value == TeamsState.Loading }
+        // again when the user chooses another language for the app
+        (application as Scout4AllApplication).followLanguage(resources.configuration.locales[0].language)
+        // the logo stays until the teams and the terms are there: no empty
+        // screen after it
+        splash.setKeepOnScreenCondition {
+            teams.state.value == TeamsState.Loading || terms.seen.value == null
+        }
         splash.setOnExitAnimationListener(::exitSplash)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -35,7 +42,7 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             Scout4AllTheme {
-                Navigation(teams)
+                Navigation(teams, terms)
             }
         }
     }
@@ -63,19 +70,45 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The screens: teams → team → its form, a player or a match → its form,
- * the start of a set, its scouting, its events or the statistics, and the forms of a new team, player or match (which
- * goes on with its first set). */
+/** The screens: the terms of use until seen, then teams → team → its form,
+ * a player or a match → its form, the start of a set, its scouting, its
+ * events or the statistics, and the forms of a new team, player or match
+ * (which goes on with its first set); teams → settings → terms, about. */
 @Composable
-private fun Navigation(teams: TeamsViewModel) {
+private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel) {
+    // under the splash until read
+    val seen = terms.seen.collectAsState().value ?: return
     val nav = rememberNavController()
-    NavHost(nav, startDestination = "teams") {
+    NavHost(nav, startDestination = if (seen) "teams" else "terms") {
+        composable("terms") {
+            TermsScreen(
+                onAccept = {
+                    terms.accept()
+                    nav.navigate("teams") { popUpTo("terms") { inclusive = true } }
+                },
+                onBack = {},
+            )
+        }
         composable("teams") {
             TeamsScreen(
                 teams,
                 onTeam = { id -> nav.navigate("team/$id") },
                 onNewTeam = { nav.navigate("new-team") },
+                onSettings = { nav.navigate("settings") },
             )
+        }
+        composable("settings") {
+            SettingsScreen(
+                onBack = { nav.popBackStack() },
+                onTerms = { nav.navigate("settings/terms") },
+                onAbout = { nav.navigate("settings/about") },
+            )
+        }
+        composable("settings/terms") {
+            TermsScreen(onAccept = null, onBack = { nav.popBackStack() })
+        }
+        composable("settings/about") {
+            AboutScreen(onBack = { nav.popBackStack() })
         }
         composable("new-team") {
             TeamFormScreen(null, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })

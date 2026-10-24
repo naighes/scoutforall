@@ -1,0 +1,137 @@
+package io.github.naighes.scout4all
+
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.widget.Toast
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.github.naighes.scout4all.core.version
+
+private const val REPOSITORY = "https://github.com/naighes/scoutforall"
+private const val CONTACT = "nic.baldi@gmail.com"
+
+/** The settings: the language of the app (the system chooses it), the terms
+ * of use, the information on the app. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit) {
+    val context = LocalContext.current
+    val locale = LocalConfiguration.current.locales[0]
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.settings)) },
+                navigationIcon = { BackButton(onBack) },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
+            // a language for the app only since Android 13: before, the one
+            // of the system
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                Row(
+                    stringResource(R.string.language),
+                    locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) },
+                ) {
+                    context.open(
+                        Intent(
+                            Settings.ACTION_APP_LOCALE_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null),
+                        ),
+                    )
+                }
+            }
+            Row(stringResource(R.string.terms_of_use), null, onTerms)
+            Row(stringResource(R.string.about), null, onAbout)
+        }
+    }
+}
+
+/** The version, the license, the data, the code, and how to report a
+ * problem: on GitHub or by e-mail, both with the version and the device. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AboutScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val version = version()
+    // what helps to reproduce a problem, at the end of the report
+    val device = "scout4all $version · Android ${Build.VERSION.RELEASE} · " +
+        "${Build.MANUFACTURER} ${Build.MODEL}"
+    val reportTitle = stringResource(R.string.report_title)
+    val reportBody = stringResource(R.string.report_body, device)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.about)) },
+                navigationIcon = { BackButton(onBack) },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
+            Row(stringResource(R.string.version), version, null)
+            Row(stringResource(R.string.license), stringResource(R.string.license_name)) {
+                context.browse("$REPOSITORY/blob/master/LICENSE")
+            }
+            Row(stringResource(R.string.data_privacy), null) {
+                context.browse("$REPOSITORY/blob/master/DATA-PRIVACY")
+            }
+            Row(stringResource(R.string.source_code), REPOSITORY.removePrefix("https://")) {
+                context.browse(REPOSITORY)
+            }
+            HorizontalDivider()
+            Row(stringResource(R.string.report_on_github), stringResource(R.string.report_on_github_detail)) {
+                context.browse(
+                    Uri.parse("$REPOSITORY/issues/new").buildUpon()
+                        .appendQueryParameter("title", reportTitle)
+                        .appendQueryParameter("body", reportBody)
+                        .build().toString(),
+                )
+            }
+            Row(stringResource(R.string.report_by_email), CONTACT) {
+                context.open(
+                    Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+                        putExtra(Intent.EXTRA_EMAIL, arrayOf(CONTACT))
+                        putExtra(Intent.EXTRA_SUBJECT, "scout4all $version: $reportTitle")
+                        putExtra(Intent.EXTRA_TEXT, reportBody)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** A row of the settings, touched when there's `onClick`. */
+@Composable
+private fun Row(headline: String, supporting: String?, onClick: (() -> Unit)?) = ListItem(
+    modifier = onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier,
+    headlineContent = { Text(headline) },
+    supportingContent = supporting?.let { { Text(it) } },
+)
+
+private fun Context.browse(url: String) = open(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+
+/** Another app opens it, if there's one. */
+private fun Context.open(intent: Intent) = try {
+    startActivity(intent)
+} catch (_: ActivityNotFoundException) {
+    Toast.makeText(this, R.string.no_app_to_open, Toast.LENGTH_SHORT).show()
+}

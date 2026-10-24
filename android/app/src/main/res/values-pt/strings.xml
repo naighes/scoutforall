@@ -133,4 +133,20 @@
     <string name="event_n">Evento %d</string>
     <string name="serve_type">Saque</string>
     <string name="set_type">Levantamento</string>
+    <string name="settings">Configurações</string>
+    <string name="language">Idioma</string>
+    <string name="terms_of_use">Termos de uso</string>
+    <string name="accept_terms">Continuar</string>
+    <string name="about">Sobre</string>
+    <string name="version">Versão</string>
+    <string name="license">Licença</string>
+    <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="data_privacy">Dados e privacidade</string>
+    <string name="source_code">Código-fonte</string>
+    <string name="report_on_github">Relatar um problema no GitHub</string>
+    <string name="report_on_github_detail">Com uma conta do GitHub</string>
+    <string name="report_by_email">Relatar um problema por e-mail</string>
+    <string name="report_title">Problema no app Android</string>
+    <string name="report_body">O que aconteceu?\n\nO que você esperava?\n\n---\n%1$s</string>
+    <string name="no_app_to_open">Nenhum app pode abrir isto</string>
 </resources>

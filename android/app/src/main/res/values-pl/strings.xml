@@ -135,4 +135,20 @@
     <string name="event_n">Zdarzenie %d</string>
     <string name="serve_type">Zagrywka</string>
     <string name="set_type">Wystawa</string>
+    <string name="settings">Ustawienia</string>
+    <string name="language">Język</string>
+    <string name="terms_of_use">Warunki korzystania</string>
+    <string name="accept_terms">Dalej</string>
+    <string name="about">O aplikacji</string>
+    <string name="version">Wersja</string>
+    <string name="license">Licencja</string>
+    <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="data_privacy">Dane i prywatność</string>
+    <string name="source_code">Kod źródłowy</string>
+    <string name="report_on_github">Zgłoś problem na GitHubie</string>
+    <string name="report_on_github_detail">Z kontem GitHub</string>
+    <string name="report_by_email">Zgłoś problem e-mailem</string>
+    <string name="report_title">Problem w aplikacji na Androida</string>
+    <string name="report_body">Co się stało?\n\nCzego się spodziewałeś(-aś)?\n\n---\n%1$s</string>
+    <string name="no_app_to_open">Żadna aplikacja nie może tego otworzyć</string>
 </resources>

@@ -10,10 +10,22 @@ import kotlinx.coroutines.withContext
 
 /** Holds the core, one for the whole app. */
 class Scout4AllApplication : Application() {
+    // the language chosen for the app, from the activity
+    @Volatile private var language: String = Locale.getDefault().language
+
     // the same layout as ~/.scout4all, in the sandbox of the app
-    private val core: Scout4All by lazy {
+    private val lazyCore = lazy {
         val dataDir = File(filesDir, "scout4all").apply { mkdirs() }
-        Scout4All(dataDir.path, Locale.getDefault().language)
+        Scout4All(dataDir.path, language)
+    }
+    private val core: Scout4All by lazyCore
+
+    /** The core follows the language of the app: the activity starts again
+     * when the user changes it, the process may stay. Setting it doesn't
+     * block, it can be called on the main thread. */
+    fun followLanguage(language: String) {
+        this.language = language
+        if (lazyCore.isInitialized()) lazyCore.value.setLanguage(language)
     }
 
     /** Calls the core off the main thread: it blocks. */

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The languages of the app, which the system lets choose for it (Android 13+). -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="it" />
+    <locale android:name="pt" />
+    <locale android:name="pl" />
+    <locale android:name="ja" />
+</locale-config>
