@@ -106,6 +106,10 @@ mod tests {
             footer.contains(&format!("Esc = {}", labels.back)),
             "{footer}"
         );
+        assert!(
+            footer.contains(&format!("F3 = {}", labels.live_stats)),
+            "{footer}"
+        );
         assert!(!footer.contains("b = "), "{footer}");
     }
 

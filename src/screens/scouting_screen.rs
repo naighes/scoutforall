@@ -1,6 +1,7 @@
 use crate::localization::current_labels;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
+use crate::screens::live_stats_screen::LiveStatsScreen;
 use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
 use crate::screens::{
@@ -217,6 +218,21 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenA
                         self.settings_reader.clone(),
                         SettingsPanel::Shortcuts,
                     )))
+                }
+                (false, Some(ScreenActionEnum::LiveStats), _) => {
+                    let session = &self.session;
+                    let current_match = session.current_match();
+                    match LiveStatsScreen::new(
+                        &session.sets(),
+                        current_match.max_substitutions,
+                        &current_match.team,
+                    ) {
+                        Ok(screen) => AppAction::SwitchScreen(Box::new(screen)),
+                        Err(e) => {
+                            self.notify_message.set_error(e.to_string());
+                            AppAction::None
+                        }
+                    }
                 }
                 (false, Some(ScreenActionEnum::Undo), _) => {
                     let undone = self.session.undo().await;
@@ -647,11 +663,13 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     fn get_screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         match (self.session.set().events.len(), self.session.step()) {
             (0, ScoutingStep::Event) => vec![
+                Sba::Simple(ScreenActionEnum::LiveStats),
                 Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Simple(ScreenActionEnum::Back),
             ],
             _ => vec![
                 Sba::Simple(ScreenActionEnum::Undo),
+                Sba::Simple(ScreenActionEnum::LiveStats),
                 Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Simple(ScreenActionEnum::Back),
             ],

@@ -359,6 +359,30 @@ impl Ui {
         lines[lines.len() - 5..].join("\n")
     }
 
+    /// The entries of the panel with the title, a line each, if it's
+    /// shown: the text between its borders, down to its bottom border.
+    pub fn panel(&mut self, title: &str) -> Option<Vec<String>> {
+        let lines: Vec<Vec<char>> = self.lines().iter().map(|l| l.chars().collect()).collect();
+        let top = format!("┌{title}");
+        let (row, x) = lines.iter().enumerate().find_map(|(row, line)| {
+            String::from_iter(line)
+                .find(&top)
+                .map(|byte| (row, String::from_iter(line)[..byte].chars().count()))
+        })?;
+        Some(
+            lines[row + 1..]
+                .iter()
+                .take_while(|line| line.get(x) != Some(&'└'))
+                .map(|line| {
+                    String::from_iter(line[x + 1..].iter().take_while(|c| **c != '│'))
+                        .trim()
+                        .to_string()
+                })
+                .filter(|entry| !entry.is_empty())
+                .collect(),
+        )
+    }
+
     pub fn screen(&mut self) -> String {
         self.lines().join("\n")
     }

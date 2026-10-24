@@ -12,7 +12,9 @@ use crate::{
     },
     shapes::{
         actions::ScreenActionEnum,
-        keybinding::{ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, UNDO_KEY},
+        keybinding::{
+            ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, STATS_KEY, UNDO_KEY,
+        },
         settings::{ScoutingShortcut, Settings, set_settings},
         symbol::KeyCombinationFormatExt,
     },
@@ -437,6 +439,7 @@ where
             (labels.settings, fmt.to_string(SETTINGS_KEY)),
             (labels.undo, fmt.to_string(UNDO_KEY)),
             (labels.back, fmt.to_string(BACK_KEY)),
+            (labels.live_stats, fmt.to_string(STATS_KEY)),
             (labels.player_number, "0-9".to_string()),
         ]
     }

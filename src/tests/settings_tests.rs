@@ -141,7 +141,7 @@ mod tests {
         let mut ui = settings().await;
         let screen = ui.screen();
         let fixed = current_labels().fixed;
-        for key in ["F2", "⇧-u", "Esc", "0-9"] {
+        for key in ["F2", "⇧-u", "Esc", "F3", "0-9"] {
             assert!(
                 screen.contains(&format!("{key} ({fixed})")),
                 "{key}: {screen}"

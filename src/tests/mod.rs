@@ -3,6 +3,7 @@ mod edit_set_events_tests;
 mod form_navigation_tests;
 mod freeball_tests;
 mod layout_tests;
+mod live_stats_tests;
 mod max_substitutions_tests;
 mod navigation_tests;
 mod point_sequence_tests;
