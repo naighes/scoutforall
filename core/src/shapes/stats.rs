@@ -108,6 +108,19 @@ impl<K: Clone + Eq + Hash> Counter<K> {
         }
     }
 
+    /// The occurrences since `earlier`, a count of the same keys taken
+    /// before: none of a key seen less since.
+    pub fn since(&self, earlier: &Counter<K>) -> Counter<K> {
+        Counter(
+            self.0
+                .iter()
+                .map(|(k, v)| (k, v.saturating_sub(earlier.0.get(k).copied().unwrap_or(0))))
+                .filter(|(_, v)| *v > 0)
+                .map(|(k, v)| (k.clone(), v))
+                .collect(),
+        )
+    }
+
     /// The keys passing the filter, with their occurrences.
     pub fn iter<'a, F>(&'a self, filter: F) -> impl Iterator<Item = (&'a K, u32)>
     where
@@ -295,6 +308,19 @@ impl Stats {
         self.rallies.merge(&other.rallies);
         self.first_rallies.merge(&other.first_rallies);
         self.freeballs.merge(&other.freeballs);
+    }
+
+    /// The statistics since `earlier`, the statistics of the same sets
+    /// taken before: e.g. of the last touches, from the statistics after
+    /// the touch before them.
+    pub fn since(&self, earlier: &Stats) -> Stats {
+        Stats {
+            events: self.events.since(&earlier.events),
+            attacks: self.attacks.since(&earlier.attacks),
+            rallies: self.rallies.since(&earlier.rallies),
+            first_rallies: self.first_rallies.since(&earlier.first_rallies),
+            freeballs: self.freeballs.since(&earlier.freeballs),
+        }
     }
 
     fn events<'a>(
