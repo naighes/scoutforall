@@ -89,6 +89,18 @@ impl Display for EventEntry {
     }
 }
 
+/// How the team stands on court: the positions must respect the order of
+/// rotation until the serve, then the players go where they play.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Formation {
+    /// we serve: in the order of rotation, the server behind the end line
+    Serve,
+    /// they serve: in the order of rotation, spread to receive
+    Reception,
+    /// after our serve or our reception, until the rally ends
+    Rally,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub score_us: u8,
@@ -383,6 +395,33 @@ impl Snapshot {
             if partials.contains(&*score) && *score > opponent_score {
                 self.partials.push((self.score_us, self.score_them));
             }
+        }
+    }
+
+    /// How the team stands on court now (see `Formation`).
+    pub fn get_formation(&self) -> Formation {
+        let options = &self.available_options;
+        match (
+            self.current_lineup.get_current_phase(),
+            options.contains(&EventTypeEnum::S),
+            options.contains(&EventTypeEnum::P),
+        ) {
+            (PhaseEnum::Break, true, _) => Formation::Serve,
+            (PhaseEnum::SideOut, _, true) => Formation::Reception,
+            _ => Formation::Rally,
+        }
+    }
+
+    /// The players by position as they play now: where they play
+    /// (`Lineup::get_rally_positions`) once our serve is made or theirs is
+    /// received, until the rally ends; before, in the order of rotation,
+    /// which the positions must respect at the serve.
+    pub fn get_playing_positions(&self) -> [Uuid; 6] {
+        let lineup = &self.current_lineup;
+        let rotation = lineup.get_positions();
+        match self.get_formation() {
+            Formation::Rally => lineup.get_rally_positions().unwrap_or(rotation),
+            Formation::Serve | Formation::Reception => rotation,
         }
     }
 
