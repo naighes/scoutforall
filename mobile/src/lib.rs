@@ -9,6 +9,7 @@
 use chrono::{DateTime, FixedOffset};
 use scout4all_core::{
     benchmark::{Measure, band, grade},
+    detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
     errors::AppError,
     localization::{Labels, Language},
     logging::logger::init_logger,
@@ -38,7 +39,7 @@ use scout4all_core::{
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
-        stats::{AttackSummary, Metric, StatsFilter},
+        stats::{AttackSummary, Metric, Stats, StatsFilter},
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
@@ -164,6 +165,21 @@ pub enum Series {
     Serve,
     SideOut,
     BreakPoint,
+}
+
+#[uniffi::remote(Enum)]
+pub enum PhaseEnum {
+    Break,
+    SideOut,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Tone {
+    Excellent,
+    Good,
+    Fair,
+    Poor,
+    Bad,
 }
 
 #[uniffi::remote(Enum)]
@@ -848,6 +864,141 @@ pub struct LiveStats {
     /// reception, attack, counter-attack, serve, side out, break point, by
     /// set: always of every set so far, whatever the scope
     pub trend: Vec<TrendLine>,
+    /// the six rotations, in order, played or not
+    pub rotations: Vec<RotationStats>,
+}
+
+/// The phases won in a rotation.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct RotationStats {
+    /// 0 to 5, as `DetailFilter::rotation`
+    pub rotation: u8,
+    /// P1 to P6 in Italian, S1 to S6 in English
+    pub name: String,
+    pub side_out: Option<PhaseStats>,
+    pub break_points: Option<PhaseStats>,
+}
+
+/// What the detail of a fundamental is narrowed to: none keeps them all.
+#[derive(Debug, Clone, Default, PartialEq, uniffi::Record)]
+pub struct DetailFilter {
+    pub phase: Option<PhaseEnum>,
+    /// 0 to 5, the setter in position 1 to 6
+    pub rotation: Option<u8>,
+    /// the id of a player
+    pub player: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PhaseChoice {
+    pub value: PhaseEnum,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct RotationChoice {
+    pub value: u8,
+    pub name: String,
+}
+
+/// The events with an evaluation.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct EvalStats {
+    pub eval: EvalEnum,
+    /// what the scouts write: #, +, !, /, -, =
+    pub symbol: String,
+    pub name: String,
+    pub tone: Tone,
+    pub count: u32,
+    /// of the events of the fundamental, 0 to 100
+    pub share: f64,
+}
+
+/// The attacks set to a zone (see `ZoneStats`) and the kills among them.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct DetailZone {
+    pub zone: u8,
+    pub share: f64,
+    pub conversion: f64,
+}
+
+/// The rallies it takes to win a point.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct RalliesPerPoint {
+    pub per_point: f64,
+    pub won: u32,
+    pub rallies: u32,
+}
+
+/// A player in a fundamental, to compare.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlayerStats {
+    pub player: ScoutingPlayer,
+    pub total: u32,
+    pub efficiency: Option<f64>,
+    pub positiveness: Option<f64>,
+    /// only for a serve, an attack or a block
+    pub points: Option<u32>,
+    pub errors: u32,
+    pub grade: Option<f64>,
+}
+
+/// A fundamental in detail (see `detail::Detail` in the core).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct FundamentalDetail {
+    pub total: u32,
+    /// the evaluations given at least once, from the best to the worst
+    pub evals: Vec<EvalStats>,
+    pub efficiency: Option<f64>,
+    pub grade: Option<f64>,
+    pub positiveness: Option<f64>,
+    pub errors: u32,
+    pub unforced_errors: u32,
+    /// none with a player: the rallies have none
+    pub phases_per_point: Option<RalliesPerPoint>,
+    pub faults: u32,
+    pub points: Option<u32>,
+    /// for an attack
+    pub zones: Vec<DetailZone>,
+    /// the players who played it, the most involved first; with the
+    /// filter but its player
+    pub players: Vec<PlayerStats>,
+}
+
+/// Their freeballs we exploited.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct Exploited {
+    pub percentage: f64,
+    pub exploited: u32,
+    pub total: u32,
+}
+
+/// The freeballs we gave, the ones they gave us (none with a player:
+/// theirs have none) and how many of these we exploited.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct FreeballStats {
+    pub given: u32,
+    pub received: Option<u32>,
+    pub exploited: Option<Exploited>,
+}
+
+/// A fundamental, or the freeballs, narrowed by the filter, with the
+/// choices of the filter.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct DetailStats {
+    pub scope: StatsScope,
+    pub sets: Vec<u8>,
+    pub event: EventTypeEnum,
+    pub filter: DetailFilter,
+    /// serve, reception, dig, block, attack, freeballs
+    pub fundamentals: Vec<EventChoice>,
+    /// the players with an event in the match so far, by their number
+    pub players: Vec<ScoutingPlayer>,
+    pub rotations: Vec<RotationChoice>,
+    pub phases: Vec<PhaseChoice>,
+    /// one of them: the fundamental, or the freeballs
+    pub fundamental: Option<FundamentalDetail>,
+    pub freeballs: Option<FreeballStats>,
 }
 
 /// Scouting the set in progress of a match, the player first (see
@@ -939,10 +1090,9 @@ impl Scouting {
                 PhaseEnum::Break => TeamSideEnum::Us,
                 PhaseEnum::SideOut => TeamSideEnum::Them,
             },
-            rotation: lineup.get_current_rotation().map_or_else(
-                |_| "-".to_string(),
-                |r| format!("{}{}", self.labels.setter_prefix, r + 1),
-            ),
+            rotation: lineup
+                .get_current_rotation()
+                .map_or_else(|_| "-".to_string(), |r| rotation_name(r, self.labels)),
             court,
             substitutions_left: lineup
                 .get_max_substitutions()
@@ -1102,6 +1252,27 @@ impl Scouting {
             self.labels,
         )
     }
+
+    /// A fundamental of a set of the match so far, or of all of them,
+    /// narrowed by the filter.
+    pub fn detail(
+        &self,
+        scope: StatsScope,
+        event: EventTypeEnum,
+        filter: DetailFilter,
+    ) -> Result<DetailStats, MobileError> {
+        let session = self.session();
+        let current_match = session.current_match();
+        detail_stats(
+            &session.sets(),
+            current_match.max_substitutions,
+            &current_match.team,
+            self.labels,
+            scope,
+            event,
+            filter,
+        )
+    }
 }
 
 /// The statistics of a set of the match, or of all of them, with their
@@ -1113,15 +1284,7 @@ fn live_stats(
     team: &TeamEntry,
     labels: &Labels,
 ) -> Result<LiveStats, MobileError> {
-    let sets: Vec<&SetEntry> = all
-        .iter()
-        .copied()
-        .filter(|s| match scope {
-            StatsScope::Set { number } => s.set_number == number,
-            StatsScope::Match => true,
-        })
-        .collect();
-    let stats = stats_of(&sets, max_substitutions)?;
+    let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
     let level = |measure: Measure, value: Option<f64>| {
         value.and_then(|v| grade(team.classification, team.gender, measure, v))
     };
@@ -1198,7 +1361,186 @@ fn live_stats(
         counter_attack_distribution: zones(Some(true)),
         graded: team.classification.is_some() && team.gender.is_some(),
         trend,
+        rotations: by_rotation(&stats)
+            .into_iter()
+            .map(|r| RotationStats {
+                rotation: r.rotation,
+                name: rotation_name(r.rotation, labels),
+                side_out: phase(r.side_out, Measure::SideOut),
+                break_points: phase(r.break_points, Measure::BreakPoint),
+            })
+            .collect(),
     })
+}
+
+/// The sets of the scope, among the sets of the match so far.
+fn in_scope<'a>(all: &[&'a SetEntry], scope: StatsScope) -> Vec<&'a SetEntry> {
+    all.iter()
+        .copied()
+        .filter(|s| match scope {
+            StatsScope::Set { number } => s.set_number == number,
+            StatsScope::Match => true,
+        })
+        .collect()
+}
+
+/// A fundamental (one of `detail::FUNDAMENTALS`) of a set of the match, or
+/// of all of them, narrowed by the filter: `all` are the sets of the match
+/// so far, in order.
+fn detail_stats(
+    all: &[&SetEntry],
+    max_substitutions: u8,
+    team: &TeamEntry,
+    labels: &Labels,
+    scope: StatsScope,
+    event: EventTypeEnum,
+    filter: DetailFilter,
+) -> Result<DetailStats, MobileError> {
+    let player = filter.player.as_deref().map(parse_id).transpose()?;
+    let narrowed = StatsFilter::new(filter.phase, filter.rotation, player);
+    let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
+    let level = |value: Option<f64>| {
+        Measure::of(event)
+            .zip(value)
+            .and_then(|(m, v)| grade(team.classification, team.gender, m, v))
+    };
+    let player_of = |id: Uuid| team.find_player(id).map(|p| scouting_player(p, labels));
+    let (fundamental, freeballs) = match Breakdown::of(&stats, event, &narrowed) {
+        Breakdown::Fundamental(d) => (
+            Some(FundamentalDetail {
+                total: d.total,
+                evals: d
+                    .evals
+                    .iter()
+                    .map(|e| EvalStats {
+                        eval: e.eval,
+                        symbol: e.eval.to_string(),
+                        name: e.eval.friendly_name(event, labels).to_string(),
+                        tone: e.tone,
+                        count: e.count,
+                        share: e.share,
+                    })
+                    .collect(),
+                efficiency: d.efficiency,
+                grade: level(d.efficiency),
+                positiveness: d.positiveness,
+                errors: d.errors,
+                unforced_errors: d.unforced_errors,
+                phases_per_point: d.phases_per_point.map(|(per_point, won, rallies)| {
+                    RalliesPerPoint {
+                        per_point,
+                        won,
+                        rallies,
+                    }
+                }),
+                faults: d.faults,
+                points: d.points,
+                zones: d
+                    .zones
+                    .iter()
+                    .map(|z| DetailZone {
+                        zone: zone_number(z.zone),
+                        share: z.share,
+                        conversion: z.conversion,
+                    })
+                    .collect(),
+                players: by_player(&stats, event, &narrowed)
+                    .into_iter()
+                    .filter_map(|line| {
+                        player_of(line.player).map(|player| PlayerStats {
+                            player,
+                            total: line.total,
+                            efficiency: line.efficiency,
+                            positiveness: line.positiveness,
+                            points: line.points,
+                            errors: line.errors,
+                            grade: level(line.efficiency),
+                        })
+                    })
+                    .collect(),
+            }),
+            None,
+        ),
+        Breakdown::Freeballs(f) => (
+            None,
+            Some(FreeballStats {
+                given: f.given,
+                received: f.received,
+                exploited: f.exploited.map(|(percentage, total, exploited)| Exploited {
+                    percentage,
+                    exploited,
+                    total,
+                }),
+            }),
+        ),
+    };
+    let mut players: Vec<ScoutingPlayer> = involved(&stats_of(all, max_substitutions)?)
+        .into_iter()
+        .filter_map(player_of)
+        .collect();
+    players.sort_by_key(|p| p.number);
+    let fundamental_name = |e: EventTypeEnum| match e {
+        EventTypeEnum::FB => labels.freeballs.to_string(),
+        _ => e.friendly_name(labels).to_string(),
+    };
+    Ok(DetailStats {
+        scope,
+        sets: all.iter().map(|s| s.set_number).collect(),
+        event,
+        filter,
+        fundamentals: FUNDAMENTALS
+            .iter()
+            .map(|e| EventChoice {
+                value: *e,
+                name: fundamental_name(*e),
+            })
+            .collect(),
+        players,
+        rotations: (0..6)
+            .map(|r| RotationChoice {
+                value: r,
+                name: rotation_name(r, labels),
+            })
+            .collect(),
+        phases: [PhaseEnum::SideOut, PhaseEnum::Break]
+            .into_iter()
+            .map(|p| PhaseChoice {
+                value: p,
+                name: p.friendly_name(labels).to_string(),
+            })
+            .collect(),
+        fundamental,
+        freeballs,
+    })
+}
+
+/// The players with an event of ours in the statistics, by their id.
+fn involved(stats: &Stats) -> Vec<Uuid> {
+    let mut players: Vec<Uuid> = stats
+        .events
+        .iter(|k| k.player.is_some())
+        .filter_map(|(k, _)| k.player)
+        .collect();
+    players.sort_unstable();
+    players.dedup();
+    players
+}
+
+/// The rotation by the position of the setter: P1 to P6 in Italian, S1 to
+/// S6 in English.
+fn rotation_name(rotation: u8, labels: &Labels) -> String {
+    format!("{}{}", labels.setter_prefix, rotation + 1)
+}
+
+fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
+    ScoutingPlayer {
+        id: p.id.to_string(),
+        name: p.name.clone(),
+        number: p.number,
+        role: p
+            .role
+            .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
+    }
 }
 
 /// The number scouts call a zone by.
@@ -1332,14 +1674,7 @@ impl Scouting {
     }
 
     fn scouting_player(&self, p: &PlayerEntry) -> ScoutingPlayer {
-        ScoutingPlayer {
-            id: p.id.to_string(),
-            name: p.name.clone(),
-            number: p.number,
-            role: p
-                .role
-                .map_or_else(String::new, |r| r.friendly_name(self.labels).to_string()),
-        }
+        scouting_player(p, self.labels)
     }
 }
 
@@ -1514,6 +1849,30 @@ impl Scout4All {
             m.max_substitutions,
             &m.team,
             self.language.labels(),
+        )
+    }
+
+    /// A fundamental of a set of the match, or of all of them, narrowed by
+    /// the filter, as while scouting.
+    pub fn match_detail(
+        &self,
+        team_id: String,
+        match_id: String,
+        scope: StatsScope,
+        event: EventTypeEnum,
+        filter: DetailFilter,
+    ) -> Result<DetailStats, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
+        sets.sort_by_key(|s| s.set_number);
+        detail_stats(
+            &sets,
+            m.max_substitutions,
+            &m.team,
+            self.language.labels(),
+            scope,
+            event,
+            filter,
         )
     }
 
@@ -2468,6 +2827,166 @@ mod tests {
         assert_eq!(saved(StatsScope::Set { number: 1 }), first);
         assert_eq!(saved(StatsScope::Match), all);
         assert_eq!(saved(StatsScope::Set { number: 3 }), none);
+    }
+
+    #[test]
+    fn the_detail_of_a_fundamental() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        // set 1: 25 aces of the player in 1
+        let scouting = started_set(&app, &team, &m);
+        for _ in 0..25 {
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        }
+        // set 2: a serve error, their error (we rotate), a serve error of
+        // the next server
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let all = DetailFilter::default();
+        let detail = |scope, event, filter: &DetailFilter| {
+            scouting.detail(scope, event, filter.clone()).unwrap()
+        };
+
+        let serve = detail(StatsScope::Match, EventTypeEnum::S, &all);
+        assert_eq!(
+            serve
+                .fundamentals
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "serve",
+                "reception",
+                "defense",
+                "block",
+                "attack",
+                "freeball"
+            ]
+        );
+        assert_eq!(serve.sets, vec![1, 2]);
+        assert_eq!(serve.freeballs, None);
+        let f = serve.fundamental.clone().unwrap();
+        assert_eq!(f.total, 27);
+        assert_eq!(
+            f.evals
+                .iter()
+                .map(|e| (e.symbol.as_str(), e.tone, e.count))
+                .collect::<Vec<_>>(),
+            vec![("#", Tone::Excellent, 25), ("=", Tone::Bad, 2)]
+        );
+        assert_eq!(f.efficiency, Some(23.0 / 27.0 * 100.0));
+        assert_eq!((f.errors, f.unforced_errors, f.points), (2, 2, Some(25)));
+        // 28 rallies, 26 won
+        assert_eq!(
+            f.phases_per_point.map(|p| (p.won, p.rallies)),
+            Some((26, 28))
+        );
+        // the two servers, the one of the aces first
+        let servers: Vec<(u8, u32, Option<f64>)> = f
+            .players
+            .iter()
+            .map(|p| (p.player.number, p.total, p.efficiency))
+            .collect();
+        assert_eq!(
+            servers,
+            vec![(1, 26, Some(24.0 / 26.0 * 100.0)), (2, 1, Some(-100.0))]
+        );
+        assert_eq!(
+            serve.players.iter().map(|p| p.number).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(serve.rotations.len(), 6);
+        assert_eq!(serve.rotations[0].name, "S1");
+        assert_eq!(serve.phases.len(), 2);
+
+        // a player: the rallies have none
+        let second = DetailFilter {
+            player: Some(f.players[1].player.id.clone()),
+            ..DetailFilter::default()
+        };
+        let theirs = detail(StatsScope::Match, EventTypeEnum::S, &second)
+            .fundamental
+            .unwrap();
+        assert_eq!((theirs.total, theirs.phases_per_point), (1, None));
+        // a set
+        let set = detail(StatsScope::Set { number: 2 }, EventTypeEnum::S, &all);
+        assert_eq!(set.fundamental.unwrap().total, 2);
+        // no serve in side out
+        let side_out = DetailFilter {
+            phase: Some(PhaseEnum::SideOut),
+            ..DetailFilter::default()
+        };
+        let none = detail(StatsScope::Match, EventTypeEnum::S, &side_out)
+            .fundamental
+            .unwrap();
+        assert_eq!((none.total, none.efficiency), (0, None));
+        assert!(none.evals.is_empty() && none.players.is_empty());
+        // the first rotation: the aces and the first error
+        let first = DetailFilter {
+            rotation: Some(0),
+            ..DetailFilter::default()
+        };
+        assert_eq!(
+            detail(StatsScope::Match, EventTypeEnum::S, &first)
+                .fundamental
+                .unwrap()
+                .total,
+            26
+        );
+
+        let freeballs = detail(StatsScope::Match, EventTypeEnum::FB, &all);
+        assert_eq!(freeballs.fundamental, None);
+        assert_eq!(
+            freeballs.freeballs,
+            Some(FreeballStats {
+                given: 0,
+                received: Some(0),
+                exploited: None,
+            })
+        );
+        assert!(
+            app.match_detail(
+                team.clone(),
+                m.clone(),
+                StatsScope::Match,
+                EventTypeEnum::S,
+                DetailFilter {
+                    player: Some("not an id".into()),
+                    ..DetailFilter::default()
+                },
+            )
+            .is_err()
+        );
+
+        // from the page of the match, the same as while scouting
+        assert_eq!(
+            app.match_detail(
+                team.clone(),
+                m.clone(),
+                StatsScope::Match,
+                EventTypeEnum::S,
+                all
+            )
+            .unwrap(),
+            serve
+        );
+
+        // the phases of each rotation: the 25 aces and the first error in
+        // break in the first, their error in side out; the next serve
+        // error in break in the rotation after
+        let rotations = scouting.stats(StatsScope::Match).unwrap().rotations;
+        let won = |p: &Option<PhaseStats>| p.as_ref().map(|p| (p.won, p.rallies));
+        let played: Vec<_> = rotations
+            .iter()
+            .filter(|r| r.side_out.is_some() || r.break_points.is_some())
+            .map(|r| (r.name.as_str(), won(&r.side_out), won(&r.break_points)))
+            .collect();
+        assert_eq!(played.len(), 2);
+        assert_eq!(played[0], ("S1", Some((1, 1)), Some((25, 26))));
+        assert_eq!((played[1].1, played[1].2), (None, Some((0, 1))));
     }
 
     #[test]
