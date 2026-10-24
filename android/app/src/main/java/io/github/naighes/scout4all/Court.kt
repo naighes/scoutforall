@@ -31,7 +31,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.lerp
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.Dp
@@ -292,13 +291,7 @@ private fun Efficiency(efficiency: Double?, modifier: Modifier) = Surface(
     )
 }
 
-private fun efficiencyColor(efficiency: Double): Color {
-    val t = (efficiency / 50.0).coerceIn(0.0, 1.0).toFloat()
-    return when {
-        t < 0.5f -> lerp(Lost, Fair, t * 2)
-        else -> lerp(Fair, Won, (t - 0.5f) * 2)
-    }
-}
+private fun efficiencyColor(efficiency: Double): Color = scaleColor(efficiency, 0.0, 50.0)
 
 /** On the jersey: the setter, the evaluation of the last touch. */
 @Composable

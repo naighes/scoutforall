@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -86,6 +87,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.EvalChoice
+import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.EventChoice
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Progress
@@ -136,6 +139,9 @@ class ScoutingViewModel(
     private val mutableState = MutableStateFlow<ScoutingUi>(ScoutingUi.Loading)
     val state: StateFlow<ScoutingUi> = mutableState
     private var scouting: Scouting? = null
+    private val mutableStats = MutableStateFlow<LiveStats?>(null)
+    /** the statistics of the scope last asked for */
+    val stats: StateFlow<LiveStats?> = mutableStats
 
     init {
         viewModelScope.launch {
@@ -171,6 +177,20 @@ class ScoutingViewModel(
     fun undo() = choose {
         it.undo()
         Progress.CHOOSING
+    }
+
+    /** The statistics of a set or of the match, off the main thread. */
+    fun stats(scope: StatsScope) {
+        val s = scouting ?: return
+        viewModelScope.launch {
+            mutableStats.value = withContext(Dispatchers.IO) {
+                try {
+                    s.stats(scope)
+                } catch (e: MobileException) {
+                    null
+                }
+            }
+        }
     }
 
     fun errorShown() {
@@ -264,6 +284,16 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
 @Composable
 private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifier: Modifier) =
     BoxWithConstraints(modifier) {
+        var statsOpen by rememberSaveable { mutableStateOf(false) }
+        if (statsOpen) {
+            val stats by model.stats.collectAsState()
+            StatsSheet(
+                stats = stats,
+                currentSet = view.state.setNumber.toInt(),
+                onScope = model::stats,
+                onDismiss = { statsOpen = false },
+            )
+        }
         val court = @Composable { m: Modifier ->
             Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Score(view.state)
@@ -312,9 +342,12 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) { Choices(view, model) }
                 // always in the same place, where the thumb is: the undo on
-                // the left, the changes of the lineup on the right edge
+                // the left, the statistics in the middle (swiping up the
+                // row opens them too), the changes of the lineup on the
+                // right edge
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp, bottom = 12.dp),
+                    Modifier.fillMaxWidth().swipeUp { statsOpen = true }
+                        .padding(start = 8.dp, top = 4.dp, bottom = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = model::undo, modifier = Modifier.size(56.dp)) {
@@ -324,7 +357,9 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                             modifier = Modifier.size(28.dp),
                         )
                     }
-                    Spacer(Modifier.weight(1f))
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        StatsHandle(onOpen = { statsOpen = true })
+                    }
                     LineupChanges(view.otherEvents.filter { it.value in lineupChanges }, model, Modifier)
                 }
             }
