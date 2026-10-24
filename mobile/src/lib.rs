@@ -13,7 +13,7 @@ use scout4all_core::{
     localization::{Labels, Language},
     logging::logger::init_logger,
     match_form::{MatchForm, MatchFormError},
-    overview::{Errors, Fundamental, Overview, distribution},
+    overview::{Errors, Fundamental, Overview, distribution, stats_of},
     player_form::{PlayerForm, PlayerFormError, removal},
     providers::{
         match_reader::MatchReader,
@@ -38,7 +38,7 @@ use scout4all_core::{
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
-        stats::{AttackSummary, Metric, Stats, StatsFilter},
+        stats::{AttackSummary, Metric, StatsFilter},
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
@@ -1103,12 +1103,7 @@ impl Scouting {
                 StatsScope::Match => true,
             })
             .collect();
-        let stats = sets.iter().try_fold(Stats::new(), |mut stats, set| {
-            set.compute_snapshot(max_substitutions).map(|s| {
-                stats.merge(&s.stats);
-                stats
-            })
-        })?;
+        let stats = stats_of(&sets, max_substitutions)?;
         let team = &session.current_match().team;
         let level = |measure: Measure, value: Option<f64>| {
             value.and_then(|v| grade(team.classification, team.gender, measure, v))
