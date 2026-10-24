@@ -10,6 +10,8 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -70,32 +73,32 @@ import io.github.naighes.scout4all.core.FundamentalStats
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.PhaseStats
 import io.github.naighes.scout4all.core.StatsScope
-import io.github.naighes.scout4all.core.TrendSample
+import io.github.naighes.scout4all.core.TrendLine
 import io.github.naighes.scout4all.core.ZoneStats
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
-/** How good a value is: red at `bad` or below, yellow halfway, green at
- * `good` or above. */
-fun scaleColor(value: Double, bad: Double, good: Double): Color {
-    val t = ((value - bad) / (good - bad)).coerceIn(0.0, 1.0).toFloat()
+/** How good a figure is for the level of the team (the grade of the
+ * core): red at 0, yellow at 0.5, green at 1. */
+fun gradeColor(grade: Double): Color {
+    val t = grade.coerceIn(0.0, 1.0).toFloat()
     return when {
         t < 0.5f -> lerp(Lost, Fair, t * 2)
         else -> lerp(Fair, Won, (t - 0.5f) * 2)
     }
 }
 
-/** Where each figure turns red and green: efficiencies differ by
- * fundamental (a serve putting them in trouble is already good). To tune
- * on real matches. */
-private fun efficiencyScale(event: EventTypeEnum): Pair<Double, Double> = when (event) {
-    EventTypeEnum.P -> 0.0 to 50.0
-    EventTypeEnum.A -> 0.0 to 40.0
-    EventTypeEnum.S -> 0.0 to 30.0
-    else -> 0.0 to 40.0
-}
-private val sideOutScale = 40.0 to 65.0
-private val breakScale = 25.0 to 50.0
+/** A color for each set in the trend: none of them amber (the actions),
+ * red or green (the grades). */
+private val setColors = listOf(
+    Color(0xFF60A5FA),
+    Color(0xFFF472B6),
+    Color(0xFFA78BFA),
+    Color(0xFF2DD4BF),
+    Color(0xFFFB923C),
+)
+
+private fun setColor(setNumber: Int) = setColors[(setNumber - 1).coerceIn(0, setColors.size - 1)]
 
 private fun pct(value: Double?) = value?.let { "${it.roundToInt()}%" } ?: "–"
 
@@ -150,10 +153,9 @@ fun StatsSheet(
     LaunchedEffect(Unit) { onScope(StatsScope.Set(currentSet.toUByte())) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
-            Scopes(stats, currentSet, onScope)
             when (stats) {
                 null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                else -> Pages(stats)
+                else -> Pages(stats, currentSet, onScope)
             }
         }
     }
@@ -161,12 +163,12 @@ fun StatsSheet(
 
 /** A chip for each set so far, then the match. */
 @Composable
-private fun Scopes(stats: LiveStats?, currentSet: Int, onScope: (StatsScope) -> Unit) = Row(
+private fun Scopes(stats: LiveStats, currentSet: Int, onScope: (StatsScope) -> Unit) = Row(
     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
 ) {
-    val sets = stats?.sets?.map { it.toInt() } ?: listOf(currentSet)
-    val scope = stats?.scope
+    val sets = stats.sets.map { it.toInt() }.ifEmpty { listOf(currentSet) }
+    val scope = stats.scope
     sets.forEach { n ->
         FilterChip(
             selected = scope is StatsScope.Set && scope.number.toInt() == n,
@@ -181,11 +183,14 @@ private fun Scopes(stats: LiveStats?, currentSet: Int, onScope: (StatsScope) -> 
     )
 }
 
+/** The pages, a swipe aside; the scope on top, but on the trend, which
+ * shows every set. */
 @Composable
-private fun Pages(stats: LiveStats) {
+private fun Pages(stats: LiveStats, currentSet: Int, onScope: (StatsScope) -> Unit) {
     val pages = StatsPage.entries
     val pager = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
+    if (pages[pager.currentPage] != StatsPage.Trend) Scopes(stats, currentSet, onScope)
     PrimaryTabRow(selectedTabIndex = pager.currentPage) {
         pages.forEachIndexed { i, page ->
             Tab(
@@ -216,9 +221,16 @@ private fun Pages(stats: LiveStats) {
  * fundamental, the unforced errors. */
 @Composable
 private fun Summary(stats: LiveStats) {
+    if (!stats.graded) {
+        Text(
+            stringResource(R.string.set_team_level),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        PhaseTile(stringResource(R.string.side_out), stats.sideOut, sideOutScale, Modifier.weight(1f))
-        PhaseTile(stringResource(R.string.break_points), stats.breakPoints, breakScale, Modifier.weight(1f))
+        PhaseTile(stringResource(R.string.side_out), stats.sideOut, Modifier.weight(1f))
+        PhaseTile(stringResource(R.string.break_points), stats.breakPoints, Modifier.weight(1f))
     }
     val fundamentals = stats.fundamentals.filter { it.event != EventTypeEnum.D }
     fundamentals.chunked(2).forEach { row ->
@@ -289,18 +301,17 @@ private fun TileDetail(text: String) = Text(
 )
 
 @Composable
-private fun PhaseTile(label: String, phase: PhaseStats?, scale: Pair<Double, Double>, modifier: Modifier) =
+private fun PhaseTile(label: String, phase: PhaseStats?, modifier: Modifier) =
     Tile(modifier) {
         TileLabel(label)
-        TileValue(pct(phase?.percentage), phase?.let { scaleColor(it.percentage, scale.first, scale.second) })
+        TileValue(pct(phase?.percentage), phase?.grade?.let { gradeColor(it) })
         TileDetail(phase?.let { stringResource(R.string.rallies_detail, it.won.toInt(), it.rallies.toInt()) } ?: "")
     }
 
 @Composable
 private fun FundamentalTile(f: FundamentalStats, modifier: Modifier) = Tile(modifier) {
-    val (bad, good) = efficiencyScale(f.event)
     TileLabel(f.name.replaceFirstChar { it.uppercase() })
-    TileValue(pct(f.efficiency), f.efficiency?.let { scaleColor(it, bad, good) })
+    TileValue(pct(f.efficiency), f.grade?.let { gradeColor(it) })
     TileDetail(
         if (f.total > 0u) stringResource(R.string.touches_detail, f.total.toInt(), f.perfect.toInt(), f.errors.toInt())
         else "",
@@ -351,7 +362,6 @@ private fun Distribution(stats: LiveStats) {
 
 @Composable
 private fun AttackLine(label: String, attacks: AttackStats) = Row(verticalAlignment = Alignment.CenterVertically) {
-    val (bad, good) = efficiencyScale(EventTypeEnum.A)
     Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
     Text(
         "${attacks.total} · #${attacks.kills} · = ${attacks.errors} · / ${attacks.blocked}",
@@ -364,7 +374,7 @@ private fun AttackLine(label: String, attacks: AttackStats) = Row(verticalAlignm
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
         textAlign = TextAlign.End,
-        color = scaleColor(attacks.efficiency, bad, good),
+        color = attacks.grade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurface,
     )
 }
 
@@ -404,7 +414,6 @@ private fun DistributionCourt(zones: List<ZoneStats>) {
 
 @Composable
 private fun ZoneCell(zone: Int, stats: ZoneStats?) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    val (bad, good) = efficiencyScale(EventTypeEnum.A)
     Text(zone.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Text(
         pct(stats?.share),
@@ -415,8 +424,8 @@ private fun ZoneCell(zone: Int, stats: ZoneStats?) = Column(horizontalAlignment 
     stats?.let {
         Surface(
             shape = RoundedCornerShape(50),
-            color = scaleColor(it.attacks.efficiency, bad, good),
-            contentColor = Color.Black,
+            color = it.attacks.grade?.let { g -> gradeColor(g) } ?: MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (it.attacks.grade != null) Color.Black else MaterialTheme.colorScheme.onSurface,
         ) {
             Text(
                 pct(it.attacks.efficiency),
@@ -517,80 +526,129 @@ private fun ErrorGroup(
     }
 }
 
-// --- trend --------------------------------------------------------------
+// --- trend ------------------------------------------------------------
 
-/** How the efficiencies and the phases went rally by rally: the value so
- * far after each one, a dashed line where a set starts. */
+/** How each figure went in each set, a line per set from its first rally,
+ * to compare them; the match so far dashed across; the band of the level
+ * shaded. So far, or of the last 10 touches. */
 @Composable
 private fun Trend(stats: LiveStats) {
-    if (stats.trend.isEmpty()) {
+    var recent by remember { mutableStateOf(false) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = !recent, onClick = { recent = false }, label = { Text(stringResource(R.string.trend_so_far)) })
+        FilterChip(selected = recent, onClick = { recent = true }, label = { Text(stringResource(R.string.trend_recent)) })
+    }
+    if (stats.trend.all { line -> line.sets.all { it.values.isEmpty() } }) {
         Text(stringResource(R.string.no_rallies), color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
-    Text(stringResource(R.string.trend_note), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    val name = { e: EventTypeEnum ->
-        stats.fundamentals.find { it.event == e }?.name?.replaceFirstChar { it.uppercase() } ?: e.name
-    }
-    val series = listOf(
-        Triple(name(EventTypeEnum.P), efficiencyScale(EventTypeEnum.P)) { t: TrendSample -> t.reception },
-        Triple(name(EventTypeEnum.A), efficiencyScale(EventTypeEnum.A)) { t: TrendSample -> t.attack },
-        Triple(stringResource(R.string.trend_counter_attack), efficiencyScale(EventTypeEnum.A)) { t: TrendSample -> t.counterAttack },
-        Triple(name(EventTypeEnum.S), efficiencyScale(EventTypeEnum.S)) { t: TrendSample -> t.serve },
-        Triple(stringResource(R.string.side_out), sideOutScale) { t: TrendSample -> t.sideOut },
-        Triple(stringResource(R.string.break_points), breakScale) { t: TrendSample -> t.breakPoints },
-    )
-    series.forEach { (label, scale, value) ->
-        TrendChart(label, stats.trend, stats.trend.map(value), scale)
-    }
+    TrendLegend(stats.trend.firstOrNull()?.sets.orEmpty().map { it.setNumber.toInt() })
+    stats.trend.forEach { TrendChart(it, recent) }
 }
 
 @Composable
-private fun TrendChart(label: String, samples: List<TrendSample>, values: List<Double?>, scale: Pair<Double, Double>) =
-    Column {
-        val last = values.lastOrNull { it != null }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+private fun TrendLegend(sets: List<Int>) = Row(
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    verticalAlignment = Alignment.CenterVertically,
+) {
+    sets.forEach { n ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(width = 12.dp, height = 3.dp).background(setColor(n)))
             Text(
-                pct(last),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = last?.let { scaleColor(it, scale.first, scale.second) } ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                " " + stringResource(R.string.set_n, n),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        val lineColor = MaterialTheme.colorScheme.primary
-        val axis = MaterialTheme.colorScheme.outline
-        val known = values.filterNotNull()
-        // always show 0 and the green mark, the line in between
-        val low = minOf(0.0, known.minOrNull() ?: 0.0)
-        val high = maxOf(scale.second, known.maxOrNull() ?: 0.0)
-        Canvas(Modifier.fillMaxWidth().height(72.dp).padding(vertical = 4.dp)) {
-            val step = if (values.size > 1) size.width / (values.size - 1) else 0f
-            fun y(v: Double) = (size.height * (1 - (v - low) / (high - low))).toFloat()
-            val dashed = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))
-            drawLine(axis, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), strokeWidth = 1.dp.toPx())
-            drawLine(Won.copy(alpha = 0.4f), Offset(0f, y(scale.second)), Offset(size.width, y(scale.second)), 1.dp.toPx(), pathEffect = dashed)
-            // a set starts
-            samples.zipWithNext().forEachIndexed { i, (a, b) ->
-                if (a.setNumber != b.setNumber) {
-                    val x = step * (i + 0.5f)
-                    drawLine(axis, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx(), pathEffect = dashed)
-                }
-            }
+    }
+    Text(
+        "- - " + stringResource(R.string.whole_match),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun TrendChart(line: TrendLine, recent: Boolean) = Column {
+    val overall = if (recent) line.overallRecent else line.overall
+    val overallGrade = if (recent) line.overallRecentGrade else line.overallGrade
+    val band = line.band
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(line.name.replaceFirstChar { it.uppercase() }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+        Text(
+            pct(overall),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = overallGrade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurface,
+        )
+    }
+    // each rally where the set had got to: the points of the team ahead,
+    // the rallies at the same points spread in between
+    val sets = line.sets.map { set ->
+        val leading = set.leading.map { it.toInt() }
+        val xs = leading.mapIndexed { i, m ->
+            val same = leading.count { it == m }
+            val nth = leading.take(i + 1).count { it == m }
+            (m - 1) + nth.toDouble() / same
+        }
+        Triple(set.setNumber.toInt(), xs, if (recent) set.recent else set.values)
+    }
+    val axis = MaterialTheme.colorScheme.outline
+    val known = sets.flatMap { it.third }.filterNotNull() + listOfNotNull(overall, band?.low, band?.high)
+    // always 0 and the band in sight
+    val low = minOf(0.0, known.minOrNull() ?: 0.0)
+    val high = maxOf(low + 10.0, known.maxOrNull() ?: 0.0)
+    // a whole set, longer at deuce
+    val points = maxOf(25.0, sets.flatMap { it.second }.maxOrNull() ?: 0.0)
+    Canvas(Modifier.fillMaxWidth().height(88.dp).padding(vertical = 4.dp)) {
+        fun x(p: Double) = (size.width * p / points).toFloat()
+        fun y(v: Double) = (size.height * (1 - (v - low) / (high - low))).toFloat()
+        val dashed = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))
+        band?.let {
+            drawRect(
+                Fair.copy(alpha = 0.10f),
+                topLeft = Offset(0f, y(it.high)),
+                size = androidx.compose.ui.geometry.Size(size.width, y(it.low) - y(it.high)),
+            )
+        }
+        drawLine(axis, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), strokeWidth = 1.dp.toPx())
+        // every 5 points
+        (5..points.toInt() step 5).forEach { p ->
+            drawLine(axis.copy(alpha = 0.3f), Offset(x(p.toDouble()), 0f), Offset(x(p.toDouble()), size.height), 1.dp.toPx())
+        }
+        overall?.let {
+            drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f.dp.toPx(), pathEffect = dashed)
+        }
+        sets.forEach { (setNumber, xs, values) ->
             val path = Path()
             var drawing = false
             values.forEachIndexed { i, v ->
+                val px = x(xs.getOrElse(i) { 0.0 })
                 when {
                     v == null -> drawing = false
-                    drawing -> path.lineTo(step * i, y(v))
+                    drawing -> path.lineTo(px, y(v))
                     else -> {
-                        path.moveTo(step * i, y(v))
+                        path.moveTo(px, y(v))
                         drawing = true
                     }
                 }
             }
-            drawPath(path, lineColor, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+            val color = setColor(setNumber)
+            drawPath(path, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
             values.withIndex().lastOrNull { it.value != null }?.let { (i, v) ->
-                drawCircle(lineColor, 3.dp.toPx(), Offset(step * i, y(v ?: 0.0)))
+                drawCircle(color, 3.dp.toPx(), Offset(x(xs.getOrElse(i) { 0.0 }), y(v ?: 0.0)))
             }
         }
     }
+    // the points: 0, 5, 10, ... under their lines
+    BoxWithConstraints(Modifier.fillMaxWidth().height(14.dp)) {
+        (0..points.toInt() step 5).forEach { p ->
+            Text(
+                p.toString(),
+                Modifier.offset(x = maxWidth * (p / points).toFloat() - if (p == 0) 0.dp else 8.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
