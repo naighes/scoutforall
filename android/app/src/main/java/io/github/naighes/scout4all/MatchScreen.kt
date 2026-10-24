@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,6 +51,7 @@ fun MatchScreen(
     onEdit: () -> Unit,
     onStartSet: () -> Unit,
     onResumeSet: () -> Unit,
+    onStats: (set: Int?) -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<MatchState>(MatchState.Loading, teamId, matchId) {
@@ -77,7 +80,7 @@ fun MatchScreen(
         when (val s = state) {
             MatchState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is MatchState.Failed -> Centered(modifier) { Text(s.message) }
-            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, modifier)
+            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, onStats, modifier)
         }
     }
 }
@@ -87,6 +90,7 @@ private fun MatchContent(
     m: MatchDetails,
     onStartSet: () -> Unit,
     onResumeSet: () -> Unit,
+    onStats: (set: Int?) -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
     val place = stringResource(if (m.home) R.string.home else R.string.away)
@@ -107,7 +111,17 @@ private fun MatchContent(
     when {
         m.sets.isEmpty() -> Centered(sets) { Text(stringResource(R.string.no_sets)) }
         else -> LazyColumn(sets) {
-            items(m.sets, key = { it.number.toInt() }) { SetRow(it, it.number == inProgress) }
+            items(m.sets, key = { it.number.toInt() }) {
+                SetRow(it, it.number == inProgress) { onStats(it.number.toInt()) }
+            }
+            // the statistics of a set touching it, of the match here
+            item(key = "stats") {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.match_stats)) },
+                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
+                    modifier = Modifier.clickable { onStats(null) },
+                )
+            }
         }
     }
     // big and at the bottom, where the thumb is
@@ -124,7 +138,7 @@ private fun MatchContent(
 }
 
 @Composable
-private fun SetRow(set: SetScore, inProgress: Boolean) = ListItem(
+private fun SetRow(set: SetScore, inProgress: Boolean, onClick: () -> Unit) = ListItem(
     headlineContent = { Text(stringResource(R.string.set_n, set.number.toInt())) },
     supportingContent = if (inProgress) {
         { Text(stringResource(R.string.in_progress), color = MaterialTheme.colorScheme.primary) }
@@ -140,6 +154,7 @@ private fun SetRow(set: SetScore, inProgress: Boolean) = ListItem(
             color = resultColor(!inProgress, set.us.toInt(), set.them.toInt()),
         )
     },
+    modifier = Modifier.clickable(onClick = onClick),
 )
 
 @Composable

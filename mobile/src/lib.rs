@@ -1093,96 +1093,112 @@ impl Scouting {
     /// with their trend rally by rally.
     pub fn stats(&self, scope: StatsScope) -> Result<LiveStats, MobileError> {
         let session = self.session();
-        let max_substitutions = session.current_match().max_substitutions;
-        let all = session.sets();
-        let sets: Vec<&SetEntry> = all
-            .iter()
-            .copied()
-            .filter(|s| match scope {
-                StatsScope::Set { number } => s.set_number == number,
-                StatsScope::Match => true,
-            })
-            .collect();
-        let stats = stats_of(&sets, max_substitutions)?;
-        let team = &session.current_match().team;
-        let level = |measure: Measure, value: Option<f64>| {
-            value.and_then(|v| grade(team.classification, team.gender, measure, v))
-        };
-        let attack_stats = |a: AttackSummary| AttackStats {
-            total: a.total,
-            kills: a.kills,
-            errors: a.errors,
-            blocked: a.blocked,
-            efficiency: a.efficiency(),
-            grade: level(Measure::Attack, Some(a.efficiency())),
-        };
-        let trend = self.trend_lines(&all, max_substitutions, team)?;
-        let o = Overview::of(&stats);
-        let fundamental = |event: EventTypeEnum, f: Fundamental| FundamentalStats {
-            event,
-            name: event.friendly_name(self.labels).to_string(),
-            total: f.total,
-            efficiency: f.efficiency,
-            perfect: f.perfect,
-            errors: f.errors,
-            grade: Measure::of(event).and_then(|m| level(m, f.efficiency)),
-        };
-        let phase = |p: Option<(f64, u32, u32)>, measure| {
-            p.map(|(percentage, won, rallies)| PhaseStats {
-                percentage,
-                won,
-                rallies,
-                grade: level(measure, Some(percentage)),
-            })
-        };
-        let errors = |e: &Errors| {
-            e.by_event
-                .iter()
-                .map(|(event, count)| ErrorCount {
-                    event: *event,
-                    count: *count,
-                })
-                .collect()
-        };
-        let zones = |counter_attack| {
-            distribution(&stats, counter_attack)
-                .into_iter()
-                .map(|z| ZoneStats {
-                    zone: zone_number(z.zone),
-                    share: z.share,
-                    attacks: attack_stats(z.attacks),
-                })
-                .collect()
-        };
-        Ok(LiveStats {
+        let current_match = session.current_match();
+        live_stats(
+            &session.sets(),
             scope,
-            sets: all.iter().map(|s| s.set_number).collect(),
-            fundamentals: vec![
-                fundamental(EventTypeEnum::P, o.reception),
-                fundamental(EventTypeEnum::A, o.attack),
-                fundamental(EventTypeEnum::S, o.serve),
-                fundamental(EventTypeEnum::B, o.block),
-                fundamental(EventTypeEnum::D, o.dig),
-            ],
-            side_out: phase(o.side_out, Measure::SideOut),
-            break_points: phase(o.break_points, Measure::BreakPoint),
-            first_attack: o.first_attack.map(attack_stats),
-            counter_attack: o.counter_attack.map(attack_stats),
-            unforced_errors: o.unforced_errors.total,
-            unforced_by_event: errors(&o.unforced_errors),
-            forced_errors: o.forced_errors.total,
-            forced_by_event: errors(&o.forced_errors),
-            aces: o.aces,
-            aces_against: o.aces_against,
-            opponent_errors: o.opponent_errors,
-            opponent_points: o.opponent_points,
-            distribution: zones(None),
-            first_attack_distribution: zones(Some(false)),
-            counter_attack_distribution: zones(Some(true)),
-            graded: team.classification.is_some() && team.gender.is_some(),
-            trend,
-        })
+            current_match.max_substitutions,
+            &current_match.team,
+            self.labels,
+        )
     }
+}
+
+/// The statistics of a set of the match, or of all of them, with their
+/// trend rally by rally: `all` are the sets of the match so far, in order.
+fn live_stats(
+    all: &[&SetEntry],
+    scope: StatsScope,
+    max_substitutions: u8,
+    team: &TeamEntry,
+    labels: &Labels,
+) -> Result<LiveStats, MobileError> {
+    let sets: Vec<&SetEntry> = all
+        .iter()
+        .copied()
+        .filter(|s| match scope {
+            StatsScope::Set { number } => s.set_number == number,
+            StatsScope::Match => true,
+        })
+        .collect();
+    let stats = stats_of(&sets, max_substitutions)?;
+    let level = |measure: Measure, value: Option<f64>| {
+        value.and_then(|v| grade(team.classification, team.gender, measure, v))
+    };
+    let attack_stats = |a: AttackSummary| AttackStats {
+        total: a.total,
+        kills: a.kills,
+        errors: a.errors,
+        blocked: a.blocked,
+        efficiency: a.efficiency(),
+        grade: level(Measure::Attack, Some(a.efficiency())),
+    };
+    let trend = trend_lines(all, max_substitutions, team, labels)?;
+    let o = Overview::of(&stats);
+    let fundamental = |event: EventTypeEnum, f: Fundamental| FundamentalStats {
+        event,
+        name: event.friendly_name(labels).to_string(),
+        total: f.total,
+        efficiency: f.efficiency,
+        perfect: f.perfect,
+        errors: f.errors,
+        grade: Measure::of(event).and_then(|m| level(m, f.efficiency)),
+    };
+    let phase = |p: Option<(f64, u32, u32)>, measure| {
+        p.map(|(percentage, won, rallies)| PhaseStats {
+            percentage,
+            won,
+            rallies,
+            grade: level(measure, Some(percentage)),
+        })
+    };
+    let errors = |e: &Errors| {
+        e.by_event
+            .iter()
+            .map(|(event, count)| ErrorCount {
+                event: *event,
+                count: *count,
+            })
+            .collect()
+    };
+    let zones = |counter_attack| {
+        distribution(&stats, counter_attack)
+            .into_iter()
+            .map(|z| ZoneStats {
+                zone: zone_number(z.zone),
+                share: z.share,
+                attacks: attack_stats(z.attacks),
+            })
+            .collect()
+    };
+    Ok(LiveStats {
+        scope,
+        sets: all.iter().map(|s| s.set_number).collect(),
+        fundamentals: vec![
+            fundamental(EventTypeEnum::P, o.reception),
+            fundamental(EventTypeEnum::A, o.attack),
+            fundamental(EventTypeEnum::S, o.serve),
+            fundamental(EventTypeEnum::B, o.block),
+            fundamental(EventTypeEnum::D, o.dig),
+        ],
+        side_out: phase(o.side_out, Measure::SideOut),
+        break_points: phase(o.break_points, Measure::BreakPoint),
+        first_attack: o.first_attack.map(attack_stats),
+        counter_attack: o.counter_attack.map(attack_stats),
+        unforced_errors: o.unforced_errors.total,
+        unforced_by_event: errors(&o.unforced_errors),
+        forced_errors: o.forced_errors.total,
+        forced_by_event: errors(&o.forced_errors),
+        aces: o.aces,
+        aces_against: o.aces_against,
+        opponent_errors: o.opponent_errors,
+        opponent_points: o.opponent_points,
+        distribution: zones(None),
+        first_attack_distribution: zones(Some(false)),
+        counter_attack_distribution: zones(Some(true)),
+        graded: team.classification.is_some() && team.gender.is_some(),
+        trend,
+    })
 }
 
 /// The number scouts call a zone by.
@@ -1201,72 +1217,72 @@ fn zone_number(zone: ZoneEnum) -> u8 {
     }
 }
 
+/// Each figure in each set, from its first rally, and in the match.
+fn trend_lines(
+    sets: &[&SetEntry],
+    max_substitutions: u8,
+    team: &TeamEntry,
+    labels: &Labels,
+) -> Result<Vec<TrendLine>, MobileError> {
+    let match_replay = Replay::new(sets, max_substitutions)?;
+    let set_replays = sets
+        .iter()
+        .map(|set| Replay::new(&[set], max_substitutions).map(|r| (set.set_number, r)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let values = |points: Vec<TrendPoint<Option<f64>>>| {
+        points.into_iter().map(|p| p.value).collect::<Vec<_>>()
+    };
+    let last = |points: Vec<TrendPoint<Option<f64>>>| points.last().and_then(|p| p.value);
+    let level = |series: Series, value: Option<f64>| {
+        value.and_then(|v| grade(team.classification, team.gender, series.measure(), v))
+    };
+    Ok(Series::ALL
+        .iter()
+        .map(|series| {
+            let overall = last(match_replay.series(*series, false));
+            let overall_recent = last(match_replay.series(*series, true));
+            TrendLine {
+                series: *series,
+                name: series_name(*series, labels),
+                band: team
+                    .classification
+                    .zip(team.gender)
+                    .map(|(level, gender)| band(level, gender, series.measure()))
+                    .map(|b| GradeBand {
+                        low: b.low,
+                        high: b.high,
+                    }),
+                sets: set_replays
+                    .iter()
+                    .map(|(set_number, replay)| SetTrend {
+                        set_number: *set_number,
+                        progress: replay.progress(),
+                        values: values(replay.series(*series, false)),
+                        recent: values(replay.series(*series, true)),
+                    })
+                    .collect(),
+                overall,
+                overall_recent,
+                overall_grade: level(*series, overall),
+                overall_recent_grade: level(*series, overall_recent),
+            }
+        })
+        .collect())
+}
+
+fn series_name(series: Series, labels: &Labels) -> String {
+    match series {
+        Series::Reception => EventTypeEnum::P.friendly_name(labels),
+        Series::Attack => EventTypeEnum::A.friendly_name(labels),
+        Series::CounterAttack => labels.counter_attack,
+        Series::Serve => EventTypeEnum::S.friendly_name(labels),
+        Series::SideOut => PhaseEnum::SideOut.friendly_name(labels),
+        Series::BreakPoint => PhaseEnum::Break.friendly_name(labels),
+    }
+    .to_string()
+}
+
 impl Scouting {
-    /// Each figure in each set, from its first rally, and in the match.
-    fn trend_lines(
-        &self,
-        sets: &[&SetEntry],
-        max_substitutions: u8,
-        team: &TeamEntry,
-    ) -> Result<Vec<TrendLine>, MobileError> {
-        let match_replay = Replay::new(sets, max_substitutions)?;
-        let set_replays = sets
-            .iter()
-            .map(|set| Replay::new(&[set], max_substitutions).map(|r| (set.set_number, r)))
-            .collect::<Result<Vec<_>, _>>()?;
-        let values = |points: Vec<TrendPoint<Option<f64>>>| {
-            points.into_iter().map(|p| p.value).collect::<Vec<_>>()
-        };
-        let last = |points: Vec<TrendPoint<Option<f64>>>| points.last().and_then(|p| p.value);
-        let level = |series: Series, value: Option<f64>| {
-            value.and_then(|v| grade(team.classification, team.gender, series.measure(), v))
-        };
-        Ok(Series::ALL
-            .iter()
-            .map(|series| {
-                let overall = last(match_replay.series(*series, false));
-                let overall_recent = last(match_replay.series(*series, true));
-                TrendLine {
-                    series: *series,
-                    name: self.series_name(*series),
-                    band: team
-                        .classification
-                        .zip(team.gender)
-                        .map(|(level, gender)| band(level, gender, series.measure()))
-                        .map(|b| GradeBand {
-                            low: b.low,
-                            high: b.high,
-                        }),
-                    sets: set_replays
-                        .iter()
-                        .map(|(set_number, replay)| SetTrend {
-                            set_number: *set_number,
-                            progress: replay.progress(),
-                            values: values(replay.series(*series, false)),
-                            recent: values(replay.series(*series, true)),
-                        })
-                        .collect(),
-                    overall,
-                    overall_recent,
-                    overall_grade: level(*series, overall),
-                    overall_recent_grade: level(*series, overall_recent),
-                }
-            })
-            .collect())
-    }
-
-    fn series_name(&self, series: Series) -> String {
-        match series {
-            Series::Reception => EventTypeEnum::P.friendly_name(self.labels),
-            Series::Attack => EventTypeEnum::A.friendly_name(self.labels),
-            Series::CounterAttack => self.labels.counter_attack,
-            Series::Serve => EventTypeEnum::S.friendly_name(self.labels),
-            Series::SideOut => PhaseEnum::SideOut.friendly_name(self.labels),
-            Series::BreakPoint => PhaseEnum::Break.friendly_name(self.labels),
-        }
-        .to_string()
-    }
-
     /// The session, even if a call panicked while holding it: each choice
     /// leaves it whole.
     fn session(&self) -> MutexGuard<'_, ScoutingSession> {
@@ -1479,6 +1495,26 @@ impl Scout4All {
             sets,
             next,
         })
+    }
+
+    /// The statistics of a set of the match, or of all of them, as while
+    /// scouting.
+    pub fn match_stats(
+        &self,
+        team_id: String,
+        match_id: String,
+        scope: StatsScope,
+    ) -> Result<LiveStats, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
+        sets.sort_by_key(|s| s.set_number);
+        live_stats(
+            &sets,
+            scope,
+            m.max_substitutions,
+            &m.team,
+            self.language.labels(),
+        )
     }
 
     /// The start of the next set of the match, to choose who serves and the
@@ -2425,6 +2461,24 @@ mod tests {
         );
         assert_eq!(none.trend, set.trend);
         assert_eq!(none.sets, vec![1, 2]);
+
+        // from the page of the match, the same as while scouting
+        let saved = |scope| app.match_stats(team.clone(), m.clone(), scope).unwrap();
+        assert_eq!(saved(StatsScope::Set { number: 2 }), set);
+        assert_eq!(saved(StatsScope::Set { number: 1 }), first);
+        assert_eq!(saved(StatsScope::Match), all);
+        assert_eq!(saved(StatsScope::Set { number: 3 }), none);
+    }
+
+    #[test]
+    fn the_statistics_of_a_match_without_sets_are_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let stats = app.match_stats(team, m, StatsScope::Match).unwrap();
+        assert!(stats.sets.is_empty());
+        assert!(stats.fundamentals.iter().all(|f| f.total == 0));
+        assert!(stats.trend.iter().all(|t| t.sets.is_empty()));
     }
 
     #[test]

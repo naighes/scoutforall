@@ -78,6 +78,8 @@
     <string name="stats">Statistiche</string>
     <string name="stats_swipe">Statistiche</string>
     <string name="whole_match">Partita</string>
+    <string name="statistics">Statistiche</string>
+    <string name="match_stats">Statistiche della partita</string>
     <string name="stats_summary">Sintesi</string>
     <string name="stats_distribution">Distribuzione</string>
     <string name="stats_errors">Errori</string>

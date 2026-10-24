@@ -155,7 +155,7 @@ fun StatsSheet(
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             when (stats) {
                 null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                else -> Pages(stats, currentSet, onScope)
+                else -> StatsPages(stats, onScope)
             }
         }
     }
@@ -163,13 +163,12 @@ fun StatsSheet(
 
 /** A chip for each set so far, then the match. */
 @Composable
-private fun Scopes(stats: LiveStats, currentSet: Int, onScope: (StatsScope) -> Unit) = Row(
+private fun Scopes(stats: LiveStats, onScope: (StatsScope) -> Unit) = Row(
     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
 ) {
-    val sets = stats.sets.map { it.toInt() }.ifEmpty { listOf(currentSet) }
     val scope = stats.scope
-    sets.forEach { n ->
+    stats.sets.map { it.toInt() }.forEach { n ->
         FilterChip(
             selected = scope is StatsScope.Set && scope.number.toInt() == n,
             onClick = { onScope(StatsScope.Set(n.toUByte())) },
@@ -184,13 +183,13 @@ private fun Scopes(stats: LiveStats, currentSet: Int, onScope: (StatsScope) -> U
 }
 
 /** The pages, a swipe aside; the scope on top, but on the trend, which
- * shows every set. */
+ * shows every set. While scouting and on the page of a match. */
 @Composable
-private fun Pages(stats: LiveStats, currentSet: Int, onScope: (StatsScope) -> Unit) {
+fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit) {
     val pages = StatsPage.entries
     val pager = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
-    if (pages[pager.currentPage] != StatsPage.Trend) Scopes(stats, currentSet, onScope)
+    if (pages[pager.currentPage] != StatsPage.Trend) Scopes(stats, onScope)
     PrimaryTabRow(selectedTabIndex = pager.currentPage) {
         pages.forEachIndexed { i, page ->
             Tab(

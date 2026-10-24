@@ -79,6 +79,8 @@
     <string name="stats">Stats</string>
     <string name="stats_swipe">Stats</string>
     <string name="whole_match">Match</string>
+    <string name="statistics">Statistics</string>
+    <string name="match_stats">Match statistics</string>
     <string name="stats_summary">Summary</string>
     <string name="stats_distribution">Distribution</string>
     <string name="stats_errors">Errors</string>

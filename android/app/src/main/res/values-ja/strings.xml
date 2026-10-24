@@ -77,6 +77,8 @@
     <string name="stats">統計</string>
     <string name="stats_swipe">統計</string>
     <string name="whole_match">試合</string>
+    <string name="statistics">統計</string>
+    <string name="match_stats">試合の統計</string>
     <string name="stats_summary">概要</string>
     <string name="stats_distribution">トス配分</string>
     <string name="stats_errors">ミス</string>
