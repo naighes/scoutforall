@@ -787,9 +787,10 @@ pub struct GradeBand {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct SetTrend {
     pub set_number: u8,
-    /// the points of the team ahead after each rally: how far the set
-    /// had gone, the same for every set
-    pub leading: Vec<u8>,
+    /// how far the set had gone after each rally, in points of the team
+    /// ahead (see `Replay::progress` in the core): to draw the sets side
+    /// by side
+    pub progress: Vec<f64>,
     /// so far in the set
     pub values: Vec<Option<f64>>,
     /// of its last touches in the set (see `RECENT_TOUCHES` in the core)
@@ -1245,11 +1246,7 @@ impl Scouting {
                         .iter()
                         .map(|(set_number, replay)| SetTrend {
                             set_number: *set_number,
-                            leading: replay
-                                .cumulative(|_| ())
-                                .iter()
-                                .map(|p| p.score_us.max(p.score_them))
-                                .collect(),
+                            progress: replay.progress(),
                             values: values(replay.series(*series, false)),
                             recent: values(replay.series(*series, true)),
                         })
@@ -2391,8 +2388,11 @@ mod tests {
         assert_eq!(serves.sets[0].recent, vec![Some(100.0); 25]);
         assert_eq!(serves.sets[1].values, vec![Some(-100.0); 3]);
         // 0-1, 1-1, 1-2
-        assert_eq!(serves.sets[1].leading, vec![1, 1, 2]);
-        assert_eq!(serves.sets[0].leading, (1..=25).collect::<Vec<u8>>());
+        assert_eq!(serves.sets[1].progress, vec![0.5, 1.0, 2.0]);
+        assert_eq!(
+            serves.sets[0].progress,
+            (1..=25).map(f64::from).collect::<Vec<_>>()
+        );
         assert_eq!(serves.sets[1].recent, vec![Some(-100.0); 3]);
         // the match: (25 aces - 2 errors) / 27 serves; the last 10: 8 aces
         // and 2 errors

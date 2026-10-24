@@ -582,16 +582,9 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column {
             color = overallGrade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurface,
         )
     }
-    // each rally where the set had got to: the points of the team ahead,
-    // the rallies at the same points spread in between
+    // each rally where the set had got to (the points of the team ahead)
     val sets = line.sets.map { set ->
-        val leading = set.leading.map { it.toInt() }
-        val xs = leading.mapIndexed { i, m ->
-            val same = leading.count { it == m }
-            val nth = leading.take(i + 1).count { it == m }
-            (m - 1) + nth.toDouble() / same
-        }
-        Triple(set.setNumber.toInt(), xs, if (recent) set.recent else set.values)
+        Triple(set.setNumber.toInt(), set.progress, if (recent) set.recent else set.values)
     }
     val axis = MaterialTheme.colorScheme.outline
     val known = sets.flatMap { it.third }.filterNotNull() + listOfNotNull(overall, band?.low, band?.high)
