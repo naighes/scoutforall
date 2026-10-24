@@ -29,6 +29,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -58,6 +62,19 @@ data class CourtSlot(
     val y: Float? = null,
     /** the same player moves from a spot to the next one */
     val key: Any? = null,
+    /** the last touch of the rally: the symbol of its evaluation, empty
+     * without one (a freeball) */
+    val touch: String? = null,
+)
+
+/** Where the ball is: on our side, by the player who touched it last, or
+ * in the middle; or on the net on their side, over the player who sent it.
+ * A freeball shows the way it goes. */
+data class CourtBall(
+    val ours: Boolean,
+    /** the position of the player who touched it last, if any */
+    val position: Int? = null,
+    val freeball: Boolean = false,
 )
 
 /** The middle of the zone of positions 1 to 6, in meters: the front row in
@@ -76,6 +93,7 @@ fun Court(
     onPosition: (Int) -> Unit,
     showPositions: Boolean = false,
     serveZone: Boolean = false,
+    ball: CourtBall? = null,
 ) = Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
     val lines = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
@@ -99,22 +117,59 @@ fun Court(
             val width = maxWidth / 3
             val token = 44.dp * scale
             val height = token + 2.dp + 16.dp * scale
+            // the top left corner of the spot of a position
+            val corner = { position: Int ->
+                val s = slot(position)
+                val (zx, zy) = zones[position - 1]
+                (maxWidth * (s.x ?: zx) / 9f).coerceIn(width / 2, maxWidth - width / 2) - width / 2 to
+                    (maxHeight * (s.y ?: zy) / 9f).coerceIn(token / 2, maxHeight - height + token / 2) - token / 2
+            }
+            // the ball by the jersey, on the right; or in the middle of the
+            // court, between the rows; or on the net, on their side
+            val ballSize = 20.dp * scale
+            val holder = ball?.position?.let(corner)
+            val ballX by animateDpAsState(
+                when (holder) {
+                    null -> maxWidth / 2
+                    else -> holder.first + width / 2 + if (ball?.ours == true) token / 2 else 0.dp
+                },
+                tween(450), label = "ball x",
+            )
+            val ballY by animateDpAsState(
+                when {
+                    ball?.ours != true -> (-6).dp
+                    holder != null -> holder.second + token - 7.dp
+                    else -> maxHeight * 4f / 9f
+                },
+                tween(450), label = "ball y",
+            )
+            if (ball?.freeball == true) {
+                // from the player over the net, or from the net into the court
+                val from = when (holder) {
+                    null -> maxWidth / 2 to 0.dp
+                    else -> holder.first + width / 2 to holder.second + token / 2
+                }
+                Freeball(from, ballX to ballY, MaterialTheme.colorScheme.primary)
+            }
             (1..6).forEach { position ->
                 val s = slot(position)
                 // the server left the court for the serve
                 if (position == 1 && server != null) return@forEach
                 key(s.key ?: position) {
-                    val (zx, zy) = zones[position - 1]
-                    val x by animateDpAsState(
-                        (maxWidth * (s.x ?: zx) / 9f).coerceIn(width / 2, maxWidth - width / 2) - width / 2,
-                        tween(450), label = "x",
-                    )
-                    val y by animateDpAsState(
-                        (maxHeight * (s.y ?: zy) / 9f).coerceIn(token / 2, maxHeight - height + token / 2) - token / 2,
-                        tween(450), label = "y",
-                    )
+                    val (cx, cy) = corner(position)
+                    val x by animateDpAsState(cx, tween(450), label = "x")
+                    val y by animateDpAsState(cy, tween(450), label = "y")
                     Spot(position, s, showPositions, scale, Modifier.offset(x, y).size(width, height)) { onPosition(position) }
                 }
+            }
+            // the server holds the ball in the serve zone
+            if (ball != null && server == null) {
+                Icon(
+                    painterResource(R.drawable.ic_ball),
+                    contentDescription = stringResource(if (ball.ours) R.string.ball_ours else R.string.ball_theirs),
+                    modifier = Modifier.offset(ballX - ballSize / 2, ballY - ballSize / 2).size(ballSize),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }
@@ -185,6 +240,7 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
         color = jersey,
         border = when {
             slot.highlighted -> BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+            slot.touch != null -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
             empty -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
             libero -> BorderStroke(2.dp, MaterialTheme.colorScheme.onSurface)
             else -> null
@@ -200,7 +256,8 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
             )
         }
     }
-    if (slot.setter) Badge(R.string.setter_short, Modifier.align(Alignment.TopEnd))
+    if (slot.setter) Badge(stringResource(R.string.setter_short), Modifier.align(Alignment.TopEnd))
+    if (!slot.touch.isNullOrEmpty()) Badge(slot.touch, Modifier.align(Alignment.BottomStart).offset(x = (-4).dp, y = 4.dp))
     if (slot.serving) {
         Icon(
             painterResource(R.drawable.ic_ball),
@@ -211,19 +268,37 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
     }
 }
 
-/** The setter, on the jersey. */
+/** On the jersey: the setter, the evaluation of the last touch. */
 @Composable
-private fun Badge(text: Int, modifier: Modifier) = Surface(
+private fun Badge(text: String, modifier: Modifier) = Surface(
     modifier = modifier.size(18.dp),
     shape = CircleShape,
     color = MaterialTheme.colorScheme.primary,
 ) {
     Box(contentAlignment = Alignment.Center) {
         Text(
-            stringResource(text),
+            text,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onPrimary,
         )
     }
+}
+
+/** The way of a freeball: a dashed line with its head on the ball. */
+@Composable
+private fun Freeball(from: Pair<Dp, Dp>, to: Pair<Dp, Dp>, color: Color) = Canvas(Modifier.fillMaxSize()) {
+    val start = Offset(from.first.toPx(), from.second.toPx())
+    val end = Offset(to.first.toPx(), to.second.toPx())
+    val line = 2.dp.toPx()
+    drawLine(color, start, end, strokeWidth = line, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())))
+    // the head, short of the ball
+    val direction = end - start
+    val length = direction.getDistance().takeIf { it > 0f } ?: return@Canvas
+    val unit = direction / length
+    val tip = end - unit * 12.dp.toPx()
+    val normal = Offset(-unit.y, unit.x)
+    val head = 7.dp.toPx()
+    drawLine(color, tip, tip - unit * head + normal * head, strokeWidth = line, cap = StrokeCap.Round)
+    drawLine(color, tip, tip - unit * head - normal * head, strokeWidth = line, cap = StrokeCap.Round)
 }
