@@ -7,6 +7,7 @@ pub mod benchmark;
 pub mod constants;
 pub mod detail;
 pub mod errors;
+pub mod event_edit;
 pub mod localization;
 pub mod logging;
 pub mod match_form;

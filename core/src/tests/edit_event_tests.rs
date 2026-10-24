@@ -5,6 +5,9 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::errors::{AppError, MatchError, SnapshotError};
+    use crate::event_edit::{EditField, EventEdit, EventEditError};
+    use crate::localization::labels;
+    use crate::shapes::enums::LanguageEnum;
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         set::SetEntry,
@@ -164,5 +167,177 @@ mod tests {
             edited.lineup_rules,
             Some(set.find_lineup_rules(DEFAULT_MAX_SUBSTITUTIONS).unwrap())
         );
+    }
+
+    // --- correcting an event (`EventEdit`) -------------------------------
+
+    fn edit(set: &SetEntry, index: usize) -> EventEdit {
+        EventEdit::new(set, index, DEFAULT_MAX_SUBSTITUTIONS).unwrap()
+    }
+
+    #[test]
+    fn substitutions_and_changes_cannot_be_corrected() {
+        let team = Team::new();
+        for event_type in [R, CL, CS] {
+            let set = team.set(
+                TeamSideEnum::Us,
+                vec![event(event_type, Some(team.setter()), None)],
+            );
+            assert_eq!(
+                EventEdit::new(&set, 0, DEFAULT_MAX_SUBSTITUTIONS).err(),
+                Some(EventEditError::NotEditable),
+                "{event_type:?}"
+            );
+        }
+        let set = side_out(&Team::new());
+        assert_eq!(
+            EventEdit::new(&set, 3, DEFAULT_MAX_SUBSTITUTIONS).err(),
+            Some(EventEditError::Unreadable)
+        );
+    }
+
+    /// The reception: before it, the set at 0-0 with them serving.
+    #[test]
+    fn what_an_event_can_become() {
+        let team = Team::new();
+        let set = side_out(&team);
+        let reception = edit(&set, 0);
+        assert_eq!(reception.index(), 0);
+        assert_eq!(
+            (reception.before().score_us, reception.before().score_them),
+            (0, 0)
+        );
+        assert_eq!(
+            reception.fields(),
+            vec![EditField::EventType, EditField::Eval]
+        );
+        let types = reception.event_types();
+        assert!(types.contains(&P), "{types:?}");
+        // never a change of the lineup, always played by a player
+        assert!(
+            types
+                .iter()
+                .all(|t| !matches!(t, R | CL | CS) && t.requires_player()),
+            "{types:?}"
+        );
+        assert_eq!(reception.evals(), P.available_evals());
+        assert_eq!(reception.techniques(), vec![None]);
+        // the serve, with its serve types
+        let serve = edit(&set, 2);
+        assert_eq!(
+            serve.fields(),
+            vec![EditField::EventType, EditField::Eval, EditField::Technique]
+        );
+        assert_eq!(
+            serve.techniques(),
+            std::iter::once(None)
+                .chain(
+                    ServeTypeEnum::ALL
+                        .into_iter()
+                        .map(|t| Some(TechniqueEnum::Serve(t)))
+                )
+                .collect::<Vec<_>>()
+        );
+        // the attack, with the sets the outside hitter can receive
+        let attack = edit(&set, 1);
+        assert!(attack.techniques().len() > 1);
+        assert!(
+            attack
+                .techniques()
+                .iter()
+                .flatten()
+                .all(|t| matches!(t, TechniqueEnum::Set(_)))
+        );
+    }
+
+    /// Changing the type keeps what the new one allows; what isn't among
+    /// the choices is ignored.
+    #[test]
+    fn choosing_keeps_what_fits() {
+        let team = Team::new();
+        let set = side_out(&team);
+        let mut serve = edit(&set, 2);
+        let float = Some(TechniqueEnum::Serve(ServeTypeEnum::ALL[0]));
+        serve.choose_technique(float);
+        serve.choose_eval(Over);
+        assert_eq!(
+            (serve.event().eval, serve.event().technique),
+            (Some(Over), float)
+        );
+        // an evaluation of the attack only, and a set: ignored
+        serve.choose_eval(Exclamative);
+        assert_eq!(serve.event().eval, Some(Over));
+        let set_type = edit(&set, 1).techniques().into_iter().flatten().next();
+        serve.choose_technique(set_type);
+        assert_eq!(serve.event().technique, float);
+        // still a serve: the evaluation and the serve type stay
+        serve.choose_event_type(S);
+        assert_eq!(
+            (serve.event().eval, serve.event().technique),
+            (Some(Over), float)
+        );
+        // a fault has no evaluation nor serve type
+        assert!(serve.event_types().contains(&F));
+        serve.choose_event_type(F);
+        assert_eq!(serve.event().event_type, F);
+        assert_eq!((serve.event().eval, serve.event().technique), (None, None));
+        assert_eq!(serve.fields(), vec![EditField::EventType]);
+        // back to a serve: its first evaluation
+        serve.choose_event_type(S);
+        assert_eq!(serve.event().eval, Some(Perfect));
+        // a reception can't come before our serve: ignored
+        serve.choose_event_type(P);
+        assert_eq!(serve.event().event_type, S);
+        // after our reception: an attack, a freeball, a fault
+        let mut attack = edit(&set, 1);
+        assert_eq!(attack.event_types(), vec![F, A, FB]);
+        // the freeball has no evaluation nor set
+        attack.choose_technique(attack.techniques().into_iter().flatten().next());
+        assert!(attack.event().technique.is_some());
+        attack.choose_event_type(FB);
+        assert_eq!(
+            (attack.event().eval, attack.event().technique),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn a_correction_applies_if_it_fits() {
+        let team = Team::new();
+        let set = side_out(&team);
+        let mut reception = edit(&set, 0);
+        reception.choose_eval(Positive);
+        let edited = reception.apply().unwrap();
+        assert_eq!(edited.events[0].eval, Some(Positive));
+        assert_eq!(edited.events.len(), 3);
+        // the attack out: they serve next, not us
+        let mut attack = edit(&set, 1);
+        attack.choose_eval(Error);
+        assert_eq!(attack.apply().err(), Some(EventEditError::DoesNotFit));
+        // the last ace becomes a serve in play: the set isn't over
+        let events: Vec<EventEntry> = (0..24)
+            .map(|_| event(OE, None, None))
+            .chain([event(S, Some(team.setter()), Some(Perfect))])
+            .collect();
+        let won = team.set(TeamSideEnum::Us, events);
+        let mut ace = edit(&won, 24);
+        ace.choose_eval(Positive);
+        assert_eq!(ace.apply().err(), Some(EventEditError::ChangesTheResult));
+    }
+
+    #[test]
+    fn every_error_has_a_message() {
+        use EventEditError::*;
+        for language in LanguageEnum::ALL {
+            let messages: Vec<&str> = [NotEditable, DoesNotFit, ChangesTheResult, Unreadable]
+                .iter()
+                .map(|e| e.message(labels(language)))
+                .collect();
+            assert!(messages.iter().all(|m| !m.is_empty()), "{language:?}");
+            let mut distinct = messages.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            assert_eq!(distinct.len(), 4, "{language:?}");
+        }
     }
 }
