@@ -198,6 +198,20 @@ impl ScoutingSession {
         stats
     }
 
+    /// The sets of the match up to this one, in order: the ones before, and
+    /// this one as scouted so far.
+    pub fn sets(&self) -> Vec<&SetEntry> {
+        let mut sets: Vec<&SetEntry> = self
+            .current_match
+            .sets
+            .iter()
+            .filter(|s| s.set_number < self.set.set_number)
+            .collect();
+        sets.sort_by_key(|s| s.set_number);
+        sets.push(&self.set);
+        sets
+    }
+
     pub fn step(&self) -> ScoutingStep {
         self.step
     }

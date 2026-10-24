@@ -516,5 +516,12 @@ mod tests {
             Ok(Progress::Saved)
         );
         assert_eq!(efficiency(&session), Some(0.0));
+        // the sets up to this one, this one as scouted so far
+        let sets: Vec<_> = session
+            .sets()
+            .iter()
+            .map(|s| (s.set_number, s.events.len()))
+            .collect();
+        assert_eq!(sets, vec![(1, 1), (2, 1)]);
     }
 }
