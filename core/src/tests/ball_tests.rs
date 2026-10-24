@@ -1,5 +1,5 @@
 //! Where the ball is while a rally is played: the last touch, and the side
-//! of the net it leaves the ball on.
+//! of the net it leaves the ball on; and the fundamental worth watching.
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
@@ -176,5 +176,52 @@ mod tests {
         );
         let events = vec![act(S, t.setter, Positive), ev(OF, None, None)];
         assert_eq!(ball(&t.replay(Us, events)), (Us, Some((OF, None, None))));
+    }
+
+    /// The players in the spotlight, in any order.
+    fn spotlight(snapshot: &Snapshot) -> Option<(EventTypeEnum, Vec<Uuid>)> {
+        snapshot.get_spotlight().map(|(fundamental, mut players)| {
+            players.sort();
+            (fundamental, players)
+        })
+    }
+
+    fn sorted(mut players: Vec<Uuid>) -> Vec<Uuid> {
+        players.sort();
+        players
+    }
+
+    #[test]
+    fn waiting_for_their_serve_the_receivers_are_in_the_spotlight() {
+        let t = Team::new();
+        assert_eq!(
+            spotlight(&t.replay(Them, vec![])),
+            Some((P, sorted(vec![t.oh1, t.oh2, t.libero])))
+        );
+    }
+
+    #[test]
+    fn with_the_ball_on_our_side_the_attackers_are_in_the_spotlight() {
+        let t = Team::new();
+        // the middle blocker in the back row is the libero's
+        let attackers = Some((A, sorted(vec![t.oh1, t.mb2, t.opposite, t.oh2])));
+        assert_eq!(
+            spotlight(&t.replay(Them, vec![act(P, t.oh1, Positive)])),
+            attackers
+        );
+        let events = vec![act(S, t.setter, Positive), act(D, t.libero, Positive)];
+        assert_eq!(spotlight(&t.replay(Us, events)), attackers);
+    }
+
+    #[test]
+    fn with_the_ball_on_their_side_or_before_our_serve_no_one_is() {
+        let t = Team::new();
+        assert_eq!(spotlight(&t.replay(Us, vec![])), None);
+        assert_eq!(
+            spotlight(&t.replay(Us, vec![act(S, t.setter, Positive)])),
+            None
+        );
+        let events = vec![act(P, t.oh1, Positive), act(A, t.oh1, Negative)];
+        assert_eq!(spotlight(&t.replay(Them, events)), None);
     }
 }

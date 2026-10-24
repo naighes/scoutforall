@@ -14,6 +14,7 @@ use crate::{
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
+        stats::Stats,
         technique::{ServeTypeEnum, TechniqueEnum},
     },
 };
@@ -111,6 +112,8 @@ pub struct ScoutingSession {
     current_match: MatchEntry,
     set: SetEntry,
     snapshot: Snapshot,
+    /// the statistics of the sets before this one
+    earlier_stats: Stats,
     step: ScoutingStep,
     event: Option<EventTypeEnum>,
     player: Option<Uuid>,
@@ -141,10 +144,20 @@ impl ScoutingSession {
         snapshot: Snapshot,
         set_writer: Arc<dyn SetWriter + Send + Sync>,
     ) -> Self {
+        let earlier_stats = current_match
+            .sets
+            .iter()
+            .filter(|s| s.set_number < set.set_number)
+            .filter_map(|s| s.compute_snapshot(current_match.max_substitutions).ok())
+            .fold(Stats::new(), |mut stats, s| {
+                stats.merge(&s.stats);
+                stats
+            });
         Self {
             current_match,
             set,
             snapshot,
+            earlier_stats,
             step: ScoutingStep::Event,
             event: None,
             player: None,
@@ -175,6 +188,14 @@ impl ScoutingSession {
 
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot
+    }
+
+    /// The statistics of the match up to now: the sets before, and this
+    /// one so far.
+    pub fn match_stats(&self) -> Stats {
+        let mut stats = self.earlier_stats.clone();
+        stats.merge(&self.snapshot.stats);
+        stats
     }
 
     pub fn step(&self) -> ScoutingStep {

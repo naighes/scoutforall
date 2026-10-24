@@ -447,6 +447,41 @@ impl Snapshot {
         }
     }
 
+    /// The fundamental worth watching now, and the players on court who
+    /// play it: the reception while we wait for their serve (the outside
+    /// hitters and the libero); the attack while the ball is on our side in
+    /// a rally (the outside hitters, the opposite, the middle blocker in the
+    /// front row). `None` otherwise.
+    pub fn get_spotlight(&self) -> Option<(EventTypeEnum, Vec<Uuid>)> {
+        use EventTypeEnum::*;
+        use RoleEnum::*;
+        let lineup = &self.current_lineup;
+        match (self.get_formation(), self.get_ball_side()) {
+            (Formation::Reception, _) => Some(P),
+            (Formation::Rally, TeamSideEnum::Us) => Some(A),
+            _ => None,
+        }
+        .map(|fundamental| {
+            let players = self
+                .get_playing_positions()
+                .into_iter()
+                .filter(|id| {
+                    matches!(
+                        (
+                            fundamental,
+                            lineup.get_role(id),
+                            lineup.is_back_row_player(id)
+                        ),
+                        (P, Ok(OutsideHitter | Libero), _)
+                            | (A, Ok(OutsideHitter | OppositeHitter), _)
+                            | (A, Ok(MiddleBlocker), false)
+                    )
+                })
+                .collect();
+            (fundamental, players)
+        })
+    }
+
     /// The team serving next: the one serving the set at its start, then
     /// the one winning the last rally. `None` while a rally is being played.
     pub fn get_serving_team(&self) -> Option<TeamSideEnum> {

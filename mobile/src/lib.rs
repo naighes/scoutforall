@@ -35,6 +35,7 @@ use scout4all_core::{
         r#match::MatchEntry,
         player::PlayerEntry,
         snapshot::{EventEntry, Formation},
+        stats::{Metric, StatsFilter},
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
@@ -520,6 +521,11 @@ pub struct CourtPlayer {
     pub libero: bool,
     /// whether the scout can choose the player now
     pub selectable: bool,
+    /// whether the player plays the fundamental worth watching now (see
+    /// `Snapshot::get_spotlight`), and their efficiency in it over the
+    /// match so far, none before their first
+    pub spotlight: bool,
+    pub efficiency: Option<f64>,
     /// where the player stands, in meters from the left sideline and from
     /// the net, seen from the bench
     pub x: f32,
@@ -727,6 +733,21 @@ impl Scouting {
                 .unwrap_or(ZONES),
             _ => ZONES,
         };
+        let spotlight = snapshot.get_spotlight();
+        let stats = spotlight.as_ref().map(|_| session.match_stats());
+        let efficiency = |id: Uuid| {
+            spotlight
+                .as_ref()
+                .filter(|(_, players)| players.contains(&id))
+                .zip(stats.as_ref())
+                .map(|((fundamental, _), stats)| {
+                    stats.metric_percentage(
+                        *fundamental,
+                        Metric::Efficiency,
+                        &StatsFilter::new(None, None, Some(id)),
+                    )
+                })
+        };
         let court = snapshot
             .get_playing_positions()
             .into_iter()
@@ -739,6 +760,8 @@ impl Scouting {
                 setter: setter == Some(p.id),
                 libero: libero == p.id,
                 selectable: selectable(&p.id),
+                spotlight: efficiency(p.id).is_some(),
+                efficiency: efficiency(p.id).flatten(),
                 x,
                 y,
             })
