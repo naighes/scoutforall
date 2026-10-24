@@ -3,6 +3,7 @@
 //! statistics, the PDF report, the persistence and the analytics.
 pub mod analytics;
 pub mod archive;
+pub mod benchmark;
 pub mod constants;
 pub mod errors;
 pub mod localization;
