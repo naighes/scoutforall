@@ -35,6 +35,7 @@ pub enum ScreenActionEnum {
     Reset,
     Undo,
     EditEvents,
+    LiveStats,
 }
 
 impl Describe for ScreenActionEnum {
@@ -70,6 +71,7 @@ impl Describe for ScreenActionEnum {
             Reset => (Reset, current_labels().reset.to_string()),
             Undo => (Undo, current_labels().undo.to_string()),
             EditEvents => (EditEvents, current_labels().edit_events.to_string()),
+            LiveStats => (LiveStats, current_labels().live_stats.to_string()),
         }
     }
 }
@@ -107,6 +109,7 @@ impl fmt::Display for ScreenActionEnum {
             Reset => "reset",
             Undo => "undo",
             EditEvents => "edit-events",
+            LiveStats => "live-stats",
         };
         write!(f, "{}", label)
     }

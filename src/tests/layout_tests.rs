@@ -28,12 +28,13 @@ mod tests {
     const SCOUTED: &str = "s#s#s=p7=s=p7#a2#";
 
     /// The keys typed, a char each: `\n` is Enter, `\x1b` Esc, `\x02` F2,
-    /// `\t` Tab, `>` the right arrow.
+    /// `\x03` F3, `\t` Tab, `>` the right arrow.
     fn code(c: char) -> KeyCode {
         match c {
             '\n' => KeyCode::Enter,
             '\x1b' => KeyCode::Esc,
             '\x02' => KeyCode::F(2),
+            '\x03' => KeyCode::F(3),
             '\t' => KeyCode::Tab,
             '>' => KeyCode::Right,
             c => KeyCode::Char(c),
@@ -64,6 +65,7 @@ mod tests {
             ("lineup", false, "\nm\n>\n".into()),
             ("scouting", true, format!("\nm\n{SCOUTED}")),
             ("scouting evaluation", true, format!("\nm\n{SCOUTED}s")),
+            ("live stats", true, format!("\nm\n{SCOUTED}\x03")),
             ("match stats", true, format!("\nm\n{SCOUTED}\x1b ")),
             ("set list", true, format!("\nm\n{SCOUTED}\x1bv")),
             ("set events", true, format!("\nm\n{SCOUTED}\x1bv\n")),
@@ -181,25 +183,7 @@ mod tests {
     /// The entries of the panel with the title, a line each, if it's
     /// shown: the text between its borders, down to its bottom border.
     fn panel(ui: &mut Ui, title: &str) -> Option<Vec<String>> {
-        let lines: Vec<Vec<char>> = ui.lines().iter().map(|l| l.chars().collect()).collect();
-        let top = format!("┌{title}");
-        let (row, x) = lines.iter().enumerate().find_map(|(row, line)| {
-            String::from_iter(line)
-                .find(&top)
-                .map(|byte| (row, String::from_iter(line)[..byte].chars().count()))
-        })?;
-        Some(
-            lines[row + 1..]
-                .iter()
-                .take_while(|line| line.get(x) != Some(&'└'))
-                .map(|line| {
-                    String::from_iter(line[x + 1..].iter().take_while(|c| **c != '│'))
-                        .trim()
-                        .to_string()
-                })
-                .filter(|entry| !entry.is_empty())
-                .collect(),
-        )
+        ui.panel(title)
     }
 
     fn shows_point_sequence(ui: &mut Ui) -> bool {

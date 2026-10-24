@@ -27,15 +27,17 @@ pub const SETTINGS_KEY: KeyCombination = key!(f2);
 pub const UNDO_KEY: KeyCombination = key!(shift - u);
 /// Leaves the scouting.
 pub const BACK_KEY: KeyCombination = key!(esc);
+/// Shows the statistics while scouting, and closes them.
+pub const STATS_KEY: KeyCombination = key!(f3);
 
-/// Whether the key is one scouting keeps for itself all along (settings, undo
-/// and back): it can't be assigned to anything.
+/// Whether the key is one scouting keeps for itself all along (settings, undo,
+/// back and statistics): it can't be assigned to anything.
 pub fn is_reserved_key(ck: &KeyCombination) -> bool {
-    [SETTINGS_KEY, UNDO_KEY, BACK_KEY].contains(ck)
+    [SETTINGS_KEY, UNDO_KEY, BACK_KEY, STATS_KEY].contains(ck)
 }
 
-/// Whether the key is one scouting keeps for itself (settings, undo, back and
-/// the digits choosing players): it can't be assigned to events nor
+/// Whether the key is one scouting keeps for itself (settings, undo, back,
+/// statistics and the digits choosing players): it can't be assigned to events nor
 /// evaluations. Sets and serves can have digits: they're chosen along with
 /// the evaluation, once the player is.
 pub fn is_fixed_key(ck: &KeyCombination) -> bool {
@@ -292,6 +294,7 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::Select, key!(enter));
         bindings.set(ScreenActionEnum::Reset, key!(r));
         bindings.set(ScreenActionEnum::Undo, UNDO_KEY);
+        bindings.set(ScreenActionEnum::LiveStats, STATS_KEY);
         bindings.set(ScreenActionEnum::EditEvents, key!(v));
         bindings
     }
@@ -404,10 +407,17 @@ fn test_normalized_symbols() {
 
 #[test]
 fn test_fixed_keys() {
-    for ck in [key!(shift - u), key!(esc), key!(f2), key!('0'), key!('9')] {
+    for ck in [
+        key!(shift - u),
+        key!(esc),
+        key!(f2),
+        key!(f3),
+        key!('0'),
+        key!('9'),
+    ] {
         assert!(is_fixed_key(&ck), "{ck}");
     }
-    for ck in [key!(a), key!(u), key!(f3), key!('+'), key!(ctrl - '1')] {
+    for ck in [key!(a), key!(u), key!(f4), key!('+'), key!(ctrl - '1')] {
         assert!(!is_fixed_key(&ck), "{ck}");
     }
 }

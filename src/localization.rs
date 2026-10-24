@@ -154,6 +154,22 @@ pub struct Labels {
     pub space_key: &'static str,
     pub could_not_recognize_home_directory: &'static str,
     pub could_not_create_app_directory: &'static str,
+    /// the statistics while scouting, opened with F3
+    pub live_stats: &'static str,
+    pub points_and_errors: &'static str,
+    pub trend: &'static str,
+    /// the figure of the last 10 touches
+    pub last_touches: &'static str,
+    pub unforced_errors: &'static str,
+    pub forced_errors: &'static str,
+    pub our_aces: &'static str,
+    pub their_aces: &'static str,
+    pub zone: &'static str,
+    /// the share of the attacks after reception
+    pub reception_share: &'static str,
+    /// the share of the counter-attacks
+    pub counter_attack_share: &'static str,
+    pub set_team_level: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -303,6 +319,18 @@ Full texts: the LICENSE and DATA-PRIVACY files, on https://github.com/naighes/sc
     space_key: "space",
     could_not_recognize_home_directory: "could not recognize home directory",
     could_not_create_app_directory: "could not create app directory",
+    live_stats: "stats",
+    points_and_errors: "points and errors",
+    trend: "trend",
+    last_touches: "last 10",
+    unforced_errors: "unforced errors",
+    forced_errors: "forced errors",
+    our_aces: "our aces",
+    their_aces: "their aces",
+    zone: "zone",
+    reception_share: "% rec",
+    counter_attack_share: "% c.att",
+    set_team_level: "set the level and gender of the team to see the colors",
 };
 
 const IT: Labels = Labels {
@@ -452,6 +480,18 @@ Testi completi: i file LICENSE e DATA-PRIVACY, su https://github.com/naighes/sco
     space_key: "spazio",
     could_not_recognize_home_directory: "impossibile riconoscere la directory home",
     could_not_create_app_directory: "impossibile creare la directory dell'applicazione",
+    live_stats: "statistiche",
+    points_and_errors: "punti ed errori",
+    trend: "andamento",
+    last_touches: "ult. 10",
+    unforced_errors: "errori non forzati",
+    forced_errors: "errori forzati",
+    our_aces: "ace nostri",
+    their_aces: "ace loro",
+    zone: "zona",
+    reception_share: "% ric",
+    counter_attack_share: "% contr",
+    set_team_level: "imposta livello e sesso della squadra per vedere i colori",
 };
 
 static LANGUAGE: LazyLock<Language> = LazyLock::new(Language::default);
