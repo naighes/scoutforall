@@ -8,6 +8,7 @@
 
 use chrono::{DateTime, FixedOffset};
 use scout4all_core::{
+    benchmark::{Measure, band, grade},
     errors::AppError,
     localization::{Labels, Language},
     logging::logger::init_logger,
@@ -43,7 +44,7 @@ use scout4all_core::{
     },
     storage::{Store, fs::FsStore},
     team_form::{TeamForm, TeamFormError},
-    trend::trend,
+    trend::{Replay, Series, TrendPoint},
 };
 use std::{
     path::PathBuf,
@@ -153,6 +154,16 @@ pub enum ScoutingStep {
     Player,
     Eval,
     Replacement,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Series {
+    Reception,
+    Attack,
+    CounterAttack,
+    Serve,
+    SideOut,
+    BreakPoint,
 }
 
 #[uniffi::remote(Enum)]
@@ -529,6 +540,9 @@ pub struct CourtPlayer {
     /// match so far, none before their first
     pub spotlight: bool,
     pub efficiency: Option<f64>,
+    /// how good the efficiency is for the level of the team, from 0 (red)
+    /// to 1 (green), none without the level
+    pub grade: Option<f64>,
     /// where the player stands, in meters from the left sideline and from
     /// the net, seen from the bench
     pub x: f32,
@@ -718,6 +732,10 @@ pub struct FundamentalStats {
     pub efficiency: Option<f64>,
     pub perfect: u32,
     pub errors: u32,
+    /// how good the efficiency is for the level of the team, from 0 (red)
+    /// to 1 (green), none without a band or without the level (see
+    /// `benchmark` in the core)
+    pub grade: Option<f64>,
 }
 
 /// The rallies won in a phase.
@@ -726,6 +744,7 @@ pub struct PhaseStats {
     pub percentage: f64,
     pub won: u32,
     pub rallies: u32,
+    pub grade: Option<f64>,
 }
 
 /// Attacks built by us (see `AttackSummary` in the core).
@@ -736,6 +755,7 @@ pub struct AttackStats {
     pub errors: u32,
     pub blocked: u32,
     pub efficiency: f64,
+    pub grade: Option<f64>,
 }
 
 /// The errors made in a fundamental, of a kind.
@@ -755,18 +775,41 @@ pub struct ZoneStats {
     pub attacks: AttackStats,
 }
 
-/// The statistics after a rally, so far in the scope.
+/// The band of a figure for the level of the team, in percent: yellow
+/// in the middle, red half a band below, green half a band above.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
-pub struct TrendSample {
+pub struct GradeBand {
+    pub low: f64,
+    pub high: f64,
+}
+
+/// A figure after every rally of a set, from its first.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SetTrend {
     pub set_number: u8,
-    pub score_us: u8,
-    pub score_them: u8,
-    pub reception: Option<f64>,
-    pub attack: Option<f64>,
-    pub counter_attack: Option<f64>,
-    pub serve: Option<f64>,
-    pub side_out: Option<f64>,
-    pub break_points: Option<f64>,
+    /// the points of the team ahead after each rally: how far the set
+    /// had gone, the same for every set
+    pub leading: Vec<u8>,
+    /// so far in the set
+    pub values: Vec<Option<f64>>,
+    /// of its last touches in the set (see `RECENT_TOUCHES` in the core)
+    pub recent: Vec<Option<f64>>,
+}
+
+/// How a figure went in each set, to compare the sets, and where it is in
+/// the match.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TrendLine {
+    pub series: Series,
+    pub name: String,
+    pub band: Option<GradeBand>,
+    pub sets: Vec<SetTrend>,
+    /// in the match so far, and of its last touches in the match
+    pub overall: Option<f64>,
+    pub overall_recent: Option<f64>,
+    /// their grades for the level of the team
+    pub overall_grade: Option<f64>,
+    pub overall_recent_grade: Option<f64>,
 }
 
 /// What the coach wants to know while the match is played (see
@@ -798,8 +841,12 @@ pub struct LiveStats {
     pub distribution: Vec<ZoneStats>,
     pub first_attack_distribution: Vec<ZoneStats>,
     pub counter_attack_distribution: Vec<ZoneStats>,
-    /// one sample per rally
-    pub trend: Vec<TrendSample>,
+    /// whether the figures have a grade: the team has a level and a
+    /// gender
+    pub graded: bool,
+    /// reception, attack, counter-attack, serve, side out, break point, by
+    /// set: always of every set so far, whatever the scope
+    pub trend: Vec<TrendLine>,
 }
 
 /// Scouting the set in progress of a match, the player first (see
@@ -867,6 +914,11 @@ impl Scouting {
                 selectable: selectable(&p.id),
                 spotlight: efficiency(p.id).is_some(),
                 efficiency: efficiency(p.id).flatten(),
+                grade: spotlight
+                    .as_ref()
+                    .and_then(|(fundamental, _)| Measure::of(*fundamental))
+                    .zip(efficiency(p.id).flatten())
+                    .and_then(|(m, v)| grade(team.classification, team.gender, m, v)),
                 x,
                 y,
             })
@@ -1056,34 +1108,19 @@ impl Scouting {
                 stats
             })
         })?;
-        let trend = trend(&sets, max_substitutions, |stats| {
-            let all = StatsFilter::default();
-            let efficiency = |e| stats.metric_percentage(e, Metric::Efficiency, &all);
-            let phase = |p| {
-                stats
-                    .rallies_won(&StatsFilter::new(Some(p), None, None))
-                    .map(|(v, _, _)| v)
-            };
-            TrendSample {
-                set_number: 0,
-                score_us: 0,
-                score_them: 0,
-                reception: efficiency(EventTypeEnum::P),
-                attack: efficiency(EventTypeEnum::A),
-                counter_attack: stats.attack_summary(true, &all).map(|a| a.efficiency()),
-                serve: efficiency(EventTypeEnum::S),
-                side_out: phase(PhaseEnum::SideOut),
-                break_points: phase(PhaseEnum::Break),
-            }
-        })?
-        .into_iter()
-        .map(|p| TrendSample {
-            set_number: p.set_number,
-            score_us: p.score_us,
-            score_them: p.score_them,
-            ..p.value
-        })
-        .collect();
+        let team = &session.current_match().team;
+        let level = |measure: Measure, value: Option<f64>| {
+            value.and_then(|v| grade(team.classification, team.gender, measure, v))
+        };
+        let attack_stats = |a: AttackSummary| AttackStats {
+            total: a.total,
+            kills: a.kills,
+            errors: a.errors,
+            blocked: a.blocked,
+            efficiency: a.efficiency(),
+            grade: level(Measure::Attack, Some(a.efficiency())),
+        };
+        let trend = self.trend_lines(&all, max_substitutions, team)?;
         let o = Overview::of(&stats);
         let fundamental = |event: EventTypeEnum, f: Fundamental| FundamentalStats {
             event,
@@ -1092,12 +1129,14 @@ impl Scouting {
             efficiency: f.efficiency,
             perfect: f.perfect,
             errors: f.errors,
+            grade: Measure::of(event).and_then(|m| level(m, f.efficiency)),
         };
-        let phase = |p: Option<(f64, u32, u32)>| {
+        let phase = |p: Option<(f64, u32, u32)>, measure| {
             p.map(|(percentage, won, rallies)| PhaseStats {
                 percentage,
                 won,
                 rallies,
+                grade: level(measure, Some(percentage)),
             })
         };
         let errors = |e: &Errors| {
@@ -1129,8 +1168,8 @@ impl Scouting {
                 fundamental(EventTypeEnum::B, o.block),
                 fundamental(EventTypeEnum::D, o.dig),
             ],
-            side_out: phase(o.side_out),
-            break_points: phase(o.break_points),
+            side_out: phase(o.side_out, Measure::SideOut),
+            break_points: phase(o.break_points, Measure::BreakPoint),
             first_attack: o.first_attack.map(attack_stats),
             counter_attack: o.counter_attack.map(attack_stats),
             unforced_errors: o.unforced_errors.total,
@@ -1144,6 +1183,7 @@ impl Scouting {
             distribution: zones(None),
             first_attack_distribution: zones(Some(false)),
             counter_attack_distribution: zones(Some(true)),
+            graded: team.classification.is_some() && team.gender.is_some(),
             trend,
         })
     }
@@ -1165,17 +1205,76 @@ fn zone_number(zone: ZoneEnum) -> u8 {
     }
 }
 
-fn attack_stats(a: AttackSummary) -> AttackStats {
-    AttackStats {
-        total: a.total,
-        kills: a.kills,
-        errors: a.errors,
-        blocked: a.blocked,
-        efficiency: a.efficiency(),
-    }
-}
-
 impl Scouting {
+    /// Each figure in each set, from its first rally, and in the match.
+    fn trend_lines(
+        &self,
+        sets: &[&SetEntry],
+        max_substitutions: u8,
+        team: &TeamEntry,
+    ) -> Result<Vec<TrendLine>, MobileError> {
+        let match_replay = Replay::new(sets, max_substitutions)?;
+        let set_replays = sets
+            .iter()
+            .map(|set| Replay::new(&[set], max_substitutions).map(|r| (set.set_number, r)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let values = |points: Vec<TrendPoint<Option<f64>>>| {
+            points.into_iter().map(|p| p.value).collect::<Vec<_>>()
+        };
+        let last = |points: Vec<TrendPoint<Option<f64>>>| points.last().and_then(|p| p.value);
+        let level = |series: Series, value: Option<f64>| {
+            value.and_then(|v| grade(team.classification, team.gender, series.measure(), v))
+        };
+        Ok(Series::ALL
+            .iter()
+            .map(|series| {
+                let overall = last(match_replay.series(*series, false));
+                let overall_recent = last(match_replay.series(*series, true));
+                TrendLine {
+                    series: *series,
+                    name: self.series_name(*series),
+                    band: team
+                        .classification
+                        .zip(team.gender)
+                        .map(|(level, gender)| band(level, gender, series.measure()))
+                        .map(|b| GradeBand {
+                            low: b.low,
+                            high: b.high,
+                        }),
+                    sets: set_replays
+                        .iter()
+                        .map(|(set_number, replay)| SetTrend {
+                            set_number: *set_number,
+                            leading: replay
+                                .cumulative(|_| ())
+                                .iter()
+                                .map(|p| p.score_us.max(p.score_them))
+                                .collect(),
+                            values: values(replay.series(*series, false)),
+                            recent: values(replay.series(*series, true)),
+                        })
+                        .collect(),
+                    overall,
+                    overall_recent,
+                    overall_grade: level(*series, overall),
+                    overall_recent_grade: level(*series, overall_recent),
+                }
+            })
+            .collect())
+    }
+
+    fn series_name(&self, series: Series) -> String {
+        match series {
+            Series::Reception => EventTypeEnum::P.friendly_name(self.labels),
+            Series::Attack => EventTypeEnum::A.friendly_name(self.labels),
+            Series::CounterAttack => self.labels.counter_attack,
+            Series::Serve => EventTypeEnum::S.friendly_name(self.labels),
+            Series::SideOut => PhaseEnum::SideOut.friendly_name(self.labels),
+            Series::BreakPoint => PhaseEnum::Break.friendly_name(self.labels),
+        }
+        .to_string()
+    }
+
     /// The session, even if a call panicked while holding it: each choice
     /// leaves it whole.
     fn session(&self) -> MutexGuard<'_, ScoutingSession> {
@@ -2201,12 +2300,13 @@ mod tests {
                 .unwrap()
         };
         let phase = |p: &Option<PhaseStats>| p.as_ref().map(|p| (p.won, p.rallies));
-        let scores = |stats: &LiveStats| {
+        let line = |stats: &LiveStats, series: Series| {
             stats
                 .trend
                 .iter()
-                .map(|t| (t.set_number, t.score_us, t.score_them))
-                .collect::<Vec<_>>()
+                .find(|t| t.series == series)
+                .cloned()
+                .unwrap()
         };
 
         let set = scouting.stats(StatsScope::Set { number: 2 }).unwrap();
@@ -2249,23 +2349,69 @@ mod tests {
         assert_eq!(set.forced_errors, 0);
         assert_eq!(phase(&set.side_out), Some((1, 1)));
         assert_eq!(phase(&set.break_points), Some((0, 2)));
-        assert_eq!(scores(&set), vec![(2, 0, 1), (2, 1, 1), (2, 1, 2)]);
+        assert!(set.distribution.is_empty());
+        // a regional women's team: graded
+        assert!(set.graded);
+        let serve_grade = |stats: &LiveStats| {
+            stats
+                .fundamentals
+                .iter()
+                .find(|f| f.event == EventTypeEnum::S)
+                .and_then(|f| f.grade)
+        };
+        assert_eq!(serve_grade(&set), Some(0.0));
+        assert_eq!(set.side_out.as_ref().and_then(|p| p.grade), Some(1.0));
         assert_eq!(
-            set.trend.iter().map(|t| t.serve).collect::<Vec<_>>(),
-            vec![Some(-100.0), Some(-100.0), Some(-100.0)]
+            set.fundamentals
+                .iter()
+                .find(|f| f.event == EventTypeEnum::D)
+                .map(|f| f.grade),
+            Some(None)
+        );
+
+        // the trend: every set so far, each from its first rally
+        assert_eq!(
+            set.trend.iter().map(|t| t.series).collect::<Vec<_>>(),
+            Series::ALL.to_vec()
+        );
+        let serves = line(&set, Series::Serve);
+        assert_eq!(serves.name, "battuta");
+        assert_eq!(
+            serves.band,
+            Some(GradeBand {
+                low: 1.0,
+                high: 25.0
+            })
         );
         assert_eq!(
-            set.trend.iter().map(|t| t.side_out).collect::<Vec<_>>(),
+            serves.sets.iter().map(|s| s.set_number).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(serves.sets[0].values, vec![Some(100.0); 25]);
+        assert_eq!(serves.sets[0].recent, vec![Some(100.0); 25]);
+        assert_eq!(serves.sets[1].values, vec![Some(-100.0); 3]);
+        // 0-1, 1-1, 1-2
+        assert_eq!(serves.sets[1].leading, vec![1, 1, 2]);
+        assert_eq!(serves.sets[0].leading, (1..=25).collect::<Vec<u8>>());
+        assert_eq!(serves.sets[1].recent, vec![Some(-100.0); 3]);
+        // the match: (25 aces - 2 errors) / 27 serves; the last 10: 8 aces
+        // and 2 errors
+        assert_eq!(serves.overall.map(|s| (s * 100.0).round()), Some(8519.0));
+        assert_eq!(serves.overall_recent, Some(60.0));
+        assert_eq!(
+            line(&set, Series::SideOut).sets[1].values,
             vec![None, Some(100.0), Some(100.0)]
         );
-        assert!(set.distribution.is_empty());
+        assert_eq!(line(&set, Series::SideOut).sets[0].values, vec![None; 25]);
 
         let first = scouting.stats(StatsScope::Set { number: 1 }).unwrap();
         assert_eq!(serve(&first), ("battuta".into(), 25, Some(100.0), 25, 0));
         assert_eq!(first.aces, 25);
         assert_eq!(phase(&first.break_points), Some((25, 25)));
         assert_eq!(first.side_out, None);
-        assert_eq!(first.trend.len(), 25);
+        assert_eq!(serve_grade(&first), Some(1.0));
+        // the trend is the same whatever the scope
+        assert_eq!(first.trend, set.trend);
 
         // the match: the trend goes on across the sets
         let all = scouting.stats(StatsScope::Match).unwrap();
@@ -2273,15 +2419,7 @@ mod tests {
         assert_eq!(serve(&all).3, 25);
         assert_eq!(all.aces, 25);
         assert_eq!(phase(&all.break_points), Some((25, 27)));
-        assert_eq!(all.trend.len(), 28);
-        assert_eq!(
-            all.trend.first().map(|t| (t.set_number, t.serve)),
-            Some((1, Some(100.0)))
-        );
-        let last = all.trend.last().unwrap();
-        assert_eq!((last.set_number, last.score_us, last.score_them), (2, 1, 2));
-        // (25 aces - 2 errors) / 27 serves
-        assert_eq!(last.serve.map(|s| (s * 100.0).round()), Some(8519.0));
+        assert_eq!(all.trend, set.trend);
 
         // a set not played yet: nothing
         let none = scouting.stats(StatsScope::Set { number: 3 }).unwrap();
@@ -2290,7 +2428,7 @@ mod tests {
                 .iter()
                 .all(|f| f.total == 0 && f.efficiency.is_none())
         );
-        assert!(none.trend.is_empty());
+        assert_eq!(none.trend, set.trend);
         assert_eq!(none.sets, vec![1, 2]);
     }
 
