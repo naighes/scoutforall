@@ -31,6 +31,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.lerp
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -65,6 +67,10 @@ data class CourtSlot(
     /** the last touch of the rally: the symbol of its evaluation, empty
      * without one (a freeball) */
     val touch: String? = null,
+    /** plays the fundamental worth watching now: the efficiency in it over
+     * the match, none before the first */
+    val spotlight: Boolean = false,
+    val efficiency: Double? = null,
 )
 
 /** Where the ball is: on our side, by the player who touched it last, or
@@ -257,6 +263,7 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
         }
     }
     if (slot.setter) Badge(stringResource(R.string.setter_short), Modifier.align(Alignment.TopEnd))
+    if (slot.spotlight) Efficiency(slot.efficiency, Modifier.align(Alignment.TopStart).offset(x = (-14).dp, y = (-6).dp))
     if (!slot.touch.isNullOrEmpty()) Badge(slot.touch, Modifier.align(Alignment.BottomStart).offset(x = (-4).dp, y = 4.dp))
     if (slot.serving) {
         Icon(
@@ -265,6 +272,31 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
             modifier = Modifier.align(Alignment.BottomStart).offset(x = (-14).dp, y = 4.dp).size(22.dp),
             tint = MaterialTheme.colorScheme.primary,
         )
+    }
+}
+
+/** The efficiency of a player, on the jersey: from red (0% or less)
+ * through yellow (25%) to green (50% or more); a dash before the first. */
+@Composable
+private fun Efficiency(efficiency: Double?, modifier: Modifier) = Surface(
+    modifier = modifier,
+    shape = CircleShape,
+    color = efficiency?.let { efficiencyColor(it) } ?: MaterialTheme.colorScheme.surfaceVariant,
+    contentColor = efficiency?.let { Color.Black } ?: MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Text(
+        efficiency?.let { "${it.roundToInt()}%" } ?: "–",
+        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+    )
+}
+
+private fun efficiencyColor(efficiency: Double): Color {
+    val t = (efficiency / 50.0).coerceIn(0.0, 1.0).toFloat()
+    return when {
+        t < 0.5f -> lerp(Lost, Fair, t * 2)
+        else -> lerp(Fair, Won, (t - 0.5f) * 2)
     }
 }
 
