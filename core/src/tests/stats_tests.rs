@@ -12,8 +12,9 @@ mod tests {
         },
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        stats::{AttackKey, EventKey, Metric, Stats, StatsFilter},
+        stats::{AttackKey, AttackSummary, EventKey, Metric, Stats, StatsFilter},
     };
+    use crate::trend::trend;
     use EvalEnum::*;
     use EventTypeEnum::*;
     use chrono::Utc;
@@ -764,6 +765,89 @@ mod tests {
         assert_eq!(distribution(ZoneEnum::Three), None);
         let break_ = StatsFilter::new(Some(PhaseEnum::Break), None, None);
         assert_eq!(stats.zone_distribution(ZoneEnum::Four, &break_), None);
+    }
+
+    /// The attacks from each zone: all of them, or only the ones on our
+    /// reception or in counter-attack.
+    #[test]
+    fn zone_attacks() {
+        let mut stats = Stats::new();
+        let player = Uuid::new_v4();
+        let mut attack = |zone, eval, prev_type| {
+            stats.attacks.add(AttackKey {
+                phase: PhaseEnum::SideOut,
+                rotation: 0,
+                player,
+                zone,
+                eval,
+                prev_type,
+                prev_eval: Some(Positive),
+            })
+        };
+        attack(ZoneEnum::Four, Perfect, P);
+        attack(ZoneEnum::Four, Error, P);
+        attack(ZoneEnum::Four, Over, D);
+        attack(ZoneEnum::Four, Positive, D);
+        attack(ZoneEnum::Two, Perfect, D);
+        let four = |counter_attack| stats.zone_attacks(ZoneEnum::Four, counter_attack, &all());
+        let summary = |total, errors, blocked, kills| {
+            Some(AttackSummary {
+                total,
+                errors,
+                blocked,
+                kills,
+            })
+        };
+        assert_eq!(four(None), summary(4, 1, 1, 1));
+        assert_eq!(four(None).map(|s| s.efficiency()), Some(-25.0));
+        assert_eq!(four(Some(false)), summary(2, 1, 0, 1));
+        assert_eq!(four(Some(true)), summary(2, 0, 1, 0));
+        assert_eq!(stats.zone_attacks(ZoneEnum::Three, None, &all()), None);
+    }
+
+    // --- the trend ----------------------------------------------------------
+
+    /// The statistics are sampled after every rally, across the sets: the
+    /// events in the middle of a rally don't make a point of the trend.
+    #[test]
+    fn trend_samples_every_rally_across_the_sets() {
+        let t = Team::new();
+        let set = |set_number, events| SetEntry {
+            set_number,
+            serving_team: TeamSideEnum::Us,
+            initial_positions: t.rotation_0(),
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events,
+        };
+        let first = set(
+            1,
+            vec![
+                act(S, t.setter, Perfect),
+                act(S, t.setter, Negative),
+                act(D, t.oh2, Positive),
+                act(A, t.oh1, Perfect),
+            ],
+        );
+        let second = set(2, vec![act(S, t.setter, Error)]);
+        let points = trend(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS, |stats| {
+            stats.metric_percentage(S, Metric::Efficiency, &all())
+        })
+        .expect("expected the sets to replay");
+        let samples: Vec<_> = points
+            .iter()
+            .map(|p| (p.set_number, p.score_us, p.score_them, p.value))
+            .collect();
+        assert_eq!(
+            samples,
+            vec![
+                (1, 1, 0, Some(100.0)),
+                (1, 2, 0, Some(50.0)),
+                (2, 0, 1, Some(0.0)),
+            ]
+        );
     }
 
     // --- the side out on first rally --------------------------------------

@@ -438,23 +438,41 @@ impl Stats {
         counter_attack: bool,
         filter: &StatsFilter,
     ) -> Option<AttackSummary> {
-        let summary = self
-            .attacks(filter)
-            .filter(|(k, _)| k.is_counter_attack() == counter_attack)
-            .fold(AttackSummary::default(), |s, (k, v)| {
-                let (errors, blocked, kills) = match k.eval {
-                    EvalEnum::Error => (v, 0, 0),
-                    EvalEnum::Over => (0, v, 0),
-                    EvalEnum::Perfect => (0, 0, v),
-                    _ => (0, 0, 0),
-                };
-                AttackSummary {
-                    total: s.total + v,
-                    errors: s.errors + errors,
-                    blocked: s.blocked + blocked,
-                    kills: s.kills + kills,
-                }
-            });
+        Self::summarize(
+            self.attacks(filter)
+                .filter(|(k, _)| k.is_counter_attack() == counter_attack),
+        )
+    }
+
+    /// The attacks built by us from this zone: all of them, or only the
+    /// ones on our reception (`counter_attack` false) or in counter-attack;
+    /// `None` when there are none.
+    pub fn zone_attacks(
+        &self,
+        zone: ZoneEnum,
+        counter_attack: Option<bool>,
+        filter: &StatsFilter,
+    ) -> Option<AttackSummary> {
+        Self::summarize(self.attacks(filter).filter(|(k, _)| {
+            k.zone == zone && counter_attack.is_none_or(|c| k.is_counter_attack() == c)
+        }))
+    }
+
+    fn summarize<'a>(attacks: impl Iterator<Item = (&'a AttackKey, u32)>) -> Option<AttackSummary> {
+        let summary = attacks.fold(AttackSummary::default(), |s, (k, v)| {
+            let (errors, blocked, kills) = match k.eval {
+                EvalEnum::Error => (v, 0, 0),
+                EvalEnum::Over => (0, v, 0),
+                EvalEnum::Perfect => (0, 0, v),
+                _ => (0, 0, 0),
+            };
+            AttackSummary {
+                total: s.total + v,
+                errors: s.errors + errors,
+                blocked: s.blocked + blocked,
+                kills: s.kills + kills,
+            }
+        });
         (summary.total > 0).then_some(summary)
     }
 
