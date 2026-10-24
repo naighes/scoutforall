@@ -58,7 +58,13 @@
     <string name="undo">Undo</string>
     <string name="touch_the_player">Touch the player on court</string>
     <string name="who_comes_in">Who comes in?</string>
-    <string name="other_events">Other</string>
+    <string name="their_point">Their point</string>
+    <string name="their_error">Their error</string>
+    <string name="their_freeball">Their free</string>
+    <string name="fault">Fault</string>
+    <string name="lineup">Lineup</string>
+    <string name="substitution_short">Sub</string>
+    <string name="setter_change_short">Setter</string>
     <string name="set_won">Set %d won</string>
     <string name="set_lost">Set %d lost</string>
     <string name="break_phase">BREAK</string>

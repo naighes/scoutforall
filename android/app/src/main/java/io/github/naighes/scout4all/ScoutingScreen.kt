@@ -1,6 +1,15 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.animation.Animatable
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
@@ -15,6 +24,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -35,6 +45,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -288,10 +301,16 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) { Choices(view, model) }
+                LineupChanges(
+                    view.otherEvents.filter { it.value in lineupChanges },
+                    model,
+                    Modifier.align(Alignment.End),
+                )
                 // always in the same place, where the thumb is
                 OutlinedButton(
                     onClick = model::undo,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)
+                        .heightIn(min = 56.dp),
                 ) { Text(stringResource(R.string.undo)) }
             }
         }
@@ -426,11 +445,11 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
         ScoutingStep.EVENT -> when (player) {
             null -> {
                 Hint(stringResource(R.string.touch_the_player))
-                OtherEvents(view.otherEvents, model)
+                RallyEvents(view.otherEvents, model)
             }
             else -> {
                 Title(player)
-                Buttons(view.playerEvents.map { it.name to { model.event(it) } }, primary = true)
+                Buttons(view.playerEvents.map { it.name to { model.event(it) } })
             }
         }
         ScoutingStep.EVAL -> {
@@ -441,7 +460,7 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
             if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
             Evals(view.evals, model)
             // the serve waits for its evaluation, or gives way
-            OtherEvents(view.otherEvents, model)
+            RallyEvents(view.otherEvents, model)
         }
         ScoutingStep.PLAYER -> {
             Title(state.event?.name.orEmpty())
@@ -476,15 +495,108 @@ private fun Title(text: String) = Text(text, style = MaterialTheme.typography.ti
 @Composable
 private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+/** The changes of the lineup, rare and at stopped play, each with its icon
+ * and a short name. */
+private val lineupChanges = mapOf(
+    EventTypeEnum.R to (R.drawable.ic_substitution to R.string.substitution_short),
+    EventTypeEnum.CL to (R.drawable.ic_libero to R.string.libero),
+    EventTypeEnum.CS to (R.drawable.ic_setter to R.string.setter_change_short),
+)
+
+/** The events of the rally the player isn't chosen first for, each with
+ * its icon and a short name. */
+private val rallyEvents = mapOf(
+    EventTypeEnum.OS to (R.drawable.ic_their_point to R.string.their_point),
+    EventTypeEnum.OE to (R.drawable.ic_their_error to R.string.their_error),
+    EventTypeEnum.OF to (R.drawable.ic_their_freeball to R.string.their_freeball),
+    EventTypeEnum.F to (R.drawable.ic_fault to R.string.fault),
+)
+
+/** The changes of the lineup: a half moon on the right edge, in the color
+ * of the actions, opens them from right to left. Dimmed when there are none
+ * to make now. */
 @Composable
-private fun OtherEvents(events: List<EventChoice>, model: ScoutingViewModel) {
-    if (events.isEmpty()) return
-    Text(
-        stringResource(R.string.other_events),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Buttons(events.map { it.name to { model.event(it) } }, primary = false)
+private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, modifier: Modifier) {
+    var open by remember { mutableStateOf(false) }
+    val expanded = open && events.isNotEmpty()
+    Surface(
+        modifier = modifier.alpha(if (events.isEmpty()) 0.38f else 1f),
+        shape = RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50),
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+    ) {
+        Row(Modifier.height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            AnimatedVisibility(
+                expanded,
+                enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
+                exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
+            ) {
+                Row(Modifier.padding(start = 12.dp)) {
+                    events.forEach { event ->
+                        val looks = lineupChanges[event.value]
+                        Column(
+                            Modifier
+                                .clickable {
+                                    open = false
+                                    model.event(event)
+                                }
+                                .semantics(mergeDescendants = true) { contentDescription = event.name }
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            looks?.let { (icon, _) -> Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) }
+                            Text(
+                                looks?.let { (_, name) -> stringResource(name) } ?: event.name,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+            Box(
+                Modifier.fillMaxHeight().clickable(enabled = events.isNotEmpty()) { open = !open }
+                    .padding(start = 14.dp, end = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Crossfade(expanded, label = "lineup") { shown ->
+                    Icon(
+                        if (shown) rememberVectorPainter(Icons.Default.Close) else painterResource(R.drawable.ic_lineup),
+                        contentDescription = stringResource(R.string.lineup),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The other events of the rally in a row, never to scroll for: an icon
+ * and a short name, the whole name for TalkBack. */
+@Composable
+private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel) = Row(
+    Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+) {
+    events.filter { it.value !in lineupChanges }.forEach { event ->
+        val looks = rallyEvents[event.value]
+        FilledTonalButton(
+            onClick = { model.event(event) },
+            modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 56.dp)
+                .semantics { contentDescription = event.name },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                looks?.let { (icon, _) -> Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) }
+                Text(
+                    looks?.let { (_, name) -> stringResource(name) } ?: event.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                )
+            }
+        }
+    }
 }
 
 /** The evaluations in a row, by their symbol: the scouts know them. */
@@ -515,21 +627,16 @@ private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewMod
     }
 }
 
-/** Buttons two by two: the events of the player stand out, the others
- * don't. */
+/** The events of the player, two by two. */
 @Composable
-private fun Buttons(buttons: List<Pair<String, () -> Unit>>, primary: Boolean) = Column(
+private fun Buttons(buttons: List<Pair<String, () -> Unit>>) = Column(
     verticalArrangement = Arrangement.spacedBy(8.dp),
 ) {
     buttons.chunked(2).forEach { row ->
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             row.forEach { (name, onClick) ->
-                val m = Modifier.weight(1f).heightIn(min = if (primary) 64.dp else 48.dp)
-                when (primary) {
-                    true -> Button(onClick = onClick, modifier = m) { Text(name, textAlign = TextAlign.Center) }
-                    false -> FilledTonalButton(onClick = onClick, modifier = m) {
-                        Text(name, textAlign = TextAlign.Center)
-                    }
+                Button(onClick = onClick, modifier = Modifier.weight(1f).heightIn(min = 64.dp)) {
+                    Text(name, textAlign = TextAlign.Center)
                 }
             }
             if (row.size == 1) Column(Modifier.weight(1f)) {}
