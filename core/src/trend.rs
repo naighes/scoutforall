@@ -185,6 +185,28 @@ impl Replay {
         }
     }
 
+    /// How far the set had gone after every rally, to draw the sets side
+    /// by side: the points of the team ahead, the rallies ending at the
+    /// same points (the team behind scoring) spread evenly up to them. From
+    /// 0 to 25 in a set without deuce, e.g. 1 after the first rally, 1.5
+    /// and 2 after 1-1 and 2-1.
+    pub fn progress(&self) -> Vec<f64> {
+        let leading: Vec<(u8, u8)> = self
+            .rallies
+            .iter()
+            .map(|end| (end.set_number, end.score_us.max(end.score_them)))
+            .collect();
+        leading
+            .iter()
+            .enumerate()
+            .map(|(i, at)| {
+                let same = leading.iter().filter(|l| *l == at).count();
+                let nth = leading.iter().take(i + 1).filter(|l| *l == at).count();
+                f64::from(at.1) - 1.0 + nth as f64 / same as f64
+            })
+            .collect()
+    }
+
     fn points<T>(&self, value: impl Fn(&RallyEnd) -> Option<T>) -> Vec<TrendPoint<T>> {
         self.rallies
             .iter()

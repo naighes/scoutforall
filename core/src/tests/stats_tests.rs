@@ -1469,6 +1469,39 @@ mod tests {
         assert_eq!(third.first(), Some(&Some(40.0)));
     }
 
+    /// How far the set had gone after each rally: the points of the team
+    /// ahead, the rallies at the same points spread up to them.
+    #[test]
+    fn the_progress_of_the_set() {
+        let t = Team::new();
+        let set = side_out_entry(&t, 1);
+        let replay =
+            Replay::new(&[&set], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
+        // 1-0 1-1 1-2 1-3 1-4 1-5 2-5 3-5 3-6: the team ahead at 1 twice,
+        // then 2 3 4 5 (three times: 1-5, 2-5, 3-5) 6
+        assert_eq!(
+            replay.progress(),
+            vec![
+                0.5,
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0 - 2.0 / 3.0,
+                5.0 - 1.0 / 3.0,
+                5.0,
+                6.0
+            ]
+        );
+        // each set from 0 again
+        let second = side_out_entry(&t, 2);
+        let both = Replay::new(&[&set, &second], DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the sets to replay");
+        let progress = both.progress();
+        assert_eq!(progress.len(), 18);
+        assert_eq!(&progress[..9], &progress[9..]);
+    }
+
     // --- the side out on first rally --------------------------------------
 
     /// How each first rally of a side out ends, and how it counts.
