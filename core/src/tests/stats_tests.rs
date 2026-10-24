@@ -5,7 +5,7 @@
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
-    use crate::overview::{Errors, Fundamental, Overview, distribution};
+    use crate::overview::{Errors, Fundamental, Overview, distribution, stats_of as sets_stats};
     use crate::shapes::{
         enums::{
             ErrorTypeEnum, EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum,
@@ -1500,6 +1500,29 @@ mod tests {
         let progress = both.progress();
         assert_eq!(progress.len(), 18);
         assert_eq!(&progress[..9], &progress[9..]);
+    }
+
+    /// The sets together count each event of each set once: two sets,
+    /// twice the figures of one.
+    #[test]
+    fn the_stats_of_sets_together() {
+        let t = Team::new();
+        let (first, second) = (side_out_entry(&t, 1), side_out_entry(&t, 2));
+        let one =
+            sets_stats(&[&first], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
+        let both = sets_stats(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the sets to replay");
+        let (o1, o2) = (Overview::of(&one), Overview::of(&both));
+        assert_eq!(o1.reception.total * 2, o2.reception.total);
+        assert_eq!(o1.attack.perfect * 2, o2.attack.perfect);
+        assert_eq!(o1.reception.efficiency, o2.reception.efficiency);
+        assert_eq!(
+            o1.side_out.map(|(_, won, rallies)| (won * 2, rallies * 2)),
+            o2.side_out.map(|(_, won, rallies)| (won, rallies))
+        );
+        // no sets, no figures
+        let none = sets_stats(&[], DEFAULT_MAX_SUBSTITUTIONS).expect("expected nothing to replay");
+        assert_eq!(Overview::of(&none).reception.total, 0);
     }
 
     // --- the side out on first rally --------------------------------------
