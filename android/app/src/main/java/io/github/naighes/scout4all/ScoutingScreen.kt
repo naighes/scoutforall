@@ -254,6 +254,8 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
         val court = @Composable { m: Modifier ->
             Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Score(view.state)
+                // where they stand: spread to receive, then where they
+                // play once our serve is made or theirs received
                 val players = view.state.court
                 // the serve waits for its evaluation: the server is in the
                 // serve zone
@@ -269,6 +271,9 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                             highlighted = player != null && player.id == view.state.player?.id,
                             enabled = player?.selectable == true || (serving && position == 1),
                             serving = serving && position == 1,
+                            x = player?.x,
+                            y = player?.y,
+                            key = player?.id,
                         )
                     },
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },
@@ -303,8 +308,8 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
     }
 
 /** The teams and the points of the set, the home team on the left; the
- * ball by the team serving, and the phase: break when we serve, side-out
- * when they do. A point stands out: the score turns, in green for ours, in
+ * ball by the team serving, the phase (break when we serve, side-out when
+ * they do) and the rotation. A point stands out: the score turns, in green for ours, in
  * red for theirs, and the phone vibrates. */
 @Composable
 private fun Score(state: ScoutingState) {
@@ -331,9 +336,9 @@ private fun Score(state: ScoutingState) {
             Points(right)
             TeamName(right, TextAlign.End, Modifier.weight(1f))
         }
-        Crossfade(weServe, label = "phase") { serving ->
+        Crossfade(weServe to state.rotation, label = "phase") { (serving, rotation) ->
             Text(
-                stringResource(if (serving) R.string.break_phase else R.string.side_out_phase),
+                stringResource(if (serving) R.string.break_phase else R.string.side_out_phase) + " · " + rotation,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 2.sp,
