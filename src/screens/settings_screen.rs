@@ -30,9 +30,12 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::{Block, Row, Table, TableState},
 };
-use scout4all_core::shapes::{
-    enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum},
-    technique::{ServeTypeEnum, SetTypeEnum},
+use scout4all_core::{
+    settings::Consent,
+    shapes::{
+        enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum},
+        technique::{ServeTypeEnum, SetTypeEnum},
+    },
 };
 
 /// below this width the two panels are stacked instead of side by side
@@ -330,7 +333,10 @@ where
                 }
             }
             GeneralField::Analytics => Settings {
-                analytics_enabled: !self.settings.analytics_enabled,
+                consent: Consent {
+                    analytics_enabled: !self.settings.consent.analytics_enabled,
+                    ..self.settings.consent
+                },
                 ..self.settings.clone()
             },
         };
@@ -397,7 +403,7 @@ where
                 ),
                 GeneralField::Analytics => format!(
                     "{} {}",
-                    if self.settings.analytics_enabled {
+                    if self.settings.consent.analytics_enabled {
                         "[X]"
                     } else {
                         "[ ]"

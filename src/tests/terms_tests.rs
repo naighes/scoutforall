@@ -7,11 +7,14 @@
 mod tests {
     use crate::localization::current_labels;
     use crate::{
-        shapes::settings::{Settings, TERMS_VERSION},
+        shapes::settings::Settings,
         tests::ui::{TeamFixture, Ui},
     };
     use crokey::crossterm::event::KeyCode;
-    use scout4all_core::shapes::enums::LanguageEnum;
+    use scout4all_core::{
+        settings::{Consent, TERMS_VERSION},
+        shapes::enums::LanguageEnum,
+    };
 
     const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",
@@ -21,7 +24,7 @@ mod tests {
 
     fn shows_terms(ui: &mut Ui) -> bool {
         ui.screen()
-            .contains(&format!("┌{}", current_labels().terms_of_use))
+            .contains(&format!("┌{}", current_labels().domain.terms_of_use))
     }
 
     fn shows_teams(ui: &mut Ui) -> bool {
@@ -43,8 +46,8 @@ mod tests {
         ui.press(KeyCode::Enter).await;
         assert!(shows_teams(&mut ui), "{}", ui.screen());
         let saved = ui.saved_settings().await.unwrap();
-        assert_eq!(saved.terms_version, TERMS_VERSION);
-        assert!(saved.analytics_enabled);
+        assert_eq!(saved.consent.terms_version, TERMS_VERSION);
+        assert!(saved.consent.analytics_enabled);
         assert!(saved.uploads_enabled());
     }
 
@@ -56,8 +59,8 @@ mod tests {
         assert!(ui.screen().contains(&unchecked), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
         let saved = ui.saved_settings().await.unwrap();
-        assert_eq!(saved.terms_version, TERMS_VERSION);
-        assert!(!saved.analytics_enabled);
+        assert_eq!(saved.consent.terms_version, TERMS_VERSION);
+        assert!(!saved.consent.analytics_enabled);
         assert!(!saved.uploads_enabled());
     }
 
@@ -83,7 +86,10 @@ mod tests {
     #[tokio::test]
     async fn the_users_of_older_versions_see_the_terms_with_their_choice() {
         let settings = Settings {
-            analytics_enabled: false,
+            consent: Consent {
+                analytics_enabled: false,
+                ..Consent::default()
+            },
             ..Settings::default()
         };
         let mut ui = Ui::start_as(TEAM, settings).await;
@@ -95,7 +101,7 @@ mod tests {
     #[tokio::test]
     async fn the_terms_seen_are_not_shown_again() {
         let settings = Settings {
-            terms_version: TERMS_VERSION,
+            consent: Consent::default().with_terms_seen(),
             ..Settings::default()
         };
         let mut ui = Ui::start_as(TEAM, settings).await;
@@ -106,7 +112,7 @@ mod tests {
     #[test]
     fn no_statistics_are_sent_before_the_terms_are_seen() {
         let unseen = Settings::default();
-        assert!(unseen.analytics_enabled);
+        assert!(unseen.consent.analytics_enabled);
         assert!(!unseen.uploads_enabled());
     }
 

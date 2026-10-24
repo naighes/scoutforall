@@ -11,7 +11,7 @@ use crate::{
             CONFIG, settings_reader::StoreSettingsReader, settings_writer::StoreSettingsWriter,
         },
     },
-    shapes::settings::{Settings, TERMS_VERSION},
+    shapes::settings::Settings,
     tests::fs_store,
 };
 use chrono::{Duration, TimeZone, Utc};
@@ -30,6 +30,7 @@ use scout4all_core::{
         team_reader::TeamReader,
         team_writer::{PlayerInput, TeamInput, TeamWriter},
     },
+    settings::Consent,
     shapes::enums::{RoleEnum, TeamSideEnum},
 };
 use std::{
@@ -100,7 +101,7 @@ impl Ui {
     ) -> Self {
         let settings = |browse| Settings {
             last_used_dir: Some(browse),
-            terms_version: TERMS_VERSION,
+            consent: Consent::default().with_terms_seen(),
             ..Settings::default()
         };
         Self::start_with_settings(teams, browse_dirs, start_sets, edit, settings).await

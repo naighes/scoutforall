@@ -164,6 +164,13 @@ pub struct Labels {
     pub setter_is_required: &'static str,
     pub libero_is_required: &'static str,
     pub could_not_start_set: &'static str,
+    pub terms_of_use: &'static str,
+    /// the terms of use, a paragraph each: the program is free, its license,
+    /// the data (no upload: each app with uploads tells its own), the full texts
+    pub terms_free: &'static str,
+    pub terms_license: &'static str,
+    pub terms_no_upload: &'static str,
+    pub terms_full: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -320,6 +327,11 @@ const EN: Labels = Labels {
     setter_is_required: "setter is required",
     libero_is_required: "libero is required",
     could_not_start_set: "could not start the set",
+    terms_of_use: "terms of use",
+    terms_free: "Scout4all is free software, free of charge: you don't have to pay to use it.",
+    terms_license: "License. Scout4all is released under the GNU Affero General Public License v3.0 (AGPL-3.0-only). You can use, copy, modify and distribute it, even for a fee, as long as you keep the copyright notice and release your changes under the same license, with their source code: also when you offer them as an online service. The program comes with NO WARRANTY.",
+    terms_no_upload: "Data. The matches you scout stay on this device: the app doesn't send them anywhere. If a future version sends statistics, it will tell you first, and you will be able to turn it off.",
+    terms_full: "Full texts: the LICENSE and DATA-PRIVACY files, on https://github.com/naighes/scoutforall. Contact: nic.baldi@gmail.com",
 };
 
 const IT: Labels = Labels {
@@ -476,6 +488,11 @@ const IT: Labels = Labels {
     setter_is_required: "il palleggiatore è obbligatorio",
     libero_is_required: "il libero è obbligatorio",
     could_not_start_set: "impossibile iniziare il set",
+    terms_of_use: "termini di utilizzo",
+    terms_free: "Scout4all è software libero e gratuito: non devi pagare per usarlo.",
+    terms_license: "Licenza. Scout4all è distribuito con la licenza GNU Affero General Public License v3.0 (AGPL-3.0-only). Puoi usarlo, copiarlo, modificarlo e distribuirlo, anche a pagamento, purché mantenga la nota di copyright e distribuisca le tue modifiche con la stessa licenza, insieme al loro codice sorgente: anche quando le offri come servizio online. Il programma è fornito SENZA ALCUNA GARANZIA.",
+    terms_no_upload: "Dati. Le partite che registri restano su questo dispositivo: l'app non le invia da nessuna parte. Se una versione futura invierà statistiche, te lo dirà prima e potrai disattivarlo.",
+    terms_full: "Testi completi: i file LICENSE e DATA-PRIVACY, su https://github.com/naighes/scoutforall. Contatto: nic.baldi@gmail.com",
 };
 
 const PT: Labels = Labels {
@@ -632,6 +649,11 @@ const PT: Labels = Labels {
     setter_is_required: "o levantador é obrigatório",
     libero_is_required: "o líbero é obrigatório",
     could_not_start_set: "não foi possível iniciar o set",
+    terms_of_use: "termos de uso",
+    terms_free: "Scout4all é software livre e gratuito: você não precisa pagar para usá-lo.",
+    terms_license: "Licença. Scout4all é distribuído sob a GNU Affero General Public License v3.0 (AGPL-3.0-only). Você pode usá-lo, copiá-lo, modificá-lo e distribuí-lo, inclusive mediante pagamento, desde que mantenha o aviso de copyright e distribua suas modificações sob a mesma licença, junto com o código-fonte: também quando as oferecer como serviço online. O programa é fornecido SEM NENHUMA GARANTIA.",
+    terms_no_upload: "Dados. As partidas que você registra ficam neste dispositivo: o app não as envia para lugar nenhum. Se uma versão futura enviar estatísticas, ela avisará você antes e você poderá desativar o envio.",
+    terms_full: "Textos completos: os arquivos LICENSE e DATA-PRIVACY, em https://github.com/naighes/scoutforall. Contato: nic.baldi@gmail.com",
 };
 
 const PL: Labels = Labels {
@@ -788,6 +810,11 @@ const PL: Labels = Labels {
     setter_is_required: "rozgrywający jest wymagany",
     libero_is_required: "libero jest wymagany",
     could_not_start_set: "nie można rozpocząć seta",
+    terms_of_use: "warunki korzystania",
+    terms_free: "Scout4all to wolne i darmowe oprogramowanie: nie musisz płacić, aby z niego korzystać.",
+    terms_license: "Licencja. Scout4all jest udostępniany na licencji GNU Affero General Public License v3.0 (AGPL-3.0-only). Możesz go używać, kopiować, modyfikować i rozpowszechniać, także odpłatnie, pod warunkiem zachowania informacji o prawach autorskich i udostępnienia swoich zmian na tej samej licencji, wraz z ich kodem źródłowym: również wtedy, gdy oferujesz je jako usługę online. Program jest dostarczany BEZ ŻADNEJ GWARANCJI.",
+    terms_no_upload: "Dane. Rejestrowane przez Ciebie mecze pozostają na tym urządzeniu: aplikacja nigdzie ich nie wysyła. Jeśli przyszła wersja będzie wysyłać statystyki, najpierw o tym poinformuje i będzie można to wyłączyć.",
+    terms_full: "Pełne teksty: pliki LICENSE i DATA-PRIVACY na https://github.com/naighes/scoutforall. Kontakt: nic.baldi@gmail.com",
 };
 
 const JA: Labels = Labels {
@@ -944,9 +971,22 @@ const JA: Labels = Labels {
     setter_is_required: "セッターは必須です",
     libero_is_required: "リベロは必須です",
     could_not_start_set: "セットを開始できません",
+    terms_of_use: "利用規約",
+    terms_free: "Scout4all は無料の自由ソフトウェアです。利用に料金はかかりません。",
+    terms_license: "ライセンス。Scout4all は GNU Affero General Public License v3.0（AGPL-3.0-only）で公開されています。著作権表示を残し、変更を同じライセンスでソースコードとともに公開する限り、有料であっても使用、複製、改変、配布ができます。変更をオンラインサービスとして提供する場合も同様です。本プログラムは一切の保証なしに提供されます。",
+    terms_no_upload: "データ。記録した試合はこの端末に保存され、アプリがどこかへ送信することはありません。将来のバージョンで統計を送信する場合は、事前にお知らせし、無効にできるようにします。",
+    terms_full: "全文：https://github.com/naighes/scoutforall の LICENSE と DATA-PRIVACY ファイル。連絡先：nic.baldi@gmail.com",
 };
 
 /// Returns the labels of a language.
+impl Labels {
+    /// The terms of use, a paragraph each, with the one on the data given by
+    /// the app (`terms_no_upload` if it sends nothing).
+    pub const fn terms(&self, data: &'static str) -> [&'static str; 4] {
+        [self.terms_free, self.terms_license, data, self.terms_full]
+    }
+}
+
 pub const fn labels(language: LanguageEnum) -> &'static Labels {
     match language {
         LanguageEnum::En => &EN,

@@ -10,7 +10,7 @@ use crate::{
     shapes::{
         actions::ScreenActionEnum,
         keybinding::{ActionsKeyBindings, navigation_keybindings},
-        settings::{Settings, TERMS_VERSION, set_settings},
+        settings::{Settings, set_settings},
         symbol::KeyCombinationFormatExt,
     },
 };
@@ -155,7 +155,7 @@ where
     }
 
     fn toggle_analytics(&mut self) {
-        self.settings.analytics_enabled = !self.settings.analytics_enabled;
+        self.settings.consent.analytics_enabled = !self.settings.consent.analytics_enabled;
     }
 
     /// Saves the choices with the terms seen, then shows the teams: if the
@@ -163,7 +163,7 @@ where
     /// are shown again at the next startup.
     async fn proceed(&mut self) -> AppAction {
         let settings = Settings {
-            terms_version: TERMS_VERSION,
+            consent: self.settings.consent.with_terms_seen(),
             ..self.settings.clone()
         };
         match self.settings_writer.save(settings.clone()).await {
@@ -180,14 +180,15 @@ where
     /// right when they don't fit.
     fn render_terms(&mut self, f: &mut Frame, area: Rect) {
         let labels = current_labels();
-        let block = panel::screen(labels.terms_of_use);
+        let block = panel::screen(labels.domain.terms_of_use);
         let inner = block.inner(area);
         f.render_widget(block, area);
         let text = Rect {
             width: inner.width.saturating_sub(1),
             ..inner
         };
-        let paragraph = Paragraph::new(labels.terms_text).wrap(Wrap { trim: true });
+        let paragraph = Paragraph::new(labels.domain.terms(labels.terms_data).join("\n\n"))
+            .wrap(Wrap { trim: true });
         let lines = u16::try_from(paragraph.line_count(text.width)).unwrap_or(u16::MAX);
         let max_scroll = lines.saturating_sub(text.height);
         self.scroll = self.scroll.min(max_scroll);
@@ -205,7 +206,7 @@ where
 
     fn render_choices(&self, f: &mut Frame, area: Rect) {
         let labels = current_labels();
-        let checkbox = match self.settings.analytics_enabled {
+        let checkbox = match self.settings.consent.analytics_enabled {
             true => "[X]",
             false => "[ ]",
         };
