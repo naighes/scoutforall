@@ -51,7 +51,8 @@ fun MatchScreen(
     onEdit: () -> Unit,
     onStartSet: () -> Unit,
     onResumeSet: () -> Unit,
-    onStats: (set: Int?) -> Unit,
+    onSet: (set: Int) -> Unit,
+    onStats: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<MatchState>(MatchState.Loading, teamId, matchId) {
@@ -80,7 +81,7 @@ fun MatchScreen(
         when (val s = state) {
             MatchState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is MatchState.Failed -> Centered(modifier) { Text(s.message) }
-            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, onStats, modifier)
+            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, onSet, onStats, modifier)
         }
     }
 }
@@ -90,7 +91,8 @@ private fun MatchContent(
     m: MatchDetails,
     onStartSet: () -> Unit,
     onResumeSet: () -> Unit,
-    onStats: (set: Int?) -> Unit,
+    onSet: (set: Int) -> Unit,
+    onStats: () -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
     val place = stringResource(if (m.home) R.string.home else R.string.away)
@@ -112,14 +114,14 @@ private fun MatchContent(
         m.sets.isEmpty() -> Centered(sets) { Text(stringResource(R.string.no_sets)) }
         else -> LazyColumn(sets) {
             items(m.sets, key = { it.number.toInt() }) {
-                SetRow(it, it.number == inProgress) { onStats(it.number.toInt()) }
+                SetRow(it, it.number == inProgress) { onSet(it.number.toInt()) }
             }
-            // the statistics of a set touching it, of the match here
+            // its events and statistics touching a set, the ones of the match here
             item(key = "stats") {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.match_stats)) },
                     trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
-                    modifier = Modifier.clickable { onStats(null) },
+                    modifier = Modifier.clickable(onClick = onStats),
                 )
             }
         }

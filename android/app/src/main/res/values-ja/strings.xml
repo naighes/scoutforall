@@ -129,4 +129,7 @@
     <string name="no_events">まだプレーなし</string>
     <string name="players_title">選手</string>
     <string name="kill_rate">決定 %1$s</string>
+    <string name="event_n">イベント %d</string>
+    <string name="serve_type">サーブ</string>
+    <string name="set_type">トス</string>
 </resources>

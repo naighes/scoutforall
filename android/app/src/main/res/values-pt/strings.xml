@@ -130,4 +130,7 @@
     <string name="no_events">Nenhum toque ainda</string>
     <string name="players_title">Jogadores</string>
     <string name="kill_rate">ponto %1$s</string>
+    <string name="event_n">Evento %d</string>
+    <string name="serve_type">Saque</string>
+    <string name="set_type">Levantamento</string>
 </resources>

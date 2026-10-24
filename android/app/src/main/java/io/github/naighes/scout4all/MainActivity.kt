@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** The screens: teams → team → its form, a player or a match → its form,
- * the start of a set, its scouting or the statistics, and the forms of a new team, player or match (which
+ * the start of a set, its scouting, its events or the statistics, and the forms of a new team, player or match (which
  * goes on with its first set). */
 @Composable
 private fun Navigation(teams: TeamsViewModel) {
@@ -126,7 +126,20 @@ private fun Navigation(teams: TeamsViewModel) {
                 onEdit = { nav.navigate("$match/edit") },
                 onStartSet = { nav.navigate("$match/start-set") },
                 onResumeSet = { nav.navigate("$match/scouting") },
-                onStats = { set -> nav.navigate("$match/stats?set=${set ?: 0}") },
+                onSet = { set -> nav.navigate("$match/set/$set") },
+                onStats = { nav.navigate("$match/stats?set=0") },
+            )
+        }
+        composable("team/{id}/match/{match}/set/{set}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val m = entry.arguments?.getString("match").orEmpty()
+            val set = entry.arguments?.getString("set")?.toIntOrNull() ?: 1
+            SetScreen(
+                id,
+                m,
+                set,
+                onBack = { nav.popBackStack() },
+                onStats = { nav.navigate("team/$id/match/${Uri.encode(m)}/stats?set=$set") },
             )
         }
         composable("team/{id}/match/{match}/stats?set={set}") { entry ->

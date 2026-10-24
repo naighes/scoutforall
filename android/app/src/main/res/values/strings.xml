@@ -131,4 +131,7 @@
     <string name="no_events">No touches yet</string>
     <string name="players_title">Players</string>
     <string name="kill_rate">kill %1$s</string>
+    <string name="event_n">Event %d</string>
+    <string name="serve_type">Serve</string>
+    <string name="set_type">Set</string>
 </resources>

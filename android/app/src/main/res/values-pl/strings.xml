@@ -132,4 +132,7 @@
     <string name="no_events">Brak akcji</string>
     <string name="players_title">Zawodnicy</string>
     <string name="kill_rate">punkt %1$s</string>
+    <string name="event_n">Zdarzenie %d</string>
+    <string name="serve_type">Zagrywka</string>
+    <string name="set_type">Wystawa</string>
 </resources>
