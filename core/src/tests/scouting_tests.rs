@@ -22,6 +22,7 @@ mod tests {
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
             player::PlayerEntry,
             snapshot::EventEntry,
+            stats::{Metric, StatsFilter},
             technique::{ServeTypeEnum, TechniqueEnum},
         },
         storage::{Store, memory::MemoryStore},
@@ -466,5 +467,54 @@ mod tests {
         // another event drops the player
         assert_eq!(s.session.choose_event(OE).await, Ok(Progress::Saved));
         assert_eq!(event_types(&saved_events(&s).await), vec![S, D, OE]);
+    }
+
+    /// The statistics of the match count the sets before and this one so
+    /// far.
+    #[tokio::test]
+    async fn the_statistics_of_the_match_count_every_set() {
+        let mut s = player_first().await;
+        let server = s.players[0];
+        // an ace in set 1
+        assert_eq!(
+            s.session.choose_eval(EvalEnum::Perfect).await,
+            Ok(Progress::Saved)
+        );
+        let mut m = s.session.current_match().clone();
+        m.sets.push(s.session.set().clone());
+        // set 2, we serve again: a serve error
+        let set_writer = Arc::new(StoreSetWriter::new(
+            Arc::clone(&s.store),
+            Language::default(),
+        ));
+        let set = set_writer
+            .create(
+                &m,
+                2,
+                TeamSideEnum::Us,
+                s.players[..6].try_into().unwrap(),
+                s.players[6],
+                None,
+                server,
+                vec![],
+            )
+            .await
+            .unwrap();
+        let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
+        let mut session =
+            ScoutingSession::new(m, set, snapshot, set_writer).with_order(ChoiceOrder::PlayerFirst);
+        let efficiency = |session: &ScoutingSession| {
+            session.match_stats().metric_percentage(
+                S,
+                Metric::Efficiency,
+                &StatsFilter::new(None, None, Some(server)),
+            )
+        };
+        assert_eq!(efficiency(&session), Some(100.0));
+        assert_eq!(
+            session.choose_eval(EvalEnum::Error).await,
+            Ok(Progress::Saved)
+        );
+        assert_eq!(efficiency(&session), Some(0.0));
     }
 }
