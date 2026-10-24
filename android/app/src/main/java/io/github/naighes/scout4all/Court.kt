@@ -4,7 +4,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -20,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -27,6 +32,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,11 +52,22 @@ data class CourtSlot(
     val enabled: Boolean = true,
     /** the server, about to serve: in the serve zone, with the ball */
     val serving: Boolean = false,
+    /** where the player stands, in meters from the left sideline and from
+     * the net; without, in the middle of the zone of the position */
+    val x: Float? = null,
+    val y: Float? = null,
+    /** the same player moves from a spot to the next one */
+    val key: Any? = null,
 )
+
+/** The middle of the zone of positions 1 to 6, in meters: the front row in
+ * the 3 meters before the attack line, the back row in the 6 behind it. */
+private val zones = listOf(7.5f to 6f, 7.5f to 1.5f, 4.5f to 1.5f, 1.5f to 1.5f, 1.5f to 6f, 4.5f to 6f)
 
 /** The half court of the team seen from the bench, the net at the top: the
  * attack line at 3 of the 9 meters, the front row 4 3 2 before it, the back
- * row 5 6 1 behind it. `slot` tells what position 1 to 6 shows. Wider than
+ * row 5 6 1 behind it. `slot` tells what position 1 to 6 shows, and where:
+ * a player moving to another spot slides there. Wider than
  * deep, to leave room for the choices below. With `serveZone`, the zone
  * behind the end line, where the server goes to serve. */
 @Composable
@@ -73,17 +91,29 @@ fun Court(
             drawLine(lines, Offset(0f, attack), Offset(size.width, attack), strokeWidth = line)
             drawLine(net, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 4.dp.toPx())
         }
-        Column(Modifier.fillMaxSize()) {
-            listOf(listOf(4, 3, 2) to 1f, listOf(5, 6, 1) to 2f).forEach { (row, depth) ->
-                Row(Modifier.weight(depth).fillMaxWidth()) {
-                    row.forEach { position ->
-                        val m = Modifier.weight(1f).fillMaxSize()
-                        when {
-                            // the server left the zone for the serve
-                            position == 1 && server != null -> Box(m)
-                            else -> Spot(position, slot(position), showPositions, m) { onPosition(position) }
-                        }
-                    }
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            // the player on the spot, the name under the jersey, a third of
+            // the court wide; on a court narrower than a phone's (360dp),
+            // all of it smaller, so that the players don't overlap
+            val scale = (maxWidth / 360.dp).coerceAtMost(1f)
+            val width = maxWidth / 3
+            val token = 44.dp * scale
+            val height = token + 2.dp + 16.dp * scale
+            (1..6).forEach { position ->
+                val s = slot(position)
+                // the server left the court for the serve
+                if (position == 1 && server != null) return@forEach
+                key(s.key ?: position) {
+                    val (zx, zy) = zones[position - 1]
+                    val x by animateDpAsState(
+                        (maxWidth * (s.x ?: zx) / 9f).coerceIn(width / 2, maxWidth - width / 2) - width / 2,
+                        tween(450), label = "x",
+                    )
+                    val y by animateDpAsState(
+                        (maxHeight * (s.y ?: zy) / 9f).coerceIn(token / 2, maxHeight - height + token / 2) - token / 2,
+                        tween(450), label = "y",
+                    )
+                    Spot(position, s, showPositions, scale, Modifier.offset(x, y).size(width, height)) { onPosition(position) }
                 }
             }
         }
@@ -94,16 +124,16 @@ fun Court(
             Box(Modifier.weight(2f))
             when (server) {
                 null -> Box(Modifier.weight(1f))
-                else -> Spot(1, server, showPosition = false, Modifier.weight(1f).fillMaxSize()) { onPosition(1) }
+                else -> Spot(1, server, showPosition = false, scale = 1f, Modifier.weight(1f).fillMaxSize()) { onPosition(1) }
             }
         }
     }
 }
 
-/** The zone of a position, all of it to touch, with its player in the
- * middle. */
+/** The player of a position, all of it to touch: the jersey at the top,
+ * the name under it. */
 @Composable
-private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, modifier: Modifier, onClick: () -> Unit) =
+private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: Float, modifier: Modifier, onClick: () -> Unit) =
     Box(modifier.clickable(enabled = slot.enabled, onClick = onClick)) {
         if (showPosition) {
             Text(
@@ -114,15 +144,16 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, modifier
             )
         }
         Column(
-            Modifier.align(Alignment.Center).alpha(if (slot.enabled) 1f else 0.38f),
+            Modifier.align(Alignment.TopCenter).alpha(if (slot.enabled) 1f else 0.38f),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Token(slot)
+            Token(slot, scale)
+            val label = MaterialTheme.typography.labelSmall
             Text(
                 slot.name.orEmpty(),
                 modifier = Modifier.padding(horizontal = 4.dp),
-                style = MaterialTheme.typography.labelSmall,
+                style = label.copy(fontSize = label.fontSize * scale, lineHeight = label.lineHeight * scale),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
@@ -130,34 +161,46 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, modifier
         }
     }
 
-/** The player as a round jersey with the number; an empty position asks
- * for a player, in the color of the actions. */
+/** The player as a round jersey with the number; the libero in a jersey of
+ * another color, dark with a light border; an empty position asks for a
+ * player, in the color of the actions. */
 @Composable
-private fun Token(slot: CourtSlot) = Box {
+private fun Token(slot: CourtSlot, scale: Float) = Box {
     val empty = slot.number == null
+    val libero = slot.libero && !empty
+    val jersey = when {
+        empty -> MaterialTheme.colorScheme.surface
+        libero -> MaterialTheme.colorScheme.background
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val number = when {
+        empty -> MaterialTheme.colorScheme.primary
+        libero -> MaterialTheme.colorScheme.onSurface
+        else -> MaterialTheme.colorScheme.surface
+    }
+    val liberoName = stringResource(R.string.libero)
     Surface(
-        modifier = Modifier.size(44.dp),
+        modifier = Modifier.size(44.dp * scale).semantics { if (libero) stateDescription = liberoName },
         shape = CircleShape,
-        color = if (empty) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
+        color = jersey,
         border = when {
             slot.highlighted -> BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
             empty -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+            libero -> BorderStroke(2.dp, MaterialTheme.colorScheme.onSurface)
             else -> null
         },
     ) {
         Box(contentAlignment = Alignment.Center) {
+            val title = MaterialTheme.typography.titleLarge
             Text(
                 slot.number?.toString() ?: "+",
-                style = MaterialTheme.typography.titleLarge,
+                style = title.copy(fontSize = title.fontSize * scale),
                 fontWeight = FontWeight.Bold,
-                color = if (empty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                color = number,
             )
         }
     }
-    when {
-        slot.setter -> Badge(R.string.setter_short, Modifier.align(Alignment.TopEnd))
-        slot.libero -> Badge(R.string.libero_short, Modifier.align(Alignment.TopEnd))
-    }
+    if (slot.setter) Badge(R.string.setter_short, Modifier.align(Alignment.TopEnd))
     if (slot.serving) {
         Icon(
             painterResource(R.drawable.ic_ball),
@@ -168,7 +211,7 @@ private fun Token(slot: CourtSlot) = Box {
     }
 }
 
-/** The setter or the libero, on the jersey. */
+/** The setter, on the jersey. */
 @Composable
 private fun Badge(text: Int, modifier: Modifier) = Surface(
     modifier = modifier.size(18.dp),
