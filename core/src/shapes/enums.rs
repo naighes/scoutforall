@@ -293,6 +293,30 @@ impl EventTypeEnum {
         }
     }
 
+    /// The side of the net this event leaves the ball on while the rally
+    /// goes on; `None` when it ends the rally (see `rally_winner`) or isn't
+    /// a touch (the changes of the lineup).
+    ///
+    /// - on our side: our reception or dig (`/` aside), our attack coming
+    ///   back (`+` off their block, `!` blocked and covered), our block `+`,
+    ///   their reception coming straight back (serve `/`), their freeball;
+    /// - on their side: our serve, our reception or dig going straight over
+    ///   (`/`), our attack defended (`-`), our block `-` (touched, played by
+    ///   them), our freeball.
+    pub fn ball_side_after(&self, eval: Option<EvalEnum>) -> Option<TeamSideEnum> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        match (self.rally_winner(eval), self, eval) {
+            (Some(_), _, _) | (None, R | CL | CS | F | OS | OE, _) => None,
+            (None, S, Some(Over))
+            | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
+            | (None, A, Some(Positive | Exclamative))
+            | (None, B, Some(Positive))
+            | (None, OF, _) => Some(TeamSideEnum::Us),
+            (None, S | P | D | A | B, _) | (None, FB, _) => Some(TeamSideEnum::Them),
+        }
+    }
+
     pub fn error_type(&self, eval: Option<EvalEnum>) -> Option<ErrorTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;

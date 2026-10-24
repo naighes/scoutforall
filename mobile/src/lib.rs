@@ -650,6 +650,8 @@ pub struct ScoutedEvent {
     pub name: String,
     pub player: Option<ScoutingPlayer>,
     pub eval: Option<String>,
+    /// what the scouts write: #, +, !, /, -, =
+    pub symbol: Option<String>,
     /// e.g. "A" or "F"
     pub technique: Option<String>,
 }
@@ -683,6 +685,10 @@ pub struct ScoutingState {
     pub player: Option<ScoutingPlayer>,
     /// the events of the set, the last first
     pub events: Vec<ScoutedEvent>,
+    /// the side of the net the ball is on
+    pub ball: TeamSideEnum,
+    /// the last touch of the rally being played, none before the serve
+    pub last_touch: Option<ScoutedEvent>,
 }
 
 /// Scouting the set in progress of a match, the player first (see
@@ -769,17 +775,12 @@ impl Scouting {
             events: events
                 .into_iter()
                 .rev()
-                .map(|e| ScoutedEvent {
-                    event: e.event_type,
-                    name: e.event_type.friendly_name(self.labels).to_string(),
-                    player: e
-                        .player
-                        .and_then(|id| team.find_player(id))
-                        .map(|p| self.scouting_player(p)),
-                    eval: e.eval.map(|v| v.friendly_name(e.event_type, self.labels)),
-                    technique: e.technique.map(|t| t.to_string()),
-                })
+                .map(|e| self.scouted_event(team, e))
                 .collect(),
+            ball: snapshot.get_ball_side(),
+            last_touch: snapshot
+                .get_last_touch()
+                .map(|(e, _)| self.scouted_event(team, e)),
         }
     }
 
@@ -940,6 +941,20 @@ impl Scouting {
         EventChoice {
             value: event,
             name: event.friendly_name(self.labels).to_string(),
+        }
+    }
+
+    fn scouted_event(&self, team: &TeamEntry, e: &EventEntry) -> ScoutedEvent {
+        ScoutedEvent {
+            event: e.event_type,
+            name: e.event_type.friendly_name(self.labels).to_string(),
+            player: e
+                .player
+                .and_then(|id| team.find_player(id))
+                .map(|p| self.scouting_player(p)),
+            eval: e.eval.map(|v| v.friendly_name(e.event_type, self.labels)),
+            symbol: e.eval.map(|v| v.to_string()),
+            technique: e.technique.map(|t| t.to_string()),
         }
     }
 
