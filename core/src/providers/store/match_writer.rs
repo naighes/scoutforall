@@ -3,7 +3,6 @@ use crate::{
     providers::{match_writer::MatchWriter, store::write_json},
     shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
     storage::{Store, layout},
-    util::sanitize_filename,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
@@ -27,9 +26,7 @@ impl MatchWriter for StoreMatchWriter {
         home: bool,
         max_substitutions: u8,
     ) -> Result<MatchEntry, AppError> {
-        let opponent_clean = sanitize_filename(&opponent);
-        let date_str = date.format("%Y-%m-%d").to_string();
-        let match_id = format!("{}_{}", date_str, opponent_clean);
+        let match_id = MatchEntry::id_of(&opponent, &date);
         let m = MatchEntry {
             opponent,
             date,

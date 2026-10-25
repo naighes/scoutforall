@@ -39,18 +39,15 @@ impl<TR: TeamReader + Send + Sync, TW: TeamWriter + Send + Sync> FileSystemActio
     }
 
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
-        // selected file name
-        let stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-            AppError::IO(IOError::Msg(current_labels().invalid_file_name.to_string()))
-        })?;
-        // file name must be a valid UUID
-        let team_id = Uuid::parse_str(stem).map_err(|_| {
-            AppError::IO(IOError::Msg(current_labels().invalid_file_name.to_string()))
-        })?;
+        // the archives exported up to v0.9.0 have the id only in their name
+        let file_id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|stem| Uuid::parse_str(stem).ok());
         let archive = fs::read(path).map_err(|e| AppError::IO(IOError::from(e)))?;
         import_team(
             &archive,
-            team_id,
+            file_id,
             &*self.team_reader,
             &*self.team_writer,
             current_labels().domain,

@@ -2,6 +2,7 @@ use crate::{
     constants::LEGACY_MAX_SUBSTITUTIONS,
     errors::AppError,
     shapes::{enums::TeamSideEnum, set::SetEntry, snapshot::Snapshot, team::TeamEntry},
+    util::sanitize_filename,
 };
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,15 @@ fn legacy_max_substitutions() -> u8 {
 }
 
 impl MatchEntry {
+    /// The id of a match against the opponent on the date: one a day.
+    pub fn id_of(opponent: &str, date: &DateTime<FixedOffset>) -> String {
+        format!(
+            "{}_{}",
+            date.format("%Y-%m-%d"),
+            sanitize_filename(opponent)
+        )
+    }
+
     pub fn get_status(&self) -> Result<MatchStatus, AppError> {
         let mut us_wins = 0;
         let mut them_wins = 0;

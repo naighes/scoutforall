@@ -262,7 +262,7 @@ mod tests {
         let target = Providers::new(Arc::new(MemoryStore::new()));
         let imported_team = import_team(
             &team_zip,
-            team.id,
+            None,
             &target.team_reader,
             &target.team_writer,
             EN,
@@ -272,7 +272,6 @@ mod tests {
         assert_eq!(imported_team.players.len(), team.players.len());
         let imported = import_match(
             &match_zip,
-            &m.id,
             &imported_team,
             &target.match_reader,
             &target.match_writer,
@@ -295,7 +294,7 @@ mod tests {
         // not twice
         let again = import_team(
             &team_zip,
-            team.id,
+            None,
             &target.team_reader,
             &target.team_writer,
             EN,
@@ -303,7 +302,6 @@ mod tests {
         assert!(again.await.is_err());
         let again = import_match(
             &match_zip,
-            &m.id,
             &imported_team,
             &target.match_reader,
             &target.match_writer,
