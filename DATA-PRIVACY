@@ -1,11 +1,16 @@
 Scout4all - Data collection and privacy
 
-Last updated: 2026-10-22
+Last updated: 2026-10-25
 
 Data controller: Nicola Baldi, nic.baldi@gmail.com
 
+Scout4all is a program for computers (Windows, macOS, Linux) and an app for
+Android. What each of them collects is described below.
+
 
 1. What is collected
+
+Program for computers
 
 Match data. Unless you turn it off (see 4), when you scout a match the
 program uploads an archive with:
@@ -28,6 +33,25 @@ Issue reports. When you send a report from "report an issue", its title and
 description, and your name and e-mail address if you type them, are sent to
 Linear, the issue tracker of the project.
 
+Android app
+
+Match data. The app sends nothing: teams, players and matches stay on your
+phone, in the storage of the app, and are deleted when you uninstall it. The
+app does not even have the permission to access the Internet.
+
+Backup. If the backup of your phone is turned on, Android copies the data of
+the app to your Google account, as it does for other apps, so that you find
+your matches on a new phone. The copy is made and kept by Google under its
+own terms; the developer has no access to it. You can turn it off in the
+settings of the phone.
+
+Issue reports. "Report a problem" opens an e-mail in your e-mail app,
+addressed to Linear, the issue tracker of the project. Nothing is sent until
+you send the e-mail yourself. Linear receives what an e-mail holds: your
+e-mail address, your name and signature if your e-mail app adds them, what
+you write, and the lines the app adds to help find the problem: the version
+of the app, of Android and the model of the phone.
+
 
 2. Why
 
@@ -47,16 +71,20 @@ Match and technical data: the legitimate interest of the developer in
 improving the program and diagnosing its bugs (Art. 6(1)(f) GDPR), on
 pseudonymous data, with your right to object at any time (see 4).
 
-Issue reports: your request. You send them yourself; name and e-mail are
-optional.
+Issue reports: your request. You send them yourself; in the program for
+computers name and e-mail are optional.
 
 
 4. Your choice
 
-The program shows this notice when it starts for the first time. You can
-turn the upload of match data off there, or at any time in the settings
-(F2, "send match statistics"). Turned off, nothing more is uploaded; to
-delete what was already sent, see 7.
+The program for computers shows this notice when it starts for the first
+time. You can turn the upload of match data off there, or at any time in the
+settings (F2, "send match statistics"). Turned off, nothing more is
+uploaded; to delete what was already sent, see 7.
+
+The Android app uploads no match data, so there is nothing to turn off. If
+a future version uploads statistics, it will tell you first, and you will be
+able to turn it off.
 
 
 5. Where
@@ -64,6 +92,7 @@ delete what was already sent, see 7.
 - Upload server: Render, Frankfurt (EU).
 - Match archives: Supabase Storage, Ireland (EU).
 - Issue reports: Linear (USA), under its data protection terms.
+- Backup of the Android app: your Google account, under the terms of Google.
 
 
 6. How long
@@ -79,7 +108,9 @@ Issue reports are kept as long as needed to handle them.
 You can ask to access, correct or delete your data, or object to its
 processing, by writing to nic.baldi@gmail.com. Since the data holds no
 names, to find it we need the identifier of your team: the name of its
-folder in the ".scout4all" folder of your home directory.
+folder in the ".scout4all" folder of your home directory. For the Android
+app the developer holds only the issue reports you sent: to find them, the
+e-mail address you sent them from is enough.
 
 You can also lodge a complaint with a data protection authority (in Italy,
 the Garante per la protezione dei dati personali).
