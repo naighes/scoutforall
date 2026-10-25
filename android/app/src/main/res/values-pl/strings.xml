@@ -174,4 +174,7 @@
     <string name="start_again">Uruchom ponownie</string>
     <string name="panic_report_title">Nieoczekiwany błąd w aplikacji Android</string>
     <string name="panic_report_body">Co robiłeś(-aś)?\n\nAplikacja napisała: %1$s\n\n---\n%2$s</string>
+    <string name="discard_changes">Odrzucić zmiany?</string>
+    <string name="discard">Odrzuć</string>
+    <string name="keep_editing">Edytuj dalej</string>
 </resources>

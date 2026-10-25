@@ -64,7 +64,11 @@ sealed interface TeamFormState {
         /** an error of the save itself */
         val error: String? = null,
         val saving: Boolean = false,
-    ) : TeamFormState
+        /** the form as it was read: changed, going back asks first */
+        val loaded: TeamForm = form,
+    ) : TeamFormState {
+        val changed: Boolean get() = form != loaded
+    }
     /** saved: the screen goes back */
     data object Saved : TeamFormState
 }
@@ -126,6 +130,7 @@ fun TeamFormScreen(id: String?, onBack: () -> Unit, onSaved: () -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val model = viewModel { TeamFormViewModel(app, id) }
     val state by model.state.collectAsState()
+    val back = rememberFormBack((state as? TeamFormState.Editing)?.changed == true, onBack)
     LaunchedEffect(state) {
         if (state == TeamFormState.Saved) onSaved()
     }
@@ -133,7 +138,7 @@ fun TeamFormScreen(id: String?, onBack: () -> Unit, onSaved: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(if (id == null) R.string.new_team else R.string.edit_team)) },
-                navigationIcon = { BackButton(onBack) },
+                navigationIcon = { BackButton(back) },
             )
         },
     ) { padding ->

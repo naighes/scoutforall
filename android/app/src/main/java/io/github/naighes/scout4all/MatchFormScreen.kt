@@ -75,7 +75,11 @@ sealed interface MatchFormState {
         /** an error of the save */
         val error: String? = null,
         val busy: Boolean = false,
-    ) : MatchFormState
+        /** the form as it was read: changed, going back asks first */
+        val loaded: MatchForm = form,
+    ) : MatchFormState {
+        val changed: Boolean get() = form != loaded
+    }
     /** saved, with the id of the match: the screen goes on */
     data class Saved(val matchId: String) : MatchFormState
 }
@@ -140,6 +144,7 @@ fun MatchFormScreen(teamId: String, matchId: String?, onBack: () -> Unit, onSave
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val model = viewModel { MatchFormViewModel(app, teamId, matchId) }
     val state by model.state.collectAsState()
+    val back = rememberFormBack((state as? MatchFormState.Editing)?.changed == true, onBack)
     LaunchedEffect(state) {
         (state as? MatchFormState.Saved)?.let { onSaved(it.matchId) }
     }
@@ -147,7 +152,7 @@ fun MatchFormScreen(teamId: String, matchId: String?, onBack: () -> Unit, onSave
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(if (matchId == null) R.string.new_match else R.string.edit_match)) },
-                navigationIcon = { BackButton(onBack) },
+                navigationIcon = { BackButton(back) },
             )
         },
     ) { padding ->

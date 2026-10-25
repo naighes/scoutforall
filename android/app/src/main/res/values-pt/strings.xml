@@ -172,4 +172,7 @@
     <string name="start_again">Reiniciar</string>
     <string name="panic_report_title">Erro inesperado no app Android</string>
     <string name="panic_report_body">O que você estava fazendo?\n\nO app disse: %1$s\n\n---\n%2$s</string>
+    <string name="discard_changes">Descartar as alterações?</string>
+    <string name="discard">Descartar</string>
+    <string name="keep_editing">Continuar editando</string>
 </resources>

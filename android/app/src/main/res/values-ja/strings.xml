@@ -171,4 +171,7 @@
     <string name="start_again">再起動</string>
     <string name="panic_report_title">Android アプリの予期しないエラー</string>
     <string name="panic_report_body">何をしていましたか？\n\nアプリのメッセージ: %1$s\n\n---\n%2$s</string>
+    <string name="discard_changes">変更を破棄しますか？</string>
+    <string name="discard">破棄</string>
+    <string name="keep_editing">編集を続ける</string>
 </resources>

@@ -173,4 +173,7 @@
     <string name="start_again">Start again</string>
     <string name="panic_report_title">Unexpected error in the Android app</string>
     <string name="panic_report_body">What were you doing?\n\nThe app said: %1$s\n\n---\n%2$s</string>
+    <string name="discard_changes">Discard the changes?</string>
+    <string name="discard">Discard</string>
+    <string name="keep_editing">Keep editing</string>
 </resources>

@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -26,10 +28,12 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -264,4 +268,29 @@ private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = ListItem(
 @Composable
 fun BackButton(onBack: () -> Unit) = IconButton(onClick = onBack) {
     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+}
+
+/** Back from a form, by the arrow (what it returns) or by the back of the
+ * system: at once when nothing `changed`, else once the user agrees to
+ * lose the changes. */
+@Composable
+fun rememberFormBack(changed: Boolean, onBack: () -> Unit): () -> Unit {
+    var asking by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = changed) { asking = true }
+    if (asking) {
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text(stringResource(R.string.discard_changes)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    asking = false
+                    onBack()
+                }) { Text(stringResource(R.string.discard)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { asking = false }) { Text(stringResource(R.string.keep_editing)) }
+            },
+        )
+    }
+    return { if (changed) asking = true else onBack() }
 }

@@ -172,4 +172,7 @@
     <string name="start_again">Riparti</string>
     <string name="panic_report_title">Errore inatteso nell\'app Android</string>
     <string name="panic_report_body">Cosa stavi facendo?\n\nL\'app ha detto: %1$s\n\n---\n%2$s</string>
+    <string name="discard_changes">Scartare le modifiche?</string>
+    <string name="discard">Scarta</string>
+    <string name="keep_editing">Continua</string>
 </resources>

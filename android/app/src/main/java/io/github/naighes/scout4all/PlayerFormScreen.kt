@@ -64,7 +64,11 @@ sealed interface PlayerFormState {
         val error: String? = null,
         val busy: Boolean = false,
         val confirmingRemoval: Boolean = false,
-    ) : PlayerFormState
+        /** the form as it was read: changed, going back asks first */
+        val loaded: PlayerForm = form,
+    ) : PlayerFormState {
+        val changed: Boolean get() = form != loaded
+    }
     /** saved or removed: the screen goes back */
     data object Done : PlayerFormState
 }
@@ -142,6 +146,7 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val model = viewModel { PlayerFormViewModel(app, teamId, playerId) }
     val state by model.state.collectAsState()
+    val back = rememberFormBack((state as? PlayerFormState.Editing)?.changed == true, onBack)
     LaunchedEffect(state) {
         if (state == PlayerFormState.Done) onDone()
     }
@@ -149,7 +154,7 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(if (playerId == null) R.string.new_player else R.string.edit_player)) },
-                navigationIcon = { BackButton(onBack) },
+                navigationIcon = { BackButton(back) },
                 actions = {
                     if (playerId != null && state is PlayerFormState.Editing) {
                         IconButton(onClick = { model.confirmRemoval(true) }) {
