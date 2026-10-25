@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 9 to 11: the same as data_extraction_rules.xml. -->
+<full-backup-content>
+    <include domain="file" path="scout4all/" />
+    <exclude domain="file" path="scout4all/scout4all.log" />
+</full-backup-content>
