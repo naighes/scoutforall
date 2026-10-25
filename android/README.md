@@ -25,6 +25,16 @@ Open this folder in Android Studio and run the `app` configuration, or:
 The build runs cargo: `cargoNdk` builds the core for Android (`arm64-v8a`)
 and `uniffiBindgen` generates the Kotlin bindings, both under `app/build`.
 
+## Tests
+
+```sh
+./gradlew testDebugUnitTest
+```
+
+The screens run on the JVM with Robolectric, no emulator: they call the real
+core, built for this machine by `uniffiBindgen` and loaded by JNA, with the
+data of each test in an empty folder.
+
 ## Data
 
 The app keeps its data in `files/scout4all` in its sandbox, with the same

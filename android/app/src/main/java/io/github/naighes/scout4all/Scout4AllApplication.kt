@@ -9,7 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Holds the core, one for the whole app. */
-class Scout4AllApplication : Application() {
+open class Scout4AllApplication : Application() {
     // the language chosen for the app, from the activity
     @Volatile private var language: String = Locale.getDefault().language
 
