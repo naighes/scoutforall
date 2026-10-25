@@ -27,6 +27,8 @@ import androidx.compose.ui.res.stringResource
 import io.github.naighes.scout4all.core.version
 
 private const val REPOSITORY = "https://github.com/naighes/scoutforall"
+// the privacy policy, also the one on Google Play: the text of DATA-PRIVACY
+private const val PRIVACY = "https://naighes.github.io/scoutforall/privacy/"
 // the e-mail address that opens an issue on Linear, the tracker of the project
 private const val REPORTS = "scout4all-0fd59357fbe3@intake.linear.app"
 
@@ -94,7 +96,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 context.browse("$REPOSITORY/blob/master/LICENSE")
             }
             Row(stringResource(R.string.data_privacy), null) {
-                context.browse("$REPOSITORY/blob/master/DATA-PRIVACY")
+                context.browse(PRIVACY)
             }
             Row(stringResource(R.string.source_code), REPOSITORY.removePrefix("https://")) {
                 context.browse(REPOSITORY)

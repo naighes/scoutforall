@@ -21,7 +21,8 @@ const release = await latestRelease();
 import FooterMain from "../components/FooterMain.astro"
 import HeaderMain from "../components/HeaderMain.astro"
 
-const { title, description } = Astro.props
+// url: the address of a page other than the home page, in one language only
+const { title, description, url } = Astro.props
 
 ---
 
@@ -43,7 +44,7 @@ const { title, description } = Astro.props
     <meta property="og:title" content={ title ?? global_settings.title } />
     <meta property="og:description" content={ description ?? global_settings.description } />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content={ homeUrl(lang) } />
+    <meta property="og:url" content={ url ?? homeUrl(lang) } />
     <meta property="og:image" content="https://naighes.github.io/scoutforall/1200x630.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -59,21 +60,23 @@ const { title, description } = Astro.props
     <Font cssVariable="--font-inter" preload />
     <Font cssVariable="--font-inter-display" preload />
 
-    {languages.map(l =>
+    {!url && languages.map(l =>
       <link
         rel="alternate"
         hreflang={ l.hreflang }
         href={ homeUrl(l.code) }
       />
     )}
-    <link
-      rel="alternate"
-      hreflang="x-default"
-      href="https://naighes.github.io/scoutforall/"
-    />
+    {!url &&
+      <link
+        rel="alternate"
+        hreflang="x-default"
+        href="https://naighes.github.io/scoutforall/"
+      />
+    }
     <link
       rel="canonical"
-      href={ homeUrl(lang) }
+      href={ url ?? homeUrl(lang) }
     />
     <link rel="sitemap" href="/scoutforall/sitemap-index.xml" />
 
