@@ -372,13 +372,14 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
 }
 
 /** The efficiency of a player, on the jersey: from red to green for the
- * level of the team, grey without it; a dash before the first. */
+ * level of the team, grey without it (the text light: grey on the grey of
+ * the court is too faint); a dash before the first. */
 @Composable
 private fun Efficiency(efficiency: Double?, grade: Double?, modifier: Modifier) = Surface(
     modifier = modifier,
     shape = CircleShape,
     color = grade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.surfaceVariant,
-    contentColor = grade?.let { Color.Black } ?: MaterialTheme.colorScheme.onSurfaceVariant,
+    contentColor = grade?.let { Color.Black } ?: MaterialTheme.colorScheme.onSurface,
 ) {
     val size = 11.dp.jerseySp()
     Text(

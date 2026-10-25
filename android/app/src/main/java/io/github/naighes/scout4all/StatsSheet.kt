@@ -96,7 +96,7 @@ fun gradeColor(grade: Double): Color {
 
 /** A color for each set in the trend: none of them amber (the actions),
  * red or green (the grades). */
-private val setColors = listOf(
+internal val setColors = listOf(
     Color(0xFF60A5FA),
     Color(0xFFF472B6),
     Color(0xFFA78BFA),

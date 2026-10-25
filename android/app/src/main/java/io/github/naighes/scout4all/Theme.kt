@@ -6,12 +6,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 // The colors of the site (web/src/assets/css/global.css): always dark, amber
-// only for what the scout acts on.
+// only for what the scout acts on. The grey of the secondary text lighter
+// than the site's (#9F9F9F), to read it at 7:1 on the court side, in the
+// sun too (`ContrastTest`).
 private val Surface0 = Color(0xFF121212)
 private val Surface1 = Color(0xFF18181B)
 private val Surface3 = Color(0xFF2F2F31)
 private val ForegroundLight = Color(0xFFEEEEEE)
-private val ForegroundDark = Color(0xFF9F9F9F)
+private val ForegroundDark = Color(0xFFA8A8A8)
 private val Amber = Color(0xFFFCD34D)
 
 // a match won or lost: Tailwind green and red 400, as the amber is Tailwind
@@ -19,7 +21,7 @@ val Won = Color(0xFF4ADE80)
 val Lost = Color(0xFFF87171)
 val Fair = Color(0xFFFACC15)
 
-private val colors = darkColorScheme(
+internal val Scout4AllColors = darkColorScheme(
     primary = Amber,
     onPrimary = Color.Black,
     primaryContainer = Surface3,
@@ -46,4 +48,4 @@ private val colors = darkColorScheme(
 /** Roboto, the font of the system. */
 @Composable
 fun Scout4AllTheme(content: @Composable () -> Unit) =
-    MaterialTheme(colorScheme = colors, content = content)
+    MaterialTheme(colorScheme = Scout4AllColors, content = content)
