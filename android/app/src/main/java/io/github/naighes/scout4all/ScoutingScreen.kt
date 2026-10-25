@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
@@ -88,6 +89,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -281,6 +283,10 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
         is ScoutingUi.SetOver -> s.view
         else -> null
     }
+    // the back of the system takes back the choice in the middle of an
+    // event first, as the undo; the arrow always goes
+    val halfway = (state as? ScoutingUi.Choosing)?.view?.state?.let { it.event != null || it.player != null } == true
+    BackHandler(enabled = halfway) { model.undo() }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -678,6 +684,7 @@ private val rallyEvents = mapOf(
 private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
     val expanded = open && events.isNotEmpty()
+    BackHandler(enabled = expanded) { open = false }
     Surface(
         modifier = modifier.alpha(if (events.isEmpty()) 0.38f else 1f),
         shape = RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50),
@@ -832,7 +839,9 @@ private fun Buttons(buttons: List<Pair<String, () -> Unit>>) = Column(
  * mistake. */
 @Composable
 private fun SetOverDialog(state: ScoutingState, onUndo: () -> Unit, onDone: () -> Unit) = AlertDialog(
-    onDismissRequest = {},
+    // the back of the system as OK: the set is saved
+    onDismissRequest = onDone,
+    properties = DialogProperties(dismissOnClickOutside = false),
     title = {
         Text(
             stringResource(
