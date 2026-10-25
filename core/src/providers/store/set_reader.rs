@@ -1,6 +1,7 @@
 use crate::{
     errors::{AppError, IOError, MatchError},
     localization::Language,
+    logging::logger::log_error,
     providers::set_reader::SetReader,
     shapes::{r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
     storage::{Store, StoreEntry, layout},
@@ -44,18 +45,34 @@ impl StoreSetReader {
 
 /// The events saved in the blob. Rows with and without the technique may be
 /// mixed, e.g. when v0.4.3 or older adds events to a set scouted by a later
-/// version.
+/// version. A last row without its line end was cut while appended (the
+/// battery out): it's left out, the set stays readable.
 pub(crate) fn read_events(csv: &[u8]) -> Result<Vec<EventEntry>, AppError> {
+    let whole = whole_rows(csv);
+    if whole.len() < csv.len() {
+        log_error(&format!(
+            "the last event of a set was cut, left out: {:?}",
+            String::from_utf8_lossy(csv.get(whole.len()..).unwrap_or_default())
+        ));
+    }
     let mut reader = ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
-        .from_reader(csv);
+        .from_reader(whole);
     // a row that can't be read makes the set unreadable: without it the set
     // would replay to something else
     reader
         .deserialize()
         .collect::<Result<Vec<EventEntry>, csv::Error>>()
         .map_err(|e| AppError::IO(IOError::from(e)))
+}
+
+/// The rows that end with a line end: every event is saved with one.
+pub(crate) fn whole_rows(csv: &[u8]) -> &[u8] {
+    csv.iter()
+        .rposition(|b| *b == b'\n')
+        .and_then(|end| csv.get(..=end))
+        .unwrap_or_default()
 }
 
 #[async_trait]

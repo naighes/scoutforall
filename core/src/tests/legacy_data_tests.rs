@@ -793,4 +793,35 @@ mod tests {
         assert_eq!(columns(&events_path(dir.path())), vec![6]);
         assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 1);
     }
+
+    /// The battery runs out while an event is appended: the row cut is left
+    /// out, the set reads without it, and the next event takes its place.
+    #[tokio::test]
+    async fn an_event_cut_while_saved_is_left_out() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        let their_error = "2025-09-20T20:00:00.000000Z,OE,,,,\n".to_string();
+        legacy_set(
+            dir.path(),
+            &p,
+            &[
+                their_error.clone(),
+                their_error,
+                // all its columns, only the line end missing
+                "2025-09-20T20:00:01.000000Z,OE,,,,".into(),
+            ],
+        );
+        let (_, m) = load(dir.path()).await;
+        assert_eq!(m.sets[0].events.len(), 2);
+        let next = m.sets[0].events[0].clone();
+        StoreSetWriter::new(fs_store(dir.path()), Language::default())
+            .append_event(&m, 1, &next)
+            .await
+            .unwrap();
+        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6]);
+        let (_, m) = load(dir.path()).await;
+        assert_eq!(m.sets[0].events.len(), 3);
+    }
 }
