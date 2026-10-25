@@ -4011,6 +4011,7 @@ dependencies = [
  "typst-layout",
  "typst-pdf",
  "uuid",
+ "webpki-root-certs",
  "zip",
 ]
 

@@ -14,7 +14,9 @@ use crate::{
     util::config_var,
 };
 use futures::TryFutureExt;
-use reqwest::{Client, StatusCode};
+#[cfg(target_os = "android")]
+use reqwest::Certificate;
+use reqwest::{Client, ClientBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string_pretty;
 use std::{
@@ -57,11 +59,28 @@ fn generate_upload_id(team_id: Uuid, match_id: &str) -> Uuid {
 // the render free plan stops the API when idle: the first request can wait
 // for it to start again. The user agent tells the app version in the API log
 fn http_client() -> Result<Client, AppError> {
-    Client::builder()
+    tls_roots(Client::builder())
         .user_agent(concat!("scout4all/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|e| AppError::IO(IOError::from(e)))
+}
+
+// the verifier of the platform: on Android it needs the context of the app
+// (JNI), and without it the first request aborts the process. The roots of
+// Mozilla, built in, are enough for the API and the storage
+#[cfg(target_os = "android")]
+fn tls_roots(builder: ClientBuilder) -> ClientBuilder {
+    builder.tls_certs_only(
+        webpki_root_certs::TLS_SERVER_ROOT_CERTS
+            .iter()
+            .filter_map(|der| Certificate::from_der(der).ok()),
+    )
+}
+
+#[cfg(not(target_os = "android"))]
+fn tls_roots(builder: ClientBuilder) -> ClientBuilder {
+    builder
 }
 
 // the query string of a signed URL holds its token: keep it out of the log
