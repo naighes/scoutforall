@@ -2510,15 +2510,12 @@ impl Scout4All {
         }
     }
 
-    /// The terms of use: this app sends no statistics yet.
+    /// The terms of use: the statistics sent unless turned off, below them.
     pub fn terms(&self) -> Terms {
         let labels = self.language.labels();
         Terms {
             title: labels.terms_of_use.to_string(),
-            paragraphs: labels
-                .terms(labels.terms_no_upload)
-                .map(String::from)
-                .to_vec(),
+            paragraphs: labels.terms(labels.terms_upload).map(String::from).to_vec(),
         }
     }
 
@@ -2831,7 +2828,7 @@ mod tests {
     }
 
     #[test]
-    fn the_terms_say_nothing_is_sent_in_the_language_of_the_app() {
+    fn the_terms_tell_about_the_statistics_in_the_language_of_the_app() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir, "it");
         let terms = app.terms();
@@ -2842,7 +2839,7 @@ mod tests {
             vec![
                 it.terms_free,
                 it.terms_license,
-                it.terms_no_upload,
+                it.terms_upload,
                 it.terms_full
             ]
         );

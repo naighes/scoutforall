@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// The version of the terms of use (license and data collection): raise it
 /// when they change, to show them again to every user.
-pub const TERMS_VERSION: u8 = 1;
+pub const TERMS_VERSION: u8 = 2;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Consent {

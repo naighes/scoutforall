@@ -10,10 +10,11 @@ Android. What each of them collects is described below.
 
 1. What is collected
 
-Program for computers
+Program for computers and Android app
 
-Match data. Unless you turn it off (see 4), when you scout a match the
-program uploads an archive with:
+Match data. Unless you turn it off (see 4), when you finish scouting a
+match, or correct one already finished, the program and the app upload an
+archive with:
 
 - the match: date, home or away, gender, year and classification of the
   team, maximum number of substitutions;
@@ -21,13 +22,21 @@ program uploads an archive with:
 - the identifier of the team.
 
 Teams and players appear only as random identifiers, generated on your
-computer. The names of players, teams and opponents, and any other text you
-type, are never sent. Without the files on your computer the identifiers
-cannot be linked to real people: this is pseudonymous data, not anonymous.
+computer or phone. The names of players, teams and opponents, and any other
+text you type, are never sent. Without the files on your computer or phone
+the identifiers cannot be linked to real people: this is pseudonymous data,
+not anonymous.
+
+The app sends the archive when the phone is connected to the Internet, also
+later if it wasn't when the match ended: Android does it in the background.
+For this, and only for this, the app has the permission to access the
+Internet.
 
 Technical data. The upload server records the IP address and the version of
-the program in its logs, and keeps the IP address in memory for a short time
-to limit the number of requests.
+the program or of the app in its logs, and keeps the IP address in memory
+for a short time to limit the number of requests.
+
+Program for computers
 
 Issue reports. When you send a report from "report an issue", its title and
 description, and your name and e-mail address if you type them, are sent to
@@ -35,9 +44,9 @@ Linear, the issue tracker of the project.
 
 Android app
 
-Match data. The app sends nothing: teams, players and matches stay on your
-phone, in the storage of the app, and are deleted when you uninstall it. The
-app does not even have the permission to access the Internet.
+Teams, players and matches stay on your phone, in the storage of the app,
+and are deleted when you uninstall it. Apart from the archives described
+above, the app sends nothing by itself.
 
 Backup. If the backup of your phone is turned on, Android copies the data of
 the app to your Google account, as it does for other apps, so that you find
@@ -77,14 +86,12 @@ computers name and e-mail are optional.
 
 4. Your choice
 
-The program for computers shows this notice when it starts for the first
-time. You can turn the upload of match data off there, or at any time in the
-settings (F2, "send match statistics"). Turned off, nothing more is
-uploaded; to delete what was already sent, see 7.
-
-The Android app uploads no match data, so there is nothing to turn off. If
-a future version uploads statistics, it will tell you first, and you will be
-able to turn it off.
+The program for computers and the app show this notice when they start for
+the first time, and again when it changes. You can turn the upload of match
+data off there, or at any time in the settings (in the program for
+computers F2, "send match statistics"). Turned off, nothing more is
+uploaded, also of the matches waiting for the Internet; to delete what was
+already sent, see 7.
 
 
 5. Where
@@ -108,9 +115,9 @@ Issue reports are kept as long as needed to handle them.
 You can ask to access, correct or delete your data, or object to its
 processing, by writing to nic.baldi@gmail.com. Since the data holds no
 names, to find it we need the identifier of your team: the name of its
-folder in the ".scout4all" folder of your home directory. For the Android
-app the developer holds only the issue reports you sent: to find them, the
-e-mail address you sent them from is enough.
+folder in the ".scout4all" folder of your home directory or, in the app,
+the name of the file you get when you share the team. For the issue reports
+you sent from the app, the e-mail address you sent them from is enough.
 
 You can also lodge a complaint with a data protection authority (in Italy,
 the Garante per la protezione dei dati personali).
