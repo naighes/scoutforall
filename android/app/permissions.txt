@@ -1,0 +1,9 @@
+# The permissions the app may have, as in the merged manifest (the
+# libraries add theirs): the build fails when they differ (see
+# VerifyPermissions in build.gradle.kts). A new one is a choice, not a side
+# effect of a library: it may change the terms (TERMS_VERSION), DATA-PRIVACY
+# and the data safety form of Google Play. One per line, then why.
+
+# androidx (core): its own, to register receivers that aren't exported;
+# granted only to the app itself, never shown to the user
+io.github.naighes.scout4all.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION

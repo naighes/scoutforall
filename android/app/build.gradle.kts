@@ -1,4 +1,6 @@
+import com.android.build.api.artifact.SingleArtifact
 import javax.inject.Inject
+import javax.xml.parsers.DocumentBuilderFactory
 import org.gradle.process.ExecOperations
 
 plugins {
@@ -108,9 +110,51 @@ val uniffiBindgen = tasks.register<UniffiBindgen>("uniffiBindgen") {
     outputDir.set(layout.buildDirectory.dir("generated/uniffi/kotlin"))
 }
 
+/** The permissions of the merged manifest, the ones of the libraries too,
+ * are the ones of `permissions.txt`: a new one is a choice (the terms,
+ * DATA-PRIVACY, the data safety of Play), not a side effect. */
+abstract class VerifyPermissions : DefaultTask() {
+    @get:InputFile abstract val manifest: RegularFileProperty
+    @get:InputFile abstract val allowed: RegularFileProperty
+    @get:OutputFile abstract val checked: RegularFileProperty
+
+    @TaskAction
+    fun verify() {
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(manifest.get().asFile)
+        val declared = listOf("uses-permission", "uses-permission-sdk-23")
+            .flatMap { tag ->
+                val nodes = document.getElementsByTagName(tag)
+                (0 until nodes.length).map { (nodes.item(it) as org.w3c.dom.Element).getAttribute("android:name") }
+            }
+            .toSortedSet()
+        val listed = allowed.get().asFile.readLines()
+            .map { it.substringBefore('#').trim() }
+            .filter { it.isNotEmpty() }
+            .toSortedSet()
+        val added = declared - listed
+        val removed = listed - declared
+        if (added.isNotEmpty() || removed.isNotEmpty()) {
+            throw GradleException(
+                "the permissions of the app changed: new $added, gone $removed. " +
+                    "Update app/permissions.txt, and the terms, DATA-PRIVACY and the data safety of Play when needed",
+            )
+        }
+        checked.get().asFile.writeText(declared.joinToString("\n"))
+    }
+}
+
 androidComponents {
     onVariants { variant ->
         variant.sources.jniLibs?.addGeneratedSourceDirectory(cargoNdk, CargoTask::outputDir)
         variant.sources.kotlin?.addGeneratedSourceDirectory(uniffiBindgen, CargoTask::outputDir)
+        val name = variant.name.replaceFirstChar { it.uppercase() }
+        val verify = tasks.register<VerifyPermissions>("verify${name}Permissions") {
+            manifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
+            allowed.set(layout.projectDirectory.file("permissions.txt"))
+            checked.set(layout.buildDirectory.file("permissions/${variant.name}.txt"))
+        }
+        // before any apk or bundle, installed or published
+        tasks.matching { it.name == "package$name" || it.name == "bundle$name" }
+            .configureEach { dependsOn(verify) }
     }
 }
