@@ -1,4 +1,5 @@
 import com.android.build.api.artifact.SingleArtifact
+import java.util.Properties
 import javax.inject.Inject
 import javax.xml.parsers.DocumentBuilderFactory
 import org.gradle.process.ExecOperations
@@ -58,24 +59,31 @@ abstract class CargoTask : DefaultTask() {
         outputs.upToDateWhen { false }
     }
 
-    protected fun cargo(vararg args: String) {
+    protected fun cargo(vararg args: String, env: Map<String, String> = emptyMap()) {
         val bin = File(System.getProperty("user.home"), ".cargo/bin")
         exec.exec {
             workingDir = workspace.get().asFile
             environment("PATH", "${bin.path}${File.pathSeparator}${System.getenv("PATH")}")
             environment("ANDROID_NDK_HOME", ndk.get().asFile.path)
+            environment(env)
             commandLine(listOf(File(bin, "cargo").takeIf { it.exists() }?.path ?: "cargo") + args)
         }
     }
 }
 
-/** The core for Android, in the layout of `jniLibs`. */
+/** The core for Android, in the layout of `jniLibs`, with the URL of the
+ * upload API built in (the core reads it with `option_env!`, as the CLI):
+ * without it the app sends no statistics. */
 abstract class CargoNdk : CargoTask() {
+    @get:Internal abstract val uploadUrl: Property<String>
+
     @TaskAction
     fun build() {
         val out = outputDir.get().asFile
+        val env = uploadUrl.orNull?.let { mapOf("ANALYTICS_UPLOAD_URL" to it) }.orEmpty()
+        if (env.isEmpty()) logger.warn("no ANALYTICS_UPLOAD_URL: this build sends no statistics")
         cargo("ndk", "-t", "arm64-v8a", "--platform", "28", "-o", out.path,
-            "build", "-p", "scout4all-mobile", "--release")
+            "build", "-p", "scout4all-mobile", "--release", env = env)
     }
 }
 
@@ -104,6 +112,15 @@ val cargoNdk = tasks.register<CargoNdk>("cargoNdk") {
     workspace.set(workspaceDir)
     ndk.set(androidComponents.sdkComponents.ndkDirectory)
     outputDir.set(layout.buildDirectory.dir("generated/rust/jniLibs"))
+    // as the CI of the CLI: from the environment, or from local.properties
+    // (not in git) on this machine
+    uploadUrl.set(
+        providers.environmentVariable("ANALYTICS_UPLOAD_URL").orElse(
+            providers.fileContents(rootProject.layout.projectDirectory.file("local.properties")).asText.map { text ->
+                Properties().apply { load(text.reader()) }.getProperty("analytics.upload.url").orEmpty()
+            },
+        ).map { it.trim() }.filter { it.isNotEmpty() },
+    )
 }
 
 val uniffiBindgen = tasks.register<UniffiBindgen>("uniffiBindgen") {
