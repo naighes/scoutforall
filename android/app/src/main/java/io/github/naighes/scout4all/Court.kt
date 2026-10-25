@@ -8,6 +8,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -25,12 +26,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.Dp
@@ -39,9 +44,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 
 /** What a position of the court shows. */
@@ -93,16 +103,35 @@ private val zones = listOf(7.5f to 6f, 7.5f to 1.5f, 4.5f to 1.5f, 1.5f to 1.5f,
  * attack line at 3 of the 9 meters, the front row 4 3 2 before it, the back
  * row 5 6 1 behind it. `slot` tells what position 1 to 6 shows, and where:
  * a player moving to another spot slides there. Wider than
- * deep, to leave room for the choices below. With `serveZone`, the zone
- * behind the end line, where the server goes to serve. */
+ * deep, to leave room for the choices below: as wide as it can, narrower
+ * if not as high. With `serveZone`, the zone behind the end line, where the
+ * server goes to serve. */
 @Composable
 fun Court(
     slot: (Int) -> CourtSlot,
     onPosition: (Int) -> Unit,
+    modifier: Modifier = Modifier,
     showPositions: Boolean = false,
     serveZone: Boolean = false,
     ball: CourtBall? = null,
-) = Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
+    val zone = if (serveZone) ServeZone else 0.dp
+    val width = when {
+        constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * 1.4f)
+        else -> maxWidth
+    }
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, Modifier.width(width))
+}
+
+@Composable
+private fun CourtColumn(
+    slot: (Int) -> CourtSlot,
+    onPosition: (Int) -> Unit,
+    showPositions: Boolean,
+    serveZone: Boolean,
+    ball: CourtBall?,
+    modifier: Modifier,
+) = Column(modifier) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
     val lines = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
     val net = MaterialTheme.colorScheme.onSurface
@@ -118,13 +147,15 @@ fun Court(
             drawLine(net, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 4.dp.toPx())
         }
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            // the player on the spot, the name under the jersey, a third of
-            // the court wide; on a court narrower than a phone's (360dp),
-            // all of it smaller, so that the players don't overlap
+            // the player on the spot, the name under the jersey in two
+            // lines, a third of the court wide; on a court narrower than a
+            // phone's (360dp), the jersey smaller, so that the players don't
+            // overlap
             val scale = (maxWidth / 360.dp).coerceAtMost(1f)
             val width = maxWidth / 3
             val token = 44.dp * scale
-            val height = token + 2.dp + 16.dp * scale
+            // each line takes whole pixels
+            val height = token + 2.dp + with(LocalDensity.current) { (ceil(nameStyle().lineHeight.toPx()) * 2).toDp() }
             // the top left corner of the spot of a position
             val corner = { position: Int ->
                 val s = slot(position)
@@ -183,7 +214,7 @@ fun Court(
     }
     if (serveZone) {
         // behind the end line, under position 1
-        Row(Modifier.fillMaxWidth().height(72.dp)) {
+        Row(Modifier.fillMaxWidth().height(ServeZone)) {
             Box(Modifier.weight(2f))
             when (server) {
                 null -> Box(Modifier.weight(1f))
@@ -192,6 +223,8 @@ fun Court(
         }
     }
 }
+
+private val ServeZone = 72.dp
 
 /** The player of a position, all of it to touch: the jersey at the top,
  * the name under it. */
@@ -212,17 +245,55 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: F
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Token(slot, scale)
-            val label = MaterialTheme.typography.labelSmall
-            Text(
-                slot.name.orEmpty(),
-                modifier = Modifier.padding(horizontal = 4.dp),
-                style = label.copy(fontSize = label.fontSize * scale, lineHeight = label.lineHeight * scale),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
+            CourtName(slot.name.orEmpty())
         }
     }
+
+/** The name under the jersey in two lines, or the surname alone (all but
+ * the first word) if it doesn't fit, never a word broken: the jersey tells
+ * the rest. A surname too long even so is hyphenated. */
+@Composable
+private fun CourtName(name: String) {
+    var surname by remember(name) { mutableStateOf(false) }
+    val text = if (surname) name.substringAfter(' ') else name
+    Text(
+        text,
+        modifier = Modifier.padding(horizontal = 4.dp),
+        style = nameStyle().copy(
+            hyphens = if (surname) Hyphens.Auto else Hyphens.None,
+            lineBreak = LineBreak.Paragraph,
+        ),
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+        onTextLayout = { layout ->
+            val broken = (0 until layout.lineCount - 1).any {
+                val end = layout.getLineEnd(it)
+                end in 1 until text.length && text[end - 1] != ' ' && text[end] != ' '
+            }
+            if (!surname && (layout.didOverflowHeight || layout.isLineEllipsized(layout.lineCount - 1) || broken)) {
+                surname = true
+            }
+        },
+    )
+}
+
+/** The names on the court grow with the system font size up to 1.3 times,
+ * not more: there's no room for them; the choices below show them whole. */
+@Composable
+private fun nameStyle(): TextStyle {
+    val label = MaterialTheme.typography.labelSmall
+    val scale = LocalDensity.current.fontScale.coerceAtMost(1.3f)
+    return label.copy(
+        fontSize = (label.fontSize.value * scale).dp.jerseySp(),
+        lineHeight = (label.lineHeight.value * scale).dp.jerseySp(),
+    )
+}
+
+/** A text of the jersey, drawn at its size: the system font size doesn't
+ * make it larger than the jersey. */
+@Composable
+private fun Dp.jerseySp(): TextUnit = with(LocalDensity.current) { toSp() }
 
 /** The player as a round jersey with the number; the libero in a jersey of
  * another color, dark with a light border; an empty position asks for a
@@ -255,10 +326,10 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
         },
     ) {
         Box(contentAlignment = Alignment.Center) {
-            val title = MaterialTheme.typography.titleLarge
+            val size = (22.dp * scale).jerseySp()
             Text(
                 slot.number?.toString() ?: "+",
-                style = title.copy(fontSize = title.fontSize * scale),
+                style = MaterialTheme.typography.titleLarge.copy(fontSize = size, lineHeight = size),
                 fontWeight = FontWeight.Bold,
                 color = number,
             )
@@ -286,10 +357,11 @@ private fun Efficiency(efficiency: Double?, grade: Double?, modifier: Modifier) 
     color = grade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.surfaceVariant,
     contentColor = grade?.let { Color.Black } ?: MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
+    val size = 11.dp.jerseySp()
     Text(
         efficiency?.let { "${it.roundToInt()}%" } ?: "–",
         modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelSmall.copy(fontSize = size, lineHeight = size),
         fontWeight = FontWeight.Bold,
     )
 }
@@ -302,9 +374,10 @@ private fun Badge(text: String, modifier: Modifier) = Surface(
     color = MaterialTheme.colorScheme.primary,
 ) {
     Box(contentAlignment = Alignment.Center) {
+        val size = 11.dp.jerseySp()
         Text(
             text,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = size, lineHeight = size),
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onPrimary,
         )

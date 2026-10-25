@@ -181,6 +181,8 @@ abstract class VerifyPermissions : DefaultTask() {
 tasks.withType<Test>().configureEach {
     dependsOn(uniffiBindgen)
     systemProperty("jna.library.path", workspaceDir.dir("target/debug").asFile.path)
+    // `-Pshots=<folder>`: the layout tests save the screens there
+    systemProperty("shots", providers.gradleProperty("shots").getOrElse(""))
     // Robolectric reaches into the file descriptors of the JDK
     jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED", "--enable-native-access=ALL-UNNAMED")
 }

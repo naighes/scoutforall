@@ -80,9 +80,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -100,7 +103,10 @@ import io.github.naighes.scout4all.core.ScoutedEvent
 import io.github.naighes.scout4all.core.ScoutingPlayer
 import io.github.naighes.scout4all.core.ScoutingState
 import io.github.naighes.scout4all.core.ScoutingStep
+import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.ServeTypeEnum
 import io.github.naighes.scout4all.core.TechniqueChoice
+import io.github.naighes.scout4all.core.TechniqueEnum
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -314,6 +320,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                 onDismiss = { statsOpen = false },
             )
         }
+        // the court fits what's left: the same at every step
         val court = @Composable { m: Modifier ->
             Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Score(view.state)
@@ -346,6 +353,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                         )
                     },
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },
+                    modifier = Modifier.weight(1f, fill = false),
                     serveZone = true,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
@@ -355,13 +363,20 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                 )
             }
         }
-        val panel = @Composable { m: Modifier ->
+        // the choices as high as the ones of the serve, the most there are:
+        // a longer list (the replacements) scrolls
+        val choices = @Composable { m: Modifier ->
+            Column(m.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Choices(view, model)
+            }
+        }
+        val panel = @Composable { m: Modifier, fixed: Boolean ->
             Column(m) {
                 HorizontalDivider()
-                Column(
-                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) { Choices(view, model) }
+                when {
+                    fixed -> AsHighAs({ ServeChoices(model) }) { choices(Modifier) }
+                    else -> choices(Modifier.weight(1f))
+                }
                 // always in the same place, where the thumb is: the undo on
                 // the left, the statistics in the middle (swiping up the
                 // row opens them too), the changes of the lineup on the
@@ -387,13 +402,60 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
         }
         when {
             maxWidth > maxHeight -> Row(Modifier.fillMaxSize()) {
-                court(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()))
-                panel(Modifier.weight(1f).fillMaxHeight())
+                court(Modifier.weight(1f).fillMaxHeight())
+                panel(Modifier.weight(1f).fillMaxHeight(), false)
             }
-            else -> Column(Modifier.fillMaxSize()) {
-                court(Modifier.fillMaxWidth())
-                panel(Modifier.weight(1f).fillMaxWidth())
+            else -> {
+                val height = maxHeight
+                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    CourtAbove(height, court = { court(Modifier) }, panel = { panel(Modifier.fillMaxWidth(), true) })
+                }
             }
+        }
+    }
+
+/** The court, the score with it, never lower than on a phone of 360×800. */
+private val MinCourt = 360.dp
+
+/** `court` over `panel`, as high as `height` all together: the court takes
+ * what the panel leaves, but not less than `MinCourt`; on a shorter screen,
+ * it all scrolls. */
+@Composable
+private fun CourtAbove(height: Dp, court: @Composable () -> Unit, panel: @Composable () -> Unit) =
+    Layout(contents = listOf(court, panel)) { (courts, panels), constraints ->
+        val loose = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
+        val below = panels.map { it.measure(loose) }
+        val left = (height.roundToPx() - below.sumOf { it.height }).coerceAtLeast(MinCourt.roundToPx())
+        val above = courts.map { it.measure(constraints.copy(minHeight = left, maxHeight = left)) }
+        layout(constraints.maxWidth, left + below.sumOf { it.height }) {
+            above.forEach { it.place(0, 0) }
+            below.fold(left) { y, p -> p.place(0, y).let { y + p.height } }
+        }
+    }
+
+/** The choices of the serve, the most a step has, only to be measured. */
+@Composable
+private fun ServeChoices(model: ScoutingViewModel) =
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Techniques(
+            listOf(ServeTypeEnum.FLOAT to "F", ServeTypeEnum.SPIN to "S").map { (type, code) ->
+                TechniqueChoice(TechniqueEnum.Serve(type), code, code, code, false)
+            },
+            model,
+        )
+        Evals(EvalEnum.entries.take(5).map { EvalChoice(it, "#", "#", null) }, model)
+        RallyEvents(listOf(EventTypeEnum.OE, EventTypeEnum.F).map { EventChoice(it, "") }, model)
+    }
+
+/** `content` as high as `reference`, which is measured but never shown. */
+@Composable
+private fun AsHighAs(reference: @Composable () -> Unit, content: @Composable () -> Unit) =
+    Layout(contents = listOf(reference, content)) { (references, contents), constraints ->
+        val loose = constraints.copy(minHeight = 0)
+        val height = references.maxOfOrNull { it.measure(loose).height }?.coerceAtMost(constraints.maxHeight) ?: 0
+        val placeables = contents.map { it.measure(constraints.copy(minHeight = height, maxHeight = height)) }
+        layout(placeables.maxOfOrNull { it.width } ?: constraints.minWidth, height) {
+            placeables.forEach { it.place(0, 0) }
         }
     }
 
@@ -720,7 +782,7 @@ private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewMod
     horizontalArrangement = Arrangement.spacedBy(4.dp),
 ) {
     techniques.forEach { t ->
-        val modifier = Modifier.weight(1f).height(56.dp).semantics { contentDescription = t.name }
+        val modifier = Modifier.weight(1f).heightIn(min = 56.dp).semantics { contentDescription = t.name }
         val padding = PaddingValues(0.dp)
         val content = @Composable {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
