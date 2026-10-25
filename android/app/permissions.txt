@@ -7,3 +7,14 @@
 # androidx (core): its own, to register receivers that aren't exported;
 # granted only to the app itself, never shown to the user
 io.github.naighes.scout4all.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+
+# the statistics of the matches, sent to the upload API (DATA-PRIVACY):
+# granted at install, never asked
+android.permission.INTERNET
+
+# WorkManager (androidx.work), which sends them when there's a network: to
+# know when there is, to keep the phone awake while sending, and to plan the
+# sending again after a restart. Granted at install, never asked
+android.permission.ACCESS_NETWORK_STATE
+android.permission.WAKE_LOCK
+android.permission.RECEIVE_BOOT_COMPLETED

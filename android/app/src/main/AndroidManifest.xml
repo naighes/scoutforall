@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- only to send the statistics of the matches (DATA-PRIVACY) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- WorkManager sends them in the background, never in the foreground -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
+        tools:node="remove" />
 
     <application
         android:name=".Scout4AllApplication"

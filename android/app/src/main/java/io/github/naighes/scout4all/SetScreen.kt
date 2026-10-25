@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.Correction
 import io.github.naighes.scout4all.core.CorrectionState
 import io.github.naighes.scout4all.core.EditField
@@ -112,6 +113,8 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
             c,
             onSave = {
                 app.core { it.saveCorrection(c) }
+                // a finished match is queued again
+                app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
                 correction = null
                 version++
             },

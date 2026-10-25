@@ -139,6 +139,8 @@
     <string name="language">Język</string>
     <string name="terms_of_use">Warunki korzystania</string>
     <string name="accept_terms">Dalej</string>
+    <string name="send_statistics">Wysyłaj statystyki meczów</string>
+    <string name="send_statistics_detail">Bez nazwisk: drużyny i zawodnicy to losowe identyfikatory</string>
     <string name="about">O aplikacji</string>
     <string name="version">Wersja</string>
     <string name="license">Licencja</string>

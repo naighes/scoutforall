@@ -33,6 +33,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.sp
+import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.TeamSideEnum
 import androidx.compose.foundation.clickable
@@ -226,7 +227,11 @@ class ScoutingViewModel(
             mutableState.value = withContext(Dispatchers.IO) {
                 try {
                     when (choice(s)) {
-                        Progress.SET_OVER -> ScoutingUi.SetOver(view(s))
+                        Progress.SET_OVER -> {
+                            // the match may be over, and queued
+                            app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
+                            ScoutingUi.SetOver(view(s))
+                        }
                         else -> ScoutingUi.Choosing(view(s))
                     }
                 } catch (e: MobileException) {

@@ -91,10 +91,15 @@ fun TermsScreen(onAccept: (suspend () -> Unit)?, onBack: () -> Unit) {
         when (val t = terms) {
             null -> Centered(modifier) { CircularProgressIndicator() }
             else -> Column(
-                modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                t.paragraphs.forEach { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                t.paragraphs.forEach {
+                    Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyLarge)
+                }
+                // "unless you turn it off below": a row of the settings,
+                // with their margins
+                StatisticsSwitch()
             }
         }
     }

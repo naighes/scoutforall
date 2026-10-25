@@ -32,8 +32,8 @@ private const val PRIVACY = "https://naighes.github.io/scoutforall/privacy/"
 // the e-mail address that opens an issue on Linear, the tracker of the project
 private const val REPORTS = "scout4all-0fd59357fbe3@intake.linear.app"
 
-/** The settings: the language of the app (the system chooses it), the terms
- * of use, the information on the app. */
+/** The settings: the language of the app (the system chooses it), the
+ * statistics sent, the terms of use, the information on the app. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit) {
@@ -63,6 +63,7 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit)
                     )
                 }
             }
+            StatisticsSwitch()
             Row(stringResource(R.string.terms_of_use), null, onTerms)
             Row(stringResource(R.string.about), null, onAbout)
         }

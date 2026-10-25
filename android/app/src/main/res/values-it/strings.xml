@@ -137,6 +137,8 @@
     <string name="language">Lingua</string>
     <string name="terms_of_use">Termini di utilizzo</string>
     <string name="accept_terms">Continua</string>
+    <string name="send_statistics">Invia le statistiche delle partite</string>
+    <string name="send_statistics_detail">Senza nomi: squadre e atleti sono identificativi casuali</string>
     <string name="about">Informazioni</string>
     <string name="version">Versione</string>
     <string name="license">Licenza</string>

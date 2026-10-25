@@ -20,6 +20,12 @@ class Scout4AllApplication : Application() {
     }
     private val core: Scout4All by lazyCore
 
+    // what wasn't sent last time (no network, the app closed)
+    override fun onCreate() {
+        super.onCreate()
+        sendUploads()
+    }
+
     /** The core follows the language of the app: the activity starts again
      * when the user changes it, the process may stay. Setting it doesn't
      * block, it can be called on the main thread. */

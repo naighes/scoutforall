@@ -138,6 +138,8 @@
     <string name="language">Language</string>
     <string name="terms_of_use">Terms of use</string>
     <string name="accept_terms">Continue</string>
+    <string name="send_statistics">Send match statistics</string>
+    <string name="send_statistics_detail">No names: teams and players are random identifiers</string>
     <string name="about">About</string>
     <string name="version">Version</string>
     <string name="license">License</string>
