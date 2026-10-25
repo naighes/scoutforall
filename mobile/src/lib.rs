@@ -8,6 +8,11 @@
 
 use chrono::{DateTime, FixedOffset};
 use scout4all_core::{
+    analytics::{
+        finished::{FinishedMatches, QueuedFinishedMatches},
+        queue_manager::QueueManager,
+        upload::{UploadStep, upload_next, upload_url},
+    },
     archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
     detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
@@ -24,6 +29,7 @@ use scout4all_core::{
         set_writer::SetWriter,
         store::{
             match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
+            queue_reader::StoreQueueReader, queue_writer::StoreQueueWriter,
             set_reader::StoreSetReader, set_writer::StoreSetWriter, team_reader::StoreTeamReader,
             team_writer::StoreTeamWriter,
         },
@@ -55,7 +61,10 @@ use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
 use std::{
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::runtime::{Builder, Runtime};
 use uuid::Uuid;
@@ -1875,7 +1884,13 @@ pub struct Scout4All {
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     /// for `config.json`
     store: Arc<dyn Store>,
+    /// the matches to upload for the statistics
+    queue: Arc<UploadQueueManager>,
+    /// whether the user allows the statistics, as in `config.json`
+    uploads_enabled: Arc<AtomicBool>,
 }
+
+type UploadQueueManager = QueueManager<StoreQueueReader, StoreQueueWriter>;
 
 #[uniffi::export]
 impl Scout4All {
@@ -1893,8 +1908,13 @@ impl Scout4All {
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })?;
-        Ok(Arc::new(Self {
+        let app = Self {
             runtime: Arc::new(runtime),
+            queue: Arc::new(QueueManager::new(
+                Arc::new(StoreQueueReader::new(store.clone())),
+                Arc::new(StoreQueueWriter::new(store.clone())),
+            )),
+            uploads_enabled: Arc::new(AtomicBool::new(false)),
             team_reader: StoreTeamReader::new(store.clone(), language.clone()),
             team_writer: StoreTeamWriter::new(store.clone()),
             match_writer: StoreMatchWriter::new(store.clone()),
@@ -1906,7 +1926,11 @@ impl Scout4All {
             ),
             store,
             language,
-        }))
+        };
+        // unreadable settings: nothing sent until the terms are accepted
+        let enabled = app.read_config().is_ok_and(|c| c.consent.uploads_enabled());
+        app.uploads_enabled.store(enabled, Ordering::Relaxed);
+        Ok(Arc::new(app))
     }
 
     /// The teams, sorted by name.
@@ -2130,8 +2154,15 @@ impl Scout4All {
             reason: e.message(labels).to_string(),
         })?;
         self.runtime
-            .block_on(self.set_writer.update(&correction.current_match, &set))
-            .map_err(MobileError::from)
+            .block_on(self.set_writer.update(&correction.current_match, &set))?;
+        // as the TUI: a finished match is uploaded again with the events
+        // corrected (the set ends as it did)
+        let m = &correction.current_match;
+        if m.get_status().is_ok_and(|status| status.match_finished) {
+            self.runtime
+                .block_on(self.finished_matches().finished(m.team.id, m.id.clone()));
+        }
+        Ok(())
     }
 
     /// The start of the next set of the match, to choose who serves and the
@@ -2167,7 +2198,11 @@ impl Scout4All {
                 .map(|session| {
                     Arc::new(Scouting {
                         runtime: self.runtime.clone(),
-                        session: Mutex::new(session.with_order(ChoiceOrder::PlayerFirst)),
+                        session: Mutex::new(
+                            session
+                                .with_order(ChoiceOrder::PlayerFirst)
+                                .with_finished(self.finished_matches()),
+                        ),
                         labels: self.language.labels(),
                     })
                 })
@@ -2491,22 +2526,44 @@ impl Scout4All {
     /// (those of the TUI too). A new `config.json` has the language too,
     /// which the TUI needs.
     pub fn accept_terms(&self) -> Result<(), MobileError> {
-        let config = self.read_config()?;
-        let language = match config.other.contains_key(LANGUAGE) {
-            true => None,
-            false => Some(to_value(self.language.get()).map_err(failed)?),
-        };
-        let config = AppConfig {
-            consent: config.consent.with_terms_seen(),
-            other: config
-                .other
-                .into_iter()
-                .chain(language.map(|l| (LANGUAGE.to_string(), l)))
-                .collect(),
-        };
-        let bytes = to_vec_pretty(&config).map_err(failed)?;
-        Ok(self.runtime.block_on(self.store.write(CONFIG, &bytes))?)
+        self.update_consent(Consent::with_terms_seen)
     }
+
+    /// Whether the user allows sending the statistics of the matches.
+    pub fn analytics_enabled(&self) -> bool {
+        self.read_config()
+            .is_ok_and(|config| config.consent.analytics_enabled)
+    }
+
+    /// The choice of the user about the statistics, saved as `accept_terms`
+    /// does. Turned off, the matches already queued stay, unsent.
+    pub fn set_analytics_enabled(&self, enabled: bool) -> Result<(), MobileError> {
+        self.update_consent(|consent| Consent {
+            analytics_enabled: enabled,
+            ..consent
+        })
+    }
+
+    /// Uploads the queued matches, one after the other, until one fails:
+    /// whether some are left to try again later (no network, the API down).
+    /// Nothing to do when the user turned the statistics off or the app was
+    /// built without the URL of the API. It blocks for a while: the system
+    /// calls it in the background, when there's a network.
+    pub fn upload_pending(&self) -> Uploads {
+        match (self.uploads_enabled.load(Ordering::Relaxed), upload_url()) {
+            (true, Some(url)) => self.upload_pending_to(&url),
+            _ => Uploads::Done,
+        }
+    }
+}
+
+/// What's left after `upload_pending`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Uploads {
+    /// nothing to send now
+    Done,
+    /// an upload failed: to try again later
+    Retry,
 }
 
 /// The version of the app (the same as the core, the TUI, the CLI).
@@ -2542,6 +2599,61 @@ fn failed(e: impl std::fmt::Display) -> MobileError {
 }
 
 impl Scout4All {
+    /// Where the scouting sends a finished match: the queue, if the user
+    /// allows the statistics.
+    fn finished_matches(&self) -> Arc<dyn FinishedMatches> {
+        Arc::new(QueuedFinishedMatches {
+            queue: self.queue.clone(),
+            enabled: self.uploads_enabled.clone(),
+        })
+    }
+
+    fn upload_pending_to(&self, url: &str) -> Uploads {
+        loop {
+            let step = self.runtime.block_on(upload_next(
+                &*self.store,
+                &self.team_reader,
+                &self.match_reader,
+                &self.queue,
+                url,
+            ));
+            // each sent or dropped match leaves the queue: it ends
+            match step {
+                Ok(UploadStep::Uploaded | UploadStep::Dropped) => continue,
+                Ok(UploadStep::Empty) => return Uploads::Done,
+                Ok(UploadStep::Failed) => return Uploads::Retry,
+                Err(e) => {
+                    log_error(&format!("could not read the upload queue: {e}"));
+                    return Uploads::Retry;
+                }
+            }
+        }
+    }
+
+    /// Changes the consent in `config.json`, keeping the other settings
+    /// (those of the TUI too); a new one has the language too, which the
+    /// TUI needs.
+    fn update_consent(&self, change: impl FnOnce(Consent) -> Consent) -> Result<(), MobileError> {
+        let config = self.read_config()?;
+        let language = match config.other.contains_key(LANGUAGE) {
+            true => None,
+            false => Some(to_value(self.language.get()).map_err(failed)?),
+        };
+        let config = AppConfig {
+            consent: change(config.consent),
+            other: config
+                .other
+                .into_iter()
+                .chain(language.map(|l| (LANGUAGE.to_string(), l)))
+                .collect(),
+        };
+        let bytes = to_vec_pretty(&config).map_err(failed)?;
+        self.runtime.block_on(self.store.write(CONFIG, &bytes))?;
+        self.uploads_enabled
+            .store(config.consent.uploads_enabled(), Ordering::Relaxed);
+        Ok(())
+    }
+
     /// `config.json`, the defaults when missing.
     fn read_config(&self) -> Result<AppConfig, MobileError> {
         match self.runtime.block_on(self.store.read(CONFIG))? {
@@ -3821,5 +3933,112 @@ mod tests {
             reason(app.preview_archive(b"not a zip".to_vec(), None, None)),
             labels(LanguageEnum::It).invalid_archive
         );
+    }
+
+    /// A match won 3-0 with aces, the terms accepted or not: the matches in
+    /// the upload queue, with their attempts.
+    fn won_match(app: &Scout4All) -> (String, String) {
+        let (team, m) = match_with_a_set(app);
+        for _ in 1..=3 {
+            let scouting = started_set(app, &team, &m);
+            for _ in 1..=25 {
+                scouting.choose_eval(EvalEnum::Perfect).unwrap();
+            }
+        }
+        assert_eq!(
+            app.match_details(team.clone(), m.clone()).unwrap().next,
+            NextSetKind::Over
+        );
+        (team, m)
+    }
+
+    fn queued(dir: &tempfile::TempDir) -> Vec<(String, u64)> {
+        std::fs::read(dir.path().join("upload_queue.json"))
+            .map(|bytes| {
+                from_slice::<Value>(&bytes).unwrap()["pending"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|p| {
+                        (
+                            p["match_id"].as_str().unwrap().to_string(),
+                            p["retry_count"].as_u64().unwrap(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_finished_match_is_queued_for_the_statistics() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        assert!(app.analytics_enabled());
+        let (_, m) = won_match(&app);
+        assert_eq!(queued(&dir), vec![(m, 0)]);
+    }
+
+    #[test]
+    fn not_before_the_terms_are_accepted_nor_once_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        won_match(&app);
+        assert_eq!(queued(&dir), vec![]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let app = self::app(&dir, "it");
+        app.accept_terms().unwrap();
+        app.set_analytics_enabled(false).unwrap();
+        won_match(&app);
+        assert_eq!(queued(&dir), vec![]);
+    }
+
+    #[test]
+    fn the_choice_about_the_statistics_keeps_the_settings_of_the_tui() {
+        let dir = tempfile::tempdir().unwrap();
+        let tui = serde_json::json!({
+            "language": "en",
+            "scouting_keybindings": { "a": "Attack" },
+            "analytics_enabled": true,
+            "terms_version": TERMS_VERSION,
+        });
+        std::fs::write(dir.path().join(CONFIG), tui.to_string()).unwrap();
+        let app = app(&dir, "it");
+        app.set_analytics_enabled(false).unwrap();
+        let mut expected = tui;
+        expected["analytics_enabled"] = false.into();
+        assert_eq!(config(&dir), expected);
+        // read again when the app starts
+        assert!(!self::app(&dir, "it").analytics_enabled());
+    }
+
+    #[test]
+    fn a_correction_of_a_finished_match_queues_it_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let (team, m) = won_match(&app);
+        // sent in the meantime
+        std::fs::remove_file(dir.path().join("upload_queue.json")).unwrap();
+        let correction = app.correction(team, m.clone(), 1, 0).unwrap();
+        app.save_correction(correction).unwrap();
+        assert_eq!(queued(&dir), vec![(m, 0)]);
+    }
+
+    /// No network: the match stays in the queue, for the next attempt.
+    #[test]
+    fn a_failed_upload_is_tried_again_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let (_, m) = won_match(&app);
+        // nothing listens there
+        assert_eq!(
+            app.upload_pending_to("http://127.0.0.1:9/sign"),
+            Uploads::Retry
+        );
+        assert_eq!(queued(&dir), vec![(m, 1)]);
     }
 }

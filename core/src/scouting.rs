@@ -6,7 +6,7 @@
 //! saved event and resumes it.
 
 use crate::{
-    analytics::global::{enqueue_match_for_upload, uploads_enabled},
+    analytics::finished::{FinishedMatches, GlobalFinishedMatches},
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
@@ -121,6 +121,7 @@ pub struct ScoutingSession {
     technique: Option<TechniqueEnum>,
     order: ChoiceOrder,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    finished: Arc<dyn FinishedMatches>,
 }
 
 impl fmt::Debug for ScoutingSession {
@@ -164,7 +165,15 @@ impl ScoutingSession {
             technique: None,
             order: ChoiceOrder::EventFirst,
             set_writer,
+            finished: Arc::new(GlobalFinishedMatches),
         }
+    }
+
+    /// The session sending the finished match to `finished`, not to the
+    /// global queue.
+    pub fn with_finished(mut self, finished: Arc<dyn FinishedMatches>) -> Self {
+        self.finished = finished;
+        self
     }
 
     /// The session with the choices in `order`.
@@ -730,16 +739,14 @@ impl ScoutingSession {
             Some(existing) => *existing = self.set.clone(),
             None => self.current_match.sets.push(self.set.clone()),
         }
-        // the global flag: the settings may change while scouting
         let finished = self
             .current_match
             .get_status()
             .is_ok_and(|status| status.match_finished);
-        if finished && uploads_enabled() {
-            // the match stays saved anyway: an upload not queued is lost
-            let _ =
-                enqueue_match_for_upload(self.current_match.team.id, self.current_match.id.clone())
-                    .await;
+        if finished {
+            self.finished
+                .finished(self.current_match.team.id, self.current_match.id.clone())
+                .await;
         }
     }
 }
