@@ -1,6 +1,9 @@
 package io.github.naighes.scout4all
 
-import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.core.app.ApplicationProvider
 import io.github.naighes.scout4all.core.EvalEnum
@@ -64,21 +67,25 @@ fun startFirstSet(team: String, opponent: String = "Cortona", serving: TeamSideE
     match
 }
 
-/** The screens read the core off the main thread, which the rule doesn't
- * wait for: until the text is there. */
-fun ComposeContentTestRule.waitForText(text: String, substring: Boolean = false) =
-    waitUntil(timeoutMillis = 5_000) {
+/** Until the text is there; if it never comes, what's there instead. */
+fun ComposeTestRule.waitForText(text: String, substring: Boolean = false) =
+    waitFor({ "no \"$text\" in ${texts()}" }) {
         onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
     }
 
+/** The texts on the screen, to tell what's there instead. */
+fun ComposeTestRule.texts(): List<String> =
+    onAllNodes(SemanticsMatcher("any") { true }).fetchSemanticsNodes()
+        .mapNotNull { it.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ") }
+
 /** Until `condition`, letting the main thread run: what the core answers
  * off it reaches the screen there. */
-fun ComposeContentTestRule.waitFor(condition: () -> Boolean) {
+fun ComposeTestRule.waitFor(why: () -> String = { "" }, condition: () -> Boolean) {
     val end = System.currentTimeMillis() + 5_000
     while (true) {
         waitForIdle()
         if (condition()) return
-        check(System.currentTimeMillis() < end) { "still not so after 5 s" }
+        check(System.currentTimeMillis() < end) { "still not so after 5 s ${why()}" }
         Thread.sleep(10)
     }
 }

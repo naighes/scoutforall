@@ -20,16 +20,21 @@ import androidx.core.animation.doOnEnd
 import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.splashscreen.SplashScreenViewProvider
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 class MainActivity : ComponentActivity() {
-    private val teams: TeamsViewModel by viewModels()
-    private val terms: TermsViewModel by viewModels()
+    // made with the application of the activity: the factory of
+    // `viewModels()` keeps the first one of the process
+    private val teams: TeamsViewModel by viewModels { viewModelFactory { initializer { TeamsViewModel(application) } } }
+    private val terms: TermsViewModel by viewModels { viewModelFactory { initializer { TermsViewModel(application) } } }
 
     // an archive another app opened with this one, until it's shown
     private val opened = MutableStateFlow<Uri?>(null)
@@ -132,27 +137,27 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
                 onMatch = nav::openMatch,
             )
         }
-        composable("settings") {
+        composable("settings") { entry ->
             SettingsScreen(
-                onBack = { nav.popBackStack() },
+                onBack = { nav.back(entry) },
                 onTerms = { nav.navigate("settings/terms") },
                 onAbout = { nav.navigate("settings/about") },
             )
         }
-        composable("settings/terms") {
-            TermsScreen(onAccept = null, onBack = { nav.popBackStack() })
+        composable("settings/terms") { entry ->
+            TermsScreen(onAccept = null, onBack = { nav.back(entry) })
         }
-        composable("settings/about") {
-            AboutScreen(onBack = { nav.popBackStack() })
+        composable("settings/about") { entry ->
+            AboutScreen(onBack = { nav.back(entry) })
         }
-        composable("new-team") {
-            TeamFormScreen(null, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
+        composable("new-team") { entry ->
+            TeamFormScreen(null, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
         }
         composable("team/{id}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             TeamScreen(
                 id,
-                onBack = { nav.popBackStack() },
+                onBack = { nav.back(entry) },
                 onEdit = { nav.navigate("team/$id/edit") },
                 onNewPlayer = { nav.navigate("team/$id/new-player") },
                 onPlayer = { player -> nav.navigate("team/$id/player/$player") },
@@ -162,20 +167,20 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
         }
         composable("team/{id}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            TeamFormScreen(id, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
+            TeamFormScreen(id, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
         }
         composable("team/{id}/new-player") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            PlayerFormScreen(id, null, onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
+            PlayerFormScreen(id, null, onBack = { nav.back(entry) }, onDone = { nav.back(entry) })
         }
         composable("team/{id}/player/{player}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val player = entry.arguments?.getString("player").orEmpty()
-            PlayerFormScreen(id, player, onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
+            PlayerFormScreen(id, player, onBack = { nav.back(entry) }, onDone = { nav.back(entry) })
         }
         composable("team/{id}/new-match") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            MatchFormScreen(id, null, onBack = { nav.popBackStack() }, onSaved = { m ->
+            MatchFormScreen(id, null, onBack = { nav.back(entry) }, onSaved = { m ->
                 // as the TUI, a new match goes on with its first set; back
                 // from it, the page of the match
                 val match = "team/$id/match/${Uri.encode(m)}"
@@ -190,7 +195,7 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
             MatchScreen(
                 id,
                 m,
-                onBack = { nav.popBackStack() },
+                onBack = { nav.back(entry) },
                 onEdit = { nav.navigate("$match/edit") },
                 onStartSet = { nav.navigate("$match/start-set") },
                 onResumeSet = { nav.navigate("$match/scouting") },
@@ -206,7 +211,7 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
                 id,
                 m,
                 set,
-                onBack = { nav.popBackStack() },
+                onBack = { nav.back(entry) },
                 onStats = { nav.navigate("team/$id/match/${Uri.encode(m)}/stats?set=$set") },
             )
         }
@@ -214,19 +219,19 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
             val set = entry.arguments?.getString("set")?.toIntOrNull()?.takeIf { it > 0 }
-            MatchStatsScreen(id, m, set, onBack = { nav.popBackStack() })
+            MatchStatsScreen(id, m, set, onBack = { nav.back(entry) })
         }
         composable("team/{id}/match/{match}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
-            MatchFormScreen(id, m, onBack = { nav.popBackStack() }, onSaved = { nav.popBackStack() })
+            MatchFormScreen(id, m, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
         }
         composable("team/{id}/match/{match}/start-set") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
             // as the TUI, a set started goes on with its scouting; back from
             // it, the page of the match
-            SetStartScreen(id, m, onBack = { nav.popBackStack() }, onStarted = {
+            SetStartScreen(id, m, onBack = { nav.back(entry) }, onStarted = {
                 nav.navigate("team/$id/match/${Uri.encode(m)}/scouting") {
                     popUpTo("team/{id}/match/{match}/start-set") { inclusive = true }
                 }
@@ -235,9 +240,16 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
         composable("team/{id}/match/{match}/scouting") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
-            ScoutingScreen(id, m, onBack = { nav.popBackStack() })
+            ScoutingScreen(id, m, onBack = { nav.back(entry) })
         }
     }
+}
+
+/** Back from the screen of `entry`, once: a second touch of the arrow
+ * before the screen goes would go back from the one under it too, the
+ * teams last, and leave an empty screen. */
+private fun NavController.back(entry: NavBackStackEntry) {
+    if (currentBackStackEntry == entry) popBackStack()
 }
 
 /** A match just imported, over its team. */

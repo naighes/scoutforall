@@ -108,11 +108,9 @@ import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.ServeTypeEnum
 import io.github.naighes.scout4all.core.TechniqueChoice
 import io.github.naighes.scout4all.core.TechniqueEnum
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /** All the screen shows at a step, read from the core at once. */
 data class ScoutingView(
@@ -158,7 +156,7 @@ class ScoutingViewModel(
             mutableState.value = try {
                 val s = app.core { it.scouting(teamId, matchId) }
                 scouting = s
-                ScoutingUi.Choosing(withContext(Dispatchers.IO) { view(s) })
+                ScoutingUi.Choosing(app.onCore { view(s) })
             } catch (e: MobileException) {
                 ScoutingUi.Failed(e.reason)
             }
@@ -193,7 +191,7 @@ class ScoutingViewModel(
     fun stats(scope: StatsScope) {
         val s = scouting ?: return
         viewModelScope.launch {
-            mutableStats.value = withContext(Dispatchers.IO) {
+            mutableStats.value = app.onCore {
                 try {
                     s.stats(scope)
                 } catch (e: MobileException) {
@@ -206,7 +204,7 @@ class ScoutingViewModel(
     /** A fundamental in detail, off the main thread. */
     suspend fun detail(scope: StatsScope, event: EventTypeEnum, filter: DetailFilter): DetailStats? {
         val s = scouting ?: return null
-        return withContext(Dispatchers.IO) {
+        return app.onCore {
             try {
                 s.detail(scope, event, filter)
             } catch (e: MobileException) {
@@ -231,7 +229,7 @@ class ScoutingViewModel(
         }
         mutableState.value = ScoutingUi.Choosing(view, busy = true)
         viewModelScope.launch {
-            mutableState.value = withContext(Dispatchers.IO) {
+            mutableState.value = app.onCore {
                 try {
                     when (choice(s)) {
                         Progress.SET_OVER -> {

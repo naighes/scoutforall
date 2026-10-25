@@ -39,7 +39,10 @@ open class Scout4AllApplication : Application() {
     protected open val coreDispatcher: CoroutineDispatcher get() = Dispatchers.IO
 
     /** Calls the core off the main thread: it blocks. */
-    suspend fun <T> core(call: (Scout4All) -> T): T = withContext(coreDispatcher) { call(core) }
+    suspend fun <T> core(call: (Scout4All) -> T): T = onCore { call(core) }
+
+    /** Calls what the core made (a scouting) where the core is called. */
+    suspend fun <T> onCore(call: () -> T): T = withContext(coreDispatcher) { call() }
 }
 
 /** What the core says went wrong, for the user. */
