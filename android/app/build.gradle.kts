@@ -67,7 +67,8 @@ dependencies {
 abstract class CargoTask : DefaultTask() {
     @get:Inject abstract val exec: ExecOperations
     @get:Internal abstract val workspace: DirectoryProperty
-    @get:Internal abstract val ndk: DirectoryProperty
+    // only to build for Android: the tests run without the NDK
+    @get:Internal @get:Optional abstract val ndk: DirectoryProperty
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
 
     init {
@@ -79,7 +80,7 @@ abstract class CargoTask : DefaultTask() {
         exec.exec {
             workingDir = workspace.get().asFile
             environment("PATH", "${bin.path}${File.pathSeparator}${System.getenv("PATH")}")
-            environment("ANDROID_NDK_HOME", ndk.get().asFile.path)
+            ndk.orNull?.let { environment("ANDROID_NDK_HOME", it.asFile.path) }
             environment(env)
             commandLine(listOf(File(bin, "cargo").takeIf { it.exists() }?.path ?: "cargo") + args)
         }
@@ -140,7 +141,6 @@ val cargoNdk = tasks.register<CargoNdk>("cargoNdk") {
 
 val uniffiBindgen = tasks.register<UniffiBindgen>("uniffiBindgen") {
     workspace.set(workspaceDir)
-    ndk.set(androidComponents.sdkComponents.ndkDirectory)
     outputDir.set(layout.buildDirectory.dir("generated/uniffi/kotlin"))
 }
 
