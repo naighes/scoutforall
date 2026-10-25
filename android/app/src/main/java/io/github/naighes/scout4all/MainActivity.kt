@@ -2,6 +2,7 @@ package io.github.naighes.scout4all
 
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -13,17 +14,25 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.core.animation.doOnEnd
+import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.splashscreen.SplashScreenViewProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 class MainActivity : ComponentActivity() {
     private val teams: TeamsViewModel by viewModels()
     private val terms: TermsViewModel by viewModels()
+
+    // an archive another app opened with this one, until it's shown
+    private val opened = MutableStateFlow<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -40,11 +49,19 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
+        // not again when the activity is recreated, e.g. rotated
+        if (savedInstanceState == null) opened.value = intent.archive()
         setContent {
             Scout4AllTheme {
-                Navigation(teams, terms)
+                Navigation(teams, terms, opened) { opened.value = null }
             }
         }
+    }
+
+    // one activity: an archive opened while the app runs comes here
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.archive()?.let { opened.value = it }
     }
 
     /** The ball grows and fades with the splash, once its turn is over. */
@@ -70,15 +87,32 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** The archive of "Open with" (a file manager, WhatsApp) or of the share
+ * sheet (Quick Share). */
+private fun Intent.archive(): Uri? = when (action) {
+    Intent.ACTION_VIEW -> data
+    Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(this, Intent.EXTRA_STREAM, Uri::class.java)
+    else -> null
+}
+
 /** The screens: the terms of use until seen, then teams → team → its form,
  * a player or a match → its form, the start of a set, its scouting, its
  * events or the statistics, and the forms of a new team, player or match
  * (which goes on with its first set); teams → settings → terms, about. */
 @Composable
-private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel) {
+private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: StateFlow<Uri?>, onOpened: () -> Unit) {
     // under the splash until read
     val seen = terms.seen.collectAsState().value ?: return
     val nav = rememberNavController()
+    // over any screen, once the terms are accepted
+    val import = rememberImport(teamId = null, onTeam = { nav.navigate("team/$it") }, onMatch = nav::openMatch)
+    val archive = opened.collectAsState().value
+    LaunchedEffect(archive, seen) {
+        if (seen && archive != null) {
+            onOpened()
+            import(archive)
+        }
+    }
     NavHost(nav, startDestination = if (seen) "teams" else "terms") {
         composable("terms") {
             TermsScreen(
@@ -95,10 +129,7 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel) {
                 onTeam = { id -> nav.navigate("team/$id") },
                 onNewTeam = { nav.navigate("new-team") },
                 onSettings = { nav.navigate("settings") },
-                onMatch = { id, m ->
-                    nav.navigate("team/$id")
-                    nav.navigate("team/$id/match/${Uri.encode(m)}")
-                },
+                onMatch = nav::openMatch,
             )
         }
         composable("settings") {
@@ -207,4 +238,10 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel) {
             ScoutingScreen(id, m, onBack = { nav.popBackStack() })
         }
     }
+}
+
+/** A match just imported, over its team. */
+private fun NavController.openMatch(teamId: String, matchId: String) {
+    navigate("team/$teamId")
+    navigate("team/$teamId/match/${Uri.encode(matchId)}")
 }

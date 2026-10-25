@@ -110,8 +110,8 @@ fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = 
 private class Chosen(val bytes: ByteArray, val fileName: String?, val preview: ArchivePreview)
 
 /** Imports an archive from a file the user chooses (Download, Drive, a USB
- * stick), after showing what it holds: a team, or a match into `teamId`
- * (any team of its players when null). Then shows what was imported. */
+ * stick): a team, or a match into `teamId` (any team of its players when
+ * null). */
 @Composable
 fun ImportButton(
     description: String,
@@ -119,28 +119,31 @@ fun ImportButton(
     onTeam: (String) -> Unit,
     onMatch: (teamId: String, matchId: String) -> Unit,
 ) {
+    val import = rememberImport(teamId, onTeam, onMatch)
+    // some apps don't say a zip is a zip
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(import)
+    }
+    IconButton(onClick = { open.launch(arrayOf(ZIP, "application/x-zip-compressed", "application/octet-stream")) }) {
+        Icon(painterResource(R.drawable.ic_import), contentDescription = description)
+    }
+}
+
+/** Reads the archive at a uri and shows what it holds; imported once
+ * confirmed, then shows what was imported. Also for the archives another
+ * app opens with this one ("Open with", Quick Share, WhatsApp…). */
+@Composable
+fun rememberImport(
+    teamId: String?,
+    onTeam: (String) -> Unit,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+): (Uri) -> Unit {
     val context = LocalContext.current
     val app = context.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     var chosen by remember { mutableStateOf<Chosen?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     error?.let { ErrorDialog(it) { error = null } }
-    // some apps don't say a zip is a zip
-    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            scope.launch {
-                context.report({ error = it }) {
-                    val (bytes, fileName) = context.read(it)
-                    val preview = app.core { core -> core.previewArchive(bytes, fileName, teamId) }
-                    chosen = Chosen(bytes, fileName, preview)
-                    null
-                }
-            }
-        }
-    }
-    IconButton(onClick = { open.launch(arrayOf(ZIP, "application/x-zip-compressed", "application/octet-stream")) }) {
-        Icon(painterResource(R.drawable.ic_import), contentDescription = description)
-    }
     chosen?.let { c ->
         ImportDialog(c.preview, teamId, onDismiss = { chosen = null }) { into ->
             chosen = null
@@ -159,6 +162,16 @@ fun ImportButton(
                         }
                     }
                 }
+            }
+        }
+    }
+    return { uri ->
+        scope.launch {
+            context.report({ error = it }) {
+                val (bytes, fileName) = context.read(uri)
+                val preview = app.core { core -> core.previewArchive(bytes, fileName, teamId) }
+                chosen = Chosen(bytes, fileName, preview)
+                null
             }
         }
     }
@@ -248,6 +261,9 @@ private suspend fun Context.report(onError: (String) -> Unit, action: suspend ()
         onError(e.reason)
     } catch (e: IOException) {
         onError(e.localizedMessage ?: getString(R.string.file_not_read))
+    } catch (_: SecurityException) {
+        // the app that has the file didn't let this one read it
+        onError(getString(R.string.file_not_read))
     }
 }
 
