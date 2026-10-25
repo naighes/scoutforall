@@ -3,12 +3,11 @@ use crate::screens::{file_system_screen::FileSystemAction, screen::AppAction};
 use async_trait::async_trait;
 use hf::is_hidden;
 use scout4all_core::{
-    archive::import_team,
+    archive::{file_team_id, import_team},
     errors::{AppError, IOError},
     providers::{team_reader::TeamReader, team_writer::TeamWriter},
 };
 use std::{fs, path::Path, sync::Arc};
-use uuid::Uuid;
 
 pub struct ImportTeamAction<TR: TeamReader + Send + Sync, TW: TeamWriter + Send + Sync> {
     team_reader: Arc<TR>,
@@ -41,9 +40,9 @@ impl<TR: TeamReader + Send + Sync, TW: TeamWriter + Send + Sync> FileSystemActio
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
         // the archives exported up to v0.9.0 have the id only in their name
         let file_id = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .and_then(|stem| Uuid::parse_str(stem).ok());
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(file_team_id);
         let archive = fs::read(path).map_err(|e| AppError::IO(IOError::from(e)))?;
         import_team(
             &archive,

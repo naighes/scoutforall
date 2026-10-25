@@ -22,6 +22,7 @@ use serde::Deserialize;
 use std::{
     collections::BTreeMap,
     io::{Cursor, Read, Write},
+    path::Path,
 };
 use uuid::Uuid;
 use zip::{
@@ -156,9 +157,37 @@ fn file_content(
     Ok((name, content))
 }
 
-/// Adds the team of the archive, unless there's one with its id: the one in
-/// the archive or, for the archives of the older versions, `file_id`, taken
-/// from the name of the file.
+/// The id of a team archive in the name of its file, the only place the
+/// archives exported up to v0.9.0 have it.
+pub fn file_team_id(file_name: &str) -> Option<Uuid> {
+    Path::new(file_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| Uuid::parse_str(stem).ok())
+}
+
+/// The team of the archive, with the id it's imported with: the one in the
+/// archive or, for the archives of the older versions, `file_id`. Unless
+/// there's already a team with that id.
+pub async fn team_to_import(
+    archive: &[u8],
+    file_id: Option<Uuid>,
+    team_reader: &(impl TeamReader + Sync + ?Sized),
+    labels: &Labels,
+) -> Result<TeamEntry, AppError> {
+    let message = |label: &str| AppError::IO(IOError::Msg(label.to_string()));
+    let (mut team, id) = match read_archive(archive, labels)? {
+        Archive::Team { team, id } => Ok((team, id.or(file_id))),
+        Archive::Match(_) => Err(message(labels.invalid_archive)),
+    }?;
+    team.id = id.ok_or_else(|| message(labels.team_archive_without_id))?;
+    match team_reader.exists(&team.id).await? {
+        true => Err(message(labels.team_already_exists)),
+        false => Ok(team),
+    }
+}
+
+/// Adds the team of the archive, as `team_to_import` finds it.
 pub async fn import_team(
     archive: &[u8],
     file_id: Option<Uuid>,
@@ -166,22 +195,10 @@ pub async fn import_team(
     team_writer: &(impl TeamWriter + Sync + ?Sized),
     labels: &Labels,
 ) -> Result<TeamEntry, AppError> {
-    let (team, id) = match read_archive(archive, labels)? {
-        Archive::Team { team, id } => Ok((team, id.or(file_id))),
-        Archive::Match(_) => Err(AppError::IO(IOError::Msg(
-            labels.invalid_archive.to_string(),
-        ))),
-    }?;
-    let team_id =
-        id.ok_or_else(|| AppError::IO(IOError::Msg(labels.team_archive_without_id.to_string())))?;
-    if team_reader.exists(&team_id).await? {
-        return Err(AppError::IO(IOError::Msg(
-            labels.team_already_exists.to_string(),
-        )));
-    }
+    let team = team_to_import(archive, file_id, team_reader, labels).await?;
     team_writer
         .save(TeamInput::New {
-            id: Some(team_id),
+            id: Some(team.id),
             name: team.name,
             year: team.year,
             classification: team.classification,
@@ -217,6 +234,33 @@ pub fn is_match_of(m: &MatchEntry, team: &TeamEntry) -> bool {
 /// without sets.
 pub fn teams_of_match<'a>(m: &MatchEntry, teams: &'a [TeamEntry]) -> Vec<&'a TeamEntry> {
     teams.iter().filter(|team| is_match_of(m, team)).collect()
+}
+
+/// The match of the archive and the teams it may be imported into: those
+/// of its players that don't have it yet. Unless there's none.
+pub async fn match_to_import<'a>(
+    archive: &[u8],
+    teams: &'a [TeamEntry],
+    match_reader: &(impl MatchReader + Sync + ?Sized),
+    labels: &Labels,
+) -> Result<(MatchEntry, Vec<&'a TeamEntry>), AppError> {
+    let message = |label: &str| AppError::IO(IOError::Msg(label.to_string()));
+    let m = match read_archive(archive, labels)? {
+        Archive::Match(m) => Ok(m),
+        Archive::Team { .. } => Err(message(labels.invalid_archive)),
+    }?;
+    let ours = teams_of_match(&m, teams);
+    let mut free = Vec::new();
+    for team in &ours {
+        if !match_reader.exists(team, &m.id).await? {
+            free.push(*team);
+        }
+    }
+    match (ours.is_empty(), free.is_empty()) {
+        (true, _) => Err(message(labels.match_of_another_team)),
+        (false, true) => Err(message(labels.match_already_exists)),
+        (false, false) => Ok((m, free)),
+    }
 }
 
 /// Adds the match of the archive to the team, unless the team has one

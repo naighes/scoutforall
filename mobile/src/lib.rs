@@ -8,9 +8,10 @@
 
 use chrono::{DateTime, FixedOffset};
 use scout4all_core::{
+    archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
     detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
-    errors::AppError,
+    errors::{AppError, IOError},
     event_edit::{EditField, EventEdit},
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error},
@@ -252,9 +253,13 @@ pub enum MobileError {
 
 impl From<AppError> for MobileError {
     fn from(e: AppError) -> Self {
-        MobileError::Failed {
-            reason: e.to_string(),
-        }
+        // the messages of the core are in the labels of the domain, for the
+        // user as they are
+        let reason = match e {
+            AppError::IO(IOError::Msg(message)) => message,
+            other => other.to_string(),
+        };
+        MobileError::Failed { reason }
     }
 }
 
@@ -392,6 +397,42 @@ pub enum MatchListing {
     },
     Unreadable {
         folder: String,
+    },
+}
+
+/// An archive to share or to save: the zip of the CLI, and the name the
+/// CLI gives to its file.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct ExportedArchive {
+    pub file_name: String,
+    pub bytes: Vec<u8>,
+}
+
+/// A team a match may be imported into.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct TeamChoice {
+    pub id: String,
+    pub name: String,
+}
+
+/// What an archive holds, to confirm importing it: only an archive that
+/// can be imported.
+#[derive(Debug, PartialEq, uniffi::Enum)]
+pub enum ArchivePreview {
+    Team {
+        name: String,
+        year: u16,
+        players: u32,
+    },
+    Match {
+        opponent: String,
+        home: bool,
+        /// RFC 3339, as in `MatchListing`
+        date: String,
+        won: u8,
+        lost: u8,
+        /// the teams of its players without it, by name: usually one
+        teams: Vec<TeamChoice>,
     },
 }
 
@@ -2296,6 +2337,119 @@ impl Scout4All {
         Ok(team.id.to_string())
     }
 
+    /// The archive of the team, as the CLI exports it.
+    pub fn export_team(&self, team_id: String) -> Result<ExportedArchive, MobileError> {
+        let id = parse_id(&team_id)?;
+        let bytes = self
+            .runtime
+            .block_on(archive::export_team(&*self.store, &id))?;
+        Ok(ExportedArchive {
+            file_name: format!("{id}.zip"),
+            bytes,
+        })
+    }
+
+    /// The archive of a match of the team, as the CLI exports it.
+    pub fn export_match(
+        &self,
+        team_id: String,
+        match_id: String,
+    ) -> Result<ExportedArchive, MobileError> {
+        let id = parse_id(&team_id)?;
+        let bytes = self
+            .runtime
+            .block_on(archive::export_match(&*self.store, &id, &match_id))?;
+        Ok(ExportedArchive {
+            file_name: format!("{match_id}.zip"),
+            bytes,
+        })
+    }
+
+    /// What the archive holds, unless it can't be imported: e.g. a team
+    /// already there, or a match of none of the teams. `file_name` is the
+    /// name of the file it comes from, when known: the archives exported up
+    /// to v0.9.0 have the id of the team only there.
+    pub fn preview_archive(
+        &self,
+        bytes: Vec<u8>,
+        file_name: Option<String>,
+    ) -> Result<ArchivePreview, MobileError> {
+        let labels = self.language.labels();
+        match read_archive(&bytes, labels)? {
+            Archive::Team { .. } => {
+                let file_id = file_name.as_deref().and_then(file_team_id);
+                let team = self.runtime.block_on(team_to_import(
+                    &bytes,
+                    file_id,
+                    &self.team_reader,
+                    labels,
+                ))?;
+                Ok(ArchivePreview::Team {
+                    players: count(&team),
+                    name: team.name,
+                    year: team.year,
+                })
+            }
+            Archive::Match(_) => {
+                let teams = self.readable_teams()?;
+                let (m, found) = self.runtime.block_on(match_to_import(
+                    &bytes,
+                    &teams,
+                    &self.match_reader,
+                    labels,
+                ))?;
+                let status = m.get_status()?;
+                let mut choices: Vec<TeamChoice> = found
+                    .into_iter()
+                    .map(|t| TeamChoice {
+                        id: t.id.to_string(),
+                        name: t.name.clone(),
+                    })
+                    .collect();
+                choices.sort_by_key(|t| t.name.to_lowercase());
+                Ok(ArchivePreview::Match {
+                    date: m.date.to_rfc3339(),
+                    opponent: m.opponent,
+                    home: m.home,
+                    won: status.us_wins,
+                    lost: status.them_wins,
+                    teams: choices,
+                })
+            }
+        }
+    }
+
+    /// Adds the team of the archive; its id.
+    pub fn import_team(
+        &self,
+        bytes: Vec<u8>,
+        file_name: Option<String>,
+    ) -> Result<String, MobileError> {
+        let file_id = file_name.as_deref().and_then(file_team_id);
+        let team = self.runtime.block_on(archive::import_team(
+            &bytes,
+            file_id,
+            &self.team_reader,
+            &self.team_writer,
+            self.language.labels(),
+        ))?;
+        Ok(team.id.to_string())
+    }
+
+    /// Adds the match of the archive to the team; its id.
+    pub fn import_match(&self, bytes: Vec<u8>, team_id: String) -> Result<String, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let m = self.runtime.block_on(archive::import_match(
+            &bytes,
+            &team,
+            &self.match_reader,
+            &self.match_writer,
+            &*self.set_writer,
+            self.language.labels(),
+        ))?;
+        Ok(m.id)
+    }
+
     /// The language of the labels from now on, a code like `"it"` (English
     /// when it isn't supported): the app follows the language chosen for it
     /// in the system.
@@ -2389,6 +2543,16 @@ impl Scout4All {
             Some(bytes) => from_slice(&bytes).map_err(failed),
             None => Ok(AppConfig::default()),
         }
+    }
+
+    /// The teams that can be read.
+    fn readable_teams(&self) -> Result<Vec<TeamEntry>, MobileError> {
+        Ok(self
+            .runtime
+            .block_on(self.team_reader.read_all())?
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect())
     }
 
     fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
@@ -3516,5 +3680,130 @@ mod tests {
             }
             other => unreachable!("expected a number in use, got {other:?}"),
         }
+    }
+
+    /// The fixtures of the core: archives as exported up to v0.9.0.
+    const OLD_TEAM: &[u8] =
+        include_bytes!("../../core/src/tests/fixtures/45a589d5-004a-4a50-99f5-6d78fd052a3c.zip");
+    const OLD_TEAM_FILE: &str = "45a589d5-004a-4a50-99f5-6d78fd052a3c.zip";
+    const OLD_MATCH: &[u8] =
+        include_bytes!("../../core/src/tests/fixtures/2025-09-20_club_arezzo.zip");
+
+    fn reason<T: std::fmt::Debug>(result: Result<T, MobileError>) -> String {
+        match result {
+            Err(MobileError::Failed { reason }) => reason,
+            other => panic!("expected a failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_team_and_a_match_move_to_another_phone() {
+        let from_dir = tempfile::tempdir().unwrap();
+        let from = app(&from_dir, "it");
+        let (team, m) = match_with_a_set(&from);
+        started_set(&from, &team, &m);
+        let team_zip = from.export_team(team.clone()).unwrap();
+        assert_eq!(team_zip.file_name, format!("{team}.zip"));
+        let match_zip = from.export_match(team.clone(), m.clone()).unwrap();
+        assert_eq!(match_zip.file_name, format!("{m}.zip"));
+
+        let to_dir = tempfile::tempdir().unwrap();
+        let to = app(&to_dir, "it");
+        // renamed on the way: the archive has the id
+        let renamed = Some("Cortona (1).zip".to_string());
+        assert_eq!(
+            to.preview_archive(team_zip.bytes.clone(), renamed.clone())
+                .unwrap(),
+            ArchivePreview::Team {
+                name: "Cortona".into(),
+                year: 2026,
+                players: 7,
+            }
+        );
+        assert_eq!(
+            to.import_team(team_zip.bytes.clone(), renamed).unwrap(),
+            team
+        );
+        let it = labels(LanguageEnum::It);
+        assert_eq!(
+            reason(to.preview_archive(team_zip.bytes, None)),
+            it.team_already_exists
+        );
+        assert_eq!(
+            to.preview_archive(match_zip.bytes.clone(), None).unwrap(),
+            ArchivePreview::Match {
+                opponent: "Arezzo".into(),
+                home: true,
+                date: "2026-10-24T18:00:00+02:00".into(),
+                won: 0,
+                lost: 0,
+                teams: vec![TeamChoice {
+                    id: team.clone(),
+                    name: "Cortona".into(),
+                }],
+            }
+        );
+        assert_eq!(
+            to.import_match(match_zip.bytes.clone(), team.clone())
+                .unwrap(),
+            m
+        );
+        assert_eq!(
+            to.match_details(team.clone(), m.clone()).unwrap(),
+            from.match_details(team, m).unwrap()
+        );
+        assert_eq!(
+            reason(to.preview_archive(match_zip.bytes, None)),
+            it.match_already_exists
+        );
+    }
+
+    #[test]
+    fn the_archives_of_the_cli_up_to_v0_9_0_are_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let en = labels(LanguageEnum::En);
+        assert_eq!(
+            reason(app.preview_archive(OLD_MATCH.to_vec(), None)),
+            en.match_of_another_team
+        );
+        assert_eq!(
+            reason(app.preview_archive(OLD_TEAM.to_vec(), None)),
+            en.team_archive_without_id
+        );
+        let file_name = Some(OLD_TEAM_FILE.to_string());
+        assert!(matches!(
+            app.preview_archive(OLD_TEAM.to_vec(), file_name.clone()),
+            Ok(ArchivePreview::Team { players: 8, .. })
+        ));
+        let team = app.import_team(OLD_TEAM.to_vec(), file_name).unwrap();
+        let Ok(ArchivePreview::Match {
+            teams, won, lost, ..
+        }) = app.preview_archive(OLD_MATCH.to_vec(), Some("whatever.zip".into()))
+        else {
+            panic!("expected a match");
+        };
+        assert_eq!((teams.len(), won, lost), (1, 0, 0));
+        let m = app.import_match(OLD_MATCH.to_vec(), team.clone()).unwrap();
+        let details = app.match_details(team, m).unwrap();
+        assert_eq!(details.opponent, "Club Arezzo");
+        assert_eq!(
+            details.sets,
+            vec![SetScore {
+                number: 1,
+                us: 3,
+                them: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_an_archive_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        assert_eq!(
+            reason(app.preview_archive(b"not a zip".to_vec(), None)),
+            labels(LanguageEnum::It).invalid_archive
+        );
     }
 }

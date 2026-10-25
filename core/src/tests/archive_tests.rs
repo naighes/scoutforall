@@ -6,8 +6,8 @@
 mod tests {
     use crate::{
         archive::{
-            Archive, export_match, export_team, import_match, import_team, read_archive,
-            teams_of_match,
+            Archive, export_match, export_team, file_team_id, import_match, import_team,
+            match_to_import, read_archive, teams_of_match,
         },
         errors::{AppError, IOError},
         localization::Language,
@@ -269,6 +269,43 @@ mod tests {
         assert_eq!(m.opponent, "Club Arezzo");
         let found: Vec<_> = teams_of_match(&m, &teams).iter().map(|t| t.id).collect();
         assert_eq!(found, [teams[1].id]);
+    }
+
+    /// Before importing, e.g. to show the archive opened from outside.
+    #[tokio::test]
+    async fn the_match_to_import_goes_to_its_team_until_imported() {
+        let p = Providers::new();
+        let other = p.other_team().await;
+        let only_other = [other.clone()];
+        let none = match_to_import(MATCH_UP_TO_V0_9_0, &only_other, &p.match_reader, EN);
+        assert_eq!(message(none.await), EN.match_of_another_team);
+        let team = p
+            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
+            .await
+            .unwrap();
+        let teams = [other, team];
+        let (m, found) = match_to_import(MATCH_UP_TO_V0_9_0, &teams, &p.match_reader, EN)
+            .await
+            .unwrap();
+        assert_eq!(m.opponent, "Club Arezzo");
+        assert_eq!(
+            found.iter().map(|t| t.id).collect::<Vec<_>>(),
+            [teams[1].id]
+        );
+        p.import_match(MATCH_UP_TO_V0_9_0, &teams[1]).await.unwrap();
+        let again = match_to_import(MATCH_UP_TO_V0_9_0, &teams, &p.match_reader, EN);
+        assert_eq!(message(again.await), EN.match_already_exists);
+    }
+
+    #[test]
+    fn the_id_of_a_team_in_the_name_of_its_file() {
+        assert_eq!(
+            file_team_id(&format!("{TEAM_ID}.zip")),
+            Uuid::parse_str(TEAM_ID).ok()
+        );
+        assert_eq!(file_team_id(TEAM_ID), Uuid::parse_str(TEAM_ID).ok());
+        assert_eq!(file_team_id(&format!("{TEAM_ID} (1).zip")), None);
+        assert_eq!(file_team_id("Volley Club.zip"), None);
     }
 
     #[tokio::test]
