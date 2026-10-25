@@ -154,4 +154,13 @@
     <string name="save_to_file">ファイルに保存…</string>
     <string name="archive_saved">保存しました</string>
     <string name="archive_not_saved">ファイルを保存できませんでした</string>
+    <string name="import_team">チームをインポート</string>
+    <string name="import_match">試合をインポート</string>
+    <string name="import_archive">インポート</string>
+    <string name="import_team_title">チームをインポートしますか？</string>
+    <string name="import_match_title">試合をインポートしますか？</string>
+    <string name="into_team">インポート先のチーム</string>
+    <string name="team_imported">チームをインポートしました</string>
+    <string name="match_imported">試合をインポートしました</string>
+    <string name="file_not_read">ファイルを読み込めませんでした</string>
 </resources>

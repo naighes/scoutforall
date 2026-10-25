@@ -71,6 +71,7 @@ fun TeamsScreen(
     onTeam: (String) -> Unit,
     onNewTeam: () -> Unit,
     onSettings: () -> Unit,
+    onMatch: (teamId: String, matchId: String) -> Unit,
 ) {
     val state by teams.state.collectAsState()
     // back from a team, which may have changed
@@ -82,6 +83,7 @@ fun TeamsScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.teams)) },
                 actions = {
+                    ImportButton(stringResource(R.string.import_team), teamId = null, onTeam = onTeam, onMatch = onMatch)
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
                     }

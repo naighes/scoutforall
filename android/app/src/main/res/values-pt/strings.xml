@@ -155,4 +155,13 @@
     <string name="save_to_file">Salvar em arquivo…</string>
     <string name="archive_saved">Salvo</string>
     <string name="archive_not_saved">Não foi possível salvar o arquivo</string>
+    <string name="import_team">Importar equipe</string>
+    <string name="import_match">Importar partida</string>
+    <string name="import_archive">Importar</string>
+    <string name="import_team_title">Importar a equipe?</string>
+    <string name="import_match_title">Importar a partida?</string>
+    <string name="into_team">Na equipe</string>
+    <string name="team_imported">Equipe importada</string>
+    <string name="match_imported">Partida importada</string>
+    <string name="file_not_read">Não foi possível ler o arquivo</string>
 </resources>

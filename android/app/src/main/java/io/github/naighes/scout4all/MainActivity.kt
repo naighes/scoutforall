@@ -95,6 +95,10 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel) {
                 onTeam = { id -> nav.navigate("team/$id") },
                 onNewTeam = { nav.navigate("new-team") },
                 onSettings = { nav.navigate("settings") },
+                onMatch = { id, m ->
+                    nav.navigate("team/$id")
+                    nav.navigate("team/$id/match/${Uri.encode(m)}")
+                },
             )
         }
         composable("settings") {

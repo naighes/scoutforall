@@ -156,4 +156,13 @@
     <string name="save_to_file">Save to file…</string>
     <string name="archive_saved">Saved</string>
     <string name="archive_not_saved">Could not save the file</string>
+    <string name="import_team">Import team</string>
+    <string name="import_match">Import match</string>
+    <string name="import_archive">Import</string>
+    <string name="import_team_title">Import the team?</string>
+    <string name="import_match_title">Import the match?</string>
+    <string name="into_team">Into the team</string>
+    <string name="team_imported">Team imported</string>
+    <string name="match_imported">Match imported</string>
+    <string name="file_not_read">Could not read the file</string>
 </resources>

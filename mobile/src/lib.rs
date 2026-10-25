@@ -2366,13 +2366,15 @@ impl Scout4All {
     }
 
     /// What the archive holds, unless it can't be imported: e.g. a team
-    /// already there, or a match of none of the teams. `file_name` is the
-    /// name of the file it comes from, when known: the archives exported up
-    /// to v0.9.0 have the id of the team only there.
+    /// already there, or a match of none of the teams, or not of `team_id`
+    /// when it's imported into that team. `file_name` is the name of the
+    /// file it comes from, when known: the archives exported up to v0.9.0
+    /// have the id of the team only there.
     pub fn preview_archive(
         &self,
         bytes: Vec<u8>,
         file_name: Option<String>,
+        team_id: Option<String>,
     ) -> Result<ArchivePreview, MobileError> {
         let labels = self.language.labels();
         match read_archive(&bytes, labels)? {
@@ -2391,7 +2393,10 @@ impl Scout4All {
                 })
             }
             Archive::Match(_) => {
-                let teams = self.readable_teams()?;
+                let teams = match team_id {
+                    Some(id) => vec![self.read_team(&id)?],
+                    None => self.readable_teams()?,
+                };
                 let (m, found) = self.runtime.block_on(match_to_import(
                     &bytes,
                     &teams,
@@ -3712,7 +3717,7 @@ mod tests {
         // renamed on the way: the archive has the id
         let renamed = Some("Cortona (1).zip".to_string());
         assert_eq!(
-            to.preview_archive(team_zip.bytes.clone(), renamed.clone())
+            to.preview_archive(team_zip.bytes.clone(), renamed.clone(), None)
                 .unwrap(),
             ArchivePreview::Team {
                 name: "Cortona".into(),
@@ -3726,11 +3731,12 @@ mod tests {
         );
         let it = labels(LanguageEnum::It);
         assert_eq!(
-            reason(to.preview_archive(team_zip.bytes, None)),
+            reason(to.preview_archive(team_zip.bytes, None, None)),
             it.team_already_exists
         );
         assert_eq!(
-            to.preview_archive(match_zip.bytes.clone(), None).unwrap(),
+            to.preview_archive(match_zip.bytes.clone(), None, None)
+                .unwrap(),
             ArchivePreview::Match {
                 opponent: "Arezzo".into(),
                 home: true,
@@ -3753,7 +3759,7 @@ mod tests {
             from.match_details(team, m).unwrap()
         );
         assert_eq!(
-            reason(to.preview_archive(match_zip.bytes, None)),
+            reason(to.preview_archive(match_zip.bytes, None, None)),
             it.match_already_exists
         );
     }
@@ -3764,26 +3770,36 @@ mod tests {
         let app = app(&dir, "en");
         let en = labels(LanguageEnum::En);
         assert_eq!(
-            reason(app.preview_archive(OLD_MATCH.to_vec(), None)),
+            reason(app.preview_archive(OLD_MATCH.to_vec(), None, None)),
             en.match_of_another_team
         );
         assert_eq!(
-            reason(app.preview_archive(OLD_TEAM.to_vec(), None)),
+            reason(app.preview_archive(OLD_TEAM.to_vec(), None, None)),
             en.team_archive_without_id
         );
         let file_name = Some(OLD_TEAM_FILE.to_string());
         assert!(matches!(
-            app.preview_archive(OLD_TEAM.to_vec(), file_name.clone()),
+            app.preview_archive(OLD_TEAM.to_vec(), file_name.clone(), None),
             Ok(ArchivePreview::Team { players: 8, .. })
         ));
         let team = app.import_team(OLD_TEAM.to_vec(), file_name).unwrap();
         let Ok(ArchivePreview::Match {
             teams, won, lost, ..
-        }) = app.preview_archive(OLD_MATCH.to_vec(), Some("whatever.zip".into()))
+        }) = app.preview_archive(OLD_MATCH.to_vec(), Some("whatever.zip".into()), None)
         else {
             panic!("expected a match");
         };
         assert_eq!((teams.len(), won, lost), (1, 0, 0));
+        // from the matches of another team
+        let other = app.save_team(None, form("Other Club")).unwrap();
+        assert_eq!(
+            reason(app.preview_archive(OLD_MATCH.to_vec(), None, Some(other))),
+            en.match_of_another_team
+        );
+        assert!(matches!(
+            app.preview_archive(OLD_MATCH.to_vec(), None, Some(team.clone())),
+            Ok(ArchivePreview::Match { .. })
+        ));
         let m = app.import_match(OLD_MATCH.to_vec(), team.clone()).unwrap();
         let details = app.match_details(team, m).unwrap();
         assert_eq!(details.opponent, "Club Arezzo");
@@ -3802,7 +3818,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir, "it");
         assert_eq!(
-            reason(app.preview_archive(b"not a zip".to_vec(), None)),
+            reason(app.preview_archive(b"not a zip".to_vec(), None, None)),
             labels(LanguageEnum::It).invalid_archive
         );
     }

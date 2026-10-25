@@ -40,6 +40,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.MatchListing
 import io.github.naighes.scout4all.core.MobileException
@@ -98,10 +99,25 @@ fun TeamScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text((state as? TeamState.Loaded)?.team?.name ?: "") },
+                // on one line, room for the buttons
+                title = {
+                    Text(
+                        (state as? TeamState.Loaded)?.team?.name ?: "",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     if (loaded) {
+                        if (tab == MATCHES_TAB) {
+                            ImportButton(
+                                stringResource(R.string.import_match),
+                                teamId = id,
+                                onTeam = {},
+                                onMatch = { _, m -> onMatch(m) },
+                            )
+                        }
                         ExportButton(stringResource(R.string.export_team)) { it.exportTeam(id) }
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_team))

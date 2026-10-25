@@ -157,4 +157,13 @@
     <string name="save_to_file">Zapisz do pliku…</string>
     <string name="archive_saved">Zapisano</string>
     <string name="archive_not_saved">Nie można zapisać pliku</string>
+    <string name="import_team">Importuj drużynę</string>
+    <string name="import_match">Importuj mecz</string>
+    <string name="import_archive">Importuj</string>
+    <string name="import_team_title">Zaimportować drużynę?</string>
+    <string name="import_match_title">Zaimportować mecz?</string>
+    <string name="into_team">Do drużyny</string>
+    <string name="team_imported">Zaimportowano drużynę</string>
+    <string name="match_imported">Zaimportowano mecz</string>
+    <string name="file_not_read">Nie można odczytać pliku</string>
 </resources>
