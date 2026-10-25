@@ -96,7 +96,7 @@ class ScoutingTest {
         show()
         repeat(25) { touch("#") }
         rule.waitForText(string(R.string.set_won, 1))
-        rule.waitForText("25–0")
+        rule.waitForText(string(R.string.score_to, 25, 0))
         // saved: no set in progress, the next one to start
         core { it.setStart(team, match) }
         // a mistake: the last point goes back, the set goes on

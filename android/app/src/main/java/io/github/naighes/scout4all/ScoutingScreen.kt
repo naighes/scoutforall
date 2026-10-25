@@ -83,6 +83,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -485,11 +487,12 @@ private fun Score(state: ScoutingState) {
         if (points > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         previous = points
     }
-    // read as one: the teams with their points, who serves
+    // read as one: the teams with their points, who serves; TalkBack says
+    // it again at each point, when it's done saying what it was saying
     val spoken = "${left.name} ${left.points}, ${right.name} ${right.points}, " +
         stringResource(R.string.serves, if (weServe) us.name else them.name)
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.readAs(spoken), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.semantics { liveRegion = LiveRegionMode.Polite }.readAs(spoken), verticalAlignment = Alignment.CenterVertically) {
             TeamName(left, TextAlign.Start, Modifier.weight(1f))
             Points(left)
             Text(
@@ -856,7 +859,13 @@ private fun SetOverDialog(state: ScoutingState, onUndo: () -> Unit, onDone: () -
             ),
         )
     },
-    text = { Text("${state.scoreUs}–${state.scoreThem}", style = MaterialTheme.typography.headlineMedium) },
+    text = {
+        Text(
+            "${state.scoreUs}–${state.scoreThem}",
+            Modifier.readAs(stringResource(R.string.score_to, state.scoreUs.toInt(), state.scoreThem.toInt())),
+            style = MaterialTheme.typography.headlineMedium,
+        )
+    },
     confirmButton = { TextButton(onClick = onDone) { Text(stringResource(R.string.ok)) } },
     dismissButton = { TextButton(onClick = onUndo) { Text(stringResource(R.string.undo)) } },
 )

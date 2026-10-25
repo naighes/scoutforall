@@ -5,6 +5,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -12,6 +15,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.MatchForm
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -54,6 +58,30 @@ class TalkBackTest {
         // the server in the serve zone: the setter, with the ball
         assertSpoken("8, Alessia Orro, ${string(R.string.setter)}, ${string(R.string.serving)}")
         assertSpoken("18, Paola Egonu")
+    }
+
+    /** The score in a live region: TalkBack says it when it changes. */
+    private fun announced(): List<String> =
+        rule.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+            .fetchSemanticsNodes().mapNotNull { it.config.getOrNull(SemanticsProperties.Text)?.joinToString(", ") }
+
+    @Test
+    fun aPointIsAnnounced() {
+        val match = startFirstSet(team)
+        show("Cortona") { ScoutingScreen(team, match, onBack = {}) }
+        assertEquals(listOf("Italia 0, Cortona 0, " + string(R.string.serves, "Italia")), announced())
+        rule.onNode(hasContentDescription("ace") and hasClickAction()).performClick()
+        rule.waitFor({ "${announced()}" }) { announced() == listOf("Italia 1, Cortona 0, " + string(R.string.serves, "Italia")) }
+    }
+
+    @Test
+    fun theEndOfTheSetSaysTheScore() {
+        val match = startFirstSet(team)
+        serve(team, match, *Array(24) { EvalEnum.PERFECT })
+        show("Cortona") { ScoutingScreen(team, match, onBack = {}) }
+        rule.onNode(hasContentDescription("ace") and hasClickAction()).performClick()
+        rule.waitForText(string(R.string.set_won, 1))
+        assertSpoken(string(R.string.score_to, 25, 0))
     }
 
     @Test
