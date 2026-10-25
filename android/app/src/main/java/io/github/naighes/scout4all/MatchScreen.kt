@@ -65,7 +65,7 @@ fun MatchScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text((state as? MatchState.Loaded)?.match?.opponent ?: "") },
+                title = { Text((state as? MatchState.Loaded)?.match?.opponent ?: "", Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     if (state is MatchState.Loaded) {
@@ -104,7 +104,7 @@ private fun MatchContent(
     )
     Text(
         "${m.won}-${m.lost}",
-        modifier = Modifier.padding(horizontal = 16.dp),
+        modifier = Modifier.padding(horizontal = 16.dp).readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
         style = MaterialTheme.typography.displayMedium,
         fontWeight = FontWeight.SemiBold,
         color = resultColor(m.finished, m.won.toInt(), m.lost.toInt()),
@@ -152,6 +152,7 @@ private fun SetRow(set: SetScore, inProgress: Boolean, onClick: () -> Unit) = Li
     trailingContent = {
         Text(
             "${set.us}-${set.them}",
+            Modifier.readAs(stringResource(R.string.score_to, set.us.toInt(), set.them.toInt())),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             color = resultColor(!inProgress, set.us.toInt(), set.them.toInt()),

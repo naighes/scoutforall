@@ -209,9 +209,12 @@ fun SetStartScreen(teamId: String, matchId: String, onBack: () -> Unit, onStarte
         topBar = {
             TopAppBar(
                 title = {
-                    Text((state as? SetStartState.Choosing)?.let {
-                        stringResource(R.string.start_set_n, it.lineup.setNumber.toInt())
-                    } ?: "")
+                    Text(
+                        (state as? SetStartState.Choosing)?.let {
+                            stringResource(R.string.start_set_n, it.lineup.setNumber.toInt())
+                        } ?: "",
+                        Modifier.title(),
+                    )
                 },
                 navigationIcon = { BackButton(onBack) },
             )
@@ -306,6 +309,7 @@ private fun ServingTeam(lineup: Lineup, model: SetStartViewModel) {
     Column(Modifier.padding(horizontal = 16.dp)) {
         Text(
             stringResource(R.string.serving_team),
+            Modifier.title(),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

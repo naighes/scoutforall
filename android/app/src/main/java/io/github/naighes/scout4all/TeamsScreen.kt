@@ -81,7 +81,7 @@ fun TeamsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.teams)) },
+                title = { Text(stringResource(R.string.teams), Modifier.title()) },
                 actions = {
                     ImportButton(stringResource(R.string.import_team), teamId = null, onTeam = onTeam, onMatch = onMatch)
                     IconButton(onClick = onSettings) {

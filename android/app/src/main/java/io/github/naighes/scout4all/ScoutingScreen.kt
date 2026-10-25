@@ -81,6 +81,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.font.FontWeight
@@ -290,7 +291,7 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "") },
+                title = { Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "", Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
             )
         },
@@ -353,6 +354,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                             key = player?.id,
                             above = player?.receives == true,
                             touch = touch?.symbol.orEmpty().takeIf { player != null && player.id == touched },
+                            touchName = touch?.eval?.takeIf { player != null && player.id == touched },
                             spotlight = player?.spotlight == true,
                             efficiency = player?.efficiency,
                             grade = player?.grade,
@@ -483,8 +485,11 @@ private fun Score(state: ScoutingState) {
         if (points > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         previous = points
     }
+    // read as one: the teams with their points, who serves
+    val spoken = "${left.name} ${left.points}, ${right.name} ${right.points}, " +
+        stringResource(R.string.serves, if (weServe) us.name else them.name)
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.readAs(spoken), verticalAlignment = Alignment.CenterVertically) {
             TeamName(left, TextAlign.Start, Modifier.weight(1f))
             Points(left)
             Text(
@@ -722,7 +727,7 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                 }
             }
             Box(
-                Modifier.fillMaxHeight().clickable(enabled = events.isNotEmpty()) { open = !open }
+                Modifier.fillMaxHeight().clickable(enabled = events.isNotEmpty(), role = Role.Button) { open = !open }
                     .padding(start = 14.dp, end = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -790,7 +795,7 @@ private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewMod
     horizontalArrangement = Arrangement.spacedBy(4.dp),
 ) {
     techniques.forEach { t ->
-        val modifier = Modifier.weight(1f).heightIn(min = 56.dp).semantics { contentDescription = t.name }
+        val modifier = Modifier.weight(1f).heightIn(min = 56.dp).semantics { contentDescription = t.shortName ?: t.name }
         val padding = PaddingValues(0.dp)
         val content = @Composable {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

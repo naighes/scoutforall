@@ -153,7 +153,7 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(if (playerId == null) R.string.new_player else R.string.edit_player)) },
+                title = { Text(stringResource(if (playerId == null) R.string.new_player else R.string.edit_player), Modifier.title()) },
                 navigationIcon = { BackButton(back) },
                 actions = {
                     if (playerId != null && state is PlayerFormState.Editing) {

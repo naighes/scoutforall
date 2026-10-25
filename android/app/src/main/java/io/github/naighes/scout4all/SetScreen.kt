@@ -86,7 +86,7 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.set_n, setNumber)) },
+                title = { Text(stringResource(R.string.set_n, setNumber), Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
                 actions = { TextButton(onClick = onStats) { Text(stringResource(R.string.statistics)) } },
             )
@@ -149,14 +149,14 @@ private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
     val color = if (e.editable) MaterialTheme.colorScheme.onSurface else dim
     Text(
         (e.index.toInt() + 1).toString(),
-        Modifier.width(28.dp),
+        Modifier.width(28.dp).readAs(stringResource(R.string.event_n, e.index.toInt() + 1)),
         style = MaterialTheme.typography.labelMedium,
         color = dim,
         textAlign = TextAlign.End,
     )
     Text(
         e.event.symbol ?: "",
-        Modifier.width(20.dp),
+        Modifier.width(20.dp).let { m -> e.event.eval?.let { m.readAs(it) } ?: m.notRead() },
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
         color = color,
@@ -181,6 +181,7 @@ private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
     }
     Text(
         "${e.scoreUs}-${e.scoreThem}",
+        Modifier.readAs(stringResource(R.string.score_to, e.scoreUs.toInt(), e.scoreThem.toInt())),
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.SemiBold,
         color = color,

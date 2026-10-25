@@ -177,4 +177,14 @@
     <string name="discard_changes">Odrzucić zmiany?</string>
     <string name="discard">Odrzuć</string>
     <string name="keep_editing">Edytuj dalej</string>
+    <!-- read by TalkBack -->
+    <string name="position_spoken">Pozycja %d</string>
+    <string name="no_player">brak zawodnika</string>
+    <string name="last_touch">ostatnie dotknięcie %s</string>
+    <string name="efficiency_spoken">efektywność %s</string>
+    <string name="no_value">brak</string>
+    <string name="serves">%s zagrywa</string>
+    <string name="score_to">%1$d do %2$d</string>
+    <string name="sets_score">sety %1$d do %2$d</string>
+    <string name="touches_spoken">dotknięcia %1$d, perfekcyjne %2$d, błędy %3$d</string>
 </resources>

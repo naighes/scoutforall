@@ -42,21 +42,21 @@ class SetEventsTest {
     fun theLastEventCorrected() {
         serve(team, match, EvalEnum.PERFECT, EvalEnum.PERFECT)
         show()
-        rule.waitForText("2-0")
-        touch("2-0")
+        rule.waitForText(string(R.string.score_to, 2, 0))
+        touch(string(R.string.score_to, 2, 0))
         rule.waitForText(string(R.string.event_n, 2))
         touch("=")
         touch(string(R.string.save))
         rule.waitFor { score() == 1 to 1 }
-        rule.waitForText("1-1")
+        rule.waitForText(string(R.string.score_to, 1, 1))
     }
 
     @Test
     fun aCorrectionTheNextEventsDontFitIsNotSaved() {
         serve(team, match, EvalEnum.PERFECT, EvalEnum.PERFECT)
         show()
-        rule.waitForText("1-0")
-        touch("1-0")
+        rule.waitForText(string(R.string.score_to, 1, 0))
+        touch(string(R.string.score_to, 1, 0))
         rule.waitForText(string(R.string.event_n, 1))
         // a serve error: then they serve, not us
         touch("=")

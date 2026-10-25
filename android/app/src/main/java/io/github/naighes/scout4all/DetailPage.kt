@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -215,7 +216,7 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
         }
     }
     if (f.players.isNotEmpty()) {
-        Text(stringResource(R.string.players_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
         Column {
             f.players.forEach { p ->
                 PlayerRow(p, selected = p.player.id == query.filter.player) {
@@ -239,7 +240,7 @@ private fun TileRow(content: @Composable RowScope.() -> Unit) = Row(
  * tile. */
 @Composable
 private fun DetailTile(label: String, value: String, color: Color?, modifier: Modifier, detail: String? = null) = Surface(
-    modifier.fillMaxHeight(),
+    modifier.fillMaxHeight().semantics(mergeDescendants = true) {},
     shape = MaterialTheme.shapes.medium,
     color = MaterialTheme.colorScheme.surfaceVariant,
 ) {
@@ -267,10 +268,14 @@ private fun DetailTile(label: String, value: String, color: Color?, modifier: Mo
 
 /** An evaluation: its symbol and name, a bar as long as its share. */
 @Composable
-private fun EvalBar(e: EvalStats, most: Double) = Row(verticalAlignment = Alignment.CenterVertically) {
+private fun EvalBar(e: EvalStats, most: Double) = Row(
+    Modifier.semantics(mergeDescendants = true) {},
+    verticalAlignment = Alignment.CenterVertically,
+) {
+    // its name next to it
     Text(
         e.symbol,
-        Modifier.width(20.dp),
+        Modifier.width(20.dp).notRead(),
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
         color = toneColor(e.tone),
@@ -327,6 +332,13 @@ private fun PlayerRow(p: PlayerStats, selected: Boolean, onClick: () -> Unit) = 
                 p.points?.let { "#$it" },
                 "err ${p.errors}",
             ).joinToString(" · "),
+            Modifier.readAs(
+                listOfNotNull(
+                    "${stringResource(R.string.total)} ${p.total}",
+                    p.points?.let { "${stringResource(R.string.points)} $it" },
+                    "${stringResource(R.string.stats_errors)} ${p.errors}",
+                ).joinToString(", "),
+            ),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

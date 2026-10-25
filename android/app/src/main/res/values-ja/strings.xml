@@ -174,4 +174,14 @@
     <string name="discard_changes">変更を破棄しますか？</string>
     <string name="discard">破棄</string>
     <string name="keep_editing">編集を続ける</string>
+    <!-- read by TalkBack -->
+    <string name="position_spoken">ポジション%d</string>
+    <string name="no_player">選手なし</string>
+    <string name="last_touch">最後のタッチ %s</string>
+    <string name="efficiency_spoken">効果率 %s</string>
+    <string name="no_value">なし</string>
+    <string name="serves">%sのサーブ</string>
+    <string name="score_to">%1$d対%2$d</string>
+    <string name="sets_score">セット %1$d対%2$d</string>
+    <string name="touches_spoken">タッチ %1$d、パーフェクト %2$d、エラー %3$d</string>
 </resources>

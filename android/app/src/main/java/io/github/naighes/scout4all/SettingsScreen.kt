@@ -42,7 +42,7 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit)
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings)) },
+                title = { Text(stringResource(R.string.settings), Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
             )
         },
@@ -83,7 +83,7 @@ fun AboutScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.about)) },
+                title = { Text(stringResource(R.string.about), Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
             )
         },

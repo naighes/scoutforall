@@ -151,7 +151,7 @@ fun MatchFormScreen(teamId: String, matchId: String?, onBack: () -> Unit, onSave
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(if (matchId == null) R.string.new_match else R.string.edit_match)) },
+                title = { Text(stringResource(if (matchId == null) R.string.new_match else R.string.edit_match), Modifier.title()) },
                 navigationIcon = { BackButton(back) },
             )
         },

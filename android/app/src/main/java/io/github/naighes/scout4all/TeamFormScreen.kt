@@ -137,7 +137,7 @@ fun TeamFormScreen(id: String?, onBack: () -> Unit, onSaved: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(if (id == null) R.string.new_team else R.string.edit_team)) },
+                title = { Text(stringResource(if (id == null) R.string.new_team else R.string.edit_team), Modifier.title()) },
                 navigationIcon = { BackButton(back) },
             )
         },
@@ -219,7 +219,7 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
 
 @Composable
 fun FieldTitle(title: String, error: String?) = Column {
-    Text(title, style = MaterialTheme.typography.titleSmall)
+    Text(title, Modifier.title(), style = MaterialTheme.typography.titleSmall)
     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }
 

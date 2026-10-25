@@ -176,4 +176,14 @@
     <string name="discard_changes">Discard the changes?</string>
     <string name="discard">Discard</string>
     <string name="keep_editing">Keep editing</string>
+    <!-- read by TalkBack -->
+    <string name="position_spoken">Position %d</string>
+    <string name="no_player">no player</string>
+    <string name="last_touch">last touch %s</string>
+    <string name="efficiency_spoken">efficiency %s</string>
+    <string name="no_value">none</string>
+    <string name="serves">%s serves</string>
+    <string name="score_to">%1$d to %2$d</string>
+    <string name="sets_score">sets %1$d to %2$d</string>
+    <string name="touches_spoken">touches %1$d, perfect %2$d, errors %3$d</string>
 </resources>

@@ -56,6 +56,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -110,7 +112,7 @@ private fun pct(value: Double?) = value?.let { "${it.roundToInt()}%" } ?: "–"
  * statistics. */
 @Composable
 fun StatsHandle(onOpen: () -> Unit, modifier: Modifier = Modifier) = Column(
-    modifier.clip(RoundedCornerShape(50)).clickable(onClick = onOpen).swipeUp(onOpen)
+    modifier.clip(RoundedCornerShape(50)).clickable(role = Role.Button, onClick = onOpen).swipeUp(onOpen)
         .padding(horizontal = 16.dp, vertical = 4.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
 ) {
@@ -285,7 +287,7 @@ private fun Summary(stats: LiveStats) {
 /** The side out and the break points of each rotation, side by side. */
 @Composable
 private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    Text(stringResource(R.string.rotations), style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.rotations), Modifier.title(), style = MaterialTheme.typography.titleMedium)
     Row {
         Spacer(Modifier.width(48.dp))
         listOf(R.string.side_out, R.string.break_points).forEach {
@@ -299,7 +301,7 @@ private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangeme
         }
     }
     rotations.forEach { r ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(r.name, Modifier.width(48.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             listOf(r.sideOut, r.breakPoints).forEach { p ->
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
@@ -324,7 +326,7 @@ private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangeme
 
 @Composable
 private fun Tile(modifier: Modifier, content: @Composable () -> Unit) = Surface(
-    modifier,
+    modifier.semantics(mergeDescendants = true) {},
     shape = MaterialTheme.shapes.medium,
     color = MaterialTheme.colorScheme.surfaceVariant,
 ) {
@@ -349,8 +351,13 @@ private fun TileValue(text: String, color: Color?) = Text(
 )
 
 @Composable
-private fun TileDetail(text: String) = Text(
+private fun TileDetail(text: String, spoken: String? = null) = Text(
     text,
+    when {
+        spoken != null -> Modifier.readAs(spoken)
+        text.isEmpty() -> Modifier.notRead()
+        else -> Modifier
+    },
     style = MaterialTheme.typography.labelSmall,
     color = MaterialTheme.colorScheme.onSurfaceVariant,
 )
@@ -370,6 +377,7 @@ private fun FundamentalTile(f: FundamentalStats, modifier: Modifier) = Tile(modi
     TileDetail(
         if (f.total > 0u) stringResource(R.string.touches_detail, f.total.toInt(), f.perfect.toInt(), f.errors.toInt())
         else "",
+        spoken = stringResource(R.string.touches_spoken, f.total.toInt(), f.perfect.toInt(), f.errors.toInt()).takeIf { f.total > 0u },
     )
 }
 
@@ -552,11 +560,11 @@ private fun ErrorGroup(
     most: Int,
 ) = Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        Text(title, Modifier.weight(1f).title(), style = MaterialTheme.typography.titleMedium)
         Text(total.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = color)
     }
     errors.forEach { e ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             Text(
                 names[e.event]?.let { stringResource(it) } ?: e.event.name,
                 Modifier.width(132.dp),
@@ -601,6 +609,8 @@ private fun Trend(stats: LiveStats) {
 
 @Composable
 private fun TrendLegend(sets: List<Int>) = Row(
+    // each chart says its sets
+    Modifier.notRead(),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
     verticalAlignment = Alignment.CenterVertically,
 ) {
@@ -622,7 +632,7 @@ private fun TrendLegend(sets: List<Int>) = Row(
 }
 
 @Composable
-private fun TrendChart(line: TrendLine, recent: Boolean) = Column {
+private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.semantics(mergeDescendants = true) {}) {
     val overall = if (recent) line.overallRecent else line.overall
     val overallGrade = if (recent) line.overallRecentGrade else line.overallGrade
     val band = line.band
@@ -686,8 +696,15 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column {
             }
         }
     }
+    // for TalkBack, where each set got to
+    Box(
+        Modifier.readAs(
+            sets.mapNotNull { (n, _, values) -> values.lastOrNull { it != null }?.let { stringResource(R.string.set_n, n) + " " + pct(it) } }
+                .joinToString(", "),
+        ),
+    )
     // the points: 0, 5, 10, ... under their lines, as high as their text
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    BoxWithConstraints(Modifier.fillMaxWidth().notRead()) {
         (0..points.toInt() step 5).forEach { p ->
             Text(
                 p.toString(),

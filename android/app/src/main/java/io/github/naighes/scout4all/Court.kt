@@ -40,6 +40,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -78,8 +79,9 @@ data class CourtSlot(
      * where they overlap, a touch goes to it */
     val above: Boolean = false,
     /** the last touch of the rally: the symbol of its evaluation, empty
-     * without one (a freeball) */
+     * without one (a freeball); its word, for TalkBack */
     val touch: String? = null,
+    val touchName: String? = null,
     /** plays the fundamental worth watching now: the efficiency in it over
      * the match, none before the first */
     val spotlight: Boolean = false,
@@ -233,14 +235,15 @@ private fun CourtColumn(
 private val ServeZone = 72.dp
 
 /** The player of a position, all of it to touch: the jersey at the top,
- * the name under it. */
+ * the name under it. TalkBack reads the number, the name, then what the
+ * badges say. */
 @Composable
 private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: Float, modifier: Modifier, onClick: () -> Unit) =
-    Box(modifier.clickable(enabled = slot.enabled, onClick = onClick)) {
+    Box(modifier.clickable(enabled = slot.enabled, role = Role.Button, onClick = onClick)) {
         if (showPosition) {
             Text(
                 position.toString(),
-                modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(6.dp).readAs(stringResource(R.string.position_spoken, position)),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -252,8 +255,20 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: F
         ) {
             Token(slot, scale)
             CourtName(slot.name.orEmpty())
+            badges(slot).takeIf { it.isNotEmpty() }?.let { Box(Modifier.readAs(it)) }
         }
     }
+
+/** What the badges of the jersey say, in words. */
+@Composable
+private fun badges(slot: CourtSlot): String = listOfNotNull(
+    stringResource(R.string.setter).takeIf { slot.setter },
+    stringResource(R.string.serving).takeIf { slot.serving },
+    slot.touchName?.let { stringResource(R.string.last_touch, it) },
+    slot.spotlight.takeIf { it }?.let {
+        stringResource(R.string.efficiency_spoken, slot.efficiency?.let { "${it.roundToInt()}%" } ?: stringResource(R.string.no_value))
+    },
+).joinToString(", ")
 
 /** The name under the jersey in two lines, or the surname alone (all but
  * the first word) if it doesn't fit, never a word broken: the jersey tells
@@ -264,7 +279,7 @@ private fun CourtName(name: String) {
     val text = if (surname) name.substringAfter(' ') else name
     Text(
         text,
-        modifier = Modifier.padding(horizontal = 4.dp),
+        modifier = Modifier.padding(horizontal = 4.dp).let { if (text.isEmpty()) it.notRead() else it },
         style = nameStyle().copy(
             hyphens = if (surname) Hyphens.Auto else Hyphens.None,
             lineBreak = LineBreak.Paragraph,
@@ -335,19 +350,21 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
             val size = (22.dp * scale).jerseySp()
             Text(
                 slot.number?.toString() ?: "+",
+                modifier = if (empty) Modifier.readAs(stringResource(R.string.no_player)) else Modifier,
                 style = MaterialTheme.typography.titleLarge.copy(fontSize = size, lineHeight = size),
                 fontWeight = FontWeight.Bold,
                 color = number,
             )
         }
     }
-    if (slot.setter) Badge(stringResource(R.string.setter_short), Modifier.align(Alignment.TopEnd))
-    if (slot.spotlight) Efficiency(slot.efficiency, slot.grade, Modifier.align(Alignment.TopStart).offset(x = (-14).dp, y = (-6).dp))
-    if (!slot.touch.isNullOrEmpty()) Badge(slot.touch, Modifier.align(Alignment.BottomStart).offset(x = (-4).dp, y = 4.dp))
+    // TalkBack reads them after the name (`badges`)
+    if (slot.setter) Badge(stringResource(R.string.setter_short), Modifier.align(Alignment.TopEnd).notRead())
+    if (slot.spotlight) Efficiency(slot.efficiency, slot.grade, Modifier.align(Alignment.TopStart).offset(x = (-14).dp, y = (-6).dp).notRead())
+    if (!slot.touch.isNullOrEmpty()) Badge(slot.touch, Modifier.align(Alignment.BottomStart).offset(x = (-4).dp, y = 4.dp).notRead())
     if (slot.serving) {
         Icon(
             painterResource(R.drawable.ic_ball),
-            contentDescription = stringResource(R.string.serving),
+            contentDescription = null,
             modifier = Modifier.align(Alignment.BottomStart).offset(x = (-14).dp, y = 4.dp).size(22.dp),
             tint = MaterialTheme.colorScheme.primary,
         )

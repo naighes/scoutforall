@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.MatchForm
 import org.junit.Assert.assertEquals
@@ -47,6 +49,22 @@ class ScreensLayoutTest(private val screen: Size) {
         assertFits("team", "Ekaterina Antropova") {
             TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
         }
+    }
+
+    @Test
+    fun theMatchesOfTheTeam() {
+        val team = saveNationalTeam()
+        startFirstSet(team)
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
+            }
+        }
+        rule.waitForText("Ekaterina Antropova")
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText("Cortona")
+        rule.shot("screen-team-matches-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
     @Test

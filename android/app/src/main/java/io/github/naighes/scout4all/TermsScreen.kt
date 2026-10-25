@@ -67,7 +67,7 @@ fun TermsScreen(onAccept: (suspend () -> Unit)?, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(terms?.title?.replaceFirstChar { it.uppercase() } ?: "") },
+                title = { Text(terms?.title?.replaceFirstChar { it.uppercase() } ?: "", Modifier.title()) },
                 navigationIcon = { if (onAccept == null) BackButton(onBack) },
             )
         },

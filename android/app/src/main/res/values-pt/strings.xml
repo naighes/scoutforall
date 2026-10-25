@@ -175,4 +175,14 @@
     <string name="discard_changes">Descartar as alterações?</string>
     <string name="discard">Descartar</string>
     <string name="keep_editing">Continuar editando</string>
+    <!-- read by TalkBack -->
+    <string name="position_spoken">Posição %d</string>
+    <string name="no_player">sem jogador</string>
+    <string name="last_touch">último toque %s</string>
+    <string name="efficiency_spoken">eficiência %s</string>
+    <string name="no_value">nenhuma</string>
+    <string name="serves">%s no saque</string>
+    <string name="score_to">%1$d a %2$d</string>
+    <string name="sets_score">sets %1$d a %2$d</string>
+    <string name="touches_spoken">toques %1$d, perfeitos %2$d, erros %3$d</string>
 </resources>

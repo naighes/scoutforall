@@ -107,6 +107,7 @@ fun TeamScreen(
                 title = {
                     Text(
                         (state as? TeamState.Loaded)?.team?.name ?: "",
+                        Modifier.title(),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -205,9 +206,10 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
         // home or away at a glance, in the grey of the secondary text
         leadingContent = {
             val place = stringResource(if (m.home) R.string.home else R.string.away)
+            // read as a text: a description would hide the rest of the row
             when {
-                m.home -> Icon(Icons.Outlined.Home, contentDescription = place)
-                else -> Icon(painterResource(R.drawable.ic_away), contentDescription = place)
+                m.home -> Icon(Icons.Outlined.Home, contentDescription = null, Modifier.readAs(place))
+                else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null, Modifier.readAs(place))
             }
         },
         headlineContent = { Text(m.opponent) },
@@ -215,7 +217,7 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
             Row {
                 Text(matchDate(m.date))
                 if (!m.finished) {
-                    Text(" · ")
+                    Text(" · ", Modifier.notRead())
                     Text(stringResource(R.string.in_progress), color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -224,6 +226,7 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
         trailingContent = {
             Text(
                 "${m.won}-${m.lost}",
+                Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = when {

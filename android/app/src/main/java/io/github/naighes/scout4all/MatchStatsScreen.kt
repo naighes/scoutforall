@@ -47,7 +47,7 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.statistics)) },
+                title = { Text(stringResource(R.string.statistics), Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
             )
         },

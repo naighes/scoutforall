@@ -94,8 +94,25 @@ fun ComposeContentTestRule.inaccessible(): List<String> {
     val unlabeled = onAllNodes(hasClickAction()).fetchSemanticsNodes()
         .filter { it.text() == null && it.description() == null }
         .map { "no label: ${it.describe()}" }
-    return unlabeled + crowded().map { (a, b) -> "closer than 48dp: ${a.describe()}, ${b.describe()}" }
+    return unlabeled + hidden() + crowded().map { (a, b) -> "closer than 48dp: ${a.describe()}, ${b.describe()}" }
 }
+
+/** Texts TalkBack doesn't read: with a description, it reads that instead
+ * of the texts. A description of something inside what's read as one (an
+ * icon in a row) hides the texts of the row: the row is read as the icon. */
+private fun ComposeContentTestRule.hidden(): List<String> {
+    val merged = onAllNodes(SemanticsMatcher("any") { true }).fetchSemanticsNodes().associateBy { it.id }
+    return onAllNodes(SemanticsMatcher("merges") { it.config.isMergingSemanticsOfDescendants }, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .mapNotNull { node -> merged[node.id]?.takeIf { it.text() != null }?.let { node to it } }
+        .flatMap { (node, read) ->
+            node.merged().mapNotNull { it.description() }.map { "read as \"$it\": ${read.text()}" }
+        }
+}
+
+/** What is read as part of this, all down: not what is read on its own. */
+private fun SemanticsNode.merged(): List<SemanticsNode> =
+    children.filterNot { it.config.isMergingSemanticsOfDescendants }.flatMap { listOf(it) + it.merged() }
 
 /** The neighbours closer than 48dp, as `inaccessible` tells. */
 fun ComposeContentTestRule.crowded(): List<Pair<SemanticsNode, SemanticsNode>> {

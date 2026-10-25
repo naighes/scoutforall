@@ -44,7 +44,7 @@ class SetStartTest {
         start().assertIsNotEnabled()
         rule.onNode(hasText(string(R.string.us)) and hasClickAction()).performClick()
         // position 1, then each empty one opens by itself
-        rule.onNode(hasText("1") and hasClickAction()).performClick()
+        rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
         nationalTeam.take(6).forEach { (name, _, _) -> pick(name) }
         pick("Alessia Orro")
         pick("Monica De Gennaro")
@@ -62,7 +62,7 @@ class SetStartTest {
     fun noSetStartsWithoutTheLineup() {
         show()
         rule.onNode(hasText(string(R.string.us)) and hasClickAction()).performClick()
-        rule.onNode(hasText("1") and hasClickAction()).performClick()
+        rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
         pick("Alessia Orro")
         // the next position opened by itself: closed
         rule.onNode(hasContentDescription(string(R.string.close))).performClick()
