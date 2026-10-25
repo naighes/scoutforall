@@ -351,6 +351,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifi
                             x = player?.x,
                             y = player?.y,
                             key = player?.id,
+                            above = player?.receives == true,
                             touch = touch?.symbol.orEmpty().takeIf { player != null && player.id == touched },
                             spotlight = player?.spotlight == true,
                             efficiency = player?.efficiency,

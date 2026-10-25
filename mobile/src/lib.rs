@@ -628,6 +628,9 @@ pub struct CourtPlayer {
     /// the net, seen from the bench
     pub x: f32,
     pub y: f32,
+    /// one of the three spread to receive the serve: the others hide
+    /// beneath them, so where they overlap a touch goes to the receiver
+    pub receives: bool,
 }
 
 /// The middle of the zone of each position, 1 to 6: the front row in the 3
@@ -705,6 +708,18 @@ const RECEPTION: [[(f32, f32); 6]; 6] = [
         (4.5, 5.4),
         (6.0, 3.1),
     ],
+];
+
+/// The positions of the three that receive in `RECEPTION`, by rotation: the
+/// outside hitters and the libero, in the back row in place of a middle
+/// blocker.
+const RECEIVERS: [[usize; 3]; 6] = [
+    [2, 5, 6],
+    [1, 3, 6],
+    [1, 4, 5],
+    [2, 5, 6],
+    [1, 3, 6],
+    [1, 4, 5],
 ];
 
 /// A player to choose for the event, or as a replacement.
@@ -1138,12 +1153,18 @@ impl Scouting {
         };
         let setter = lineup.get_setter();
         let libero = lineup.get_current_libero();
-        let spots = match (snapshot.get_formation(), lineup.get_current_rotation()) {
-            (Formation::Reception, Ok(rotation)) => RECEPTION
-                .get(usize::from(rotation))
-                .copied()
-                .unwrap_or(ZONES),
-            _ => ZONES,
+        let (spots, receivers) = match (snapshot.get_formation(), lineup.get_current_rotation()) {
+            (Formation::Reception, Ok(rotation)) => (
+                RECEPTION
+                    .get(usize::from(rotation))
+                    .copied()
+                    .unwrap_or(ZONES),
+                RECEIVERS
+                    .get(usize::from(rotation))
+                    .copied()
+                    .unwrap_or_default(),
+            ),
+            _ => (ZONES, [0; 3]),
         };
         let spotlight = snapshot.get_spotlight();
         let stats = spotlight.as_ref().map(|_| session.match_stats());
@@ -1164,8 +1185,9 @@ impl Scouting {
             .get_playing_positions()
             .into_iter()
             .zip(spots)
-            .filter_map(|(id, spot)| team.find_player(id).map(|p| (p, spot)))
-            .map(|(p, (x, y))| CourtPlayer {
+            .zip(1..)
+            .filter_map(|((id, spot), position)| team.find_player(id).map(|p| (p, spot, position)))
+            .map(|(p, (x, y), position)| CourtPlayer {
                 id: p.id.to_string(),
                 name: p.name.clone(),
                 number: p.number,
@@ -1181,6 +1203,7 @@ impl Scouting {
                     .and_then(|(m, v)| grade(team.classification, team.gender, m, v)),
                 x,
                 y,
+                receives: receivers.contains(&position),
             })
             .collect();
         let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
@@ -3317,6 +3340,42 @@ mod tests {
         let spots: Vec<(f32, f32)> = state.court.iter().map(|p| (p.x, p.y)).collect();
         assert_eq!(spots, RECEPTION[0].to_vec());
         assert!(state.court[0].setter);
+        let receivers: Vec<usize> = (1..=6).filter(|p| state.court[p - 1].receives).collect();
+        assert_eq!(receivers, RECEIVERS[0].to_vec());
+    }
+
+    #[test]
+    fn nobody_receives_once_the_serve_is_received() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        // we serve: the players are in their zones
+        assert!(scouting.state().court.iter().all(|p| !p.receives));
+    }
+
+    #[test]
+    fn the_receivers_spread_across_the_court_in_front_of_the_others() {
+        for (rotation, (spots, receivers)) in RECEPTION.iter().zip(RECEIVERS).enumerate() {
+            let spot = |position: usize| spots[position - 1];
+            let mut across: Vec<f32> = receivers.iter().map(|p| spot(*p).0).collect();
+            across.sort_by(f32::total_cmp);
+            // one on the left, one in the middle, one on the right
+            assert!(
+                across.windows(2).all(|w| w[1] - w[0] >= 2.5),
+                "P{}: {across:?}",
+                rotation + 1
+            );
+            // the outside hitters and the libero, never the setter
+            let setter = rotation + 1;
+            assert!(!receivers.contains(&setter), "P{}", rotation + 1);
+            let hitters = [(rotation + 1) % 6 + 1, (rotation + 4) % 6 + 1];
+            assert!(
+                hitters.iter().all(|h| receivers.contains(h)),
+                "P{}",
+                rotation + 1
+            );
+        }
     }
 
     #[test]

@@ -39,6 +39,7 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -73,6 +74,9 @@ data class CourtSlot(
     val y: Float? = null,
     /** the same player moves from a spot to the next one */
     val key: Any? = null,
+    /** above the others (a receiver above the players hiding behind):
+     * where they overlap, a touch goes to it */
+    val above: Boolean = false,
     /** the last touch of the rally: the symbol of its evaluation, empty
      * without one (a freeball) */
     val touch: String? = null,
@@ -198,7 +202,9 @@ private fun CourtColumn(
                     val (cx, cy) = corner(position)
                     val x by animateDpAsState(cx, tween(450), label = "x")
                     val y by animateDpAsState(cy, tween(450), label = "y")
-                    Spot(position, s, showPositions, scale, Modifier.offset(x, y).size(width, height)) { onPosition(position) }
+                    Spot(position, s, showPositions, scale, Modifier.zIndex(if (s.above) 1f else 0f).offset(x, y).size(width, height)) {
+                        onPosition(position)
+                    }
                 }
             }
             // the server holds the ball in the serve zone

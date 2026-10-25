@@ -52,14 +52,20 @@ fun saveNationalTeam(): String {
 }
 
 /** A match of the team, with its first set started: the players of
- * `nationalTeam` in order; the match id. */
-fun startFirstSet(team: String, opponent: String = "Cortona", serving: TeamSideEnum = TeamSideEnum.US): String = core { c ->
+ * `nationalTeam` in order, the setter first, in position `setterAt`; the
+ * match id. */
+fun startFirstSet(
+    team: String,
+    opponent: String = "Cortona",
+    serving: TeamSideEnum = TeamSideEnum.US,
+    setterAt: Int = 1,
+): String = core { c ->
     val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6"))
     val start = c.setStart(team, match)
     start.chooseServingTeam(serving)
     val players = c.team(team).players.associateBy { it.name }
     nationalTeam.take(6).forEachIndexed { i, (name, _, _) ->
-        start.place((i + 1).toUByte(), players.getValue(name).id)
+        start.place(((i + setterAt - 1) % 6 + 1).toUByte(), players.getValue(name).id)
     }
     start.chooseSetter(players.getValue("Alessia Orro").id)
     start.chooseLibero(players.getValue("Monica De Gennaro").id)

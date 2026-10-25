@@ -29,7 +29,7 @@ class ScreensLayoutTest(private val screen: Size) {
         rule.setContent { Scout4AllTheme { content() } }
         rule.waitForText(shown)
         rule.shot("screen-$name-$screen")
-        assertEquals(emptyList<String>(), rule.misfits(scrolls = true))
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         button?.let { rule.assertWhole(hasText(it) and hasClickAction()) }
     }
 

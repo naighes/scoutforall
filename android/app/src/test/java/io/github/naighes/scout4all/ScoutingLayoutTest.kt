@@ -7,7 +7,6 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
-import io.github.naighes.scout4all.core.TeamSideEnum
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -15,7 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
 
 /** The scouting fits every screen at every step: never a scroll, no text
- * cut. */
+ * cut; the reception is in `ReceptionLayoutTest`. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 class ScoutingLayoutTest(private val screen: Size) {
     @get:Rule(order = 0) val size = SizeRule(screen)
@@ -27,9 +26,9 @@ class ScoutingLayoutTest(private val screen: Size) {
         fun sizes() = sizes.map { arrayOf(it) }
     }
 
-    private fun scout(serving: TeamSideEnum = TeamSideEnum.US) {
+    private fun scout() {
         val team = saveNationalTeam()
-        val match = startFirstSet(team, serving = serving)
+        val match = startFirstSet(team)
         rule.setContent { Scout4AllTheme { ScoutingScreen(team, match, onBack = {}) } }
         rule.waitForText("Cortona", substring = true)
     }
@@ -51,7 +50,7 @@ class ScoutingLayoutTest(private val screen: Size) {
 
     private fun assertFits(name: String) {
         rule.shot("scouting-$name-$screen")
-        assertEquals(emptyList<String>(), rule.misfits(screen.scrolls))
+        assertEquals(emptyList<String>(), rule.misfits(screen.scrolls) + rule.inaccessible())
     }
 
     @Test
@@ -82,11 +81,5 @@ class ScoutingLayoutTest(private val screen: Size) {
         touch("18")
         touch("defense")
         assertFits("theEvaluation")
-    }
-
-    @Test
-    fun theReception() {
-        scout(serving = TeamSideEnum.THEM)
-        assertFits("theReception")
     }
 }

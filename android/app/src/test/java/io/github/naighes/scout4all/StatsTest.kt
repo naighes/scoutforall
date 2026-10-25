@@ -38,7 +38,7 @@ class StatsLayoutTest(private val screen: Size) {
             rule.onNode(hasText(string(page)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
             rule.waitForIdle()
             rule.shot("stats-${string(page)}-$screen")
-            string(page) to rule.misfits(scrolls = true)
+            string(page) to rule.misfits(scrolls = true) + rule.inaccessible()
         }
         assertEquals(pages.associate { string(it) to emptyList<String>() }, misfits)
     }

@@ -8,11 +8,14 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import java.io.File
+import kotlin.math.abs
 import org.junit.rules.TestRule
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
@@ -37,6 +40,7 @@ val sizes = listOf(
     Size("landscape", "w824dp-h368dp-land"),
     Size("tablet", "w800dp-h1208dp-port"),
     Size("font 1.3", "w392dp-h800dp-port", fontScale = 1.3f),
+    Size("font 1.5", "w392dp-h800dp-port", fontScale = 1.5f),
     Size("font 2", "w392dp-h800dp-port", fontScale = 2f),
 )
 
@@ -78,6 +82,43 @@ fun ComposeContentTestRule.misfits(scrolls: Boolean): List<String> {
     }
 }
 
+/** What TalkBack or a finger can't use: something to touch without a
+ * label to read, or two neighbours closer than 48dp. Compose grows the
+ * touch area of whatever is smaller up to 48dp (as Material does for its
+ * icon buttons and chips), but between two neighbours the touch goes to the
+ * nearer, or to the one on top: each gets a square of 48dp around its
+ * middle only if their middles are 48dp apart. Neighbours are in the same
+ * parent: a button floating over a list is above it, not beside. The tree
+ * is the merged one, as TalkBack reads it. */
+fun ComposeContentTestRule.inaccessible(): List<String> {
+    val unlabeled = onAllNodes(hasClickAction()).fetchSemanticsNodes()
+        .filter { it.text() == null && it.description() == null }
+        .map { "no label: ${it.describe()}" }
+    return unlabeled + crowded().map { (a, b) -> "closer than 48dp: ${a.describe()}, ${b.describe()}" }
+}
+
+/** The neighbours closer than 48dp, as `inaccessible` tells. */
+fun ComposeContentTestRule.crowded(): List<Pair<SemanticsNode, SemanticsNode>> {
+    waitForIdle()
+    val nodes = onAllNodes(hasClickAction()).fetchSemanticsNodes()
+    return nodes.flatMapIndexed { i, a ->
+        nodes.drop(i + 1).filter { b -> a.parent?.id == b.parent?.id && a.crowds(b) }.map { b -> a to b }
+    }
+}
+
+/** Their middles are closer than 48dp, both across and down; a border of
+ * 1dp they may share. */
+private fun SemanticsNode.crowds(other: SemanticsNode): Boolean {
+    val apart = bounds().center - other.bounds().center
+    val side = with(layoutInfo.density) { 47.dp.toPx() }
+    return abs(apart.x) < side && abs(apart.y) < side
+}
+
+fun SemanticsNode.bounds() = Rect(positionInRoot, size.toSize())
+
+private fun SemanticsNode.description(): String? =
+    config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" ")?.takeIf { it.isNotBlank() }
+
 private fun SemanticsNode.textLayout(): TextLayoutResult? {
     val results = mutableListOf<TextLayoutResult>()
     return config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(results)
@@ -108,7 +149,7 @@ fun ComposeContentTestRule.assertWhole(matcher: SemanticsMatcher) {
 
 /** Smaller than itself: a parent or the window cut it. */
 private fun SemanticsNode.clipped(): Boolean {
-    val whole = Rect(positionInRoot, size.toSize())
+    val whole = bounds()
     val shown = boundsInRoot
     return shown.width < whole.width - 1f || shown.height < whole.height - 1f
 }
@@ -116,5 +157,5 @@ private fun SemanticsNode.clipped(): Boolean {
 private fun androidx.compose.ui.unit.IntSize.toSize() =
     androidx.compose.ui.geometry.Size(width.toFloat(), height.toFloat())
 
-private fun SemanticsNode.describe(): String =
-    text() ?: config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" ") ?: "node $id"
+fun SemanticsNode.describe(): String =
+    text() ?: description() ?: "node $id"

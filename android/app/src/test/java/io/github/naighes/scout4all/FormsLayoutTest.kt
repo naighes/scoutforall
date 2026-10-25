@@ -29,7 +29,7 @@ class FormsLayoutTest(private val screen: Size) {
         rule.save()
         rule.assertInvalid(string(firstField))
         rule.shot("form-$name-$screen")
-        assertEquals(emptyList<String>(), rule.misfits(scrolls = true))
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         rule.assertWhole(hasText(string(R.string.save)) and hasClickAction())
     }
 
