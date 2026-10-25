@@ -150,4 +150,11 @@
     <string name="report_title">Problem w aplikacji na Androida</string>
     <string name="report_body">Co się stało?\n\nCzego się spodziewałeś(-aś)?\n\n---\n%1$s</string>
     <string name="no_app_to_open">Żadna aplikacja nie może tego otworzyć</string>
+    <!-- archives -->
+    <string name="export_team">Eksportuj drużynę</string>
+    <string name="export_match">Eksportuj mecz</string>
+    <string name="share">Udostępnij…</string>
+    <string name="save_to_file">Zapisz do pliku…</string>
+    <string name="archive_saved">Zapisano</string>
+    <string name="archive_not_saved">Nie można zapisać pliku</string>
 </resources>

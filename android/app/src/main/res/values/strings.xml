@@ -149,4 +149,11 @@
     <string name="report_title">Problem in the Android app</string>
     <string name="report_body">What happened?\n\nWhat did you expect instead?\n\n---\n%1$s</string>
     <string name="no_app_to_open">No app can open it</string>
+    <!-- archives -->
+    <string name="export_team">Export team</string>
+    <string name="export_match">Export match</string>
+    <string name="share">Share…</string>
+    <string name="save_to_file">Save to file…</string>
+    <string name="archive_saved">Saved</string>
+    <string name="archive_not_saved">Could not save the file</string>
 </resources>

@@ -102,6 +102,7 @@ fun TeamScreen(
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     if (loaded) {
+                        ExportButton(stringResource(R.string.export_team)) { it.exportTeam(id) }
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_team))
                         }

@@ -69,6 +69,7 @@ fun MatchScreen(
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     if (state is MatchState.Loaded) {
+                        ExportButton(stringResource(R.string.export_match)) { it.exportMatch(teamId, matchId) }
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_match))
                         }
