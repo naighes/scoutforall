@@ -34,11 +34,15 @@ import kotlinx.coroutines.launch
 /** Sends the matches of the upload queue: the core says whether some are
  * left, to try again later. */
 class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result =
+    override suspend fun doWork(): Result = try {
         when ((applicationContext as Scout4AllApplication).core { it.uploadPending() }) {
             Uploads.DONE -> Result.success()
             Uploads.RETRY -> Result.retry()
         }
+    } catch (_: CorePanic) {
+        // the queue stays: sent again by the app started again
+        Result.failure()
+    }
 }
 
 /** Sends the upload queue as soon as there's a network, in the background:

@@ -13,9 +13,15 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.animation.doOnEnd
 import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -59,6 +65,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             Scout4AllTheme {
                 Navigation(teams, terms, opened) { opened.value = null }
+                PanicDialog(application as Scout4AllApplication)
             }
         }
     }
@@ -243,6 +250,28 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
             ScoutingScreen(id, m, onBack = { nav.back(entry) })
         }
     }
+}
+
+/** Over everything once the core panicked: its state may be broken, the
+ * app starts again; before, the user may report it. */
+@Composable
+private fun PanicDialog(app: Scout4AllApplication) {
+    val panic = app.panic.collectAsState().value ?: return
+    val context = LocalContext.current
+    val title = stringResource(R.string.panic_report_title)
+    val body = stringResource(R.string.panic_report_body, panic, device())
+    AlertDialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = { Text(stringResource(R.string.panic_title)) },
+        text = { Text(stringResource(R.string.panic_text)) },
+        dismissButton = {
+            TextButton(onClick = { context.report(title, body) }) { Text(stringResource(R.string.report)) }
+        },
+        confirmButton = {
+            TextButton(onClick = app::startAgain) { Text(stringResource(R.string.start_again)) }
+        },
+    )
 }
 
 /** Back from the screen of `entry`, once: a second touch of the arrow

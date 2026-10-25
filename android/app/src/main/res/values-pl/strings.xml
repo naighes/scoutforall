@@ -168,4 +168,10 @@
     <string name="team_imported">Zaimportowano drużynę</string>
     <string name="match_imported">Zaimportowano mecz</string>
     <string name="file_not_read">Nie można odczytać pliku</string>
+    <string name="panic_title">Coś poszło nie tak</string>
+    <string name="panic_text">Aplikacja musi się uruchomić ponownie: to, co zapisane, nie przepadnie. Zgłoś to, proszę: e-mail jest gotowy.</string>
+    <string name="report">Zgłoś</string>
+    <string name="start_again">Uruchom ponownie</string>
+    <string name="panic_report_title">Nieoczekiwany błąd w aplikacji Android</string>
+    <string name="panic_report_body">Co robiłeś(-aś)?\n\nAplikacja napisała: %1$s\n\n---\n%2$s</string>
 </resources>

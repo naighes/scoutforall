@@ -87,7 +87,8 @@ abstract class CargoTask : DefaultTask() {
     }
 }
 
-/** The core for Android, in the layout of `jniLibs`, with the URL of the
+/** The core for Android (the `mobile` profile: a panic unwinds), in the
+ * layout of `jniLibs`, with the URL of the
  * upload API built in (the core reads it with `option_env!`, as the CLI):
  * without it the app sends no statistics. */
 abstract class CargoNdk : CargoTask() {
@@ -99,7 +100,7 @@ abstract class CargoNdk : CargoTask() {
         val env = uploadUrl.orNull?.let { mapOf("ANALYTICS_UPLOAD_URL" to it) }.orEmpty()
         if (env.isEmpty()) logger.warn("no ANALYTICS_UPLOAD_URL: this build sends no statistics")
         cargo("ndk", "-t", "arm64-v8a", "--platform", "28", "-o", out.path,
-            "build", "-p", "scout4all-mobile", "--release", env = env)
+            "build", "-p", "scout4all-mobile", "--profile", "mobile", env = env)
     }
 }
 

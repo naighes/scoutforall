@@ -166,4 +166,10 @@
     <string name="team_imported">Equipe importada</string>
     <string name="match_imported">Partida importada</string>
     <string name="file_not_read">Não foi possível ler o arquivo</string>
+    <string name="panic_title">Algo deu errado</string>
+    <string name="panic_text">O app precisa reiniciar: o que está salvo não se perde. Por favor, informe: o e-mail está pronto.</string>
+    <string name="report">Informar</string>
+    <string name="start_again">Reiniciar</string>
+    <string name="panic_report_title">Erro inesperado no app Android</string>
+    <string name="panic_report_body">O que você estava fazendo?\n\nO app disse: %1$s\n\n---\n%2$s</string>
 </resources>

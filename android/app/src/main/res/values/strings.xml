@@ -167,4 +167,10 @@
     <string name="team_imported">Team imported</string>
     <string name="match_imported">Match imported</string>
     <string name="file_not_read">Could not read the file</string>
+    <string name="panic_title">Something went wrong</string>
+    <string name="panic_text">The app has to start again: what is saved is not lost. Please report it, the e-mail is ready.</string>
+    <string name="report">Report</string>
+    <string name="start_again">Start again</string>
+    <string name="panic_report_title">Unexpected error in the Android app</string>
+    <string name="panic_report_body">What were you doing?\n\nThe app said: %1$s\n\n---\n%2$s</string>
 </resources>

@@ -165,4 +165,10 @@
     <string name="team_imported">チームをインポートしました</string>
     <string name="match_imported">試合をインポートしました</string>
     <string name="file_not_read">ファイルを読み込めませんでした</string>
+    <string name="panic_title">問題が発生しました</string>
+    <string name="panic_text">アプリを再起動します。保存済みのデータは失われません。報告にご協力ください（メールは準備済みです）。</string>
+    <string name="report">報告</string>
+    <string name="start_again">再起動</string>
+    <string name="panic_report_title">Android アプリの予期しないエラー</string>
+    <string name="panic_report_body">何をしていましたか？\n\nアプリのメッセージ: %1$s\n\n---\n%2$s</string>
 </resources>

@@ -78,11 +78,8 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit)
 fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val version = version()
-    // what helps to reproduce a problem, at the end of the report
-    val device = "scout4all $version · Android ${Build.VERSION.RELEASE} · " +
-        "${Build.MANUFACTURER} ${Build.MODEL}"
     val reportTitle = stringResource(R.string.report_title)
-    val reportBody = stringResource(R.string.report_body, device)
+    val reportBody = stringResource(R.string.report_body, device())
     Scaffold(
         topBar = {
             TopAppBar(
@@ -104,13 +101,7 @@ fun AboutScreen(onBack: () -> Unit) {
             }
             HorizontalDivider()
             Row(stringResource(R.string.report_problem), stringResource(R.string.report_problem_detail)) {
-                context.open(
-                    Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
-                        putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORTS))
-                        putExtra(Intent.EXTRA_SUBJECT, "scout4all $version: $reportTitle")
-                        putExtra(Intent.EXTRA_TEXT, reportBody)
-                    },
-                )
+                context.report(reportTitle, reportBody)
             }
         }
     }
@@ -122,6 +113,19 @@ private fun Row(headline: String, supporting: String?, onClick: (() -> Unit)?) =
     modifier = onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier,
     headlineContent = { Text(headline) },
     supportingContent = supporting?.let { { Text(it) } },
+)
+
+/** What helps to reproduce a problem, at the end of a report. */
+fun device(): String = "scout4all ${version()} · Android ${Build.VERSION.RELEASE} · " +
+    "${Build.MANUFACTURER} ${Build.MODEL}"
+
+/** An e-mail ready to send, that opens an issue on Linear. */
+fun Context.report(title: String, body: String) = open(
+    Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+        putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORTS))
+        putExtra(Intent.EXTRA_SUBJECT, "scout4all ${version()}: $title")
+        putExtra(Intent.EXTRA_TEXT, body)
+    },
 )
 
 private fun Context.browse(url: String) = open(Intent(Intent.ACTION_VIEW, Uri.parse(url)))

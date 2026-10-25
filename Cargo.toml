@@ -67,6 +67,13 @@ strip = true
 panic = "abort"
 incremental = false
 
+# the core of the apps: as release, but a panic unwinds, and UniFFI turns it
+# into an exception of the app, which says so and restarts, instead of
+# closing at once
+[profile.mobile]
+inherits = "release"
+panic = "unwind"
+
 [dependencies]
 scout4all-core.workspace = true
 async-trait.workspace = true

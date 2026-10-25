@@ -1,12 +1,18 @@
 package io.github.naighes.scout4all
 
 import android.app.Application
+import android.content.ComponentName
+import android.content.Intent
+import io.github.naighes.scout4all.core.InternalException
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Scout4All
 import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 
 /** Holds the core, one for the whole app. */
@@ -41,8 +47,35 @@ open class Scout4AllApplication : Application() {
     /** Calls the core off the main thread: it blocks. */
     suspend fun <T> core(call: (Scout4All) -> T): T = onCore { call(core) }
 
-    /** Calls what the core made (a scouting) where the core is called. */
-    suspend fun <T> onCore(call: () -> T): T = withContext(coreDispatcher) { call() }
+    private val mutablePanic = MutableStateFlow<String?>(null)
+    /** What a panic of the core said: its state may be broken, the app
+     * starts again. */
+    val panic: StateFlow<String?> = mutablePanic
+
+    /** Calls what the core made (a scouting) where the core is called. A
+     * panic of the core (UniFFI turns it into an exception) stops the
+     * caller, as cancelled, and shows. */
+    suspend fun <T> onCore(call: () -> T): T = withContext(coreDispatcher) {
+        try {
+            call()
+        } catch (e: InternalException) {
+            mutablePanic.value = e.message.orEmpty()
+            throw CorePanic(e)
+        }
+    }
+
+    /** A new process, from the teams: the core reads again what's saved. */
+    open fun startAgain() {
+        startActivity(Intent.makeRestartActivityTask(ComponentName(this, MainActivity::class.java)))
+        Runtime.getRuntime().exit(0)
+    }
+}
+
+/** A panic of the core: what called it stops, the app says so. */
+class CorePanic(cause: InternalException) : CancellationException(cause.message) {
+    init {
+        initCause(cause)
+    }
 }
 
 /** What the core says went wrong, for the user. */
