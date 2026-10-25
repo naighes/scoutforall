@@ -94,6 +94,13 @@ private fun TextLayoutResult.cut(): Boolean =
 private fun SemanticsNode.text(): String? =
     config.getOrNull(SemanticsProperties.Text)?.joinToString(" ")?.takeIf { it.isNotBlank() }
 
+/** The node with `text` is shown whole: not cut by a parent nor by the
+ * window. */
+fun ComposeContentTestRule.assertWhole(matcher: SemanticsMatcher) {
+    val node = onNode(matcher).fetchSemanticsNode()
+    check(!node.clipped()) { "not whole: ${node.describe()}" }
+}
+
 /** Smaller than itself: a parent or the window cut it. */
 private fun SemanticsNode.clipped(): Boolean {
     val whole = Rect(positionInRoot, size.toSize())

@@ -69,3 +69,15 @@ fun ComposeContentTestRule.waitForText(text: String, substring: Boolean = false)
     waitUntil(timeoutMillis = 5_000) {
         onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
     }
+
+/** Until `condition`, letting the main thread run: what the core answers
+ * off it reaches the screen there. */
+fun ComposeContentTestRule.waitFor(condition: () -> Boolean) {
+    val end = System.currentTimeMillis() + 5_000
+    while (true) {
+        waitForIdle()
+        if (condition()) return
+        check(System.currentTimeMillis() < end) { "still not so after 5 s" }
+        Thread.sleep(10)
+    }
+}
