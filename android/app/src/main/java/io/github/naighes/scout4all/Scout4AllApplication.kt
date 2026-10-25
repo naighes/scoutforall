@@ -78,7 +78,8 @@ class CorePanic(cause: InternalException) : CancellationException(cause.message)
     }
 }
 
-/** What the core says went wrong, for the user. */
+/** What the core says went wrong, for the user: a sentence, with the
+ * capital letter the messages of the core leave to the app. */
 val MobileException.reason: String
     get() = when (this) {
         is MobileException.Failed -> reason
@@ -86,4 +87,4 @@ val MobileException.reason: String
         is MobileException.InvalidPlayer -> reason
         is MobileException.InvalidMatch -> reason
         is MobileException.Scouting -> reason
-    }
+    }.replaceFirstChar { it.titlecase(Locale.getDefault()) }

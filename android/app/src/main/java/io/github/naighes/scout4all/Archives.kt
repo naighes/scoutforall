@@ -28,8 +28,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +39,8 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.ArchivePreview
 import io.github.naighes.scout4all.core.ExportedArchive
 import io.github.naighes.scout4all.core.MobileException
@@ -61,8 +63,8 @@ fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = 
     val context = LocalContext.current
     val app = context.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
-    var open by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var open by rememberSaveable { mutableStateOf(false) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
     error?.let { ErrorDialog(it) { error = null } }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ZIP)) { uri ->
         uri?.let {
@@ -109,6 +111,14 @@ fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = 
 /** An archive chosen to import, with what it holds. */
 private class Chosen(val bytes: ByteArray, val fileName: String?, val preview: ArchivePreview)
 
+/** The archive being imported, or why it wasn't: they outlive the activity
+ * made again (another language, the dark theme, a split window). Not in
+ * the saved state: an archive may be larger than it allows. */
+private class ImportViewModel : ViewModel() {
+    var chosen by mutableStateOf<Chosen?>(null)
+    var error by mutableStateOf<String?>(null)
+}
+
 /** Imports an archive from a file the user chooses (Download, Drive, a USB
  * stick): a team, or a match into `teamId` (any team of its players when
  * null). */
@@ -141,14 +151,13 @@ fun rememberImport(
     val context = LocalContext.current
     val app = context.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
-    var chosen by remember { mutableStateOf<Chosen?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    error?.let { ErrorDialog(it) { error = null } }
-    chosen?.let { c ->
-        ImportDialog(c.preview, teamId, onDismiss = { chosen = null }) { into ->
-            chosen = null
+    val state = viewModel(key = "import-$teamId") { ImportViewModel() }
+    state.error?.let { ErrorDialog(it) { state.error = null } }
+    state.chosen?.let { c ->
+        ImportDialog(c.preview, teamId, onDismiss = { state.chosen = null }) { into ->
+            state.chosen = null
             scope.launch {
-                context.report({ error = it }) {
+                context.report({ state.error = it }) {
                     when (into) {
                         null -> {
                             val id = app.core { it.importTeam(c.bytes, c.fileName) }
@@ -167,10 +176,10 @@ fun rememberImport(
     }
     return { uri ->
         scope.launch {
-            context.report({ error = it }) {
+            context.report({ state.error = it }) {
                 val (bytes, fileName) = context.read(uri)
                 val preview = app.core { core -> core.previewArchive(bytes, fileName, teamId) }
-                chosen = Chosen(bytes, fileName, preview)
+                state.chosen = Chosen(bytes, fileName, preview)
                 null
             }
         }
@@ -187,7 +196,7 @@ private fun ImportDialog(
     onImport: (into: String?) -> Unit,
 ) {
     val teams = (preview as? ArchivePreview.Match)?.teams.orEmpty()
-    var into by remember { mutableStateOf(teamId ?: teams.firstOrNull()?.id) }
+    var into by rememberSaveable { mutableStateOf(teamId ?: teams.firstOrNull()?.id) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
