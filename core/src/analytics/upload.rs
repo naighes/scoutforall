@@ -145,19 +145,21 @@ pub(crate) async fn create_match_archive(
         .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
+/// The URL of the API that signs the uploads: from the environment, or the
+/// one given when the program was built.
+pub fn upload_url() -> Option<String> {
+    config_var("ANALYTICS_UPLOAD_URL", option_env!("ANALYTICS_UPLOAD_URL"))
+}
+
 // retrieve signed URL for sending analytics data
-async fn get_signed_url(m: &MatchEntry) -> Result<(String, Uuid), AppError> {
+async fn get_signed_url(m: &MatchEntry, upload_url: &str) -> Result<(String, Uuid), AppError> {
     let client = http_client()?;
     let uuid = generate_upload_id(m.team.id, m.id.as_str());
     let payload = UploadRequest {
         filename: format!("{}.zip", uuid),
     };
-    let analytics_upload_url =
-        config_var("ANALYTICS_UPLOAD_URL", option_env!("ANALYTICS_UPLOAD_URL")).ok_or_else(
-            || AppError::IO(IOError::Msg("could not get analytics upload url".into())),
-        )?;
     let response = client
-        .post(analytics_upload_url)
+        .post(upload_url)
         .json(&payload)
         .send()
         .map_err(|e| AppError::IO(IOError::from(e)))
@@ -243,67 +245,78 @@ impl<
             let mut ticker = interval(polling_interval);
             loop {
                 ticker.tick().await;
-                let _ = async {
-                    uploads_enabled().then_some(())?;
-                    let queue = queue_manager.load().await.ok()?;
-                    if queue.is_empty() {
-                        return Some(());
-                    }
-                    // process first item
-                    let pending = queue.peek().cloned()?;
-                    match load_match_from_disk(
-                        Arc::clone(&team_reader),
-                        Arc::clone(&match_reader),
-                        &pending.team_id,
-                        &pending.match_id,
-                    )
-                    .await
-                    {
-                        Ok(match_entry) => {
-                            // upload attempt
-                            if process_single_upload(&match_entry, &*store).await.is_ok() {
-                                // success
-                                let _ = queue_manager
-                                    .dequeue(&pending.team_id, &pending.match_id)
-                                    .await;
-                            } else {
-                                // failure: just mark retry, keep in queue indefinitely
-                                let _ = queue_manager
-                                    .mark_retry(&pending.team_id, &pending.match_id)
-                                    .await;
-                            }
-                        }
-                        Err(_) => {
-                            // match not found
-                            let _ = queue_manager
-                                .dequeue(&pending.team_id, &pending.match_id)
-                                .await;
-                        }
-                    }
-                    Some(())
+                if let (true, Some(url)) = (uploads_enabled(), upload_url()) {
+                    let _ =
+                        upload_next(&*store, &*team_reader, &*match_reader, &queue_manager, &url)
+                            .await;
                 }
-                .await;
             }
         })
     }
 }
 
-// process a single upload
-async fn process_single_upload(m: &MatchEntry, store: &dyn Store) -> Result<(), AppError> {
-    let (signed_url, _) = get_signed_url(m).await?;
-    upload_to_signed_url(&signed_url, create_match_archive(m, store).await?).await
+/// What an attempt at the first upload of the queue did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadStep {
+    /// nothing to upload
+    Empty,
+    /// sent, and out of the queue
+    Uploaded,
+    /// not sent: to the back of the queue, to try again later
+    Failed,
+    /// the match can't be read any more (e.g. removed): out of the queue
+    Dropped,
 }
 
-// helper to load match from disk
-async fn load_match_from_disk<
-    TR: TeamReader + Send + Sync + 'static,
-    MR: MatchReader + Send + Sync + 'static,
->(
-    team_reader: Arc<TR>,
-    match_reader: Arc<MR>,
-    team_id: &Uuid,
-    match_id: &str,
-) -> Result<MatchEntry, AppError> {
-    let team = team_reader.read_single(team_id).await?;
-    match_reader.read_single(&team, match_id).await
+/// Tries once the first upload of the queue, through the API at
+/// `upload_url`. Whoever calls it decides when: the TUI every few seconds,
+/// the phone when there's a network.
+pub async fn upload_next<QR: QueueReader + Send + Sync, QW: QueueWriter + Send + Sync>(
+    store: &dyn Store,
+    team_reader: &(impl TeamReader + Sync + ?Sized),
+    match_reader: &(impl MatchReader + Sync + ?Sized),
+    queue_manager: &QueueManager<QR, QW>,
+    upload_url: &str,
+) -> Result<UploadStep, AppError> {
+    let queue = queue_manager.load().await?;
+    let Some(pending) = queue.peek().cloned() else {
+        return Ok(UploadStep::Empty);
+    };
+    let read = async {
+        let team = team_reader.read_single(&pending.team_id).await?;
+        match_reader.read_single(&team, &pending.match_id).await
+    };
+    match read.await {
+        Ok(m) => match process_single_upload(&m, store, upload_url).await {
+            Ok(()) => {
+                queue_manager
+                    .dequeue(&pending.team_id, &pending.match_id)
+                    .await?;
+                Ok(UploadStep::Uploaded)
+            }
+            Err(_) => {
+                // kept in the queue indefinitely
+                queue_manager
+                    .mark_retry(&pending.team_id, &pending.match_id)
+                    .await?;
+                Ok(UploadStep::Failed)
+            }
+        },
+        Err(_) => {
+            queue_manager
+                .dequeue(&pending.team_id, &pending.match_id)
+                .await?;
+            Ok(UploadStep::Dropped)
+        }
+    }
+}
+
+// process a single upload
+async fn process_single_upload(
+    m: &MatchEntry,
+    store: &dyn Store,
+    upload_url: &str,
+) -> Result<(), AppError> {
+    let (signed_url, _) = get_signed_url(m, upload_url).await?;
+    upload_to_signed_url(&signed_url, create_match_archive(m, store).await?).await
 }
