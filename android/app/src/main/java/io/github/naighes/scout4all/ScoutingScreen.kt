@@ -78,6 +78,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.Layout
@@ -433,10 +434,11 @@ private fun CourtAbove(height: Dp, court: @Composable () -> Unit, panel: @Compos
         }
     }
 
-/** The choices of the serve, the most a step has, only to be measured. */
+/** The choices of the serve, the most a step has, only to be measured: not
+ * there for TalkBack either. */
 @Composable
 private fun ServeChoices(model: ScoutingViewModel) =
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.clearAndSetSemantics {}.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Techniques(
             listOf(ServeTypeEnum.FLOAT to "F", ServeTypeEnum.SPIN to "S").map { (type, code) ->
                 TechniqueChoice(TechniqueEnum.Serve(type), code, code, code, false)
