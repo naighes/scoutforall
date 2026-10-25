@@ -5,6 +5,7 @@ import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Scout4All
 import java.io.File
 import java.util.Locale
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -34,8 +35,11 @@ open class Scout4AllApplication : Application() {
         if (lazyCore.isInitialized()) lazyCore.value.setLanguage(language)
     }
 
+    /** Where the core is called: it blocks. */
+    protected open val coreDispatcher: CoroutineDispatcher get() = Dispatchers.IO
+
     /** Calls the core off the main thread: it blocks. */
-    suspend fun <T> core(call: (Scout4All) -> T): T = withContext(Dispatchers.IO) { call(core) }
+    suspend fun <T> core(call: (Scout4All) -> T): T = withContext(coreDispatcher) { call(core) }
 }
 
 /** What the core says went wrong, for the user. */

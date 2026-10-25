@@ -331,13 +331,13 @@ private fun Tile(modifier: Modifier, content: @Composable () -> Unit) = Surface(
     Column(Modifier.padding(12.dp)) { content() }
 }
 
+/** The texts of a tile wrap: the large system font makes them longer
+ * than the tile. */
 @Composable
 private fun TileLabel(text: String) = Text(
     text,
     style = MaterialTheme.typography.labelMedium,
     color = MaterialTheme.colorScheme.onSurfaceVariant,
-    maxLines = 1,
-    overflow = TextOverflow.Ellipsis,
 )
 
 @Composable
@@ -353,8 +353,6 @@ private fun TileDetail(text: String) = Text(
     text,
     style = MaterialTheme.typography.labelSmall,
     color = MaterialTheme.colorScheme.onSurfaceVariant,
-    maxLines = 1,
-    overflow = TextOverflow.Ellipsis,
 )
 
 @Composable
@@ -563,8 +561,6 @@ private fun ErrorGroup(
                 names[e.event]?.let { stringResource(it) } ?: e.event.name,
                 Modifier.width(132.dp),
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
             Box(Modifier.weight(1f).height(12.dp)) {
                 Box(
@@ -690,8 +686,8 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column {
             }
         }
     }
-    // the points: 0, 5, 10, ... under their lines
-    BoxWithConstraints(Modifier.fillMaxWidth().height(14.dp)) {
+    // the points: 0, 5, 10, ... under their lines, as high as their text
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
         (0..points.toInt() step 5).forEach { p ->
             Text(
                 p.toString(),

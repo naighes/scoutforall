@@ -3,6 +3,7 @@ package io.github.naighes.scout4all
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.core.app.ApplicationProvider
+import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.GenderEnum
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.PlayerForm
@@ -80,4 +81,10 @@ fun ComposeContentTestRule.waitFor(condition: () -> Boolean) {
         check(System.currentTimeMillis() < end) { "still not so after 5 s" }
         Thread.sleep(10)
     }
+}
+
+/** Our serves in the set in progress, scouted with the core: each
+ * evaluation an event. */
+fun serve(team: String, match: String, vararg evals: EvalEnum) = core { c ->
+    c.scouting(team, match).use { scouting -> evals.forEach { scouting.chooseEval(it) } }
 }

@@ -235,6 +235,8 @@ private fun TileRow(content: @Composable RowScope.() -> Unit) = Row(
     content = content,
 )
 
+/** Its texts wrap: the large system font makes them longer than the
+ * tile. */
 @Composable
 private fun DetailTile(label: String, value: String, color: Color?, modifier: Modifier, detail: String? = null) = Surface(
     modifier.fillMaxHeight(),
@@ -246,8 +248,6 @@ private fun DetailTile(label: String, value: String, color: Color?, modifier: Mo
             label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
         Text(
             value,
@@ -260,8 +260,6 @@ private fun DetailTile(label: String, value: String, color: Color?, modifier: Mo
                 it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -313,9 +311,10 @@ private fun PlayerRow(p: PlayerStats, selected: Boolean, onClick: () -> Unit) = 
         Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurface),
         contentAlignment = Alignment.Center,
     ) {
+        val size = 14.dp.jerseySp()
         Text(
             p.player.number.toString(),
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelLarge.copy(fontSize = size, lineHeight = size),
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.surface,
         )

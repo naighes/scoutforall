@@ -290,10 +290,10 @@ private fun nameStyle(): TextStyle {
     )
 }
 
-/** A text of the jersey, drawn at its size: the system font size doesn't
+/** A text of a jersey, drawn at its size: the system font size doesn't
  * make it larger than the jersey. */
 @Composable
-private fun Dp.jerseySp(): TextUnit = with(LocalDensity.current) { toSp() }
+fun Dp.jerseySp(): TextUnit = with(LocalDensity.current) { toSp() }
 
 /** The player as a round jersey with the number; the libero in a jersey of
  * another color, dark with a light border; an empty position asks for a
