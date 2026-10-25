@@ -3,6 +3,7 @@ package io.github.naighes.scout4all
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -48,6 +49,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        // a phone stays upright: the court of the scouting needs the height;
+        // a tablet turns
+        if (resources.configuration.smallestScreenWidthDp < TABLET_WIDTH) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         // again when the user chooses another language for the app
         (application as Scout4AllApplication).followLanguage(resources.configuration.locales[0].language)
         // the logo stays until the teams and the terms are there: no empty
@@ -98,6 +104,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/** The smallest width of a tablet, in dp. */
+private const val TABLET_WIDTH = 600
 
 /** The archive of "Open with" (a file manager, WhatsApp) or of the share
  * sheet (Quick Share). */
