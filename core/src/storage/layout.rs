@@ -21,6 +21,9 @@ pub const ROOT: &str = "";
 /// fields of the others.
 pub const CONFIG: &str = "config.json";
 
+/// The settings that couldn't be read, set aside as they were.
+pub const UNREADABLE_CONFIG: &str = "config.json.unreadable";
+
 /// The matches waiting to be uploaded.
 pub const UPLOAD_QUEUE: &str = UPLOAD_QUEUE_FILE_NAME;
 

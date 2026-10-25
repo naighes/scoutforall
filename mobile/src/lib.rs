@@ -52,7 +52,11 @@ use scout4all_core::{
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
-    storage::{Store, fs::FsStore, layout::CONFIG},
+    storage::{
+        Store,
+        fs::FsStore,
+        layout::{CONFIG, UNREADABLE_CONFIG},
+    },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
 };
@@ -2631,7 +2635,7 @@ impl Scout4All {
     /// (those of the TUI too); a new one has the language too, which the
     /// TUI needs.
     fn update_consent(&self, change: impl FnOnce(Consent) -> Consent) -> Result<(), MobileError> {
-        let config = self.read_config()?;
+        let config = self.read_config().or_else(|e| self.set_aside_config(&e))?;
         let language = match config.other.contains_key(LANGUAGE) {
             true => None,
             false => Some(to_value(self.language.get()).map_err(failed)?),
@@ -2649,6 +2653,18 @@ impl Scout4All {
         self.uploads_enabled
             .store(config.consent.uploads_enabled(), Ordering::Relaxed);
         Ok(())
+    }
+
+    /// A `config.json` that can't be read goes beside it, as it is, and the
+    /// defaults take its place: kept, the terms would come back at every
+    /// start, and the choice about the statistics could never be saved.
+    fn set_aside_config(&self, error: &MobileError) -> Result<AppConfig, MobileError> {
+        log_error(&format!("could not read the settings, set aside: {error}"));
+        if let Some(bytes) = self.runtime.block_on(self.store.read(CONFIG))? {
+            self.runtime
+                .block_on(self.store.write(UNREADABLE_CONFIG, &bytes))?;
+        }
+        Ok(AppConfig::default())
     }
 
     /// `config.json`, the defaults when missing.
@@ -2814,17 +2830,25 @@ mod tests {
         assert_eq!(config(&dir), expected);
     }
 
+    /// Kept, they would show the terms at every start: accepting them sets
+    /// the unreadable ones aside, as they were, and starts again from the
+    /// defaults.
     #[test]
-    fn unreadable_settings_show_the_terms_and_are_not_overwritten() {
+    fn unreadable_settings_are_set_aside_once_the_terms_are_accepted() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(CONFIG), "{ not json").unwrap();
         let app = app(&dir, "it");
         assert!(!app.terms_seen());
-        assert!(app.accept_terms().is_err());
+        assert!(!app.analytics_enabled());
+        app.accept_terms().unwrap();
+        assert!(app.terms_seen());
+        assert!(app.analytics_enabled());
         assert_eq!(
-            std::fs::read_to_string(dir.path().join(CONFIG)).unwrap(),
+            std::fs::read_to_string(dir.path().join(UNREADABLE_CONFIG)).unwrap(),
             "{ not json"
         );
+        // not a team
+        assert_eq!(app.teams().unwrap(), vec![]);
     }
 
     #[test]
