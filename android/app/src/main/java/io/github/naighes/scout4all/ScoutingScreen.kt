@@ -82,6 +82,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -290,6 +293,8 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
     // event first, as the undo; the arrow always goes
     val halfway = (state as? ScoutingUi.Choosing)?.view?.state?.let { it.event != null || it.player != null } == true
     BackHandler(enabled = halfway) { model.undo() }
+    val system = LocalDensity.current
+    AtAGlance {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -303,30 +308,47 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
         when (val s = state) {
             ScoutingUi.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is ScoutingUi.Failed -> Centered(modifier) { Text(s.message) }
-            is ScoutingUi.Choosing -> ScoutingContent(s.view, model, modifier)
+            is ScoutingUi.Choosing -> ScoutingContent(s.view, model, system, modifier)
             is ScoutingUi.SetOver -> {
-                ScoutingContent(s.view, model, modifier)
+                ScoutingContent(s.view, model, system, modifier)
                 SetOverDialog(s.view.state, onUndo = model::undo, onDone = onBack)
             }
         }
     }
+    }
+}
+
+/** The scouting reads at a glance and never scrolls: it grows with the
+ * font size of the system up to 1.3 times, not more (larger, the court
+ * would shrink to a stamp); TalkBack and the zoom of the system still
+ * help. */
+@Composable
+private fun AtAGlance(content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    CompositionLocalProvider(
+        LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(1.3f)),
+        content = content,
+    )
 }
 
 /** The score and the court always in sight; below them, or beside them in
  * landscape, the choices of the step and the undo. */
 @Composable
-private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, modifier: Modifier) =
+private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system: Density, modifier: Modifier) =
     BoxWithConstraints(modifier) {
         var statsOpen by rememberSaveable { mutableStateOf(false) }
         if (statsOpen) {
             val stats by model.stats.collectAsState()
-            StatsSheet(
-                stats = stats,
-                currentSet = view.state.setNumber.toInt(),
-                onScope = model::stats,
-                loadDetail = model::detail,
-                onDismiss = { statsOpen = false },
-            )
+            // read calmly, at the font size of the system
+            CompositionLocalProvider(LocalDensity provides system) {
+                StatsSheet(
+                    stats = stats,
+                    currentSet = view.state.setNumber.toInt(),
+                    onScope = model::stats,
+                    loadDetail = model::detail,
+                    onDismiss = { statsOpen = false },
+                )
+            }
         }
         // the court fits what's left: the same at every step
         val court = @Composable { m: Modifier ->
@@ -592,13 +614,18 @@ private fun TeamName(side: Side, align: TextAlign, modifier: Modifier) = Row(
         }
     }
     if (align == TextAlign.End) ball()
+    // in two lines, never a word broken: on one line with the dots if a
+    // word is longer than the line
+    var oneLine by remember(side.name) { mutableStateOf(false) }
     Text(
         side.name,
         modifier = Modifier.weight(1f, fill = false),
         style = MaterialTheme.typography.titleMedium,
         textAlign = align,
-        maxLines = 2,
+        maxLines = if (oneLine) 1 else 2,
+        softWrap = !oneLine,
         overflow = TextOverflow.Ellipsis,
+        onTextLayout = { if (!oneLine && it.breaksAWord(side.name)) oneLine = true },
     )
     if (align == TextAlign.Start) ball()
 }
@@ -752,6 +779,10 @@ private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel) = R
     Modifier.fillMaxWidth().height(IntrinsicSize.Min),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
 ) {
+    // the lines of the longest name, for all: laid out, a name may take one
+    // line more than measured beforehand (by less than a pixel), and its
+    // button wouldn't grow
+    var lines by remember(events) { mutableIntStateOf(1) }
     events.filter { it.value !in lineupChanges }.forEach { event ->
         val looks = rallyEvents[event.value]
         FilledTonalButton(
@@ -768,6 +799,8 @@ private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel) = R
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
+                    minLines = lines,
+                    onTextLayout = { if (it.lineCount > lines) lines = it.lineCount },
                 )
             }
         }

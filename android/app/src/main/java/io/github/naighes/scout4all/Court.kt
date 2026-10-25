@@ -40,6 +40,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
@@ -288,15 +289,18 @@ private fun CourtName(name: String) {
         overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center,
         onTextLayout = { layout ->
-            val broken = (0 until layout.lineCount - 1).any {
-                val end = layout.getLineEnd(it)
-                end in 1 until text.length && text[end - 1] != ' ' && text[end] != ' '
-            }
-            if (!surname && (layout.didOverflowHeight || layout.isLineEllipsized(layout.lineCount - 1) || broken)) {
+            if (!surname && (layout.didOverflowHeight || layout.isLineEllipsized(layout.lineCount - 1) || layout.breaksAWord(text))) {
                 surname = true
             }
         },
     )
+}
+
+/** A line of `text` ends in the middle of a word: the word is longer than
+ * the line. */
+fun TextLayoutResult.breaksAWord(text: String): Boolean = (0 until lineCount - 1).any {
+    val end = getLineEnd(it)
+    end in 1 until text.length && text[end - 1] != ' ' && text[end] != ' '
 }
 
 /** The names on the court grow with the system font size up to 1.3 times,
