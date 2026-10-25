@@ -86,10 +86,15 @@ private fun SemanticsNode.textLayout(): TextLayoutResult? {
 
 /** Lines left out, an ellipsis, or a line wider than the text: not
  * `hasVisualOverflow`, which here says a text narrower than its constraints
- * overflows. */
+ * overflows. A line is never wider than the whole text on one line: laid
+ * out without a maximum width (a tab of a scrollable row), Android 9 puts
+ * its right edge further. */
 private fun TextLayoutResult.cut(): Boolean =
     didOverflowHeight || multiParagraph.didExceedMaxLines ||
-        (0 until lineCount).any { isLineEllipsized(it) || getLineRight(it) - getLineLeft(it) > size.width + 0.5f }
+        (0 until lineCount).any {
+            isLineEllipsized(it) ||
+                minOf(getLineRight(it) - getLineLeft(it), multiParagraph.maxIntrinsicWidth) > size.width + 0.5f
+        }
 
 private fun SemanticsNode.text(): String? =
     config.getOrNull(SemanticsProperties.Text)?.joinToString(" ")?.takeIf { it.isNotBlank() }
