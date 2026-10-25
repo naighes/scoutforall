@@ -2687,14 +2687,25 @@ impl Scout4All {
 
     fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
         let id = parse_id(id)?;
-        Ok(self.runtime.block_on(self.team_reader.read_single(&id))?)
+        self.runtime
+            .block_on(self.team_reader.read_single(&id))
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_team))
     }
 
     fn read_match(&self, team_id: &str, match_id: &str) -> Result<MatchEntry, MobileError> {
         let team = self.read_team(team_id)?;
-        Ok(self
-            .runtime
-            .block_on(self.match_reader.read_single(&team, match_id))?)
+        self.runtime
+            .block_on(self.match_reader.read_single(&team, match_id))
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))
+    }
+}
+
+/// What the user reads when a team or a match can't be read; the detail
+/// (a file, a row, a field) goes to the log.
+fn unreadable(error: &AppError, reason: &str) -> MobileError {
+    log_error(&format!("{reason}: {error}"));
+    MobileError::Failed {
+        reason: reason.to_string(),
     }
 }
 
@@ -3802,6 +3813,47 @@ mod tests {
         assert!(stats.sets.is_empty());
         assert!(stats.fundamentals.iter().all(|f| f.total == 0));
         assert!(stats.trend.iter().all(|t| t.sets.is_empty()));
+    }
+
+    /// Damaged files: what the user reads says so, in the language of the
+    /// app; the detail goes to the log.
+    #[test]
+    fn a_damaged_team_or_match_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let (team, m) = match_with_a_set(&app);
+        let started = started_set(&app, &team, &m);
+        drop(started);
+        let reason = |e: MobileError| match e {
+            MobileError::Failed { reason } => reason,
+            other => format!("{other:?}"),
+        };
+        let folder = dir.path().join(&team);
+        let match_folder = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.is_dir())
+            .unwrap();
+        let it = labels(LanguageEnum::It);
+        std::fs::write(match_folder.join("set_1.json"), "").unwrap();
+        assert_eq!(
+            reason(app.scouting(team.clone(), m.clone()).err().unwrap()),
+            it.unreadable_match
+        );
+        std::fs::write(match_folder.join("match.json"), "{ not json").unwrap();
+        assert_eq!(
+            reason(app.match_details(team.clone(), m.clone()).unwrap_err()),
+            it.unreadable_match
+        );
+        std::fs::write(folder.join("team.json"), "{}").unwrap();
+        assert_eq!(
+            reason(app.team(team.clone()).unwrap_err()),
+            it.unreadable_team
+        );
+        assert_eq!(
+            reason(app.match_details(team, m).unwrap_err()),
+            it.unreadable_team
+        );
     }
 
     #[test]
