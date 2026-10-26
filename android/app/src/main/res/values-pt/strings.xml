@@ -189,4 +189,11 @@
     <string name="tutorial_skip">Pular</string>
     <string name="tutorial_next">Avançar</string>
     <string name="tutorial_progress">%1$d de %2$d</string>
+    <string name="tutorial_welcome">Vou mostrar como fazer o scout de uma partida, com o time de exemplo: a seleção feminina da Itália. Leva uns dois minutos.</string>
+    <string name="tutorial_team">Este é o time de exemplo: toque nele.</string>
+    <string name="tutorial_matches">Aqui estão as jogadoras. As partidas estão na outra aba: toque nela.</string>
+    <string name="tutorial_new_match">Toque em + para uma nova partida.</string>
+    <string name="tutorial_save_match">Adversário, data, casa ou fora, substituições: eu já preenchi. Toque em Salvar.</string>
+    <string name="tutorial_lineup">A escalação do primeiro set está pronta: levantadora na 6 (P6), nós na recepção; Spirito é a líbero, Fersino a segunda líbero. Tocando uma posição, troca-se a jogadora.</string>
+    <string name="tutorial_start_set">Toque em Iniciar o set.</string>
 </resources>

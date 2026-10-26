@@ -85,11 +85,13 @@ sealed interface MatchFormState {
 }
 
 /** A new match of the team (`matchId` null), today, or one being edited.
- * The core checks the form. */
+ * The core checks the form. The `example` match is the one of the
+ * tutorial, ready to save. */
 class MatchFormViewModel(
     private val app: Scout4AllApplication,
     private val teamId: String,
     private val matchId: String?,
+    example: Boolean = false,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow<MatchFormState>(MatchFormState.Loading)
     val state: StateFlow<MatchFormState> = mutableState
@@ -100,7 +102,10 @@ class MatchFormViewModel(
                 app.core { core ->
                     MatchFormState.Editing(
                         when (matchId) {
-                            null -> core.newMatchForm(rfc3339(OffsetDateTime.now()))
+                            null -> when (example) {
+                                true -> core.tutorialMatchForm(rfc3339(OffsetDateTime.now()))
+                                false -> core.newMatchForm(rfc3339(OffsetDateTime.now()))
+                            }
                             else -> core.matchForm(teamId, matchId)
                         },
                     )
@@ -140,9 +145,15 @@ class MatchFormViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MatchFormScreen(teamId: String, matchId: String?, onBack: () -> Unit, onSaved: (String) -> Unit) {
+fun MatchFormScreen(
+    teamId: String,
+    matchId: String?,
+    onBack: () -> Unit,
+    onSaved: (String) -> Unit,
+    example: Boolean = false,
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val model = viewModel { MatchFormViewModel(app, teamId, matchId) }
+    val model = viewModel { MatchFormViewModel(app, teamId, matchId, example) }
     val state by model.state.collectAsState()
     val back = rememberFormBack((state as? MatchFormState.Editing)?.changed == true, onBack)
     LaunchedEffect(state) {
@@ -219,7 +230,7 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
         Button(
             onClick = model::save,
             enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("save-match"),
         ) { Text(stringResource(R.string.save)) }
     }
 

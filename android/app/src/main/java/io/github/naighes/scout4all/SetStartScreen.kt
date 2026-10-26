@@ -86,11 +86,13 @@ sealed interface SetStartState {
 }
 
 /** The start of the next set of a match: the core holds the choices and
- * checks them; the set is saved only at the start. */
+ * checks them; the set is saved only at the start. The `example` lineup is
+ * the one of the tutorial. */
 class SetStartViewModel(
     private val app: Scout4AllApplication,
     teamId: String,
     matchId: String,
+    example: Boolean = false,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow<SetStartState>(SetStartState.Loading)
     val state: StateFlow<SetStartState> = mutableState
@@ -100,6 +102,7 @@ class SetStartViewModel(
         viewModelScope.launch {
             mutableState.value = try {
                 val start = app.core { it.setStart(teamId, matchId) }
+                if (example) start.tutorialLineup()
                 setStart = start
                 SetStartState.Choosing(start.lineup())
             } catch (e: MobileException) {
@@ -198,9 +201,15 @@ private fun missing(lineup: Lineup): Pick? =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SetStartScreen(teamId: String, matchId: String, onBack: () -> Unit, onStarted: () -> Unit) {
+fun SetStartScreen(
+    teamId: String,
+    matchId: String,
+    onBack: () -> Unit,
+    onStarted: () -> Unit,
+    example: Boolean = false,
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val model = viewModel { SetStartViewModel(app, teamId, matchId) }
+    val model = viewModel { SetStartViewModel(app, teamId, matchId, example) }
     val state by model.state.collectAsState()
     LaunchedEffect(state) {
         if (state == SetStartState.Started) onStarted()
@@ -240,7 +249,7 @@ private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewMo
     BackHandler(enabled = pick != null) { model.open(null) }
     BoxWithConstraints(modifier) {
         val court = @Composable { m: Modifier ->
-            Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(m.tutorial("lineup").padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ServingTeam(lineup, model)
                 Court(
                     slot = { position ->
@@ -297,7 +306,7 @@ private fun Choices(state: SetStartState.Choosing, model: SetStartViewModel, mod
         Button(
             onClick = model::start,
             enabled = lineup.complete && !state.busy,
-            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("start-set"),
         ) { Text(stringResource(R.string.start_set)) }
     }
 

@@ -114,7 +114,7 @@ fun TeamsScreen(
 @Composable
 private fun TeamRow(team: TeamListing, onTeam: (String) -> Unit) = when (team) {
     is TeamListing.Team -> ListItem(
-        modifier = Modifier.clickable { onTeam(team.id) },
+        modifier = Modifier.clickable { onTeam(team.id) }.tutorial("team:${team.id}"),
         headlineContent = { Text(team.name) },
         supportingContent = {
             val players = team.players.toInt()

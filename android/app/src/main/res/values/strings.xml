@@ -190,4 +190,11 @@
     <string name="tutorial_skip">Skip</string>
     <string name="tutorial_next">Next</string>
     <string name="tutorial_progress">%1$d of %2$d</string>
+    <string name="tutorial_welcome">Let me show you how to scout a match, with the example team: Italy\'s women\'s national team. It takes a couple of minutes.</string>
+    <string name="tutorial_team">This is the example team: touch it.</string>
+    <string name="tutorial_matches">Here are the players. The matches are in the other tab: touch it.</string>
+    <string name="tutorial_new_match">Touch + for a new match.</string>
+    <string name="tutorial_save_match">Opponent, date, home or away, substitutions: I filled them in. Touch Save.</string>
+    <string name="tutorial_lineup">The lineup of the first set is ready: the setter in 6 (P6), we receive; Spirito is the libero, Fersino the second libero. Touching a position changes its player.</string>
+    <string name="tutorial_start_set">Touch Start the set.</string>
 </resources>

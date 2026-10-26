@@ -26,14 +26,16 @@ class TutorialTest {
 
     private val touched = mutableListOf<String>()
     private var ended = 0
-    private val tutorial = Tutorial(
-        listOf(
-            TutorialStep.Touch("a", R.string.teams),
-            TutorialStep.SwipeUp("b", until = "opened", caption = R.string.settings),
-            TutorialStep.Read(null, R.string.lineup),
-        ),
-        onEnd = { ended++ },
-    )
+    private val tutorial = Tutorial().apply {
+        start(
+            listOf(
+                TutorialStep.Touch("a", R.string.teams),
+                TutorialStep.SwipeUp("b", until = "opened", caption = R.string.settings),
+                TutorialStep.Read(null, R.string.lineup),
+            ),
+            onEnd = { ended++ },
+        )
+    }
 
     private fun show() = rule.setContent {
         Scout4AllTheme {
@@ -81,6 +83,7 @@ class TutorialTest {
         assertEquals(0, ended)
         touch(string(R.string.tutorial_next))
         assertEquals(1, ended)
+        assertEquals(null, tutorial.step)
         rule.waitForIdle()
         rule.onAllNodesWithText(string(R.string.tutorial_skip)).assertCountEquals(0)
         touch("B")

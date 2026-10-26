@@ -3,12 +3,18 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        example::{add_example_team_if_new, is_new_installation},
+        example::{
+            add_example_team_if_new, example_team, is_new_installation, tutorial_lineup,
+            tutorial_match,
+        },
         localization::{Language, labels},
+        providers::team_writer::TeamInput,
         providers::{
             store::{team_reader::StoreTeamReader, team_writer::StoreTeamWriter},
             team_reader::TeamReader,
         },
+        set_start::SetStartForm,
+        shapes::enums::TeamSideEnum,
         shapes::enums::{GenderEnum, LanguageEnum, RoleEnum, TeamClassificationEnum},
         storage::{Store, layout, memory::MemoryStore},
         tests::EN,
@@ -113,5 +119,55 @@ mod tests {
             team.players.iter().map(|p| p.id).collect()
         };
         assert!(ids(&one).is_disjoint(&ids(&other)));
+    }
+
+    fn team() -> crate::shapes::team::TeamEntry {
+        match example_team(EN, 2026) {
+            TeamInput::New {
+                players,
+                name,
+                year,
+                classification,
+                gender,
+                ..
+            } => crate::shapes::team::TeamEntry {
+                name,
+                year,
+                players,
+                classification,
+                gender,
+                ..Default::default()
+            },
+            TeamInput::Existing(team) => team,
+        }
+    }
+
+    /// We receive in P6: the setter in 6, the outside hitter in 4 receives.
+    #[test]
+    fn the_lineup_of_the_tutorial_is_complete_in_p6() {
+        let team = team();
+        let mut form = SetStartForm::new(1, None);
+        tutorial_lineup(&mut form, &team);
+        let number = |id: uuid::Uuid| team.find_player(id).map(|p| p.number);
+        let input = form.validate(&team).unwrap();
+        assert_eq!(input.serving_team, TeamSideEnum::Them);
+        assert_eq!(
+            input.positions.map(|id| number(id).unwrap()),
+            [17, 19, 18, 16, 11, 8]
+        );
+        assert_eq!(number(input.setter), Some(8));
+        assert_eq!(input.positions[5], input.setter);
+        assert_eq!(number(input.libero), Some(5));
+        assert_eq!(input.fallback_libero.and_then(number), Some(7));
+    }
+
+    #[test]
+    fn the_match_of_the_tutorial_is_at_home_against_brazil() {
+        let date = chrono::Utc::now().fixed_offset();
+        let form = tutorial_match(labels(LanguageEnum::It), date);
+        assert_eq!(form.opponent, "Brasile");
+        assert!(form.home);
+        assert_eq!(form.date, Some(date));
+        assert!(form.validate(None).is_ok());
     }
 }

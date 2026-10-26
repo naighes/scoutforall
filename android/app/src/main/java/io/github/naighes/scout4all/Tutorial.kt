@@ -93,19 +93,33 @@ sealed interface TutorialStep {
     data class Read(override val target: String?, @StringRes override val caption: Int) : TutorialStep
 }
 
-/** The tutorial going on: one step after the other, until the last one or
- * until skipped; then `onEnd`. The screens tell it where its targets are
- * (`Modifier.tutorial`), when one is touched and what is reached. */
-class Tutorial(private val steps: List<TutorialStep>, private val onEnd: () -> Unit) {
+/** The tutorial of the app, one for the activity: once started, one step
+ * after the other, until the last one or until skipped; then the `onEnd`
+ * of the start. The screens tell it where their targets are
+ * (`Modifier.tutorial`), when one is touched and what is reached, even
+ * when it isn't going on. */
+class Tutorial {
+    private var steps by mutableStateOf<List<TutorialStep>>(emptyList())
+    private var onEnd: () -> Unit = {}
+
     var index by mutableIntStateOf(0)
         private set
 
+    /** The step going on, none when the tutorial isn't. */
     val step: TutorialStep? get() = steps.getOrNull(index)
+
+    val active: Boolean get() = step != null
 
     val count: Int get() = steps.size
 
     /** Where the targets shown are, in the window. */
     internal val targets = mutableStateMapOf<String, Rect>()
+
+    fun start(steps: List<TutorialStep>, onEnd: () -> Unit) {
+        this.steps = steps
+        this.onEnd = onEnd
+        index = 0
+    }
 
     internal fun place(target: String, bounds: Rect) {
         targets[target] = bounds
@@ -127,19 +141,24 @@ class Tutorial(private val steps: List<TutorialStep>, private val onEnd: () -> U
     }
 
     fun next() {
-        if (index >= steps.size) return
+        if (!active) return
         index++
-        if (index == steps.size) onEnd()
+        if (index == steps.size) end()
     }
 
     fun skip() {
-        if (index >= steps.size) return
-        index = steps.size
+        if (active) end()
+    }
+
+    private fun end() {
+        steps = emptyList()
+        index = 0
         onEnd()
     }
 }
 
-/** The tutorial going on, if any: the screens tell it about their targets. */
+/** The tutorial of the app, if any (not in the tests of a screen alone):
+ * the screens tell it about their targets. */
 val LocalTutorial = staticCompositionLocalOf<Tutorial?> { null }
 
 /** A target of the tutorial: where it is, and when it's touched. The touch

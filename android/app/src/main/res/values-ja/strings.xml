@@ -188,4 +188,11 @@
     <string name="tutorial_skip">スキップ</string>
     <string name="tutorial_next">次へ</string>
     <string name="tutorial_progress">%1$d / %2$d</string>
+    <string name="tutorial_welcome">サンプルチーム(イタリア女子代表)で、試合のスカウティングの方法を説明します。数分で終わります。</string>
+    <string name="tutorial_team">これがサンプルチームです。タップしてください。</string>
+    <string name="tutorial_matches">ここは選手の一覧です。試合はもう一つのタブにあります。タップしてください。</string>
+    <string name="tutorial_new_match">+ をタップして新しい試合を作ります。</string>
+    <string name="tutorial_save_match">相手、日付、ホームかアウェイか、交代回数は入力済みです。「保存」をタップしてください。</string>
+    <string name="tutorial_lineup">第1セットのラインナップは準備済みです。セッターは6番ポジション(P6)、こちらはレセプションから。リベロはスピリト、第2リベロはフェルジーノ。ポジションをタップすると選手を変えられます。</string>
+    <string name="tutorial_start_set">「セットを開始」をタップしてください。</string>
 </resources>

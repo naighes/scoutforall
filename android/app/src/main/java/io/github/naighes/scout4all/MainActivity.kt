@@ -14,10 +14,12 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +44,9 @@ class MainActivity : ComponentActivity() {
     // `viewModels()` keeps the first one of the process
     private val teams: TeamsViewModel by viewModels { viewModelFactory { initializer { TeamsViewModel(application) } } }
     private val terms: TermsViewModel by viewModels { viewModelFactory { initializer { TermsViewModel(application) } } }
+    private val tutorial: TutorialViewModel by viewModels {
+        viewModelFactory { initializer { TutorialViewModel(application as Scout4AllApplication) } }
+    }
 
     // an archive another app opened with this one, until it's shown
     private val opened = MutableStateFlow<Uri?>(null)
@@ -70,7 +75,12 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) opened.value = intent.archive()
         setContent {
             Scout4AllTheme {
-                Navigation(teams, terms, opened) { opened.value = null }
+                CompositionLocalProvider(LocalTutorial provides tutorial.tutorial) {
+                    Box {
+                        Navigation(teams, terms, opened, onOpened = { opened.value = null }, onTerms = tutorial::startIfPending)
+                        TutorialOverlay(tutorial.tutorial)
+                    }
+                }
                 PanicDialog(application as Scout4AllApplication)
             }
         }
@@ -116,15 +126,26 @@ private fun Intent.archive(): Uri? = when (action) {
     else -> null
 }
 
-/** The screens: the terms of use until seen, then teams → team → its form,
- * a player or a match → its form, the start of a set, its scouting, its
- * events or the statistics, and the forms of a new team, player or match
- * (which goes on with its first set); teams → settings → terms, about. */
+/** The screens: the terms of use until seen (then `onTerms`), then teams →
+ * team → its form, a player or a match → its form, the start of a set, its
+ * scouting, its events or the statistics, and the forms of a new team,
+ * player or match (which goes on with its first set); teams → settings →
+ * terms, about. A match and a set started in the tutorial are its
+ * examples. */
 @Composable
-private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: StateFlow<Uri?>, onOpened: () -> Unit) {
+private fun Navigation(
+    teams: TeamsViewModel,
+    terms: TermsViewModel,
+    opened: StateFlow<Uri?>,
+    onOpened: () -> Unit,
+    onTerms: () -> Unit,
+) {
     // under the splash until read
     val seen = terms.seen.collectAsState().value ?: return
     val nav = rememberNavController()
+    // the tutorial, if still to show, once the terms are accepted
+    LaunchedEffect(seen) { if (seen) onTerms() }
+    val tutorial = LocalTutorial.current?.active == true
     // over any screen, once the terms are accepted
     val import = rememberImport(teamId = null, onTeam = { nav.navigate("team/$it") }, onMatch = nav::openMatch)
     val archive = opened.collectAsState().value
@@ -196,7 +217,7 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
         }
         composable("team/{id}/new-match") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            MatchFormScreen(id, null, onBack = { nav.back(entry) }, onSaved = { m ->
+            MatchFormScreen(id, null, example = tutorial, onBack = { nav.back(entry) }, onSaved = { m ->
                 // as the TUI, a new match goes on with its first set; back
                 // from it, the page of the match
                 val match = "team/$id/match/${Uri.encode(m)}"
@@ -247,7 +268,7 @@ private fun Navigation(teams: TeamsViewModel, terms: TermsViewModel, opened: Sta
             val m = entry.arguments?.getString("match").orEmpty()
             // as the TUI, a set started goes on with its scouting; back from
             // it, the page of the match
-            SetStartScreen(id, m, onBack = { nav.back(entry) }, onStarted = {
+            SetStartScreen(id, m, example = tutorial, onBack = { nav.back(entry) }, onStarted = {
                 nav.navigate("team/$id/match/${Uri.encode(m)}/scouting") {
                     popUpTo("team/{id}/match/{match}/start-set") { inclusive = true }
                 }

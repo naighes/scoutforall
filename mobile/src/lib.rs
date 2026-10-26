@@ -569,6 +569,11 @@ impl SetStart {
         Ok(())
     }
 
+    /// The lineup of the tutorial, the example team receiving in P6.
+    pub fn tutorial_lineup(&self) {
+        example::tutorial_lineup(&mut self.form(), &self.team);
+    }
+
     /// The players that can go in `position` (1 to 6), by number.
     pub fn position_choices(&self, position: u8) -> Vec<LineupPlayer> {
         self.choices(self.form().position_choices(&self.team, index(position)))
@@ -2259,6 +2264,11 @@ impl Scout4All {
     /// The form of a new match, on `date` (now, where it's played).
     pub fn new_match_form(&self, date: MatchDate) -> MatchForm {
         MatchForm::new(date)
+    }
+
+    /// The match of the tutorial, on `date`, ready to save.
+    pub fn tutorial_match_form(&self, date: MatchDate) -> MatchForm {
+        example::tutorial_match(self.language.labels(), date)
     }
 
     /// The form of a match of the team, to edit it.

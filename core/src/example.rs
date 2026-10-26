@@ -5,15 +5,17 @@
 use crate::{
     errors::AppError,
     localization::Labels,
+    match_form::MatchForm,
     providers::team_writer::{TeamInput, TeamWriter},
+    set_start::SetStartForm,
     shapes::{
-        enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
+        enums::{GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
         player::PlayerEntry,
         team::TeamEntry,
     },
     storage::{Store, StoreEntry, layout},
 };
-use chrono::{Datelike, Local};
+use chrono::{DateTime, Datelike, FixedOffset, Local};
 
 /// The players: number, name, role.
 const PLAYERS: [(u8, &str, RoleEnum); 14] = [
@@ -95,4 +97,42 @@ pub async fn add_example_team_if_new(
         true => add_example_team(writer, labels).await.map(Some),
         false => Ok(None),
     }
+}
+
+/// The match of the tutorial, on `date`: at home, against the opponent of
+/// the example.
+pub fn tutorial_match(labels: &Labels, date: DateTime<FixedOffset>) -> MatchForm {
+    MatchForm {
+        opponent: labels.example_opponent.to_string(),
+        home: true,
+        ..MatchForm::new(date)
+    }
+}
+
+/// The lineup of the tutorial, by number, positions 1 to 6: the setter in 6
+/// (P6), the outside hitter next to her in 1, then the middle blocker, the
+/// opposite, the other outside hitter (in 4, she receives) and the other
+/// middle blocker, whom the libero replaces.
+const TUTORIAL_POSITIONS: [u8; 6] = [17, 19, 18, 16, 11, 8];
+const TUTORIAL_SETTER: u8 = 8;
+const TUTORIAL_LIBERO: u8 = 5;
+const TUTORIAL_FALLBACK_LIBERO: u8 = 7;
+
+/// The start of the set of the tutorial: they serve, we receive in P6. A
+/// player missing from `team` leaves her place empty.
+pub fn tutorial_lineup(form: &mut SetStartForm, team: &TeamEntry) {
+    let id = |number: u8| {
+        team.active_players()
+            .iter()
+            .find(|p| p.number == number)
+            .map(|p| p.id)
+    };
+    TUTORIAL_POSITIONS
+        .iter()
+        .enumerate()
+        .for_each(|(position, number)| form.place(position, id(*number)));
+    form.serving_team = Some(TeamSideEnum::Them);
+    form.setter = id(TUTORIAL_SETTER);
+    form.libero = id(TUTORIAL_LIBERO);
+    form.fallback_libero = id(TUTORIAL_FALLBACK_LIBERO);
 }

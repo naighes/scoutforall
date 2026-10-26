@@ -137,7 +137,8 @@ fun TeamScreen(
                     PLAYERS_TAB -> onNewPlayer to R.string.new_player
                     else -> onNewMatch to R.string.new_match
                 }
-                FloatingActionButton(onClick = onNew) {
+                val target = if (tab == PLAYERS_TAB) "new-player" else "new-match"
+                FloatingActionButton(onClick = onNew, modifier = Modifier.tutorial(target)) {
                     Icon(Icons.Filled.Add, contentDescription = stringResource(description))
                 }
             }
@@ -164,6 +165,7 @@ fun TeamScreen(
                     Tab(
                         selected = tab == MATCHES_TAB,
                         onClick = { tab = MATCHES_TAB },
+                        modifier = Modifier.tutorial("matches-tab"),
                         text = { Text(stringResource(R.string.matches)) },
                     )
                 }
