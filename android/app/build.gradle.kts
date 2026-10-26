@@ -9,6 +9,36 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+/** The version of the workspace (`[workspace.package]` of `Cargo.toml`): the
+ * app is released with the CLI, the same number and the same tag. */
+val workspaceVersion: String = rootProject.layout.projectDirectory.file("../Cargo.toml").asFile.readText()
+    .substringAfter("[workspace.package]")
+    .let { Regex("""(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"""").find(it) }
+    ?.groupValues?.get(1)
+    ?: throw GradleException("no version in [workspace.package] of Cargo.toml")
+
+/** Play wants a number that grows with each upload: major, minor and patch
+ * in two digits each (0.9.0 is 900, 1.0.0 is 10000). */
+val workspaceVersionCode: Int = workspaceVersion.split('.').map { it.toInt() }
+    .also { parts -> if (parts.drop(1).any { it > 99 }) throw GradleException("$workspaceVersion: minor and patch must stay below 100") }
+    .fold(0) { code, part -> code * 100 + part }
+
+/** The upload key, never in git: from the environment (the CI) or from
+ * local.properties on this machine. Play re-signs the app with the key of
+ * the app (Play App Signing): this one only proves who uploaded it. */
+val uploadKey: Map<String, String> = run {
+    val local = rootProject.layout.projectDirectory.file("local.properties").asFile
+        .takeIf { it.exists() }
+        ?.let { file -> Properties().apply { file.reader().use { load(it) } } }
+    listOf("store.file", "store.password", "key.alias", "key.password")
+        .mapNotNull { name ->
+            val env = "UPLOAD_" + name.uppercase().replace('.', '_')
+            (System.getenv(env) ?: local?.getProperty("upload.$name"))
+                ?.trim()?.takeIf { it.isNotEmpty() }?.let { name to it }
+        }
+        .toMap()
+}
+
 android {
     namespace = "io.github.naighes.scout4all"
     compileSdk = 37
@@ -18,13 +48,38 @@ android {
         applicationId = "io.github.naighes.scout4all"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.9.0"
+        versionCode = workspaceVersionCode
+        versionName = workspaceVersion
         // the core is built for these only (see cargoNdk); its symbols go
         // in the bundle, for Play to name the functions of a native crash
         ndk {
             abiFilters += "arm64-v8a"
             debugSymbolLevel = "SYMBOL_TABLE"
+        }
+    }
+
+    signingConfigs {
+        if (uploadKey.size == 4) {
+            create("upload") {
+                storeFile = file(uploadKey.getValue("store.file"))
+                storePassword = uploadKey.getValue("store.password")
+                keyAlias = uploadKey.getValue("key.alias")
+                keyPassword = uploadKey.getValue("key.password")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // R8: JNA and the bindings of UniFFI keep their names
+            // (proguard-rules.pro), or the release crashes where the debug
+            // doesn't
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // without the upload key, the debug one: the release installs
+            // over the debug on a phone, keeping its data, and Play refuses it
+            signingConfig = signingConfigs.findByName("upload") ?: signingConfigs.getByName("debug")
         }
     }
 
@@ -180,6 +235,10 @@ abstract class VerifyPermissions : DefaultTask() {
         }
         checked.get().asFile.writeText(declared.joinToString("\n"))
     }
+}
+
+if (uploadKey.isNotEmpty() && uploadKey.size < 4) {
+    throw GradleException("the upload key needs store.file, store.password, key.alias and key.password: got ${uploadKey.keys}")
 }
 
 // The tests call the core built for this machine, by uniffiBindgen.
