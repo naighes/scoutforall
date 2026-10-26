@@ -105,6 +105,7 @@ import io.github.naighes.scout4all.core.DetailStats
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.EventChoice
+import io.github.naighes.scout4all.core.MatchResult
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Progress
 import io.github.naighes.scout4all.core.Scouting
@@ -142,7 +143,8 @@ sealed interface ScoutingUi {
         val busy: Boolean = false,
     ) : ScoutingUi
     /** the last point won the set */
-    data class SetOver(val view: ScoutingView) : ScoutingUi
+    /** The set is over, and the match with it when `result` is there. */
+    data class SetOver(val view: ScoutingView, val result: MatchResult? = null) : ScoutingUi
 }
 
 /** Scouting the set in progress, the player first: the core holds the
@@ -243,7 +245,7 @@ class ScoutingViewModel(
                         Progress.SET_OVER -> {
                             // the match may be over, and queued
                             app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
-                            ScoutingUi.SetOver(view(s))
+                            ScoutingUi.SetOver(view(s), s.matchResult())
                         }
                         else -> ScoutingUi.Choosing(view(s))
                     }
@@ -311,7 +313,10 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
             is ScoutingUi.Choosing -> ScoutingContent(s.view, model, system, modifier)
             is ScoutingUi.SetOver -> {
                 ScoutingContent(s.view, model, system, modifier)
-                SetOverDialog(s.view.state, onUndo = model::undo, onDone = onBack)
+                when (val result = s.result) {
+                    null -> SetOverDialog(s.view.state, onUndo = model::undo, onDone = onBack)
+                    else -> MatchOverDialog(s.view.state, result, onUndo = model::undo, onDone = onBack)
+                }
             }
         }
     }

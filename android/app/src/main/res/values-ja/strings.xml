@@ -64,6 +64,10 @@
     <string name="setter_change_short">セッター</string>
     <string name="set_won">第%dセット 勝ち</string>
     <string name="set_lost">第%dセット 負け</string>
+    <string name="match_won">試合に勝利</string>
+    <string name="match_lost">試合に敗戦</string>
+    <string name="match_won_cheer">チームのみんな、おめでとう！</string>
+    <string name="match_lost_cheer">次の試合に切り替えよう！</string>
     <string name="break_phase">ブレイク</string>
     <string name="side_out_phase">サイドアウト</string>
     <string name="serving">サーブ中</string>

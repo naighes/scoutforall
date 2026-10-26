@@ -458,6 +458,30 @@ pub struct SetScore {
     pub them: u8,
 }
 
+/// The points of each set of the match, in order.
+fn set_scores(m: &MatchEntry) -> Result<Vec<SetScore>, AppError> {
+    let mut numbers: Vec<u8> = m.sets.iter().map(|s| s.set_number).collect();
+    numbers.sort_unstable();
+    numbers
+        .into_iter()
+        .map(|number| {
+            m.get_set_snapshot(number).map(|snapshot| SetScore {
+                number,
+                us: snapshot.as_ref().map_or(0, |s| s.score_us),
+                them: snapshot.as_ref().map_or(0, |s| s.score_them),
+            })
+        })
+        .collect()
+}
+
+/// A match over: the sets won and lost, the points of each.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct MatchResult {
+    pub won: u8,
+    pub lost: u8,
+    pub sets: Vec<SetScore>,
+}
+
 /// What scouting a match goes on with.
 #[derive(Debug, PartialEq, uniffi::Enum)]
 pub enum NextSetKind {
@@ -1361,6 +1385,22 @@ impl Scouting {
         self.scouted(self.runtime.block_on(session.choose_eval(eval)))
     }
 
+    /// The result of the match once the set just over ended it, none while
+    /// it goes on.
+    pub fn match_result(&self) -> Result<Option<MatchResult>, MobileError> {
+        let session = self.session();
+        let m = session.current_match();
+        let status = m.get_status()?;
+        Ok(match status.match_finished {
+            true => Some(MatchResult {
+                won: status.us_wins,
+                lost: status.them_wins,
+                sets: set_scores(m)?,
+            }),
+            false => None,
+        })
+    }
+
     /// Goes back a choice, or removes the last saved event.
     pub fn undo(&self) -> Result<(), MobileError> {
         let mut session = self.session();
@@ -2047,18 +2087,7 @@ impl Scout4All {
     ) -> Result<MatchDetails, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let status = m.get_status()?;
-        let mut numbers: Vec<u8> = m.sets.iter().map(|s| s.set_number).collect();
-        numbers.sort_unstable();
-        let sets = numbers
-            .into_iter()
-            .map(|number| {
-                m.get_set_snapshot(number).map(|snapshot| SetScore {
-                    number,
-                    us: snapshot.as_ref().map_or(0, |s| s.score_us),
-                    them: snapshot.as_ref().map_or(0, |s| s.score_them),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let sets = set_scores(&m)?;
         let next = match next_set(&status) {
             NextSet::Start(form) => NextSetKind::Start {
                 set_number: form.set_number,
@@ -3623,6 +3652,34 @@ mod tests {
                 rotation + 1
             );
         }
+    }
+
+    #[test]
+    fn the_set_that_wins_the_match_has_its_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let mut result = None;
+        for set in 1..=3 {
+            let scouting = started_set(&app, &team, &m);
+            // aces until the set is over
+            while scouting.choose_eval(EvalEnum::Perfect).unwrap() != Progress::SetOver {}
+            result = scouting.match_result().unwrap();
+            assert_eq!(result.is_some(), set == 3, "set {set}");
+        }
+        let point = |number| SetScore {
+            number,
+            us: 25,
+            them: 0,
+        };
+        assert_eq!(
+            result,
+            Some(MatchResult {
+                won: 3,
+                lost: 0,
+                sets: vec![point(1), point(2), point(3)],
+            })
+        );
     }
 
     #[test]

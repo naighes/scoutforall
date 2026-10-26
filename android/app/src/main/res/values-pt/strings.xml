@@ -64,6 +64,10 @@
     <string name="setter_change_short">Levant.</string>
     <string name="set_won">Set %d ganho</string>
     <string name="set_lost">Set %d perdido</string>
+    <string name="match_won">Partida ganha</string>
+    <string name="match_lost">Partida perdida</string>
+    <string name="match_won_cheer">Parabéns a toda a equipe!</string>
+    <string name="match_lost_cheer">Cabeça erguida, vamos à próxima!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="serving">No saque</string>

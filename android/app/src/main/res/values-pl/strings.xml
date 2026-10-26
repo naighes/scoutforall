@@ -64,6 +64,10 @@
     <string name="setter_change_short">Rozgr.</string>
     <string name="set_won">Set %d wygrany</string>
     <string name="set_lost">Set %d przegrany</string>
+    <string name="match_won">Mecz wygrany</string>
+    <string name="match_lost">Mecz przegrany</string>
+    <string name="match_won_cheer">Gratulacje dla całej drużyny!</string>
+    <string name="match_lost_cheer">Głowa do góry, następnym razem!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="serving">Zagrywamy</string>

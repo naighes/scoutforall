@@ -65,6 +65,10 @@
     <string name="setter_change_short">Setter</string>
     <string name="set_won">Set %d won</string>
     <string name="set_lost">Set %d lost</string>
+    <string name="match_won">Match won</string>
+    <string name="match_lost">Match lost</string>
+    <string name="match_won_cheer">Well played, everyone!</string>
+    <string name="match_lost_cheer">Heads up, on to the next one!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="serving">Serving</string>

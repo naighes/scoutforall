@@ -61,6 +61,16 @@ fun startFirstSet(
     setterAt: Int = 1,
 ): String = core { c ->
     val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6"))
+    startSet(c, team, match, serving, setterAt)
+    match
+}
+
+/** The next set of the match started, with the lineup of `startFirstSet`;
+ * who serves as the rules say, or `serving` in the tie-break. */
+fun startNextSet(team: String, match: String, serving: TeamSideEnum = TeamSideEnum.US) =
+    core { startSet(it, team, match, serving, setterAt = 1) }
+
+private fun startSet(c: Scout4All, team: String, match: String, serving: TeamSideEnum, setterAt: Int) {
     val start = c.setStart(team, match)
     start.chooseServingTeam(serving)
     val players = c.team(team).players.associateBy { it.name }
@@ -70,7 +80,6 @@ fun startFirstSet(
     start.chooseSetter(players.getValue("Alessia Orro").id)
     start.chooseLibero(players.getValue("Monica De Gennaro").id)
     c.startSet(start)
-    match
 }
 
 /** Until the text is there; if it never comes, what's there instead. */

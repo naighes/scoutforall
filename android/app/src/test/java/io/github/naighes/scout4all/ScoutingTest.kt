@@ -5,8 +5,13 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.EventTypeEnum
+import io.github.naighes.scout4all.core.Scouting
 import io.github.naighes.scout4all.core.ScoutingState
+import io.github.naighes.scout4all.core.TeamSideEnum
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -107,4 +112,50 @@ class ScoutingTest {
         rule.onNode(hasText(string(R.string.ok)) and hasClickAction()).performClick()
         rule.waitFor { back == 1 }
     }
+
+    /** The two sets before scouted with the core, the last one here but its
+     * last point, touched with `last`: `point` scores each. */
+    private fun lastSet(point: (Scouting) -> Unit, last: () -> Unit) {
+        repeat(3) { set ->
+            core { c -> c.scouting(team, match).use { s -> repeat(if (set < 2) 25 else 24) { point(s) } } }
+            if (set < 2) startNextSet(team, match)
+        }
+        show()
+        last()
+    }
+
+    private val ourAce = { s: Scouting -> s.chooseEval(EvalEnum.PERFECT) }
+    // our serve wrong, then theirs a point
+    private val theirPoint = { s: Scouting ->
+        when (s.state().servingTeam) {
+            TeamSideEnum.US -> s.chooseEval(EvalEnum.ERROR)
+            TeamSideEnum.THEM -> s.chooseEvent(EventTypeEnum.OS)
+        }
+    }
+
+    @Test
+    fun theSetThatWinsTheMatchSaysSo() {
+        lastSet({ ourAce(it) }) { touch("#") }
+        rule.waitForText(string(R.string.match_won))
+        rule.waitForText(string(R.string.sets_score, 3, 0))
+        rule.waitForText(List(3) { string(R.string.score_to, 25, 0) }.joinToString(", "))
+        rule.waitForText(string(R.string.match_won_cheer))
+        rule.shot("match-won")
+        rule.onNode(hasText(string(R.string.ok)) and hasClickAction()).performClick()
+        rule.waitFor { back == 1 }
+    }
+
+    @Test
+    fun theSetThatLosesTheMatchSaysSoAndCanBeUndone() {
+        lastSet({ theirPoint(it) }) { touch(string(R.string.their_point)) }
+        rule.waitForText(string(R.string.match_lost))
+        rule.waitForText(string(R.string.sets_score, 0, 3))
+        rule.waitForText(string(R.string.match_lost_cheer))
+        rule.shot("match-lost")
+        assertEquals(0, rule.onAllNodesWithText(string(R.string.match_won_cheer)).fetchSemanticsNodes().size)
+        // a mistake: the last point goes back, the match goes on
+        rule.onNode(hasText(string(R.string.undo)) and hasClickAction()).performClick()
+        rule.waitFor { score(saved()) == 0 to 24 }
+    }
 }
+
