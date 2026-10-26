@@ -1932,7 +1932,6 @@ impl Scout4All {
     #[uniffi::constructor]
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
-        init_logger(data_dir.join("scout4all.log"));
         let language = Language::new(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
         let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
         let runtime = Builder::new_current_thread()
@@ -2678,6 +2677,14 @@ pub enum Uploads {
     Done,
     /// an upload failed: to try again later
     Retry,
+}
+
+/// Writes the log of the core in `data_dir`. The log is one for the
+/// process: the app starts it once, the tests leave it off (each of them has
+/// its own data, the log would go to the last one's).
+#[uniffi::export]
+pub fn start_log(data_dir: String) {
+    init_logger(PathBuf::from(data_dir).join("scout4all.log"));
 }
 
 /// The version of the app (the same as the core, the TUI, the CLI).

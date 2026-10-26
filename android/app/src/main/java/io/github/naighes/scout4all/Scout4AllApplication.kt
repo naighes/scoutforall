@@ -6,6 +6,7 @@ import android.content.Intent
 import io.github.naighes.scout4all.core.InternalException
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Scout4All
+import io.github.naighes.scout4all.core.startLog as startCoreLog
 import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
@@ -23,8 +24,12 @@ open class Scout4AllApplication : Application() {
     // the same layout as ~/.scout4all, in the sandbox of the app
     private val lazyCore = lazy {
         val dataDir = File(filesDir, "scout4all").apply { mkdirs() }
+        startLog(dataDir.path)
         Scout4All(dataDir.path, language).also(::addExampleTeam)
     }
+
+    /** The log of the core, one for the process. */
+    protected open fun startLog(dataDir: String) = startCoreLog(dataDir)
 
     /** A new installation starts with the example team, before the teams
      * are listed; without it the app works all the same. */
