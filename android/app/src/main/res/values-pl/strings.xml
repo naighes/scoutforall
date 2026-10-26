@@ -187,4 +187,8 @@
     <string name="score_to">%1$d do %2$d</string>
     <string name="sets_score">sety %1$d do %2$d</string>
     <string name="touches_spoken">dotknięcia %1$d, perfekcyjne %2$d, błędy %3$d</string>
+    <!-- the tutorial -->
+    <string name="tutorial_skip">Pomiń</string>
+    <string name="tutorial_next">Dalej</string>
+    <string name="tutorial_progress">%1$d z %2$d</string>
 </resources>

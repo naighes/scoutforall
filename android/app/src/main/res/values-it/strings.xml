@@ -185,4 +185,8 @@
     <string name="score_to">%1$d a %2$d</string>
     <string name="sets_score">set %1$d a %2$d</string>
     <string name="touches_spoken">tocchi %1$d, perfetti %2$d, errori %3$d</string>
+    <!-- the tutorial -->
+    <string name="tutorial_skip">Salta</string>
+    <string name="tutorial_next">Avanti</string>
+    <string name="tutorial_progress">%1$d di %2$d</string>
 </resources>

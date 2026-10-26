@@ -184,4 +184,8 @@
     <string name="score_to">%1$d対%2$d</string>
     <string name="sets_score">セット %1$d対%2$d</string>
     <string name="touches_spoken">タッチ %1$d、パーフェクト %2$d、エラー %3$d</string>
+    <!-- the tutorial -->
+    <string name="tutorial_skip">スキップ</string>
+    <string name="tutorial_next">次へ</string>
+    <string name="tutorial_progress">%1$d / %2$d</string>
 </resources>
