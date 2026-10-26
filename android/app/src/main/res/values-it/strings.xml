@@ -39,8 +39,6 @@
     <string name="resume_set_n">Riprendi set %d</string>
     <string name="no_sets">Ancora nessun set</string>
     <string name="serving_team">Al servizio</string>
-    <string name="us">Noi</string>
-    <string name="them">Loro</string>
     <string name="position_n">Pos %d</string>
     <string name="setter">Palleggiatore</string>
     <string name="libero">Libero</string>

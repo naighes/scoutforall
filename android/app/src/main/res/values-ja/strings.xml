@@ -40,8 +40,6 @@
     <string name="resume_set_n">第%dセットを再開</string>
     <string name="no_sets">セットはまだありません</string>
     <string name="serving_team">サーブ権</string>
-    <string name="us">自チーム</string>
-    <string name="them">相手</string>
     <string name="position_n">P%d</string>
     <string name="setter">セッター</string>
     <string name="libero">リベロ</string>

@@ -40,8 +40,6 @@
     <string name="resume_set_n">Wznów set %d</string>
     <string name="no_sets">Brak setów</string>
     <string name="serving_team">Zagrywka</string>
-    <string name="us">My</string>
-    <string name="them">Rywal</string>
     <string name="position_n">Poz %d</string>
     <string name="setter">Rozgrywający</string>
     <string name="libero">Libero</string>

@@ -2,6 +2,8 @@ package io.github.naighes.scout4all
 
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -42,7 +44,7 @@ class SetStartTest {
     fun theLineupGoesInAtAGlanceThenTheSetStarts() {
         show()
         start().assertIsNotEnabled()
-        rule.onNode(hasText(string(R.string.us)) and hasClickAction()).performClick()
+        rule.onNode(hasText("Italia") and hasClickAction()).performClick()
         // position 1, then each empty one opens by itself
         rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
         nationalTeam.take(6).forEach { (name, _, _) -> pick(name) }
@@ -61,7 +63,7 @@ class SetStartTest {
     @Test
     fun noSetStartsWithoutTheLineup() {
         show()
-        rule.onNode(hasText(string(R.string.us)) and hasClickAction()).performClick()
+        rule.onNode(hasText("Italia") and hasClickAction()).performClick()
         rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
         pick("Alessia Orro")
         // the next position opened by itself: closed
@@ -69,5 +71,14 @@ class SetStartTest {
         rule.waitForIdle()
         start().assertIsNotEnabled()
         assertEquals(0, started)
+    }
+
+    /** Who serves by the names of the teams; the ball by the one chosen. */
+    @Test
+    fun theTeamsServingAreNamed() {
+        show()
+        rule.onNode(hasText("Cortona") and hasClickAction()).performClick()
+        rule.onNode(hasText("Cortona") and hasClickAction()).assertIsSelected()
+        rule.onNode(hasText("Italia") and hasClickAction()).assertIsNotSelected()
     }
 }

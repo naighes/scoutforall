@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -44,8 +45,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -311,10 +314,10 @@ private fun Choices(state: SetStartState.Choosing, model: SetStartViewModel, mod
     }
 
 /** Who serves: chosen in the first set and in the tie-break, else as the
- * previous set says. */
+ * previous set says. The two teams by name, the ball by the one serving. */
 @Composable
 private fun ServingTeam(lineup: Lineup, model: SetStartViewModel) {
-    val sides = listOf(TeamSideEnum.US to R.string.us, TeamSideEnum.THEM to R.string.them)
+    val sides = listOf(TeamSideEnum.US to lineup.team, TeamSideEnum.THEM to lineup.opponent)
     Column(Modifier.padding(horizontal = 16.dp)) {
         Text(
             stringResource(R.string.serving_team),
@@ -324,12 +327,23 @@ private fun ServingTeam(lineup: Lineup, model: SetStartViewModel) {
         )
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 4.dp)) {
             sides.forEachIndexed { index, (side, name) ->
+                val serving = lineup.servingTeam == side
                 SegmentedButton(
-                    selected = lineup.servingTeam == side,
+                    selected = serving,
                     onClick = { model.serve(side) },
                     enabled = lineup.choosesServingTeam,
                     shape = SegmentedButtonDefaults.itemShape(index, sides.size),
-                ) { Text(stringResource(name)) }
+                    icon = {
+                        if (serving) {
+                            Icon(
+                                painterResource(R.drawable.ic_ball),
+                                contentDescription = null,
+                                Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    },
+                ) { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }

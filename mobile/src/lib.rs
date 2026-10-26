@@ -496,6 +496,9 @@ pub struct LineupPlayer {
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct Lineup {
     pub set_number: u8,
+    /// the names of the team and of the opponent, to say who serves
+    pub team: String,
+    pub opponent: String,
     /// whether the scout chooses who serves: in the first set and in the
     /// tie-break
     pub chooses_serving_team: bool,
@@ -517,6 +520,7 @@ pub struct Lineup {
 pub struct SetStart {
     team: TeamEntry,
     match_id: String,
+    opponent: String,
     form: Mutex<SetStartForm>,
     labels: &'static Labels,
 }
@@ -531,6 +535,8 @@ impl SetStart {
         };
         Lineup {
             set_number: form.set_number,
+            team: self.team.name.clone(),
+            opponent: self.opponent.clone(),
             chooses_serving_team: form.chooses_serving_team(),
             serving_team: form.serving_team,
             positions: form.positions.iter().map(|id| player(*id)).collect(),
@@ -2209,6 +2215,7 @@ impl Scout4All {
             NextSet::Start(form) => Ok(Arc::new(SetStart {
                 team: m.team,
                 match_id: m.id,
+                opponent: m.opponent,
                 form: Mutex::new(form),
                 labels: self.language.labels(),
             })),

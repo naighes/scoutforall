@@ -41,8 +41,6 @@
     <string name="resume_set_n">Resume set %d</string>
     <string name="no_sets">No sets yet</string>
     <string name="serving_team">Serving</string>
-    <string name="us">Us</string>
-    <string name="them">Them</string>
     <string name="position_n">Pos %d</string>
     <string name="setter">Setter</string>
     <string name="libero">Libero</string>
