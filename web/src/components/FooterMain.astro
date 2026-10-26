@@ -2,6 +2,7 @@
 
 import Logo from '../assets/theme-images/logo.svg'
 
+const currentLang = Astro.params.lang || 'en'
 const { settings } = Astro.props
 const currentYear = new Date().getFullYear()
 const copyright =
@@ -35,7 +36,7 @@ const copyright =
 
           { [...settings.nav].sort((a,b) => a.title.localeCompare(b.title)).map( item =>
 
-            <a href={ item.link }>
+            <a href={ `/scoutforall/${currentLang}/${item.link}` }>
               { item.title }
             </a>
 
@@ -71,6 +72,8 @@ const copyright =
       </a>
       <span>•</span>
       <span><a href="https://github.com/naighes/scoutforall/blob/master/LICENSE">{ settings.labels.license }</a></span>
+      <span>•</span>
+      <span><a href="/scoutforall/privacy/">{ settings.labels.privacy }</a></span>
       <span>•</span>
       <span>{ settings.labels.made_with } <a href="https://github.com/naighes">n@ighes</a></span>
     </nav>

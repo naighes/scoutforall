@@ -48,14 +48,9 @@ impl<
     }
 
     async fn on_selected(&mut self, path: &Path) -> Result<AppAction, AppError> {
-        // selected file name
-        let match_id = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
-            AppError::IO(IOError::Msg(current_labels().invalid_file_name.to_string()))
-        })?;
         let archive = fs::read(path).map_err(|e| AppError::IO(IOError::from(e)))?;
         import_match(
             &archive,
-            match_id,
             &self.team,
             &*self.match_reader,
             &*self.match_writer,

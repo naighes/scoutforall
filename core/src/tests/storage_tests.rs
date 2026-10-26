@@ -76,6 +76,34 @@ mod tests {
         blobs_and_folders(&MemoryStore::new()).await;
     }
 
+    /// A write goes to a hidden file first, then in place of the old one:
+    /// stopped halfway, the old one is still there, whole; what's left of
+    /// it is never data.
+    #[tokio::test]
+    async fn a_write_stopped_halfway_leaves_the_old_file() {
+        let dir = TempDir::new().unwrap();
+        let store = FsStore::new(dir.path());
+        store.write("a/b.json", b"old").await.unwrap();
+        assert!(!dir.path().join("a/.b.json.tmp").exists());
+        // a write stopped halfway: the new file never took the place of
+        // the old one
+        std::fs::write(dir.path().join("a/.b.json.tmp"), b"ne").unwrap();
+        std::fs::write(dir.path().join("a/.DS_Store"), b"").unwrap();
+        assert_eq!(store.read("a/b.json").await.unwrap(), Some(b"old".to_vec()));
+        assert_eq!(
+            store.list("a").await.unwrap(),
+            vec![StoreEntry::Blob("b.json".into())]
+        );
+        // the next write goes over it
+        store.write("a/b.json", b"new").await.unwrap();
+        assert_eq!(store.read("a/b.json").await.unwrap(), Some(b"new".to_vec()));
+        assert!(!dir.path().join("a/.b.json.tmp").exists());
+        // the new file can't be written: the old one stays
+        std::fs::create_dir(dir.path().join("a/.b.json.tmp")).unwrap();
+        assert!(store.write("a/b.json", b"newer").await.is_err());
+        assert_eq!(store.read("a/b.json").await.unwrap(), Some(b"new".to_vec()));
+    }
+
     /// A key can't reach out of the folder of the data.
     #[tokio::test]
     async fn the_file_system_store_stays_in_its_folder() {
@@ -139,6 +167,9 @@ mod tests {
             role: Some(role),
             number: i as u8 + 1,
             deleted: false,
+            birth_date: None,
+            height_cm: None,
+            notes: String::new(),
         })
         .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
@@ -162,6 +193,7 @@ mod tests {
                 Utc::now().fixed_offset(),
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
+                String::new(),
             )
             .await
             .unwrap();
@@ -262,7 +294,7 @@ mod tests {
         let target = Providers::new(Arc::new(MemoryStore::new()));
         let imported_team = import_team(
             &team_zip,
-            team.id,
+            None,
             &target.team_reader,
             &target.team_writer,
             EN,
@@ -272,7 +304,6 @@ mod tests {
         assert_eq!(imported_team.players.len(), team.players.len());
         let imported = import_match(
             &match_zip,
-            &m.id,
             &imported_team,
             &target.match_reader,
             &target.match_writer,
@@ -295,7 +326,7 @@ mod tests {
         // not twice
         let again = import_team(
             &team_zip,
-            team.id,
+            None,
             &target.team_reader,
             &target.team_writer,
             EN,
@@ -303,7 +334,6 @@ mod tests {
         assert!(again.await.is_err());
         let again = import_match(
             &match_zip,
-            &m.id,
             &imported_team,
             &target.match_reader,
             &target.match_writer,

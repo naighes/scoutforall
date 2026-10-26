@@ -13,7 +13,7 @@ mod tests {
             team_writer::{TeamInput, TeamWriter},
         },
         storage::{Store, memory::MemoryStore},
-        util::config_var,
+        util::{config_var, config_var_in},
     };
     use chrono::Utc;
     use std::{
@@ -21,7 +21,8 @@ mod tests {
         sync::Arc,
     };
 
-    // a name per test: tests run in parallel and share the environment
+    // no test changes the environment of the process: tests run in parallel
+    // and share it
     #[test]
     fn built_in_value_without_the_environment() {
         let name = "SCOUT4ALL_TEST_BUILT_IN";
@@ -34,13 +35,15 @@ mod tests {
     #[test]
     fn environment_overrides_the_built_in_value() {
         let name = "SCOUT4ALL_TEST_OVERRIDE";
-        // SAFETY: no other test reads or writes this variable
-        unsafe { std::env::set_var(name, "https://from.env") };
+        let environment = |n: &str| (n == name).then(|| "https://from.env".to_string());
         assert_eq!(
-            config_var(name, Some("https://built.in")),
+            config_var_in(environment, name, Some("https://built.in")),
             Some("https://from.env".to_string())
         );
-        assert_eq!(config_var(name, None), Some("https://from.env".to_string()));
+        assert_eq!(
+            config_var_in(environment, name, None),
+            Some("https://from.env".to_string())
+        );
     }
 
     /// A variable unset in CI is injected empty.
@@ -71,6 +74,7 @@ mod tests {
                 Utc::now().fixed_offset(),
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
+                String::new(),
             )
             .await
             .unwrap();

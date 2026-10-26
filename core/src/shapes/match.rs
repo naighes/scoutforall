@@ -2,6 +2,7 @@ use crate::{
     constants::LEGACY_MAX_SUBSTITUTIONS,
     errors::AppError,
     shapes::{enums::TeamSideEnum, set::SetEntry, snapshot::Snapshot, team::TeamEntry},
+    util::sanitize_filename,
 };
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,8 @@ pub struct MatchStatus {
     pub next_set_number: Option<u8>,
     pub last_incomplete_set: Option<SetEntry>,
     pub match_finished: bool,
-    pub last_serving_team: Option<TeamSideEnum>,
+    /// the last set won or lost, if any
+    pub last_set: Option<SetEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -28,6 +30,9 @@ pub struct MatchEntry {
     // matches saved before the number was configurable used the old rules
     #[serde(default = "legacy_max_substitutions")]
     pub max_substitutions: u8,
+    // since v0.10, written only when given: see `PlayerEntry::notes`
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub notes: String,
     #[serde(skip_serializing, skip_deserializing)]
     pub sets: Vec<SetEntry>,
 }
@@ -37,12 +42,21 @@ fn legacy_max_substitutions() -> u8 {
 }
 
 impl MatchEntry {
+    /// The id of a match against the opponent on the date: one a day.
+    pub fn id_of(opponent: &str, date: &DateTime<FixedOffset>) -> String {
+        format!(
+            "{}_{}",
+            date.format("%Y-%m-%d"),
+            sanitize_filename(opponent)
+        )
+    }
+
     pub fn get_status(&self) -> Result<MatchStatus, AppError> {
         let mut us_wins = 0;
         let mut them_wins = 0;
         let mut next_set_number = 1;
         let mut last_incomplete_set = None;
-        let mut last_serving_team: Option<TeamSideEnum> = None;
+        let mut last_set: Option<SetEntry> = None;
         // scan all sets
         for set_number in 1..=5 {
             if let Some(set_entry) = self.sets.iter().find(|s| s.set_number == set_number) {
@@ -51,11 +65,11 @@ impl MatchEntry {
                 if let Some(snapshot) = snapshot {
                     match snapshot.get_set_winner(set_number) {
                         Some(TeamSideEnum::Us) => {
-                            last_serving_team = Some(set_entry.serving_team);
+                            last_set = Some(set_entry.clone());
                             us_wins += 1;
                         }
                         Some(TeamSideEnum::Them) => {
-                            last_serving_team = Some(set_entry.serving_team);
+                            last_set = Some(set_entry.clone());
                             them_wins += 1;
                         }
                         None => {
@@ -70,7 +84,7 @@ impl MatchEntry {
                             next_set_number: None,
                             last_incomplete_set: None,
                             match_finished: true,
-                            last_serving_team,
+                            last_set,
                         });
                     }
                 } else {
@@ -89,7 +103,7 @@ impl MatchEntry {
             next_set_number: Some(next_set_number),
             last_incomplete_set,
             match_finished: false,
-            last_serving_team,
+            last_set,
         })
     }
 

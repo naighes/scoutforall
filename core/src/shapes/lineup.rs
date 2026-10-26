@@ -207,6 +207,15 @@ impl Lineup {
         self.players.iter().position(|id| id == player_id)
     }
 
+    /// The player on the diagonal of the setter, three positions away: the
+    /// only one who can become the setter keeping the libero in place (its
+    /// slot depends on the rotation modulo 3, see `get_libero_slot`).
+    pub fn get_setter_diagonal(&self) -> Option<Uuid> {
+        self.find_position(&self.current_setter)
+            .and_then(|setter| self.players.get((setter + 3) % 6))
+            .copied()
+    }
+
     fn try_set(&mut self, player_id: &Uuid, position: usize) -> Result<(), AppError> {
         if position < self.players.len() {
             self.players[position] = *player_id;
@@ -325,9 +334,47 @@ impl Lineup {
         self.get(index)
     }
 
+    /// The players where they play during the rally, once the serve is
+    /// made in break or received in side out, by position (index 0 is
+    /// position 1), instead of the order of rotation. In the front row the
+    /// setter or the opposite in 2, the middle blocker in 3, the outside
+    /// hitter in 4; in the back row the setter or the opposite in 1, the
+    /// outside hitter in 6, the libero (or the middle blocker serving) in 5.
+    /// Each diagonal has a player in each row, so every position is taken.
+    /// But in side out with the setter in 1 (the canonical P1, as
+    /// `Snapshot::get_attack_zone`) the front row stays as it received: the
+    /// opposite in 4, the outside hitter in 2. `None` if the setter is not
+    /// on court.
+    pub fn get_rally_positions(&self) -> Option<[Uuid; 6]> {
+        let setter_index = self.find_position(&self.current_setter)?;
+        let canonical_p1 = self.phase == PhaseEnum::SideOut && setter_index == 0;
+        let mut positions = self.players;
+        for (index, player) in self.players.iter().enumerate() {
+            let offset = (index + 6 - setter_index) % 6;
+            let front = !matches!(index, 0 | 4 | 5);
+            let position = match (offset % 3, front, canonical_p1) {
+                (_, true, true) => index,
+                (0, true, _) => 1,
+                (0, false, _) => 0,
+                (1, true, _) => 3,
+                (1, false, _) => 5,
+                (_, true, _) => 2,
+                (_, false, _) => 4,
+            };
+            positions[position] = *player;
+        }
+        Some(positions)
+    }
+
     pub fn get_serving_player(&self) -> Option<Uuid> {
         let serving_index = 0; // the player in position 1 (index 0) is always the server
         self.get(serving_index)
+    }
+
+    /// The players by position, in the order of rotation (index 0 is
+    /// position 1).
+    pub fn get_positions(&self) -> [Uuid; 6] {
+        self.players
     }
 
     pub fn get(&self, index: usize) -> Option<Uuid> {

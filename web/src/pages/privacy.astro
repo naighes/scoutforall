@@ -1,0 +1,46 @@
+---
+// the privacy policy, also the one of the app on Google Play: the text of
+// DATA-PRIVACY, in english only like the file
+import Layout from "../layouts/Layout.astro";
+import { privacy } from "../lib/privacy.js";
+
+const title = privacy[0]?.text ?? "Scout4all - Data collection and privacy";
+
+// the text, with the e-mail addresses as links
+const EMAIL = /([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/;
+const parts = (text) =>
+  text.split(EMAIL).map((part, i) => ({ text: part, email: i % 2 === 1 }));
+---
+
+<Layout
+  title={ title }
+  description="What scout4all collects, on computers and on Android, and why."
+  url="https://naighes.github.io/scoutforall/privacy/"
+>
+  <article class="bs-container max-w-3xl py-12 flex flex-col gap-4 bs-body-text text-bs-foreground-light">
+    { privacy.map((b) => {
+      switch (b.kind) {
+        case 'title':
+          return <h1 class="bs-h1 text-white mb-4">{ b.text }</h1>;
+        case 'section':
+          return <h2 class="bs-h2 text-white mt-8">{ b.text }</h2>;
+        case 'subsection':
+          return <h3 class="bs-h3 text-white mt-4">{ b.text }</h3>;
+        case 'list':
+          return (
+            <ul class="list-disc pl-6 flex flex-col gap-1">
+              { b.items.map((item) => <li>{ item }</li>) }
+            </ul>
+          );
+        default:
+          return (
+            <p>
+              { parts(b.text).map((p) =>
+                p.email ? <a class="underline" href={ `mailto:${p.text}` }>{ p.text }</a> : p.text
+              ) }
+            </p>
+          );
+      }
+    }) }
+  </article>
+</Layout>

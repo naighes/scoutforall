@@ -141,7 +141,7 @@ mod tests {
         let mut ui = settings().await;
         let screen = ui.screen();
         let fixed = current_labels().fixed;
-        for key in ["F2", "⇧-u", "Esc", "0-9"] {
+        for key in ["F2", "⇧-u", "Esc", "F3", "0-9"] {
             assert!(
                 screen.contains(&format!("{key} ({fixed})")),
                 "{key}: {screen}"
@@ -243,10 +243,10 @@ mod tests {
         let mut ui = settings().await;
         ui.press(KeyCode::Down).await;
         ui.press(KeyCode::Char(' ')).await;
-        assert!(!saved(&ui).await.analytics_enabled);
+        assert!(!saved(&ui).await.consent.analytics_enabled);
         assert!(ui.selected().unwrap_or_default().contains("[ ]"));
         ui.press(KeyCode::Enter).await;
-        assert!(saved(&ui).await.analytics_enabled);
+        assert!(saved(&ui).await.consent.analytics_enabled);
         assert!(ui.selected().unwrap_or_default().contains("[X]"));
     }
 
@@ -857,7 +857,7 @@ mod tests {
             .unwrap();
         let defaults = Settings::default();
         assert_eq!(settings.language, LanguageEnum::It);
-        assert!(!settings.analytics_enabled);
+        assert!(!settings.consent.analytics_enabled);
         assert_eq!(
             settings
                 .scouting_keybindings
@@ -1116,7 +1116,7 @@ mod tests {
             .expect("expected the settings");
         let defaults = Settings::default();
         assert_eq!(settings.language, LanguageEnum::It);
-        assert!(settings.analytics_enabled);
+        assert!(settings.consent.analytics_enabled);
         assert_eq!(
             settings.scouting_keybindings.key_for(&EventTypeEnum::S),
             defaults.scouting_keybindings.key_for(&EventTypeEnum::S)

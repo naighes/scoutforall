@@ -1,0 +1,23 @@
+scout4all is volleyball scouting for coaches and analysts: record every touch of a match from the bench, with a few taps, and read the statistics while the set is still being played.
+
+SCOUTING THAT KEEPS UP WITH THE RALLY
+• Tap the player first: the app offers only the skills she can play in that moment, and then the evaluation (#, +, !, -, /, =).
+• The court follows the rally: rotations, the setter, the libero, the server, the side of the ball.
+• Substitutions, libero swaps and the setter change without leaving the screen.
+• Made a mistake? Undo the last touch, or correct any event of a set afterwards.
+
+STATISTICS, LIVE AND AFTER THE MATCH
+• Summary, distribution of the attacks, errors and the trend of every set.
+• Detail by skill, by player and by rotation, in break and side-out.
+• Efficiency colored against reference values for the level and the gender of the team.
+• The receivers and attackers on court show their efficiency on their jersey.
+
+YOUR DATA, YOUR WAY
+• Works offline: teams and matches stay on the phone, with the Android backup.
+• Share a team or a match as a file (WhatsApp, e-mail, Quick Share) and open it on another phone or in the scout4all desktop app, for Windows, macOS and Linux.
+• Unless you turn it off in the settings, the matches you scout are sent without names to the developer, for statistics and to fix bugs.
+
+START IN TWO MINUTES
+A guided tutorial scouts a few rallies with an example team, the Italian women's national team: you learn by doing.
+
+In English, Italian, Portuguese, Polish and Japanese. Free, no ads, open source (AGPL-3.0): https://github.com/naighes/scoutforall

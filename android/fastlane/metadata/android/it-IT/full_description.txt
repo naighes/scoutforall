@@ -1,0 +1,23 @@
+scout4all è lo scouting della pallavolo per allenatori e scoutman: registra ogni tocco di una partita dalla panchina, con pochi tocchi, e leggi le statistiche mentre il set è ancora in corso.
+
+UNO SCOUTING CHE TIENE IL RITMO DELL'AZIONE
+• Prima tocchi la giocatrice: l'app propone solo i fondamentali che può giocare in quel momento, poi la valutazione (#, +, !, -, /, =).
+• Il campo segue l'azione: rotazioni, palleggiatrice, libero, chi batte, da che parte è la palla.
+• Sostituzioni, cambi del libero e cambio della palleggiatrice senza lasciare lo schermo.
+• Uno sbaglio? Annulli l'ultimo tocco, o correggi dopo qualsiasi evento di un set.
+
+STATISTICHE, DAL VIVO E A FINE PARTITA
+• Sintesi, distribuzione degli attacchi, errori e andamento di ogni set.
+• Dettaglio per fondamentale, per giocatrice e per rotazione, in break e in cambio palla.
+• Efficienza colorata secondo valori di riferimento per il livello e il genere della squadra.
+• Ricevitori e attaccanti in campo mostrano la loro efficienza sulla maglia.
+
+I TUOI DATI
+• Funziona senza rete: squadre e partite restano sul telefono, con il backup di Android.
+• Condividi una squadra o una partita come file (WhatsApp, e-mail, Quick Share) e aprila su un altro telefono o nella versione per computer di scout4all, per Windows, macOS e Linux.
+• Se non lo disattivi nelle impostazioni, le partite registrate vengono inviate senza nomi allo sviluppatore, per le statistiche e per correggere i difetti.
+
+PRONTI IN DUE MINUTI
+Un tutorial guidato fa lo scouting di qualche azione con una squadra di esempio, la nazionale italiana femminile: si impara facendo.
+
+In italiano, inglese, portoghese, polacco e giapponese. Gratuita, senza pubblicità, open source (AGPL-3.0): https://github.com/naighes/scoutforall

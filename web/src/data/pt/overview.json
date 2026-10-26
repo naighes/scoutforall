@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Scout de vôlei sem complicação",
+    "content": "<strong>Ações rápidas e validadas permitem registrar cada evento do jogo sem esforço</strong>, deixando o scout da partida rápido, preciso e intuitivo",
+    "image": "/scoutforall/content-images/scouting-anim.gif",
+    "image_alt": ""
+  },
+  {
+    "title": "Análises que fazem diferença",
+    "content": "<strong>Analise eficiência, positividade e distribuição.</strong> Tudo o que você precisa para entender o jogo num piscar de olhos e tomar decisões táticas mais inteligentes",
+    "image": "/scoutforall/content-images/stats_blur.png",
+    "image_alt": ""
+  },
+  {
+    "title": "Feito pela comunidade",
+    "content": "<strong>Open source e construído em conjunto.</strong> O scout4all cresce com as contribuições de técnicos, analistas e desenvolvedores que compartilham a mesma paixão pelo vôlei.",
+    "image": "/scoutforall/content-images/community.png",
+    "image_alt": ""
+  }
+]

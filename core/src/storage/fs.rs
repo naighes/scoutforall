@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::{
-    fs::{OpenOptions, create_dir_all, metadata, read, read_dir, try_exists, write},
+    fs::{File, OpenOptions, create_dir_all, metadata, read, read_dir, rename, try_exists},
     io::AsyncWriteExt,
 };
 
@@ -37,6 +37,41 @@ impl FsStore {
         }
     }
 
+    /// Beside the file, hidden: what's written goes there first.
+    fn temp_path(path: &Path) -> Result<PathBuf, AppError> {
+        match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => {
+                Ok(parent.join(format!(".{}.tmp", name.to_string_lossy())))
+            }
+            _ => Err(AppError::IO(IOError::Msg(format!(
+                "no file name: {:?}",
+                path
+            )))),
+        }
+    }
+
+    /// On the disk, not only in the cache of the system: the battery may
+    /// run out right after.
+    async fn sync(file: &File) -> Result<(), AppError> {
+        file.sync_all()
+            .await
+            .map_err(|e| AppError::IO(IOError::from(e)))
+    }
+
+    /// The folder knows the file renamed in it, on the disk too; only on
+    /// unix a folder can be opened as a file.
+    async fn sync_folder(path: &Path) -> Result<(), AppError> {
+        match path.parent() {
+            Some(parent) if cfg!(unix) => {
+                let folder = File::open(parent)
+                    .await
+                    .map_err(|e| AppError::IO(IOError::from(e)))?;
+                Self::sync(&folder).await
+            }
+            _ => Ok(()),
+        }
+    }
+
     async fn create_parent(path: &Path) -> Result<(), AppError> {
         match path.parent() {
             Some(parent) => create_dir_all(parent)
@@ -60,10 +95,21 @@ impl Store for FsStore {
     async fn write(&self, key: &str, data: &[u8]) -> Result<(), AppError> {
         let path = self.path(key)?;
         Self::create_parent(&path).await?;
-        // written when awaited: a tokio file isn't, unless flushed
-        write(&path, data)
+        // a new file beside, then in its place: a write stopped halfway (the
+        // app killed, the battery out) leaves the old one, never half of it
+        let temp = Self::temp_path(&path)?;
+        let mut file = File::create(&temp)
             .await
-            .map_err(|e| AppError::IO(IOError::from(e)))
+            .map_err(|e| AppError::IO(IOError::from(e)))?;
+        file.write_all(data)
+            .await
+            .map_err(|e| AppError::IO(IOError::from(e)))?;
+        Self::sync(&file).await?;
+        drop(file);
+        rename(&temp, &path)
+            .await
+            .map_err(|e| AppError::IO(IOError::from(e)))?;
+        Self::sync_folder(&path).await
     }
 
     async fn append(&self, key: &str, data: &[u8]) -> Result<(), AppError> {
@@ -80,7 +126,8 @@ impl Store for FsStore {
             .map_err(|e| AppError::IO(IOError::from(e)))?;
         file.flush()
             .await
-            .map_err(|e| AppError::IO(IOError::from(e)))
+            .map_err(|e| AppError::IO(IOError::from(e)))?;
+        Self::sync(&file).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, AppError> {
@@ -102,6 +149,11 @@ impl Store for FsStore {
             .map_err(|e| AppError::IO(IOError::from(e)))?
         {
             let name = entry.file_name().to_string_lossy().into_owned();
+            // hidden: a write stopped halfway, or the files of the system
+            // (.DS_Store), never data
+            if name.starts_with('.') {
+                continue;
+            }
             // the links count as what they point to
             match metadata(entry.path()).await {
                 Ok(m) if m.is_dir() => entries.push(StoreEntry::Folder(name)),

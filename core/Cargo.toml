@@ -28,9 +28,16 @@ typst-pdf.workspace = true
 uuid.workspace = true
 zip.workspace = true
 
+# Android has its own verifier of certificates, which needs the context of
+# the app (JNI): the roots of Mozilla, built in, instead
+[target.'cfg(target_os = "android")'.dependencies]
+webpki-root-certs = "1.0.9"
+
 [dev-dependencies]
 dirs.workspace = true
 tempfile.workspace = true
+# a local server stands for the upload API
+tokio = { workspace = true, features = ["net"] }
 
 [lints]
 workspace = true

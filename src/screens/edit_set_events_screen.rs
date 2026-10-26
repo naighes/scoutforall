@@ -25,14 +25,15 @@ use ratatui::{
 };
 use scout4all_core::{
     analytics::global::{enqueue_match_for_upload, uploads_enabled},
-    errors::{AppError, MatchError},
+    errors::AppError,
+    event_edit::{EditField, EventEdit},
     providers::set_writer::SetWriter,
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName},
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        technique::{ServeTypeEnum, TechniqueEnum},
+        technique::TechniqueEnum,
     },
 };
 use std::sync::Arc;
@@ -56,17 +57,10 @@ pub struct EditSetEventsScreen<SSW: SetWriter + Send + Sync> {
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum FormField {
-    EventType,
-    Eval,
-    Technique,
-}
-
 #[derive(Debug)]
 struct EventForm {
-    field: FormField,
-    event: EventEntry,
+    field: EditField,
+    edit: EventEdit,
 }
 
 /// The player in the list of the events, shortened when the screen is
@@ -101,7 +95,7 @@ impl<SSW: SetWriter + Send + Sync> Renderable for EditSetEventsScreen<SSW> {
         let form_height = self
             .form
             .as_ref()
-            .map_or(0, |form| Self::fields(&form.event).len() as u16 + 2);
+            .map_or(0, |form| form.edit.fields().len() as u16 + 2);
         let left = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(3), Constraint::Length(form_height)])
@@ -211,7 +205,7 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
     fn shown_event(&self) -> Option<&EventEntry> {
         self.form
             .as_ref()
-            .map(|form| &form.event)
+            .map(|form| form.edit.event())
             .or_else(|| self.set.events.get(self.selected()))
     }
 
@@ -243,83 +237,27 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
     }
 
     fn edit_selected(&mut self) -> AppAction {
-        use EventTypeEnum::*;
-        match self.set.events.get(self.selected()) {
-            Some(event) if matches!(event.event_type, R | CL | CS) => {
-                self.notify_message
-                    .set_error(current_labels().event_cannot_be_edited.to_string());
-            }
-            Some(event) => {
+        match EventEdit::new(
+            &self.set,
+            self.selected(),
+            self.current_match.max_substitutions,
+        ) {
+            Ok(edit) => {
                 self.form = Some(EventForm {
-                    field: FormField::EventType,
-                    event: event.clone(),
+                    field: EditField::EventType,
+                    edit,
                 });
             }
-            None => {}
+            Err(e) => self
+                .notify_message
+                .set_error(e.message(current_labels().domain).to_string()),
         }
         AppAction::None
     }
 
-    /// The fields of the event that can change: the evaluation for the
-    /// events having one, the set or serve for the attacks and the serves.
-    fn fields(event: &EventEntry) -> Vec<FormField> {
-        [
-            Some(FormField::EventType),
-            event
-                .event_type
-                .requires_evaluation()
-                .then_some(FormField::Eval),
-            matches!(event.event_type, EventTypeEnum::A | EventTypeEnum::S)
-                .then_some(FormField::Technique),
-        ]
-        .into_iter()
-        .flatten()
-        .collect()
-    }
-
-    /// The events the selected one can become: the ones that could come at
-    /// that point, played by the same player (or by none, as the event),
-    /// but the substitutions and the libero and setter changes.
-    fn event_types(&self, event: &EventEntry) -> Vec<EventTypeEnum> {
-        use EventTypeEnum::*;
-        self.before
-            .get_available_options()
-            .iter()
-            .copied()
-            .filter(|t| !matches!(t, R | CL | CS))
-            .filter(|t| t.requires_player() == event.event_type.requires_player())
-            .filter(|t| event.player.is_none_or(|p| self.before.can_play(*t, &p)))
-            .collect()
-    }
-
-    /// The sets the attacker can receive, the serves, and no technique, as
-    /// the events saved before it was scouted.
-    fn techniques(
-        &self,
-        event_type: EventTypeEnum,
-        player: Option<uuid::Uuid>,
-    ) -> Vec<Option<TechniqueEnum>> {
-        let techniques: Vec<TechniqueEnum> = match (event_type, player) {
-            (EventTypeEnum::A, Some(attacker)) => self
-                .before
-                .available_set_types(&attacker)
-                .into_iter()
-                .map(TechniqueEnum::Set)
-                .collect(),
-            (EventTypeEnum::S, _) => ServeTypeEnum::ALL
-                .into_iter()
-                .map(TechniqueEnum::Serve)
-                .collect(),
-            _ => vec![],
-        };
-        std::iter::once(None)
-            .chain(techniques.into_iter().map(Some))
-            .collect()
-    }
-
     fn move_field(&mut self, next: bool) -> AppAction {
         if let Some(form) = self.form.as_mut() {
-            form.field = cycle(&Self::fields(&form.event), form.field, !next, true);
+            form.field = cycle(&form.edit.fields(), form.field, !next, true);
         }
         AppAction::None
     }
@@ -327,63 +265,38 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
     /// Changes the value of the field: a new event keeps the evaluation and
     /// the technique when it allows them.
     fn change_value(&mut self, back: bool) {
-        let Some(form) = self.form.as_ref() else {
+        let Some(form) = self.form.as_mut() else {
             return;
         };
-        let mut event = form.event.clone();
+        let edit = &mut form.edit;
+        let event = edit.event().clone();
         match form.field {
-            FormField::EventType => {
-                event.event_type = cycle(&self.event_types(&event), event.event_type, back, true);
-                let evals = event.event_type.available_evals();
-                event.eval = event
-                    .eval
-                    .filter(|e| evals.contains(e))
-                    .or_else(|| evals.first().copied());
-                event.technique = event.technique.filter(|t| {
-                    self.techniques(event.event_type, event.player)
-                        .contains(&Some(*t))
-                });
+            EditField::EventType => {
+                edit.choose_event_type(cycle(&edit.event_types(), event.event_type, back, true))
             }
-            FormField::Eval => {
-                event.eval = event
-                    .eval
-                    .map(|e| cycle(&event.event_type.available_evals(), e, back, true));
+            EditField::Eval => {
+                if let Some(eval) = event.eval {
+                    edit.choose_eval(cycle(&edit.evals(), eval, back, true));
+                }
             }
-            FormField::Technique => {
-                event.technique = cycle(
-                    &self.techniques(event.event_type, event.player),
-                    event.technique,
-                    back,
-                    true,
-                );
+            EditField::Technique => {
+                edit.choose_technique(cycle(&edit.techniques(), event.technique, back, true))
             }
         }
-        self.form = Some(EventForm {
-            field: form.field,
-            event,
-        });
     }
 
     async fn save(&mut self) -> AppAction {
         let Some(form) = self.form.as_ref() else {
             return AppAction::None;
         };
-        let edited = self.set.with_event(
-            self.selected(),
-            form.event.clone(),
-            self.current_match.max_substitutions,
-        );
-        let saved = match edited {
+        let saved = match form.edit.apply() {
             Ok(set) => self
                 .set_writer
                 .update(&self.current_match, &set)
                 .await
                 .map(|_| set)
                 .map_err(|_| current_labels().could_not_save_set),
-            Err(AppError::Match(MatchError::SetOutcomeChanged(_))) => {
-                Err(current_labels().edit_changes_the_set_result)
-            }
-            Err(_) => Err(current_labels().edit_does_not_fit_the_set),
+            Err(e) => Err(e.message(current_labels().domain)),
         };
         match saved {
             Ok(set) => {
@@ -499,17 +412,19 @@ impl<SSW: SetWriter + Send + Sync> EditSetEventsScreen<SSW> {
             return;
         };
         let labels = current_labels();
-        let event = &form.event;
-        let rows: Vec<Row> = Self::fields(event)
+        let event = form.edit.event();
+        let rows: Vec<Row> = form
+            .edit
+            .fields()
             .into_iter()
             .map(|field| {
                 let (label, value) = match field {
-                    FormField::EventType => (
+                    EditField::EventType => (
                         labels.event,
                         event.event_type.friendly_name(labels.domain).to_string(),
                     ),
-                    FormField::Eval => (labels.evaluation, Self::eval_name(event, event.eval)),
-                    FormField::Technique => (
+                    EditField::Eval => (labels.evaluation, Self::eval_name(event, event.eval)),
+                    EditField::Technique => (
                         match event.event_type {
                             EventTypeEnum::S => labels.serve_type,
                             _ => labels.set_type,

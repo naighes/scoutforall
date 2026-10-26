@@ -6,8 +6,9 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{
-            checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
-            notify_banner::NotifyBanner, panel, team_header::TeamHeader, text_box::TextBox,
+            checkbox::CheckBox, date_picker::DatePicker, form_fields::field_areas,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
+            team_header::TeamHeader, text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
@@ -21,13 +22,28 @@ use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
 };
 use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
+    match_form::{MatchForm, MatchInput},
     providers::{match_writer::MatchWriter, set_writer::SetWriter},
-    shapes::{enums::EventTypeEnum, r#match::MatchEntry, team::TeamEntry},
+    set_start::SetStartForm,
+    shapes::{r#match::MatchEntry, team::TeamEntry},
 };
+
+/// The fields, in the order of Tab.
+const FIELDS: usize = 5;
+
+/// The notes of a match, `notes` to begin with.
+fn notes_box(notes: &str) -> TextBox {
+    TextBox::new(
+        current_labels().notes.to_owned(),
+        false,
+        Some(notes).filter(|n| !n.is_empty()),
+    )
+    .wrapping()
+}
 
 #[derive(Debug)]
 pub struct AddMatchScreen<
@@ -46,6 +62,7 @@ pub struct AddMatchScreen<
     date: DatePicker,           // field 1
     home: CheckBox,             // field 2
     max_substitutions: TextBox, // field 3
+    notes: TextBox,             // field 4
     field: usize,
     notify_message: NotifyBanner,
     header: TeamHeader,
@@ -72,23 +89,14 @@ impl<
             .constraints([Constraint::Length(5), Constraint::Min(1)])
             .split(body);
 
-        let area = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3), // opponent
-                Constraint::Length(3), // date
-                Constraint::Length(3), // home
-                Constraint::Length(3), // max substitutions
-                Constraint::Min(1),
-            ])
-            .split(container[1]);
+        let area = field_areas(container[1].inner(Margin::new(1, 1)), FIELDS);
         self.notify_message.render(f, footer_right);
         self.render_header(f, container[1]);
         self.opponent.render(f, area[0]);
         self.date.render(f, area[1]);
         self.home.render(f, area[2]);
         self.max_substitutions.render(f, area[3]);
+        self.notes.render(f, area[4]);
         self.header.render(f, container[0], Some(&self.team));
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
@@ -171,6 +179,7 @@ impl<
             date,
             home,
             max_substitutions,
+            notes_box(""),
             None,
         )
     }
@@ -198,6 +207,7 @@ impl<
             |current: &str, c: char| current.len() < 2 && c.is_ascii_digit(),
         );
         let team = m.team.clone();
+        let notes = notes_box(&m.notes);
         Self::build(
             settings_reader,
             settings_writer,
@@ -209,6 +219,7 @@ impl<
             date,
             home,
             max_substitutions,
+            notes,
             Some(m),
         )
     }
@@ -224,6 +235,7 @@ impl<
         date: DatePicker,
         home: CheckBox,
         max_substitutions: TextBox,
+        notes: TextBox,
         editing: Option<MatchEntry>,
     ) -> Self {
         let screen_actions = &[
@@ -246,6 +258,7 @@ impl<
             date,
             home,
             max_substitutions,
+            notes,
             field: 0,
             notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
@@ -268,57 +281,37 @@ impl<
     }
 
     async fn handle_confirm(&mut self) -> AppAction {
-        let max_substitutions = self
-            .max_substitutions
-            .get_selected_value()
-            .and_then(|v| v.parse::<u8>().ok())
-            .filter(|v| *v > 0);
-        match (
-            self.date.get_selected_value(),
-            self.opponent
+        let form = MatchForm {
+            notes: self.notes.get_selected_value().unwrap_or_default(),
+            opponent: self.opponent.get_selected_value().unwrap_or_default(),
+            date: self.date.get_selected_value().ok(),
+            home: self.home.get_selected_value(),
+            max_substitutions: self
+                .max_substitutions
                 .get_selected_value()
-                .filter(|o| !o.trim().is_empty()),
-            max_substitutions,
-        ) {
-            (_, None, _) => {
+                .unwrap_or_default(),
+        };
+        match (form.validate(self.editing.as_ref()), self.editing.clone()) {
+            (Err(e), _) => {
                 self.notify_message
-                    .set_error(current_labels().opponent_cannot_be_empty.to_string());
+                    .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
-            (_, _, None) => {
-                self.notify_message
-                    .set_error(current_labels().invalid_max_substitutions.to_string());
-                AppAction::None
-            }
-            (Ok(date), Some(opponent), Some(max_substitutions)) => match &self.editing {
-                Some(m) => {
-                    self.handle_update(m.clone(), opponent, date, max_substitutions)
-                        .await
-                }
-                None => self.handle_create(opponent, date, max_substitutions).await,
-            },
-            _ => {
-                self.notify_message
-                    .set_error(current_labels().invalid_date.to_string());
-                AppAction::None
-            }
+            (Ok(input), Some(m)) => self.handle_update(m, input).await,
+            (Ok(input), None) => self.handle_create(input).await,
         }
     }
 
-    async fn handle_create(
-        &mut self,
-        opponent: String,
-        date: chrono::DateTime<chrono::FixedOffset>,
-        max_substitutions: u8,
-    ) -> AppAction {
+    async fn handle_create(&mut self, input: MatchInput) -> AppAction {
         match self
             .match_writer
             .create(
                 &self.team,
-                opponent,
-                date,
-                self.home.get_selected_value(),
-                max_substitutions,
+                input.opponent,
+                input.date,
+                input.home,
+                input.max_substitutions,
+                input.notes,
             )
             .await
         {
@@ -327,8 +320,7 @@ impl<
                 self.settings_writer.clone(),
                 self.settings.clone(),
                 m,
-                1,
-                None,
+                SetStartForm::new(1, None),
                 Some(2),
                 self.set_writer.clone(),
             ))),
@@ -340,42 +332,23 @@ impl<
         }
     }
 
-    async fn handle_update(
-        &mut self,
-        m: MatchEntry,
-        opponent: String,
-        date: chrono::DateTime<chrono::FixedOffset>,
-        max_substitutions: u8,
-    ) -> AppAction {
-        let max_existing = m
-            .sets
-            .iter()
-            .map(|s| {
-                s.events
-                    .iter()
-                    .filter(|e| e.event_type == EventTypeEnum::R)
-                    .count() as u8
-            })
-            .max()
-            .unwrap_or(0);
-        let result = match max_substitutions < max_existing {
-            true => Err(current_labels().max_substitutions_below_existing_substitutions),
-            false => self
-                .match_writer
-                .update(
-                    &m,
-                    opponent,
-                    date,
-                    self.home.get_selected_value(),
-                    max_substitutions,
-                )
-                .await
-                .map_err(|_| current_labels().could_not_update_match),
-        };
-        match result {
+    async fn handle_update(&mut self, m: MatchEntry, input: MatchInput) -> AppAction {
+        match self
+            .match_writer
+            .update(
+                &m,
+                input.opponent,
+                input.date,
+                input.home,
+                input.max_substitutions,
+                input.notes,
+            )
+            .await
+        {
             Ok(()) => AppAction::Back(true, Some(1)),
-            Err(message) => {
-                self.notify_message.set_error(message.to_string());
+            Err(_) => {
+                self.notify_message
+                    .set_error(current_labels().could_not_update_match.to_string());
                 AppAction::None
             }
         }
@@ -385,6 +358,7 @@ impl<
         self.opponent.handle_backspace();
         self.date.handle_backspace();
         self.max_substitutions.handle_backspace();
+        self.notes.handle_backspace();
         AppAction::None
     }
 
@@ -393,19 +367,20 @@ impl<
         self.home.handle_char(c);
         self.date.handle_char(c);
         self.max_substitutions.handle_char(c);
+        self.notes.handle_char(c);
         AppAction::None
     }
 
     fn handle_next(&mut self) -> AppAction {
         self.date.handle_tab();
-        self.field = (self.field + 1) % 4;
+        self.field = (self.field + 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
 
     fn handle_previous(&mut self) -> AppAction {
         self.date.handle_tab();
-        self.field = (self.field + 3) % 4;
+        self.field = (self.field + FIELDS - 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
@@ -415,5 +390,6 @@ impl<
         self.date.writing_mode = self.field == 1;
         self.home.writing_mode = self.field == 2;
         self.max_substitutions.writing_mode = self.field == 3;
+        self.notes.writing_mode = self.field == 4;
     }
 }

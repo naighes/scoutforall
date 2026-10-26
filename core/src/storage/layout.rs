@@ -5,6 +5,7 @@
 //! <team id>/<match id>/match.json
 //! <team id>/<match id>/set_<n>.json   the lineup
 //! <team id>/<match id>/set_<n>.csv    the events
+//! config.json
 //! upload_queue.json
 //! ```
 
@@ -15,6 +16,13 @@ use uuid::Uuid;
 
 /// The root folder, where the teams are.
 pub const ROOT: &str = "";
+
+/// The settings of the app: the same file for every app, each keeps the
+/// fields of the others.
+pub const CONFIG: &str = "config.json";
+
+/// The settings that couldn't be read, set aside as they were.
+pub const UNREADABLE_CONFIG: &str = "config.json.unreadable";
 
 /// The matches waiting to be uploaded.
 pub const UPLOAD_QUEUE: &str = UPLOAD_QUEUE_FILE_NAME;

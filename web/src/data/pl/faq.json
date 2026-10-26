@@ -1,0 +1,26 @@
+[
+  {
+    "question": "Czy w programie mogę zapisywać kierunek ataku lub zagrywki albo strefy przyjęcia?",
+    "answer": "Na razie nie. Program opiera się na wyniku akcji: określasz rodzaj akcji (atak, przyjęcie, zagrywka itd.) i jej ocenę (pozytywna, negatywna, błąd itd.), ale obecnie nie można wskazać miejsca upadku piłki, kierunku zagrywki ani strefy przyjęcia. Jeśli zainteresowanie tą funkcją będzie duże, może ona zostać rozważona w przyszłych aktualizacjach."
+  },
+  {
+    "question": "Czy program jest darmowy?",
+    "answer": "Tak! Program jest całkowicie darmowy i open source. Zachęcamy społeczność do współpracy: każdy może pomóc ulepszyć program, zaproponować funkcje lub zgłosić problemy."
+  },
+  {
+    "question": "Dlaczego to aplikacja terminalowa, a nie graficzna?",
+    "answer": "Program stawia na produktywność i wydajność. Wprowadzanie danych z klawiatury jest szybsze niż stukanie w ekran tabletu czy smartfona. Pozwala to zapisywać akcje szybko i systematycznie, co jest szczególnie ważne przy scoutingu i analizie, gdy liczy się czas."
+  },
+  {
+    "question": "Czy wszystkie pozycje zawodników i strefy ataku można dowolnie ustawić?",
+    "answer": "Nie. Aplikacja przyjmuje pewne arbitralne, ale spójne założenia, aby uprościć wprowadzanie danych i zachować spójność analiz. Na przykład środkowego w drugiej linii zawsze zastępuje libero (chyba że środkowy zagrywa). Oznacza to, że nie można odwzorować fazy side-outu bez libero w drugiej linii. Ponadto strefy ataku są wyznaczane automatycznie na podstawie pozycji zawodników i miejsca rozgrywającego. Na przykład jeśli w bieżącym ustawieniu rozgrywający jest w strefie 1, atakujący atakuje ze strefy 4. Systemy takie jak odwrócone ustawienie z rozgrywającym w strefie 1 nie są obsługiwane."
+  },
+  {
+    "question": "Jak często program jest aktualizowany i czy muszę instalować aktualizacje ręcznie?",
+    "answer": "Program jest aktywnie rozwijany i stale się zmienia. Nowe funkcje, ulepszenia i poprawki błędów pojawiają się regularnie. Nie musisz ręcznie pobierać aktualizacji: przy każdym uruchomieniu aplikacja sprawdza, czy jest nowa wersja, i po Twoim potwierdzeniu instaluje ją i uruchamia się ponownie. Dzięki temu od razu korzystasz z wkładu społeczności i ciągłego rozwoju projektu."
+  },
+  {
+    "question": "Aplikacja nie uruchamia się po automatycznej aktualizacji. Co się stało?",
+    "answer": "Do wersji 0.4.2 automatyczna aktualizacja mogła zastąpić aplikację plikiem danych publikowanym razem z każdym wydaniem (wykazem składników oprogramowania) zamiast nowej wersji: po aktualizacji aplikacja się nie uruchamia. Zostało to naprawione od wersji 0.4.3. Aby to naprawić, pobierz ponownie najnowszą wersję z sekcji <a href=\"#download\">pobieranie</a> i zastąp stary plik. Twoje drużyny i mecze są przechowywane osobno i nic się z nimi nie dzieje."
+  }
+]

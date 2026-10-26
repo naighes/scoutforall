@@ -11,7 +11,7 @@ use crate::{
             CONFIG, settings_reader::StoreSettingsReader, settings_writer::StoreSettingsWriter,
         },
     },
-    shapes::settings::{Settings, TERMS_VERSION},
+    shapes::settings::Settings,
     tests::fs_store,
 };
 use chrono::{Duration, TimeZone, Utc};
@@ -30,6 +30,7 @@ use scout4all_core::{
         team_reader::TeamReader,
         team_writer::{PlayerInput, TeamInput, TeamWriter},
     },
+    settings::Consent,
     shapes::enums::{RoleEnum, TeamSideEnum},
 };
 use std::{
@@ -85,6 +86,12 @@ impl Ui {
         Self::start_with(teams, &[], true, edit).await
     }
 
+    /// Like `start`, changing the saved files before the app starts, e.g.
+    /// to remove a player: `edit` gets the data folder.
+    pub async fn start_editing(teams: &[TeamFixture], edit: impl FnOnce(&Path)) -> Self {
+        Self::start_with(teams, &[], false, edit).await
+    }
+
     /// The terms of use are already seen: the app opens on the team list.
     async fn start_with(
         teams: &[TeamFixture],
@@ -94,7 +101,7 @@ impl Ui {
     ) -> Self {
         let settings = |browse| Settings {
             last_used_dir: Some(browse),
-            terms_version: TERMS_VERSION,
+            consent: Consent::default().with_terms_seen(),
             ..Settings::default()
         };
         Self::start_with_settings(teams, browse_dirs, start_sets, edit, settings).await
@@ -139,13 +146,21 @@ impl Ui {
                     name: p.to_string(),
                     role: RoleEnum::OutsideHitter,
                     number: i as u8 + 1,
+                    details: Default::default(),
                 };
                 team_writer.save_player(input, &mut team).await.unwrap();
             }
             for (i, o) in t.opponents.iter().enumerate() {
                 let date = first_match + Duration::days(i as i64);
                 let m = match_writer
-                    .create(&team, o.to_string(), date, true, DEFAULT_MAX_SUBSTITUTIONS)
+                    .create(
+                        &team,
+                        o.to_string(),
+                        date,
+                        true,
+                        DEFAULT_MAX_SUBSTITUTIONS,
+                        String::new(),
+                    )
                     .await
                     .unwrap();
                 if start_sets {
@@ -237,6 +252,16 @@ impl Ui {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
+    /// The team files as saved on disk.
+    pub fn saved_teams(&self) -> Vec<serde_json::Value> {
+        std::fs::read_dir(&self.base)
+            .unwrap()
+            .map(|e| e.unwrap().path().join("team.json"))
+            .filter(|p| p.exists())
+            .map(|p| serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap())
+            .collect()
+    }
+
     /// The match descriptors as saved on disk.
     pub fn saved_matches(&self) -> Vec<serde_json::Value> {
         self.match_descriptor_paths()
@@ -257,9 +282,15 @@ impl Ui {
 
     /// The descriptors of the first set of each match, as saved on disk.
     pub fn saved_first_sets(&self) -> Vec<serde_json::Value> {
+        self.saved_sets(1)
+    }
+
+    /// The descriptors of set `number` of each match, as saved on disk.
+    pub fn saved_sets(&self, number: u8) -> Vec<serde_json::Value> {
+        let name = format!("set_{number}.json");
         self.match_descriptor_paths()
             .iter()
-            .filter_map(|p| std::fs::read_to_string(p.with_file_name("set_1.json")).ok())
+            .filter_map(|p| std::fs::read_to_string(p.with_file_name(&name)).ok())
             .map(|json| serde_json::from_str(&json).unwrap())
             .collect()
     }
@@ -351,6 +382,30 @@ impl Ui {
     pub fn footer(&mut self) -> String {
         let lines = self.lines();
         lines[lines.len() - 5..].join("\n")
+    }
+
+    /// The entries of the panel with the title, a line each, if it's
+    /// shown: the text between its borders, down to its bottom border.
+    pub fn panel(&mut self, title: &str) -> Option<Vec<String>> {
+        let lines: Vec<Vec<char>> = self.lines().iter().map(|l| l.chars().collect()).collect();
+        let top = format!("┌{title}");
+        let (row, x) = lines.iter().enumerate().find_map(|(row, line)| {
+            String::from_iter(line)
+                .find(&top)
+                .map(|byte| (row, String::from_iter(line)[..byte].chars().count()))
+        })?;
+        Some(
+            lines[row + 1..]
+                .iter()
+                .take_while(|line| line.get(x) != Some(&'└'))
+                .map(|line| {
+                    String::from_iter(line[x + 1..].iter().take_while(|c| **c != '│'))
+                        .trim()
+                        .to_string()
+                })
+                .filter(|entry| !entry.is_empty())
+                .collect(),
+        )
     }
 
     pub fn screen(&mut self) -> String {

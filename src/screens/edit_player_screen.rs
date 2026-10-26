@@ -5,8 +5,9 @@ use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
-            select::Select, team_header::TeamHeader, text_box::TextBox,
+            form_fields::field_areas, navigation_footer::NavigationFooter,
+            notify_banner::NotifyBanner, panel, select::Select, team_header::TeamHeader,
+            text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
@@ -16,13 +17,15 @@ use crate::{
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
+use chrono::Local;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
 };
 use scout4all_core::{
-    providers::team_writer::{PlayerInput, TeamWriter},
+    player_form::PlayerForm,
+    providers::team_writer::TeamWriter,
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
 };
 
@@ -30,11 +33,31 @@ fn validate_player_number(current: &str, c: char) -> bool {
     c.is_ascii_digit() && current.len() < 2 && !(current.is_empty() && c == '0')
 }
 
+/// YYYY-MM-DD: the core checks the date.
+fn validate_birth_date(current: &str, c: char) -> bool {
+    (c.is_ascii_digit() || c == '-') && current.len() < 10
+}
+
+fn validate_height(current: &str, c: char) -> bool {
+    c.is_ascii_digit() && current.len() < 3
+}
+
+/// The fields, in the order of Tab.
+const FIELDS: usize = 6;
+
+/// What a text box starts with: nothing for an empty text.
+fn text(value: &str) -> Option<&str> {
+    Some(value).filter(|v| !v.is_empty())
+}
+
 pub struct EditPlayerScreen<TW: TeamWriter + Send + Sync> {
     team: TeamEntry,
     name: TextBox,
     number: TextBox,
     role: Select<RoleEnum>,
+    birth_date: TextBox,
+    height: TextBox,
+    notes: TextBox,
     field: usize,
     notify_message: NotifyBanner,
     existing_player: Option<PlayerEntry>,
@@ -56,21 +79,15 @@ impl<TW: TeamWriter + Send + Sync> Renderable for EditPlayerScreen<TW> {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(5), Constraint::Min(1)])
             .split(body);
-        let area = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3), // name
-                Constraint::Length(3), // role
-                Constraint::Length(3), // number
-                Constraint::Min(1),
-            ])
-            .split(container[1]);
+        let area = field_areas(container[1].inner(Margin::new(1, 1)), FIELDS);
         self.notify_message.render(f, footer_right);
         self.render_header(f, container[1]);
         self.name.render(f, area[0]);
         self.role.render(f, area[1]);
         self.number.render(f, area[2]);
+        self.birth_date.render(f, area[3]);
+        self.height.render(f, area[4]);
+        self.notes.render(f, area[5]);
         self.header.render(f, container[0], Some(&self.team));
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
@@ -108,64 +125,19 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditPlayerScreen<TW> {
 
 impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
     pub fn new(team: TeamEntry, team_writer: Arc<TW>) -> Self {
-        let role = Select::new(
-            current_labels().role.to_owned(),
-            RoleEnum::ALL.to_vec(),
-            None,
-            false,
-        );
-        let name = TextBox::new(current_labels().name.to_owned(), true, None);
-        let number = TextBox::with_validator(
-            current_labels().number.to_owned(),
-            false,
-            None,
-            validate_player_number,
-        );
-
-        let actions = &[
-            Sba::Simple(ScreenActionEnum::Confirm),
-            Sba::Simple(ScreenActionEnum::Back),
-        ];
-        let kb = navigation_keybindings();
-        let footer_entries = navigation_entries()
-            .into_iter()
-            .chain([change_value_entry()])
-            .chain(get_keybinding_actions(kb, actions))
-            .collect();
-        let screen_key_bindings = kb.slice(Sba::keys(actions));
-
-        EditPlayerScreen {
-            team,
-            name,
-            number,
-            role,
-            field: 0,
-            notify_message: NotifyBanner::new(),
-            existing_player: None,
-            back: false,
-            header: TeamHeader::default(),
-            footer: NavigationFooter::new(),
-            footer_entries,
-            team_writer,
-            screen_key_bindings,
-        }
+        Self::with(team, None, team_writer)
     }
 
     pub fn edit(team: TeamEntry, player: PlayerEntry, team_writer: Arc<TW>) -> Self {
-        let role = Select::new(
-            current_labels().role.to_owned(),
-            RoleEnum::ALL.to_vec(),
-            player.role,
-            false,
-        );
-        let name = TextBox::new(current_labels().name.to_owned(), true, Some(&player.name));
-        let number = TextBox::with_validator(
-            current_labels().number.to_owned(),
-            false,
-            Some(&player.number.to_string()),
-            validate_player_number,
-        );
+        Self::with(team, Some(player), team_writer)
+    }
 
+    fn with(team: TeamEntry, existing_player: Option<PlayerEntry>, team_writer: Arc<TW>) -> Self {
+        let labels = current_labels();
+        let form = existing_player
+            .as_ref()
+            .map(PlayerForm::of)
+            .unwrap_or_default();
         let actions = &[
             Sba::Simple(ScreenActionEnum::Confirm),
             Sba::Simple(ScreenActionEnum::Back),
@@ -180,12 +152,35 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
 
         EditPlayerScreen {
             team,
-            name,
-            number,
-            role,
+            name: TextBox::new(labels.name.to_owned(), true, text(&form.name)),
+            number: TextBox::with_validator(
+                labels.number.to_owned(),
+                false,
+                text(&form.number),
+                validate_player_number,
+            ),
+            role: Select::new(
+                labels.role.to_owned(),
+                RoleEnum::ALL.to_vec(),
+                form.role,
+                false,
+            ),
+            birth_date: TextBox::with_validator(
+                labels.birth_date.to_owned(),
+                false,
+                text(&form.birth_date),
+                validate_birth_date,
+            ),
+            height: TextBox::with_validator(
+                labels.height.to_owned(),
+                false,
+                text(&form.height_cm),
+                validate_height,
+            ),
+            notes: TextBox::new(labels.notes.to_owned(), false, text(&form.notes)).wrapping(),
             field: 0,
             notify_message: NotifyBanner::new(),
-            existing_player: Some(player),
+            existing_player,
             back: false,
             header: TeamHeader::default(),
             footer: NavigationFooter::new(),
@@ -204,86 +199,64 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         }
     }
 
+    fn text_boxes(&mut self) -> [&mut TextBox; 5] {
+        [
+            &mut self.name,
+            &mut self.number,
+            &mut self.birth_date,
+            &mut self.height,
+            &mut self.notes,
+        ]
+    }
+
     fn handle_char(&mut self, c: char) -> AppAction {
-        self.name.handle_char(c);
-        self.number.handle_char(c);
+        self.text_boxes().into_iter().for_each(|t| t.handle_char(c));
         AppAction::None
     }
 
-    fn is_player_number_available(&self, number: u8) -> bool {
-        let existing_id = self.existing_player.as_ref().map(|ep| ep.id);
-        !self
-            .team
-            .active_players()
-            .iter()
-            .any(|p| p.number == number && Some(p.id) != existing_id)
-    }
-
     async fn handle_confirm(&mut self) -> AppAction {
-        match (
-            self.name.get_selected_value(),
-            self.role.get_selected_value(),
-            self.number
-                .get_selected_value()
-                .and_then(|v| v.parse::<u8>().ok()),
+        let form = PlayerForm {
+            name: self.name.get_selected_value().unwrap_or_default(),
+            role: self.role.get_selected_value(),
+            number: self.number.get_selected_value().unwrap_or_default(),
+            birth_date: self.birth_date.get_selected_value().unwrap_or_default(),
+            height_cm: self.height.get_selected_value().unwrap_or_default(),
+            notes: self.notes.get_selected_value().unwrap_or_default(),
+        };
+        match form.validate(
+            &self.team,
+            self.existing_player.as_ref(),
+            Local::now().date_naive(),
         ) {
-            (None, _, _) => {
+            Err(e) => {
                 self.notify_message
-                    .set_error(current_labels().name_cannot_be_empty.to_string());
+                    .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
-            (_, None, _) => {
-                self.notify_message
-                    .set_error(current_labels().role_is_required.to_string());
-                AppAction::None
-            }
-            (Some(name), Some(role), Some(number)) => {
-                if self.is_player_number_available(number) {
-                    let input = match &self.existing_player {
-                        Some(player) => {
-                            let mut updated = player.clone();
-                            updated.name = name;
-                            updated.role = Some(role);
-                            updated.number = number;
-                            PlayerInput::Existing(updated)
-                        }
-                        None => PlayerInput::New { name, role, number },
-                    };
-                    match self.team_writer.save_player(input, &mut self.team).await {
-                        Ok(_) => {
-                            self.back = true;
-                            self.notify_message
-                                .set_info(current_labels().operation_successful.to_string());
-                            AppAction::None
-                        }
-                        Err(_) => {
-                            self.notify_message
-                                .set_error(current_labels().could_not_create_player.to_string());
-                            AppAction::None
-                        }
-                    }
-                } else {
+            Ok(input) => match self.team_writer.save_player(input, &mut self.team).await {
+                Ok(_) => {
+                    self.back = true;
                     self.notify_message
-                        .set_error(current_labels().number_already_in_use.to_string());
+                        .set_info(current_labels().operation_successful.to_string());
                     AppAction::None
                 }
-            }
-            (_, _, None) => {
-                self.notify_message
-                    .set_error(current_labels().number_must_be_between_0_and_99.to_string());
-                AppAction::None
-            }
+                Err(_) => {
+                    self.notify_message
+                        .set_error(current_labels().could_not_create_player.to_string());
+                    AppAction::None
+                }
+            },
         }
     }
 
     fn handle_next(&mut self) -> AppAction {
-        self.field = (self.field + 1) % 3;
+        self.field = (self.field + 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
 
     fn handle_previous(&mut self) -> AppAction {
-        self.field = (self.field + 2) % 3;
+        self.field = (self.field + FIELDS - 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
@@ -292,6 +265,9 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
         self.name.writing_mode = self.field == 0;
         self.role.writing_mode = self.field == 1;
         self.number.writing_mode = self.field == 2;
+        self.birth_date.writing_mode = self.field == 3;
+        self.height.writing_mode = self.field == 4;
+        self.notes.writing_mode = self.field == 5;
     }
 
     fn handle_up(&mut self) -> AppAction {
@@ -305,8 +281,9 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
     }
 
     fn handle_backspace(&mut self) -> AppAction {
-        self.name.handle_backspace();
-        self.number.handle_backspace();
+        self.text_boxes()
+            .into_iter()
+            .for_each(TextBox::handle_backspace);
         AppAction::None
     }
 

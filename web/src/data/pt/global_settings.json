@@ -1,0 +1,39 @@
+{
+  "title": "scout4all | ferramenta de análise de partidas de vôlei",
+  "description": "Uma ferramenta CLI para coletar, gerenciar e gerar relatórios dos dados das partidas de vôlei. Ajuda técnicos e analistas a acompanhar os eventos da partida e a gerar relatórios úteis para a análise pós-jogo.",
+  "base_url": "https://naighes.github.io/scoutforall/",
+  "github_url": "https://github.com/naighes/scoutforall",
+  "github_image": "/scoutforall/content-images/github-mark-white.svg",
+  "theme_color": "#18181b",
+  "nav": [
+    {
+      "title": "visão geral",
+      "link": "./#overview"
+    },
+    {
+      "title": "downloads",
+      "link": "./#download"
+    },
+    {
+      "title": "FAQ",
+      "link": "./#faq"
+    }
+  ],
+  "social_links": [
+    {
+      "title": "GitHub",
+      "link": "https://github.com/naighes/scoutforall"
+    }
+  ],
+  "labels": {
+    "skip_to_content": "Pular para o conteúdo",
+    "back_to_top": "Voltar ao topo",
+    "license": "Licença",
+    "privacy": "Privacidade",
+    "made_with": "Feito com ❤️ por",
+    "previous_slide": "Slide anterior",
+    "next_slide": "Próximo slide",
+    "hero_image_alt": "A tela de estatísticas do scout4all em um notebook",
+    "language": "Idioma"
+  }
+}

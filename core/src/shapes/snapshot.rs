@@ -89,6 +89,18 @@ impl Display for EventEntry {
     }
 }
 
+/// How the team stands on court: the positions must respect the order of
+/// rotation until the serve, then the players go where they play.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Formation {
+    /// we serve: in the order of rotation, the server behind the end line
+    Serve,
+    /// they serve: in the order of rotation, spread to receive
+    Reception,
+    /// after our serve or our reception, until the rally ends
+    Rally,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub score_us: u8,
@@ -384,6 +396,90 @@ impl Snapshot {
                 self.partials.push((self.score_us, self.score_them));
             }
         }
+    }
+
+    /// How the team stands on court now (see `Formation`).
+    pub fn get_formation(&self) -> Formation {
+        let options = &self.available_options;
+        match (
+            self.current_lineup.get_current_phase(),
+            options.contains(&EventTypeEnum::S),
+            options.contains(&EventTypeEnum::P),
+        ) {
+            (PhaseEnum::Break, true, _) => Formation::Serve,
+            (PhaseEnum::SideOut, _, true) => Formation::Reception,
+            _ => Formation::Rally,
+        }
+    }
+
+    /// The players by position as they play now: where they play
+    /// (`Lineup::get_rally_positions`) once our serve is made or theirs is
+    /// received, until the rally ends; before, in the order of rotation,
+    /// which the positions must respect at the serve.
+    pub fn get_playing_positions(&self) -> [Uuid; 6] {
+        let lineup = &self.current_lineup;
+        let rotation = lineup.get_positions();
+        match self.get_formation() {
+            Formation::Rally => lineup.get_rally_positions().unwrap_or(rotation),
+            Formation::Serve | Formation::Reception => rotation,
+        }
+    }
+
+    /// The last touch of the rally being played, with the side of the net
+    /// it leaves the ball on (see `EventTypeEnum::ball_side_after`); `None`
+    /// before the serve.
+    pub fn get_last_touch(&self) -> Option<(&EventEntry, TeamSideEnum)> {
+        self.last_event
+            .as_ref()
+            .and_then(|e| e.event_type.ball_side_after(e.eval).map(|side| (e, side)))
+    }
+
+    /// The side of the net the ball is on: after the last touch while a
+    /// rally is played, before the serve with the team serving.
+    pub fn get_ball_side(&self) -> TeamSideEnum {
+        match (
+            self.get_last_touch(),
+            self.current_lineup.get_current_phase(),
+        ) {
+            (Some((_, side)), _) => side,
+            (None, PhaseEnum::Break) => TeamSideEnum::Us,
+            (None, PhaseEnum::SideOut) => TeamSideEnum::Them,
+        }
+    }
+
+    /// The fundamental worth watching now, and the players on court who
+    /// play it: the reception while we wait for their serve (the outside
+    /// hitters and the libero); the attack while the ball is on our side in
+    /// a rally (the outside hitters, the opposite, the middle blocker in the
+    /// front row). `None` otherwise.
+    pub fn get_spotlight(&self) -> Option<(EventTypeEnum, Vec<Uuid>)> {
+        use EventTypeEnum::*;
+        use RoleEnum::*;
+        let lineup = &self.current_lineup;
+        match (self.get_formation(), self.get_ball_side()) {
+            (Formation::Reception, _) => Some(P),
+            (Formation::Rally, TeamSideEnum::Us) => Some(A),
+            _ => None,
+        }
+        .map(|fundamental| {
+            let players = self
+                .get_playing_positions()
+                .into_iter()
+                .filter(|id| {
+                    matches!(
+                        (
+                            fundamental,
+                            lineup.get_role(id),
+                            lineup.is_back_row_player(id)
+                        ),
+                        (P, Ok(OutsideHitter | Libero), _)
+                            | (A, Ok(OutsideHitter | OppositeHitter), _)
+                            | (A, Ok(MiddleBlocker), false)
+                    )
+                })
+                .collect();
+            (fundamental, players)
+        })
     }
 
     /// The team serving next: the one serving the set at its start, then

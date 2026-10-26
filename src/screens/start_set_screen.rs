@@ -21,15 +21,18 @@ use ratatui::{
 };
 use scout4all_core::{
     providers::set_writer::SetWriter,
+    set_start::{self, SetStartForm},
     shapes::{
         enums::{RoleEnum, TeamSideEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
     },
 };
-use std::{collections::HashSet, sync::Arc};
-use uuid::Uuid;
+use std::sync::Arc;
 
+/// Starting a set: the keys choose who serves, then the players in
+/// positions 1 to 6, the setter and the liberos, as the core's
+/// `SetStartForm` allows.
 #[derive(Debug)]
 pub struct StartSetScreen<
     SSW: SetWriter + Send + Sync,
@@ -40,24 +43,24 @@ pub struct StartSetScreen<
     settings_writer: Arc<SW>,
     settings: Settings,
     current_match: MatchEntry,
-    set_number: u8,
-    lineup: Vec<PlayerEntry>,
-    initial_setter: Option<PlayerEntry>,
-    initial_libero: Option<PlayerEntry>,
+    form: SetStartForm,
     notify_message: NotifyBanner,
-    state: StartSetScreenState,
-    serving_team: Option<TeamSideEnum>,
+    step: StartSetStep,
     list_state: TableState,
     back_stack_count: Option<u8>,
     set_writer: Arc<SSW>,
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
 }
 
-#[derive(Debug)]
-pub enum StartSetScreenState {
-    SelectServingTeam,
-    // (player position index, setter, libero)
-    SelectLineupPlayers(usize, Option<Uuid>, Option<Uuid>),
+/// What the scout chooses now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartSetStep {
+    ServingTeam,
+    /// the player in a position, 0 for position 1
+    Position(usize),
+    Setter,
+    Libero,
+    FallbackLibero,
 }
 
 /// The keys choosing the serving team: left and right change the team, as
@@ -84,45 +87,34 @@ impl<
 > Renderable for StartSetScreen<SSW, SW, SR>
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        match self.state {
-            StartSetScreenState::SelectServingTeam => [change_value_entry()]
+        match self.step {
+            StartSetStep::ServingTeam => [change_value_entry()]
                 .into_iter()
                 .chain(get_keybinding_actions(
                     navigation_keybindings(),
                     &SERVING_TEAM_ACTIONS,
                 ))
                 .collect(),
-            StartSetScreenState::SelectLineupPlayers(..) => {
-                get_keybinding_actions(navigation_keybindings(), &LINEUP_SELECTION_ACTIONS)
-            }
+            _ => get_keybinding_actions(navigation_keybindings(), &LINEUP_SELECTION_ACTIONS),
         }
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
-        use StartSetScreenState::*;
         let rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(body);
         self.render_header(f, rows[0]);
         self.notify_message.render(f, footer_right);
-        match self.state {
-            SelectServingTeam => {
+        match self.step {
+            StartSetStep::ServingTeam => {
                 self.render_serving_team(f, rows[1], footer_left);
             }
-            SelectLineupPlayers(position_index, setter, libero) => {
+            _ => {
                 if self.list_state.selected().is_none() {
-                    self.list_state
-                        .select(self.default_select(position_index, setter, libero));
+                    self.list_state.select(self.default_select());
                 }
-                self.render_lineup_selection_screen(
-                    f,
-                    rows[1],
-                    position_index,
-                    setter,
-                    libero,
-                    footer_left,
-                );
+                self.render_lineup_selection_screen(f, rows[1], footer_left);
             }
         }
     }
@@ -136,25 +128,15 @@ impl<
 > ScreenAsync for StartSetScreen<SSW, SW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        use StartSetScreenState::*;
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             let action = self.screen_key_bindings.get(key_combination).copied();
-            match (&self.state, &self.notify_message.has_value()) {
+            match (self.step, self.notify_message.has_value()) {
                 (_, true) => {
                     self.notify_message.reset();
                     AppAction::None
                 }
-                (SelectServingTeam, _) => self.handle_serving_team_selection(action),
-                (SelectLineupPlayers(current_player_position, setter, libero), _) => {
-                    self.handle_select_lineup_players_key(
-                        action,
-                        key,
-                        *current_player_position,
-                        *setter,
-                        *libero,
-                    )
-                    .await
-                }
+                (StartSetStep::ServingTeam, _) => self.handle_serving_team_selection(action),
+                (_, _) => self.handle_select_lineup_players_key(action, key).await,
             }
         } else {
             AppAction::None
@@ -172,25 +154,19 @@ impl<
 {
     fn handle_serving_team_selection(&mut self, action: Option<ScreenActionEnum>) -> AppAction {
         use TeamSideEnum::*;
-        match (action, self.serving_team) {
-            (Some(ScreenActionEnum::Next | ScreenActionEnum::Previous), Some(Them)) => {
-                self.serving_team = Some(Us);
+        match (action, self.form.serving_team) {
+            (Some(ScreenActionEnum::Next | ScreenActionEnum::Previous), Some(Them))
+            | (Some(ScreenActionEnum::Previous), None) => {
+                self.form.serving_team = Some(Us);
                 AppAction::None
             }
-            (Some(ScreenActionEnum::Previous), None) => {
-                self.serving_team = Some(Us);
-                AppAction::None
-            }
-            (Some(ScreenActionEnum::Next | ScreenActionEnum::Previous), Some(Us)) => {
-                self.serving_team = Some(Them);
-                AppAction::None
-            }
-            (Some(ScreenActionEnum::Next), None) => {
-                self.serving_team = Some(Them);
+            (Some(ScreenActionEnum::Next | ScreenActionEnum::Previous), Some(Us))
+            | (Some(ScreenActionEnum::Next), None) => {
+                self.form.serving_team = Some(Them);
                 AppAction::None
             }
             (Some(ScreenActionEnum::Confirm), Some(_)) => {
-                self.state = StartSetScreenState::SelectLineupPlayers(0, None, None);
+                self.go_to(StartSetStep::Position(0));
                 AppAction::None
             }
             (Some(ScreenActionEnum::Back), _) => AppAction::Back(true, self.back_stack_count),
@@ -198,196 +174,142 @@ impl<
         }
     }
 
-    fn default_select(
-        &self,
-        position_index: usize,
-        setter: Option<Uuid>,
-        libero: Option<Uuid>,
-    ) -> Option<usize> {
-        let available_players = self.get_available_players(position_index, setter, libero);
-        match (available_players.is_empty(), position_index, setter, libero) {
-            (true, _, _, _) => None,
-            // on setter selection, grab the first setter from available players as default
-            (false, 6, None, _) => available_players
+    /// The players to choose from in the current step.
+    fn choices(&self) -> Vec<PlayerEntry> {
+        let team = &self.current_match.team;
+        match self.step {
+            StartSetStep::ServingTeam => vec![],
+            StartSetStep::Position(i) => self.form.position_choices(team, i),
+            StartSetStep::Setter => self.form.setter_choices(team),
+            StartSetStep::Libero => self.form.libero_choices(team),
+            StartSetStep::FallbackLibero => self.form.fallback_libero_choices(team),
+        }
+        .into_iter()
+        .cloned()
+        .collect()
+    }
+
+    /// The player highlighted when a step begins: the one proposed for it
+    /// (the lineup of the last set), else the first setter for the setter,
+    /// the first libero for the liberos, else the first player.
+    fn default_select(&self) -> Option<usize> {
+        let choices = self.choices();
+        let proposed = match self.step {
+            StartSetStep::ServingTeam => None,
+            StartSetStep::Position(i) => self.form.positions.get(i).copied().flatten(),
+            StartSetStep::Setter => self.form.setter,
+            StartSetStep::Libero => self.form.libero,
+            StartSetStep::FallbackLibero => self.form.fallback_libero,
+        };
+        let preferred = match self.step {
+            StartSetStep::Setter => Some(RoleEnum::Setter),
+            StartSetStep::Libero | StartSetStep::FallbackLibero => Some(RoleEnum::Libero),
+            _ => None,
+        };
+        let proposed = proposed.and_then(|id| choices.iter().position(|p| p.id == id));
+        match (choices.is_empty(), proposed, preferred) {
+            (true, _, _) => None,
+            (false, Some(i), _) => Some(i),
+            (false, None, Some(role)) => choices
                 .iter()
-                .position(|p| p.role == Some(RoleEnum::Setter))
+                .position(|p| p.role == Some(role))
                 .or(Some(0)),
-            // on libero/fallbacklibero selection, grab the first libero from available players as default
-            (false, 6, Some(_), None | Some(_)) => available_players
-                .iter()
-                .position(|p| p.role == Some(RoleEnum::Libero))
-                .or(Some(0)),
-            _ => Some(0),
+            (false, None, None) => Some(0),
         }
     }
 
-    fn handle_lineup_selection_back(
-        &mut self,
-        current_player_position: usize,
-        setter: Option<Uuid>,
-        libero: Option<Uuid>,
-    ) -> AppAction {
-        match (current_player_position, self.set_number, setter, libero) {
-            // set number (1 or 5) => back to serving team selection
-            (0, 1 | 5, _, _) => {
-                self.state = StartSetScreenState::SelectServingTeam;
+    fn go_to(&mut self, step: StartSetStep) {
+        self.step = step;
+        self.list_state.select(self.default_select());
+    }
+
+    fn handle_lineup_selection_back(&mut self) -> AppAction {
+        match (self.step, self.form.chooses_serving_team()) {
+            (StartSetStep::Position(0), true) => self.go_to(StartSetStep::ServingTeam),
+            (StartSetStep::Position(0), false) => {
+                return AppAction::Back(true, self.back_stack_count);
             }
-            // back from the entry point
-            (0, _, _, _) => return AppAction::Back(true, self.back_stack_count),
-            // back from setter selection
-            (6, _, None, _) => {
-                self.state = StartSetScreenState::SelectLineupPlayers(5, None, None);
-                self.lineup.pop();
-                self.list_state.select(self.default_select(5, None, None));
+            (StartSetStep::Position(i), _) => {
+                self.form.place(i - 1, None);
+                self.go_to(StartSetStep::Position(i - 1));
             }
-            // back from libero selection
-            (6, _, Some(_), None) => {
-                self.state = StartSetScreenState::SelectLineupPlayers(6, None, None);
-                self.initial_setter = None;
-                self.list_state.select(self.default_select(6, None, None));
+            (StartSetStep::Setter, _) => {
+                self.form.place(5, None);
+                self.go_to(StartSetStep::Position(5));
             }
-            // back from fallback libero selection
-            (6, _, Some(_), Some(_)) => {
-                self.state = StartSetScreenState::SelectLineupPlayers(6, setter, None);
-                self.initial_libero = None;
-                self.list_state.select(self.default_select(6, setter, None));
+            (StartSetStep::Libero, _) => {
+                self.form.setter = None;
+                self.go_to(StartSetStep::Setter);
             }
-            // back to previous position
-            (i, _, None, None) => {
-                self.state = StartSetScreenState::SelectLineupPlayers(i - 1, None, None);
-                self.lineup.pop();
-                self.list_state
-                    .select(self.default_select(i - 1, None, None));
+            (StartSetStep::FallbackLibero, _) => {
+                self.form.libero = None;
+                self.go_to(StartSetStep::Libero);
             }
-            _ => {}
+            (StartSetStep::ServingTeam, _) => {}
         };
         AppAction::None
     }
 
-    async fn handle_fallback_libero_selection(
-        &mut self,
-        selection_index: Option<usize>,
-        available_players: Vec<PlayerEntry>,
-    ) -> AppAction {
-        let lineup: Result<[Uuid; 6], _> = self
-            .lineup
-            .iter()
-            .map(|p| p.id)
-            .collect::<Vec<_>>()
-            .try_into();
-        match (
-            selection_index.and_then(|i| available_players.get(i).cloned()),
-            &self.serving_team,
-            &self.initial_setter,
-            &self.initial_libero,
-            lineup,
-        ) {
-            (
-                fallback_libero,
-                Some(serving_team),
-                Some(initial_setter),
-                Some(initial_libero),
-                Ok(lineup),
-            ) => {
-                // this is due to the start of a new set, so selection is cleaned up here
-                self.list_state.select(self.default_select(0, None, None));
+    /// Chooses `player` in the current step, and goes to the next one.
+    async fn choose(&mut self, player: &PlayerEntry) -> AppAction {
+        match self.step {
+            StartSetStep::Position(i) => {
+                self.form.place(i, Some(player.id));
+                self.go_to(match i {
+                    5 => StartSetStep::Setter,
+                    _ => StartSetStep::Position(i + 1),
+                });
+                AppAction::None
+            }
+            StartSetStep::Setter => {
+                self.form.setter = Some(player.id);
+                self.go_to(StartSetStep::Libero);
+                AppAction::None
+            }
+            StartSetStep::Libero => {
+                self.form.libero = Some(player.id);
                 match self
-                    .set_writer
-                    .create(
-                        &self.current_match,
-                        self.set_number,
-                        *serving_team,
-                        lineup,
-                        initial_libero.id,
-                        fallback_libero.map(|f| f.id),
-                        initial_setter.id,
-                        vec![], // no events at the start of the set
-                    )
-                    .await
-                    .and_then(|set_entry| {
-                        set_entry
-                            .compute_snapshot(self.current_match.max_substitutions)
-                            .map(|snapshot| (set_entry, snapshot))
-                    }) {
-                    Ok((set_entry, snapshot)) => {
-                        AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
-                            self.settings_reader.clone(),
-                            self.settings_writer.clone(),
-                            self.settings.clone(),
-                            self.current_match.clone(),
-                            set_entry,
-                            snapshot,
-                            self.back_stack_count.map(|x| x + 1),
-                            self.set_writer.clone(),
-                        )))
-                    }
-                    Err(_) => {
-                        self.notify_message.set_error(
-                            current_labels()
-                                .domain
-                                .could_not_compute_snapshot
-                                .to_string(),
-                        );
+                    .form
+                    .fallback_libero_choices(&self.current_match.team)
+                    .is_empty()
+                {
+                    // no fallback libero to choose
+                    true => self.start().await,
+                    false => {
+                        self.go_to(StartSetStep::FallbackLibero);
                         AppAction::None
                     }
                 }
             }
-            _ => AppAction::None,
-        }
-    }
-
-    fn handle_player_selection(
-        &mut self,
-        selection_index: usize,
-        available_players: Vec<PlayerEntry>,
-        current_player_position: usize,
-    ) -> AppAction {
-        if let Some(player) = available_players.get(selection_index).cloned() {
-            match self.lineup.get_mut(current_player_position) {
-                Some(slot) => *slot = player,
-                None => self.lineup.push(player),
+            StartSetStep::FallbackLibero => {
+                self.form.fallback_libero = Some(player.id);
+                self.start().await
             }
-            self.list_state
-                .select(self.default_select(current_player_position + 1, None, None));
-            self.state =
-                StartSetScreenState::SelectLineupPlayers(current_player_position + 1, None, None);
-        };
-        AppAction::None
-    }
-
-    fn handle_setter_selection(&mut self, selection_index: usize) -> AppAction {
-        if let Some(setter) = self.lineup.get(selection_index) {
-            self.initial_setter = Some(setter.clone());
-            self.list_state
-                .select(self.default_select(6, Some(setter.id), None));
-            self.state = StartSetScreenState::SelectLineupPlayers(6, Some(setter.id), None);
+            StartSetStep::ServingTeam => AppAction::None,
         }
-        AppAction::None
     }
 
-    async fn handle_libero_selection(
-        &mut self,
-        selection_index: usize,
-        available_players: Vec<PlayerEntry>,
-    ) -> AppAction {
-        if let (Some(libero), Some(setter_id)) = (
-            available_players.get(selection_index).cloned(),
-            self.initial_setter.clone().map(|s| s.id),
-        ) {
-            self.initial_libero = Some(libero.clone());
-            self.list_state
-                .select(self.default_select(6, Some(setter_id), Some(libero.id)));
-            self.state =
-                StartSetScreenState::SelectLineupPlayers(6, Some(setter_id), Some(libero.id));
-            if self.current_match.team.players.len() < 8 {
-                // cannot have a second libero with less than 8 players
-                self.handle_fallback_libero_selection(None, available_players)
-                    .await
-            } else {
+    /// Saves the set and scouts it.
+    async fn start(&mut self) -> AppAction {
+        let started = match self.form.clone().validate(&self.current_match.team) {
+            Ok(input) => {
+                set_start::start(self.current_match.clone(), input, self.set_writer.clone()).await
+            }
+            Err(e) => Err(e),
+        };
+        match started {
+            Ok(session) => AppAction::SwitchScreen(Box::new(ScoutingScreen::new(
+                self.settings_reader.clone(),
+                self.settings_writer.clone(),
+                self.settings.clone(),
+                session,
+                self.back_stack_count.map(|x| x + 1),
+            ))),
+            Err(e) => {
+                self.notify_message
+                    .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
-        } else {
-            AppAction::None
         }
     }
 
@@ -395,13 +317,9 @@ impl<
         &mut self,
         action: Option<ScreenActionEnum>,
         key: KeyEvent,
-        current_player_position: usize,
-        setter: Option<Uuid>,
-        libero: Option<Uuid>,
     ) -> AppAction {
-        let available_players: Vec<PlayerEntry> =
-            self.get_available_players(current_player_position, setter, libero);
-        if available_players.is_empty() {
+        let choices = self.choices();
+        if choices.is_empty() {
             self.notify_message
                 .set_error(current_labels().no_available_players.to_string());
             return AppAction::None;
@@ -410,11 +328,11 @@ impl<
         if self
             .list_state
             .selected()
-            .filter(|&i| i >= available_players.len())
+            .filter(|&i| i >= choices.len())
             .is_some()
         {
             self.list_state
-                .select(Some(available_players.len().saturating_sub(1)));
+                .select(Some(choices.len().saturating_sub(1)));
         }
         match (action, key.code, self.list_state.selected()) {
             // no player selection: select the first one
@@ -424,61 +342,27 @@ impl<
             }
             // move up
             (Some(ScreenActionEnum::Up), _, Some(i)) => {
-                self.list_state.select(Some(if i == 0 {
-                    available_players.len() - 1
-                } else {
-                    i - 1
+                self.list_state.select(Some(match i {
+                    0 => choices.len() - 1,
+                    _ => i - 1,
                 }));
                 AppAction::None
             }
             // move down
             (Some(ScreenActionEnum::Down), _, Some(i)) => {
                 self.list_state
-                    .select(Some(if i + 1 >= available_players.len() {
-                        0
-                    } else {
-                        i + 1
-                    }));
+                    .select(Some(if i + 1 >= choices.len() { 0 } else { i + 1 }));
                 AppAction::None
             }
-            (Some(ScreenActionEnum::Back), _, _) => {
-                self.handle_lineup_selection_back(current_player_position, setter, libero)
-            }
-            (Some(ScreenActionEnum::Select), _, Some(selection_index)) => {
-                match (current_player_position, setter, libero) {
-                    // players selection
-                    (0..6, None, _) => self.handle_player_selection(
-                        selection_index,
-                        available_players,
-                        current_player_position,
-                    ),
-                    // setter selection
-                    (6, None, _) => self.handle_setter_selection(selection_index),
-                    // libero selection
-                    (6, Some(_), None) => {
-                        self.handle_libero_selection(selection_index, available_players)
-                            .await
-                    }
-                    (6, Some(_), Some(_)) => {
-                        self.handle_fallback_libero_selection(
-                            Some(selection_index),
-                            available_players,
-                        )
-                        .await
-                    }
-                    _ => AppAction::None,
-                }
-            }
-            (None, KeyCode::Tab, _) => {
-                if matches!(
-                    (current_player_position, setter, libero),
-                    (6, Some(_), Some(_))
-                ) {
-                    self.handle_fallback_libero_selection(None, available_players)
-                        .await
-                } else {
-                    AppAction::None
-                }
+            (Some(ScreenActionEnum::Back), _, _) => self.handle_lineup_selection_back(),
+            (Some(ScreenActionEnum::Select), _, Some(i)) => match choices.get(i) {
+                Some(player) => self.choose(player).await,
+                None => AppAction::None,
+            },
+            // no fallback libero
+            (None, KeyCode::Tab, _) if self.step == StartSetStep::FallbackLibero => {
+                self.form.fallback_libero = None;
+                self.start().await
             }
             _ => AppAction::None,
         }
@@ -489,8 +373,7 @@ impl<
         settings_writer: Arc<SW>,
         settings: Settings,
         current_match: MatchEntry,
-        set_number: u8,
-        serving_team: Option<TeamSideEnum>,
+        form: SetStartForm,
         back_stack_count: Option<u8>,
         set_writer: Arc<SSW>,
     ) -> Self {
@@ -499,61 +382,30 @@ impl<
             settings_writer,
             settings,
             current_match,
-            set_number,
-            serving_team,
-            lineup: vec![],
-            initial_setter: None,
-            initial_libero: None,
+            step: match form.chooses_serving_team() {
+                true => StartSetStep::ServingTeam,
+                false => StartSetStep::Position(0),
+            },
+            form,
             notify_message: NotifyBanner::new(),
             list_state: TableState::default(),
-            state: if set_number == 1 || set_number == 5 {
-                StartSetScreenState::SelectServingTeam
-            } else {
-                StartSetScreenState::SelectLineupPlayers(0, None, None)
-            },
             back_stack_count,
             set_writer,
             screen_key_bindings: ActionsKeyBindings::empty(),
         }
     }
 
-    fn get_available_players(
-        &self,
-        position_index: usize,
-        setter: Option<Uuid>,
-        libero: Option<Uuid>,
-    ) -> Vec<PlayerEntry> {
-        match (position_index, setter, libero) {
-            // setter selection: choose only from lineup
-            (6, None, None) => self.lineup.clone(),
-            _ => {
-                let mut selected_ids: HashSet<Uuid> = self.lineup.iter().map(|p| p.id).collect();
-                if let Some(initial_libero) = &self.initial_libero {
-                    selected_ids.insert(initial_libero.id);
-                }
-                self.current_match
-                    .team
-                    .players
-                    .iter()
-                    .filter(|p| !selected_ids.contains(&p.id))
-                    .cloned()
-                    .collect()
-            }
-        }
-    }
-
-    fn lineup_selection_title(
-        position_index: usize,
-        setter: Option<Uuid>,
-        libero: Option<Uuid>,
-    ) -> Block<'static> {
-        let title = match (position_index, setter, libero) {
-            (6, None, _) => current_labels().lineup_selection_setter,
-            (_, Some(_), None) => current_labels().lineup_selection_libero,
-            (_, Some(_), Some(_)) => current_labels().lineup_selection_fallback_libero,
-            _ => &format!("pos {}", position_index + 1),
+    fn lineup_selection_title(&self) -> Block<'static> {
+        let title = match self.step {
+            StartSetStep::Setter => current_labels().lineup_selection_setter.to_string(),
+            StartSetStep::Libero => current_labels().lineup_selection_libero.to_string(),
+            StartSetStep::FallbackLibero => current_labels()
+                .lineup_selection_fallback_libero
+                .to_string(),
+            StartSetStep::Position(i) => format!("pos {}", i + 1),
+            StartSetStep::ServingTeam => String::new(),
         };
-        panel::section(title.to_string())
+        panel::section(title)
     }
 
     fn render_lineup_selection_row(p: &PlayerEntry) -> Row<'static> {
@@ -564,16 +416,9 @@ impl<
         ])
     }
 
-    fn render_lineup_selection_available_players(
-        &mut self,
-        f: &mut Frame,
-        position_index: usize,
-        setter: Option<Uuid>,
-        libero: Option<Uuid>,
-        area: Rect,
-    ) {
-        let area = match (setter, libero) {
-            (Some(_), Some(_)) => {
+    fn render_lineup_selection_available_players(&mut self, f: &mut Frame, area: Rect) {
+        let area = match self.step {
+            StartSetStep::FallbackLibero => {
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(3), Constraint::Min(1)])
@@ -594,9 +439,8 @@ impl<
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         );
-        let available_players: Vec<PlayerEntry> =
-            self.get_available_players(position_index, setter, libero);
-        let rows: Vec<Row> = available_players
+        let rows: Vec<Row> = self
+            .choices()
             .iter()
             .map(Self::render_lineup_selection_row)
             .collect();
@@ -609,7 +453,7 @@ impl<
             ],
         )
         .header(header)
-        .block(Self::lineup_selection_title(position_index, setter, libero))
+        .block(self.lineup_selection_title())
         .row_highlight_style(
             Style::default()
                 .add_modifier(Modifier::BOLD)
@@ -619,27 +463,13 @@ impl<
         f.render_stateful_widget(table, area, &mut self.list_state);
     }
 
-    fn render_lineup_selection_screen(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        position_index: usize,
-        setter: Option<Uuid>,
-        libero: Option<Uuid>,
-        footer_area: Rect,
-    ) {
+    fn render_lineup_selection_screen(&mut self, f: &mut Frame, area: Rect, footer_area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(area);
-        self.render_lineup_selection_available_players(
-            f,
-            position_index,
-            setter,
-            libero,
-            chunks[0],
-        );
-        self.render_lineup_selection_court(f, chunks[1], position_index, setter);
+        self.render_lineup_selection_available_players(f, chunks[0]);
+        self.render_lineup_selection_court(f, chunks[1]);
         self.render_lineup_selection_footer(f, footer_area);
     }
 
@@ -649,13 +479,7 @@ impl<
         NavigationFooter::new().render(f, area, self.footer_entries());
     }
 
-    fn render_lineup_selection_court(
-        &self,
-        f: &mut Frame,
-        area: Rect,
-        position_index: usize,
-        setter: Option<Uuid>,
-    ) {
+    fn render_lineup_selection_court(&self, f: &mut Frame, area: Rect) {
         let court_rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -674,8 +498,6 @@ impl<
             for (column_index, cell_area) in columns.iter().enumerate() {
                 self.render_lineup_selection_court_cell(
                     f,
-                    position_index,
-                    setter,
                     row_index,
                     column_index,
                     &position_map,
@@ -686,27 +508,28 @@ impl<
     }
 
     fn lineup_selection_court_cell_content(&self, index: usize) -> String {
-        if let Some(player) = self.lineup.get(index) {
-            if let Some(true) = self.initial_setter.as_ref().map(|s| s.id == player.id) {
-                format!(
-                    "{}\n{}\n({})",
-                    player.number,
-                    player.name,
-                    current_labels().domain.setter_prefix
-                )
-            } else {
-                format!("{}\n{}", player.number, player.name)
-            }
-        } else {
-            format!("pos {}", index + 1)
+        let player = self
+            .form
+            .positions
+            .get(index)
+            .copied()
+            .flatten()
+            .and_then(|id| self.current_match.team.find_player(id));
+        match (player, player.map(|p| Some(p.id) == self.form.setter)) {
+            (Some(player), Some(true)) => format!(
+                "{}\n{}\n({})",
+                player.number,
+                player.name,
+                current_labels().domain.setter_prefix
+            ),
+            (Some(player), _) => format!("{}\n{}", player.number, player.name),
+            (None, _) => format!("pos {}", index + 1),
         }
     }
 
     fn render_lineup_selection_court_cell(
         &self,
         f: &mut Frame,
-        position_index: usize,
-        setter: Option<Uuid>,
         row_index: usize,
         column_index: usize,
         position_map: &[usize; 6],
@@ -717,15 +540,11 @@ impl<
         let cell = Paragraph::new(self.lineup_selection_court_cell_content(index))
             .alignment(ratatui::layout::Alignment::Center)
             .block(Block::default().borders(Borders::ALL))
-            .style(match (position_index, setter) {
-                (i, None) => {
-                    if index == i {
-                        Style::default().add_modifier(Modifier::REVERSED)
-                    } else {
-                        Style::default()
-                    }
+            .style(match self.step {
+                StartSetStep::Position(i) if i == index => {
+                    Style::default().add_modifier(Modifier::REVERSED)
                 }
-                (_, Some(_)) => Style::default(),
+                _ => Style::default(),
             });
         f.render_widget(cell, *area);
     }
@@ -749,7 +568,7 @@ impl<
                     .add_modifier(Modifier::BOLD),
             )
             .alignment(ratatui::layout::Alignment::Center)
-            .block(panel::screen(format!("set {:?}", self.set_number)));
+            .block(panel::screen(format!("set {:?}", self.form.set_number)));
         f.render_widget(content, area);
     }
 
@@ -801,13 +620,13 @@ impl<
             f,
             current_labels().us,
             us_area,
-            self.serving_team == Some(TeamSideEnum::Us),
+            self.form.serving_team == Some(TeamSideEnum::Us),
         );
         Self::render_serving_team_button(
             f,
             current_labels().them,
             them_area,
-            self.serving_team == Some(TeamSideEnum::Them),
+            self.form.serving_team == Some(TeamSideEnum::Them),
         );
         self.render_serving_team_footer(f, footer_area);
     }

@@ -1,13 +1,10 @@
 ---
 
 import Logo from '../assets/theme-images/logo.svg'
+import { languages } from '../lib/languages.js'
 
 const currentLang = Astro.params.lang || 'en';
 const { settings } = Astro.props
-const languages = [
-  { code: 'en', label: 'English' },
-  { code: 'it', label: 'Italiano' },
-]
 
 ---
 
@@ -50,7 +47,7 @@ const languages = [
         onchange="try { localStorage.setItem('scout4all-language', this.selectedOptions[0].dataset.lang) } catch (e) {} window.location.href = this.value"
       >
         {languages.map(lang =>
-          <option value={`/scoutforall/${lang.code}/`} data-lang={lang.code} lang={lang.code} selected={lang.code === currentLang}>{lang.label}</option>
+          <option value={`/scoutforall/${lang.code}/`} data-lang={lang.code} lang={lang.hreflang} selected={lang.code === currentLang}>{lang.label}</option>
         )}
       </select>
     </div>

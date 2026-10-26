@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
-    widgets::Paragraph,
+    widgets::{Paragraph, Wrap},
 };
 use std::{
     fmt::{Debug, Formatter},
@@ -15,6 +15,8 @@ pub struct TextBox {
     label: String,
     pub validator: Box<dyn Fn(&str, char) -> bool + Send + Sync + 'static>,
     pub multiline: bool,
+    // a long text goes on the next lines of its area, not cut
+    wrapping: bool,
     last_blink: Instant,
     show_cursor: bool,
 }
@@ -37,6 +39,7 @@ impl TextBox {
             label,
             validator: Box::new(|_, _| true),
             multiline: false,
+            wrapping: false,
             last_blink: Instant::now(),
             show_cursor: true,
         }
@@ -44,6 +47,12 @@ impl TextBox {
 
     pub fn enable_multiline(mut self, enabled: bool) -> Self {
         self.multiline = enabled;
+        self
+    }
+
+    /// A long text on more lines, as the notes.
+    pub fn wrapping(mut self) -> Self {
+        self.wrapping = true;
         self
     }
 
@@ -62,6 +71,7 @@ impl TextBox {
             label,
             validator: Box::new(validator),
             multiline: false,
+            wrapping: false,
             last_blink: Instant::now(),
             show_cursor: true,
         }
@@ -85,6 +95,10 @@ impl TextBox {
         } else {
             Style::default()
         });
+        let widget = match self.wrapping {
+            true => widget.wrap(Wrap { trim: false }),
+            false => widget,
+        };
         f.render_widget(widget, area);
     }
 

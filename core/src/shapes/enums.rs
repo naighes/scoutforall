@@ -60,7 +60,7 @@ impl FriendlyName for PhaseEnum {
     fn friendly_name(&self, labels: &Labels) -> &'static str {
         use PhaseEnum::*;
         match self {
-            Break => "break",
+            Break => labels.break_phase,
             SideOut => labels.sideout,
         }
     }
@@ -290,6 +290,30 @@ impl EventTypeEnum {
                 Some(TeamSideEnum::Them)
             }
             _ => None,
+        }
+    }
+
+    /// The side of the net this event leaves the ball on while the rally
+    /// goes on; `None` when it ends the rally (see `rally_winner`) or isn't
+    /// a touch (the changes of the lineup).
+    ///
+    /// - on our side: our reception or dig (`/` aside), our attack coming
+    ///   back (`+` off their block, `!` blocked and covered), our block `+`,
+    ///   their reception coming straight back (serve `/`), their freeball;
+    /// - on their side: our serve, our reception or dig going straight over
+    ///   (`/`), our attack defended (`-`), our block `-` (touched, played by
+    ///   them), our freeball.
+    pub fn ball_side_after(&self, eval: Option<EvalEnum>) -> Option<TeamSideEnum> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        match (self.rally_winner(eval), self, eval) {
+            (Some(_), _, _) | (None, R | CL | CS | F | OS | OE, _) => None,
+            (None, S, Some(Over))
+            | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
+            | (None, A, Some(Positive | Exclamative))
+            | (None, B, Some(Positive))
+            | (None, OF, _) => Some(TeamSideEnum::Us),
+            (None, S | P | D | A | B, _) | (None, FB, _) => Some(TeamSideEnum::Them),
         }
     }
 
@@ -836,10 +860,20 @@ impl FromStr for RoleEnum {
 pub enum LanguageEnum {
     En,
     It,
+    /// Brazilian Portuguese
+    Pt,
+    Pl,
+    Ja,
 }
 
 impl LanguageEnum {
-    pub const ALL: [LanguageEnum; 2] = [LanguageEnum::En, LanguageEnum::It];
+    pub const ALL: [LanguageEnum; 5] = [
+        LanguageEnum::En,
+        LanguageEnum::It,
+        LanguageEnum::Pt,
+        LanguageEnum::Pl,
+        LanguageEnum::Ja,
+    ];
 }
 
 impl fmt::Display for LanguageEnum {
@@ -848,6 +882,9 @@ impl fmt::Display for LanguageEnum {
         let label = match self {
             En => "english",
             It => "italiano",
+            Pt => "português",
+            Pl => "polski",
+            Ja => "日本語",
         };
         write!(f, "{}", label)
     }
@@ -860,6 +897,9 @@ impl FromStr for LanguageEnum {
         match s.to_uppercase().as_str() {
             "EN" | "ENGLISH" => Ok(En),
             "IT" | "ITALIANO" | "ITALIAN" => Ok(It),
+            "PT" | "PT-BR" | "PT_BR" | "PORTUGUÊS" | "PORTUGUESE" => Ok(Pt),
+            "PL" | "POLSKI" | "POLISH" => Ok(Pl),
+            "JA" | "日本語" | "JAPANESE" => Ok(Ja),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid language: {}",
                 s
@@ -874,6 +914,9 @@ impl FriendlyName for LanguageEnum {
         match self {
             En => "english",
             It => "italiano",
+            Pt => "português",
+            Pl => "polski",
+            Ja => "日本語",
         }
     }
 }

@@ -86,6 +86,7 @@ mod tests {
             home: false,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set()],
+            notes: String::new(),
         };
         let sequence = build_report(&m, EN)
             .expect("expected the report")

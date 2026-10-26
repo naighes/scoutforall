@@ -108,6 +108,7 @@ mod tests {
             .await;
         ui.press(KeyCode::Enter).await;
         let error: String = current_labels()
+            .domain
             .edit_does_not_fit_the_set
             .chars()
             .take(30)
@@ -207,6 +208,7 @@ mod tests {
         edit_events(&mut ui).await;
         ui.press(KeyCode::Enter).await;
         let error: String = current_labels()
+            .domain
             .event_cannot_be_edited
             .chars()
             .take(30)

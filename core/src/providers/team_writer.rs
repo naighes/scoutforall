@@ -7,6 +7,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use uuid::Uuid;
 
 pub enum TeamInput {
@@ -21,11 +22,21 @@ pub enum TeamInput {
     Existing(TeamEntry),
 }
 
+/// What a player has beyond name, role and number: all optional.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlayerDetails {
+    pub birth_date: Option<NaiveDate>,
+    /// in centimetres
+    pub height_cm: Option<u16>,
+    pub notes: String,
+}
+
 pub enum PlayerInput {
     New {
         name: String,
         role: RoleEnum,
         number: u8,
+        details: PlayerDetails,
     },
     Existing(PlayerEntry),
 }

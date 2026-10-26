@@ -3,7 +3,6 @@ use crate::{
     providers::{match_writer::MatchWriter, store::write_json},
     shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
     storage::{Store, layout},
-    util::sanitize_filename,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
@@ -26,10 +25,9 @@ impl MatchWriter for StoreMatchWriter {
         date: DateTime<FixedOffset>,
         home: bool,
         max_substitutions: u8,
+        notes: String,
     ) -> Result<MatchEntry, AppError> {
-        let opponent_clean = sanitize_filename(&opponent);
-        let date_str = date.format("%Y-%m-%d").to_string();
-        let match_id = format!("{}_{}", date_str, opponent_clean);
+        let match_id = MatchEntry::id_of(&opponent, &date);
         let m = MatchEntry {
             opponent,
             date,
@@ -37,6 +35,7 @@ impl MatchWriter for StoreMatchWriter {
             team: team.clone(),
             home,
             max_substitutions,
+            notes,
             sets: vec![],
         };
         let key = layout::match_descriptor(&team.id, &match_id);
@@ -54,6 +53,7 @@ impl MatchWriter for StoreMatchWriter {
         date: DateTime<FixedOffset>,
         home: bool,
         max_substitutions: u8,
+        notes: String,
     ) -> Result<(), AppError> {
         // the reader replays the sets saved without the lineup rules with
         // those of v0.3.0 once the descriptor saves the substitutions: they
@@ -72,6 +72,7 @@ impl MatchWriter for StoreMatchWriter {
             date,
             home,
             max_substitutions,
+            notes,
             id: m.id.clone(),
             team: m.team.clone(),
             sets: m.sets.clone(),

@@ -1,5 +1,6 @@
 pub mod checkbox;
 pub mod date_picker;
+pub mod form_fields;
 pub mod navigation_footer;
 pub mod notify_banner;
 pub mod notify_dialogue;

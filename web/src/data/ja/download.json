@@ -1,0 +1,37 @@
+{
+  "version": "バージョン",
+  "other_systems": "別のパソコンを使っていますか？",
+  "hide_other_systems": "ほかのパソコンを隠す",
+  "all_versions": "ほかのバージョン（上級者向け）",
+  "phone": "Scout4All はパソコンで動作します。このページを PC または Mac で開いてください。",
+  "platforms": {
+    "windows": {
+      "title": "Windows",
+      "requirements": "Windows 10 と 11",
+      "files": {
+        "default": "Windows 版をダウンロード"
+      },
+      "help_title": "Windows に警告が表示されますか？",
+      "help": "<strong>詳細情報</strong>をクリックし、<strong>実行</strong>をクリックしてください。"
+    },
+    "macos": {
+      "title": "Mac",
+      "requirements": "Apple チップ・Intel チップのすべての Mac",
+      "files": {
+        "default": "Mac 版をダウンロード"
+      },
+      "help_title": "Mac に開くのをブロックされましたか？",
+      "help": "<strong>システム設定 → プライバシーとセキュリティ</strong>を開き、<strong>このまま開く</strong>をクリックしてください。"
+    },
+    "linux": {
+      "title": "Linux",
+      "requirements": "どれかわからない場合は、ほとんどが Intel または AMD です。",
+      "files": {
+        "x86_64": "Intel または AMD",
+        "aarch64": "ARM（Raspberry Pi など）"
+      },
+      "help_title": "起動するには？",
+      "help": "アーカイブを展開し、ターミナルで <code>./scout4all</code> を実行してください。"
+    }
+  }
+}

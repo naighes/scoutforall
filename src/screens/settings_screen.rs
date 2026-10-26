@@ -12,7 +12,9 @@ use crate::{
     },
     shapes::{
         actions::ScreenActionEnum,
-        keybinding::{ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, UNDO_KEY},
+        keybinding::{
+            ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, STATS_KEY, UNDO_KEY,
+        },
         settings::{ScoutingShortcut, Settings, set_settings},
         symbol::KeyCombinationFormatExt,
     },
@@ -28,9 +30,12 @@ use ratatui::{
     style::{Color, Modifier, Style},
     widgets::{Block, Row, Table, TableState},
 };
-use scout4all_core::shapes::{
-    enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum},
-    technique::{ServeTypeEnum, SetTypeEnum},
+use scout4all_core::{
+    settings::Consent,
+    shapes::{
+        enums::{EvalEnum, EventTypeEnum, FriendlyName, LanguageEnum},
+        technique::{ServeTypeEnum, SetTypeEnum},
+    },
 };
 
 /// below this width the two panels are stacked instead of side by side
@@ -328,7 +333,10 @@ where
                 }
             }
             GeneralField::Analytics => Settings {
-                analytics_enabled: !self.settings.analytics_enabled,
+                consent: Consent {
+                    analytics_enabled: !self.settings.consent.analytics_enabled,
+                    ..self.settings.consent
+                },
                 ..self.settings.clone()
             },
         };
@@ -395,7 +403,7 @@ where
                 ),
                 GeneralField::Analytics => format!(
                     "{} {}",
-                    if self.settings.analytics_enabled {
+                    if self.settings.consent.analytics_enabled {
                         "[X]"
                     } else {
                         "[ ]"
@@ -437,6 +445,7 @@ where
             (labels.settings, fmt.to_string(SETTINGS_KEY)),
             (labels.undo, fmt.to_string(UNDO_KEY)),
             (labels.back, fmt.to_string(BACK_KEY)),
+            (labels.live_stats, fmt.to_string(STATS_KEY)),
             (labels.player_number, "0-9".to_string()),
         ]
     }

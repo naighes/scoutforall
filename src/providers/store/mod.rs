@@ -3,5 +3,4 @@
 pub mod settings_reader;
 pub mod settings_writer;
 
-/// The key of the settings.
-pub const CONFIG: &str = "config.json";
+pub use scout4all_core::storage::layout::CONFIG;

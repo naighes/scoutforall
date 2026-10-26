@@ -914,6 +914,7 @@ mod tests {
             home: true,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
+            notes: String::new(),
         };
         let labels = EN;
         // a row for all the rallies, then one per phase

@@ -5,6 +5,11 @@
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
+    use crate::detail::{
+        Breakdown, Detail, EvalShare, FUNDAMENTALS, Freeballs, PlayerLine, RotationLine, Tone,
+        ZoneDetail, by_player, by_rotation, evaluations,
+    };
+    use crate::overview::{Errors, Fundamental, Overview, distribution, stats_of as sets_stats};
     use crate::shapes::{
         enums::{
             ErrorTypeEnum, EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum,
@@ -12,8 +17,9 @@ mod tests {
         },
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        stats::{AttackKey, EventKey, Metric, Stats, StatsFilter},
+        stats::{AttackKey, AttackSummary, EventKey, Metric, Stats, StatsFilter},
     };
+    use crate::trend::{RECENT_TOUCHES, Replay, Series, trend};
     use EvalEnum::*;
     use EventTypeEnum::*;
     use chrono::Utc;
@@ -766,6 +772,1062 @@ mod tests {
         assert_eq!(stats.zone_distribution(ZoneEnum::Four, &break_), None);
     }
 
+    /// The attacks from each zone: all of them, or only the ones on our
+    /// reception or in counter-attack.
+    #[test]
+    fn zone_attacks() {
+        let mut stats = Stats::new();
+        let player = Uuid::new_v4();
+        let mut attack = |zone, eval, prev_type| {
+            stats.attacks.add(AttackKey {
+                phase: PhaseEnum::SideOut,
+                rotation: 0,
+                player,
+                zone,
+                eval,
+                prev_type,
+                prev_eval: Some(Positive),
+            })
+        };
+        attack(ZoneEnum::Four, Perfect, P);
+        attack(ZoneEnum::Four, Error, P);
+        attack(ZoneEnum::Four, Over, D);
+        attack(ZoneEnum::Four, Positive, D);
+        attack(ZoneEnum::Two, Perfect, D);
+        let four = |counter_attack| stats.zone_attacks(ZoneEnum::Four, counter_attack, &all());
+        let summary = |total, errors, blocked, kills| {
+            Some(AttackSummary {
+                total,
+                errors,
+                blocked,
+                kills,
+            })
+        };
+        assert_eq!(four(None), summary(4, 1, 1, 1));
+        assert_eq!(four(None).map(|s| s.efficiency()), Some(-25.0));
+        assert_eq!(four(Some(false)), summary(2, 1, 0, 1));
+        assert_eq!(four(Some(true)), summary(2, 0, 1, 0));
+        assert_eq!(stats.zone_attacks(ZoneEnum::Three, None, &all()), None);
+    }
+
+    // --- the trend ----------------------------------------------------------
+
+    /// The statistics are sampled after every rally, across the sets: the
+    /// events in the middle of a rally don't make a point of the trend.
+    #[test]
+    fn trend_samples_every_rally_across_the_sets() {
+        let t = Team::new();
+        let set = |set_number, events| SetEntry {
+            set_number,
+            serving_team: TeamSideEnum::Us,
+            initial_positions: t.rotation_0(),
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events,
+        };
+        let first = set(
+            1,
+            vec![
+                act(S, t.setter, Perfect),
+                act(S, t.setter, Negative),
+                act(D, t.oh2, Positive),
+                act(A, t.oh1, Perfect),
+            ],
+        );
+        let second = set(2, vec![act(S, t.setter, Error)]);
+        let points = trend(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS, |stats| {
+            stats.metric_percentage(S, Metric::Efficiency, &all())
+        })
+        .expect("expected the sets to replay");
+        let samples: Vec<_> = points
+            .iter()
+            .map(|p| (p.set_number, p.score_us, p.score_them, p.value))
+            .collect();
+        assert_eq!(
+            samples,
+            vec![
+                (1, 1, 0, Some(100.0)),
+                (1, 2, 0, Some(50.0)),
+                (2, 0, 1, Some(0.0)),
+            ]
+        );
+    }
+
+    // --- the overview -------------------------------------------------------
+
+    /// Every event with every evaluation it can have, once: each error is
+    /// counted as forced or unforced in the fundamental it was made in,
+    /// the aces both ways, the errors and points of the opponent.
+    #[test]
+    fn overview_counts_every_event_once() {
+        let events: Vec<(EventTypeEnum, Option<EvalEnum>)> = EventTypeEnum::ALL
+            .iter()
+            .filter(|et| !matches!(et, R | CL | CS))
+            .flat_map(|et| match et.requires_evaluation() {
+                true => et
+                    .available_evals()
+                    .into_iter()
+                    .map(|e| (*et, Some(e)))
+                    .collect(),
+                false => vec![(*et, None)],
+            })
+            .collect();
+        let overview = Overview::of(&stats_of(&events));
+        assert_eq!(
+            overview.unforced_errors,
+            Errors {
+                total: 4,
+                // a serve error, an attack error, a block invasion, a fault
+                by_event: vec![(S, 1), (A, 1), (B, 1), (F, 1)],
+            }
+        );
+        assert_eq!(
+            overview.forced_errors,
+            Errors {
+                total: 4,
+                // an attack blocked, a block out, an ace received, a dig
+                // lost
+                by_event: vec![(A, 1), (B, 1), (P, 1), (D, 1)],
+            }
+        );
+        assert_eq!(overview.aces, 1);
+        assert_eq!(overview.aces_against, 1);
+        assert_eq!(overview.opponent_errors, 1);
+        assert_eq!(overview.opponent_points, 1);
+        // each fundamental once with each evaluation it can have
+        let fundamental = |f: Fundamental| (f.total, f.perfect, f.errors);
+        assert_eq!(fundamental(overview.serve), (5, 1, 1));
+        assert_eq!(fundamental(overview.reception), (6, 1, 1));
+        assert_eq!(fundamental(overview.attack), (6, 1, 2));
+        assert_eq!(fundamental(overview.dig), (6, 1, 1));
+        assert_eq!(fundamental(overview.block), (5, 1, 2));
+    }
+
+    /// With no events: nothing to show, every count 0, the errors still by
+    /// fundamental.
+    #[test]
+    fn overview_of_nothing() {
+        let overview = Overview::of(&Stats::new());
+        let none = Fundamental {
+            total: 0,
+            efficiency: None,
+            perfect: 0,
+            errors: 0,
+        };
+        assert_eq!(overview.reception, none);
+        assert_eq!(overview.attack, none);
+        assert_eq!(overview.serve, none);
+        assert_eq!(overview.block, none);
+        assert_eq!(overview.dig, none);
+        assert_eq!(overview.side_out, None);
+        assert_eq!(overview.break_points, None);
+        assert_eq!(overview.first_attack, None);
+        assert_eq!(overview.counter_attack, None);
+        assert_eq!(
+            overview.unforced_errors,
+            Errors {
+                total: 0,
+                by_event: vec![(S, 0), (A, 0), (B, 0), (F, 0)],
+            }
+        );
+        assert_eq!(
+            overview.forced_errors,
+            Errors {
+                total: 0,
+                by_event: vec![(A, 0), (B, 0), (P, 0), (D, 0)],
+            }
+        );
+        assert_eq!(
+            (
+                overview.aces,
+                overview.aces_against,
+                overview.opponent_errors,
+                overview.opponent_points
+            ),
+            (0, 0, 0, 0)
+        );
+        assert!(distribution(&Stats::new(), None).is_empty());
+    }
+
+    /// A set from rotation 0, them serving, played as the app scouts it.
+    fn side_out_set(t: &Team) -> Vec<EventEntry> {
+        vec![
+            // 1-0: their serve received, the outside hitter 1 kills from 2
+            // (rotation 0 in side out); we rotate, and serve
+            act(P, t.oh2, Perfect),
+            act(A, t.oh1, Perfect),
+            // 1-1: the outside hitter 1 serves in the net
+            act(S, t.oh1, Error),
+            // 1-2: their ace
+            act(P, t.oh1, Error),
+            // 1-3: the opposite (front row, 2) blocked
+            act(P, t.oh1, Positive),
+            act(A, t.opposite, Over),
+            // 1-4: the outside hitter 2 (front row, 4) out
+            act(P, t.oh1, Positive),
+            act(A, t.oh2, Error),
+            // 1-5: their ace, untouched
+            opp(OS),
+            // 2-5: the outside hitter 2 can't put it away, the opposite
+            // kills in counter-attack
+            act(P, t.oh1, Negative),
+            act(A, t.oh2, Positive),
+            act(A, t.opposite, Perfect),
+            // 3-5: their error
+            opp(OE),
+            // 3-6: our fault
+            act(F, t.oh1, Error),
+        ]
+    }
+
+    /// Their ace is our reception `=`, or their point right after their
+    /// serve, before we touch the ball: not their point later in the rally,
+    /// nor one while we serve.
+    #[test]
+    fn their_aces_touched_or_not() {
+        let t = Team::new();
+        let snapshot = t.receiving(vec![
+            // 0-1: our fault before their serve, not an ace
+            ev(F, Some(t.oh1), None),
+            // 0-2: untouched
+            opp(OS),
+            // 0-3: their point after our attack
+            act(P, t.oh2, Positive),
+            act(A, t.oh1, Negative),
+            opp(OS),
+            // 0-4: touched
+            act(P, t.oh2, Error),
+            // 1-4: we side out, then serve; 1-5: their point in the rally
+            act(P, t.oh2, Positive),
+            act(A, t.oh1, Perfect),
+            act(S, t.oh1, Negative),
+            opp(OS),
+            // 1-6: untouched again
+            opp(OS),
+            // 2-6: their serve error, not an ace
+            opp(OE),
+        ]);
+        assert_eq!((snapshot.score_us, snapshot.score_them), (2, 6));
+        assert_eq!(snapshot.stats.untouched_aces(&all()), 2);
+        let overview = Overview::of(&snapshot.stats);
+        assert_eq!(overview.aces_against, 3);
+        assert_eq!(overview.opponent_points, 2);
+        assert_eq!(overview.opponent_errors, 1);
+        // each in the rotation it was served in
+        let rotations: u32 = (0..6)
+            .map(|r| {
+                snapshot
+                    .stats
+                    .untouched_aces(&StatsFilter::new(None, Some(r), None))
+            })
+            .sum();
+        assert_eq!(rotations, 2);
+        let player = StatsFilter::new(None, None, Some(t.oh2));
+        assert_eq!(snapshot.stats.untouched_aces(&player), 0);
+    }
+
+    /// The overview of a set played: every number counted by hand.
+    #[test]
+    fn overview_of_a_set() {
+        let t = Team::new();
+        let mut events = side_out_set(&t);
+        // a fault has no evaluation
+        if let Some(fault) = events.last_mut() {
+            fault.eval = None;
+        }
+        let snapshot = t.receiving(events);
+        assert_eq!((snapshot.score_us, snapshot.score_them), (3, 6));
+        let overview = Overview::of(&snapshot.stats);
+        // receptions # = + + -: (1 + 2 - 1) / 5
+        assert_eq!(
+            overview.reception,
+            Fundamental {
+                total: 5,
+                efficiency: Some(40.0),
+                perfect: 1,
+                errors: 1,
+            }
+        );
+        // attacks # / = + #: (2 - 2) / 5
+        assert_eq!(
+            overview.attack,
+            Fundamental {
+                total: 5,
+                efficiency: Some(0.0),
+                perfect: 2,
+                errors: 2,
+            }
+        );
+        assert_eq!(
+            overview.serve,
+            Fundamental {
+                total: 1,
+                efficiency: Some(-100.0),
+                perfect: 0,
+                errors: 1,
+            }
+        );
+        assert_eq!(overview.block.total, 0);
+        // side out: won the first and the counter-attack, lost the two
+        // aces, the block and the attack out
+        assert_eq!(overview.side_out.map(|(_, w, r)| (w, r)), Some((2, 6)));
+        // break: lost the serve and the fault, won their error
+        assert_eq!(overview.break_points.map(|(_, w, r)| (w, r)), Some((1, 3)));
+        assert_eq!(
+            overview.first_attack,
+            Some(AttackSummary {
+                total: 4,
+                errors: 1,
+                blocked: 1,
+                kills: 1,
+            })
+        );
+        assert_eq!(
+            overview.counter_attack,
+            Some(AttackSummary {
+                total: 1,
+                errors: 0,
+                blocked: 0,
+                kills: 1,
+            })
+        );
+        assert_eq!(overview.unforced_errors.total, 3);
+        assert_eq!(
+            overview.unforced_errors.by_event,
+            vec![(S, 1), (A, 1), (B, 0), (F, 1)]
+        );
+        assert_eq!(overview.forced_errors.total, 2);
+        assert_eq!(
+            overview.forced_errors.by_event,
+            vec![(A, 1), (B, 0), (P, 1), (D, 0)]
+        );
+        assert_eq!(overview.aces, 0);
+        // the reception `=` and the untouched one
+        assert_eq!(overview.aces_against, 2);
+        assert_eq!(overview.opponent_errors, 1);
+        assert_eq!(overview.opponent_points, 0);
+    }
+
+    // --- the detail -------------------------------------------------------
+
+    /// `side_out_set` with the fault as the app saves it, with no
+    /// evaluation.
+    fn side_out_stats(t: &Team) -> Stats {
+        let mut events = side_out_set(t);
+        if let Some(fault) = events.last_mut() {
+            fault.eval = None;
+        }
+        t.receiving(events).stats
+    }
+
+    fn detail(stats: &Stats, event_type: EventTypeEnum, filter: &StatsFilter) -> Detail {
+        match Breakdown::of(stats, event_type, filter) {
+            Breakdown::Fundamental(d) => d,
+            Breakdown::Freeballs(f) => panic!("expected a fundamental, got {f:?}"),
+        }
+    }
+
+    fn share(eval: EvalEnum, tone: Tone, count: u32, share: f64) -> EvalShare {
+        EvalShare {
+            eval,
+            tone,
+            count,
+            share,
+        }
+    }
+
+    /// Every evaluation a fundamental can have is listed once, and only
+    /// those: the freeballs and the other events have none.
+    #[test]
+    fn the_evaluations_of_each_fundamental() {
+        for event_type in FUNDAMENTALS {
+            let mut listed: Vec<EvalEnum> =
+                evaluations(event_type).iter().map(|(e, _)| *e).collect();
+            let mut available = match event_type.requires_evaluation() {
+                true => event_type.available_evals(),
+                false => vec![],
+            };
+            listed.sort_by_key(|e| e.to_string());
+            available.sort_by_key(|e| e.to_string());
+            assert_eq!(listed, available, "{event_type:?}");
+        }
+        // the best first, the worst last
+        let tones = |event_type| {
+            evaluations(event_type)
+                .iter()
+                .map(|(e, t)| format!("{e}{t:?}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        assert_eq!(tones(S), "#Excellent /Excellent +Good -Poor =Bad");
+        assert_eq!(tones(P), "#Excellent +Good !Fair -Poor /Poor =Bad");
+        assert_eq!(tones(D), tones(P));
+        assert_eq!(tones(B), "#Excellent +Good -Poor =Bad /Bad");
+        assert_eq!(tones(A), "#Excellent +Good !Good -Poor /Bad =Bad");
+        assert!(evaluations(FB).is_empty());
+    }
+
+    /// The attacks of the set: # / = + #, the opposite and the outside
+    /// hitter 1 from 2, the outside hitter 2 from 4.
+    #[test]
+    fn detail_of_the_attack() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        assert_eq!(
+            detail(&stats, A, &all()),
+            Detail {
+                total: 5,
+                evals: vec![
+                    share(Perfect, Tone::Excellent, 2, 40.0),
+                    share(Positive, Tone::Good, 1, 20.0),
+                    share(Over, Tone::Bad, 1, 20.0),
+                    share(Error, Tone::Bad, 1, 20.0),
+                ],
+                // (2 - 2) / 5; # + good, / = bad
+                efficiency: Some(0.0),
+                // # + ! over 5
+                positiveness: Some(60.0),
+                // blocked (forced), out (unforced)
+                errors: 2,
+                unforced_errors: 1,
+                // 9 rallies, 3 won
+                phases_per_point: Some((3.0, 3, 9)),
+                faults: 1,
+                points: Some(2),
+                zones: vec![
+                    ZoneDetail {
+                        zone: ZoneEnum::Four,
+                        share: 40.0,
+                        conversion: 0.0,
+                    },
+                    ZoneDetail {
+                        zone: ZoneEnum::Two,
+                        share: 60.0,
+                        conversion: 2.0 / 3.0 * 100.0,
+                    },
+                ],
+            }
+        );
+    }
+
+    /// A player: only the events, the faults and the zones of the player;
+    /// the rallies have no player.
+    #[test]
+    fn detail_of_a_player() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        assert_eq!(
+            detail(&stats, A, &StatsFilter::new(None, None, Some(t.opposite))),
+            Detail {
+                total: 2,
+                evals: vec![
+                    share(Perfect, Tone::Excellent, 1, 50.0),
+                    share(Over, Tone::Bad, 1, 50.0),
+                ],
+                efficiency: Some(0.0),
+                positiveness: Some(50.0),
+                errors: 1,
+                unforced_errors: 0,
+                phases_per_point: None,
+                faults: 0,
+                points: Some(1),
+                zones: vec![ZoneDetail {
+                    zone: ZoneEnum::Two,
+                    share: 100.0,
+                    conversion: 50.0,
+                }],
+            }
+        );
+        // the fault of the outside hitter 1
+        assert_eq!(
+            detail(&stats, S, &StatsFilter::new(None, None, Some(t.oh1))).faults,
+            1
+        );
+    }
+
+    /// The receptions in side out: # = + + -; the fault, in break, is left
+    /// out, and so are the rallies in break.
+    #[test]
+    fn detail_of_the_reception_in_a_phase() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        let side_out = StatsFilter::new(Some(PhaseEnum::SideOut), None, None);
+        assert_eq!(
+            detail(&stats, P, &side_out),
+            Detail {
+                total: 5,
+                evals: vec![
+                    share(Perfect, Tone::Excellent, 1, 20.0),
+                    share(Positive, Tone::Good, 2, 40.0),
+                    share(Negative, Tone::Poor, 1, 20.0),
+                    share(Error, Tone::Bad, 1, 20.0),
+                ],
+                efficiency: Some(40.0),
+                positiveness: Some(60.0),
+                // their ace, forced
+                errors: 1,
+                unforced_errors: 0,
+                phases_per_point: Some((3.0, 2, 6)),
+                faults: 0,
+                // a reception scores no point
+                points: None,
+                zones: vec![],
+            }
+        );
+        let break_points = StatsFilter::new(Some(PhaseEnum::Break), None, None);
+        let none = detail(&stats, P, &break_points);
+        assert_eq!(
+            (none.total, none.efficiency, none.positiveness),
+            (0, None, None)
+        );
+        assert!(none.evals.is_empty());
+        assert_eq!(none.faults, 1);
+        assert_eq!(none.phases_per_point, Some((3.0, 1, 3)));
+    }
+
+    /// Their freeball after ours, exploited with a kill: with a player, only
+    /// the ones given.
+    #[test]
+    fn detail_of_the_freeballs() {
+        let t = Team::new();
+        let stats = t
+            .receiving(vec![
+                act(P, t.oh2, Positive),
+                ev(FB, Some(t.setter), None),
+                opp(OF),
+                act(A, t.oh1, Perfect),
+            ])
+            .stats;
+        let freeballs = |filter| match Breakdown::of(&stats, FB, &filter) {
+            Breakdown::Freeballs(f) => f,
+            Breakdown::Fundamental(d) => panic!("expected the freeballs, got {d:?}"),
+        };
+        assert_eq!(
+            freeballs(all()),
+            Freeballs {
+                given: 1,
+                received: Some(1),
+                exploited: Some((100.0, 1, 1)),
+            }
+        );
+        let player = |p| StatsFilter::new(None, None, Some(p));
+        assert_eq!(
+            freeballs(player(t.setter)),
+            Freeballs {
+                given: 1,
+                received: None,
+                exploited: None,
+            }
+        );
+        assert_eq!(freeballs(player(t.oh1)).given, 0);
+        assert!(by_player(&stats, FB, &all()).is_empty());
+    }
+
+    /// The players compared: the most involved first, then the most
+    /// efficient; only the ones who played the fundamental in the phase.
+    #[test]
+    fn players_compared() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        let line = |player, total, efficiency, positiveness, points, errors| PlayerLine {
+            player,
+            total,
+            efficiency,
+            positiveness,
+            points,
+            errors,
+        };
+        assert_eq!(
+            by_player(&stats, A, &all()),
+            vec![
+                // / #
+                line(t.opposite, 2, Some(0.0), Some(50.0), Some(1), 1),
+                // = +
+                line(t.oh2, 2, Some(-50.0), Some(50.0), Some(0), 1),
+                // #
+                line(t.oh1, 1, Some(100.0), Some(100.0), Some(1), 0),
+            ]
+        );
+        assert_eq!(
+            by_player(&stats, P, &all()),
+            vec![
+                // = + + -: (2 - 1) / 4
+                line(t.oh1, 4, Some(25.0), Some(50.0), None, 1),
+                line(t.oh2, 1, Some(100.0), Some(100.0), None, 0),
+            ]
+        );
+        // no reception in break; the filter of a player is ignored
+        let break_points = StatsFilter::new(Some(PhaseEnum::Break), None, None);
+        assert!(by_player(&stats, P, &break_points).is_empty());
+        assert_eq!(
+            by_player(&stats, A, &StatsFilter::new(None, None, Some(t.oh1))).len(),
+            3
+        );
+    }
+
+    /// The set from rotation 0: the side out at once, then we serve in the
+    /// next rotation and lose it, win one side out of five there, and
+    /// serve in the one after: their error, our fault.
+    #[test]
+    fn phases_by_rotation() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        let lines = by_rotation(&stats);
+        assert_eq!(
+            lines.iter().map(|l| l.rotation).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5]
+        );
+        let played: Vec<RotationLine> = lines
+            .into_iter()
+            .filter(|l| l.side_out.is_some() || l.break_points.is_some())
+            .collect();
+        let won = |p: Option<(f64, u32, u32)>| p.map(|(_, w, r)| (w, r));
+        let mut phases: Vec<_> = played
+            .iter()
+            .map(|l| (won(l.side_out), won(l.break_points)))
+            .collect();
+        phases.sort();
+        assert_eq!(
+            phases,
+            vec![
+                (None, Some((1, 2))),
+                (Some((1, 1)), None),
+                (Some((1, 5)), Some((0, 1))),
+            ]
+        );
+        assert_eq!(played[0].rotation, 0);
+        assert_eq!(won(played[0].side_out), Some((1, 1)));
+        // every rally once
+        let (side_out, break_points) = played.iter().fold((0, 0), |(s, b), l| {
+            (
+                s + l.side_out.map_or(0, |(_, _, r)| r),
+                b + l.break_points.map_or(0, |(_, _, r)| r),
+            )
+        });
+        assert_eq!((side_out, break_points), (6, 3));
+    }
+
+    /// The distribution of the set: the share of each zone and its
+    /// efficiency, all the attacks or only the first or the counter ones.
+    #[test]
+    fn distribution_of_a_set() {
+        let t = Team::new();
+        let mut events = side_out_set(&t);
+        if let Some(fault) = events.last_mut() {
+            fault.eval = None;
+        }
+        let stats = t.receiving(events).stats;
+        let zones = |counter_attack| {
+            distribution(&stats, counter_attack)
+                .into_iter()
+                .map(|z| {
+                    (
+                        z.zone,
+                        z.share.round(),
+                        z.attacks.total,
+                        z.attacks.efficiency().round(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        // 4: = +, (0 - 1) / 2; 2: # / #, (2 - 1) / 3
+        assert_eq!(
+            zones(None),
+            vec![
+                (ZoneEnum::Four, 40.0, 2, -50.0),
+                (ZoneEnum::Two, 60.0, 3, 33.0)
+            ]
+        );
+        assert_eq!(
+            zones(Some(false)),
+            vec![
+                (ZoneEnum::Four, 50.0, 2, -50.0),
+                (ZoneEnum::Two, 50.0, 2, 0.0)
+            ]
+        );
+        assert_eq!(zones(Some(true)), vec![(ZoneEnum::Two, 100.0, 1, 100.0)]);
+        let shares: f64 = distribution(&stats, None).iter().map(|z| z.share).sum();
+        assert!((shares - 100.0).abs() < 1e-9);
+    }
+
+    /// An attack with no zone (the setter in the back row) counts in the
+    /// attack, not in the distribution.
+    #[test]
+    fn distribution_leaves_out_the_attacks_with_no_zone() {
+        let t = Team::new();
+        let stats = t
+            .receiving(vec![act(P, t.oh2, Positive), act(A, t.setter, Perfect)])
+            .stats;
+        assert_eq!(Overview::of(&stats).attack.total, 1);
+        assert_eq!(Overview::of(&stats).attack.perfect, 1);
+        assert!(distribution(&stats, None).is_empty());
+    }
+
+    /// Serving: our ace, a block point, a block invasion.
+    #[test]
+    fn overview_of_the_serve_and_the_block() {
+        let t = Team::new();
+        let snapshot = t.serving(vec![
+            act(S, t.setter, Perfect),
+            act(S, t.setter, Negative),
+            act(B, t.opposite, Perfect),
+            act(S, t.setter, Positive),
+            act(B, t.mb2, Over),
+        ]);
+        assert_eq!((snapshot.score_us, snapshot.score_them), (2, 1));
+        let overview = Overview::of(&snapshot.stats);
+        // serves # - +: (2 - 0) / 3
+        assert_eq!(overview.serve.total, 3);
+        assert_eq!(overview.serve.efficiency.map(f64::round), Some(67.0));
+        assert_eq!(overview.aces, 1);
+        // blocks # /: (1 - 1) / 2
+        assert_eq!(
+            overview.block,
+            Fundamental {
+                total: 2,
+                efficiency: Some(0.0),
+                perfect: 1,
+                errors: 1,
+            }
+        );
+        assert_eq!(
+            overview.unforced_errors.by_event,
+            vec![(S, 0), (A, 0), (B, 1), (F, 0)]
+        );
+        assert_eq!(overview.forced_errors.total, 0);
+        assert_eq!(overview.break_points.map(|(_, w, r)| (w, r)), Some((2, 3)));
+        assert_eq!(overview.side_out, None);
+    }
+
+    /// The trend ends where the overview of the set is: its last point is
+    /// the statistics of the whole set, one point per rally.
+    #[test]
+    fn trend_ends_at_the_overview_of_the_set() {
+        let t = Team::new();
+        let mut events = side_out_set(&t);
+        if let Some(fault) = events.last_mut() {
+            fault.eval = None;
+        }
+        let set = SetEntry {
+            set_number: 1,
+            serving_team: TeamSideEnum::Them,
+            initial_positions: t.rotation_0(),
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events,
+        };
+        let snapshot = set
+            .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the set to replay");
+        let points = trend(&[&set], DEFAULT_MAX_SUBSTITUTIONS, Overview::of)
+            .expect("expected the set to replay");
+        assert_eq!(points.len(), snapshot.points.len());
+        assert_eq!(
+            points.last().map(|p| &p.value),
+            Some(&Overview::of(&snapshot.stats))
+        );
+        // the reception after each rally: #, then the serve (no
+        // reception), then = + + (the untouched ace: none) -, then none
+        let receptions: Vec<Option<f64>> = points
+            .iter()
+            .map(|p| p.value.reception.efficiency.map(f64::round))
+            .collect();
+        assert_eq!(
+            receptions,
+            vec![
+                Some(100.0),
+                Some(100.0),
+                Some(0.0),
+                Some(33.0),
+                Some(50.0),
+                Some(50.0),
+                Some(40.0),
+                Some(40.0),
+                Some(40.0),
+            ]
+        );
+        // the score after each rally
+        let scores: Vec<(u8, u8)> = points.iter().map(|p| (p.score_us, p.score_them)).collect();
+        assert_eq!(
+            scores,
+            vec![
+                (1, 0),
+                (1, 1),
+                (1, 2),
+                (1, 3),
+                (1, 4),
+                (1, 5),
+                (2, 5),
+                (3, 5),
+                (3, 6)
+            ]
+        );
+    }
+
+    /// The statistics since earlier ones of the same sets are the ones of
+    /// the events in between.
+    #[test]
+    fn stats_since_earlier_ones() {
+        let t = Team::new();
+        let first = t.serving(vec![act(S, t.setter, Perfect), act(S, t.setter, Error)]);
+        let later = t.serving(vec![
+            act(S, t.setter, Perfect),
+            act(S, t.setter, Error),
+            act(P, t.oh2, Positive),
+            act(A, t.oh1, Perfect),
+        ]);
+        let since = later.stats.since(&first.stats);
+        assert_eq!(since.event_count(S, None, &all()), 0);
+        assert_eq!(since.event_count(P, None, &all()), 1);
+        assert_eq!(since.event_count(A, Some(Perfect), &all()), 1);
+        assert_eq!(
+            since.attack_summary(false, &all()).map(|a| a.total),
+            Some(1)
+        );
+        assert_eq!(
+            since.rallies_won(&all()).map(|(_, w, r)| (w, r)),
+            Some((1, 1))
+        );
+        // since nothing: all of them; since themselves: none
+        assert_eq!(
+            later
+                .stats
+                .since(&Stats::new())
+                .event_count(S, None, &all()),
+            2
+        );
+        assert_eq!(later.stats.since(&later.stats).rallies_won(&all()), None);
+    }
+
+    fn side_out_entry(t: &Team, set_number: u8) -> SetEntry {
+        let mut events = side_out_set(t);
+        if let Some(fault) = events.last_mut() {
+            fault.eval = None;
+        }
+        SetEntry {
+            set_number,
+            serving_team: TeamSideEnum::Them,
+            initial_positions: t.rotation_0(),
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events,
+        }
+    }
+
+    fn reception(stats: &Stats) -> Option<f64> {
+        stats.metric_percentage(P, Metric::Efficiency, &all())
+    }
+
+    fn receptions(stats: &Stats) -> u32 {
+        stats.event_count(P, None, &all())
+    }
+
+    /// The last 2 receptions after each rally: # = + + - in the set.
+    #[test]
+    fn trend_of_the_last_touches() {
+        let t = Team::new();
+        let set = side_out_entry(&t, 1);
+        let replay =
+            Replay::new(&[&set], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
+        let last_two: Vec<Option<f64>> = replay
+            .window(2, receptions, reception)
+            .into_iter()
+            .map(|p| p.value)
+            .collect();
+        assert_eq!(
+            last_two,
+            vec![
+                // #, then the serve error: still #
+                Some(100.0),
+                Some(100.0),
+                // # =
+                Some(0.0),
+                // = +
+                Some(0.0),
+                // + +, then the untouched ace
+                Some(100.0),
+                Some(100.0),
+                // + -, then their error and our fault
+                Some(50.0),
+                Some(50.0),
+                Some(50.0),
+            ]
+        );
+        // a window larger than the touches: all of them
+        let all_of_them = replay.window(10, receptions, reception);
+        assert_eq!(all_of_them, replay.cumulative(reception));
+        assert_eq!(
+            replay.cumulative(reception),
+            trend(&[&set], DEFAULT_MAX_SUBSTITUTIONS, reception)
+                .expect("expected the set to replay")
+        );
+    }
+
+    /// The window goes on across the sets: the last 2 receptions of set 2
+    /// start with the last one of set 1.
+    #[test]
+    fn the_last_touches_across_the_sets() {
+        let t = Team::new();
+        let first = side_out_entry(&t, 1);
+        let second = side_out_entry(&t, 2);
+        let replay = Replay::new(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the sets to replay");
+        let points = replay.window(2, receptions, reception);
+        assert_eq!(points.len(), 18);
+        // the first rally of set 2: - (set 1) and # (set 2)
+        let first_of_second = points.iter().find(|p| p.set_number == 2).map(|p| p.value);
+        assert_eq!(first_of_second, Some(Some(50.0)));
+        // the last: as in set 1
+        assert_eq!(points.last().map(|p| p.value), Some(Some(50.0)));
+        // the window is always 2 receptions, once there are 2
+        let sizes: Vec<u32> = replay
+            .window(2, receptions, receptions)
+            .into_iter()
+            .map(|p| p.value)
+            .collect();
+        assert_eq!(&sizes[..2], &[1, 1]);
+        assert!(sizes[2..].iter().all(|n| *n == 2));
+    }
+
+    /// Each figure of the trend on the set played: its value, its touches
+    /// and its band.
+    #[test]
+    fn the_figures_of_the_trend() {
+        use crate::benchmark::Measure;
+        let t = Team::new();
+        let set = side_out_entry(&t, 1);
+        let stats = set
+            .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the set to replay")
+            .stats;
+        let figure = |s: Series| (s.value(&stats).map(f64::round), s.touches(&stats));
+        // receptions # = + + -: (1 + 2 - 1) / 5
+        assert_eq!(figure(Series::Reception), (Some(40.0), 5));
+        // attacks # / = + #: (2 - 2) / 5
+        assert_eq!(figure(Series::Attack), (Some(0.0), 5));
+        // one counter-attack, a kill
+        assert_eq!(figure(Series::CounterAttack), (Some(100.0), 1));
+        assert_eq!(figure(Series::Serve), (Some(-100.0), 1));
+        // side out 2 of 6, break point 1 of 3
+        assert_eq!(figure(Series::SideOut), (Some(33.0), 6));
+        assert_eq!(figure(Series::BreakPoint), (Some(33.0), 3));
+        let measures: Vec<Measure> = Series::ALL.iter().map(|s| s.measure()).collect();
+        assert_eq!(
+            measures,
+            vec![
+                Measure::Reception,
+                Measure::Attack,
+                Measure::Attack,
+                Measure::Serve,
+                Measure::SideOut,
+                Measure::BreakPoint
+            ]
+        );
+        // nothing yet: no value, no touches
+        for series in Series::ALL {
+            assert_eq!(
+                (series.value(&Stats::new()), series.touches(&Stats::new())),
+                (None, 0)
+            );
+        }
+    }
+
+    /// A figure after every rally: so far, or of its last 10 touches.
+    #[test]
+    fn the_series_so_far_and_recent() {
+        let t = Team::new();
+        let sets: Vec<SetEntry> = (1..=3).map(|n| side_out_entry(&t, n)).collect();
+        let refs: Vec<&SetEntry> = sets.iter().collect();
+        let replay =
+            Replay::new(&refs, DEFAULT_MAX_SUBSTITUTIONS).expect("expected the sets to replay");
+        let so_far = replay.series(Series::Reception, false);
+        assert_eq!(so_far, replay.cumulative(|s| Series::Reception.value(s)));
+        let recent = replay.series(Series::Reception, true);
+        assert_eq!(
+            recent,
+            replay.window(RECENT_TOUCHES, receptions, |s| Series::Reception.value(s))
+        );
+        // 15 receptions in three sets: the last 10 are the last two sets,
+        // as the whole match, the same
+        assert_eq!(
+            recent.last().map(|p| p.value),
+            so_far.last().map(|p| p.value)
+        );
+        // after set 2: the last 10 are sets 1 and 2 entirely, # = + + - twice
+        let end_of_two = recent.iter().rfind(|p| p.set_number <= 2);
+        assert_eq!(end_of_two.map(|p| p.value), Some(Some(40.0)));
+        // early in set 3: the last 10 drop set 1's first reception (#)
+        let third: Vec<Option<f64>> = recent
+            .iter()
+            .filter(|p| p.set_number == 3)
+            .map(|p| p.value.map(f64::round))
+            .collect();
+        // 1st rally: = + + - (set 1) # = + + - (set 2) # (set 3): 40%
+        assert_eq!(third.first(), Some(&Some(40.0)));
+    }
+
+    /// How far the set had gone after each rally: the points of the team
+    /// ahead, the rallies at the same points spread up to them.
+    #[test]
+    fn the_progress_of_the_set() {
+        let t = Team::new();
+        let set = side_out_entry(&t, 1);
+        let replay =
+            Replay::new(&[&set], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
+        // 1-0 1-1 1-2 1-3 1-4 1-5 2-5 3-5 3-6: the team ahead at 1 twice,
+        // then 2 3 4 5 (three times: 1-5, 2-5, 3-5) 6
+        assert_eq!(
+            replay.progress(),
+            vec![
+                0.5,
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0 - 2.0 / 3.0,
+                5.0 - 1.0 / 3.0,
+                5.0,
+                6.0
+            ]
+        );
+        // each set from 0 again
+        let second = side_out_entry(&t, 2);
+        let both = Replay::new(&[&set, &second], DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the sets to replay");
+        let progress = both.progress();
+        assert_eq!(progress.len(), 18);
+        assert_eq!(&progress[..9], &progress[9..]);
+    }
+
+    /// The sets together count each event of each set once: two sets,
+    /// twice the figures of one.
+    #[test]
+    fn the_stats_of_sets_together() {
+        let t = Team::new();
+        let (first, second) = (side_out_entry(&t, 1), side_out_entry(&t, 2));
+        let one =
+            sets_stats(&[&first], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
+        let both = sets_stats(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS)
+            .expect("expected the sets to replay");
+        let (o1, o2) = (Overview::of(&one), Overview::of(&both));
+        assert_eq!(o1.reception.total * 2, o2.reception.total);
+        assert_eq!(o1.attack.perfect * 2, o2.attack.perfect);
+        assert_eq!(o1.reception.efficiency, o2.reception.efficiency);
+        assert_eq!(
+            o1.side_out.map(|(_, won, rallies)| (won * 2, rallies * 2)),
+            o2.side_out.map(|(_, won, rallies)| (won, rallies))
+        );
+        // no sets, no figures
+        let none = sets_stats(&[], DEFAULT_MAX_SUBSTITUTIONS).expect("expected nothing to replay");
+        assert_eq!(Overview::of(&none).reception.total, 0);
+    }
+
     // --- the side out on first rally --------------------------------------
 
     /// How each first rally of a side out ends, and how it counts.
@@ -1086,6 +2148,7 @@ mod tests {
             home: true,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
+            notes: String::new(),
         };
         let report = build_report(&m, EN).expect("expected the report data");
         let names: Vec<&Cell> = report.players.rows.iter().map(|r| &r.lead[1]).collect();
@@ -1139,6 +2202,7 @@ mod tests {
             home: true,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
+            notes: String::new(),
         };
         let report = build_report(&m, EN).expect("expected the report data");
         let labels = EN;

@@ -133,7 +133,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: run cargo clippy
-        run: cargo clippy --all-targets --all-features -- --deny warnings
+        run: cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
   format:
     needs: check
@@ -181,7 +181,32 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-nextest --locked
-      - run: cargo nextest run --locked --all-features
+      - run: cargo nextest run --workspace --locked --all-features
         env:
           RUST_BACKTRACE: full
           CI: "true"
+
+  android-tests:
+    needs: check
+    name: android tests
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v6
+      # the screens on the JVM, with the core built for the runner: no NDK
+      - name: run the tests of the app
+        working-directory: android
+        run: ./gradlew testDebugUnitTest

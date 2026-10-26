@@ -1,5 +1,6 @@
 mod app;
 mod localization;
+mod pdf_viewer;
 mod providers;
 mod screens;
 mod shapes;
@@ -24,6 +25,7 @@ use crokey::crossterm::event::{self, Event};
 use ratatui::{Terminal, backend::Backend};
 use scout4all_core::{
     analytics::{global::init_global_queue_manager, upload::AnalyticsUploadWorker},
+    example::add_example_team_if_new,
     logging::logger::{init_logger, log_error},
     providers::{
         store::{
@@ -119,13 +121,18 @@ async fn run() -> Result<(), String> {
     let set_writer = StoreSetWriter::new(Arc::clone(&store), language());
     let queue_reader = StoreQueueReader::new(Arc::clone(&store));
     let queue_writer = StoreQueueWriter::new(Arc::clone(&store));
-    let teams = team_reader.read_all().await.unwrap_or_else(|_| vec![]);
     let settings = settings_reader
         .read()
         .await
         .ok()
         .unwrap_or_else(Settings::default);
     init_settings(settings.clone());
+    // a new installation starts with a team, to try the app at once
+    if let Err(e) = add_example_team_if_new(store.as_ref(), &team_writer, language().labels()).await
+    {
+        log_error(&format!("could not add the example team: {e}"));
+    }
+    let teams = team_reader.read_all().await.unwrap_or_else(|_| vec![]);
     maybe_check_update().await;
     let team_reader_arc = Arc::new(team_reader);
     let team_writer_arc = Arc::new(team_writer);

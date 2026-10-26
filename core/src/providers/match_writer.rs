@@ -14,6 +14,7 @@ pub trait MatchWriter {
         date: DateTime<FixedOffset>,
         home: bool,
         max_substitutions: u8,
+        notes: String,
     ) -> Result<MatchEntry, AppError>;
 
     async fn update(
@@ -23,5 +24,6 @@ pub trait MatchWriter {
         date: DateTime<FixedOffset>,
         home: bool,
         max_substitutions: u8,
+        notes: String,
     ) -> Result<(), AppError>;
 }

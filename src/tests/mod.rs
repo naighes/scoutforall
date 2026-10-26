@@ -1,13 +1,17 @@
+mod archive_tests;
 mod edit_match_tests;
 mod edit_set_events_tests;
 mod form_navigation_tests;
 mod freeball_tests;
 mod layout_tests;
+mod live_stats_tests;
 mod max_substitutions_tests;
 mod navigation_tests;
+mod player_details_tests;
 mod point_sequence_tests;
 mod scouting_tests;
 mod settings_tests;
+mod start_set_tests;
 mod team_list_tests;
 mod technique_tests;
 mod terms_tests;

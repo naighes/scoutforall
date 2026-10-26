@@ -1,6 +1,7 @@
 use crate::localization::current_labels;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
+use crate::screens::live_stats_screen::LiveStatsScreen;
 use crate::screens::screen::{Sba, get_keybinding_actions};
 use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
 use crate::screens::{
@@ -25,13 +26,10 @@ use ratatui::{
     widgets::{Row, Table},
 };
 use scout4all_core::{
-    providers::set_writer::SetWriter,
     scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     shapes::{
         enums::{EventTypeEnum, FriendlyName, RoleEnum},
-        r#match::MatchEntry,
-        set::SetEntry,
-        snapshot::{EventEntry, Snapshot},
+        snapshot::EventEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
 };
@@ -221,6 +219,21 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenA
                         SettingsPanel::Shortcuts,
                     )))
                 }
+                (false, Some(ScreenActionEnum::LiveStats), _) => {
+                    let session = &self.session;
+                    let current_match = session.current_match();
+                    match LiveStatsScreen::new(
+                        &session.sets(),
+                        current_match.max_substitutions,
+                        &current_match.team,
+                    ) {
+                        Ok(screen) => AppAction::SwitchScreen(Box::new(screen)),
+                        Err(e) => {
+                            self.notify_message.set_error(e.to_string());
+                            AppAction::None
+                        }
+                    }
+                }
                 (false, Some(ScreenActionEnum::Undo), _) => {
                     let undone = self.session.undo().await;
                     self.show(undone.map(|_| Progress::Choosing))
@@ -248,22 +261,19 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenA
 }
 
 impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScoutingScreen<SW, SR> {
-    pub fn new<SSW: SetWriter + Send + Sync + 'static>(
+    pub fn new(
         settings_reader: Arc<SR>,
         settings_writer: Arc<SW>,
         settings: Settings,
-        current_match: MatchEntry,
-        set: SetEntry,
-        snapshot: Snapshot,
+        session: ScoutingSession,
         back_stack_count: Option<u8>,
-        set_writer: Arc<SSW>,
     ) -> Self {
         let event_key_bindings = settings.scouting_keybindings.clone();
         ScoutingScreen {
             settings_reader,
             settings_writer,
             settings,
-            session: ScoutingSession::new(current_match, set, snapshot, set_writer),
+            session,
             notify_message: NotifyBanner::new(),
             back_stack_count,
             back: false,
@@ -653,11 +663,13 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     fn get_screen_actions(&self) -> Vec<Sba<ScreenActionEnum>> {
         match (self.session.set().events.len(), self.session.step()) {
             (0, ScoutingStep::Event) => vec![
+                Sba::Simple(ScreenActionEnum::LiveStats),
                 Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Simple(ScreenActionEnum::Back),
             ],
             _ => vec![
                 Sba::Simple(ScreenActionEnum::Undo),
+                Sba::Simple(ScreenActionEnum::LiveStats),
                 Sba::Simple(ScreenActionEnum::Settings),
                 Sba::Simple(ScreenActionEnum::Back),
             ],

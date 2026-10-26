@@ -1,0 +1,105 @@
+name: release android
+
+# The app is released with the CLI: the same tag, the same version (the
+# versionName and the versionCode come from Cargo.toml). Apart from
+# publish.yml, so that a failure here never blocks the release of the CLI.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PACKAGE_NAME: io.github.naighes.scout4all
+
+jobs:
+  bundle:
+    name: build the signed bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: check the tag matches Cargo.toml
+        if: github.ref_type == 'tag'
+        run: |
+          version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml)"
+          [ "v${version}" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME}, Cargo.toml ${version}"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-ndk --locked
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: android-actions/setup-android@v4
+      # the one of ndkVersion in app/build.gradle.kts
+      - name: install the NDK
+        run: |
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' android/app/build.gradle.kts)"
+          sdkmanager --install "ndk;${ndk}"
+      - uses: gradle/actions/setup-gradle@v6
+      # the upload key, never in git (app/build.gradle.kts): without it the
+      # bundle would be signed with a debug key, which Play refuses
+      - name: restore the upload key
+        run: |
+          [ -n "${KEYSTORE}" ] && [ -n "${UPLOAD_STORE_PASSWORD}" ] && [ -n "${UPLOAD_KEY_ALIAS}" ] && [ -n "${UPLOAD_KEY_PASSWORD}" ] \
+            || { echo "missing the secrets of the upload key"; exit 1; }
+          echo "${KEYSTORE}" | base64 --decode > "${RUNNER_TEMP}/upload.jks"
+        env:
+          KEYSTORE: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+      - name: build the bundle
+        working-directory: android
+        run: ./gradlew bundleRelease
+        env:
+          UPLOAD_STORE_FILE: ${{ runner.temp }}/upload.jks
+          UPLOAD_STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+          ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
+      - name: check the bundle
+        run: |
+          [ -n "${ANALYTICS_UPLOAD_URL}" ] || { echo "no ANALYTICS_UPLOAD_URL: the app would send no statistics"; exit 1; }
+          bundle=android/app/build/outputs/bundle/release/app-release.aab
+          certs="$(jarsigner -verify -verbose -certs "${bundle}")"
+          echo "${certs}" | grep -q "jar verified" || { echo "the bundle is not signed"; exit 1; }
+          ! echo "${certs}" | grep -q "CN=Android Debug" || { echo "the bundle is signed with a debug key"; exit 1; }
+          rm -f "${RUNNER_TEMP}/upload.jks"
+        env:
+          ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scout4all-android-${{ github.ref_name }}
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+  # to the internal test of Play, as a draft to roll out from the console.
+  # Only once the service account exists (Play Console → API access), and
+  # after the first bundle, which Play wants uploaded by hand
+  play:
+    name: upload to Play (internal test)
+    needs: bundle
+    if: vars.PLAY_UPLOAD == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: scout4all-android-${{ github.ref_name }}
+      - uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.PACKAGE_NAME }}
+          releaseFiles: app-release.aab
+          track: internal
+          status: draft

@@ -101,6 +101,20 @@ impl SetEntry {
         )
     }
 
+    /// The score after each event, ours first: to find an event in the set.
+    pub fn scores(&self, max_substitutions: u8) -> Result<Vec<(u8, u8)>, AppError> {
+        let rules = self.find_lineup_rules(max_substitutions)?;
+        let mut snapshot = Snapshot::with_rules(self, max_substitutions, rules)?;
+        self.events
+            .iter()
+            .map(|event| {
+                snapshot
+                    .add_event(event)
+                    .map(|_| (snapshot.score_us, snapshot.score_them))
+            })
+            .collect()
+    }
+
     /// The set with the event at `index` in place of the one scouted, if
     /// all the events still replay with the rules of the set and the set
     /// ends as it did: won by the same team, or still in progress. The set

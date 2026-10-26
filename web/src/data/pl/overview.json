@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Scouting siatkówki w prosty sposób",
+    "content": "<strong>Szybkie, sprawdzane akcje pozwalają bez wysiłku zapisać każde zdarzenie meczu</strong>, dzięki czemu scouting jest szybki, dokładny i intuicyjny",
+    "image": "/scoutforall/content-images/scouting-anim.gif",
+    "image_alt": ""
+  },
+  {
+    "title": "Analizy, które coś mówią",
+    "content": "<strong>Analizuj skuteczność, pozytywność i rozegranie.</strong> Wszystko, czego potrzebujesz, by od razu zrozumieć mecz i podejmować lepsze decyzje taktyczne",
+    "image": "/scoutforall/content-images/stats_blur.png",
+    "image_alt": ""
+  },
+  {
+    "title": "Tworzone przez społeczność",
+    "content": "<strong>Open source, budowane wspólnie.</strong> scout4all rozwija się dzięki wkładowi trenerów, analityków i programistów, których łączy ta sama pasja do siatkówki.",
+    "image": "/scoutforall/content-images/community.png",
+    "image_alt": ""
+  }
+]

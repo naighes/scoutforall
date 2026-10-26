@@ -3,7 +3,10 @@ use crate::{
     localization::Language,
     providers::{
         set_writer::SetWriter,
-        store::{set_reader::read_events, write_json},
+        store::{
+            set_reader::{read_events, whole_rows},
+            write_json,
+        },
     },
     shapes::{enums::TeamSideEnum, r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
     storage::{Store, layout},
@@ -67,8 +70,9 @@ impl SetWriter for StoreSetWriter {
         let key = layout::set_events(&m.team.id, &m.id, set_number);
         let saved = self.store.read(&key).await?.unwrap_or_default();
         // the older versions read a file only when all its rows have the
-        // same columns: the rows saved without the technique get it
-        match has_rows_without_technique(&saved)? {
+        // same columns: the rows saved without the technique get it; a last
+        // row cut (see read_events) goes, the event isn't appended to it
+        match whole_rows(&saved).len() < saved.len() || has_rows_without_technique(&saved)? {
             true => {
                 let mut events = read_events(&saved)?;
                 events.push(event.clone());

@@ -85,6 +85,9 @@ mod tests {
                         role: Some(role),
                         number: i as u8 + 1,
                         deleted: false,
+                        birth_date: None,
+                        height_cm: None,
+                        notes: String::new(),
                     })
                     .collect(),
                 ..TeamEntry::default()
@@ -577,5 +580,130 @@ mod tests {
         assert_eq!(scout.phase(), PhaseEnum::SideOut);
         assert_eq!(scout.rotation(), 0);
         scout.assert_libero_rules(p.libero, [p.mb1, p.mb2], "after the serve");
+    }
+
+    /// Our serve, evaluated: the rally goes on after a positive one.
+    fn serve(scout: &mut Scout, eval: EvalEnum) {
+        let server = scout.snapshot.current_lineup.get_serving_player();
+        scout.add(EventEntry {
+            eval: Some(eval),
+            ..event(EventTypeEnum::S, server, None)
+        });
+    }
+
+    #[test]
+    fn players_play_in_their_positions_after_our_serve() {
+        // setter in 5 (P5): C2 1, O 2, S2 3, C1 4, P 5, S1 6, the middle
+        // blocker serving
+        let p = Players::new();
+        let mut scout = Scout::new(&p.set(4, TeamSideEnum::Us));
+        let rotation = [p.mb2, p.opposite, p.oh2, p.mb1, p.setter, p.oh1];
+        assert_eq!(scout.snapshot.get_playing_positions(), rotation);
+        serve(&mut scout, EvalEnum::Positive);
+        assert_eq!(
+            scout.snapshot.get_playing_positions(),
+            [p.setter, p.opposite, p.mb1, p.oh2, p.mb2, p.oh1]
+        );
+        // the point: the next serve, in the order of rotation again
+        scout.we_score();
+        assert_eq!(scout.snapshot.get_playing_positions(), rotation);
+    }
+
+    #[test]
+    fn break_positions_from_any_rotation() {
+        let p = Players::new();
+        for rotation in 0..6 {
+            let mut scout = Scout::new(&p.set(rotation, TeamSideEnum::Us));
+            serve(&mut scout, EvalEnum::Positive);
+            let positions = scout.snapshot.get_playing_positions();
+            let front = &positions[1..4];
+            let back = [positions[0], positions[4], positions[5]];
+            let context = format!("rotation {}: {positions:?}", rotation + 1);
+            assert!([p.setter, p.opposite].contains(&positions[1]), "{context}");
+            assert!([p.mb1, p.mb2].contains(&positions[2]), "{context}");
+            assert!([p.oh1, p.oh2].contains(&positions[3]), "{context}");
+            assert!([p.setter, p.opposite].contains(&positions[0]), "{context}");
+            assert!(
+                [p.mb1, p.mb2, p.libero].contains(&positions[4]),
+                "{context}"
+            );
+            assert!([p.oh1, p.oh2].contains(&positions[5]), "{context}");
+            // nobody changes row
+            let on_court = scout.on_court();
+            assert!(
+                front.iter().all(|id| on_court[1..4].contains(id)),
+                "{context}"
+            );
+            assert!(
+                back.iter().all(|id| !on_court[1..4].contains(id)),
+                "{context}"
+            );
+        }
+    }
+
+    /// Their serve, received: the rally goes on after a positive one.
+    fn receive(scout: &mut Scout) {
+        let receiver = scout.snapshot.current_lineup.get_oh1();
+        scout.add(EventEntry {
+            eval: Some(EvalEnum::Positive),
+            ..event(EventTypeEnum::P, receiver, None)
+        });
+    }
+
+    #[test]
+    fn players_play_in_their_positions_after_the_reception() {
+        // setter in 5 (P5), the libero in 1 for C2
+        let p = Players::new();
+        let mut scout = Scout::new(&p.set(4, TeamSideEnum::Them));
+        let rotation = [p.libero, p.opposite, p.oh2, p.mb1, p.setter, p.oh1];
+        assert_eq!(scout.snapshot.get_playing_positions(), rotation);
+        receive(&mut scout);
+        assert_eq!(
+            scout.snapshot.get_playing_positions(),
+            [p.setter, p.opposite, p.mb1, p.oh2, p.libero, p.oh1]
+        );
+        // our attack error: the next reception, in the order of rotation
+        // again
+        scout.add(EventEntry {
+            eval: Some(EvalEnum::Error),
+            ..event(EventTypeEnum::A, Some(p.oh2), None)
+        });
+        assert_eq!(scout.snapshot.get_playing_positions(), rotation);
+    }
+
+    #[test]
+    fn the_canonical_p1_attacks_from_where_it_receives() {
+        let p = Players::new();
+        let mut scout = Scout::new(&p.set(0, TeamSideEnum::Them));
+        receive(&mut scout);
+        // the opposite in 4 and S1 in 2, as they received
+        assert_eq!(
+            scout.snapshot.get_playing_positions(),
+            [p.setter, p.oh1, p.mb2, p.opposite, p.libero, p.oh2]
+        );
+        // in break the opposite plays in 2 again
+        let mut scout = Scout::new(&p.set(0, TeamSideEnum::Us));
+        serve(&mut scout, EvalEnum::Positive);
+        assert_eq!(
+            scout.snapshot.get_playing_positions(),
+            [p.setter, p.opposite, p.mb2, p.oh1, p.libero, p.oh2]
+        );
+    }
+
+    #[test]
+    fn rally_positions_after_the_reception_from_any_rotation_but_p1() {
+        let p = Players::new();
+        for rotation in 1..6 {
+            let mut scout = Scout::new(&p.set(rotation, TeamSideEnum::Them));
+            receive(&mut scout);
+            let positions = scout.snapshot.get_playing_positions();
+            let context = format!("rotation {}: {positions:?}", rotation + 1);
+            assert!([p.setter, p.opposite].contains(&positions[0]), "{context}");
+            assert!([p.setter, p.opposite].contains(&positions[1]), "{context}");
+            assert!([p.mb1, p.mb2].contains(&positions[2]), "{context}");
+            assert!([p.oh1, p.oh2].contains(&positions[3]), "{context}");
+            assert_eq!(positions[4], p.libero, "{context}");
+            assert!([p.oh1, p.oh2].contains(&positions[5]), "{context}");
+        }
     }
 }

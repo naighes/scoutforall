@@ -23,16 +23,15 @@ use ratatui::{
     },
 };
 use scout4all_core::{
+    detail::{Breakdown, Detail, Tone},
     errors::AppError,
     shapes::{
-        enums::{
-            ErrorTypeEnum, EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum,
-        },
+        enums::{EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
         snapshot::Snapshot,
-        stats::{Metric, Stats, StatsFilter},
+        stats::{Stats, StatsFilter},
     },
 };
 use std::{collections::HashSet, fmt::Display, iter::once};
@@ -323,11 +322,13 @@ impl MatchStatsScreen {
                     .cloned(),
             );
         }
-        let players = once(None).chain(
-            players
-                .iter()
-                .map(|p| current_match.team.find_player(*p).cloned()),
-        );
+        // by their number, to find them
+        let mut players: Vec<Option<PlayerEntry>> = players
+            .iter()
+            .map(|p| current_match.team.find_player(*p).cloned())
+            .collect();
+        players.sort_by_key(|p| p.as_ref().map(|p| p.number));
+        let players = once(None).chain(players);
         let screen_actions = &[
             Sba::Hidden(ScreenActionEnum::Previous),
             Sba::Hidden(ScreenActionEnum::Next),
@@ -399,15 +400,21 @@ impl MatchStatsScreen {
                 Constraint::Length(3),
             ])
             .split(area);
-        let Some(stats) = self.get_current_stats(self.set_filter.selected().copied()) else {
+        let Some(Breakdown::Fundamental(detail)) = self.breakdown(selection.event_type) else {
             return;
         };
-        let filter = self.current_filter();
-        let event_type = selection.event_type;
-        Self::render_evals_bars(f, &stats, &filter, event_type, chunks[0]);
-        Self::render_summary_table(f, &stats, &filter, event_type, chunks[1]);
-        Self::render_efficiency_bars(f, &stats, &filter, event_type, chunks[2]);
-        Self::render_positiveness_bars(f, &stats, &filter, event_type, chunks[3]);
+        let with_player = self.player_filter.selected().is_some();
+        Self::render_evals_bars(f, &detail, chunks[0]);
+        Self::render_summary_table(f, &detail, with_player, chunks[1]);
+        Self::render_efficiency_bars(f, &detail, chunks[2]);
+        Self::render_positiveness_bars(f, &detail, chunks[3]);
+    }
+
+    /// The fundamental in the set (or the match) selected, narrowed by the
+    /// filters.
+    fn breakdown(&self, event_type: EventTypeEnum) -> Option<Breakdown> {
+        self.get_current_stats(self.set_filter.selected().copied())
+            .map(|stats| Breakdown::of(&stats, event_type, &self.current_filter()))
     }
 
     fn render_right(&mut self, f: &mut Frame, area: Rect) {
@@ -434,9 +441,7 @@ impl MatchStatsScreen {
     where
         F: Fn((f64, f64)) -> f64,
     {
-        let set = self.set_filter.selected().copied();
-        let filter = self.current_filter();
-        if let Some(stats) = self.get_current_stats(set) {
+        if let Some(Breakdown::Fundamental(detail)) = self.breakdown(EventTypeEnum::A) {
             let zones = [
                 (ZoneEnum::Four, 1.0, 1.0),
                 (ZoneEnum::Three, 4.0, 1.0),
@@ -470,9 +475,11 @@ impl MatchStatsScreen {
                         color: Color::Blue,
                     });
                     for (zone, x, y) in zones.iter() {
-                        let text = stats
-                            .zone_distribution(*zone, &filter)
-                            .map(|(p, s)| format!("{:.1}%", select_value((p, s))))
+                        let text = detail
+                            .zones
+                            .iter()
+                            .find(|z| z.zone == *zone)
+                            .map(|z| format!("{:.1}%", select_value((z.share, z.conversion))))
                             .unwrap_or("-".to_string());
                         ctx.print(*x, y_inverted(*y), text);
                     }
@@ -481,70 +488,21 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_evals_bars(
-        f: &mut Frame,
-        stats: &Stats,
-        filter: &StatsFilter,
-        event_type: EventTypeEnum,
-        area: Rect,
-    ) {
-        let evals_with_colors = match event_type {
-            EventTypeEnum::S => vec![
-                (EvalEnum::Perfect, Color::Green),
-                (EvalEnum::Over, Color::Green),
-                (EvalEnum::Positive, Color::LightGreen),
-                (EvalEnum::Negative, Color::Yellow),
-                (EvalEnum::Error, Color::Red),
-            ],
-            EventTypeEnum::P => vec![
-                (EvalEnum::Perfect, Color::Green),
-                (EvalEnum::Positive, Color::LightGreen),
-                (EvalEnum::Exclamative, Color::LightYellow),
-                (EvalEnum::Negative, Color::Yellow),
-                (EvalEnum::Over, Color::Yellow),
-                (EvalEnum::Error, Color::Red),
-            ],
-            EventTypeEnum::B => vec![
-                (EvalEnum::Perfect, Color::Green),
-                (EvalEnum::Positive, Color::LightGreen),
-                (EvalEnum::Negative, Color::Yellow),
-                (EvalEnum::Error, Color::Red),
-                (EvalEnum::Over, Color::Red),
-            ],
-            EventTypeEnum::D => vec![
-                (EvalEnum::Perfect, Color::Green),
-                (EvalEnum::Positive, Color::LightGreen),
-                (EvalEnum::Exclamative, Color::LightYellow),
-                (EvalEnum::Negative, Color::Yellow),
-                (EvalEnum::Over, Color::Yellow),
-                (EvalEnum::Error, Color::Red),
-            ],
-            EventTypeEnum::A => vec![
-                (EvalEnum::Perfect, Color::Green),
-                (EvalEnum::Positive, Color::LightGreen),
-                (EvalEnum::Exclamative, Color::LightGreen),
-                (EvalEnum::Negative, Color::Yellow),
-                (EvalEnum::Over, Color::Red),
-                (EvalEnum::Error, Color::Red),
-            ],
-            _ => vec![],
-        };
-        let mut bars: Vec<Bar> = Vec::new();
-        for (eval, color) in evals_with_colors {
-            // only the evaluations given at least once
-            if let Some(percent) = stats.event_percentage(event_type, eval, filter)
-                && percent > 0.0
-            {
-                bars.push(
-                    Bar::default()
-                        .label(eval.to_string())
-                        .value((percent.round() as u64).min(100))
-                        .text_value(format!("{}%", percent.round()))
-                        .style(Style::default().fg(color))
-                        .value_style(Style::default().fg(Color::Black).bg(color)),
-                );
-            }
-        }
+    fn render_evals_bars(f: &mut Frame, detail: &Detail, area: Rect) {
+        // only the evaluations given at least once
+        let bars: Vec<Bar> = detail
+            .evals
+            .iter()
+            .map(|e| {
+                let color = tone_color(e.tone);
+                Bar::default()
+                    .label(e.eval.to_string())
+                    .value((e.share.round() as u64).min(100))
+                    .text_value(format!("{}%", e.share.round()))
+                    .style(Style::default().fg(color))
+                    .value_style(Style::default().fg(Color::Black).bg(color))
+            })
+            .collect();
         let group = BarGroup::default().bars(&bars);
         let evals_barchart = BarChart::default()
             .block(panel::section(current_labels().evaluations).padding(Padding::new(2, 2, 1, 1)))
@@ -555,14 +513,8 @@ impl MatchStatsScreen {
         f.render_widget(evals_barchart, area);
     }
 
-    fn render_efficiency_bars(
-        f: &mut Frame,
-        stats: &Stats,
-        filter: &StatsFilter,
-        event_type: EventTypeEnum,
-        area: Rect,
-    ) {
-        if let Some(eff) = stats.metric_percentage(event_type, Metric::Efficiency, filter) {
+    fn render_efficiency_bars(f: &mut Frame, detail: &Detail, area: Rect) {
+        if let Some(eff) = detail.efficiency {
             let color = if eff < 10.0 {
                 Color::Red
             } else if eff < 30.0 {
@@ -589,14 +541,8 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_positiveness_bars(
-        f: &mut Frame,
-        stats: &Stats,
-        filter: &StatsFilter,
-        event_type: EventTypeEnum,
-        area: Rect,
-    ) {
-        if let Some(eff) = stats.metric_percentage(event_type, Metric::Positive, filter) {
+    fn render_positiveness_bars(f: &mut Frame, detail: &Detail, area: Rect) {
+        if let Some(eff) = detail.positiveness {
             let color = if eff < 10.0 {
                 Color::Red
             } else if eff < 20.0 {
@@ -623,40 +569,32 @@ impl MatchStatsScreen {
         }
     }
 
-    fn render_summary_table(
-        f: &mut Frame,
-        stats: &Stats,
-        filter: &StatsFilter,
-        event_type: EventTypeEnum,
-        area: Rect,
-    ) {
+    fn render_summary_table(f: &mut Frame, detail: &Detail, with_player: bool, area: Rect) {
         let count = |n: u32| match n {
             0 => "-".to_string(),
             n => n.to_string(),
         };
         let mut rows: Vec<Row> = vec![Row::new(vec![
             Cell::from(current_labels().domain.total),
-            Cell::from(count(stats.event_count(event_type, None, filter))),
+            Cell::from(count(detail.total)),
         ])];
-        let errors = stats.errors(event_type, None, filter);
-        let unforced_errors = stats.errors(event_type, Some(ErrorTypeEnum::Unforced), filter);
         rows.push(Row::new(vec![
             Cell::from(format!(
                 "{}({})",
                 current_labels().domain.errors,
                 current_labels().unforced
             )),
-            Cell::from(match (errors, unforced_errors) {
+            Cell::from(match (detail.errors, detail.unforced_errors) {
                 (0, _) => "-".to_string(),
                 (e, 0) => format!("{}(-)", e),
                 (e, ue) => format!("{}({})", e, ue),
             }),
         ]));
         // the rallies have no player
-        if filter.player.is_none() {
+        if !with_player {
             rows.push(Row::new(vec![
                 Cell::from(current_labels().phase_efficiency),
-                Cell::from(match stats.phases_per_point(filter) {
+                Cell::from(match detail.phases_per_point {
                     Some((p, won, rallies)) => format!("{:.2}({}/{})", p, won, rallies),
                     _ => "-".to_string(),
                 }),
@@ -664,10 +602,9 @@ impl MatchStatsScreen {
         }
         rows.push(Row::new(vec![
             Cell::from(current_labels().domain.faults),
-            Cell::from(count(stats.event_count(EventTypeEnum::F, None, filter))),
+            Cell::from(count(detail.faults)),
         ]));
-        if event_type.provides_direct_points() {
-            let points = stats.event_count(event_type, Some(EvalEnum::Perfect), filter);
+        if let Some(points) = detail.points {
             rows.push(Row::new(vec![
                 Cell::from(current_labels().domain.points),
                 Cell::from(count(points)),
@@ -694,10 +631,9 @@ impl MatchStatsScreen {
     /// many of these we exploited. Theirs have no player: with a player
     /// selected, only the ones given.
     fn render_freeball_stats(&self, f: &mut Frame, area: Rect) {
-        let Some(stats) = self.get_current_stats(self.set_filter.selected().copied()) else {
+        let Some(Breakdown::Freeballs(freeballs)) = self.breakdown(EventTypeEnum::FB) else {
             return;
         };
-        let filter = self.current_filter();
         let labels = current_labels();
         let count = |n: u32| match n {
             0 => "-".to_string(),
@@ -705,25 +641,27 @@ impl MatchStatsScreen {
         };
         let given = Row::new(vec![
             Cell::from(labels.domain.freeballs_given),
-            Cell::from(count(stats.event_count(EventTypeEnum::FB, None, &filter))),
+            Cell::from(count(freeballs.given)),
         ]);
-        let received = [
-            Row::new(vec![
-                Cell::from(labels.domain.freeballs_received),
-                Cell::from(count(stats.event_count(EventTypeEnum::OF, None, &filter))),
-            ]),
-            Row::new(vec![
-                Cell::from(labels.domain.freeballs_exploited),
-                Cell::from(match stats.freeball_exploitation(&filter) {
-                    Some((p, total, exploited)) => format!("{:.0}%({}/{})", p, exploited, total),
-                    None => "-".to_string(),
-                }),
-            ]),
-        ];
-        let rows: Vec<Row> = match filter.player {
-            Some(_) => vec![given],
-            None => once(given).chain(received).collect(),
-        };
+        // theirs have no player
+        let received = freeballs.received.map(|received| {
+            [
+                Row::new(vec![
+                    Cell::from(labels.domain.freeballs_received),
+                    Cell::from(count(received)),
+                ]),
+                Row::new(vec![
+                    Cell::from(labels.domain.freeballs_exploited),
+                    Cell::from(match freeballs.exploited {
+                        Some((p, total, exploited)) => {
+                            format!("{:.0}%({}/{})", p, exploited, total)
+                        }
+                        None => "-".to_string(),
+                    }),
+                ]),
+            ]
+        });
+        let rows: Vec<Row> = once(given).chain(received.into_iter().flatten()).collect();
         let area = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -756,5 +694,16 @@ impl MatchStatsScreen {
         self.phase_filter.render(f, chunks[2]);
         self.event_filter.render(f, chunks[3]);
         self.player_filter.render(f, chunks[4]);
+    }
+}
+
+/// The color of an evaluation, by how good it is for the fundamental.
+fn tone_color(tone: Tone) -> Color {
+    match tone {
+        Tone::Excellent => Color::Green,
+        Tone::Good => Color::LightGreen,
+        Tone::Fair => Color::LightYellow,
+        Tone::Poor => Color::Yellow,
+        Tone::Bad => Color::Red,
     }
 }

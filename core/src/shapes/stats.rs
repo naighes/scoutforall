@@ -108,6 +108,19 @@ impl<K: Clone + Eq + Hash> Counter<K> {
         }
     }
 
+    /// The occurrences since `earlier`, a count of the same keys taken
+    /// before: none of a key seen less since.
+    pub fn since(&self, earlier: &Counter<K>) -> Counter<K> {
+        Counter(
+            self.0
+                .iter()
+                .map(|(k, v)| (k, v.saturating_sub(earlier.0.get(k).copied().unwrap_or(0))))
+                .filter(|(_, v)| *v > 0)
+                .map(|(k, v)| (k.clone(), v))
+                .collect(),
+        )
+    }
+
     /// The keys passing the filter, with their occurrences.
     pub fn iter<'a, F>(&'a self, filter: F) -> impl Iterator<Item = (&'a K, u32)>
     where
@@ -297,6 +310,19 @@ impl Stats {
         self.freeballs.merge(&other.freeballs);
     }
 
+    /// The statistics since `earlier`, the statistics of the same sets
+    /// taken before: e.g. of the last touches, from the statistics after
+    /// the touch before them.
+    pub fn since(&self, earlier: &Stats) -> Stats {
+        Stats {
+            events: self.events.since(&earlier.events),
+            attacks: self.attacks.since(&earlier.attacks),
+            rallies: self.rallies.since(&earlier.rallies),
+            first_rallies: self.first_rallies.since(&earlier.first_rallies),
+            freeballs: self.freeballs.since(&earlier.freeballs),
+        }
+    }
+
     fn events<'a>(
         &'a self,
         event_type: EventTypeEnum,
@@ -438,23 +464,41 @@ impl Stats {
         counter_attack: bool,
         filter: &StatsFilter,
     ) -> Option<AttackSummary> {
-        let summary = self
-            .attacks(filter)
-            .filter(|(k, _)| k.is_counter_attack() == counter_attack)
-            .fold(AttackSummary::default(), |s, (k, v)| {
-                let (errors, blocked, kills) = match k.eval {
-                    EvalEnum::Error => (v, 0, 0),
-                    EvalEnum::Over => (0, v, 0),
-                    EvalEnum::Perfect => (0, 0, v),
-                    _ => (0, 0, 0),
-                };
-                AttackSummary {
-                    total: s.total + v,
-                    errors: s.errors + errors,
-                    blocked: s.blocked + blocked,
-                    kills: s.kills + kills,
-                }
-            });
+        Self::summarize(
+            self.attacks(filter)
+                .filter(|(k, _)| k.is_counter_attack() == counter_attack),
+        )
+    }
+
+    /// The attacks built by us from this zone: all of them, or only the
+    /// ones on our reception (`counter_attack` false) or in counter-attack;
+    /// `None` when there are none.
+    pub fn zone_attacks(
+        &self,
+        zone: ZoneEnum,
+        counter_attack: Option<bool>,
+        filter: &StatsFilter,
+    ) -> Option<AttackSummary> {
+        Self::summarize(self.attacks(filter).filter(|(k, _)| {
+            k.zone == zone && counter_attack.is_none_or(|c| k.is_counter_attack() == c)
+        }))
+    }
+
+    fn summarize<'a>(attacks: impl Iterator<Item = (&'a AttackKey, u32)>) -> Option<AttackSummary> {
+        let summary = attacks.fold(AttackSummary::default(), |s, (k, v)| {
+            let (errors, blocked, kills) = match k.eval {
+                EvalEnum::Error => (v, 0, 0),
+                EvalEnum::Over => (0, v, 0),
+                EvalEnum::Perfect => (0, 0, v),
+                _ => (0, 0, 0),
+            };
+            AttackSummary {
+                total: s.total + v,
+                errors: s.errors + errors,
+                blocked: s.blocked + blocked,
+                kills: s.kills + kills,
+            }
+        });
         (summary.total > 0).then_some(summary)
     }
 
@@ -529,6 +573,18 @@ impl Stats {
             }
         }
         (summary.total > 0).then_some(summary)
+    }
+
+    /// Their aces with no touch of ours: their point (`OS`) right after
+    /// their serve. As every ace, a reception error of ours, of the team:
+    /// the scouting doesn't tell who should have received it. They have no
+    /// player: a player filter leaves none.
+    pub fn untouched_aces(&self, filter: &StatsFilter) -> u32 {
+        self.first_rallies.count(|k| {
+            filter.matches(PhaseEnum::SideOut, k.rotation, None)
+                && k.reception_eval.is_none()
+                && k.ending == EventTypeEnum::OS
+        })
     }
 
     /// Their freeballs we exploited: `(percentage, freeballs, exploited)`,

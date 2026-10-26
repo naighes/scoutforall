@@ -1,5 +1,6 @@
 ---
 
+import { languages, language, homeUrl, content } from '../lib/languages.js';
 const lang = Astro.params.lang || 'en';
 import '../assets/css/global.css'
 import "../assets/css/base.css"
@@ -12,9 +13,7 @@ import { Font } from 'astro:assets';
 import Image from "astro/components/Image.astro"
 import bg_image from "../assets/theme-images/hero-image.jpg"
 
-import global_settings_en from '../data/en/global_settings.json';
-import global_settings_it from '../data/it/global_settings.json';
-const global_settings = lang === 'it' ? global_settings_it : global_settings_en;
+const global_settings = content(lang, 'global_settings');
 
 import { latestRelease } from '../lib/release.js';
 const release = await latestRelease();
@@ -22,11 +21,12 @@ const release = await latestRelease();
 import FooterMain from "../components/FooterMain.astro"
 import HeaderMain from "../components/HeaderMain.astro"
 
-const { title, description } = Astro.props
+// url: the address of a page other than the home page, in one language only
+const { title, description, url } = Astro.props
 
 ---
 
-<html lang={lang}>
+<html lang={ language(lang).hreflang }>
 
   <head>
     <meta charset="utf-8" />
@@ -44,12 +44,12 @@ const { title, description } = Astro.props
     <meta property="og:title" content={ title ?? global_settings.title } />
     <meta property="og:description" content={ description ?? global_settings.description } />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content={`https://naighes.github.io/scoutforall/${lang === 'en' ? '' : lang + '/'}`} />
+    <meta property="og:url" content={ url ?? homeUrl(lang) } />
     <meta property="og:image" content="https://naighes.github.io/scoutforall/1200x630.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/jpeg" />
-    <meta property="og:locale" content={ lang === 'it' ? 'it_IT' : 'en_US' } />
+    <meta property="og:locale" content={ language(lang).locale } />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={ title ?? global_settings.title } />
@@ -60,24 +60,23 @@ const { title, description } = Astro.props
     <Font cssVariable="--font-inter" preload />
     <Font cssVariable="--font-inter-display" preload />
 
-    <link
-      rel="alternate"
-      hreflang="en"
-      href="https://naighes.github.io/scoutforall/"
-    />
-    <link
-      rel="alternate"
-      hreflang="it"
-      href="https://naighes.github.io/scoutforall/it/"
-    />
-    <link
-      rel="alternate"
-      hreflang="x-default"
-      href="https://naighes.github.io/scoutforall/"
-    />
+    {!url && languages.map(l =>
+      <link
+        rel="alternate"
+        hreflang={ l.hreflang }
+        href={ homeUrl(l.code) }
+      />
+    )}
+    {!url &&
+      <link
+        rel="alternate"
+        hreflang="x-default"
+        href="https://naighes.github.io/scoutforall/"
+      />
+    }
     <link
       rel="canonical"
-      href={`https://naighes.github.io/scoutforall/${lang === 'en' ? '' : lang + '/'}`}
+      href={ url ?? homeUrl(lang) }
     />
     <link rel="sitemap" href="/scoutforall/sitemap-index.xml" />
 
@@ -92,7 +91,7 @@ const { title, description } = Astro.props
           "operatingSystem": "macOS, Windows, Linux",
           "softwareVersion": release?.version,
           "url": "https://naighes.github.io/scoutforall/",
-          "inLanguage": lang,
+          "inLanguage": language(lang).hreflang,
           "description": description ?? global_settings.description,
           "image": "https://naighes.github.io/scoutforall/1200x630.jpg",
           "offers": {
@@ -114,7 +113,7 @@ const { title, description } = Astro.props
     <!-- the home page is english: move to the language picked in the
          selector, or else to the one of the browser; inline, so that it
          runs before the page renders -->
-    <script is:inline>
+    <script is:inline define:vars={{ codes: languages.map(l => l.code).filter(c => c !== 'en') }}>
       (function () {
         var picked = null;
         try {
@@ -122,8 +121,8 @@ const { title, description } = Astro.props
         } catch (e) {}
         var browser = (navigator.language || navigator.userLanguage || '').slice(0, 2);
         var lang = picked || browser;
-        if (location.pathname === '/scoutforall/' && !location.search && !location.hash && lang === 'it') {
-          window.location.replace('/scoutforall/it/');
+        if (location.pathname === '/scoutforall/' && !location.search && !location.hash && codes.indexOf(lang) !== -1) {
+          window.location.replace('/scoutforall/' + lang + '/');
         }
       })();
     </script>
