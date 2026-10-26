@@ -17,7 +17,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,9 +79,10 @@ fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = 
     IconButton(onClick = { open = true }) {
         Icon(Icons.Filled.Share, contentDescription = description)
     }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+    Menu(expanded = open, onDismissRequest = { open = false }) {
         DropdownMenuItem(
             text = { Text(stringResource(R.string.share)) },
+            leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
             onClick = {
                 open = false
                 scope.launch {
@@ -95,6 +95,7 @@ fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = 
         )
         DropdownMenuItem(
             text = { Text(stringResource(R.string.save_to_file)) },
+            leadingIcon = { Icon(painterResource(R.drawable.ic_save), contentDescription = null) },
             onClick = {
                 open = false
                 scope.launch {

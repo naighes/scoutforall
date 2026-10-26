@@ -21,7 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -124,9 +124,14 @@ private fun <T> FilterMenu(label: String, chosen: String?, options: List<Pair<St
             label = { Text(chosen ?: label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        // the one chosen with a tick
+        val tick = @Composable { on: Boolean ->
+            if (on) Icon(Icons.Filled.Check, contentDescription = null) else Spacer(Modifier.size(24.dp))
+        }
+        Menu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.filter_all)) },
+                leadingIcon = { tick(chosen == null) },
                 onClick = {
                     open = false
                     onChoose(null)
@@ -135,6 +140,7 @@ private fun <T> FilterMenu(label: String, chosen: String?, options: List<Pair<St
             options.forEach { (name, value) ->
                 DropdownMenuItem(
                     text = { Text(name) },
+                    leadingIcon = { tick(chosen == name) },
                     onClick = {
                         open = false
                         onChoose(value)

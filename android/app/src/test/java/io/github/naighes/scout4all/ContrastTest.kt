@@ -3,6 +3,7 @@ package io.github.naighes.scout4all
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /** The contrast of the colors of the theme, as WCAG measures it: the app is
@@ -84,4 +85,22 @@ class ContrastTest {
             },
         ),
     )
+
+    /** A menu (share, filters) is not the screen it covers: its fill is
+     * another, its edge a line at 3:1 on the screen, its text readable. */
+    @Test
+    fun aMenuStandsOut() {
+        assertNotEquals(c.surface, MenuColors.container)
+        assertEquals(
+            emptyList<String>(),
+            below(3.0, listOf(Triple("edge of a menu", MenuColors.edge, c.surface))) +
+                below(
+                    4.5,
+                    listOf(
+                        Triple("text of a menu", c.onSurface, MenuColors.container),
+                        Triple("icon of a menu", c.onSurfaceVariant, MenuColors.container),
+                    ),
+                ),
+        )
+    }
 }
