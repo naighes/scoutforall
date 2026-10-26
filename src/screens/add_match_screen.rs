@@ -6,8 +6,9 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{
-            checkbox::CheckBox, date_picker::DatePicker, navigation_footer::NavigationFooter,
-            notify_banner::NotifyBanner, panel, team_header::TeamHeader, text_box::TextBox,
+            checkbox::CheckBox, date_picker::DatePicker, form_fields::field_areas,
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
+            team_header::TeamHeader, text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
@@ -21,7 +22,7 @@ use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
 };
 use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
@@ -30,6 +31,19 @@ use scout4all_core::{
     set_start::SetStartForm,
     shapes::{r#match::MatchEntry, team::TeamEntry},
 };
+
+/// The fields, in the order of Tab.
+const FIELDS: usize = 5;
+
+/// The notes of a match, `notes` to begin with.
+fn notes_box(notes: &str) -> TextBox {
+    TextBox::new(
+        current_labels().notes.to_owned(),
+        false,
+        Some(notes).filter(|n| !n.is_empty()),
+    )
+    .wrapping()
+}
 
 #[derive(Debug)]
 pub struct AddMatchScreen<
@@ -48,6 +62,7 @@ pub struct AddMatchScreen<
     date: DatePicker,           // field 1
     home: CheckBox,             // field 2
     max_substitutions: TextBox, // field 3
+    notes: TextBox,             // field 4
     field: usize,
     notify_message: NotifyBanner,
     header: TeamHeader,
@@ -74,23 +89,14 @@ impl<
             .constraints([Constraint::Length(5), Constraint::Min(1)])
             .split(body);
 
-        let area = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3), // opponent
-                Constraint::Length(3), // date
-                Constraint::Length(3), // home
-                Constraint::Length(3), // max substitutions
-                Constraint::Min(1),
-            ])
-            .split(container[1]);
+        let area = field_areas(container[1].inner(Margin::new(1, 1)), FIELDS);
         self.notify_message.render(f, footer_right);
         self.render_header(f, container[1]);
         self.opponent.render(f, area[0]);
         self.date.render(f, area[1]);
         self.home.render(f, area[2]);
         self.max_substitutions.render(f, area[3]);
+        self.notes.render(f, area[4]);
         self.header.render(f, container[0], Some(&self.team));
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
@@ -173,6 +179,7 @@ impl<
             date,
             home,
             max_substitutions,
+            notes_box(""),
             None,
         )
     }
@@ -200,6 +207,7 @@ impl<
             |current: &str, c: char| current.len() < 2 && c.is_ascii_digit(),
         );
         let team = m.team.clone();
+        let notes = notes_box(&m.notes);
         Self::build(
             settings_reader,
             settings_writer,
@@ -211,6 +219,7 @@ impl<
             date,
             home,
             max_substitutions,
+            notes,
             Some(m),
         )
     }
@@ -226,6 +235,7 @@ impl<
         date: DatePicker,
         home: CheckBox,
         max_substitutions: TextBox,
+        notes: TextBox,
         editing: Option<MatchEntry>,
     ) -> Self {
         let screen_actions = &[
@@ -248,6 +258,7 @@ impl<
             date,
             home,
             max_substitutions,
+            notes,
             field: 0,
             notify_message: NotifyBanner::new(),
             header: TeamHeader::default(),
@@ -271,12 +282,7 @@ impl<
 
     async fn handle_confirm(&mut self) -> AppAction {
         let form = MatchForm {
-            // what this screen doesn't edit stays as it is
-            notes: self
-                .editing
-                .as_ref()
-                .map(|m| m.notes.clone())
-                .unwrap_or_default(),
+            notes: self.notes.get_selected_value().unwrap_or_default(),
             opponent: self.opponent.get_selected_value().unwrap_or_default(),
             date: self.date.get_selected_value().ok(),
             home: self.home.get_selected_value(),
@@ -352,6 +358,7 @@ impl<
         self.opponent.handle_backspace();
         self.date.handle_backspace();
         self.max_substitutions.handle_backspace();
+        self.notes.handle_backspace();
         AppAction::None
     }
 
@@ -360,19 +367,20 @@ impl<
         self.home.handle_char(c);
         self.date.handle_char(c);
         self.max_substitutions.handle_char(c);
+        self.notes.handle_char(c);
         AppAction::None
     }
 
     fn handle_next(&mut self) -> AppAction {
         self.date.handle_tab();
-        self.field = (self.field + 1) % 4;
+        self.field = (self.field + 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
 
     fn handle_previous(&mut self) -> AppAction {
         self.date.handle_tab();
-        self.field = (self.field + 3) % 4;
+        self.field = (self.field + FIELDS - 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
@@ -382,5 +390,6 @@ impl<
         self.date.writing_mode = self.field == 1;
         self.home.writing_mode = self.field == 2;
         self.max_substitutions.writing_mode = self.field == 3;
+        self.notes.writing_mode = self.field == 4;
     }
 }

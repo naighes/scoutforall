@@ -252,6 +252,16 @@ impl Ui {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 
+    /// The team files as saved on disk.
+    pub fn saved_teams(&self) -> Vec<serde_json::Value> {
+        std::fs::read_dir(&self.base)
+            .unwrap()
+            .map(|e| e.unwrap().path().join("team.json"))
+            .filter(|p| p.exists())
+            .map(|p| serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap())
+            .collect()
+    }
+
     /// The match descriptors as saved on disk.
     pub fn saved_matches(&self) -> Vec<serde_json::Value> {
         self.match_descriptor_paths()
