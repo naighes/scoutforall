@@ -9,6 +9,9 @@ import androidx.compose.ui.test.performScrollTo
 import io.github.naighes.scout4all.core.PlayerForm
 import io.github.naighes.scout4all.core.RoleEnum
 import org.junit.Assert.assertEquals
+import java.time.format.FormatStyle
+import java.time.format.DateTimeFormatter
+import java.time.LocalDate
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -87,5 +90,51 @@ class PlayerFormTest {
         rule.onNodeWithText(string(R.string.remove)).performClick()
         rule.waitFor { done == 1 }
         assertEquals(0, players().size)
+    }
+
+    @Test
+    fun aNewPlayerWithHeightAndNotes() {
+        show()
+        rule.type(string(R.string.name), "Paola Egonu")
+        rule.type(string(R.string.number), "18")
+        rule.onNodeWithText(role(RoleEnum.OPPOSITE_HITTER)).performScrollTo().performClick()
+        rule.type(string(R.string.height), "193")
+        rule.type(string(R.string.notes), "left-handed")
+        rule.save()
+        rule.waitFor { done == 1 }
+        val player = players().single()
+        assertEquals(Pair("193", "left-handed"), Pair(player.form.heightCm, player.form.notes))
+    }
+
+    @Test
+    fun aHeightOutOfRangeIsRejected() {
+        show()
+        rule.type(string(R.string.name), "Paola Egonu")
+        rule.type(string(R.string.number), "18")
+        rule.onNodeWithText(role(RoleEnum.OPPOSITE_HITTER)).performScrollTo().performClick()
+        rule.type(string(R.string.height), "1.93")
+        rule.save()
+        rule.assertInvalid(string(R.string.height))
+        rule.assertValid(string(R.string.number))
+        assertEquals(0, players().size)
+    }
+
+    @Test
+    fun theBirthDateIsShownAndCanBeRemoved() {
+        val id = core {
+            it.savePlayer(
+                team,
+                null,
+                PlayerForm("Paola Egonu", RoleEnum.OPPOSITE_HITTER, "18", birthDate = "1998-12-18"),
+            )
+        }
+        show(id)
+        val shown = LocalDate.of(1998, 12, 18).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG))
+        // read only: a text, not a field to type in
+        rule.onNodeWithText(shown).performScrollTo()
+        rule.onNodeWithContentDescription(string(R.string.remove_birth_date)).performScrollTo().performClick()
+        rule.save()
+        rule.waitFor { done == 1 }
+        assertEquals("", players().single().form.birthDate)
     }
 }

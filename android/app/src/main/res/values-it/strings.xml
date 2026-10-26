@@ -34,6 +34,11 @@
     <string name="home_match">In casa</string>
     <string name="away_match">In trasferta</string>
     <string name="max_substitutions">Sostituzioni per set</string>
+    <string name="birth_date">Data di nascita</string>
+    <string name="height">Altezza</string>
+    <string name="notes">Note</string>
+    <string name="remove_birth_date">Togli la data di nascita</string>
+    <string name="centimetres">cm</string>
     <string name="set_n">Set %d</string>
     <string name="start_set_n">Inizia set %d</string>
     <string name="resume_set_n">Riprendi set %d</string>

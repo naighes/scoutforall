@@ -80,6 +80,19 @@ class ScreensLayoutTest(private val screen: Size) {
     }
 
     @Test
+    fun theMatchWithLongNotes() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        serve(team, match, EvalEnum.PERFECT)
+        val form = core { it.matchForm(team, match) }
+        core { it.saveMatch(team, match, form.copy(notes = "Palestra fredda, rete bassa. ".repeat(20))) }
+        // the notes whole, after the sets: the statistics and the set still in sight
+        assertFits("match-notes", string(R.string.match_stats), string(R.string.resume_set_n, 1)) {
+            MatchScreen(team, match, onBack = {}, onEdit = {}, onStartSet = {}, onResumeSet = {}, onSet = {}, onStats = {})
+        }
+    }
+
+    @Test
     fun theStartOfTheSet() {
         val team = saveNationalTeam()
         val match = core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6")) }

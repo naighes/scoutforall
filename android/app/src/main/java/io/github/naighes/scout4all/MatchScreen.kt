@@ -132,10 +132,17 @@ private fun MatchContent(
     }
     val sets = Modifier.weight(1f).fillMaxWidth()
     when {
-        m.sets.isEmpty() -> Centered(sets) { Text(stringResource(R.string.no_sets)) }
+        m.sets.isEmpty() && m.notes.isEmpty() -> Centered(sets) { Text(stringResource(R.string.no_sets)) }
         else -> LazyColumn(sets) {
+            if (m.sets.isEmpty()) {
+                item { Text(stringResource(R.string.no_sets), Modifier.padding(16.dp)) }
+            }
             items(m.sets, key = { it.number.toInt() }) {
                 SetRow(it, it.number == inProgress) { onSet(it.number.toInt()) }
+            }
+            // after the sets, whole: the list scrolls when they are long
+            if (m.notes.isNotEmpty()) {
+                item(key = "notes") { MatchNotes(m.notes) }
             }
         }
     }
@@ -150,6 +157,16 @@ private fun MatchContent(
         }
         NextSetKind.Over -> {}
     }
+}
+
+@Composable
+private fun MatchNotes(notes: String) = Column(Modifier.fillMaxWidth().padding(16.dp)) {
+    Text(
+        stringResource(R.string.notes),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(notes, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodyMedium)
 }
 
 @Composable

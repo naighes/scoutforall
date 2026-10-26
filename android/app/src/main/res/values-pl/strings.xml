@@ -34,6 +34,11 @@
     <string name="home_match">U siebie</string>
     <string name="away_match">Na wyjeździe</string>
     <string name="max_substitutions">Zmiany w secie</string>
+    <string name="birth_date">Data urodzenia</string>
+    <string name="height">Wzrost</string>
+    <string name="notes">Notatki</string>
+    <string name="remove_birth_date">Usuń datę urodzenia</string>
+    <string name="centimetres">cm</string>
     <string name="ok">OK</string>
     <string name="set_n">Set %d</string>
     <string name="start_set_n">Rozpocznij set %d</string>

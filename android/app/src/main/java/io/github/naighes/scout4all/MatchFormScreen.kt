@@ -222,6 +222,7 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 supportingText = error(MatchField.MAX_SUBSTITUTIONS)?.let { { Text(it) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
+            NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
         }
         state.error?.let {
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)

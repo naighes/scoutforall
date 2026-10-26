@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -12,10 +14,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -23,13 +29,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -45,6 +57,11 @@ import io.github.naighes.scout4all.core.PlayerField
 import io.github.naighes.scout4all.core.PlayerForm
 import io.github.naighes.scout4all.core.RoleChoice
 import io.github.naighes.scout4all.core.Scout4All
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -110,7 +127,7 @@ class PlayerFormViewModel(
     }
 
     /** A change of the form: the error of the field changed goes away. */
-    fun change(field: PlayerField, edit: (PlayerForm) -> PlayerForm) = update { s ->
+    fun change(field: PlayerField?, edit: (PlayerForm) -> PlayerForm) = update { s ->
         s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
     }
 
@@ -220,6 +237,22 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                     )
                 }
             }
+            // optional, after what scouting needs
+            BirthDateField(form.birthDate, error(PlayerField.BIRTH_DATE)) { date ->
+                model.change(PlayerField.BIRTH_DATE) { it.copy(birthDate = date) }
+            }
+            OutlinedTextField(
+                value = form.heightCm,
+                onValueChange = { height -> model.change(PlayerField.HEIGHT) { it.copy(heightCm = height) } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.height)) },
+                suffix = { Text(stringResource(R.string.centimetres)) },
+                singleLine = true,
+                isError = error(PlayerField.HEIGHT) != null,
+                supportingText = error(PlayerField.HEIGHT)?.let { { Text(it) } },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+            )
+            NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
         }
         state.error?.let {
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
@@ -246,3 +279,78 @@ private fun RemovalDialog(name: String, model: PlayerFormViewModel) = AlertDialo
         TextButton(onClick = { model.confirmRemoval(false) }) { Text(stringResource(R.string.cancel)) }
     },
 )
+
+/** The birth date, in the language of the phone, or nothing; a tap opens
+ * the calendar, at most today. The core has it as YYYY-MM-DD. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BirthDateField(date: String, error: String?, onDate: (String) -> Unit) {
+    val parsed = remember(date) { runCatching { LocalDate.parse(date) }.getOrNull() }
+    var picking by rememberSaveable { mutableStateOf(false) }
+    // a read-only field doesn't take clicks: its presses do
+    val presses = remember { MutableInteractionSource() }
+    LaunchedEffect(presses) {
+        presses.interactions.collect { if (it is PressInteraction.Release) picking = true }
+    }
+    OutlinedTextField(
+        value = parsed?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)) ?: date,
+        onValueChange = {},
+        modifier = Modifier.fillMaxWidth(),
+        readOnly = true,
+        label = { Text(stringResource(R.string.birth_date)) },
+        trailingIcon = {
+            when (date) {
+                "" -> Icon(Icons.Filled.DateRange, contentDescription = null)
+                else -> IconButton(onClick = { onDate("") }) {
+                    Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.remove_birth_date))
+                }
+            }
+        },
+        isError = error != null,
+        supportingText = error?.let { { Text(it) } },
+        interactionSource = presses,
+    )
+    if (picking) {
+        // the picker counts days in UTC; a player is rarely a child
+        val today = LocalDate.now()
+        val millis = { day: LocalDate -> day.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
+        val picker = rememberDatePickerState(
+            initialSelectedDateMillis = parsed?.let(millis),
+            initialDisplayedMonthMillis = millis(parsed ?: today.minusYears(BIRTH_YEARS_SHOWN)),
+            yearRange = FIRST_BIRTH_YEAR..today.year,
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= millis(today)
+            },
+        )
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    picker.selectedDateMillis?.let { selected ->
+                        onDate(Instant.ofEpochMilli(selected).atZone(ZoneOffset.UTC).toLocalDate().toString())
+                    }
+                    picking = false
+                }) { Text(stringResource(R.string.ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        ) { DatePicker(picker) }
+    }
+}
+
+/** The years back the calendar opens at without a birth date. */
+private const val BIRTH_YEARS_SHOWN = 18L
+private const val FIRST_BIRTH_YEAR = 1900
+
+/** Notes, on more lines: of a player or of a match. */
+@Composable
+fun NotesField(notes: String, onNotes: (String) -> Unit) = OutlinedTextField(
+    value = notes,
+    onValueChange = onNotes,
+    modifier = Modifier.fillMaxWidth(),
+    label = { Text(stringResource(R.string.notes)) },
+    minLines = 3,
+    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+)
+

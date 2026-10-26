@@ -62,4 +62,14 @@ class MatchFormTest {
         rule.waitFor { saved.size == 1 }
         assertEquals("12", core { it.matchForm(team, match) }.maxSubstitutions)
     }
+
+    @Test
+    fun theNotesOfAMatchAreSaved() {
+        show()
+        rule.type(string(R.string.opponent), "Cortona")
+        rule.type(string(R.string.notes), "windy gym")
+        rule.save()
+        rule.waitFor { saved.size == 1 }
+        assertEquals("windy gym", core { it.matchForm(team, saved.single()) }.notes)
+    }
 }

@@ -34,6 +34,11 @@
     <string name="home_match">ホーム</string>
     <string name="away_match">アウェイ</string>
     <string name="max_substitutions">セットごとの交代数</string>
+    <string name="birth_date">生年月日</string>
+    <string name="height">身長</string>
+    <string name="notes">メモ</string>
+    <string name="remove_birth_date">生年月日を削除</string>
+    <string name="centimetres">cm</string>
     <string name="ok">OK</string>
     <string name="set_n">第%dセット</string>
     <string name="start_set_n">第%dセットを開始</string>

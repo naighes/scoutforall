@@ -517,6 +517,8 @@ pub struct MatchDetails {
     /// the sets played or in progress, by number
     pub sets: Vec<SetScore>,
     pub next: NextSetKind,
+    /// what the scout noted about the match, empty if nothing
+    pub notes: String,
 }
 
 /// A player to choose when starting a set.
@@ -2120,6 +2122,7 @@ impl Scout4All {
             finished: status.match_finished,
             sets,
             next,
+            notes: m.notes,
         })
     }
 
