@@ -163,6 +163,9 @@ fun StatsSheet(
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(Unit) { onScope(StatsScope.Set(currentSet.toUByte())) }
+    // the step of the tutorial that opens it is over
+    val tutorial = LocalTutorial.current
+    LaunchedEffect(Unit) { tutorial?.reached(STATS_OPENED) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             when (stats) {

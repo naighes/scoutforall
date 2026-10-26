@@ -414,7 +414,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                 // row opens them too), the changes of the lineup on the
                 // right edge
                 Row(
-                    Modifier.fillMaxWidth().swipeUp { statsOpen = true }
+                    Modifier.fillMaxWidth().tutorial("stats").swipeUp { statsOpen = true }
                         .padding(start = 8.dp, top = 4.dp, bottom = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -513,7 +513,7 @@ private fun Score(state: ScoutingState) {
     // it again at each point, when it's done saying what it was saying
     val spoken = "${left.name} ${left.points}, ${right.name} ${right.points}, " +
         stringResource(R.string.serves, if (weServe) us.name else them.name)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().tutorial("score").padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.semantics { liveRegion = LiveRegionMode.Polite }.readAs(spoken), verticalAlignment = Alignment.CenterVertically) {
             TeamName(left, TextAlign.Start, Modifier.weight(1f))
             Points(left)
@@ -644,7 +644,7 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
             }
             else -> {
                 Title(player)
-                Buttons(view.playerEvents.map { it.name to { model.event(it) } })
+                Buttons(view.playerEvents.map { Triple("event:${it.value}", it.name) { model.event(it) } })
             }
         }
         ScoutingStep.EVAL -> {
@@ -667,7 +667,7 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
             Column {
                 view.replacements.forEach { p ->
                     ListItem(
-                        modifier = Modifier.clickable { model.replacement(p) },
+                        modifier = Modifier.tutorial("replacement:${p.number}").clickable { model.replacement(p) },
                         leadingContent = {
                             Text(
                                 p.number.toString(),
@@ -738,6 +738,7 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                         val looks = lineupChanges[event.value]
                         Column(
                             Modifier
+                                .tutorial("event:${event.value}")
                                 .clickable {
                                     open = false
                                     model.event(event)
@@ -757,7 +758,7 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                 }
             }
             Box(
-                Modifier.fillMaxHeight().clickable(enabled = events.isNotEmpty(), role = Role.Button) { open = !open }
+                Modifier.fillMaxHeight().tutorial("lineup").clickable(enabled = events.isNotEmpty(), role = Role.Button) { open = !open }
                     .padding(start = 14.dp, end = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -787,7 +788,7 @@ private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel) = R
         val looks = rallyEvents[event.value]
         FilledTonalButton(
             onClick = { model.event(event) },
-            modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 56.dp)
+            modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 56.dp).tutorial("event:${event.value}")
                 .semantics { contentDescription = event.name },
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
             shape = MaterialTheme.shapes.medium,
@@ -815,7 +816,7 @@ private fun Evals(evals: List<EvalChoice>, model: ScoutingViewModel) = Row(
     evals.forEach { eval ->
         Button(
             onClick = { model.eval(eval) },
-            modifier = Modifier.weight(1f).heightIn(min = 52.dp)
+            modifier = Modifier.weight(1f).heightIn(min = 52.dp).tutorial("eval:${eval.value}")
                 .semantics { contentDescription = eval.name },
             contentPadding = PaddingValues(0.dp),
         ) {
@@ -861,14 +862,14 @@ private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewMod
 /** The events of the player, two by two, three by three if more than
  * four: never to scroll for. */
 @Composable
-private fun Buttons(buttons: List<Pair<String, () -> Unit>>) = Column(
+private fun Buttons(buttons: List<Triple<String, String, () -> Unit>>) = Column(
     verticalArrangement = Arrangement.spacedBy(8.dp),
 ) {
     val columns = if (buttons.size > 4) 3 else 2
     buttons.chunked(columns).forEach { row ->
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            row.forEach { (name, onClick) ->
-                Button(onClick = onClick, modifier = Modifier.weight(1f).heightIn(min = 64.dp)) {
+            row.forEach { (target, name, onClick) ->
+                Button(onClick = onClick, modifier = Modifier.weight(1f).heightIn(min = 64.dp).tutorial(target)) {
                     Text(name, textAlign = TextAlign.Center)
                 }
             }

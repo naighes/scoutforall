@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -60,9 +61,12 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.GlobalPositionAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.ObserverModifierNode
+import androidx.compose.ui.node.observeReads
 import androidx.compose.ui.node.PointerInputModifierNode
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.relocation.bringIntoView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -72,7 +76,9 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /** A step of the tutorial: what its caption says, and what ends it. */
 sealed interface TutorialStep {
@@ -91,7 +97,16 @@ sealed interface TutorialStep {
 
     /** Only to read, with `target` shown if any: ends with "Next". */
     data class Read(override val target: String?, @StringRes override val caption: Int) : TutorialStep
+
+    /** The last word, over everything (the statistics too, in a window of
+     * their own): ends with "Finish". */
+    data class Done(@StringRes override val caption: Int) : TutorialStep {
+        override val target: String? get() = null
+    }
 }
+
+/** What the statistics reach once opened. */
+const val STATS_OPENED = "stats-opened"
 
 /** The tutorial of the app, one for the activity: once started, one step
  * after the other, until the last one or until skipped; then the `onEnd`
@@ -180,11 +195,20 @@ private class TutorialTargetNode(var target: String) :
     Modifier.Node(),
     GlobalPositionAwareModifierNode,
     PointerInputModifierNode,
-    CompositionLocalConsumerModifierNode {
+    CompositionLocalConsumerModifierNode,
+    ObserverModifierNode {
     var tutorial: Tutorial? = null
 
     override fun onAttach() {
         tutorial = currentValueOf(LocalTutorial)
+        scrollToWhenItsTurn()
+    }
+
+    override fun onObservedReadsChanged() = scrollToWhenItsTurn()
+
+    // its step started: in sight, if in something that scrolls
+    private fun scrollToWhenItsTurn() = observeReads {
+        if (tutorial?.step?.target == target) coroutineScope.launch { bringIntoView() }
     }
 
     override fun onDetach() {
@@ -214,6 +238,7 @@ private class TutorialTargetNode(var target: String) :
 @Composable
 fun TutorialOverlay(tutorial: Tutorial) {
     val step = tutorial.step ?: return
+    if (step is TutorialStep.Done) return Finish(step, tutorial)
     BackHandler {}
     var origin by remember { mutableStateOf(Offset.Zero) }
     val margin = with(LocalDensity.current) { HoleMargin.toPx() }
@@ -229,6 +254,15 @@ fun TutorialOverlay(tutorial: Tutorial) {
         Caption(step, tutorial, Modifier.align(if (below) Alignment.BottomCenter else Alignment.TopCenter))
     }
 }
+
+/** The last word, in a dialog: over the statistics too. */
+@Composable
+private fun Finish(step: TutorialStep.Done, tutorial: Tutorial) = AlertDialog(
+    onDismissRequest = {},
+    properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+    text = { Text(stringResource(step.caption), style = MaterialTheme.typography.bodyLarge) },
+    confirmButton = { Button(onClick = tutorial::next) { Text(stringResource(R.string.tutorial_finish)) } },
+)
 
 /** Around the target, so that the whole of it shows. */
 private val HoleMargin = 6.dp

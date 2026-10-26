@@ -1,12 +1,18 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.lifecycle.ViewModelProvider
+import io.github.naighes.scout4all.core.MatchListing
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -32,6 +38,27 @@ class TutorialFlowTest {
 
     private fun caption(id: Int) = rule.waitForText(string(id))
 
+    private val tutorial: Tutorial get() = ViewModelProvider(rule.activity)[TutorialViewModel::class.java].tutorial
+
+    /** Does what the step asks, where the tutorial shows it. */
+    private fun play(step: TutorialStep) {
+        caption(step.caption)
+        val target = step.target
+        if (target != null) rule.waitFor({ "$target not shown for ${string(step.caption)}" }) { target in tutorial.targets }
+        val at = target?.let { tutorial.targets[it] }
+        when (step) {
+            is TutorialStep.Touch -> rule.onRoot().performTouchInput { click(at?.center ?: center) }
+            is TutorialStep.SwipeUp -> rule.onRoot().performTouchInput {
+                val from = at?.center ?: center
+                swipe(from, from.copy(y = from.y - 400f), durationMillis = 300)
+            }
+            is TutorialStep.Read -> touch(string(R.string.tutorial_next))
+            is TutorialStep.Done -> touch(string(R.string.tutorial_finish))
+        }
+    }
+
+    /** Under the veil only the target can be touched; the steps go on one
+     * after the other to the scouting, as the captions say. */
     @Test
     fun fromTheTeamsToTheScoutingOfAMatchOfTheExampleTeam() {
         start()
@@ -62,8 +89,34 @@ class TutorialFlowTest {
         caption(R.string.tutorial_start_set)
         touch(string(R.string.start_set))
         rule.waitForText(string(R.string.touch_the_player))
+        caption(R.string.tutorial_score)
+    }
+
+    /** Every step can be done as its caption says, to the last one: the
+     * match scouted as the script tells, the lineup changed. */
+    @Test
+    fun theWholeTutorialGoesToTheEnd() {
+        start()
+        caption(R.string.tutorial_welcome)
+        var steps = 0
+        while (true) {
+            val step = tutorial.step ?: break
+            play(step)
+            rule.waitForIdle()
+            steps++
+            check(steps < 100) { "the tutorial doesn't end" }
+        }
+        assertEquals(tutorialSteps("").size, steps)
         rule.waitFor({ "the tutorial still to show" }) { !core { it.tutorialPending() } }
-        rule.onAllNodesWithText(string(R.string.tutorial_skip)).assertCountEquals(0)
+        val team = core { it.tutorialTeam() }
+        val match = core { it.matches(team) }.single() as MatchListing.Match
+        val state = core { it.scouting(team, match.id).state() }
+        assertEquals(2, state.scoreUs.toInt())
+        assertEquals(0, state.scoreThem.toInt())
+        val numbers = state.court.map { it.number.toInt() }
+        assertTrue("$numbers", numbers.containsAll(listOf(3, 24)))
+        assertTrue("$numbers", numbers.none { it == 18 || it == 8 })
+        assertEquals(3, state.court.single { it.setter }.number.toInt())
     }
 
     @Test

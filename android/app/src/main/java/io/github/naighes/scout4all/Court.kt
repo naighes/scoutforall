@@ -240,7 +240,7 @@ private val ServeZone = 72.dp
  * badges say. */
 @Composable
 private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: Float, modifier: Modifier, onClick: () -> Unit) =
-    Box(modifier.clickable(enabled = slot.enabled, role = Role.Button, onClick = onClick)) {
+    Box(modifier.tutorial("player:${slot.number}").clickable(enabled = slot.enabled, role = Role.Button, onClick = onClick)) {
         if (showPosition) {
             Text(
                 position.toString(),

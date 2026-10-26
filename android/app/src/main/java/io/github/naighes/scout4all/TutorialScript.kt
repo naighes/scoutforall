@@ -34,8 +34,15 @@ class TutorialViewModel(private val app: Scout4AllApplication) : ViewModel() {
     }
 }
 
-/** From the teams to the scouting of a match of the example `team`. */
-fun tutorialSteps(team: String): List<TutorialStep> = listOf(
+/** From the teams to the scouting of a match of the example `team`, its
+ * statistics last. */
+fun tutorialSteps(team: String): List<TutorialStep> = toTheSet(team) + rallies + lineupChanges + listOf(
+    TutorialStep.SwipeUp("stats", until = STATS_OPENED, caption = R.string.tutorial_stats),
+    TutorialStep.Done(R.string.tutorial_done),
+)
+
+/** The example team, a new match, its first set. */
+private fun toTheSet(team: String) = listOf(
     TutorialStep.Read(null, R.string.tutorial_welcome),
     TutorialStep.Touch("team:$team", R.string.tutorial_team),
     TutorialStep.Touch("matches-tab", R.string.tutorial_matches),
@@ -44,4 +51,54 @@ fun tutorialSteps(team: String): List<TutorialStep> = listOf(
     TutorialStep.Touch("save-match", R.string.tutorial_save_match),
     TutorialStep.Read("lineup", R.string.tutorial_lineup),
     TutorialStep.Touch("start-set", R.string.tutorial_start_set),
+)
+
+private fun touch(target: String, caption: Int) = TutorialStep.Touch(target, caption)
+
+// the players by number: 16 Nervini, 11 Danesi, 19 Fahr, 18 Egonu, 8 Orro,
+// 3 Cambi, 24 Antropova (`core::example`)
+
+/** Two rallies: a side-out, then a break (2-0). */
+private val rallies = listOf(
+    TutorialStep.Read("score", R.string.tutorial_score),
+    // the first: Nervini receives and scores
+    touch("player:16", R.string.tutorial_reception),
+    touch("eval:PERFECT", R.string.tutorial_reception_eval),
+    touch("player:16", R.string.tutorial_attack),
+    touch("event:A", R.string.tutorial_attack_event),
+    touch("eval:PERFECT", R.string.tutorial_attack_point),
+    TutorialStep.Read("score", R.string.tutorial_side_out),
+    // the second: Fahr serves, a long rally, their error
+    touch("eval:NEGATIVE", R.string.tutorial_serve),
+    touch("player:11", R.string.tutorial_block),
+    touch("event:B", R.string.tutorial_block_event),
+    touch("eval:NEGATIVE", R.string.tutorial_block_eval),
+    touch("player:19", R.string.tutorial_dig),
+    touch("event:D", R.string.tutorial_dig_event),
+    touch("eval:POSITIVE", R.string.tutorial_dig_eval),
+    touch("player:18", R.string.tutorial_opposite),
+    touch("event:A", R.string.tutorial_attack_event),
+    touch("eval:NEGATIVE", R.string.tutorial_attack_dug),
+    touch("event:OF", R.string.tutorial_their_freeball),
+    touch("player:18", R.string.tutorial_opposite_again),
+    touch("event:A", R.string.tutorial_attack_event),
+    touch("eval:NEGATIVE", R.string.tutorial_attack_dug),
+    touch("event:OE", R.string.tutorial_their_error),
+)
+
+/** A double substitution, the setter that came in, the other libero. */
+private val lineupChanges = listOf(
+    touch("lineup", R.string.tutorial_lineup_menu),
+    touch("event:R", R.string.tutorial_substitution),
+    touch("player:18", R.string.tutorial_out_egonu),
+    touch("replacement:3", R.string.tutorial_in_cambi),
+    touch("lineup", R.string.tutorial_lineup_again),
+    touch("event:R", R.string.tutorial_substitution),
+    touch("player:8", R.string.tutorial_out_orro),
+    touch("replacement:24", R.string.tutorial_in_antropova),
+    touch("lineup", R.string.tutorial_setter_menu),
+    touch("event:CS", R.string.tutorial_setter),
+    touch("player:3", R.string.tutorial_setter_cambi),
+    touch("lineup", R.string.tutorial_libero_menu),
+    touch("event:CL", R.string.tutorial_libero),
 )
