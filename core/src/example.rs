@@ -53,6 +53,16 @@ pub fn example_team(labels: &Labels, year: u16) -> TeamInput {
     }
 }
 
+/// Whether the team still has every player of the example team, as the
+/// tutorial expects.
+pub fn is_example_team(team: &TeamEntry) -> bool {
+    PLAYERS.iter().all(|(number, name, role)| {
+        team.active_players()
+            .iter()
+            .any(|p| p.number == *number && p.name == *name && p.role == Some(*role))
+    })
+}
+
 /// Whether the data are those of a new installation: no settings and no
 /// team. An update has the settings (the terms of use accepted) or a team.
 pub async fn is_new_installation(store: &dyn Store) -> Result<bool, AppError> {

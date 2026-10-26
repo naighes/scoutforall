@@ -18,6 +18,7 @@ use scout4all_core::{
     detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
     errors::{AppError, IOError},
     event_edit::{EditField, EventEdit},
+    example,
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error},
     match_form::{MatchForm, MatchFormError},
@@ -2553,6 +2554,66 @@ impl Scout4All {
         self.update_consent(Consent::with_terms_seen)
     }
 
+    /// On a new installation, the example team, and the tutorial to show
+    /// once the terms are accepted: whether it was added. Nothing on an
+    /// update. To call at startup, before the teams are listed.
+    pub fn add_example_team_if_new(&self) -> Result<bool, MobileError> {
+        let added = self.runtime.block_on(example::add_example_team_if_new(
+            &*self.store,
+            &self.team_writer,
+            self.language.labels(),
+        ))?;
+        match added {
+            Some(team) => self
+                .update_tutorial(|_| Tutorial {
+                    tutorial_pending: true,
+                    example_team: Some(team.id.to_string()),
+                })
+                .map(|()| true),
+            None => Ok(false),
+        }
+    }
+
+    /// Whether the tutorial is still to show by itself.
+    pub fn tutorial_pending(&self) -> bool {
+        self.read_config()
+            .is_ok_and(|config| config.tutorial.tutorial_pending)
+    }
+
+    /// The tutorial seen, or skipped: not shown by itself again.
+    pub fn tutorial_seen(&self) -> Result<(), MobileError> {
+        self.update_tutorial(|tutorial| Tutorial {
+            tutorial_pending: false,
+            ..tutorial
+        })
+    }
+
+    /// The id of the example team the tutorial scouts with: a new one when
+    /// it was removed or lost some of its players.
+    pub fn tutorial_team(&self) -> Result<String, MobileError> {
+        let kept = self
+            .read_config()
+            .ok()
+            .and_then(|config| config.tutorial.example_team)
+            .and_then(|id| self.read_team(&id).ok())
+            .filter(example::is_example_team);
+        match kept {
+            Some(team) => Ok(team.id.to_string()),
+            None => {
+                let team = self.runtime.block_on(example::add_example_team(
+                    &self.team_writer,
+                    self.language.labels(),
+                ))?;
+                let id = team.id.to_string();
+                self.update_tutorial(|tutorial| Tutorial {
+                    example_team: Some(id.clone()),
+                    ..tutorial
+                })?;
+                Ok(id)
+            }
+        }
+    }
+
     /// Whether the user allows sending the statistics of the matches.
     pub fn analytics_enabled(&self) -> bool {
         self.read_config()
@@ -2613,7 +2674,21 @@ struct AppConfig {
     #[serde(flatten)]
     consent: Consent,
     #[serde(flatten)]
+    tutorial: Tutorial,
+    #[serde(flatten)]
     other: Map<String, Value>,
+}
+
+/// The tutorial of the scouting, in `config.json`: missing, it was seen, as
+/// on an update.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct Tutorial {
+    /// still to show by itself: only a new installation has it
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tutorial_pending: bool,
+    /// the example team it scouts with
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    example_team: Option<String>,
 }
 
 fn failed(e: impl std::fmt::Display) -> MobileError {
@@ -2658,18 +2733,39 @@ impl Scout4All {
     /// (those of the TUI too); a new one has the language too, which the
     /// TUI needs.
     fn update_consent(&self, change: impl FnOnce(Consent) -> Consent) -> Result<(), MobileError> {
-        let config = self.read_config().or_else(|e| self.set_aside_config(&e))?;
+        self.update_config(|config| AppConfig {
+            consent: change(config.consent),
+            ..config
+        })
+    }
+
+    /// Changes the tutorial in `config.json`, as `update_consent`.
+    fn update_tutorial(
+        &self,
+        change: impl FnOnce(Tutorial) -> Tutorial,
+    ) -> Result<(), MobileError> {
+        self.update_config(|config| AppConfig {
+            tutorial: change(config.tutorial),
+            ..config
+        })
+    }
+
+    fn update_config(
+        &self,
+        change: impl FnOnce(AppConfig) -> AppConfig,
+    ) -> Result<(), MobileError> {
+        let config = change(self.read_config().or_else(|e| self.set_aside_config(&e))?);
         let language = match config.other.contains_key(LANGUAGE) {
             true => None,
             false => Some(to_value(self.language.get()).map_err(failed)?),
         };
         let config = AppConfig {
-            consent: change(config.consent),
             other: config
                 .other
                 .into_iter()
                 .chain(language.map(|l| (LANGUAGE.to_string(), l)))
                 .collect(),
+            ..config
         };
         let bytes = to_vec_pretty(&config).map_err(failed)?;
         self.runtime.block_on(self.store.write(CONFIG, &bytes))?;
@@ -2883,6 +2979,87 @@ mod tests {
         );
         // not a team
         assert_eq!(app.teams().unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_new_installation_has_the_example_team_and_the_tutorial_to_show() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        assert!(app.add_example_team_if_new().unwrap());
+        let teams = app.teams().unwrap();
+        let id = match teams.as_slice() {
+            [
+                TeamListing::Team {
+                    id,
+                    name,
+                    players: 14,
+                    ..
+                },
+            ] if name == "Italia" => id.clone(),
+            _ => unreachable!("the example team only: {teams:?}"),
+        };
+        // the terms still to accept, which keeps the tutorial
+        assert!(!app.terms_seen());
+        assert!(app.tutorial_pending());
+        app.accept_terms().unwrap();
+        assert!(app.tutorial_pending());
+        assert_eq!(app.tutorial_team().unwrap(), id);
+        // nothing more at the next start
+        assert!(!app.add_example_team_if_new().unwrap());
+        assert_eq!(app.teams().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_tutorial_seen_is_not_shown_again_and_keeps_its_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        app.add_example_team_if_new().unwrap();
+        app.accept_terms().unwrap();
+        let id = app.tutorial_team().unwrap();
+        app.tutorial_seen().unwrap();
+        assert!(!app.tutorial_pending());
+        let config = config(&dir);
+        assert_eq!(config.get("tutorial_pending"), None);
+        assert_eq!(config["example_team"], serde_json::json!(id));
+        assert_eq!(config["terms_version"], serde_json::json!(TERMS_VERSION));
+        // seen again from the settings, with the same team
+        assert_eq!(app.tutorial_team().unwrap(), id);
+    }
+
+    /// An update has the settings, or a team: neither the team nor the
+    /// tutorial by itself.
+    #[test]
+    fn an_update_has_no_example_team_nor_the_tutorial() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = serde_json::json!({ "analytics_enabled": true, "terms_version": 1 });
+        std::fs::write(dir.path().join(CONFIG), settings.to_string()).unwrap();
+        let app = app(&dir, "it");
+        assert!(!app.add_example_team_if_new().unwrap());
+        assert_eq!(app.teams().unwrap(), vec![]);
+        assert!(!app.tutorial_pending());
+        app.accept_terms().unwrap();
+        assert!(!app.tutorial_pending());
+        assert_eq!(config(&dir).get("tutorial_pending"), None);
+    }
+
+    /// Seen again from the settings, the tutorial needs its players: a new
+    /// example team when one was removed.
+    #[test]
+    fn the_tutorial_gets_a_new_team_when_its_players_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        assert_eq!(app.teams().unwrap(), vec![]);
+        // an update: none yet
+        let first = app.tutorial_team().unwrap();
+        assert_eq!(app.tutorial_team().unwrap(), first);
+        let team = app.team(first.clone()).unwrap();
+        let orro = team.players.iter().find(|p| p.number == 8).unwrap();
+        app.remove_player(first.clone(), orro.id.clone()).unwrap();
+        let second = app.tutorial_team().unwrap();
+        assert_ne!(second, first);
+        assert_eq!(app.team(second.clone()).unwrap().players.len(), 14);
+        assert_eq!(app.teams().unwrap().len(), 2);
+        assert_eq!(config(&dir)["example_team"], serde_json::json!(second));
     }
 
     #[test]

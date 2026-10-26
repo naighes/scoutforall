@@ -1,6 +1,7 @@
 package io.github.naighes.scout4all
 
 import androidx.work.testing.WorkManagerTestInitHelper
+import io.github.naighes.scout4all.core.Scout4All
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 
@@ -9,11 +10,14 @@ import kotlinx.coroutines.Dispatchers
  * main thread: in the tests of Compose a screen goes on where the core
  * answered, not on the main thread as on a phone, and a state written from
  * there may never show. Starting again only counts: the JVM of the tests
- * stays. */
+ * stays. Without the example team: the tests start from the data they
+ * write. */
 class TestApplication : Scout4AllApplication() {
     override val coreDispatcher: CoroutineDispatcher get() = Dispatchers.Main.immediate
 
     var startedAgain = 0
+
+    override fun addExampleTeam(core: Scout4All) {}
 
     override fun startAgain() {
         startedAgain++

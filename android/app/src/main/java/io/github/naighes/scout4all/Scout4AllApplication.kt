@@ -23,7 +23,16 @@ open class Scout4AllApplication : Application() {
     // the same layout as ~/.scout4all, in the sandbox of the app
     private val lazyCore = lazy {
         val dataDir = File(filesDir, "scout4all").apply { mkdirs() }
-        Scout4All(dataDir.path, language)
+        Scout4All(dataDir.path, language).also(::addExampleTeam)
+    }
+
+    /** A new installation starts with the example team, before the teams
+     * are listed; without it the app works all the same. */
+    protected open fun addExampleTeam(core: Scout4All) {
+        try {
+            core.addExampleTeamIfNew()
+        } catch (_: MobileException) {
+        }
     }
     private val core: Scout4All by lazyCore
 
