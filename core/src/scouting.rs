@@ -580,12 +580,24 @@ impl ScoutingSession {
         }
     }
 
+    /// Whether the scout made a choice that `undo` takes back, instead of
+    /// removing the last saved event: the serve chosen by itself isn't one.
+    pub fn is_halfway(&self) -> bool {
+        use ChoiceOrder::*;
+        use ScoutingStep::*;
+        !matches!(
+            (self.order, self.step, self.event, self.player),
+            (_, Event, _, None) | (PlayerFirst, Eval, Some(EventTypeEnum::S), _)
+        )
+    }
+
     /// Goes back a choice: before the first one, removes the last saved
     /// event and resumes it from its last choice.
     pub async fn undo(&mut self) -> Result<(), ScoutingError> {
         use ChoiceOrder::*;
         use ScoutingStep::*;
         match (self.order, self.step, self.event, self.player) {
+            // as `is_halfway` says
             (_, Event, _, None) => self.undo_last_event().await,
             // the serve chosen by itself: nothing to go back to
             (PlayerFirst, Eval, Some(EventTypeEnum::S), _) => self.undo_last_event().await,

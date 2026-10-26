@@ -937,6 +937,9 @@ pub struct ScoutingState {
     pub court: Vec<CourtPlayer>,
     pub substitutions_left: u8,
     pub step: ScoutingStep,
+    /// whether the scout made a choice that `undo` takes back; otherwise it
+    /// removes the last saved event (see `ScoutingSession::is_halfway`)
+    pub halfway: bool,
     /// the event being chosen, and its player once chosen
     pub event: Option<EventChoice>,
     pub player: Option<ScoutingPlayer>,
@@ -1324,6 +1327,7 @@ impl Scouting {
                 .get_max_substitutions()
                 .saturating_sub(u8::try_from(lineup.get_substitutions().len()).unwrap_or(u8::MAX)),
             step: session.step(),
+            halfway: session.is_halfway(),
             event: session.event().map(|e| self.event_choice(e)),
             player: session
                 .player()

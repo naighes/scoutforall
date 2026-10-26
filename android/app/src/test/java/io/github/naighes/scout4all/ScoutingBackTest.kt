@@ -8,6 +8,7 @@ import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.test.espresso.Espresso.pressBack
+import androidx.test.espresso.Espresso.pressBackUnconditionally
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -49,6 +50,21 @@ class ScoutingBackTest {
         // the serve stays
         rule.waitForText("serve +", substring = true)
         assertEquals(0, back)
+    }
+
+    /** Serving again, chosen by itself: nothing of the scout to take back.
+     * Up to v0.10 the back undid the saved events one after another. */
+    @Test
+    fun backLeavesTheSavedEventsAsTheyAre() {
+        show()
+        touch("#")
+        rule.waitForText("serve #", substring = true)
+        // no choice to take back: the system closes the screen
+        pressBackUnconditionally()
+        rule.waitForIdle()
+        val state = core { it.scouting(team, match) }.state()
+        assertEquals(1, state.scoreUs.toInt())
+        assertEquals(1, state.events.size)
     }
 
     @Test

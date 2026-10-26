@@ -398,6 +398,59 @@ mod tests {
         assert_eq!(s.session.undo().await, Ok(()));
     }
 
+    /// Undoes, checking that it removes a saved event only when the session
+    /// isn't halfway.
+    async fn undo_as_said(s: &mut Scouting) {
+        let halfway = s.session.is_halfway();
+        let before = s.session.set().events.len();
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            s.session.set().events.len() < before,
+            !halfway && before > 0,
+            "halfway {halfway}, {before} events before"
+        );
+    }
+
+    /// The serve chosen by itself isn't halfway: undoing it removes the last
+    /// event (up to v0.10 the back of the app undid the saved substitutions
+    /// one after another, see `is_halfway`); a choice of the scout is.
+    #[tokio::test]
+    async fn halfway_only_after_a_choice_of_the_scout() {
+        let mut s = player_first().await;
+        assert!(!s.session.is_halfway());
+        // a substitution: the player out, then the one in
+        s.session.choose_event(R).await.unwrap();
+        assert!(s.session.is_halfway());
+        let out = s.players[1];
+        s.session.choose_player(out).await.unwrap();
+        assert!(s.session.is_halfway());
+        let replacement = s.session.replacement_choices()[0].id;
+        assert_eq!(
+            s.session.choose_replacement(replacement).await,
+            Ok(Progress::Saved)
+        );
+        // serving again, by itself
+        assert_eq!(
+            (s.session.step(), s.session.event()),
+            (ScoutingStep::Eval, Some(S))
+        );
+        assert!(!s.session.is_halfway());
+        // the substitution undone, back to its last choice
+        undo_as_said(&mut s).await;
+        assert_eq!(s.session.step(), ScoutingStep::Replacement);
+        undo_as_said(&mut s).await;
+        undo_as_said(&mut s).await;
+        assert!(!s.session.is_halfway());
+        // a serve, then a player chosen first
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_player_first(s.players[2]).await.unwrap();
+        assert!(s.session.is_halfway());
+        for _ in 0..3 {
+            undo_as_said(&mut s).await;
+        }
+        assert!(saved_events(&s).await.is_empty());
+    }
+
     /// With the player first, the event is chosen only when the player can
     /// play more than one.
     #[tokio::test]

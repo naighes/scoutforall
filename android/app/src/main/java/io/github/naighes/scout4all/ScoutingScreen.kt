@@ -292,9 +292,10 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
         is ScoutingUi.SetOver -> s.view
         else -> null
     }
-    // the back of the system takes back the choice in the middle of an
-    // event first, as the undo; the arrow always goes
-    val halfway = (state as? ScoutingUi.Choosing)?.view?.state?.let { it.event != null || it.player != null } == true
+    // the back of the system takes back a choice the scout made in the
+    // middle of an event, as the undo, never a saved event (the serve is
+    // chosen by itself); the arrow always goes
+    val halfway = (state as? ScoutingUi.Choosing)?.view?.state?.halfway == true
     BackHandler(enabled = halfway) { model.undo() }
     val system = LocalDensity.current
     AtAGlance {
