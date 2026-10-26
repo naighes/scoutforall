@@ -249,9 +249,13 @@ fun TutorialOverlay(tutorial: Tutorial) {
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
         Veil(hole)
         Blockers(open)
-        if (open != null) Hand(open, swipe = step is TutorialStep.SwipeUp)
-        // the finger below the hole in sight too
-        val pointed = open?.let { it.copy(bottom = fingerAt(it, margin, finger).y + finger.toFloat()) } ?: hole
+        val swipe = step is TutorialStep.SwipeUp
+        if (open != null) Hand(open, swipe)
+        // the finger by the hole in sight too
+        val pointed = open?.let { o ->
+            val at = fingerAt(o, margin, finger, swipe)
+            Rect(minOf(o.left, at.x.toFloat()), o.top, maxOf(o.right, at.x + finger.toFloat()), maxOf(o.bottom, at.y + finger.toFloat()))
+        } ?: hole
         CaptionBy(pointed, tutorial.targets["score"]?.translate(-origin)) { Caption(step, tutorial) }
     }
 }
@@ -360,8 +364,8 @@ private fun Modifier.blockTouches() = pointerInput(Unit) {
     }
 }
 
-/** A ring that grows from the middle of the hole and a finger: tapping, or
- * going up for a swipe. */
+/** A finger and a ring that grows from its tip: tapping, or going up for a
+ * swipe. */
 @Composable
 private fun Hand(hole: Rect, swipe: Boolean) {
     val transition = rememberInfiniteTransition(label = "hand")
@@ -373,31 +377,41 @@ private fun Hand(hole: Rect, swipe: Boolean) {
     )
     val density = LocalDensity.current
     val rise = with(density) { if (swipe) 96.dp.toPx() * phase else 0f }
+    val finger = with(density) { Finger.roundToPx() }
+    val margin = with(density) { HoleMargin.toPx() }
     // white on a dark edge: seen on the amber of a button too
     Canvas(Modifier.fillMaxSize()) {
         val radius = 18.dp.toPx() + 22.dp.toPx() * phase
-        val center = hole.center - Offset(0f, rise)
+        val center = tipAt(hole, margin, finger, swipe) - Offset(0f, rise)
         val alpha = 1f - phase
         drawCircle(Color.Black.copy(alpha = alpha * 0.6f), radius, center, style = Stroke(6.dp.toPx()))
         drawCircle(Color.White.copy(alpha = alpha), radius, center, style = Stroke(3.dp.toPx()))
     }
-    val finger = with(density) { Finger.roundToPx() }
-    val margin = with(density) { HoleMargin.toPx() }
     Icon(
         painterResource(R.drawable.ic_touch),
         contentDescription = null,
         tint = Color.White,
-        modifier = Modifier.size(Finger).offset { fingerAt(hole, margin, finger) - IntOffset(0, rise.roundToInt()) },
+        modifier = Modifier.size(Finger).offset { fingerAt(hole, margin, finger, swipe) - IntOffset(0, rise.roundToInt()) },
     )
 }
 
 internal val Finger = 40.dp
 
-/** Where the finger goes, `finger` big: its tip on the bottom edge of the
- * target in `hole` (`margin` around it), in the middle, so that the words
- * of the target show. */
-internal fun fingerAt(hole: Rect, margin: Float, finger: Int) =
-    IntOffset(hole.center.x.roundToInt() - finger * 11 / 24, (hole.bottom - margin).roundToInt() - finger / 8)
+/** Where the tip of the finger, `finger` big, touches the target in
+ * `hole` (`margin` around it), so that the words of the target show: on
+ * its bottom edge, in the middle; for a swipe, which goes up, the whole
+ * finger on the right of it (from the middle it went up over the words). */
+internal fun tipAt(hole: Rect, margin: Float, finger: Int, swipe: Boolean = false) =
+    Offset(
+        if (swipe) hole.right - margin + finger * 11 / 24 else hole.center.x,
+        hole.bottom - margin,
+    )
+
+/** Where the finger goes, `finger` big: its tip at `tipAt`. */
+internal fun fingerAt(hole: Rect, margin: Float, finger: Int, swipe: Boolean = false): IntOffset {
+    val tip = tipAt(hole, margin, finger, swipe)
+    return IntOffset(tip.x.roundToInt() - finger * 11 / 24, tip.y.roundToInt() - finger / 8)
+}
 
 /** What to do, how far the tutorial is, and how to end it. */
 @Composable
