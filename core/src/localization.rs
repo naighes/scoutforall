@@ -172,6 +172,8 @@ pub struct Labels {
     pub libero_is_required: &'static str,
     pub could_not_start_set: &'static str,
     pub terms_of_use: &'static str,
+    /// the name of the team added to a new installation
+    pub example_team_name: &'static str,
     /// the terms of use, a paragraph each: the program is free, its license,
     /// the data (the phone: the TUI tells its own, with its keys), the full
     /// texts
@@ -341,6 +343,7 @@ const EN: Labels = Labels {
     libero_is_required: "libero is required",
     could_not_start_set: "could not start the set",
     terms_of_use: "terms of use",
+    example_team_name: "Italy",
     terms_free: "Scout4all is free software, free of charge: you don't have to pay to use it.",
     terms_license: "License. Scout4all is released under the GNU Affero General Public License v3.0 (AGPL-3.0-only). You can use, copy, modify and distribute it, even for a fee, as long as you keep the copyright notice and release your changes under the same license, with their source code: also when you offer them as an online service. The program comes with NO WARRANTY.",
     terms_upload: "Data. Unless you turn it off below, the matches you scout are sent to the developer to compute statistics and diagnose bugs; aggregate statistics can be used in future services of the project. They hold no names: teams and players appear only as random identifiers, along with the date, the category, the gender and the events of the match. The server records your IP address in its logs. Data controller: Nicola Baldi. You can change your choice at any time in the settings.",
@@ -507,6 +510,7 @@ const IT: Labels = Labels {
     libero_is_required: "il libero è obbligatorio",
     could_not_start_set: "impossibile iniziare il set",
     terms_of_use: "termini di utilizzo",
+    example_team_name: "Italia",
     terms_free: "Scout4all è software libero e gratuito: non devi pagare per usarlo.",
     terms_license: "Licenza. Scout4all è distribuito con la licenza GNU Affero General Public License v3.0 (AGPL-3.0-only). Puoi usarlo, copiarlo, modificarlo e distribuirlo, anche a pagamento, purché mantenga la nota di copyright e distribuisca le tue modifiche con la stessa licenza, insieme al loro codice sorgente: anche quando le offri come servizio online. Il programma è fornito SENZA ALCUNA GARANZIA.",
     terms_upload: "Dati. Se non lo disattivi qui sotto, le partite che registri vengono inviate allo sviluppatore per calcolare statistiche e diagnosticare bug; le statistiche aggregate possono essere usate in futuri servizi del progetto. Non contengono nomi: squadre e atleti compaiono solo come identificativi casuali, insieme a data, categoria, genere ed eventi della partita. Il server registra il tuo indirizzo IP nei suoi log. Titolare del trattamento: Nicola Baldi. Puoi cambiare la tua scelta in qualsiasi momento nelle impostazioni.",
@@ -673,6 +677,7 @@ const PT: Labels = Labels {
     libero_is_required: "o líbero é obrigatório",
     could_not_start_set: "não foi possível iniciar o set",
     terms_of_use: "termos de uso",
+    example_team_name: "Itália",
     terms_free: "Scout4all é software livre e gratuito: você não precisa pagar para usá-lo.",
     terms_license: "Licença. Scout4all é distribuído sob a GNU Affero General Public License v3.0 (AGPL-3.0-only). Você pode usá-lo, copiá-lo, modificá-lo e distribuí-lo, inclusive mediante pagamento, desde que mantenha o aviso de copyright e distribua suas modificações sob a mesma licença, junto com o código-fonte: também quando as oferecer como serviço online. O programa é fornecido SEM NENHUMA GARANTIA.",
     terms_upload: "Dados. A menos que você desative abaixo, as partidas que você registra são enviadas ao desenvolvedor para calcular estatísticas e diagnosticar bugs; as estatísticas agregadas podem ser usadas em futuros serviços do projeto. Elas não contêm nomes: equipes e atletas aparecem apenas como identificadores aleatórios, junto com a data, a categoria, o gênero e os eventos da partida. O servidor registra seu endereço IP em seus logs. Controlador dos dados: Nicola Baldi. Você pode mudar sua escolha a qualquer momento nas configurações.",
@@ -839,6 +844,7 @@ const PL: Labels = Labels {
     libero_is_required: "libero jest wymagany",
     could_not_start_set: "nie można rozpocząć seta",
     terms_of_use: "warunki korzystania",
+    example_team_name: "Włochy",
     terms_free: "Scout4all to wolne i darmowe oprogramowanie: nie musisz płacić, aby z niego korzystać.",
     terms_license: "Licencja. Scout4all jest udostępniany na licencji GNU Affero General Public License v3.0 (AGPL-3.0-only). Możesz go używać, kopiować, modyfikować i rozpowszechniać, także odpłatnie, pod warunkiem zachowania informacji o prawach autorskich i udostępnienia swoich zmian na tej samej licencji, wraz z ich kodem źródłowym: również wtedy, gdy oferujesz je jako usługę online. Program jest dostarczany BEZ ŻADNEJ GWARANCJI.",
     terms_upload: "Dane. Jeśli nie wyłączysz tego poniżej, rejestrowane przez Ciebie mecze są wysyłane do twórcy w celu obliczania statystyk i diagnozowania błędów; zbiorcze statystyki mogą być wykorzystane w przyszłych usługach projektu. Nie zawierają nazwisk: drużyny i zawodnicy występują tylko jako losowe identyfikatory, wraz z datą, kategorią, płcią i zdarzeniami meczu. Serwer zapisuje Twój adres IP w swoich logach. Administrator danych: Nicola Baldi. Swój wybór możesz zmienić w każdej chwili w ustawieniach.",
@@ -1005,6 +1011,7 @@ const JA: Labels = Labels {
     libero_is_required: "リベロは必須です",
     could_not_start_set: "セットを開始できません",
     terms_of_use: "利用規約",
+    example_team_name: "イタリア",
     terms_free: "Scout4all は無料の自由ソフトウェアです。利用に料金はかかりません。",
     terms_license: "ライセンス。Scout4all は GNU Affero General Public License v3.0（AGPL-3.0-only）で公開されています。著作権表示を残し、変更を同じライセンスでソースコードとともに公開する限り、有料であっても使用、複製、改変、配布ができます。変更をオンラインサービスとして提供する場合も同様です。本プログラムは一切の保証なしに提供されます。",
     terms_upload: "データ。下で無効にしない限り、記録した試合は統計の算出とバグの診断のために開発者へ送信されます。集計された統計は、プロジェクトの今後のサービスで使われることがあります。名前は含まれません。チームと選手はランダムな識別子としてのみ記録され、試合の日付、カテゴリー、性別、イベントとともに送信されます。サーバーはログに IP アドレスを記録します。データ管理者：Nicola Baldi。選択は設定でいつでも変更できます。",

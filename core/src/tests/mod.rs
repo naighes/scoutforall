@@ -11,6 +11,7 @@ mod benchmark_tests;
 mod config_tests;
 mod edit_event_tests;
 mod event_validation_tests;
+mod example_tests;
 mod finished_match_tests;
 mod freeball_tests;
 mod language_tests;
