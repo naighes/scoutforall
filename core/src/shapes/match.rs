@@ -14,7 +14,8 @@ pub struct MatchStatus {
     pub next_set_number: Option<u8>,
     pub last_incomplete_set: Option<SetEntry>,
     pub match_finished: bool,
-    pub last_serving_team: Option<TeamSideEnum>,
+    /// the last set won or lost, if any
+    pub last_set: Option<SetEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -55,7 +56,7 @@ impl MatchEntry {
         let mut them_wins = 0;
         let mut next_set_number = 1;
         let mut last_incomplete_set = None;
-        let mut last_serving_team: Option<TeamSideEnum> = None;
+        let mut last_set: Option<SetEntry> = None;
         // scan all sets
         for set_number in 1..=5 {
             if let Some(set_entry) = self.sets.iter().find(|s| s.set_number == set_number) {
@@ -64,11 +65,11 @@ impl MatchEntry {
                 if let Some(snapshot) = snapshot {
                     match snapshot.get_set_winner(set_number) {
                         Some(TeamSideEnum::Us) => {
-                            last_serving_team = Some(set_entry.serving_team);
+                            last_set = Some(set_entry.clone());
                             us_wins += 1;
                         }
                         Some(TeamSideEnum::Them) => {
-                            last_serving_team = Some(set_entry.serving_team);
+                            last_set = Some(set_entry.clone());
                             them_wins += 1;
                         }
                         None => {
@@ -83,7 +84,7 @@ impl MatchEntry {
                             next_set_number: None,
                             last_incomplete_set: None,
                             match_finished: true,
-                            last_serving_team,
+                            last_set,
                         });
                     }
                 } else {
@@ -102,7 +103,7 @@ impl MatchEntry {
             next_set_number: Some(next_set_number),
             last_incomplete_set,
             match_finished: false,
-            last_serving_team,
+            last_set,
         })
     }
 

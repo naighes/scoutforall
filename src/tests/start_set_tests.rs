@@ -1,13 +1,18 @@
 //! Starting a set: who serves, the lineup, the setter and the liberos, as
 //! the core's `SetStartForm` allows. Up to v0.9.0 the lineup offered the
-//! removed players too, and counted them for the fallback libero.
+//! removed players too, and counted them for the fallback libero; up to
+//! v0.10 every set started from an empty lineup.
 
 #[cfg(test)]
 mod tests {
     use crate::localization::current_labels;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
-    use std::path::Path;
+    use std::{
+        fs::OpenOptions,
+        io::Write,
+        path::{Path, PathBuf},
+    };
 
     const TEAM: &[TeamFixture] = &[TeamFixture {
         name: "Volley Club",
@@ -40,6 +45,50 @@ mod tests {
         }
     }
 
+    /// The folders inside `folder`.
+    fn folders(folder: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(folder)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
+            .collect()
+    }
+
+    /// The first set of every match won 25-0, on errors of the opponent,
+    /// started with Bea to Gina on court, Bea the setter, Ilaria the
+    /// libero: Anna, on the bench, comes first in the lists.
+    fn win_first_sets(base: &Path) {
+        for t in folders(base) {
+            let team: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(t.join("team.json")).unwrap())
+                    .unwrap();
+            let ids: Vec<_> = team["players"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p["id"].clone())
+                .collect();
+            for m in folders(&t) {
+                let path = m.join("set_1.json");
+                let mut set: serde_json::Value =
+                    serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                set["initial_positions"] = ids[1..7].into();
+                set["setter"] = ids[1].clone();
+                set["libero"] = ids[7].clone();
+                std::fs::write(&path, serde_json::to_vec_pretty(&set).unwrap()).unwrap();
+            }
+        }
+        for m in folders(base).iter().flat_map(|t| folders(t)) {
+            let mut file = OpenOptions::new()
+                .append(true)
+                .open(m.join("set_1.csv"))
+                .unwrap();
+            for _ in 0..25 {
+                file.write_all(b"2025-09-01T18:00:00Z,OE,,,\n").unwrap();
+            }
+        }
+    }
+
     fn is_scouting(ui: &mut Ui) -> bool {
         ui.screen().contains(current_labels().choose_the_event)
     }
@@ -68,6 +117,27 @@ mod tests {
         assert_eq!(set["setter"], set["initial_positions"][0]);
         assert!(set["libero"].is_string());
         assert!(set["fallback_libero"].is_string());
+    }
+
+    #[tokio::test]
+    async fn the_second_set_proposes_the_lineup_of_the_first() {
+        let mut ui = Ui::start_with_files(TEAM, win_first_sets).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('m'), KeyCode::Enter])
+            .await;
+        // who served first receives: no choice, on position 1
+        assert!(ui.screen().contains("pos 1"), "{}", ui.screen());
+        // Enter confirms each proposed player, the setter and the libero;
+        // no fallback libero in the first set
+        for _ in 0..8 {
+            ui.press(KeyCode::Enter).await;
+        }
+        ui.press(KeyCode::Tab).await;
+        assert!(is_scouting(&mut ui), "not scouting: {}", ui.screen());
+        let (first, second) = (&ui.saved_sets(1)[0], &ui.saved_sets(2)[0]);
+        assert_eq!(second["serving_team"], "Them");
+        for field in ["initial_positions", "setter", "libero", "fallback_libero"] {
+            assert_eq!(second[field], first[field], "{field}");
+        }
     }
 
     #[tokio::test]

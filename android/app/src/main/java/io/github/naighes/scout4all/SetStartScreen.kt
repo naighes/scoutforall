@@ -107,7 +107,10 @@ class SetStartViewModel(
                 val start = app.core { it.setStart(teamId, matchId) }
                 if (example) start.tutorialLineup()
                 setStart = start
-                SetStartState.Choosing(start.lineup())
+                // the lineup of the last set, a player removed since then
+                // left out: their choice opens by itself
+                val lineup = start.lineup()
+                SetStartState.Choosing(lineup, pick = missing(lineup).takeIf { anyChosen(lineup) })
             } catch (e: MobileException) {
                 SetStartState.Failed(e.reason)
             }
@@ -196,6 +199,9 @@ private fun chosen(lineup: Lineup, pick: Pick): LineupPlayer? = when (pick) {
     Pick.Libero -> lineup.libero
     Pick.FallbackLibero -> lineup.fallbackLibero
 }
+
+private fun anyChosen(lineup: Lineup): Boolean =
+    lineup.positions.any { it != null } || lineup.setter != null || lineup.libero != null
 
 /** The first choice still to make: the positions, the setter, the libero. */
 private fun missing(lineup: Lineup): Pick? =

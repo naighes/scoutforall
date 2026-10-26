@@ -499,7 +499,7 @@ impl<
     fn handle_enter_key(&mut self) -> AppAction {
         let selected = self.get_selected_match().map(|(m, s)| (m.clone(), s));
         if let Some((match_entry, status)) = selected {
-            match next_set(status) {
+            match next_set(status, &match_entry.team) {
                 NextSet::Start(form) => self.new_set(&match_entry, form),
                 NextSet::Resume(set) => self.continue_set(&match_entry, set),
                 NextSet::Over => AppAction::None,

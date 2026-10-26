@@ -428,8 +428,11 @@ pub enum MatchListing {
 }
 
 /// What scouting the match goes on with.
-fn next_kind(status: &scout4all_core::shapes::r#match::MatchStatus) -> NextSetKind {
-    match next_set(status) {
+fn next_kind(
+    status: &scout4all_core::shapes::r#match::MatchStatus,
+    team: &TeamEntry,
+) -> NextSetKind {
+    match next_set(status, team) {
         NextSet::Start(form) => NextSetKind::Start {
             set_number: form.set_number,
         },
@@ -2161,7 +2164,7 @@ impl Scout4All {
                         home: m.home,
                         won: status.us_wins,
                         lost: status.them_wins,
-                        next: next_kind(&status),
+                        next: next_kind(&status, &team),
                     },
                 ))
             }));
@@ -2187,7 +2190,7 @@ impl Scout4All {
         let m = self.read_match(&team_id, &match_id)?;
         let status = m.get_status()?;
         let sets = set_scores(&m)?;
-        let next = next_kind(&status);
+        let next = next_kind(&status, &m.team);
         Ok(MatchDetails {
             date: m.date.to_rfc3339(),
             id: m.id,
@@ -2332,7 +2335,7 @@ impl Scout4All {
         match_id: String,
     ) -> Result<Arc<SetStart>, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
-        match next_set(&m.get_status()?) {
+        match next_set(&m.get_status()?, &m.team) {
             NextSet::Start(form) => Ok(Arc::new(SetStart {
                 team: m.team,
                 match_id: m.id,
@@ -2353,7 +2356,7 @@ impl Scout4All {
         match_id: String,
     ) -> Result<Arc<Scouting>, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
-        match next_set(&m.get_status()?) {
+        match next_set(&m.get_status()?, &m.team) {
             NextSet::Resume(set) => set_start::resume(m, set, self.set_writer.clone())
                 .map(|session| {
                     Arc::new(Scouting {
@@ -3796,6 +3799,32 @@ mod tests {
             let scouting = started_set(app, team, m);
             while scouting.choose_eval(EvalEnum::Perfect).unwrap() != Progress::SetOver {}
         }
+    }
+
+    #[test]
+    fn the_second_set_proposes_the_lineup_of_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, m) = match_with_a_set(&app);
+        play(&app, &team, &m, 1);
+        let lineup = app.set_start(team.clone(), m).unwrap().lineup();
+        let numbers = |players: &[Option<LineupPlayer>]| -> Vec<Option<u8>> {
+            players
+                .iter()
+                .map(|p| p.as_ref().map(|p| p.number))
+                .collect()
+        };
+        assert_eq!(lineup.set_number, 2);
+        assert_eq!(lineup.serving_team, Some(TeamSideEnum::Them));
+        assert_eq!(
+            numbers(&lineup.positions),
+            [1, 2, 3, 4, 5, 6].map(Some).to_vec()
+        );
+        assert_eq!(
+            numbers(&[lineup.setter, lineup.libero]),
+            vec![Some(1), Some(7)]
+        );
+        assert!(lineup.complete);
     }
 
     #[test]

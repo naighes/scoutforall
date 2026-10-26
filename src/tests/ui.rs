@@ -282,9 +282,15 @@ impl Ui {
 
     /// The descriptors of the first set of each match, as saved on disk.
     pub fn saved_first_sets(&self) -> Vec<serde_json::Value> {
+        self.saved_sets(1)
+    }
+
+    /// The descriptors of set `number` of each match, as saved on disk.
+    pub fn saved_sets(&self, number: u8) -> Vec<serde_json::Value> {
+        let name = format!("set_{number}.json");
         self.match_descriptor_paths()
             .iter()
-            .filter_map(|p| std::fs::read_to_string(p.with_file_name("set_1.json")).ok())
+            .filter_map(|p| std::fs::read_to_string(p.with_file_name(&name)).ok())
             .map(|json| serde_json::from_str(&json).unwrap())
             .collect()
     }

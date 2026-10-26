@@ -32,16 +32,21 @@ pub enum NextSet {
     Over,
 }
 
-/// What scouting the match of `status` goes on with.
-pub fn next_set(status: &MatchStatus) -> NextSet {
+/// What scouting the match of `status`, of `team`, goes on with. A new set
+/// after the first proposes the lineup the last one started with.
+pub fn next_set(status: &MatchStatus, team: &TeamEntry) -> NextSet {
     match (
         status.match_finished,
         &status.last_incomplete_set,
         status.next_set_number,
+        &status.last_set,
     ) {
-        (false, Some(set), _) => NextSet::Resume(set.clone()),
-        (false, None, Some(set_number)) => {
-            NextSet::Start(SetStartForm::new(set_number, status.last_serving_team))
+        (false, Some(set), _, _) => NextSet::Resume(set.clone()),
+        (false, None, Some(set_number), Some(last)) => NextSet::Start(
+            SetStartForm::new(set_number, Some(last.serving_team)).with_lineup_of(last, team),
+        ),
+        (false, None, Some(set_number), None) => {
+            NextSet::Start(SetStartForm::new(set_number, None))
         }
         _ => NextSet::Over,
     }
@@ -118,6 +123,25 @@ impl SetStartForm {
             libero: None,
             fallback_libero: None,
         }
+    }
+
+    /// The form with the lineup `set` started with: who is no longer active
+    /// in `team` leaves an empty choice.
+    pub fn with_lineup_of(mut self, set: &SetEntry, team: &TeamEntry) -> Self {
+        let active: HashSet<Uuid> = team.active_players().iter().map(|p| p.id).collect();
+        let only_active = |id: Uuid| Some(id).filter(|id| active.contains(id));
+        for (position, id) in set.initial_positions.iter().enumerate() {
+            self.place(position, only_active(*id));
+        }
+        let on_court = self.on_court();
+        self.setter = only_active(set.setter).filter(|s| on_court.contains(s));
+        self.libero = only_active(set.libero).filter(|l| !on_court.contains(l));
+        self.fallback_libero = set.fallback_libero.and_then(only_active).filter(|f| {
+            self.fallback_libero_choices(team)
+                .iter()
+                .any(|p| p.id == *f)
+        });
+        self
     }
 
     /// Whether the scout chooses who serves: the toss decides it in the

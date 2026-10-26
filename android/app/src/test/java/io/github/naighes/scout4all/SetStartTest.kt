@@ -11,7 +11,10 @@ import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
+import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.MatchForm
+import io.github.naighes.scout4all.core.PlayerForm
+import io.github.naighes.scout4all.core.RoleEnum
 import io.github.naighes.scout4all.core.TeamSideEnum
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -27,9 +30,9 @@ class SetStartTest {
     private val match = core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6")) }
     private var started = 0
 
-    private fun show() {
+    private fun show(match: String = this.match, shown: String = string(R.string.start_set)) {
         rule.setContent { Scout4AllTheme { SetStartScreen(team, match, onBack = {}, onStarted = { started++ }) } }
-        rule.waitForText(string(R.string.start_set))
+        rule.waitForText(shown)
     }
 
     private fun start() = rule.onNode(hasText(string(R.string.start_set)) and hasClickAction())
@@ -71,6 +74,41 @@ class SetStartTest {
         rule.waitForIdle()
         start().assertIsNotEnabled()
         assertEquals(0, started)
+    }
+
+    /** A match with its first set won with aces; its id. */
+    private fun firstSetWon(): String {
+        val match = startFirstSet(team, opponent = "Arezzo")
+        serve(team, match, *Array(25) { EvalEnum.PERFECT })
+        return match
+    }
+
+    @Test
+    fun theSecondSetStartsAsTheFirstDid() {
+        val match = firstSetWon()
+        show(match)
+        rule.waitFor { runCatching { start().assertIsEnabled() }.isSuccess }
+        start().performClick()
+        rule.waitFor { started == 1 }
+        val state = core { it.scouting(team, match) }.state()
+        // who received first serves
+        assertEquals(TeamSideEnum.THEM, state.servingTeam)
+        // the libero in for the middle blocker in the back row
+        val court = nationalTeam.take(5).map { it.first } + "Monica De Gennaro"
+        assertEquals(court.toSet(), state.court.map { it.name }.toSet())
+    }
+
+    @Test
+    fun aPlayerRemovedSinceTheLastSetIsChosenAgain() {
+        val match = firstSetWon()
+        val orro = core { it.team(team) }.players.first { it.name == "Alessia Orro" }.id
+        core { it.removePlayer(team, orro) }
+        core { it.savePlayer(team, null, PlayerForm("Carlotta Cambi", RoleEnum.SETTER, "10")) }
+        // position 1 and the setter empty: position 1 opens by itself
+        show(match, shown = "Carlotta Cambi")
+        pick("Carlotta Cambi")
+        pick("Carlotta Cambi")
+        rule.waitFor { runCatching { start().assertIsEnabled() }.isSuccess }
     }
 
     /** Who serves by the names of the teams; the ball by the one chosen. */

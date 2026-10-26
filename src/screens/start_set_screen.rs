@@ -189,22 +189,32 @@ impl<
         .collect()
     }
 
-    /// The player highlighted when a step begins: the first setter for the
-    /// setter, the first libero for the liberos, else the first player.
+    /// The player highlighted when a step begins: the one proposed for it
+    /// (the lineup of the last set), else the first setter for the setter,
+    /// the first libero for the liberos, else the first player.
     fn default_select(&self) -> Option<usize> {
         let choices = self.choices();
+        let proposed = match self.step {
+            StartSetStep::ServingTeam => None,
+            StartSetStep::Position(i) => self.form.positions.get(i).copied().flatten(),
+            StartSetStep::Setter => self.form.setter,
+            StartSetStep::Libero => self.form.libero,
+            StartSetStep::FallbackLibero => self.form.fallback_libero,
+        };
         let preferred = match self.step {
             StartSetStep::Setter => Some(RoleEnum::Setter),
             StartSetStep::Libero | StartSetStep::FallbackLibero => Some(RoleEnum::Libero),
             _ => None,
         };
-        match (choices.is_empty(), preferred) {
-            (true, _) => None,
-            (false, Some(role)) => choices
+        let proposed = proposed.and_then(|id| choices.iter().position(|p| p.id == id));
+        match (choices.is_empty(), proposed, preferred) {
+            (true, _, _) => None,
+            (false, Some(i), _) => Some(i),
+            (false, None, Some(role)) => choices
                 .iter()
                 .position(|p| p.role == Some(role))
                 .or(Some(0)),
-            (false, None) => Some(0),
+            (false, None, None) => Some(0),
         }
     }
 

@@ -17,6 +17,7 @@ mod tests {
             enums::{RoleEnum, TeamSideEnum},
             r#match::MatchStatus,
             player::PlayerEntry,
+            set::SetEntry,
             team::TeamEntry,
         },
         storage::{Store, memory::MemoryStore},
@@ -83,14 +84,36 @@ mod tests {
         form
     }
 
-    fn status(next_set_number: u8, last_serving_team: Option<TeamSideEnum>) -> MatchStatus {
+    fn status(next_set_number: u8, last_set: Option<SetEntry>) -> MatchStatus {
         MatchStatus {
             us_wins: next_set_number - 1,
             them_wins: 0,
             next_set_number: Some(next_set_number),
             last_incomplete_set: None,
             match_finished: false,
-            last_serving_team,
+            last_set,
+        }
+    }
+
+    /// The first set, started as `complete` with `serving_team` serving and
+    /// the eighth player the fallback libero.
+    fn first_set(team: &TeamEntry, serving_team: TeamSideEnum) -> SetEntry {
+        let positions: [Uuid; 6] = std::array::from_fn(|i| id(team, i));
+        SetEntry::new(
+            1,
+            serving_team,
+            positions,
+            id(team, 6),
+            Some(id(team, 7)),
+            id(team, 0),
+        )
+        .unwrap()
+    }
+
+    fn start_form(status: &MatchStatus, team: &TeamEntry) -> Option<SetStartForm> {
+        match next_set(status, team) {
+            NextSet::Start(form) => Some(form),
+            _ => None,
         }
     }
 
@@ -104,10 +127,8 @@ mod tests {
 
     #[test]
     fn the_team_that_received_first_serves_first_in_the_next_set() {
-        let form = |last| match next_set(&status(2, Some(last))) {
-            NextSet::Start(form) => Some(form),
-            _ => None,
-        };
+        let team = team(8);
+        let form = |last| start_form(&status(2, Some(first_set(&team, last))), &team);
         let after_us = form(TeamSideEnum::Us).unwrap();
         assert_eq!(after_us.set_number, 2);
         assert!(!after_us.chooses_serving_team());
@@ -124,9 +145,60 @@ mod tests {
             us_wins: 3,
             next_set_number: None,
             match_finished: true,
-            ..status(4, Some(TeamSideEnum::Us))
+            ..status(4, Some(first_set(&team(8), TeamSideEnum::Us)))
         };
-        assert!(matches!(next_set(&over), NextSet::Over));
+        assert!(matches!(next_set(&over, &team(8)), NextSet::Over));
+    }
+
+    #[test]
+    fn the_next_set_proposes_the_lineup_the_last_one_started_with() {
+        let team = team(8);
+        let form = start_form(&status(2, Some(first_set(&team, TeamSideEnum::Us))), &team).unwrap();
+        let expected = SetStartForm {
+            set_number: 2,
+            serving_team: Some(TeamSideEnum::Them),
+            ..complete(&team)
+        };
+        assert_eq!(
+            form,
+            SetStartForm {
+                fallback_libero: Some(id(&team, 7)),
+                ..expected
+            }
+        );
+        assert!(form.validate(&team).is_ok());
+    }
+
+    #[test]
+    fn the_tie_break_proposes_the_lineup_but_not_who_serves() {
+        let team = team(8);
+        let form = start_form(&status(5, Some(first_set(&team, TeamSideEnum::Us))), &team).unwrap();
+        assert_eq!(form.serving_team, None);
+        assert_eq!(form.positions, complete(&team).positions);
+    }
+
+    #[test]
+    fn a_player_removed_since_the_last_set_leaves_an_empty_choice() {
+        let mut team = team(8);
+        let last = first_set(&team, TeamSideEnum::Us);
+        // the setter in position 1, the libero and the fallback libero
+        for i in [0, 6, 7] {
+            team.players[i].deleted = true;
+        }
+        let form = start_form(&status(2, Some(last)), &team).unwrap();
+        assert_eq!(form.positions[0], None);
+        assert_eq!(form.positions[1..], complete(&team).positions[1..]);
+        assert_eq!(
+            (form.setter, form.libero, form.fallback_libero),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn the_first_set_proposes_no_lineup() {
+        let team = team(8);
+        let form = start_form(&status(1, None), &team).unwrap();
+        assert_eq!(form, SetStartForm::new(1, None));
     }
 
     #[test]
