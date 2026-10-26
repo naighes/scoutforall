@@ -110,6 +110,7 @@
     <string name="all_attacks">Todos</string>
     <string name="first_attack">Após a recepção</string>
     <string name="counter_attack">Contra-ataque</string>
+    <string name="zone_attacks">%d atq</string>
     <string name="attacks_detail">%1$d at · efi %2$s</string>
     <string name="no_attacks">Nenhum ataque ainda</string>
     <string name="no_rallies">Nenhum rali ainda</string>

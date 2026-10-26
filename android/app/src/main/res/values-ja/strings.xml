@@ -109,6 +109,7 @@
     <string name="all_attacks">すべて</string>
     <string name="first_attack">レセプションから</string>
     <string name="counter_attack">切り返し</string>
+    <string name="zone_attacks">%d本</string>
     <string name="attacks_detail">%1$d 本 · 効果率 %2$s</string>
     <string name="no_attacks">アタックはまだありません</string>
     <string name="no_rallies">ラリーはまだありません</string>
