@@ -197,6 +197,7 @@ mod tests {
             home,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets,
+            notes: String::new(),
         }
     }
 

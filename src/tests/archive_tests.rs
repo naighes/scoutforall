@@ -54,6 +54,7 @@ mod tests {
                 name: format!("player {}", i + 1),
                 role: RoleEnum::OutsideHitter,
                 number: i + 1,
+                details: Default::default(),
             };
             writer.save_player(input, &mut team).await.unwrap();
         }
@@ -98,7 +99,14 @@ mod tests {
         let base = dir.path();
         let ours = team(base, "Volley Club").await;
         let m = StoreMatchWriter::new(fs_store(base))
-            .create(&ours, "Cortona".into(), Utc::now().into(), true, 8)
+            .create(
+                &ours,
+                "Cortona".into(),
+                Utc::now().into(),
+                true,
+                8,
+                String::new(),
+            )
             .await
             .unwrap();
         let ids: Vec<Uuid> = ours.players.iter().map(|p| p.id).collect();

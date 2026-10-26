@@ -66,6 +66,7 @@ mod tests {
                 "2026-10-25T18:00:00+02:00".parse().unwrap(),
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
+                String::new(),
             )
             .await
             .unwrap();

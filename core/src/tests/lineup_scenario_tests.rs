@@ -85,6 +85,9 @@ mod tests {
                         role: Some(role),
                         number: i as u8 + 1,
                         deleted: false,
+                        birth_date: None,
+                        height_cm: None,
+                        notes: String::new(),
                     })
                     .collect(),
                 ..TeamEntry::default()

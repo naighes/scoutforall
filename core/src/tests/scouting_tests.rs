@@ -62,6 +62,9 @@ mod tests {
             role: Some(role),
             number: i as u8 + 1,
             deleted: false,
+            birth_date: None,
+            height_cm: None,
+            notes: String::new(),
         })
         .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
@@ -83,6 +86,7 @@ mod tests {
                 Utc::now().fixed_offset(),
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
+                String::new(),
             )
             .await
             .unwrap();

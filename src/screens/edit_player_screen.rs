@@ -16,6 +16,7 @@ use crate::{
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings},
 };
 use async_trait::async_trait;
+use chrono::Local;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -212,12 +213,23 @@ impl<TW: TeamWriter + Send + Sync> EditPlayerScreen<TW> {
     }
 
     async fn handle_confirm(&mut self) -> AppAction {
+        // what this screen doesn't edit stays as it is
+        let kept = self
+            .existing_player
+            .as_ref()
+            .map(PlayerForm::of)
+            .unwrap_or_default();
         let form = PlayerForm {
             name: self.name.get_selected_value().unwrap_or_default(),
             role: self.role.get_selected_value(),
             number: self.number.get_selected_value().unwrap_or_default(),
+            ..kept
         };
-        match form.validate(&self.team, self.existing_player.as_ref()) {
+        match form.validate(
+            &self.team,
+            self.existing_player.as_ref(),
+            Local::now().date_naive(),
+        ) {
             Err(e) => {
                 self.notify_message
                     .set_error(e.message(current_labels().domain));

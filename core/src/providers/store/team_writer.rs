@@ -59,10 +59,18 @@ impl TeamWriter for StoreTeamWriter {
         team: &mut TeamEntry,
     ) -> Result<PlayerEntry, AppError> {
         let player = match input {
-            PlayerInput::New { name, role, number } => PlayerEntry {
+            PlayerInput::New {
+                name,
+                role,
+                number,
+                details,
+            } => PlayerEntry {
                 name,
                 role: Some(role),
                 number,
+                birth_date: details.birth_date,
+                height_cm: details.height_cm,
+                notes: details.notes,
                 ..Default::default()
             },
             PlayerInput::Existing(existing) => existing,

@@ -146,13 +146,21 @@ impl Ui {
                     name: p.to_string(),
                     role: RoleEnum::OutsideHitter,
                     number: i as u8 + 1,
+                    details: Default::default(),
                 };
                 team_writer.save_player(input, &mut team).await.unwrap();
             }
             for (i, o) in t.opponents.iter().enumerate() {
                 let date = first_match + Duration::days(i as i64);
                 let m = match_writer
-                    .create(&team, o.to_string(), date, true, DEFAULT_MAX_SUBSTITUTIONS)
+                    .create(
+                        &team,
+                        o.to_string(),
+                        date,
+                        true,
+                        DEFAULT_MAX_SUBSTITUTIONS,
+                        String::new(),
+                    )
                     .await
                     .unwrap();
                 if start_sets {

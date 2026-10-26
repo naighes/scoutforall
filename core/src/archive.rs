@@ -295,6 +295,7 @@ pub async fn import_match(
             archived.date,
             archived.home,
             archived.max_substitutions,
+            archived.notes,
         )
         .await?;
     for mut set in archived.sets {

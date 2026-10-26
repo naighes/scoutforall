@@ -10,13 +10,15 @@ use crate::{
 use chrono::{DateTime, FixedOffset};
 
 /// What the user filled in: the substitutions are text, as typed; the date
-/// is missing when the user interface couldn't read it.
+/// is missing when the user interface couldn't read it; the notes may be
+/// empty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchForm {
     pub opponent: String,
     pub date: Option<DateTime<FixedOffset>>,
     pub home: bool,
     pub max_substitutions: String,
+    pub notes: String,
 }
 
 /// A valid form, the arguments of `MatchWriter::create` and `update`.
@@ -26,6 +28,7 @@ pub struct MatchInput {
     pub date: DateTime<FixedOffset>,
     pub home: bool,
     pub max_substitutions: u8,
+    pub notes: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +62,7 @@ impl MatchForm {
             date: Some(date),
             home: false,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS.to_string(),
+            notes: String::new(),
         }
     }
 
@@ -69,11 +73,12 @@ impl MatchForm {
             date: Some(m.date),
             home: m.home,
             max_substitutions: m.max_substitutions.to_string(),
+            notes: m.notes.clone(),
         }
     }
 
-    /// What creates a match, or updates `existing`. The opponent is
-    /// trimmed. The first error, in the order of the fields, when the form
+    /// What creates a match, or updates `existing`. The opponent and the
+    /// notes are trimmed. The first error, in the order of the fields, when the form
     /// isn't valid.
     pub fn validate(self, existing: Option<&MatchEntry>) -> Result<MatchInput, MatchFormError> {
         let opponent = self.opponent.trim().to_string();
@@ -89,6 +94,7 @@ impl MatchForm {
                 date,
                 home: self.home,
                 max_substitutions,
+                notes: self.notes.trim().to_string(),
             }),
         }
     }

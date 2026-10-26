@@ -39,6 +39,9 @@ mod tests {
                 }),
                 number: i as u8 + 1,
                 deleted: i == active,
+                birth_date: None,
+                height_cm: None,
+                notes: String::new(),
             })
             .collect();
         TeamEntry {
@@ -277,6 +280,7 @@ mod tests {
                 Utc::now().fixed_offset(),
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
+                String::new(),
             )
             .await
             .unwrap();

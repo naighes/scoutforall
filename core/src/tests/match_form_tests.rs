@@ -26,6 +26,7 @@ mod tests {
             date: Some(date()),
             home: true,
             max_substitutions: max_substitutions.into(),
+            notes: String::new(),
         }
     }
 
@@ -63,6 +64,7 @@ mod tests {
             home: false,
             max_substitutions: 6,
             sets: vec![set(1, 2), set(2, 4)],
+            notes: String::new(),
         }
     }
 
@@ -82,6 +84,7 @@ mod tests {
                 date: date(),
                 home: true,
                 max_substitutions: 6,
+                notes: String::new(),
             })
         );
     }
@@ -129,6 +132,7 @@ mod tests {
                 date: None,
                 home: false,
                 max_substitutions: String::new(),
+                notes: String::new(),
             }),
             MatchFormError::EmptyOpponent
         );
@@ -151,6 +155,7 @@ mod tests {
                 date: Some(date()),
                 home: false,
                 max_substitutions: "6".into(),
+                notes: String::new(),
             }
         );
         assert!(MatchForm::of(&m).validate(Some(&m)).is_ok());
@@ -163,5 +168,37 @@ mod tests {
             "opponent cannot be empty"
         );
         assert_eq!(MatchFormError::InvalidDate.message(EN), "invalid date");
+    }
+
+    #[test]
+    fn the_notes_are_optional_and_trimmed() {
+        let input = MatchForm {
+            notes: "  windy, gym cold \n".into(),
+            ..form("6")
+        }
+        .validate(None)
+        .unwrap();
+        assert_eq!(input.notes, "windy, gym cold");
+        let m = MatchEntry {
+            notes: "windy".into(),
+            ..played()
+        };
+        assert_eq!(MatchForm::of(&m).notes, "windy");
+    }
+
+    /// A match without notes is written as before: an older version reads
+    /// it alike; one of an older version reads without them.
+    #[test]
+    fn the_notes_are_written_only_when_given() {
+        let old = r#"{"opponent":"Arezzo","date":"2025-09-15T00:00:00Z","home":true}"#;
+        let m: MatchEntry = serde_json::from_str(old).unwrap();
+        assert_eq!(m.notes, "");
+        let written = serde_json::to_value(&m).unwrap();
+        assert!(written.get("notes").is_none());
+        let noted = MatchEntry {
+            notes: "windy".into(),
+            ..m
+        };
+        assert_eq!(serde_json::to_value(&noted).unwrap()["notes"], "windy");
     }
 }

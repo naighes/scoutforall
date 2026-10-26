@@ -161,6 +161,7 @@ mod tests {
                 name: format!("player {}", i + 1),
                 role: RoleEnum::OutsideHitter,
                 number: i + 1,
+                details: Default::default(),
             };
             writer.save_player(input, &mut team).await.unwrap();
         }

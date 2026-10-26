@@ -2148,6 +2148,7 @@ mod tests {
             home: true,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
+            notes: String::new(),
         };
         let report = build_report(&m, EN).expect("expected the report data");
         let names: Vec<&Cell> = report.players.rows.iter().map(|r| &r.lead[1]).collect();
@@ -2201,6 +2202,7 @@ mod tests {
             home: true,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
+            notes: String::new(),
         };
         let report = build_report(&m, EN).expect("expected the report data");
         let labels = EN;

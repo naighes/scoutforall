@@ -6,7 +6,7 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Local};
 use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
@@ -220,6 +220,13 @@ pub struct PlayerForm {
     pub name: String,
     pub role: Option<RoleEnum>,
     pub number: String,
+    // empty by default: a form made in Kotlin without them is as before
+    #[uniffi(default = "")]
+    pub birth_date: String,
+    #[uniffi(default = "")]
+    pub height_cm: String,
+    #[uniffi(default = "")]
+    pub notes: String,
 }
 
 #[uniffi::remote(Record)]
@@ -236,6 +243,8 @@ pub struct MatchForm {
     pub date: Option<MatchDate>,
     pub home: bool,
     pub max_substitutions: String,
+    #[uniffi(default = "")]
+    pub notes: String,
 }
 
 /// RFC 3339 text for the app, with the offset of where the match is played.
@@ -301,6 +310,8 @@ pub enum PlayerField {
     Name,
     Role,
     Number,
+    BirthDate,
+    Height,
 }
 
 impl From<PlayerFormError> for PlayerField {
@@ -309,6 +320,8 @@ impl From<PlayerFormError> for PlayerField {
             PlayerFormError::EmptyName => PlayerField::Name,
             PlayerFormError::MissingRole => PlayerField::Role,
             PlayerFormError::InvalidNumber | PlayerFormError::NumberInUse => PlayerField::Number,
+            PlayerFormError::InvalidBirthDate => PlayerField::BirthDate,
+            PlayerFormError::InvalidHeight => PlayerField::Height,
         }
     }
 }
@@ -2360,6 +2373,7 @@ impl Scout4All {
                     input.date,
                     input.home,
                     input.max_substitutions,
+                    input.notes,
                 ))
                 .map(|()| m.id),
             None => self
@@ -2370,6 +2384,7 @@ impl Scout4All {
                     input.date,
                     input.home,
                     input.max_substitutions,
+                    input.notes,
                 ))
                 .map(|m| m.id),
         };
@@ -2430,12 +2445,12 @@ impl Scout4All {
     ) -> Result<String, MobileError> {
         let mut team = self.read_team(&team_id)?;
         let existing = player_id.map(|id| find_player(&team, &id)).transpose()?;
-        let input =
-            form.validate(&team, existing.as_ref())
-                .map_err(|e| MobileError::InvalidPlayer {
-                    field: e.into(),
-                    reason: e.message(self.language.labels()),
-                })?;
+        let input = form
+            .validate(&team, existing.as_ref(), Local::now().date_naive())
+            .map_err(|e| MobileError::InvalidPlayer {
+                field: e.into(),
+                reason: e.message(self.language.labels()),
+            })?;
         let player = self
             .runtime
             .block_on(self.team_writer.save_player(input, &mut team))?;
@@ -3228,6 +3243,9 @@ mod tests {
             name: name.into(),
             role: Some(RoleEnum::Setter),
             number: number.into(),
+            birth_date: String::new(),
+            height_cm: String::new(),
+            notes: String::new(),
         }
     }
 
@@ -3276,7 +3294,7 @@ mod tests {
         ] {
             let date = DateTime::parse_from_rfc3339(date).unwrap();
             app.runtime
-                .block_on(writer.create(&team, opponent.into(), date, home, 6))
+                .block_on(writer.create(&team, opponent.into(), date, home, 6, String::new()))
                 .unwrap();
         }
         std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
@@ -3315,6 +3333,7 @@ mod tests {
             date: DateTime::parse_from_rfc3339(date).ok(),
             home: true,
             max_substitutions: max_substitutions.into(),
+            notes: String::new(),
         }
     }
 

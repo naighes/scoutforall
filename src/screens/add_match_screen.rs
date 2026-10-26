@@ -271,6 +271,12 @@ impl<
 
     async fn handle_confirm(&mut self) -> AppAction {
         let form = MatchForm {
+            // what this screen doesn't edit stays as it is
+            notes: self
+                .editing
+                .as_ref()
+                .map(|m| m.notes.clone())
+                .unwrap_or_default(),
             opponent: self.opponent.get_selected_value().unwrap_or_default(),
             date: self.date.get_selected_value().ok(),
             home: self.home.get_selected_value(),
@@ -299,6 +305,7 @@ impl<
                 input.date,
                 input.home,
                 input.max_substitutions,
+                input.notes,
             )
             .await
         {
@@ -328,6 +335,7 @@ impl<
                 input.date,
                 input.home,
                 input.max_substitutions,
+                input.notes,
             )
             .await
         {

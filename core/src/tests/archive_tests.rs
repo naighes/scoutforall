@@ -13,13 +13,14 @@ mod tests {
         localization::Language,
         providers::{
             match_reader::MatchReader,
+            match_writer::MatchWriter,
             store::{
                 match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
                 set_reader::StoreSetReader, set_writer::StoreSetWriter,
                 team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
             },
             team_reader::TeamReader,
-            team_writer::{TeamInput, TeamWriter},
+            team_writer::{PlayerInput, TeamInput, TeamWriter},
         },
         shapes::{enums::LineupRulesEnum, r#match::MatchEntry, team::TeamEntry},
         storage::{Store, layout, memory::MemoryStore},
@@ -221,6 +222,49 @@ mod tests {
         assert_eq!((snapshot.score_us, snapshot.score_them), (3, 1));
         let twice = to.import_match(&archive, &team).await;
         assert_eq!(message(twice), EN.match_already_exists);
+    }
+
+    /// The details of the players and the notes of the match go with the
+    /// archives.
+    #[tokio::test]
+    async fn archives_carry_the_details_and_the_notes() {
+        let from = Providers::new();
+        let (mut team, m) = from.legacy_match().await;
+        let mut player = team.players[0].clone();
+        player.birth_date = chrono::NaiveDate::from_ymd_opt(2001, 12, 3);
+        player.height_cm = Some(182);
+        player.notes = "captain".into();
+        from.team_writer
+            .save_player(PlayerInput::Existing(player.clone()), &mut team)
+            .await
+            .unwrap();
+        from.match_writer
+            .update(
+                &m,
+                m.opponent.clone(),
+                m.date,
+                m.home,
+                m.max_substitutions,
+                "windy".into(),
+            )
+            .await
+            .unwrap();
+        let to = Providers::new();
+        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
+        let team = to.import_team(&team_archive, None).await.unwrap();
+        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
+        to.import_match(&archive, &team).await.unwrap();
+        let imported = team.find_player(player.id).unwrap();
+        assert_eq!(
+            (
+                imported.birth_date,
+                imported.height_cm,
+                imported.notes.as_str()
+            ),
+            (player.birth_date, Some(182), "captain")
+        );
+        let again = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        assert_eq!(again.notes, "windy");
     }
 
     /// v0.4.3 added an event, without the technique, to a set scouted

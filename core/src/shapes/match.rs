@@ -29,6 +29,9 @@ pub struct MatchEntry {
     // matches saved before the number was configurable used the old rules
     #[serde(default = "legacy_max_substitutions")]
     pub max_substitutions: u8,
+    // since v0.10, written only when given: see `PlayerEntry::notes`
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub notes: String,
     #[serde(skip_serializing, skip_deserializing)]
     pub sets: Vec<SetEntry>,
 }

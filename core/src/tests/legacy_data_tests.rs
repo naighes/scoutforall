@@ -271,7 +271,14 @@ mod tests {
     async fn edit(base: &Path) -> MatchEntry {
         let (_, m) = load(base).await;
         StoreMatchWriter::new(fs_store(base))
-            .update(&m, "Arezzo".into(), m.date, true, m.max_substitutions)
+            .update(
+                &m,
+                "Arezzo".into(),
+                m.date,
+                true,
+                m.max_substitutions,
+                String::new(),
+            )
             .await
             .expect("expected the match to be updated");
         load(base).await.1

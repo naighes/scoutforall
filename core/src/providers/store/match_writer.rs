@@ -25,6 +25,7 @@ impl MatchWriter for StoreMatchWriter {
         date: DateTime<FixedOffset>,
         home: bool,
         max_substitutions: u8,
+        notes: String,
     ) -> Result<MatchEntry, AppError> {
         let match_id = MatchEntry::id_of(&opponent, &date);
         let m = MatchEntry {
@@ -34,6 +35,7 @@ impl MatchWriter for StoreMatchWriter {
             team: team.clone(),
             home,
             max_substitutions,
+            notes,
             sets: vec![],
         };
         let key = layout::match_descriptor(&team.id, &match_id);
@@ -51,6 +53,7 @@ impl MatchWriter for StoreMatchWriter {
         date: DateTime<FixedOffset>,
         home: bool,
         max_substitutions: u8,
+        notes: String,
     ) -> Result<(), AppError> {
         // the reader replays the sets saved without the lineup rules with
         // those of v0.3.0 once the descriptor saves the substitutions: they
@@ -69,6 +72,7 @@ impl MatchWriter for StoreMatchWriter {
             date,
             home,
             max_substitutions,
+            notes,
             id: m.id.clone(),
             team: m.team.clone(),
             sets: m.sets.clone(),
