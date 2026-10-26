@@ -501,7 +501,7 @@ private fun ZoneCell(zone: Int, stats: ZoneStats?) = Column(horizontalAlignment 
             )
         }
         Text(
-            "${it.attacks.total} att",
+            stringResource(R.string.zone_attacks, it.attacks.total.toInt()),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -112,6 +112,7 @@
     <string name="all_attacks">Wszystkie</string>
     <string name="first_attack">Po przyjęciu</string>
     <string name="counter_attack">Kontratak</string>
+    <string name="zone_attacks">%d at.</string>
     <string name="attacks_detail">%1$d at · sku %2$s</string>
     <string name="no_attacks">Brak ataków</string>
     <string name="no_rallies">Brak akcji</string>

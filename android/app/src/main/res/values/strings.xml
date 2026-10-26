@@ -111,6 +111,7 @@
     <string name="all_attacks">All</string>
     <string name="first_attack">On reception</string>
     <string name="counter_attack">Counter-attack</string>
+    <string name="zone_attacks">%d att</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>
     <string name="no_attacks">No attacks yet</string>
     <string name="no_rallies">No rallies yet</string>
