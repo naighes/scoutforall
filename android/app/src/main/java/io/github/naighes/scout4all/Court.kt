@@ -43,6 +43,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
@@ -249,13 +250,16 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: F
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // dimmed piece by piece: in one layer the badge of the setter, above
+        // the jersey, would be cut at the edge of the column
+        val dim = if (slot.enabled) 1f else 0.38f
         Column(
-            Modifier.align(Alignment.TopCenter).alpha(if (slot.enabled) 1f else 0.38f),
+            Modifier.align(Alignment.TopCenter),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Token(slot, scale)
-            CourtName(slot.name.orEmpty())
+            Token(slot, scale, dim)
+            CourtName(slot.name.orEmpty(), Modifier.alpha(dim))
             badges(slot).takeIf { it.isNotEmpty() }?.let { Box(Modifier.readAs(it)) }
         }
     }
@@ -275,12 +279,12 @@ private fun badges(slot: CourtSlot): String = listOfNotNull(
  * the first word) if it doesn't fit, never a word broken: the jersey tells
  * the rest. A surname too long even so is hyphenated. */
 @Composable
-private fun CourtName(name: String) {
+private fun CourtName(name: String, modifier: Modifier = Modifier) {
     var surname by remember(name) { mutableStateOf(false) }
     val text = if (surname) name.substringAfter(' ') else name
     Text(
         text,
-        modifier = Modifier.padding(horizontal = 4.dp).let { if (text.isEmpty()) it.notRead() else it },
+        modifier = modifier.padding(horizontal = 4.dp).let { if (text.isEmpty()) it.notRead() else it },
         style = nameStyle().copy(
             hyphens = if (surname) Hyphens.Auto else Hyphens.None,
             lineBreak = LineBreak.Paragraph,
@@ -324,7 +328,7 @@ fun Dp.jerseySp(): TextUnit = with(LocalDensity.current) { toSp() }
  * another color, dark with a light border; an empty position asks for a
  * player, in the color of the actions. */
 @Composable
-private fun Token(slot: CourtSlot, scale: Float) = Box {
+private fun Token(slot: CourtSlot, scale: Float, dim: Float = 1f) = Box {
     val empty = slot.number == null
     val libero = slot.libero && !empty
     val jersey = when {
@@ -339,7 +343,7 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
     }
     val liberoName = stringResource(R.string.libero)
     Surface(
-        modifier = Modifier.size(44.dp * scale).semantics { if (libero) stateDescription = liberoName },
+        modifier = Modifier.size(44.dp * scale).alpha(dim).semantics { if (libero) stateDescription = liberoName },
         shape = CircleShape,
         color = jersey,
         border = when {
@@ -362,14 +366,21 @@ private fun Token(slot: CourtSlot, scale: Float) = Box {
         }
     }
     // TalkBack reads them after the name (`badges`)
-    if (slot.setter) Badge(stringResource(R.string.setter_short), Modifier.align(Alignment.TopEnd).notRead())
-    if (slot.spotlight) Efficiency(slot.efficiency, slot.grade, Modifier.align(Alignment.TopStart).offset(x = (-14).dp, y = (-6).dp).notRead())
-    if (!slot.touch.isNullOrEmpty()) Badge(slot.touch, Modifier.align(Alignment.BottomStart).offset(x = (-4).dp, y = 4.dp).notRead())
+    // above the number, which takes 26 of the 44 of the jersey, centered:
+    // on it a number like 12 lost its second digit
+    if (slot.setter) {
+        Badge(
+            stringResource(R.string.setter_short),
+            Modifier.align(Alignment.TopEnd).offset(y = 9.dp * scale - BADGE).alpha(dim).testTag(SETTER_BADGE).notRead(),
+        )
+    }
+    if (slot.spotlight) Efficiency(slot.efficiency, slot.grade, Modifier.align(Alignment.TopStart).offset(x = (-14).dp, y = (-6).dp).alpha(dim).notRead())
+    if (!slot.touch.isNullOrEmpty()) Badge(slot.touch, Modifier.align(Alignment.BottomStart).offset(x = (-4).dp, y = 4.dp).alpha(dim).notRead())
     if (slot.serving) {
         Icon(
             painterResource(R.drawable.ic_ball),
             contentDescription = null,
-            modifier = Modifier.align(Alignment.BottomStart).offset(x = (-14).dp, y = 4.dp).size(22.dp),
+            modifier = Modifier.align(Alignment.BottomStart).offset(x = (-14).dp, y = 4.dp).size(22.dp).alpha(dim),
             tint = MaterialTheme.colorScheme.primary,
         )
     }
@@ -394,10 +405,15 @@ private fun Efficiency(efficiency: Double?, grade: Double?, modifier: Modifier) 
     )
 }
 
+private val BADGE = 18.dp
+
+/** The badge of the setter, for the tests. */
+const val SETTER_BADGE = "setter badge"
+
 /** On the jersey: the setter, the evaluation of the last touch. */
 @Composable
 private fun Badge(text: String, modifier: Modifier) = Surface(
-    modifier = modifier.size(18.dp),
+    modifier = modifier.size(BADGE),
     shape = CircleShape,
     color = MaterialTheme.colorScheme.primary,
 ) {
