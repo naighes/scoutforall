@@ -451,6 +451,25 @@ mod tests {
         assert!(saved_events(&s).await.is_empty());
     }
 
+    /// Only the player on the diagonal of the setter can become the setter:
+    /// anyone else would move the libero. Up to v0.10 any player on court
+    /// but the libero could.
+    #[tokio::test]
+    async fn only_the_diagonal_becomes_the_setter() {
+        let mut s = scouting().await;
+        let ids = |choices: Vec<crate::scouting::PlayerChoice>| -> Vec<Uuid> {
+            choices.iter().map(|c| c.id).collect()
+        };
+        s.session.choose_event(CS).await.unwrap();
+        // the setter in position 1, the opposite in 4
+        assert_eq!(ids(s.session.player_choices()), vec![s.players[3]]);
+        s.session.choose_player(s.players[3]).await.unwrap();
+        assert_eq!(event_types(&saved_events(&s).await), vec![CS]);
+        // and back
+        s.session.choose_event(CS).await.unwrap();
+        assert_eq!(ids(s.session.player_choices()), vec![s.players[0]]);
+    }
+
     /// With the player first, the event is chosen only when the player can
     /// play more than one.
     #[tokio::test]

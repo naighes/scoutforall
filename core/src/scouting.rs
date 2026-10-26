@@ -262,6 +262,10 @@ impl ScoutingSession {
             .filter_map(|(index, (role, id))| {
                 id.filter(|id| match event {
                     Some(EventTypeEnum::R) | None => lineup.find_position(id).is_some(),
+                    // only the diagonal: the libero follows the setter, so
+                    // anyone else would move it, even to the front row; the
+                    // saved sets with another one stay readable
+                    Some(EventTypeEnum::CS) => lineup.get_setter_diagonal() == Some(*id),
                     Some(event) => self.snapshot.can_play(event, id),
                 })
                 .and_then(|id| self.current_match.team.find_player(id))

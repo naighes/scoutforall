@@ -207,6 +207,15 @@ impl Lineup {
         self.players.iter().position(|id| id == player_id)
     }
 
+    /// The player on the diagonal of the setter, three positions away: the
+    /// only one who can become the setter keeping the libero in place (its
+    /// slot depends on the rotation modulo 3, see `get_libero_slot`).
+    pub fn get_setter_diagonal(&self) -> Option<Uuid> {
+        self.find_position(&self.current_setter)
+            .and_then(|setter| self.players.get((setter + 3) % 6))
+            .copied()
+    }
+
     fn try_set(&mut self, player_id: &Uuid, position: usize) -> Result<(), AppError> {
         if position < self.players.len() {
             self.players[position] = *player_id;
