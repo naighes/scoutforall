@@ -1,23 +1,28 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -26,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -110,20 +116,26 @@ private fun MatchContent(
         color = resultColor(m.finished, m.won.toInt(), m.lost.toInt()),
     )
     val inProgress = (m.next as? NextSetKind.Resume)?.setNumber
+    // the statistics of the match under its score, a button of their own;
+    // the ones of a set touching it
+    if (m.sets.isNotEmpty()) {
+        OutlinedButton(
+            onClick = onStats,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+        ) {
+            Icon(painterResource(R.drawable.ic_stats), contentDescription = null, Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.match_stats), Modifier.weight(1f, fill = false))
+        }
+    }
     val sets = Modifier.weight(1f).fillMaxWidth()
     when {
         m.sets.isEmpty() -> Centered(sets) { Text(stringResource(R.string.no_sets)) }
         else -> LazyColumn(sets) {
             items(m.sets, key = { it.number.toInt() }) {
                 SetRow(it, it.number == inProgress) { onSet(it.number.toInt()) }
-            }
-            // its events and statistics touching a set, the ones of the match here
-            item(key = "stats") {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.match_stats)) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
-                    modifier = Modifier.clickable(onClick = onStats),
-                )
             }
         }
     }

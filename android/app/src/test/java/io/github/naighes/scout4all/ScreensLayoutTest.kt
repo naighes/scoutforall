@@ -75,6 +75,8 @@ class ScreensLayoutTest(private val screen: Size) {
         assertFits("match", string(R.string.match_stats), string(R.string.resume_set_n, 1)) {
             MatchScreen(team, match, onBack = {}, onEdit = {}, onStartSet = {}, onResumeSet = {}, onSet = {}, onStats = {})
         }
+        // the statistics a button of their own, whole under the score
+        rule.assertWhole(hasText(string(R.string.match_stats)) and hasClickAction())
     }
 
     @Test
