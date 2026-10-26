@@ -97,6 +97,15 @@ class TutorialFlowTest {
     @Test
     fun theWholeTutorialGoesToTheEnd() {
         start()
+        playToTheEnd()
+        rule.waitFor({ "the tutorial still to show" }) { !core { it.tutorialPending() } }
+        val team = core { it.tutorialTeam() }
+        val match = core { it.matches(team) }.single() as MatchListing.Match
+        assertScouted(team, match)
+    }
+
+    /** Each step played, to the last one. */
+    private fun playToTheEnd() {
         caption(R.string.tutorial_welcome)
         var steps = 0
         while (true) {
@@ -107,9 +116,10 @@ class TutorialFlowTest {
             check(steps < 100) { "the tutorial doesn't end" }
         }
         assertEquals(tutorialSteps("").size, steps)
-        rule.waitFor({ "the tutorial still to show" }) { !core { it.tutorialPending() } }
-        val team = core { it.tutorialTeam() }
-        val match = core { it.matches(team) }.single() as MatchListing.Match
+    }
+
+    /** The match as the tutorial scouts it: 2-0, the lineup changed. */
+    private fun assertScouted(team: String, match: MatchListing.Match) {
         val state = core { it.scouting(team, match.id).state() }
         assertEquals(2, state.scoreUs.toInt())
         assertEquals(0, state.scoreThem.toInt())
@@ -117,6 +127,43 @@ class TutorialFlowTest {
         assertTrue("$numbers", numbers.containsAll(listOf(3, 24)))
         assertTrue("$numbers", numbers.none { it == 18 || it == 8 })
         assertEquals(3, state.court.single { it.setter }.number.toInt())
+    }
+
+    private fun tutorialFromTheSettings() {
+        rule.onNode(hasContentDescription(string(R.string.settings)) and hasClickAction()).performClick()
+        rule.waitForText(string(R.string.tutorial_detail))
+        touch(string(R.string.tutorial))
+    }
+
+    /** Seen again the same day: on a new match, the first one kept. */
+    @Test
+    fun seenAgainFromTheSettingsItScoutsAnotherMatch() {
+        start()
+        playToTheEnd()
+        // back from the scouting to the teams
+        repeat(3) {
+            rule.waitForIdle()
+            rule.onNode(hasContentDescription(string(R.string.back)) and hasClickAction()).performClick()
+        }
+        rule.waitForText(string(R.string.teams))
+        tutorialFromTheSettings()
+        playToTheEnd()
+        val team = core { it.tutorialTeam() }
+        val matches = core { it.matches(team) }.map { it as MatchListing.Match }
+        assertEquals(listOf("Brazil", "Brazil 2"), matches.map { it.opponent }.sorted())
+        matches.forEach { assertScouted(team, it) }
+        assertEquals(1, core { it.teams() }.size)
+    }
+
+    /** An update has no example team: seen from the settings, it gets one. */
+    @Test
+    fun onAnUpdateFromTheSettingsWithANewExampleTeam() {
+        start(newInstallation = false)
+        rule.waitForText(string(R.string.no_teams))
+        tutorialFromTheSettings()
+        playToTheEnd()
+        assertEquals(1, core { it.teams() }.size)
+        assertFalse(core { it.tutorialPending() })
     }
 
     @Test

@@ -10,6 +10,7 @@ use crate::{
     set_start::SetStartForm,
     shapes::{
         enums::{GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
+        r#match::MatchEntry,
         player::PlayerEntry,
         team::TeamEntry,
     },
@@ -100,10 +101,18 @@ pub async fn add_example_team_if_new(
 }
 
 /// The match of the tutorial, on `date`: at home, against the opponent of
-/// the example.
-pub fn tutorial_match(labels: &Labels, date: DateTime<FixedOffset>) -> MatchForm {
+/// the example, numbered from 2 when the matches of `taken` (their ids)
+/// already have it that day, as when the tutorial is seen again.
+pub fn tutorial_match(labels: &Labels, date: DateTime<FixedOffset>, taken: &[String]) -> MatchForm {
+    let opponent = (1..)
+        .map(|n| match n {
+            1 => labels.example_opponent.to_string(),
+            _ => format!("{} {n}", labels.example_opponent),
+        })
+        .find(|opponent| !taken.contains(&MatchEntry::id_of(opponent, &date)))
+        .unwrap_or_default();
     MatchForm {
-        opponent: labels.example_opponent.to_string(),
+        opponent,
         home: true,
         ..MatchForm::new(date)
     }

@@ -186,6 +186,8 @@
     <string name="sets_score">sets %1$d a %2$d</string>
     <string name="touches_spoken">toques %1$d, perfeitos %2$d, erros %3$d</string>
     <!-- the tutorial -->
+    <string name="tutorial">Tutorial</string>
+    <string name="tutorial_detail">Como fazer o scout de uma partida, com o time de exemplo</string>
     <string name="tutorial_skip">Pular</string>
     <string name="tutorial_next">Avançar</string>
     <string name="tutorial_progress">%1$d de %2$d</string>

@@ -187,6 +187,8 @@
     <string name="sets_score">sets %1$d to %2$d</string>
     <string name="touches_spoken">touches %1$d, perfect %2$d, errors %3$d</string>
     <!-- the tutorial -->
+    <string name="tutorial">Tutorial</string>
+    <string name="tutorial_detail">How to scout a match, with the example team</string>
     <string name="tutorial_skip">Skip</string>
     <string name="tutorial_next">Next</string>
     <string name="tutorial_progress">%1$d of %2$d</string>

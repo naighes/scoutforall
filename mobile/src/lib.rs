@@ -54,9 +54,9 @@ use scout4all_core::{
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
     storage::{
-        Store,
+        Store, StoreEntry,
         fs::FsStore,
-        layout::{CONFIG, UNREADABLE_CONFIG},
+        layout::{self, CONFIG, UNREADABLE_CONFIG},
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
@@ -2266,9 +2266,28 @@ impl Scout4All {
         MatchForm::new(date)
     }
 
-    /// The match of the tutorial, on `date`, ready to save.
-    pub fn tutorial_match_form(&self, date: MatchDate) -> MatchForm {
-        example::tutorial_match(self.language.labels(), date)
+    /// The match of the tutorial of the team, on `date`, ready to save: a
+    /// new one, also when the tutorial is seen again.
+    pub fn tutorial_match_form(
+        &self,
+        team_id: String,
+        date: MatchDate,
+    ) -> Result<MatchForm, MobileError> {
+        let folder = layout::team_folder(&parse_id(&team_id)?);
+        let taken: Vec<String> = self
+            .runtime
+            .block_on(self.store.list(&folder))?
+            .into_iter()
+            .filter_map(|entry| match entry {
+                StoreEntry::Folder(name) => Some(name),
+                StoreEntry::Blob(_) => None,
+            })
+            .collect();
+        Ok(example::tutorial_match(
+            self.language.labels(),
+            date,
+            &taken,
+        ))
     }
 
     /// The form of a match of the team, to edit it.

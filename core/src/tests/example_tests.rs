@@ -164,10 +164,21 @@ mod tests {
     #[test]
     fn the_match_of_the_tutorial_is_at_home_against_brazil() {
         let date = chrono::Utc::now().fixed_offset();
-        let form = tutorial_match(labels(LanguageEnum::It), date);
+        let form = tutorial_match(labels(LanguageEnum::It), date, &[]);
         assert_eq!(form.opponent, "Brasile");
         assert!(form.home);
         assert_eq!(form.date, Some(date));
         assert!(form.validate(None).is_ok());
+    }
+
+    /// Seen again the same day: another match, not one already there.
+    #[test]
+    fn the_match_of_the_tutorial_seen_again_is_numbered() {
+        let date = chrono::Utc::now().fixed_offset();
+        let id = |opponent: &str| crate::shapes::r#match::MatchEntry::id_of(opponent, &date);
+        let taken = vec![id("Brazil"), id("Brazil 2")];
+        assert_eq!(tutorial_match(EN, date, &taken).opponent, "Brazil 3");
+        let yesterday = date - chrono::Duration::days(1);
+        assert_eq!(tutorial_match(EN, yesterday, &taken).opponent, "Brazil");
     }
 }

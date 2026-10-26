@@ -103,7 +103,7 @@ class MatchFormViewModel(
                     MatchFormState.Editing(
                         when (matchId) {
                             null -> when (example) {
-                                true -> core.tutorialMatchForm(rfc3339(OffsetDateTime.now()))
+                                true -> core.tutorialMatchForm(teamId, rfc3339(OffsetDateTime.now()))
                                 false -> core.newMatchForm(rfc3339(OffsetDateTime.now()))
                             }
                             else -> core.matchForm(teamId, matchId)

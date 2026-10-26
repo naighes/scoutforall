@@ -36,7 +36,7 @@ private const val REPORTS = "scout4all-0fd59357fbe3@intake.linear.app"
  * statistics sent, the terms of use, the information on the app. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit, onTutorial: () -> Unit = {}) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
     Scaffold(
@@ -64,6 +64,7 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit)
                 }
             }
             StatisticsSwitch()
+            Row(stringResource(R.string.tutorial), stringResource(R.string.tutorial_detail), onTutorial)
             Row(stringResource(R.string.terms_of_use), null, onTerms)
             Row(stringResource(R.string.about), null, onAbout)
         }

@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
             Scout4AllTheme {
                 CompositionLocalProvider(LocalTutorial provides tutorial.tutorial) {
                     Box {
-                        Navigation(teams, terms, opened, onOpened = { opened.value = null }, onTerms = tutorial::startIfPending)
+                        Navigation(teams, terms, tutorial, opened, onOpened = { opened.value = null })
                         TutorialOverlay(tutorial.tutorial)
                     }
                 }
@@ -126,7 +126,7 @@ private fun Intent.archive(): Uri? = when (action) {
     else -> null
 }
 
-/** The screens: the terms of use until seen (then `onTerms`), then teams →
+/** The screens: the terms of use until seen (then the tutorial), then teams →
  * team → its form, a player or a match → its form, the start of a set, its
  * scouting, its events or the statistics, and the forms of a new team,
  * player or match (which goes on with its first set); teams → settings →
@@ -136,15 +136,15 @@ private fun Intent.archive(): Uri? = when (action) {
 private fun Navigation(
     teams: TeamsViewModel,
     terms: TermsViewModel,
+    tutorials: TutorialViewModel,
     opened: StateFlow<Uri?>,
     onOpened: () -> Unit,
-    onTerms: () -> Unit,
 ) {
     // under the splash until read
     val seen = terms.seen.collectAsState().value ?: return
     val nav = rememberNavController()
     // the tutorial, if still to show, once the terms are accepted
-    LaunchedEffect(seen) { if (seen) onTerms() }
+    LaunchedEffect(seen) { if (seen) tutorials.startIfPending() }
     val tutorial = LocalTutorial.current?.active == true
     // over any screen, once the terms are accepted
     val import = rememberImport(teamId = null, onTeam = { nav.navigate("team/$it") }, onMatch = nav::openMatch)
@@ -179,6 +179,7 @@ private fun Navigation(
                 onBack = { nav.back(entry) },
                 onTerms = { nav.navigate("settings/terms") },
                 onAbout = { nav.navigate("settings/about") },
+                onTutorial = { tutorials.startAgain { nav.popBackStack("teams", inclusive = false) } },
             )
         }
         composable("settings/terms") { entry ->

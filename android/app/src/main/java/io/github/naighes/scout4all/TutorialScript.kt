@@ -24,6 +24,21 @@ class TutorialViewModel(private val app: Scout4AllApplication) : ViewModel() {
         }
     }
 
+    /** From the settings: on the example team, a new one if it was removed
+     * or changed; `onReady` goes back to the teams, where it starts. */
+    fun startAgain(onReady: () -> Unit) {
+        if (tutorial.active) return
+        viewModelScope.launch {
+            val team = try {
+                app.core { it.tutorialTeam() }
+            } catch (_: MobileException) {
+                return@launch
+            }
+            onReady()
+            start(team)
+        }
+    }
+
     private fun start(team: String) = tutorial.start(tutorialSteps(team)) {
         viewModelScope.launch {
             try {
