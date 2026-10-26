@@ -69,10 +69,12 @@ incremental = false
 
 # the core of the apps: as release, but a panic unwinds, and UniFFI turns it
 # into an exception of the app, which says so and restarts, instead of
-# closing at once
+# closing at once; with its symbols, which the Android build takes out of the
+# app and gives to Play, to name the functions of a crash
 [profile.mobile]
 inherits = "release"
 panic = "unwind"
+strip = false
 
 [dependencies]
 scout4all-core.workspace = true

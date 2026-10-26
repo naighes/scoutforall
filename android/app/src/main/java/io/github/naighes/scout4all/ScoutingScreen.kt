@@ -174,25 +174,25 @@ class ScoutingViewModel(
     }
 
     /** A player on court: the player first, or the player of the event. */
-    fun player(id: String) = choose { s ->
+    fun player(id: String) = choose("player $id") { s ->
         when (s.state().step) {
             ScoutingStep.PLAYER -> s.choosePlayer(id)
             else -> s.choosePlayerFirst(id)
         }
     }
 
-    fun event(event: EventChoice) = choose { it.chooseEvent(event.value) }
+    fun event(event: EventChoice) = choose("event ${event.value}") { it.chooseEvent(event.value) }
 
-    fun replacement(player: ScoutingPlayer) = choose { it.chooseReplacement(player.id) }
+    fun replacement(player: ScoutingPlayer) = choose("replacement ${player.id}") { it.chooseReplacement(player.id) }
 
-    fun technique(technique: TechniqueChoice) = choose {
+    fun technique(technique: TechniqueChoice) = choose("technique ${technique.value}") {
         it.chooseTechnique(technique.value)
         Progress.CHOOSING
     }
 
-    fun eval(eval: EvalChoice) = choose { it.chooseEval(eval.value) }
+    fun eval(eval: EvalChoice) = choose("eval ${eval.value}") { it.chooseEval(eval.value) }
 
-    fun undo() = choose {
+    fun undo() = choose("undo") {
         it.undo()
         Progress.CHOOSING
     }
@@ -229,8 +229,8 @@ class ScoutingViewModel(
     }
 
     /** One choice at a time: it may save an event, off the main thread.
-     * Once the set is over, only the undo. */
-    private fun choose(choice: (Scouting) -> Progress) {
+     * Once the set is over, only the undo. `what` goes in the journal. */
+    private fun choose(what: String, choice: (Scouting) -> Progress) {
         val s = scouting ?: return
         val view = when (val current = mutableState.value) {
             is ScoutingUi.Choosing -> current.view.takeUnless { current.busy } ?: return
@@ -238,6 +238,7 @@ class ScoutingViewModel(
             else -> return
         }
         mutableState.value = ScoutingUi.Choosing(view, busy = true)
+        app.journal.add(what)
         viewModelScope.launch {
             mutableState.value = app.onCore {
                 try {

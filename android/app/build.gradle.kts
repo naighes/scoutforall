@@ -20,8 +20,12 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.9.0"
-        // the core is built for these only (see cargoNdk)
-        ndk { abiFilters += "arm64-v8a" }
+        // the core is built for these only (see cargoNdk); its symbols go
+        // in the bundle, for Play to name the functions of a native crash
+        ndk {
+            abiFilters += "arm64-v8a"
+            debugSymbolLevel = "SYMBOL_TABLE"
+        }
     }
 
     buildFeatures { compose = true }

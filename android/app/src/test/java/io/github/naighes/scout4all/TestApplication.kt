@@ -22,6 +22,9 @@ class TestApplication : Scout4AllApplication() {
 
     override fun startLog(dataDir: String) {}
 
+    // a handler of every thread would outlive the test
+    override fun catchCrashes() {}
+
     override fun startAgain() {
         startedAgain++
     }

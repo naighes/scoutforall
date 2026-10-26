@@ -182,6 +182,11 @@
     <string name="start_again">再起動</string>
     <string name="panic_report_title">Android アプリの予期しないエラー</string>
     <string name="panic_report_body">何をしていましたか？\n\nアプリのメッセージ: %1$s\n\n---\n%2$s</string>
+    <string name="crash_title">アプリが予期せず終了しました</string>
+    <string name="crash_text">前回、エラーのためアプリが終了しました。報告しますか？エラーと最後の画面・操作（名前なし）を含むメールが用意されています。</string>
+    <string name="not_now">後で</string>
+    <string name="crash_report_title">Android アプリの予期しない終了</string>
+    <string name="crash_report_body">何をしていましたか？\n\n---\n%1$s</string>
     <string name="discard_changes">変更を破棄しますか？</string>
     <string name="discard">破棄</string>
     <string name="keep_editing">編集を続ける</string>

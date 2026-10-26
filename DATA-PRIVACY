@@ -61,6 +61,14 @@ e-mail address, your name and signature if your e-mail app adds them, what
 you write, and the lines the app adds to help find the problem: the version
 of the app, of Android and the model of the phone.
 
+Crash reports. If the app closes because of an error, at the next start it
+offers to report it, with an e-mail as above that you send yourself. The
+e-mail also holds the error and the last screens and choices of scouting
+done in the app, by random identifiers, never names. Until then they stay
+on the phone, and are deleted whether you send the report or not. If you
+let your phone share diagnostics with Google, Google Play also tells the
+developer of crashes, without your data, under the terms of Google.
+
 
 2. Why
 

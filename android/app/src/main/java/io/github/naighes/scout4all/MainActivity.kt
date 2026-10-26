@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
@@ -79,6 +80,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 PanicDialog(application as Scout4AllApplication)
+                CrashDialog(application as Scout4AllApplication)
             }
         }
     }
@@ -130,6 +132,17 @@ private fun Navigation(
     // under the splash until read
     val seen = terms.seen.collectAsState().value ?: return
     val nav = rememberNavController()
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    // the screens in the journal, by their ids
+    DisposableEffect(nav) {
+        val listener = NavController.OnDestinationChangedListener { _, destination, arguments ->
+            val ids = arguments?.keySet().orEmpty().sorted()
+                .mapNotNull { key -> arguments?.getString(key)?.let { "$key=$it" } }
+            app.journal.add(listOfNotNull("screen", destination.route, ids.joinToString(" ").ifEmpty { null }).joinToString(" "))
+        }
+        nav.addOnDestinationChangedListener(listener)
+        onDispose { nav.removeOnDestinationChangedListener(listener) }
+    }
     // the tutorial, if still to show, once the terms are accepted
     LaunchedEffect(seen) { if (seen) tutorials.startIfPending() }
     val tutorial = LocalTutorial.current?.active == true
@@ -283,7 +296,7 @@ private fun PanicDialog(app: Scout4AllApplication) {
     val panic = app.panic.collectAsState().value ?: return
     val context = LocalContext.current
     val title = stringResource(R.string.panic_report_title)
-    val body = stringResource(R.string.panic_report_body, panic, device())
+    val body = stringResource(R.string.panic_report_body, panic, journaled(app))
     AlertDialog(
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
@@ -294,6 +307,34 @@ private fun PanicDialog(app: Scout4AllApplication) {
         },
         confirmButton = {
             TextButton(onClick = app::startAgain) { Text(stringResource(R.string.start_again)) }
+        },
+    )
+}
+
+/** The phone and what was done last: what helps to reproduce a problem. */
+private fun journaled(app: Scout4AllApplication) =
+    (listOf(device(), "Journal:") + app.journal.lines()).joinToString("\n")
+
+/** At the start after a crash: the report, to send or not; either way not
+ * offered again. */
+@Composable
+private fun CrashDialog(app: Scout4AllApplication) {
+    val crash = app.crashed.collectAsState().value ?: return
+    val context = LocalContext.current
+    val title = stringResource(R.string.crash_report_title)
+    val body = stringResource(R.string.crash_report_body, crash)
+    AlertDialog(
+        onDismissRequest = app::forgetCrash,
+        title = { Text(stringResource(R.string.crash_title)) },
+        text = { Text(stringResource(R.string.crash_text)) },
+        dismissButton = {
+            TextButton(onClick = app::forgetCrash) { Text(stringResource(R.string.not_now)) }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                context.report(title, body)
+                app.forgetCrash()
+            }) { Text(stringResource(R.string.report)) }
         },
     )
 }

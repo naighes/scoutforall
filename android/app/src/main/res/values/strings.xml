@@ -184,6 +184,11 @@
     <string name="start_again">Start again</string>
     <string name="panic_report_title">Unexpected error in the Android app</string>
     <string name="panic_report_body">What were you doing?\n\nThe app said: %1$s\n\n---\n%2$s</string>
+    <string name="crash_title">The app closed unexpectedly</string>
+    <string name="crash_text">Last time the app closed because of an error. Will you report it? The e-mail is ready, with the error and the last screens and touches (no names).</string>
+    <string name="not_now">Not now</string>
+    <string name="crash_report_title">Crash of the Android app</string>
+    <string name="crash_report_body">What were you doing?\n\n---\n%1$s</string>
     <string name="discard_changes">Discard the changes?</string>
     <string name="discard">Discard</string>
     <string name="keep_editing">Keep editing</string>

@@ -41,10 +41,30 @@ open class Scout4AllApplication : Application() {
     }
     private val core: Scout4All by lazyCore
 
-    // what wasn't sent last time (no network, the app closed)
+    /** What was done last, for a report. */
+    val journal = Journal()
+
+    val crashes by lazy { Crashes(filesDir) }
+
+    private val mutableCrashed = MutableStateFlow<String?>(null)
+    /** The report of a crash of the last time, until sent or not. */
+    val crashed: StateFlow<String?> = mutableCrashed
+
     override fun onCreate() {
         super.onCreate()
+        mutableCrashed.value = crashes.last()
+        catchCrashes()
+        // what wasn't sent last time (no network, the app closed)
         sendUploads()
+    }
+
+    /** A crash written for the next start: the whole process. */
+    protected open fun catchCrashes() = crashes.catchAll(journal, ::device)
+
+    /** The report of the last crash, sent or not: not offered again. */
+    fun forgetCrash() {
+        crashes.forget()
+        mutableCrashed.value = null
     }
 
     /** The core follows the language of the app: the activity starts again

@@ -183,6 +183,11 @@
     <string name="start_again">Reiniciar</string>
     <string name="panic_report_title">Erro inesperado no app Android</string>
     <string name="panic_report_body">O que você estava fazendo?\n\nO app disse: %1$s\n\n---\n%2$s</string>
+    <string name="crash_title">O app fechou inesperadamente</string>
+    <string name="crash_text">Da última vez, o app fechou por causa de um erro. Quer informar? O e-mail está pronto, com o erro e as últimas telas e escolhas (sem nomes).</string>
+    <string name="not_now">Agora não</string>
+    <string name="crash_report_title">Fechamento inesperado do app Android</string>
+    <string name="crash_report_body">O que você estava fazendo?\n\n---\n%1$s</string>
     <string name="discard_changes">Descartar as alterações?</string>
     <string name="discard">Descartar</string>
     <string name="keep_editing">Continuar editando</string>

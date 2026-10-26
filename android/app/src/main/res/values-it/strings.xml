@@ -183,6 +183,11 @@
     <string name="start_again">Riparti</string>
     <string name="panic_report_title">Errore inatteso nell\'app Android</string>
     <string name="panic_report_body">Cosa stavi facendo?\n\nL\'app ha detto: %1$s\n\n---\n%2$s</string>
+    <string name="crash_title">L\'app si è chiusa all\'improvviso</string>
+    <string name="crash_text">L\'ultima volta l\'app si è chiusa per un errore. Vuoi segnalarlo? L\'e-mail è pronta, con l\'errore e le ultime schermate e scelte (senza nomi).</string>
+    <string name="not_now">Non ora</string>
+    <string name="crash_report_title">Chiusura improvvisa dell\'app Android</string>
+    <string name="crash_report_body">Cosa stavi facendo?\n\n---\n%1$s</string>
     <string name="discard_changes">Scartare le modifiche?</string>
     <string name="discard">Scarta</string>
     <string name="keep_editing">Continua</string>

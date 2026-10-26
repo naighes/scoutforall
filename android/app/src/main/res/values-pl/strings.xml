@@ -185,6 +185,11 @@
     <string name="start_again">Uruchom ponownie</string>
     <string name="panic_report_title">Nieoczekiwany błąd w aplikacji Android</string>
     <string name="panic_report_body">Co robiłeś(-aś)?\n\nAplikacja napisała: %1$s\n\n---\n%2$s</string>
+    <string name="crash_title">Aplikacja nieoczekiwanie się zamknęła</string>
+    <string name="crash_text">Ostatnio aplikacja zamknęła się z powodu błędu. Czy chcesz to zgłosić? E-mail jest gotowy, z błędem i ostatnimi ekranami i wyborami (bez nazwisk).</string>
+    <string name="not_now">Nie teraz</string>
+    <string name="crash_report_title">Nieoczekiwane zamknięcie aplikacji Android</string>
+    <string name="crash_report_body">Co robiłeś(-aś)?\n\n---\n%1$s</string>
     <string name="discard_changes">Odrzucić zmiany?</string>
     <string name="discard">Odrzuć</string>
     <string name="keep_editing">Edytuj dalej</string>
