@@ -40,6 +40,7 @@ fun tutorialSteps(team: String): List<TutorialStep> = listOf(
     TutorialStep.Touch("team:$team", R.string.tutorial_team),
     TutorialStep.Touch("matches-tab", R.string.tutorial_matches),
     TutorialStep.Touch("new-match", R.string.tutorial_new_match),
+    TutorialStep.Read("match-fields", R.string.tutorial_match_fields),
     TutorialStep.Touch("save-match", R.string.tutorial_save_match),
     TutorialStep.Read("lineup", R.string.tutorial_lineup),
     TutorialStep.Touch("start-set", R.string.tutorial_start_set),

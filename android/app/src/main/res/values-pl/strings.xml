@@ -195,7 +195,8 @@
     <string name="tutorial_team">To jest przykładowa drużyna: dotknij jej.</string>
     <string name="tutorial_matches">Tu są zawodniczki. Mecze są w drugiej karcie: dotknij jej.</string>
     <string name="tutorial_new_match">Dotknij +, aby dodać nowy mecz.</string>
-    <string name="tutorial_save_match">Przeciwnik, data, u siebie czy na wyjeździe, zmiany: już wypełniłem. Dotknij Zapisz.</string>
+    <string name="tutorial_match_fields">Przeciwnik, data, u siebie czy na wyjeździe, zmiany: już wypełniłem.</string>
+    <string name="tutorial_save_match">Dotknij Zapisz.</string>
     <string name="tutorial_lineup">Skład pierwszego seta jest gotowy: rozgrywająca na 6 (P6), my przyjmujemy; Spirito jest libero, Fersino drugą libero. Dotknięcie pozycji zmienia jej zawodniczkę.</string>
     <string name="tutorial_start_set">Dotknij Rozpocznij seta.</string>
 </resources>

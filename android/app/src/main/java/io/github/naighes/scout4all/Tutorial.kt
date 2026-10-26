@@ -288,10 +288,13 @@ private fun Hand(hole: Rect, swipe: Boolean) {
     )
     val density = LocalDensity.current
     val rise = with(density) { if (swipe) 96.dp.toPx() * phase else 0f }
-    val color = MaterialTheme.colorScheme.primary
+    // white on a dark edge: seen on the amber of a button too
     Canvas(Modifier.fillMaxSize()) {
         val radius = 18.dp.toPx() + 22.dp.toPx() * phase
-        drawCircle(color.copy(alpha = 1f - phase), radius, hole.center - Offset(0f, rise), style = Stroke(3.dp.toPx()))
+        val center = hole.center - Offset(0f, rise)
+        val alpha = 1f - phase
+        drawCircle(Color.Black.copy(alpha = alpha * 0.6f), radius, center, style = Stroke(6.dp.toPx()))
+        drawCircle(Color.White.copy(alpha = alpha), radius, center, style = Stroke(3.dp.toPx()))
     }
     val finger = with(density) { 40.dp.roundToPx() }
     Icon(

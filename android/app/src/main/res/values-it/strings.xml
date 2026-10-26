@@ -193,7 +193,8 @@
     <string name="tutorial_team">Questa è la squadra di esempio: toccala.</string>
     <string name="tutorial_matches">Qui ci sono le giocatrici. Le partite sono nell\'altra scheda: toccala.</string>
     <string name="tutorial_new_match">Tocca + per una nuova partita.</string>
-    <string name="tutorial_save_match">Avversario, data, casa o trasferta, cambi: li ho già scritti io. Tocca Salva.</string>
+    <string name="tutorial_match_fields">Avversario, data, casa o trasferta, cambi: li ho già scritti io.</string>
+    <string name="tutorial_save_match">Tocca Salva.</string>
     <string name="tutorial_lineup">La formazione del primo set è pronta: palleggiatrice in 6 (P6), noi in ricezione; Spirito è il libero, Fersino il secondo libero. Toccando una posizione se ne cambia la giocatrice.</string>
     <string name="tutorial_start_set">Tocca Inizia il set.</string>
 </resources>

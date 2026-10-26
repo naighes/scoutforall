@@ -46,8 +46,13 @@ class TutorialFlowTest {
         touch(string(R.string.matches))
         caption(R.string.tutorial_new_match)
         rule.onNode(hasContentDescription(string(R.string.new_match)) and hasClickAction()).performClick()
-        caption(R.string.tutorial_save_match)
+        caption(R.string.tutorial_match_fields)
         rule.waitForText("Brazil")
+        // to read: the form can't be changed meanwhile
+        touch(string(R.string.save))
+        caption(R.string.tutorial_match_fields)
+        touch(string(R.string.tutorial_next))
+        caption(R.string.tutorial_save_match)
         touch(string(R.string.save))
         caption(R.string.tutorial_lineup)
         listOf("Alessia Orro", "Paola Egonu", "Ilaria Spirito", "Eleonora Fersino").forEach {

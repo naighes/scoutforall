@@ -193,7 +193,8 @@
     <string name="tutorial_team">Este é o time de exemplo: toque nele.</string>
     <string name="tutorial_matches">Aqui estão as jogadoras. As partidas estão na outra aba: toque nela.</string>
     <string name="tutorial_new_match">Toque em + para uma nova partida.</string>
-    <string name="tutorial_save_match">Adversário, data, casa ou fora, substituições: eu já preenchi. Toque em Salvar.</string>
+    <string name="tutorial_match_fields">Adversário, data, casa ou fora, substituições: eu já preenchi.</string>
+    <string name="tutorial_save_match">Toque em Salvar.</string>
     <string name="tutorial_lineup">A escalação do primeiro set está pronta: levantadora na 6 (P6), nós na recepção; Spirito é a líbero, Fersino a segunda líbero. Tocando uma posição, troca-se a jogadora.</string>
     <string name="tutorial_start_set">Toque em Iniciar o set.</string>
 </resources>

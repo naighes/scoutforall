@@ -182,7 +182,7 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
         val form = state.form
         val error = { field: MatchField -> state.invalid?.takeIf { it.first == field }?.second }
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.weight(1f).verticalScroll(rememberScrollState()).tutorial("match-fields").padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             OutlinedTextField(
