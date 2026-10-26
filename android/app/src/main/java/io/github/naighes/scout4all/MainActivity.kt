@@ -1,14 +1,10 @@
 package io.github.naighes.scout4all
 
-import android.animation.AnimatorSet
-import android.animation.ObjectAnimator
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
-import android.view.View
-import android.view.animation.AccelerateInterpolator
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -92,23 +88,13 @@ class MainActivity : ComponentActivity() {
         intent.archive()?.let { opened.value = it }
     }
 
-    /** The ball grows and fades with the splash, once its turn is over. */
+    /** The name of the app under the ball, then the app, once the turn of
+     * the ball is over. */
     private fun exitSplash(provider: SplashScreenViewProvider) {
-        val icon: View? = provider.iconView
         val remaining = provider.iconAnimationStartMillis + provider.iconAnimationDurationMillis -
             SystemClock.uptimeMillis()
-        val fade = ObjectAnimator.ofFloat(provider.view, View.ALPHA, 1f, 0f)
-        val grow = listOfNotNull(icon).flatMap {
-            listOf(
-                ObjectAnimator.ofFloat(it, View.SCALE_X, 1f, 1.25f),
-                ObjectAnimator.ofFloat(it, View.SCALE_Y, 1f, 1.25f),
-            )
-        }
-        AnimatorSet().apply {
-            playTogether(grow + fade)
-            duration = 300
+        splashExit(provider.view, provider.iconView).apply {
             startDelay = remaining.coerceIn(0, 700)
-            interpolator = AccelerateInterpolator()
             doOnEnd { provider.remove() }
             start()
         }
