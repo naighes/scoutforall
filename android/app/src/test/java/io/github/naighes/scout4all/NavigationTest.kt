@@ -18,11 +18,11 @@ import org.robolectric.RobolectricTestRunner
 class NavigationTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
 
-    /** Past the terms, to the teams. */
+    /** Past the terms, to the home. */
     private fun start() {
         rule.waitForText(string(R.string.accept_terms))
         rule.onNode(hasText(string(R.string.accept_terms)) and hasClickAction()).performClick()
-        rule.waitForText(string(R.string.teams))
+        rule.waitForText(string(R.string.app_name))
     }
 
     private fun back() = rule.onNode(hasContentDescription(string(R.string.back)) and hasClickAction())

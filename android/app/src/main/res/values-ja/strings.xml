@@ -27,6 +27,10 @@
     <string name="home">ホーム</string>
     <string name="away">アウェイ</string>
     <string name="in_progress">進行中</string>
+    <string name="home_in_progress">進行中</string>
+    <string name="home_recent">最近の試合</string>
+    <string name="resume">再開</string>
+    <string name="start">開始</string>
     <string name="new_match">新しい試合</string>
     <string name="edit_match">試合を編集</string>
     <string name="opponent">対戦相手</string>

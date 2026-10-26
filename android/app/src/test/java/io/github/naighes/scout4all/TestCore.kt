@@ -65,6 +65,16 @@ fun startFirstSet(
     match
 }
 
+/** A match of the team won 3–0 with aces; its id. */
+fun winMatch(team: String, opponent: String): String {
+    val match = startFirstSet(team, opponent)
+    repeat(3) { set ->
+        if (set > 0) startNextSet(team, match)
+        core { c -> c.scouting(team, match).use { s -> repeat(25) { s.chooseEval(EvalEnum.PERFECT) } } }
+    }
+    return match
+}
+
 /** The next set of the match started, with the lineup of `startFirstSet`;
  * who serves as the rules say, or `serving` in the tie-break. */
 fun startNextSet(team: String, match: String, serving: TeamSideEnum = TeamSideEnum.US) =

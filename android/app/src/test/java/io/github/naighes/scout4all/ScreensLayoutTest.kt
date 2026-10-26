@@ -44,6 +44,16 @@ class ScreensLayoutTest(private val screen: Size) {
     }
 
     @Test
+    fun theHome() {
+        val team = saveNationalTeam()
+        startFirstSet(team, "Cortona Volley Pallavolo Femminile Valdichiana")
+        winMatch(team, "Serbia")
+        assertFits("home", string(R.string.resume), string(R.string.resume)) {
+            TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
+        }
+    }
+
+    @Test
     fun theTeam() {
         val team = saveNationalTeam()
         assertFits("team", "Ekaterina Antropova") {

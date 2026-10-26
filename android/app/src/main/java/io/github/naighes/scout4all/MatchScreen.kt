@@ -191,7 +191,7 @@ private fun SetRow(set: SetScore, inProgress: Boolean, onClick: () -> Unit) = Li
 )
 
 @Composable
-private fun resultColor(over: Boolean, us: Int, them: Int) = when {
+fun resultColor(over: Boolean, us: Int, them: Int) = when {
     !over -> MaterialTheme.colorScheme.onSurface
     us > them -> Won
     else -> Lost

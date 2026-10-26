@@ -427,6 +427,47 @@ pub enum MatchListing {
     },
 }
 
+/// What scouting the match goes on with.
+fn next_kind(status: &scout4all_core::shapes::r#match::MatchStatus) -> NextSetKind {
+    match next_set(status) {
+        NextSet::Start(form) => NextSetKind::Start {
+            set_number: form.set_number,
+        },
+        NextSet::Resume(set) => NextSetKind::Resume {
+            set_number: set.set_number,
+        },
+        NextSet::Over => NextSetKind::Over,
+    }
+}
+
+/// A match as the home lists it, with its team: how it stands and what
+/// scouting goes on with.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct HomeMatch {
+    pub team_id: String,
+    pub team_name: String,
+    pub id: String,
+    pub opponent: String,
+    pub home: bool,
+    /// RFC 3339, as in `MatchListing`
+    pub date: String,
+    pub won: u8,
+    pub lost: u8,
+    pub next: NextSetKind,
+}
+
+/// The home: the matches not over, the last ones over, of every team, the
+/// most recent first; then the teams.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct Home {
+    pub in_progress: Vec<HomeMatch>,
+    pub recent: Vec<HomeMatch>,
+    pub teams: Vec<TeamListing>,
+}
+
+/// How many matches over the home lists.
+pub const RECENT_MATCHES: usize = 5;
+
 /// An archive to share or to save: the zip of the CLI, and the name the
 /// CLI gives to its file.
 #[derive(Debug, PartialEq, uniffi::Record)]
@@ -2094,6 +2135,49 @@ impl Scout4All {
             .collect())
     }
 
+    /// The home: the matches of every team not over and the last ones
+    /// over, the most recent first, then the teams. What can't be read is
+    /// left out of the matches; the teams list it.
+    pub fn home(&self) -> Result<Home, MobileError> {
+        let teams = self.teams()?;
+        let mut matches: Vec<(DateTime<FixedOffset>, HomeMatch)> = Vec::new();
+        for team in self
+            .runtime
+            .block_on(self.team_reader.read_all())?
+            .into_iter()
+            .flatten()
+        {
+            let read = self.runtime.block_on(self.match_reader.read_all(&team))?;
+            matches.extend(read.into_iter().flatten().filter_map(|m| {
+                let status = m.get_status().ok()?;
+                Some((
+                    m.date,
+                    HomeMatch {
+                        team_id: team.id.to_string(),
+                        team_name: team.name.clone(),
+                        date: m.date.to_rfc3339(),
+                        id: m.id,
+                        opponent: m.opponent,
+                        home: m.home,
+                        won: status.us_wins,
+                        lost: status.them_wins,
+                        next: next_kind(&status),
+                    },
+                ))
+            }));
+        }
+        matches.sort_by(|(a, _), (b, _)| b.cmp(a));
+        let (recent, in_progress): (Vec<HomeMatch>, Vec<HomeMatch>) = matches
+            .into_iter()
+            .map(|(_, m)| m)
+            .partition(|m| m.next == NextSetKind::Over);
+        Ok(Home {
+            in_progress,
+            recent: recent.into_iter().take(RECENT_MATCHES).collect(),
+            teams,
+        })
+    }
+
     /// A match of the team, with its sets.
     pub fn match_details(
         &self,
@@ -2103,15 +2187,7 @@ impl Scout4All {
         let m = self.read_match(&team_id, &match_id)?;
         let status = m.get_status()?;
         let sets = set_scores(&m)?;
-        let next = match next_set(&status) {
-            NextSet::Start(form) => NextSetKind::Start {
-                set_number: form.set_number,
-            },
-            NextSet::Resume(set) => NextSetKind::Resume {
-                set_number: set.set_number,
-            },
-            NextSet::Over => NextSetKind::Over,
-        };
+        let next = next_kind(&status);
         Ok(MatchDetails {
             date: m.date.to_rfc3339(),
             id: m.id,
@@ -3701,6 +3777,90 @@ mod tests {
                 lost: 0,
                 sets: vec![point(1), point(2), point(3)],
             })
+        );
+    }
+
+    /// A match of `team` against `opponent` on `day` of October 2026.
+    fn match_on(app: &Scout4All, team: &str, opponent: &str, day: u8) -> String {
+        app.save_match(
+            team.into(),
+            None,
+            match_form(opponent, &format!("2026-10-{day:02}T18:00:00+02:00"), "8"),
+        )
+        .unwrap()
+    }
+
+    /// Plays the sets of the match, all aces, until it's over or `sets` are.
+    fn play(app: &Scout4All, team: &str, m: &str, sets: u8) {
+        for _ in 0..sets {
+            let scouting = started_set(app, team, m);
+            while scouting.choose_eval(EvalEnum::Perfect).unwrap() != Progress::SetOver {}
+        }
+    }
+
+    #[test]
+    fn the_home_has_the_matches_of_every_team_not_over_and_the_last_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        // Arezzo on the 24th, not started
+        let (cortona, _) = match_with_a_set(&app);
+        let siena = app.save_team(None, form("Siena")).unwrap();
+        for n in 1..=7 {
+            app.save_player(
+                siena.clone(),
+                None,
+                player(&format!("S{n}"), &n.to_string()),
+            )
+            .unwrap();
+        }
+        // six over, on the 1st to the 6th
+        for day in 1..=6 {
+            let m = match_on(&app, &cortona, &format!("Over {day}"), day);
+            play(&app, &cortona, &m, 3);
+        }
+        // a set over, one in progress, one not started
+        let between = match_on(&app, &siena, "Between", 20);
+        play(&app, &siena, &between, 1);
+        let resume = match_on(&app, &cortona, "Resume", 21);
+        started_set(&app, &cortona, &resume);
+        let home = app.home().unwrap();
+        let opponents = |matches: &[HomeMatch]| -> Vec<String> {
+            matches.iter().map(|m| m.opponent.clone()).collect()
+        };
+        assert_eq!(
+            opponents(&home.in_progress),
+            ["Arezzo", "Resume", "Between"]
+        );
+        assert_eq!(
+            home.in_progress.iter().map(|m| &m.next).collect::<Vec<_>>(),
+            [
+                &NextSetKind::Start { set_number: 1 },
+                &NextSetKind::Resume { set_number: 1 },
+                &NextSetKind::Start { set_number: 2 },
+            ]
+        );
+        assert_eq!(home.in_progress[2].team_name, "Siena");
+        // the five most recent over, the oldest left out
+        assert_eq!(
+            opponents(&home.recent),
+            ["Over 6", "Over 5", "Over 4", "Over 3", "Over 2"]
+        );
+        assert_eq!((home.recent[0].won, home.recent[0].lost), (3, 0));
+        assert_eq!(home.recent[0].team_id, cortona);
+        assert_eq!(home.teams.len(), 2);
+    }
+
+    #[test]
+    fn without_teams_the_home_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        assert_eq!(
+            app.home().unwrap(),
+            Home {
+                in_progress: vec![],
+                recent: vec![],
+                teams: vec![],
+            }
         );
     }
 

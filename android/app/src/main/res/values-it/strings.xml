@@ -27,6 +27,10 @@
     <string name="home">in casa</string>
     <string name="away">in trasferta</string>
     <string name="in_progress">in corso</string>
+    <string name="home_in_progress">In corso</string>
+    <string name="home_recent">Ultime partite</string>
+    <string name="resume">Riprendi</string>
+    <string name="start">Inizia</string>
     <string name="new_match">Nuova partita</string>
     <string name="edit_match">Modifica partita</string>
     <string name="opponent">Avversario</string>

@@ -27,6 +27,10 @@
     <string name="home">em casa</string>
     <string name="away">fora</string>
     <string name="in_progress">em andamento</string>
+    <string name="home_in_progress">Em andamento</string>
+    <string name="home_recent">Últimas partidas</string>
+    <string name="resume">Retomar</string>
+    <string name="start">Iniciar</string>
     <string name="new_match">Nova partida</string>
     <string name="edit_match">Editar partida</string>
     <string name="opponent">Adversário</string>

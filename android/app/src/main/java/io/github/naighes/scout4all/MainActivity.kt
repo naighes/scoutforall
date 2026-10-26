@@ -32,6 +32,7 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import io.github.naighes.scout4all.core.NextSetKind
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -158,6 +159,12 @@ private fun Navigation(
                 onNewTeam = { nav.navigate("new-team") },
                 onSettings = { nav.navigate("settings") },
                 onMatch = nav::openMatch,
+                onResume = { team, match, next ->
+                    // over the match: back goes to it
+                    nav.openMatch(team, match)
+                    val scouting = if (next is NextSetKind.Resume) "scouting" else "start-set"
+                    nav.navigate("team/$team/match/${Uri.encode(match)}/$scouting")
+                },
             )
         }
         composable("settings") { entry ->

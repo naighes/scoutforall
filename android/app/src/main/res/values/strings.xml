@@ -28,6 +28,10 @@
     <string name="home">home</string>
     <string name="away">away</string>
     <string name="in_progress">in progress</string>
+    <string name="home_in_progress">In progress</string>
+    <string name="home_recent">Recent matches</string>
+    <string name="resume">Resume</string>
+    <string name="start">Start</string>
     <string name="new_match">New match</string>
     <string name="edit_match">Edit match</string>
     <string name="opponent">Opponent</string>
