@@ -198,7 +198,7 @@
     <string name="tutorial_new_match">Touch + for a new match.</string>
     <string name="tutorial_match_fields">Opponent, date, home or away, substitutions: I filled them in.</string>
     <string name="tutorial_save_match">Touch Save.</string>
-    <string name="tutorial_lineup">The lineup of the first set is ready: the setter in 6 (P6), we receive; Spirito is the libero, Fersino the second libero. Touching a position changes its player.</string>
+    <string name="tutorial_lineup">The lineup of the first set is ready: the setter in 6 (S6), we receive; Spirito is the libero, Fersino the second libero. Touching a position changes its player.</string>
     <string name="tutorial_start_set">Touch Start the set.</string>
     <string name="tutorial_score">The score, the phase and the rotation: side-out, S6 (the setter in 6). They serve.</string>
     <string name="tutorial_reception">Nervini receives: touch her.</string>

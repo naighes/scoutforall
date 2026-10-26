@@ -199,13 +199,13 @@
     <string name="tutorial_save_match">Toque em Salvar.</string>
     <string name="tutorial_lineup">A escalação do primeiro set está pronta: levantadora na 6 (P6), nós na recepção; Spirito é a líbero, Fersino a segunda líbero. Tocando uma posição, troca-se a jogadora.</string>
     <string name="tutorial_start_set">Toque em Iniciar o set.</string>
-    <string name="tutorial_score">O placar, a fase e o rodízio: side-out, S6 (levantadora na 6). Elas sacam.</string>
+    <string name="tutorial_score">O placar, a fase e o rodízio: side-out, P6 (levantadora na 6). Elas sacam.</string>
     <string name="tutorial_reception">Nervini recebe: toque nela.</string>
     <string name="tutorial_reception_eval">Recepção perfeita: toque em #.</string>
     <string name="tutorial_attack">O levantamento é para ela, que ataca: toque nela de novo.</string>
     <string name="tutorial_attack_event">Toque em Ataque.</string>
     <string name="tutorial_attack_point">Ponto dela: toque em #.</string>
-    <string name="tutorial_side_out">Side-out: 1–0. Rodamos para S5 e Fahr saca.</string>
+    <string name="tutorial_side_out">Side-out: 1–0. Rodamos para P5 e Fahr saca.</string>
     <string name="tutorial_serve">O saque já está pronto para avaliar: negativo, toque em −.</string>
     <string name="tutorial_block">Elas atacam e Danesi bloqueia: toque nela.</string>
     <string name="tutorial_block_event">Toque em Bloqueio.</string>

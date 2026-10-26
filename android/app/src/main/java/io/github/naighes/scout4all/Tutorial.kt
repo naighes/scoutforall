@@ -11,7 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -74,8 +72,10 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.window.DialogProperties
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -242,17 +242,68 @@ fun TutorialOverlay(tutorial: Tutorial) {
     BackHandler {}
     var origin by remember { mutableStateOf(Offset.Zero) }
     val margin = with(LocalDensity.current) { HoleMargin.toPx() }
+    val finger = with(LocalDensity.current) { Finger.roundToPx() }
     val hole = step.target?.let { tutorial.targets[it] }?.translate(-origin)?.inflate(margin)
     // a step to read: nothing to touch but its buttons
     val open = hole.takeIf { step !is TutorialStep.Read }
-    BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
+    Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
         Veil(hole)
         Blockers(open)
         if (open != null) Hand(open, swipe = step is TutorialStep.SwipeUp)
-        // on the other half of the screen
-        val below = hole == null || hole.center.y < constraints.maxHeight / 2
-        Caption(step, tutorial, Modifier.align(if (below) Alignment.BottomCenter else Alignment.TopCenter))
+        // the finger below the hole in sight too
+        val pointed = open?.let { it.copy(bottom = fingerAt(it, margin, finger).y + finger.toFloat()) } ?: hole
+        CaptionBy(pointed, tutorial.targets["score"]?.translate(-origin)) { Caption(step, tutorial) }
     }
+}
+
+/** The caption by the hole: above or below it, on the side with more room
+ * first, else beside it; the first place where it leaves the hole and
+ * `inSight` (the score) uncovered, else the first. At the bottom without a
+ * hole. */
+@Composable
+private fun CaptionBy(hole: Rect?, inSight: Rect?, caption: @Composable () -> Unit) {
+    val insets = WindowInsets.safeDrawing
+    val narrowest = with(LocalDensity.current) { CaptionBeside.roundToPx() }
+    Layout(content = caption, modifier = Modifier.fillMaxSize()) { measurables, constraints ->
+        val caption = measurables.first()
+        val area = IntRect(
+            insets.getLeft(this, layoutDirection),
+            insets.getTop(this),
+            (constraints.maxWidth - insets.getRight(this, layoutDirection)).coerceAtLeast(0),
+            (constraints.maxHeight - insets.getBottom(this)).coerceAtLeast(0),
+        )
+        val places = captionPlaces(hole?.roundToIntRect(), area, narrowest) { width -> caption.maxIntrinsicHeight(width) }
+        val covers = listOfNotNull(hole, inSight).map { it.roundToIntRect() }
+        val place = places.firstOrNull { p -> covers.none { it.overlaps(p) } } ?: places.first()
+        val placeable = caption.measure(Constraints(maxWidth = place.width, maxHeight = area.height.coerceAtLeast(0)))
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            placeable.place(place.left + (place.width - placeable.width) / 2, place.top)
+        }
+    }
+}
+
+/** Not beside the hole if narrower. */
+private val CaptionBeside = 240.dp
+
+/** Where a caption `height(width)` high can go in `area` by `hole`, in
+ * order: above or below it (where there's more room first), then right
+ * and left of it, if there's room; at the bottom without a hole. Each in
+ * `area`, where it fits. */
+internal fun captionPlaces(hole: IntRect?, area: IntRect, narrowest: Int, height: (Int) -> Int): List<IntRect> {
+    fun at(left: Int, top: Int, width: Int): IntRect {
+        val h = height(width)
+        val y = top.coerceIn(area.top, (area.bottom - h).coerceAtLeast(area.top))
+        return IntRect(left, y, left + width, y + h)
+    }
+    val full = height(area.width)
+    if (hole == null) return listOf(at(area.left, area.bottom - full, area.width))
+    val below = at(area.left, hole.bottom, area.width)
+    val above = at(area.left, hole.top - full, area.width)
+    val vertical = if (hole.center.y < area.center.y) listOf(below, above) else listOf(above, below)
+    val beside = listOf(hole.right to area.right - hole.right, area.left to hole.left - area.left)
+        .filter { (_, width) -> width >= narrowest }
+        .map { (left, width) -> at(left, hole.center.y - height(width) / 2, width) }
+    return vertical + beside
 }
 
 /** The last word, in a dialog: over the statistics too. */
@@ -265,7 +316,7 @@ private fun Finish(step: TutorialStep.Done, tutorial: Tutorial) = AlertDialog(
 )
 
 /** Around the target, so that the whole of it shows. */
-private val HoleMargin = 6.dp
+internal val HoleMargin = 6.dp
 
 @Composable
 private fun Veil(hole: Rect?) {
@@ -330,22 +381,28 @@ private fun Hand(hole: Rect, swipe: Boolean) {
         drawCircle(Color.Black.copy(alpha = alpha * 0.6f), radius, center, style = Stroke(6.dp.toPx()))
         drawCircle(Color.White.copy(alpha = alpha), radius, center, style = Stroke(3.dp.toPx()))
     }
-    val finger = with(density) { 40.dp.roundToPx() }
+    val finger = with(density) { Finger.roundToPx() }
+    val margin = with(density) { HoleMargin.toPx() }
     Icon(
         painterResource(R.drawable.ic_touch),
         contentDescription = null,
         tint = Color.White,
-        modifier = Modifier.size(40.dp).offset {
-            // the tip of the finger on the middle of the hole
-            IntOffset(hole.center.x.roundToInt() - finger * 11 / 24, (hole.center.y - rise).roundToInt() - finger / 8)
-        },
+        modifier = Modifier.size(Finger).offset { fingerAt(hole, margin, finger) - IntOffset(0, rise.roundToInt()) },
     )
 }
 
+internal val Finger = 40.dp
+
+/** Where the finger goes, `finger` big: its tip on the bottom edge of the
+ * target in `hole` (`margin` around it), in the middle, so that the words
+ * of the target show. */
+internal fun fingerAt(hole: Rect, margin: Float, finger: Int) =
+    IntOffset(hole.center.x.roundToInt() - finger * 11 / 24, (hole.bottom - margin).roundToInt() - finger / 8)
+
 /** What to do, how far the tutorial is, and how to end it. */
 @Composable
-private fun Caption(step: TutorialStep, tutorial: Tutorial, modifier: Modifier) = Surface(
-    modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing).padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
+private fun Caption(step: TutorialStep, tutorial: Tutorial) = Surface(
+    modifier = Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
     shape = MaterialTheme.shapes.large,
     color = MaterialTheme.colorScheme.surfaceVariant,
     contentColor = MaterialTheme.colorScheme.onSurface,

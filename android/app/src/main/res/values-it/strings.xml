@@ -199,13 +199,13 @@
     <string name="tutorial_save_match">Tocca Salva.</string>
     <string name="tutorial_lineup">La formazione del primo set è pronta: palleggiatrice in 6 (P6), noi in ricezione; Spirito è il libero, Fersino il secondo libero. Toccando una posizione se ne cambia la giocatrice.</string>
     <string name="tutorial_start_set">Tocca Inizia il set.</string>
-    <string name="tutorial_score">Il punteggio, la fase e la rotazione: side-out, S6 (palleggiatrice in 6). Battono loro.</string>
+    <string name="tutorial_score">Il punteggio, la fase e la rotazione: side-out, P6 (palleggiatrice in 6). Battono loro.</string>
     <string name="tutorial_reception">Riceve Nervini: toccala.</string>
     <string name="tutorial_reception_eval">Ricezione perfetta: tocca #.</string>
     <string name="tutorial_attack">L\'alzata è per lei, che attacca: toccala di nuovo.</string>
     <string name="tutorial_attack_event">Tocca Attacco.</string>
     <string name="tutorial_attack_point">Punto suo: tocca #.</string>
-    <string name="tutorial_side_out">Side-out: 1–0. Si ruota in S5 e batte Fahr.</string>
+    <string name="tutorial_side_out">Side-out: 1–0. Si ruota in P5 e batte Fahr.</string>
     <string name="tutorial_serve">La battuta è già pronta da valutare: negativa, tocca −.</string>
     <string name="tutorial_block">Attaccano loro e mura Danesi: toccala.</string>
     <string name="tutorial_block_event">Tocca Muro.</string>

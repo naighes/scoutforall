@@ -196,7 +196,7 @@
     <string name="tutorial_new_match">+ をタップして新しい試合を作ります。</string>
     <string name="tutorial_match_fields">相手、日付、ホームかアウェイか、交代回数は入力済みです。</string>
     <string name="tutorial_save_match">「保存」をタップしてください。</string>
-    <string name="tutorial_lineup">第1セットのラインナップは準備済みです。セッターは6番ポジション(P6)、こちらはレセプションから。リベロはスピリト、第2リベロはフェルジーノ。ポジションをタップすると選手を変えられます。</string>
+    <string name="tutorial_lineup">第1セットのラインナップは準備済みです。セッターは6番ポジション(S6)、こちらはレセプションから。リベロはスピリト、第2リベロはフェルジーノ。ポジションをタップすると選手を変えられます。</string>
     <string name="tutorial_start_set">「セットを開始」をタップしてください。</string>
     <string name="tutorial_score">スコア、フェーズ、ローテーション:サイドアウト、S6(セッターは6番)。相手のサーブです。</string>
     <string name="tutorial_reception">ネルヴィーニがレシーブ:タップしてください。</string>

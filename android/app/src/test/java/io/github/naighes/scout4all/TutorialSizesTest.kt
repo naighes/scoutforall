@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -12,7 +13,7 @@ import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
 
 /** The tutorial on every screen: each target in the window and whole, the
- * caption never over it. */
+ * caption never over it, its finger or the score. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 class TutorialSizesTest(private val screen: Size) {
     @get:Rule(order = 0) val size = SizeRule(screen)
@@ -37,9 +38,23 @@ class TutorialSizesTest(private val screen: Size) {
                 val caption = rule.onNode(hasText(name)).fetchSemanticsNode().boundsInRoot
                 if (target.intersect(window) != target) wrong += "out of the window: $name"
                 if (caption.overlaps(target)) wrong += "under the caption: $name"
+                // the box of the caption, round its words
+                val box = rule.onNode(hasText(name), useUnmergedTree = true).fetchSemanticsNode().parent?.boundsInRoot ?: caption
+                if (box.overlaps(finger(target))) wrong += "finger under the caption: $name"
+            }
+            val score = rule.tutorial.targets["score"]
+            if (score != null && step.target != "score" && step !is TutorialStep.Done) {
+                val caption = rule.onNode(hasText(name)).fetchSemanticsNode().boundsInRoot
+                if (caption.overlaps(score)) wrong += "score under the caption: $name"
             }
             if (step.target == "stats") rule.shot("tutorial-$screen")
         }
         assertEquals(emptyList<String>(), wrong)
+    }
+
+    private fun finger(target: Rect): Rect = with(rule.density) {
+        val size = Finger.roundToPx()
+        val at = fingerAt(target.inflate(HoleMargin.toPx()), HoleMargin.toPx(), size)
+        Rect(at.x.toFloat(), at.y.toFloat(), (at.x + size).toFloat(), (at.y + size).toFloat())
     }
 }
