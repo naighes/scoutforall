@@ -40,23 +40,6 @@ class TutorialFlowTest {
 
     private val tutorial: Tutorial get() = ViewModelProvider(rule.activity)[TutorialViewModel::class.java].tutorial
 
-    /** Does what the step asks, where the tutorial shows it. */
-    private fun play(step: TutorialStep) {
-        caption(step.caption)
-        val target = step.target
-        if (target != null) rule.waitFor({ "$target not shown for ${string(step.caption)}" }) { target in tutorial.targets }
-        val at = target?.let { tutorial.targets[it] }
-        when (step) {
-            is TutorialStep.Touch -> rule.onRoot().performTouchInput { click(at?.center ?: center) }
-            is TutorialStep.SwipeUp -> rule.onRoot().performTouchInput {
-                val from = at?.center ?: center
-                swipe(from, from.copy(y = from.y - 400f), durationMillis = 300)
-            }
-            is TutorialStep.Read -> touch(string(R.string.tutorial_next))
-            is TutorialStep.Done -> touch(string(R.string.tutorial_finish))
-        }
-    }
-
     /** Under the veil only the target can be touched; the steps go on one
      * after the other to the scouting, as the captions say. */
     @Test
@@ -104,19 +87,7 @@ class TutorialFlowTest {
         assertScouted(team, match)
     }
 
-    /** Each step played, to the last one. */
-    private fun playToTheEnd() {
-        caption(R.string.tutorial_welcome)
-        var steps = 0
-        while (true) {
-            val step = tutorial.step ?: break
-            play(step)
-            rule.waitForIdle()
-            steps++
-            check(steps < 100) { "the tutorial doesn't end" }
-        }
-        assertEquals(tutorialSteps("").size, steps)
-    }
+    private fun playToTheEnd() = rule.playTutorial(tutorial)
 
     /** The match as the tutorial scouts it: 2-0, the lineup changed. */
     private fun assertScouted(team: String, match: MatchListing.Match) {
