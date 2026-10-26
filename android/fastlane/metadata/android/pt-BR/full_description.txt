@@ -1,0 +1,23 @@
+scout4all é o scout de vôlei para técnicos e analistas: registre cada toque de uma partida do banco, com poucos toques na tela, e leia as estatísticas enquanto o set ainda está em jogo.
+
+UM SCOUT QUE ACOMPANHA O RALI
+• Primeiro você toca a jogadora: o app oferece só os fundamentos que ela pode jogar naquele momento, e depois a avaliação (#, +, !, -, /, =).
+• A quadra acompanha o rali: rodízios, levantadora, líbero, quem saca, de que lado está a bola.
+• Substituições, trocas do líbero e troca da levantadora sem sair da tela.
+• Errou? Desfaça o último toque, ou corrija depois qualquer evento de um set.
+
+ESTATÍSTICAS, AO VIVO E DEPOIS DA PARTIDA
+• Resumo, distribuição dos ataques, erros e a evolução de cada set.
+• Detalhe por fundamento, por jogadora e por rodízio, em break e side-out.
+• Eficiência colorida segundo valores de referência para o nível e o gênero do time.
+• Passadoras e atacantes em quadra mostram a sua eficiência na camisa.
+
+SEUS DADOS
+• Funciona sem internet: times e partidas ficam no celular, com o backup do Android.
+• Compartilhe um time ou uma partida como arquivo (WhatsApp, e-mail, Quick Share) e abra em outro celular ou na versão para computador do scout4all, para Windows, macOS e Linux.
+• A menos que você desative nas configurações, as partidas registradas são enviadas sem nomes ao desenvolvedor, para estatísticas e para corrigir erros.
+
+PRONTO EM DOIS MINUTOS
+Um tutorial guiado faz o scout de alguns ralis com um time de exemplo, a seleção feminina italiana: aprende-se fazendo.
+
+Em português, inglês, italiano, polonês e japonês. Grátis, sem anúncios, código aberto (AGPL-3.0): https://github.com/naighes/scoutforall
