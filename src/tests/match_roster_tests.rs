@@ -128,4 +128,49 @@ mod tests {
             ui.screen()
         );
     }
+
+    /// Eighteen players, a match saved before v0.11 without a roster: the
+    /// whole team.
+    const EIGHTEEN: &[TeamFixture] = &[TeamFixture {
+        name: "Volley Club",
+        players: &[
+            "Anna", "Bea", "Carla", "Dora", "Elsa", "Fede", "Gina", "Ilaria", "Laura", "Marta",
+            "Nina", "Olga", "Paola", "Rita", "Sara", "Tina", "Ugo", "Vera",
+        ],
+        opponents: &["Cortona Volley"],
+    }];
+
+    /// Eleven on the bench of a match without a roster: after the nine
+    /// digits, the letters.
+    #[tokio::test]
+    async fn the_bench_past_nine_is_chosen_with_letters() {
+        let mut ui = Ui::start_with_sets(EIGHTEEN).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('m'), KeyCode::Enter])
+            .await;
+        ui.type_keys(&[KeyCode::Char('r'), KeyCode::Char('1')])
+            .await;
+        assert!(
+            ui.screen().contains(current_labels().select_replacement),
+            "{}",
+            ui.screen()
+        );
+        // the eleventh, number 18
+        let row = ui.rows_containing(&["Vera"]).join("");
+        assert!(row.starts_with("b #18 Vera"), "{row}");
+        ui.press(KeyCode::Char('b')).await;
+        let vera = ui.saved_teams()[0]["players"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == "Vera")
+            .and_then(|p| p["id"].as_str())
+            .unwrap()
+            .to_string();
+        let events = ui.saved_first_set_events();
+        assert!(
+            events.last().is_some_and(|e| e.contains(&vera)),
+            "{events:?}\n{}",
+            ui.screen()
+        );
+    }
 }
