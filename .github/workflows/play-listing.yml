@@ -1,0 +1,56 @@
+name: play listing
+
+# The listing of Play from android/fastlane/metadata/android: the texts, the
+# icon, the feature graphic and the screenshots in every language, when they
+# change on master or by hand, with no new version. Each change goes through
+# the review of Google, as from the console. The release notes go with the
+# bundle (publish-android.yml).
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'android/fastlane/metadata/android/*/*.txt'
+      - 'android/fastlane/metadata/android/*/images/**'
+
+permissions:
+  contents: read
+
+jobs:
+  listing:
+    name: upload the listing
+    if: vars.PLAY_UPLOAD == 'true'
+    runs-on: ubuntu-latest
+    # one edit of the app at a time on Play
+    concurrency:
+      group: play
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: check the listing
+        run: python3 -I android/fastlane/check.py
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: gem install fastlane --no-document --version 2.240.1
+      # the images only when they differ from those on Play. Supply wants a
+      # release to attach the edit to: the one of this version on the track
+      # (PLAY_TRACK, alpha if unset), already uploaded
+      - name: upload the listing
+        run: |
+          fastlane supply \
+            --package_name io.github.naighes.scout4all \
+            --track "${TRACK}" \
+            --version_code "$(python3 -I android/fastlane/check.py --version-code)" \
+            --metadata_path android/fastlane/metadata/android \
+            --skip_upload_apk true \
+            --skip_upload_aab true \
+            --skip_upload_changelogs true \
+            --sync_image_upload true
+        env:
+          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          TRACK: ${{ vars.PLAY_TRACK || 'alpha' }}
