@@ -245,7 +245,16 @@ pub struct MatchForm {
     pub max_substitutions: String,
     #[uniffi(default = "")]
     pub notes: String,
+    #[uniffi(default = None)]
+    pub roster: Option<Vec<Uuid>>,
 }
+
+// the id of a player, as text for the app
+uniffi::custom_type!(Uuid, String, {
+    remote,
+    lower: |id| id.to_string(),
+    try_lift: |id| Ok(Uuid::parse_str(&id)?),
+});
 
 /// RFC 3339 text for the app, with the offset of where the match is played.
 pub type MatchDate = DateTime<FixedOffset>;
@@ -331,6 +340,7 @@ pub enum MatchField {
     Opponent,
     Date,
     MaxSubstitutions,
+    Roster,
 }
 
 impl From<MatchFormError> for MatchField {
@@ -341,6 +351,9 @@ impl From<MatchFormError> for MatchField {
             MatchFormError::InvalidMaxSubstitutions | MatchFormError::MaxSubstitutionsBelowUsed => {
                 MatchField::MaxSubstitutions
             }
+            MatchFormError::RosterTooSmall
+            | MatchFormError::RosterTooLarge
+            | MatchFormError::RosterWithoutPlayed => MatchField::Roster,
         }
     }
 }
@@ -2444,12 +2457,12 @@ impl Scout4All {
                     .block_on(self.match_reader.read_single(&team, &id))
             })
             .transpose()?;
-        let input = form
-            .validate(existing.as_ref())
-            .map_err(|e| MobileError::InvalidMatch {
-                field: e.into(),
-                reason: e.message(self.language.labels()),
-            })?;
+        let input =
+            form.validate(&team, existing.as_ref())
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(self.language.labels()),
+                })?;
         let saved = match existing {
             Some(m) => self
                 .runtime
@@ -2460,6 +2473,7 @@ impl Scout4All {
                     input.home,
                     input.max_substitutions,
                     input.notes,
+                    input.roster,
                 ))
                 .map(|()| m.id),
             None => self
@@ -2471,6 +2485,7 @@ impl Scout4All {
                     input.home,
                     input.max_substitutions,
                     input.notes,
+                    input.roster,
                 ))
                 .map(|m| m.id),
         };
@@ -3380,7 +3395,15 @@ mod tests {
         ] {
             let date = DateTime::parse_from_rfc3339(date).unwrap();
             app.runtime
-                .block_on(writer.create(&team, opponent.into(), date, home, 6, String::new()))
+                .block_on(writer.create(
+                    &team,
+                    opponent.into(),
+                    date,
+                    home,
+                    6,
+                    String::new(),
+                    vec![],
+                ))
                 .unwrap();
         }
         std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
@@ -3420,6 +3443,7 @@ mod tests {
             home: true,
             max_substitutions: max_substitutions.into(),
             notes: String::new(),
+            roster: None,
         }
     }
 
@@ -3428,6 +3452,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
+        let players: Vec<Uuid> = (1..=7)
+            .map(|n| {
+                app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
+                    .and_then(|id| parse_id(&id))
+                    .unwrap()
+            })
+            .collect();
         let date = "2026-10-24T18:00:00+02:00";
         let new = app.new_match_form(DateTime::parse_from_rfc3339(date).unwrap());
         assert_eq!(new.max_substitutions, "8");
@@ -3439,7 +3470,14 @@ mod tests {
         let edited = match_form("Arezzo Volley", date, "6");
         app.save_match(team.clone(), Some(id.clone()), edited.clone())
             .unwrap();
-        assert_eq!(app.match_form(team.clone(), id.clone()).unwrap(), edited);
+        // the roster of a new match: the players of the team
+        assert_eq!(
+            app.match_form(team.clone(), id.clone()).unwrap(),
+            MatchForm {
+                roster: Some(players),
+                ..edited
+            }
+        );
         match app.matches(team).unwrap().as_slice() {
             [
                 MatchListing::Match {

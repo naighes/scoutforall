@@ -912,6 +912,7 @@ mod tests {
                 ..TeamEntry::default()
             },
             home: true,
+            roster: vec![],
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
             notes: String::new(),

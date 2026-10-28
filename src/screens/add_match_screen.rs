@@ -290,8 +290,14 @@ impl<
                 .max_substitutions
                 .get_selected_value()
                 .unwrap_or_default(),
+            // the roster of the match being edited; a new one gets the
+            // active players
+            roster: self.editing.as_ref().and_then(|m| MatchForm::of(m).roster),
         };
-        match (form.validate(self.editing.as_ref()), self.editing.clone()) {
+        match (
+            form.validate(&self.team, self.editing.as_ref()),
+            self.editing.clone(),
+        ) {
             (Err(e), _) => {
                 self.notify_message
                     .set_error(e.message(current_labels().domain));
@@ -312,6 +318,7 @@ impl<
                 input.home,
                 input.max_substitutions,
                 input.notes,
+                input.roster,
             )
             .await
         {
@@ -342,6 +349,7 @@ impl<
                 input.home,
                 input.max_substitutions,
                 input.notes,
+                input.roster,
             )
             .await
         {

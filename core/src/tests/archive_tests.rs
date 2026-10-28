@@ -246,6 +246,7 @@ mod tests {
                 m.home,
                 m.max_substitutions,
                 "windy".into(),
+                vec![],
             )
             .await
             .unwrap();

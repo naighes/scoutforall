@@ -97,7 +97,7 @@ impl StoreMatchReader {
         let mut entry: MatchEntry =
             from_value(descriptor).map_err(|e| AppError::IO(IOError::from(e)))?;
         entry.id = match_id.to_string();
-        entry.team = team.clone();
+        entry.team = team.with_roster(&entry.roster);
         entry.sets = self.set_reader.read_all(&entry).await?;
         if created_since_v0_3_0 {
             // v0.3.0 didn't save the lineup rules of its sets, but scouted

@@ -106,6 +106,7 @@ mod tests {
                 true,
                 8,
                 String::new(),
+                vec![],
             )
             .await
             .unwrap();

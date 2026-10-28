@@ -278,6 +278,7 @@ mod tests {
                 true,
                 m.max_substitutions,
                 String::new(),
+                vec![],
             )
             .await
             .expect("expected the match to be updated");

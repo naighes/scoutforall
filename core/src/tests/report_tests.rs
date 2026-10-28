@@ -190,6 +190,7 @@ mod tests {
 
     fn match_entry(team: TeamEntry, opponent: &str, home: bool, sets: Vec<SetEntry>) -> MatchEntry {
         MatchEntry {
+            roster: vec![],
             opponent: opponent.to_string(),
             date: Utc::now().fixed_offset(),
             id: "match".to_string(),

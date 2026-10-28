@@ -3,15 +3,19 @@
 //! saves once it's valid.
 
 use crate::{
-    constants::DEFAULT_MAX_SUBSTITUTIONS,
+    constants::{DEFAULT_MAX_SUBSTITUTIONS, MAX_ROSTER, MIN_ROSTER},
     localization::Labels,
-    shapes::{enums::EventTypeEnum, r#match::MatchEntry},
+    shapes::{enums::EventTypeEnum, r#match::MatchEntry, player::PlayerEntry, team::TeamEntry},
 };
 use chrono::{DateTime, FixedOffset};
+use std::collections::HashSet;
+use uuid::Uuid;
 
 /// What the user filled in: the substitutions are text, as typed; the date
 /// is missing when the user interface couldn't read it; the notes may be
-/// empty.
+/// empty. The roster, the players on the score sheet, is none until chosen:
+/// then the active players of the team for a new match, and no roster for
+/// a match saved before v0.11 without one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchForm {
     pub opponent: String,
@@ -19,6 +23,14 @@ pub struct MatchForm {
     pub home: bool,
     pub max_substitutions: String,
     pub notes: String,
+    pub roster: Option<Vec<Uuid>>,
+}
+
+/// A player that can be on the score sheet, and whether it is.
+#[derive(Debug, Clone)]
+pub struct RosterChoice {
+    pub player: PlayerEntry,
+    pub chosen: bool,
 }
 
 /// A valid form, the arguments of `MatchWriter::create` and `update`.
@@ -29,6 +41,8 @@ pub struct MatchInput {
     pub home: bool,
     pub max_substitutions: u8,
     pub notes: String,
+    /// empty for a match saved without one, which keeps the whole team
+    pub roster: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +53,12 @@ pub enum MatchFormError {
     InvalidMaxSubstitutions,
     /// fewer than the substitutions already made in a set of the match
     MaxSubstitutionsBelowUsed,
+    /// fewer than six and the libero
+    RosterTooSmall,
+    /// more than the score sheet takes
+    RosterTooLarge,
+    /// without a player who already played in a set of the match
+    RosterWithoutPlayed,
 }
 
 impl MatchFormError {
@@ -49,6 +69,9 @@ impl MatchFormError {
             InvalidDate => labels.invalid_date,
             InvalidMaxSubstitutions => labels.invalid_max_substitutions,
             MaxSubstitutionsBelowUsed => labels.max_substitutions_below_existing_substitutions,
+            RosterTooSmall => labels.roster_too_small,
+            RosterTooLarge => labels.roster_too_large,
+            RosterWithoutPlayed => labels.roster_without_played,
         }
         .to_string()
     }
@@ -63,6 +86,7 @@ impl MatchForm {
             home: false,
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS.to_string(),
             notes: String::new(),
+            roster: None,
         }
     }
 
@@ -74,28 +98,118 @@ impl MatchForm {
             home: m.home,
             max_substitutions: m.max_substitutions.to_string(),
             notes: m.notes.clone(),
+            roster: Some(m.roster.clone()).filter(|r| !r.is_empty()),
         }
     }
 
-    /// What creates a match, or updates `existing`. The opponent and the
-    /// notes are trimmed. The first error, in the order of the fields, when the form
-    /// isn't valid.
-    pub fn validate(self, existing: Option<&MatchEntry>) -> Result<MatchInput, MatchFormError> {
+    /// Who can be on the score sheet of a match of `team`, or of `existing`,
+    /// by number: the active players, and those of the roster or who played
+    /// even if removed since. Chosen as in the roster; until it's chosen,
+    /// the active players, and also who played in a match saved without a
+    /// roster.
+    pub fn roster_choices(
+        &self,
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) -> Vec<RosterChoice> {
+        let kept: HashSet<Uuid> = existing
+            .map(|m| m.roster.iter().copied().chain(m.played()).collect())
+            .unwrap_or_default();
+        let chosen = self.chosen(team, existing);
+        let mut choices: Vec<RosterChoice> = team
+            .players
+            .iter()
+            .filter(|p| !p.deleted || kept.contains(&p.id))
+            .map(|p| RosterChoice {
+                player: p.clone(),
+                chosen: chosen.contains(&p.id),
+            })
+            .collect();
+        choices.sort_by_key(|c| c.player.number);
+        choices
+    }
+
+    /// Puts `player` on the score sheet, or takes it off.
+    pub fn toggle(&mut self, player: Uuid, team: &TeamEntry, existing: Option<&MatchEntry>) {
+        let choices = self.roster_choices(team, existing);
+        if choices.iter().any(|c| c.player.id == player) {
+            self.roster = Some(
+                choices
+                    .iter()
+                    .filter(|c| c.chosen != (c.player.id == player))
+                    .map(|c| c.player.id)
+                    .collect(),
+            );
+        }
+    }
+
+    /// The players chosen, by `roster_choices`.
+    fn chosen(&self, team: &TeamEntry, existing: Option<&MatchEntry>) -> HashSet<Uuid> {
+        match (&self.roster, existing) {
+            (Some(roster), _) => roster.iter().copied().collect(),
+            (None, Some(m)) => team
+                .active_players()
+                .iter()
+                .map(|p| p.id)
+                .chain(m.played())
+                .collect(),
+            (None, None) => team.active_players().iter().map(|p| p.id).collect(),
+        }
+    }
+
+    /// What creates a match of `team`, or updates `existing`. The opponent
+    /// and the notes are trimmed; the roster is by number, without whoever
+    /// can't be on it. The first error, in the order of the fields, when the
+    /// form isn't valid.
+    pub fn validate(
+        self,
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) -> Result<MatchInput, MatchFormError> {
         let opponent = self.opponent.trim().to_string();
         let max_substitutions = parse_max_substitutions(&self.max_substitutions);
         let used = existing.map(used_substitutions).unwrap_or(0);
-        match (opponent.is_empty(), self.date, max_substitutions) {
-            (true, _, _) => Err(MatchFormError::EmptyOpponent),
-            (_, None, _) => Err(MatchFormError::InvalidDate),
-            (_, _, None) => Err(MatchFormError::InvalidMaxSubstitutions),
-            (_, _, Some(max)) if max < used => Err(MatchFormError::MaxSubstitutionsBelowUsed),
-            (false, Some(date), Some(max_substitutions)) => Ok(MatchInput {
+        let roster = self.valid_roster(team, existing);
+        match (opponent.is_empty(), self.date, max_substitutions, roster) {
+            (true, _, _, _) => Err(MatchFormError::EmptyOpponent),
+            (_, None, _, _) => Err(MatchFormError::InvalidDate),
+            (_, _, None, _) => Err(MatchFormError::InvalidMaxSubstitutions),
+            (_, _, Some(max), _) if max < used => Err(MatchFormError::MaxSubstitutionsBelowUsed),
+            (_, _, _, Err(e)) => Err(e),
+            (false, Some(date), Some(max_substitutions), Ok(roster)) => Ok(MatchInput {
                 opponent,
                 date,
                 home: self.home,
                 max_substitutions,
                 notes: self.notes.trim().to_string(),
+                roster,
             }),
+        }
+    }
+
+    /// The roster to save: none for a match saved without one and left so,
+    /// else from `MIN_ROSTER` to `MAX_ROSTER` players with all who played.
+    fn valid_roster(
+        &self,
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) -> Result<Vec<Uuid>, MatchFormError> {
+        let roster: Vec<Uuid> = self
+            .roster_choices(team, existing)
+            .into_iter()
+            .filter(|c| c.chosen)
+            .map(|c| c.player.id)
+            .collect();
+        let played = existing.map(MatchEntry::played).unwrap_or_default();
+        let undeclared = self.roster.is_none() && existing.is_some_and(|m| m.roster.is_empty());
+        match roster.len() {
+            _ if undeclared => Ok(vec![]),
+            n if n < MIN_ROSTER => Err(MatchFormError::RosterTooSmall),
+            n if n > MAX_ROSTER => Err(MatchFormError::RosterTooLarge),
+            _ if !played.iter().all(|p| roster.contains(p)) => {
+                Err(MatchFormError::RosterWithoutPlayed)
+            }
+            _ => Ok(roster),
         }
     }
 }
