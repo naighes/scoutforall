@@ -1,0 +1,2 @@
+- Estatísticas durante o scout: o painel não fica mais pulando para cima e para baixo depois de uma rolagem rápida.
+- Tutorial: "Avançar" em cada passo, que faz o passo por você enquanto a mão mostra onde tocar; as estatísticas abrem com um toque na alça, ou deslizando para cima; instruções mais claras sobre o que tocar.

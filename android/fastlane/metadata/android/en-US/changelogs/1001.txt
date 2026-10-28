@@ -1,0 +1,2 @@
+- Statistics while scouting: the panel no longer bounces up and down after a quick scroll.
+- Tutorial: "Next" at every step, which does the step for you while the hand shows where to tap; the statistics open with a tap on their handle, or a swipe up; clearer wording on what to tap.

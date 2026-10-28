@@ -1,0 +1,2 @@
+- Statystyki podczas scoutingu: panel nie skacze już w górę i w dół po szybkim przewinięciu.
+- Samouczek: „Dalej” na każdym kroku, który wykonuje krok za Ciebie, a dłoń pokazuje, gdzie dotknąć; statystyki otwierają się dotknięciem uchwytu lub przesunięciem w górę; jaśniejsze wskazówki, co dotknąć.

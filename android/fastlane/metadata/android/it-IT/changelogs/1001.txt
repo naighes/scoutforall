@@ -1,0 +1,2 @@
+- Statistiche durante lo scouting: il pannello non balla più su e giù dopo uno scorrimento veloce.
+- Tutorial: "Avanti" a ogni passo, che fa il passo al posto tuo mentre la mano mostra dove toccare; le statistiche si aprono con un tocco sulla maniglia, o scorrendo verso l'alto; indicazioni più chiare su cosa toccare.
