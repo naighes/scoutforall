@@ -19,8 +19,13 @@ fun ComposeContentTestRule.type(label: String, text: String) {
     field(label).performScrollTo().performTextReplacement(text)
 }
 
-fun ComposeContentTestRule.save() {
-    onNode(hasText(string(R.string.save)) and androidx.compose.ui.test.hasClickAction()).performClick()
+fun ComposeContentTestRule.save() = press(R.string.save)
+
+/** From the fields of the match to its roster. */
+fun ComposeContentTestRule.goOn() = press(R.string.go_on)
+
+private fun ComposeContentTestRule.press(button: Int) {
+    onNode(hasText(string(button)) and androidx.compose.ui.test.hasClickAction()).performClick()
     waitForIdle()
 }
 

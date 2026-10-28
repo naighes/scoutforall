@@ -43,6 +43,9 @@
     <string name="notes">Notatki</string>
     <string name="roster">W protokole: %1$d z %2$d</string>
     <string name="played">grał(a)</string>
+    <string name="go_on">Kontynuuj</string>
+    <string name="roster_title">Protokół</string>
+    <string name="roster_hint">Dotknij zawodnika, aby dodać go do protokołu lub go usunąć.</string>
     <string name="remove_birth_date">Usuń datę urodzenia</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>
@@ -217,6 +220,8 @@
     <string name="tutorial_matches">Tu są zawodniczki. Mecze są w drugiej karcie: dotknij karty.</string>
     <string name="tutorial_new_match">Dotknij +, aby dodać nowy mecz.</string>
     <string name="tutorial_match_fields">Przeciwnik, data, u siebie czy na wyjeździe, zmiany: już wypełniłem.</string>
+    <string name="tutorial_match_next">Dotknij Kontynuuj: potem zawodniczki w protokole.</string>
+    <string name="tutorial_roster">Cała drużyna jest w protokole, do 14: dotknięcie usuwa zawodniczkę lub ją przywraca.</string>
     <string name="tutorial_save_match">Dotknij Zapisz.</string>
     <string name="tutorial_lineup">Skład pierwszego seta jest gotowy: rozgrywająca na 6 (R6), my przyjmujemy; Spirito jest libero, Fersino drugą libero. Dotknięcie pozycji zmienia jej zawodniczkę.</string>
     <string name="tutorial_start_set">Dotknij Rozpocznij seta.</string>

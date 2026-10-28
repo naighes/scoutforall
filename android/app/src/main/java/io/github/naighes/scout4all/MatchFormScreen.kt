@@ -1,11 +1,24 @@
 package io.github.naighes.scout4all
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +31,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -45,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -89,6 +102,8 @@ sealed interface MatchFormState {
         val busy: Boolean = false,
         /** the form as it was read: changed, going back asks first */
         val loaded: MatchForm = form,
+        /** the second step, after the fields: who is on the score sheet */
+        val onRoster: Boolean = false,
     ) : MatchFormState {
         val changed: Boolean get() = form != loaded
     }
@@ -168,6 +183,28 @@ class MatchFormViewModel(
         }
     }
 
+    /** The fields checked by the core, on to the roster. */
+    fun next() {
+        val editing = mutableState.value as? MatchFormState.Editing ?: return
+        if (editing.busy) return
+        mutableState.value = editing.copy(busy = true)
+        viewModelScope.launch {
+            mutableState.value = try {
+                app.core { it.checkMatchFields(teamId, matchId, editing.form) }
+                editing.copy(onRoster = true, invalid = null, error = null)
+            } catch (e: MobileException.InvalidMatch) {
+                editing.copy(invalid = e.field to e.reason, error = null)
+            } catch (e: MobileException) {
+                editing.copy(error = e.reason, invalid = null)
+            }
+        }
+    }
+
+    /** Back from the roster to the fields, the roster as chosen. */
+    fun toFields() = mutableState.update { s ->
+        (s as? MatchFormState.Editing)?.copy(onRoster = false, invalid = null, error = null) ?: s
+    }
+
     /** Saves, once at a time. */
     fun save() {
         val editing = mutableState.value as? MatchFormState.Editing ?: return
@@ -177,7 +214,8 @@ class MatchFormViewModel(
             mutableState.value = try {
                 MatchFormState.Saved(app.core { it.saveMatch(teamId, matchId, editing.form) })
             } catch (e: MobileException.InvalidMatch) {
-                editing.copy(invalid = e.field to e.reason, error = null)
+                // on the step of the field
+                editing.copy(invalid = e.field to e.reason, error = null, onRoster = e.field == MatchField.ROSTER)
             } catch (e: MobileException) {
                 editing.copy(error = e.reason, invalid = null)
             }
@@ -198,14 +236,24 @@ fun MatchFormScreen(
     val model = viewModel { MatchFormViewModel(app, teamId, matchId, example) }
     val state by model.state.collectAsState()
     val back = rememberFormBack((state as? MatchFormState.Editing)?.changed == true, onBack)
+    val onRoster = (state as? MatchFormState.Editing)?.onRoster == true
+    // from the roster, back to the fields
+    BackHandler(enabled = onRoster) { model.toFields() }
     LaunchedEffect(state) {
         (state as? MatchFormState.Saved)?.let { onSaved(it.matchId) }
     }
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(if (matchId == null) R.string.new_match else R.string.edit_match), Modifier.title()) },
-                navigationIcon = { BackButton(back) },
+                title = {
+                    val title = when {
+                        onRoster -> R.string.roster_title
+                        matchId == null -> R.string.new_match
+                        else -> R.string.edit_match
+                    }
+                    Text(stringResource(title), Modifier.title())
+                },
+                navigationIcon = { BackButton(if (onRoster) model::toFields else back) },
             )
         },
     ) { padding ->
@@ -213,7 +261,10 @@ fun MatchFormScreen(
         when (val s = state) {
             MatchFormState.Loading, is MatchFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
             is MatchFormState.Failed -> Centered(modifier) { Text(s.message) }
-            is MatchFormState.Editing -> MatchFormContent(s, model, modifier)
+            is MatchFormState.Editing -> when (s.onRoster) {
+                true -> RosterContent(s, model, modifier)
+                false -> MatchFormContent(s, model, modifier)
+            }
         }
     }
 }
@@ -265,12 +316,57 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
-            Roster(state.players, error(MatchField.ROSTER), model::toggle)
         }
         state.error?.let {
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
         }
         // big and at the bottom, where the thumb is
+        Button(
+            onClick = model::next,
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("match-next"),
+        ) { Text(stringResource(R.string.go_on)) }
+    }
+
+/** The second step: the players of the team as tiles, by number, the ones
+ * on the score sheet lit; a tap puts one on or takes it off, who played in
+ * a set stays. Then the match is saved. */
+@Composable
+private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewModel, modifier: Modifier) =
+    Column(modifier) {
+        val chosen = state.players.count { it.chosen }
+        val error = state.invalid?.takeIf { it.first == MatchField.ROSTER }?.second
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                stringResource(R.string.roster, chosen, MAX_ROSTER),
+                Modifier.title(),
+                style = MaterialTheme.typography.titleMedium,
+                color = if (chosen > MAX_ROSTER) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            )
+            LinearProgressIndicator(
+                progress = { (chosen.toFloat() / MAX_ROSTER).coerceAtMost(1f) },
+                modifier = Modifier.fillMaxWidth(),
+                color = if (chosen > MAX_ROSTER) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                error ?: stringResource(R.string.roster_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        LazyVerticalGrid(
+            // wider tiles with a larger font: long names stay whole
+            columns = GridCells.Adaptive(minSize = 104.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)),
+            modifier = Modifier.weight(1f).tutorial("roster"),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(state.players, key = { it.id }) { player -> PlayerTile(player) { model.toggle(player.id) } }
+        }
+        state.error?.let {
+            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
+        }
         Button(
             onClick = model::save,
             enabled = !state.busy,
@@ -278,48 +374,59 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
         ) { Text(stringResource(R.string.save)) }
     }
 
-/** The players on the score sheet, from 7 to 14: a tap puts one on or
- * takes it off; who played in a set stays. */
+/** A player as a tile: the number big, as on the shirt, the name below.
+ * On the score sheet it's lit with a tick, or a lock once played. */
 @Composable
-private fun Roster(players: List<RosterPlayer>, error: String?, onToggle: (String) -> Unit) = Column {
-    val chosen = players.count { it.chosen }
-    FieldTitle(stringResource(R.string.roster, chosen, MAX_ROSTER), error)
-    players.forEach { player ->
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .toggleable(
-                    value = player.chosen,
-                    enabled = !(player.chosen && player.played),
-                    role = Role.Checkbox,
-                    onValueChange = { onToggle(player.id) },
+private fun PlayerTile(player: RosterPlayer, onToggle: () -> Unit) {
+    val locked = player.chosen && player.played
+    val colors = MaterialTheme.colorScheme
+    val container by animateColorAsState(if (player.chosen) colors.primaryContainer else colors.surfaceContainerHigh, label = "tile")
+    val content = if (player.chosen) colors.onPrimaryContainer else colors.onSurfaceVariant
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = container,
+        contentColor = content,
+        border = if (player.chosen) BorderStroke(2.dp, colors.primary) else null,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 120.dp)
+            .clip(MaterialTheme.shapes.large)
+            .toggleable(value = player.chosen, enabled = !locked, role = Role.Checkbox, onValueChange = { onToggle() }),
+    ) {
+        Box {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    player.number.toString(),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
                 )
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                checked = player.chosen,
-                onCheckedChange = null,
-                enabled = !(player.chosen && player.played),
-                modifier = Modifier.padding(end = 12.dp),
-            )
-            Text(
-                player.number.toString(),
-                Modifier.width(32.dp),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Column(Modifier.weight(1f)) {
-                Text(player.name, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    player.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                )
                 listOfNotNull(player.role, stringResource(R.string.played).takeIf { player.played })
                     .takeIf { it.isNotEmpty() }
                     ?.let {
                         Text(
                             it.joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.Center,
+                            color = content.copy(alpha = 0.75f),
                         )
                     }
+            }
+            if (player.chosen) {
+                Icon(
+                    if (locked) Icons.Filled.Lock else Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(20.dp),
+                )
             }
         }
     }

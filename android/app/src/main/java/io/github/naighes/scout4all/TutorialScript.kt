@@ -64,6 +64,8 @@ private fun toTheSet(team: String) = listOf(
     TutorialStep.Touch("matches-tab", R.string.tutorial_matches),
     TutorialStep.Touch("new-match", R.string.tutorial_new_match),
     TutorialStep.Read("match-fields", R.string.tutorial_match_fields),
+    TutorialStep.Touch("match-next", R.string.tutorial_match_next),
+    TutorialStep.Read("roster", R.string.tutorial_roster),
     TutorialStep.Touch("save-match", R.string.tutorial_save_match),
     TutorialStep.Read("lineup", R.string.tutorial_lineup),
     TutorialStep.Touch("start-set", R.string.tutorial_start_set),

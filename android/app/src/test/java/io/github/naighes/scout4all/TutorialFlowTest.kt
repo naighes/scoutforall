@@ -58,9 +58,16 @@ class TutorialFlowTest {
         rule.onNode(hasContentDescription(string(R.string.new_match)) and hasClickAction()).performClick()
         caption(R.string.tutorial_match_fields)
         rule.waitForText("Brazil")
-        // to read: the form can't be changed meanwhile
-        touch(string(R.string.save))
+        // to read: the form can't go on meanwhile
+        touch(string(R.string.go_on))
         caption(R.string.tutorial_match_fields)
+        touch(string(R.string.tutorial_next))
+        caption(R.string.tutorial_match_next)
+        touch(string(R.string.go_on))
+        caption(R.string.tutorial_roster)
+        // to read: the roster can't be changed meanwhile
+        rule.onNode(hasText("Alessia Orro", substring = true) and hasClickAction()).performClick()
+        caption(R.string.tutorial_roster)
         touch(string(R.string.tutorial_next))
         caption(R.string.tutorial_save_match)
         touch(string(R.string.save))

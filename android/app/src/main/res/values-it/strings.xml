@@ -43,6 +43,9 @@
     <string name="notes">Note</string>
     <string name="roster">A referto: %1$d su %2$d</string>
     <string name="played">ha giocato</string>
+    <string name="go_on">Continua</string>
+    <string name="roster_title">A referto</string>
+    <string name="roster_hint">Tocca un giocatore per metterlo a referto o toglierlo.</string>
     <string name="remove_birth_date">Togli la data di nascita</string>
     <string name="centimetres">cm</string>
     <string name="set_n">Set %d</string>
@@ -215,6 +218,8 @@
     <string name="tutorial_matches">Qui ci sono le giocatrici. Le partite sono nell\'altra scheda: tocca la scheda.</string>
     <string name="tutorial_new_match">Tocca + per una nuova partita.</string>
     <string name="tutorial_match_fields">Avversario, data, casa o trasferta, cambi: li ho già scritti io.</string>
+    <string name="tutorial_match_next">Tocca Continua: poi le giocatrici a referto.</string>
+    <string name="tutorial_roster">Tutta la squadra è a referto, fino a 14: un tocco toglie o rimette una giocatrice.</string>
     <string name="tutorial_save_match">Tocca Salva.</string>
     <string name="tutorial_lineup">La formazione del primo set è pronta: palleggiatrice in 6 (P6), noi in ricezione; Spirito è il libero, Fersino il secondo libero. Toccando una posizione se ne cambia la giocatrice.</string>
     <string name="tutorial_start_set">Tocca Inizia il set.</string>

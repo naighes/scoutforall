@@ -2456,6 +2456,27 @@ impl Scout4All {
         ))
     }
 
+    /// Checks the fields of the form before its roster, the next step: the
+    /// error of the first one not valid.
+    pub fn check_match_fields(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+    ) -> Result<(), MobileError> {
+        let team = self.read_team(&team_id)?;
+        let existing = match_id
+            .map(|id| self.read_match(&team_id, &id))
+            .transpose()?;
+        match form.validate(&team, existing.as_ref()) {
+            Err(e) if !e.is_roster() => Err(MobileError::InvalidMatch {
+                field: e.into(),
+                reason: e.message(self.language.labels()),
+            }),
+            _ => Ok(()),
+        }
+    }
+
     /// The roster of the form of a match of the team, new (no `match_id`)
     /// or saved, with `toggled` put on the score sheet or taken off.
     pub fn match_roster(
@@ -3567,6 +3588,9 @@ mod tests {
             Err(MobileError::InvalidMatch { field, .. }) => assert_eq!(field, MatchField::Roster),
             other => unreachable!("expected too many players, got {other:?}"),
         }
+        // the fields are fine: the roster is the next step
+        app.check_match_fields(team.clone(), None, new.form.clone())
+            .unwrap();
         let first = new.players[0].id;
         let toggled = app
             .match_roster(team.clone(), None, new.form, Some(first))
