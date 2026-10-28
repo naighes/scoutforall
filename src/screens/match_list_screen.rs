@@ -519,6 +519,8 @@ impl<
                 self.settings.clone(),
                 self.match_writer.clone(),
                 self.set_writer.clone(),
+                // the team as it is, also with the players not on the roster
+                self.team.clone(),
                 m,
             ))),
             None => {

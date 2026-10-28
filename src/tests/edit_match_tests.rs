@@ -102,7 +102,8 @@ mod tests {
         ui.type_keys(&[KeyCode::Tab, KeyCode::Char(' ')]).await;
         ui.type_keys(&[KeyCode::Tab, KeyCode::Backspace, KeyCode::Char('6')])
             .await;
-        ui.press(KeyCode::Enter).await;
+        // the form, then the roster as it is
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         let saved = ui.saved_matches();
         assert_eq!(saved.len(), 1, "{}", ui.screen());
         assert_eq!(saved[0]["opponent"], "Arezzo");
@@ -136,7 +137,8 @@ mod tests {
         ui.press(KeyCode::Esc).await;
         ui.type_keys(&[KeyCode::Backspace, KeyCode::Char('2')])
             .await;
-        ui.press(KeyCode::Enter).await;
+        // the form, then the roster as it is
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         assert_eq!(
             ui.saved_matches()[0]["max_substitutions"],
             2,

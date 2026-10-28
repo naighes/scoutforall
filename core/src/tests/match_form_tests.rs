@@ -344,13 +344,27 @@ mod tests {
                 (9, false)
             ]
         );
-        f.toggle(ids(&team, &[1])[0], &team, Some(&m));
-        f.toggle(ids(&team, &[9])[0], &team, Some(&m));
         assert_eq!(
-            f.clone().validate(&team, Some(&m)),
+            choices
+                .iter()
+                .filter(|c| c.played)
+                .map(|c| c.player.number)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6, 7]
+        );
+        // toggled, who played stays
+        f.toggle(ids(&team, &[1])[0], &team, Some(&m));
+        assert_eq!(f, MatchForm::of(&m));
+        // a roster without them, as no form makes it, is refused
+        let without = MatchForm {
+            roster: Some(ids(&team, &[2, 3, 4, 5, 6, 7, 8, 9])),
+            ..f.clone()
+        };
+        assert_eq!(
+            without.validate(&team, Some(&m)),
             Err(MatchFormError::RosterWithoutPlayed)
         );
-        f.toggle(ids(&team, &[1])[0], &team, Some(&m));
+        f.toggle(ids(&team, &[9])[0], &team, Some(&m));
         f.toggle(ids(&team, &[8])[0], &team, Some(&m));
         assert_eq!(
             f.validate(&team, Some(&m)).unwrap().roster,

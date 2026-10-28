@@ -10,11 +10,11 @@ use crate::{
             navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
             team_header::TeamHeader, text_box::TextBox,
         },
+        match_roster_screen::MatchRosterScreen,
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
             get_keybinding_actions, navigation_entries,
         },
-        start_set_screen::StartSetScreen,
     },
     shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings, settings::Settings},
 };
@@ -26,9 +26,8 @@ use ratatui::{
 };
 use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
-    match_form::{MatchForm, MatchInput},
+    match_form::MatchForm,
     providers::{match_writer::MatchWriter, set_writer::SetWriter},
-    set_start::SetStartForm,
     shapes::{r#match::MatchEntry, team::TeamEntry},
 };
 
@@ -190,6 +189,7 @@ impl<
         settings: Settings,
         match_writer: Arc<MW>,
         set_writer: Arc<SSW>,
+        team: TeamEntry,
         m: MatchEntry,
     ) -> Self {
         let max_sub_str = m.max_substitutions.to_string();
@@ -206,7 +206,6 @@ impl<
             Some(&max_sub_str),
             |current: &str, c: char| current.len() < 2 && c.is_ascii_digit(),
         );
-        let team = m.team.clone();
         let notes = notes_box(&m.notes);
         Self::build(
             settings_reader,
@@ -294,71 +293,23 @@ impl<
             // active players
             roster: self.editing.as_ref().and_then(|m| MatchForm::of(m).roster),
         };
-        match (
-            form.validate(&self.team, self.editing.as_ref()),
-            self.editing.clone(),
-        ) {
-            (Err(e), _) => {
+        // the fields here first, then the roster on its own screen
+        match form.clone().validate(&self.team, self.editing.as_ref()) {
+            Err(e) if !e.is_roster() => {
                 self.notify_message
                     .set_error(e.message(current_labels().domain));
                 AppAction::None
             }
-            (Ok(input), Some(m)) => self.handle_update(m, input).await,
-            (Ok(input), None) => self.handle_create(input).await,
-        }
-    }
-
-    async fn handle_create(&mut self, input: MatchInput) -> AppAction {
-        match self
-            .match_writer
-            .create(
-                &self.team,
-                input.opponent,
-                input.date,
-                input.home,
-                input.max_substitutions,
-                input.notes,
-                input.roster,
-            )
-            .await
-        {
-            Ok(m) => AppAction::SwitchScreen(Box::new(StartSetScreen::new(
+            _ => AppAction::SwitchScreen(Box::new(MatchRosterScreen::new(
                 self.settings_reader.clone(),
                 self.settings_writer.clone(),
                 self.settings.clone(),
-                m,
-                SetStartForm::new(1, None),
-                Some(2),
+                self.match_writer.clone(),
                 self.set_writer.clone(),
+                self.team.clone(),
+                form,
+                self.editing.clone(),
             ))),
-            Err(_) => {
-                self.notify_message
-                    .set_error(current_labels().could_not_create_match.to_string());
-                AppAction::None
-            }
-        }
-    }
-
-    async fn handle_update(&mut self, m: MatchEntry, input: MatchInput) -> AppAction {
-        match self
-            .match_writer
-            .update(
-                &m,
-                input.opponent,
-                input.date,
-                input.home,
-                input.max_substitutions,
-                input.notes,
-                input.roster,
-            )
-            .await
-        {
-            Ok(()) => AppAction::Back(true, Some(1)),
-            Err(_) => {
-                self.notify_message
-                    .set_error(current_labels().could_not_update_match.to_string());
-                AppAction::None
-            }
         }
     }
 

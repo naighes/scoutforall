@@ -134,7 +134,8 @@ mod tests {
             ui.press(KeyCode::Tab).await;
         }
         ui.type_keys(&chars("windy")).await;
-        ui.press(KeyCode::Enter).await;
+        // the form, then the roster as it is
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         assert_eq!(ui.saved_matches()[0]["notes"], "windy", "{}", ui.screen());
         // back on the match list
         ui.type_keys(&[KeyCode::Char('e')]).await;

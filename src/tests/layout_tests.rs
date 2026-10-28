@@ -59,6 +59,7 @@ mod tests {
             ("match list", true, "\nm".into()),
             ("new match", true, "\nmn".into()),
             ("edit match", true, "\nme".into()),
+            ("match roster", true, "\nme\n".into()),
             ("export match", true, "\nms".into()),
             ("import match", true, "\nmi".into()),
             ("serving team", false, "\nm\n".into()),

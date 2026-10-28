@@ -31,6 +31,8 @@ pub struct MatchForm {
 pub struct RosterChoice {
     pub player: PlayerEntry,
     pub chosen: bool,
+    /// played in a set of the match: on the score sheet for good
+    pub played: bool,
 }
 
 /// A valid form, the arguments of `MatchWriter::create` and `update`.
@@ -62,6 +64,16 @@ pub enum MatchFormError {
 }
 
 impl MatchFormError {
+    /// An error of the roster, not of the other fields.
+    pub fn is_roster(self) -> bool {
+        matches!(
+            self,
+            MatchFormError::RosterTooSmall
+                | MatchFormError::RosterTooLarge
+                | MatchFormError::RosterWithoutPlayed
+        )
+    }
+
     pub fn message(&self, labels: &Labels) -> String {
         use MatchFormError::*;
         match self {
@@ -112,8 +124,9 @@ impl MatchForm {
         team: &TeamEntry,
         existing: Option<&MatchEntry>,
     ) -> Vec<RosterChoice> {
+        let played = existing.map(MatchEntry::played).unwrap_or_default();
         let kept: HashSet<Uuid> = existing
-            .map(|m| m.roster.iter().copied().chain(m.played()).collect())
+            .map(|m| m.roster.iter().chain(&played).copied().collect())
             .unwrap_or_default();
         let chosen = self.chosen(team, existing);
         let mut choices: Vec<RosterChoice> = team
@@ -123,23 +136,32 @@ impl MatchForm {
             .map(|p| RosterChoice {
                 player: p.clone(),
                 chosen: chosen.contains(&p.id),
+                played: played.contains(&p.id),
             })
             .collect();
         choices.sort_by_key(|c| c.player.number);
         choices
     }
 
-    /// Puts `player` on the score sheet, or takes it off.
+    /// Puts `player` on the score sheet, or takes it off unless it played.
     pub fn toggle(&mut self, player: Uuid, team: &TeamEntry, existing: Option<&MatchEntry>) {
         let choices = self.roster_choices(team, existing);
-        if choices.iter().any(|c| c.player.id == player) {
-            self.roster = Some(
-                choices
-                    .iter()
-                    .filter(|c| c.chosen != (c.player.id == player))
-                    .map(|c| c.player.id)
-                    .collect(),
-            );
+        match choices.iter().find(|c| c.player.id == player) {
+            Some(RosterChoice {
+                chosen: true,
+                played: true,
+                ..
+            })
+            | None => {}
+            Some(_) => {
+                self.roster = Some(
+                    choices
+                        .iter()
+                        .filter(|c| c.chosen != (c.player.id == player))
+                        .map(|c| c.player.id)
+                        .collect(),
+                )
+            }
         }
     }
 
