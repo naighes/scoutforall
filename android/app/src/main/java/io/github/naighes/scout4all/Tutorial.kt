@@ -1,5 +1,8 @@
 package io.github.naighes.scout4all
 
+import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.core.LinearEasing
@@ -64,6 +67,7 @@ import androidx.compose.ui.node.observeReads
 import androidx.compose.ui.node.PointerInputModifierNode
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.relocation.bringIntoView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -87,13 +91,14 @@ sealed interface TutorialStep {
     /** The target, if any: in the hole of the veil. */
     val target: String?
 
-    /** Ends when `target` is touched: the hand taps on it. */
-    data class Touch(override val target: String, @StringRes override val caption: Int) : TutorialStep
-
-    /** Ends when `until` is reached, swiping up from `target`: the hand
-     * swipes. */
-    data class SwipeUp(override val target: String, val until: String, @StringRes override val caption: Int) :
-        TutorialStep
+    /** Ends when `target` is touched, by hand or by "Next"; with `until`,
+     * when that is reached instead (the statistics open, by a touch or a
+     * swipe: what comes next goes over them). The hand taps on it. */
+    data class Touch(
+        override val target: String,
+        @StringRes override val caption: Int,
+        val until: String? = null,
+    ) : TutorialStep
 
     /** Only to read, with `target` shown if any: ends with "Next". */
     data class Read(override val target: String?, @StringRes override val caption: Int) : TutorialStep
@@ -146,13 +151,13 @@ class Tutorial {
 
     /** `target` touched: the step that waits for it is over. */
     fun touched(target: String) {
-        if (step.let { it is TutorialStep.Touch && it.target == target }) next()
+        if (step.let { it is TutorialStep.Touch && it.target == target && it.until == null }) next()
     }
 
     /** `what` reached (the statistics opened): the step that waits for it
      * is over. */
     fun reached(what: String) {
-        if (step.let { it is TutorialStep.SwipeUp && it.until == what }) next()
+        if (step.let { it is TutorialStep.Touch && it.until == what }) next()
     }
 
     fun next() {
@@ -234,7 +239,8 @@ private class TutorialTargetNode(var target: String) :
 
 /** The veil over the app, with a hole on the target of the step: only the
  * target can be touched, the hand shows how; the caption says what to do,
- * with "Skip" always there. The system back does nothing meanwhile. */
+ * with "Skip" always there and "Next", which touches the target itself.
+ * The system back does nothing meanwhile. */
 @Composable
 fun TutorialOverlay(tutorial: Tutorial) {
     val step = tutorial.step ?: return
@@ -243,20 +249,25 @@ fun TutorialOverlay(tutorial: Tutorial) {
     var origin by remember { mutableStateOf(Offset.Zero) }
     val margin = with(LocalDensity.current) { HoleMargin.toPx() }
     val finger = with(LocalDensity.current) { Finger.roundToPx() }
+    val view = LocalView.current
     val hole = step.target?.let { tutorial.targets[it] }?.translate(-origin)?.inflate(margin)
     // a step to read: nothing to touch but its buttons
     val open = hole.takeIf { step !is TutorialStep.Read }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot() }) {
         Veil(hole)
         Blockers(open)
-        val swipe = step is TutorialStep.SwipeUp
-        if (open != null) Hand(open, swipe)
+        if (open != null) Hand(open)
         // the finger by the hole in sight too
         val pointed = open?.let { o ->
-            val at = fingerAt(o, margin, finger, swipe)
+            val at = fingerAt(o, margin, finger)
             Rect(minOf(o.left, at.x.toFloat()), o.top, maxOf(o.right, at.x + finger.toFloat()), maxOf(o.bottom, at.y + finger.toFloat()))
         } ?: hole
-        CaptionBy(pointed, tutorial.targets["score"]?.translate(-origin)) { Caption(step, tutorial) }
+        // the target where it is in the window, as a finger touches it
+        val next = when (step) {
+            is TutorialStep.Touch -> tutorial.targets[step.target]?.let { at -> { view.tap(at.center) } }
+            else -> tutorial::next
+        }
+        CaptionBy(pointed, tutorial.targets["score"]?.translate(-origin)) { Caption(step, tutorial, next) }
     }
 }
 
@@ -364,10 +375,23 @@ private fun Modifier.blockTouches() = pointerInput(Unit) {
     }
 }
 
-/** A finger and a ring that grows from its tip: tapping, or going up for a
- * swipe. */
+/** A tap on `at`, in the window, as a finger does: what is there gets it,
+ * through the hole of the veil. Once the touch of "Next" is over: a touch
+ * within a touch is lost. */
+private fun View.tap(at: Offset) {
+    post {
+        val time = SystemClock.uptimeMillis()
+        listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).forEach { action ->
+            val event = MotionEvent.obtain(time, time, action, at.x, at.y, 0)
+            dispatchTouchEvent(event)
+            event.recycle()
+        }
+    }
+}
+
+/** A finger and a ring that grows from its tip, tapping. */
 @Composable
-private fun Hand(hole: Rect, swipe: Boolean) {
+private fun Hand(hole: Rect) {
     val transition = rememberInfiniteTransition(label = "hand")
     val phase by transition.animateFloat(
         initialValue = 0f,
@@ -376,13 +400,12 @@ private fun Hand(hole: Rect, swipe: Boolean) {
         label = "phase",
     )
     val density = LocalDensity.current
-    val rise = with(density) { if (swipe) 96.dp.toPx() * phase else 0f }
     val finger = with(density) { Finger.roundToPx() }
     val margin = with(density) { HoleMargin.toPx() }
     // white on a dark edge: seen on the amber of a button too
     Canvas(Modifier.fillMaxSize()) {
         val radius = 18.dp.toPx() + 22.dp.toPx() * phase
-        val center = tipAt(hole, margin, finger, swipe) - Offset(0f, rise)
+        val center = tipAt(hole, margin)
         val alpha = 1f - phase
         drawCircle(Color.Black.copy(alpha = alpha * 0.6f), radius, center, style = Stroke(6.dp.toPx()))
         drawCircle(Color.White.copy(alpha = alpha), radius, center, style = Stroke(3.dp.toPx()))
@@ -391,31 +414,27 @@ private fun Hand(hole: Rect, swipe: Boolean) {
         painterResource(R.drawable.ic_touch),
         contentDescription = null,
         tint = Color.White,
-        modifier = Modifier.size(Finger).offset { fingerAt(hole, margin, finger, swipe) - IntOffset(0, rise.roundToInt()) },
+        modifier = Modifier.size(Finger).offset { fingerAt(hole, margin, finger) },
     )
 }
 
 internal val Finger = 40.dp
 
-/** Where the tip of the finger, `finger` big, touches the target in
- * `hole` (`margin` around it), so that the words of the target show: on
- * its bottom edge, in the middle; for a swipe, which goes up, the whole
- * finger on the right of it (from the middle it went up over the words). */
-internal fun tipAt(hole: Rect, margin: Float, finger: Int, swipe: Boolean = false) =
-    Offset(
-        if (swipe) hole.right - margin + finger * 11 / 24 else hole.center.x,
-        hole.bottom - margin,
-    )
+/** Where the tip of the finger touches the target in `hole` (`margin`
+ * around it), so that the words of the target show: on its bottom edge, in
+ * the middle. */
+internal fun tipAt(hole: Rect, margin: Float) = Offset(hole.center.x, hole.bottom - margin)
 
 /** Where the finger goes, `finger` big: its tip at `tipAt`. */
-internal fun fingerAt(hole: Rect, margin: Float, finger: Int, swipe: Boolean = false): IntOffset {
-    val tip = tipAt(hole, margin, finger, swipe)
+internal fun fingerAt(hole: Rect, margin: Float, finger: Int): IntOffset {
+    val tip = tipAt(hole, margin)
     return IntOffset(tip.x.roundToInt() - finger * 11 / 24, tip.y.roundToInt() - finger / 8)
 }
 
-/** What to do, how far the tutorial is, and how to end it. */
+/** What to do, how far the tutorial is, how to end it, and `next` to go on
+ * (none while its target isn't there yet). */
 @Composable
-private fun Caption(step: TutorialStep, tutorial: Tutorial) = Surface(
+private fun Caption(step: TutorialStep, tutorial: Tutorial, next: (() -> Unit)?) = Surface(
     modifier = Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
     shape = MaterialTheme.shapes.large,
     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -436,7 +455,7 @@ private fun Caption(step: TutorialStep, tutorial: Tutorial) = Surface(
             )
             Spacer(Modifier.weight(1f))
             TextButton(onClick = tutorial::skip) { Text(stringResource(R.string.tutorial_skip)) }
-            if (step is TutorialStep.Read) Button(onClick = tutorial::next) { Text(stringResource(R.string.tutorial_next)) }
+            next?.let { Button(onClick = it) { Text(stringResource(R.string.tutorial_next)) } }
         }
     }
 }

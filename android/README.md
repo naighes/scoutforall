@@ -63,9 +63,34 @@ build, keeping its data, and Play refuses it. From a tag, the workflow
 `publish-android.yml` builds the signed bundle with the secrets of the
 repository.
 
-The texts of the Play listing, the icon and the feature graphic are in
-`fastlane/metadata/android` (`fastlane/graphics.py` draws the images from
-the vectors of the app).
+The texts of the Play listing, the icon, the feature graphic and the
+screenshots are in `fastlane/metadata/android/<language>` (`fastlane/graphics.py`
+draws the icon and the graphic from the vectors of the app).
+
+### Play from the CI
+
+Nothing that changes with the versions is done from the Play Console:
+
+- **the bundle**: `publish-android.yml` uploads it from the tag with
+  fastlane `supply`, to the track of the variable `PLAY_TRACK` (`alpha`,
+  the closed test, if unset) with the status of `PLAY_STATUS` (`draft` if
+  unset; `completed` once the app is reviewed; `inProgress` with
+  `PLAY_ROLLOUT`, the share of users from 0 to 1, for a staged rollout).
+  Run by hand, the track, the status and the rollout are its inputs;
+- **the release notes**: `fastlane/metadata/android/<language>/changelogs/<versionCode>.txt`
+  in every language, at most 500 characters, written with the bump: the
+  release fails before the build without them;
+- **the listing**: `play-listing.yml` uploads texts and images when they
+  change on master (or by hand), the images only when they differ. Each
+  change goes through the review of Google, as from the console.
+
+Both upload only with the variable `PLAY_UPLOAD=true` and the key of the
+service account in the secret `PLAY_SERVICE_ACCOUNT_JSON`. Before a pull
+request, the limits of Play (and, with `--release`, the release notes):
+
+```sh
+python3 -I fastlane/check.py [--release]
+```
 
 ## Data
 

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +24,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -166,7 +170,13 @@ fun StatsSheet(
     // the step of the tutorial that opens it is over
     val tutorial = LocalTutorial.current
     LaunchedEffect(Unit) { tutorial?.reached(STATS_OPENED) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
+    // only the bottom inset: the top one is padded by how far the sheet is
+    // from the top, its height would move it and it would never stop
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheet,
+        contentWindowInsets = { WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom) },
+    ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             when (stats) {
                 null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }

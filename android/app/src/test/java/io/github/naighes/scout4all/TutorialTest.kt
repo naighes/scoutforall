@@ -19,7 +19,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** The veil of the tutorial: only its target can be touched. */
+/** The veil of the tutorial: only its target can be touched, by hand or
+ * by "Next". */
 @RunWith(RobolectricTestRunner::class)
 class TutorialTest {
     @get:Rule val rule = createComposeRule()
@@ -30,7 +31,7 @@ class TutorialTest {
         start(
             listOf(
                 TutorialStep.Touch("a", R.string.teams),
-                TutorialStep.SwipeUp("b", until = "opened", caption = R.string.settings),
+                TutorialStep.Touch("b", R.string.settings, until = "opened"),
                 TutorialStep.Read(null, R.string.lineup),
             ),
             onEnd = { ended++ },
@@ -64,13 +65,35 @@ class TutorialTest {
         assertEquals(listOf("a"), touched)
         assertEquals(1, tutorial.index)
         rule.waitForText(string(R.string.settings))
-        // the target of a swipe: touched, it waits for what it opens
+        // a target that opens something: touched, it waits for it
         touch("B")
         assertEquals(1, tutorial.index)
     }
 
+    /** "Next" touches the target itself: what it does is done, as by
+     * hand, and the step is over. */
     @Test
-    fun aSwipeEndsWhenItsStepIsReachedAndAReadingWithNext() {
+    fun nextTouchesTheTarget() {
+        show()
+        rule.waitForText(string(R.string.teams))
+        touch(string(R.string.tutorial_next))
+        // the touch of the target comes after the one of "Next"
+        rule.waitForIdle()
+        assertEquals(listOf("a"), touched)
+        assertEquals(1, tutorial.index)
+        rule.waitForText(string(R.string.settings))
+        touch(string(R.string.tutorial_next))
+        rule.waitForIdle()
+        assertEquals(listOf("a", "b"), touched)
+        assertEquals(1, tutorial.index)
+        tutorial.reached("opened")
+        assertEquals(2, tutorial.index)
+    }
+
+    /** A step ends when what its target opens is reached too (the
+     * statistics swiped up); a reading with "Next". */
+    @Test
+    fun aTouchEndsWhenItsStepIsReachedAndAReadingWithNext() {
         show()
         touch("A")
         tutorial.reached("something else")

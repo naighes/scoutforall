@@ -421,7 +421,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                 // row opens them too), the changes of the lineup on the
                 // right edge
                 Row(
-                    Modifier.fillMaxWidth().tutorial("stats").swipeUp { statsOpen = true }
+                    Modifier.fillMaxWidth().swipeUp { statsOpen = true }
                         .padding(start = 8.dp, top = 4.dp, bottom = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -433,7 +433,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                         )
                     }
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        StatsHandle(onOpen = { statsOpen = true })
+                        StatsHandle(onOpen = { statsOpen = true }, Modifier.tutorial("stats"))
                     }
                     LineupChanges(view.otherEvents.filter { it.value in lineupChanges }, model, Modifier)
                 }

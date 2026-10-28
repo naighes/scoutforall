@@ -9,7 +9,6 @@ import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipe
 import androidx.lifecycle.ViewModelProvider
 import org.junit.Assert.assertEquals
 
@@ -18,10 +17,11 @@ val AndroidComposeTestRule<*, out ComponentActivity>.tutorial: Tutorial
     get() = ViewModelProvider(activity)[TutorialViewModel::class.java].tutorial
 
 /** Plays each step of the tutorial where it shows its target, from the
- * welcome to the last one; `check` sees each step with its target, before
- * it's done. */
+ * welcome to the last one, or with "Next" at each step `byNext`; `check`
+ * sees each step with its target, before it's done. */
 fun AndroidComposeTestRule<*, out ComponentActivity>.playTutorial(
     tutorial: Tutorial,
+    byNext: Boolean = false,
     check: (TutorialStep, Rect?) -> Unit = { _, _ -> },
 ) {
     waitForText(app.getString(R.string.tutorial_welcome))
@@ -34,14 +34,11 @@ fun AndroidComposeTestRule<*, out ComponentActivity>.playTutorial(
         waitForIdle()
         val at = target?.let { tutorial.targets[it] }
         check(step, at)
-        when (step) {
-            is TutorialStep.Touch -> onRoot().performTouchInput { click(at?.center ?: center) }
-            is TutorialStep.SwipeUp -> onRoot().performTouchInput {
-                val from = at?.center ?: center
-                swipe(from, from.copy(y = from.y - 400f), durationMillis = 300)
-            }
-            is TutorialStep.Read -> onNode(hasText(app.getString(R.string.tutorial_next)) and hasClickAction()).performClick()
-            is TutorialStep.Done -> onNode(hasText(app.getString(R.string.tutorial_finish)) and hasClickAction()).performClick()
+        when {
+            step is TutorialStep.Touch && !byNext -> onRoot().performTouchInput { click(at?.center ?: center) }
+            step is TutorialStep.Touch || step is TutorialStep.Read ->
+                onNode(hasText(app.getString(R.string.tutorial_next)) and hasClickAction()).performClick()
+            else -> onNode(hasText(app.getString(R.string.tutorial_finish)) and hasClickAction()).performClick()
         }
         waitForIdle()
         steps++
