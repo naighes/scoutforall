@@ -248,7 +248,7 @@
     <string name="tutorial_setter_cambi">Tap Cambi: the rotation follows her.</string>
     <string name="tutorial_libero_menu">Last, the other libero: the half moon.</string>
     <string name="tutorial_libero">Tap Libero: Fersino takes the place of Spirito.</string>
-    <string name="tutorial_stats">The statistics of the set and of the match: swipe up from here.</string>
+    <string name="tutorial_stats">The statistics of the set and of the match: tap here, or swipe up from here.</string>
     <string name="tutorial_done">That\'s all. The match stays with the example team: go on scouting it, or make your own team. Undo, at the bottom left, takes back the last touch. The tutorial is in the settings, to watch it again.</string>
     <string name="tutorial_finish">Finish</string>
 </resources>

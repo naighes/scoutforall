@@ -246,7 +246,7 @@
     <string name="tutorial_setter_cambi">カンビをタップ:ローテーションは彼女が基準になります。</string>
     <string name="tutorial_libero_menu">最後にもう一人のリベロ:半月のボタン。</string>
     <string name="tutorial_libero">「リベロ」をタップ:フェルジーノがスピリトと交代。</string>
-    <string name="tutorial_stats">セットと試合のスタッツ:ここから上にスワイプ。</string>
+    <string name="tutorial_stats">セットと試合のスタッツ:ここをタップ、またはここから上にスワイプ。</string>
     <string name="tutorial_done">以上です。試合はサンプルチームに残ります。スカウティングを続けるか、自分のチームを作りましょう。左下の「元に戻す」で最後のタッチを取り消せます。チュートリアルは設定から再表示できます。</string>
     <string name="tutorial_finish">終了</string>
 </resources>

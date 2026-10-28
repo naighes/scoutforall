@@ -247,7 +247,7 @@
     <string name="tutorial_setter_cambi">Toque em Cambi: o rodízio segue ela.</string>
     <string name="tutorial_libero_menu">Por último, a outra líbero: a meia-lua.</string>
     <string name="tutorial_libero">Toque em Líbero: Fersino toma o lugar de Spirito.</string>
-    <string name="tutorial_stats">As estatísticas do set e da partida: deslize para cima daqui.</string>
+    <string name="tutorial_stats">As estatísticas do set e da partida: toque aqui ou deslize para cima daqui.</string>
     <string name="tutorial_done">É isso. A partida fica no time de exemplo: continue o scout ou crie o seu time. Desfazer, embaixo à esquerda, tira o último toque. O tutorial está nas configurações, para ver de novo.</string>
     <string name="tutorial_finish">Concluir</string>
 </resources>

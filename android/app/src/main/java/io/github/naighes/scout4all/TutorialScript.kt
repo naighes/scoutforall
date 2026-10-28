@@ -52,7 +52,8 @@ class TutorialViewModel(private val app: Scout4AllApplication) : ViewModel() {
 /** From the teams to the scouting of a match of the example `team`, its
  * statistics last. */
 fun tutorialSteps(team: String): List<TutorialStep> = toTheSet(team) + rallies + lineupChanges + listOf(
-    TutorialStep.SwipeUp("stats", until = STATS_OPENED, caption = R.string.tutorial_stats),
+    // a tap on the handle, or a swipe up (the caption says both)
+    TutorialStep.Touch("stats", R.string.tutorial_stats, until = STATS_OPENED),
     TutorialStep.Done(R.string.tutorial_done),
 )
 

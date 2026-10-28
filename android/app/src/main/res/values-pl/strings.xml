@@ -249,7 +249,7 @@
     <string name="tutorial_setter_cambi">Dotknij Cambi: ustawienie idzie za nią.</string>
     <string name="tutorial_libero_menu">Na koniec druga libero: półksiężyc.</string>
     <string name="tutorial_libero">Dotknij Libero: Fersino zastępuje Spirito.</string>
-    <string name="tutorial_stats">Statystyki seta i meczu: przesuń stąd w górę.</string>
+    <string name="tutorial_stats">Statystyki seta i meczu: dotknij tutaj albo przesuń stąd w górę.</string>
     <string name="tutorial_done">To wszystko. Mecz zostaje w przykładowej drużynie: kontynuuj scouting albo utwórz własną drużynę. Cofnij, w lewym dolnym rogu, usuwa ostatnie dotknięcie. Samouczek jest w ustawieniach, aby obejrzeć go ponownie.</string>
     <string name="tutorial_finish">Zakończ</string>
 </resources>

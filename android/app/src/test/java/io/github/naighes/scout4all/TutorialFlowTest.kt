@@ -87,6 +87,18 @@ class TutorialFlowTest {
         assertScouted(team, match)
     }
 
+    /** "Next" at every step, which touches each target itself: the same
+     * match, to the end. */
+    @Test
+    fun theWholeTutorialGoesToTheEndWithNext() {
+        start()
+        rule.playTutorial(tutorial, byNext = true)
+        rule.waitFor({ "the tutorial still to show" }) { !core { it.tutorialPending() } }
+        val team = core { it.tutorialTeam() }
+        val match = core { it.matches(team) }.single() as MatchListing.Match
+        assertScouted(team, match)
+    }
+
     private fun playToTheEnd() = rule.playTutorial(tutorial)
 
     /** The match as the tutorial scouts it: 2-0, the lineup changed. */

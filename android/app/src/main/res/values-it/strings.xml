@@ -247,7 +247,7 @@
     <string name="tutorial_setter_cambi">Tocca Cambi: la rotazione segue lei.</string>
     <string name="tutorial_libero_menu">Per ultimo, l\'altro libero: la mezzaluna.</string>
     <string name="tutorial_libero">Tocca Libero: Fersino prende il posto di Spirito.</string>
-    <string name="tutorial_stats">Le statistiche del set e della partita: scorri verso l\'alto da qui.</string>
+    <string name="tutorial_stats">Le statistiche del set e della partita: tocca qui, oppure scorri verso l\'alto da qui.</string>
     <string name="tutorial_done">È tutto. La partita resta nella squadra di esempio: continua a fare lo scouting o crea la tua squadra. Annulla, in basso a sinistra, toglie l\'ultimo tocco. Il tutorial è nelle impostazioni, per rivederlo.</string>
     <string name="tutorial_finish">Fine</string>
 </resources>
