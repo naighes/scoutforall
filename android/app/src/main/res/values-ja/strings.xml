@@ -41,6 +41,8 @@
     <string name="birth_date">生年月日</string>
     <string name="height">身長</string>
     <string name="notes">メモ</string>
+    <string name="roster">スコアシート: %1$d / %2$d人</string>
+    <string name="played">出場済み</string>
     <string name="remove_birth_date">生年月日を削除</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>

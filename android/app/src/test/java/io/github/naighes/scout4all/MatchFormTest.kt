@@ -1,6 +1,15 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import io.github.naighes.scout4all.core.PlayerForm
+import io.github.naighes.scout4all.core.RoleEnum
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -71,5 +80,35 @@ class MatchFormTest {
         rule.save()
         rule.waitFor { saved.size == 1 }
         assertEquals("windy gym", core { it.matchForm(team, saved.single()) }.notes)
+    }
+
+    /** The row of the player in the roster. */
+    private fun rosterRow(name: String) = rule.onNode(hasText(name, substring = true) and isToggleable())
+
+    /** Fifteen players, one too many: one off, and the match is saved
+     * with the other fourteen. */
+    @Test
+    fun aLargeTeamChoosesItsRoster() {
+        (1..8).forEach { core { c -> c.savePlayer(team, null, PlayerForm("Extra $it", RoleEnum.OUTSIDE_HITTER, "${30 + it}")) } }
+        show()
+        rule.type(string(R.string.opponent), "Cortona")
+        rosterRow("Extra 8").performScrollTo().assertIsOn()
+        rule.save()
+        rule.waitForText(string(R.string.roster, 15, 14))
+        assertEquals(emptyList<String>(), saved)
+        rosterRow("Extra 8").performScrollTo().performClick()
+        rule.waitFor { runCatching { rosterRow("Extra 8").assertIsOff() }.isSuccess }
+        rule.waitForText(string(R.string.roster, 14, 14))
+        rule.save()
+        rule.waitFor { saved.size == 1 }
+        assertEquals(14, core { it.matchForm(team, saved.single()) }.roster?.size)
+    }
+
+    /** Who played in a set stays on the score sheet. */
+    @Test
+    fun whoPlayedStaysOnTheRoster() {
+        val match = startFirstSet(team)
+        show(match)
+        rosterRow("Alessia Orro").performScrollTo().assertIsOn().assertIsNotEnabled()
     }
 }

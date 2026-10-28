@@ -41,6 +41,8 @@
     <string name="birth_date">Data de nascimento</string>
     <string name="height">Altura</string>
     <string name="notes">Notas</string>
+    <string name="roster">Na súmula: %1$d de %2$d</string>
+    <string name="played">jogou</string>
     <string name="remove_birth_date">Remover a data de nascimento</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>

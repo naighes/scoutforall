@@ -365,6 +365,25 @@ pub struct RoleChoice {
     pub name: String,
 }
 
+/// A player that can be on the score sheet of a match, and whether it is.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct RosterPlayer {
+    pub id: Uuid,
+    pub name: String,
+    pub number: u8,
+    pub role: Option<String>,
+    pub chosen: bool,
+    /// played in a set of the match: on the score sheet for good
+    pub played: bool,
+}
+
+/// The match form with the players of its roster, by number.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct MatchRoster {
+    pub form: MatchForm,
+    pub players: Vec<RosterPlayer>,
+}
+
 /// A player as the team page shows it.
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct Player {
@@ -2437,6 +2456,40 @@ impl Scout4All {
         ))
     }
 
+    /// The roster of the form of a match of the team, new (no `match_id`)
+    /// or saved, with `toggled` put on the score sheet or taken off.
+    pub fn match_roster(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+        toggled: Option<Uuid>,
+    ) -> Result<MatchRoster, MobileError> {
+        // the team as it is, also with the players not on the roster
+        let team = self.read_team(&team_id)?;
+        let existing = match_id
+            .map(|id| self.read_match(&team_id, &id))
+            .transpose()?;
+        let mut form = form;
+        if let Some(player) = toggled {
+            form.toggle(player, &team, existing.as_ref());
+        }
+        let labels = self.language.labels();
+        let players = form
+            .roster_choices(&team, existing.as_ref())
+            .into_iter()
+            .map(|c| RosterPlayer {
+                id: c.player.id,
+                name: c.player.name,
+                number: c.player.number,
+                role: c.player.role.map(|r| r.friendly_name(labels).to_string()),
+                chosen: c.chosen,
+                played: c.played,
+            })
+            .collect();
+        Ok(MatchRoster { form, players })
+    }
+
     /// The form of a match of the team, to edit it.
     pub fn match_form(&self, team_id: String, match_id: String) -> Result<MatchForm, MobileError> {
         Ok(MatchForm::of(&self.read_match(&team_id, &match_id)?))
@@ -3491,6 +3544,45 @@ mod tests {
             }
             other => unreachable!("expected the match, got {other:?}"),
         }
+    }
+
+    /// Over 14 players the roster is chosen: the core says who is on it,
+    /// and refuses too many.
+    #[test]
+    fn a_match_of_a_large_team_chooses_its_roster() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        for n in 1..=15 {
+            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
+                .unwrap();
+        }
+        let date = "2026-10-24T18:00:00+02:00";
+        let new = app
+            .match_roster(team.clone(), None, match_form("Arezzo", date, "8"), None)
+            .unwrap();
+        assert_eq!(new.form.roster, None);
+        assert_eq!(new.players.iter().filter(|p| p.chosen).count(), 15);
+        match app.save_match(team.clone(), None, new.form.clone()) {
+            Err(MobileError::InvalidMatch { field, .. }) => assert_eq!(field, MatchField::Roster),
+            other => unreachable!("expected too many players, got {other:?}"),
+        }
+        let first = new.players[0].id;
+        let toggled = app
+            .match_roster(team.clone(), None, new.form, Some(first))
+            .unwrap();
+        assert_eq!(
+            toggled
+                .players
+                .iter()
+                .map(|p| (p.number, p.chosen))
+                .collect::<Vec<_>>(),
+            (1..=15).map(|n| (n, n != 1)).collect::<Vec<_>>()
+        );
+        let id = app.save_match(team.clone(), None, toggled.form).unwrap();
+        let edited = app.match_form(team.clone(), id.clone()).unwrap();
+        let saved = app.match_roster(team, Some(id), edited, None).unwrap();
+        assert_eq!(saved.players.iter().filter(|p| p.chosen).count(), 14);
     }
 
     #[test]

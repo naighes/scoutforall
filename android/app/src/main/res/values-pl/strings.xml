@@ -41,6 +41,8 @@
     <string name="birth_date">Data urodzenia</string>
     <string name="height">Wzrost</string>
     <string name="notes">Notatki</string>
+    <string name="roster">W protokole: %1$d z %2$d</string>
+    <string name="played">grał(a)</string>
     <string name="remove_birth_date">Usuń datę urodzenia</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>

@@ -42,6 +42,8 @@
     <string name="birth_date">Birth date</string>
     <string name="height">Height</string>
     <string name="notes">Notes</string>
+    <string name="roster">On the score sheet: %1$d of %2$d</string>
+    <string name="played">played</string>
     <string name="remove_birth_date">Remove the birth date</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>

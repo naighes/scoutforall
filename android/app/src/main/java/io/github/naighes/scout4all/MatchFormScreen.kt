@@ -4,6 +4,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -38,9 +42,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,6 +58,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.MatchField
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.RosterPlayer
 import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
@@ -64,12 +72,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 sealed interface MatchFormState {
     data object Loading : MatchFormState
     data class Failed(val message: String) : MatchFormState
     data class Editing(
         val form: MatchForm,
+        /** who can be on the score sheet, by number, and who is */
+        val players: List<RosterPlayer> = emptyList(),
         /** the field the core rejected, with why */
         val invalid: Pair<MatchField, String>? = null,
         /** an error of the save */
@@ -100,15 +112,14 @@ class MatchFormViewModel(
         viewModelScope.launch {
             mutableState.value = try {
                 app.core { core ->
-                    MatchFormState.Editing(
-                        when (matchId) {
-                            null -> when (example) {
-                                true -> core.tutorialMatchForm(teamId, rfc3339(OffsetDateTime.now()))
-                                false -> core.newMatchForm(rfc3339(OffsetDateTime.now()))
-                            }
-                            else -> core.matchForm(teamId, matchId)
-                        },
-                    )
+                    val form = when (matchId) {
+                        null -> when (example) {
+                            true -> core.tutorialMatchForm(teamId, rfc3339(OffsetDateTime.now()))
+                            false -> core.newMatchForm(rfc3339(OffsetDateTime.now()))
+                        }
+                        else -> core.matchForm(teamId, matchId)
+                    }
+                    MatchFormState.Editing(form, core.matchRoster(teamId, matchId, form, null).players)
                 }
             } catch (e: MobileException) {
                 MatchFormState.Failed(e.reason)
@@ -123,6 +134,37 @@ class MatchFormViewModel(
             is MatchFormState.Editing ->
                 s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
             else -> s
+        }
+    }
+
+    /** One toggle at a time, each on the roster of the one before. */
+    private val toggling = Mutex()
+
+    /** Puts the player on the score sheet, or takes it off: the core
+     * says who is on it then. */
+    fun toggle(player: String) {
+        viewModelScope.launch { toggling.withLock { toggleNow(player) } }
+    }
+
+    private suspend fun toggleNow(player: String) {
+        val editing = mutableState.value as? MatchFormState.Editing ?: return
+        val roster = try {
+            app.core { it.matchRoster(teamId, matchId, editing.form, player) }
+        } catch (e: MobileException) {
+            mutableState.update { s -> (s as? MatchFormState.Editing)?.copy(error = e.reason) ?: s }
+            return
+        }
+        mutableState.update { s ->
+            when (s) {
+                // the form as changed meanwhile, the roster as toggled
+                is MatchFormState.Editing -> s.copy(
+                    form = s.form.copy(roster = roster.form.roster),
+                    players = roster.players,
+                    invalid = s.invalid?.takeIf { it.first != MatchField.ROSTER },
+                    error = null,
+                )
+                else -> s
+            }
         }
     }
 
@@ -223,6 +265,7 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
+            Roster(state.players, error(MatchField.ROSTER), model::toggle)
         }
         state.error?.let {
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
@@ -234,6 +277,56 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("save-match"),
         ) { Text(stringResource(R.string.save)) }
     }
+
+/** The players on the score sheet, from 7 to 14: a tap puts one on or
+ * takes it off; who played in a set stays. */
+@Composable
+private fun Roster(players: List<RosterPlayer>, error: String?, onToggle: (String) -> Unit) = Column {
+    val chosen = players.count { it.chosen }
+    FieldTitle(stringResource(R.string.roster, chosen, MAX_ROSTER), error)
+    players.forEach { player ->
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = player.chosen,
+                    enabled = !(player.chosen && player.played),
+                    role = Role.Checkbox,
+                    onValueChange = { onToggle(player.id) },
+                )
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = player.chosen,
+                onCheckedChange = null,
+                enabled = !(player.chosen && player.played),
+                modifier = Modifier.padding(end = 12.dp),
+            )
+            Text(
+                player.number.toString(),
+                Modifier.width(32.dp),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(player.name, style = MaterialTheme.typography.bodyLarge)
+                listOfNotNull(player.role, stringResource(R.string.played).takeIf { player.played })
+                    .takeIf { it.isNotEmpty() }
+                    ?.let {
+                        Text(
+                            it.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+            }
+        }
+    }
+}
+
+/** The players a score sheet takes at most. */
+private const val MAX_ROSTER = 14
 
 /** The day of the match, in the language of the phone; a tap opens the
  * calendar. The time of day stays. */
