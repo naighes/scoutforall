@@ -4,8 +4,27 @@ name: release android
 # versionName and the versionCode come from Cargo.toml). Apart from
 # publish.yml, so that a failure here never blocks the release of the CLI.
 
+# Where it goes on Play: from the inputs when run by hand, otherwise from
+# the variables PLAY_TRACK (alpha, the closed test, if unset), PLAY_STATUS
+# (draft if unset: completed once the app is reviewed, inProgress for a
+# staged rollout) and PLAY_ROLLOUT (the share of users of inProgress).
 on:
   workflow_dispatch:
+    inputs:
+      track:
+        description: the track of Play
+        type: choice
+        options: [internal, alpha, beta, production]
+        default: alpha
+      status:
+        description: the status of the release
+        type: choice
+        options: [draft, completed, inProgress]
+        default: draft
+      rollout:
+        description: the share of users, from 0 to 1, for inProgress
+        type: string
+        required: false
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -30,6 +49,10 @@ jobs:
         run: |
           version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml)"
           [ "v${version}" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME}, Cargo.toml ${version}"; exit 1; }
+      # the release notes of this version in every language, before the
+      # build: Play shows them to the testers
+      - name: check the listing and the release notes
+        run: python3 -I android/fastlane/check.py --release
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
@@ -84,22 +107,55 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
-  # to the internal test of Play, as a draft to roll out from the console.
-  # Only once the service account exists (Play Console → API access), and
-  # after the first bundle, which Play wants uploaded by hand
+  # the bundle and its release notes (fastlane/metadata/android/<language>/
+  # changelogs/<versionCode>.txt) to Play; the listing is play-listing.yml.
+  # Only once the service account exists (Play Console → Users and
+  # permissions) with its key in PLAY_SERVICE_ACCOUNT_JSON
   play:
-    name: upload to Play (internal test)
+    name: upload to Play
     needs: bundle
     if: vars.PLAY_UPLOAD == 'true'
     runs-on: ubuntu-latest
+    # one edit of the app at a time on Play
+    concurrency:
+      group: play
+      cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: android/fastlane
       - uses: actions/download-artifact@v4
         with:
           name: scout4all-android-${{ github.ref_name }}
-      - uses: r0adkll/upload-google-play@v1
+      - uses: ruby/setup-ruby@v1
         with:
-          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
-          packageName: ${{ env.PACKAGE_NAME }}
-          releaseFiles: app-release.aab
-          track: internal
-          status: draft
+          ruby-version: '3.3'
+      - run: gem install fastlane --no-document --version 2.240.1
+      - name: upload the bundle
+        run: |
+          # by hand, the inputs alone
+          [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && ROLLOUT="${INPUT_ROLLOUT}" || ROLLOUT="${PLAY_ROLLOUT}"
+          case "${STATUS}:${ROLLOUT}" in
+            inProgress:0.*) ;;
+            inProgress:*) echo "inProgress wants a rollout between 0 and 1, not '${ROLLOUT}'"; exit 1 ;;
+            *:) ;;
+            *) echo "a rollout is only for inProgress, not ${STATUS}"; exit 1 ;;
+          esac
+          fastlane supply \
+            --package_name "${PACKAGE_NAME}" \
+            --aab app-release.aab \
+            --track "${TRACK}" \
+            --release_status "${STATUS}" \
+            ${ROLLOUT:+--rollout "${ROLLOUT}"} \
+            --metadata_path android/fastlane/metadata/android \
+            --skip_upload_apk true \
+            --skip_upload_metadata true \
+            --skip_upload_images true \
+            --skip_upload_screenshots true
+        env:
+          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          TRACK: ${{ inputs.track || vars.PLAY_TRACK || 'alpha' }}
+          STATUS: ${{ inputs.status || vars.PLAY_STATUS || 'draft' }}
+          INPUT_ROLLOUT: ${{ inputs.rollout }}
+          PLAY_ROLLOUT: ${{ vars.PLAY_ROLLOUT }}
