@@ -15,4 +15,6 @@ pub const LEGACY_MAX_SUBSTITUTIONS: u8 = 6;
 // and the libero to start a set
 pub const MAX_ROSTER: usize = 14;
 pub const MIN_ROSTER: usize = 7;
+/// More players on the score sheet need a libero among them.
+pub const MAX_ROSTER_WITHOUT_LIBERO: usize = 12;
 pub const DEFAULT_LANGUAGE: &str = "en";

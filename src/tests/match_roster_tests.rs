@@ -84,6 +84,42 @@ mod tests {
         );
     }
 
+    /// Over 12 players the score sheet needs a libero: without Gina, the
+    /// libero, 14 aren't saved.
+    #[tokio::test]
+    async fn over_12_players_the_roster_needs_a_libero() {
+        let mut ui = Ui::start(FIFTEEN, &[]).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Char('m'), KeyCode::Char('n')])
+            .await;
+        ui.type_keys(&chars("Arezzo")).await;
+        ui.press(KeyCode::Tab).await;
+        ui.type_keys(&chars("20260920")).await;
+        ui.press(KeyCode::Enter).await;
+        for _ in 0..6 {
+            ui.press(KeyCode::Down).await;
+        }
+        ui.press(KeyCode::Char(' ')).await;
+        assert!(ui.screen().contains(&title(14)), "{}", ui.screen());
+        ui.press(KeyCode::Enter).await;
+        let error: String = current_labels()
+            .domain
+            .roster_without_libero
+            .chars()
+            .take(30)
+            .collect();
+        assert!(ui.screen().contains(&error), "{}", ui.screen());
+        assert!(roster_numbers(&ui).is_empty());
+        // Gina back on, Anna off
+        ui.press(KeyCode::Esc).await;
+        ui.press(KeyCode::Char(' ')).await;
+        for _ in 0..6 {
+            ui.press(KeyCode::Up).await;
+        }
+        ui.press(KeyCode::Char(' ')).await;
+        ui.press(KeyCode::Enter).await;
+        assert_eq!(roster_numbers(&ui), (2..=15).collect::<Vec<_>>());
+    }
+
     /// Who played in a set stays: the row doesn't change; someone who
     /// didn't leaves.
     #[tokio::test]

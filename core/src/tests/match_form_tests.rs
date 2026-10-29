@@ -5,7 +5,7 @@ mod tests {
     use crate::{
         match_form::{MatchForm, MatchFormError, MatchInput},
         shapes::{
-            enums::{EventTypeEnum, TeamSideEnum},
+            enums::{EventTypeEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
             player::PlayerEntry,
             set::SetEntry,
@@ -33,7 +33,7 @@ mod tests {
     }
 
     /// A team of `n` players, numbered from 1, each with the same id in
-    /// every team.
+    /// every team; the seventh is the libero.
     fn team_of(n: u8) -> TeamEntry {
         TeamEntry {
             players: (1..=n)
@@ -41,6 +41,7 @@ mod tests {
                     id: Uuid::from_u128(number.into()),
                     number,
                     name: format!("player {number}"),
+                    role: (number == 7).then_some(RoleEnum::Libero),
                     ..PlayerEntry::default()
                 })
                 .collect(),
@@ -300,6 +301,43 @@ mod tests {
             f.toggle(ids(&team, &[n])[0], &team, None);
         }
         assert_eq!(f.validate(&team, None), Err(MatchFormError::RosterTooSmall));
+    }
+
+    /// Over 12 players the score sheet needs a libero: up to 12 it doesn't,
+    /// and a libero off the roster doesn't count.
+    #[test]
+    fn over_12_players_the_roster_needs_a_libero() {
+        let mut team = team_of(14);
+        assert_eq!(form("6").validate(&team, None).unwrap().roster.len(), 14);
+        let libero = ids(&team, &[7])[0];
+        let mut f = form("6");
+        f.toggle(libero, &team, None);
+        assert_eq!(
+            f.clone().validate(&team, None),
+            Err(MatchFormError::RosterWithoutLibero)
+        );
+        f.toggle(ids(&team, &[14])[0], &team, None);
+        assert_eq!(f.validate(&team, None).unwrap().roster.len(), 12);
+        team.players[6].role = Some(RoleEnum::Setter);
+        assert_eq!(
+            form("6").validate(&team, None),
+            Err(MatchFormError::RosterWithoutLibero)
+        );
+        assert!(MatchFormError::RosterWithoutLibero.is_roster());
+    }
+
+    /// A match saved before v0.11 without a roster keeps the whole team,
+    /// with or without a libero.
+    #[test]
+    fn a_match_without_roster_needs_no_libero() {
+        let mut team = team_of(14);
+        team.players[6].role = None;
+        let m = MatchEntry {
+            roster: vec![],
+            ..played()
+        };
+        let input = MatchForm::of(&m).validate(&team, Some(&m)).unwrap();
+        assert!(input.roster.is_empty());
     }
 
     /// Toggled twice, a player is back as it was; someone not in the team

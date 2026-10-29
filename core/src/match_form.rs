@@ -3,9 +3,14 @@
 //! saves once it's valid.
 
 use crate::{
-    constants::{DEFAULT_MAX_SUBSTITUTIONS, MAX_ROSTER, MIN_ROSTER},
+    constants::{DEFAULT_MAX_SUBSTITUTIONS, MAX_ROSTER, MAX_ROSTER_WITHOUT_LIBERO, MIN_ROSTER},
     localization::Labels,
-    shapes::{enums::EventTypeEnum, r#match::MatchEntry, player::PlayerEntry, team::TeamEntry},
+    shapes::{
+        enums::{EventTypeEnum, RoleEnum},
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        team::TeamEntry,
+    },
 };
 use chrono::{DateTime, FixedOffset};
 use std::collections::HashSet;
@@ -61,6 +66,9 @@ pub enum MatchFormError {
     RosterTooLarge,
     /// without a player who already played in a set of the match
     RosterWithoutPlayed,
+    /// more than 12 players and no libero among them: the score sheet
+    /// takes 13 or 14 only with a libero
+    RosterWithoutLibero,
 }
 
 impl MatchFormError {
@@ -71,6 +79,7 @@ impl MatchFormError {
             MatchFormError::RosterTooSmall
                 | MatchFormError::RosterTooLarge
                 | MatchFormError::RosterWithoutPlayed
+                | MatchFormError::RosterWithoutLibero
         )
     }
 
@@ -84,6 +93,7 @@ impl MatchFormError {
             RosterTooSmall => labels.roster_too_small,
             RosterTooLarge => labels.roster_too_large,
             RosterWithoutPlayed => labels.roster_without_played,
+            RosterWithoutLibero => labels.roster_without_libero,
         }
         .to_string()
     }
@@ -210,18 +220,21 @@ impl MatchForm {
     }
 
     /// The roster to save: none for a match saved without one and left so,
-    /// else from `MIN_ROSTER` to `MAX_ROSTER` players with all who played.
+    /// else from `MIN_ROSTER` to `MAX_ROSTER` players with all who played,
+    /// and a libero when more than `MAX_ROSTER_WITHOUT_LIBERO`.
     fn valid_roster(
         &self,
         team: &TeamEntry,
         existing: Option<&MatchEntry>,
     ) -> Result<Vec<Uuid>, MatchFormError> {
-        let roster: Vec<Uuid> = self
+        let chosen: Vec<PlayerEntry> = self
             .roster_choices(team, existing)
             .into_iter()
             .filter(|c| c.chosen)
-            .map(|c| c.player.id)
+            .map(|c| c.player)
             .collect();
+        let with_libero = chosen.iter().any(|p| p.role == Some(RoleEnum::Libero));
+        let roster: Vec<Uuid> = chosen.iter().map(|p| p.id).collect();
         let played = existing.map(MatchEntry::played).unwrap_or_default();
         let undeclared = self.roster.is_none() && existing.is_some_and(|m| m.roster.is_empty());
         match roster.len() {
@@ -230,6 +243,9 @@ impl MatchForm {
             n if n > MAX_ROSTER => Err(MatchFormError::RosterTooLarge),
             _ if !played.iter().all(|p| roster.contains(p)) => {
                 Err(MatchFormError::RosterWithoutPlayed)
+            }
+            n if n > MAX_ROSTER_WITHOUT_LIBERO && !with_libero => {
+                Err(MatchFormError::RosterWithoutLibero)
             }
             _ => Ok(roster),
         }

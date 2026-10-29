@@ -353,7 +353,8 @@ impl From<MatchFormError> for MatchField {
             }
             MatchFormError::RosterTooSmall
             | MatchFormError::RosterTooLarge
-            | MatchFormError::RosterWithoutPlayed => MatchField::Roster,
+            | MatchFormError::RosterWithoutPlayed
+            | MatchFormError::RosterWithoutLibero => MatchField::Roster,
         }
     }
 }
@@ -3575,8 +3576,16 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=15 {
-            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                .unwrap();
+            // a libero: more than 12 on the score sheet need one
+            let role = Some(match n {
+                7 => RoleEnum::Libero,
+                _ => RoleEnum::Setter,
+            });
+            let player = PlayerForm {
+                role,
+                ..player(&format!("P{n}"), &n.to_string())
+            };
+            app.save_player(team.clone(), None, player).unwrap();
         }
         let date = "2026-10-24T18:00:00+02:00";
         let new = app
