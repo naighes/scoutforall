@@ -1,0 +1,4 @@
+- Skład meczu: wybierz, kto jest w protokole (od 7 do 14 zawodników); kto rozegrał seta, pozostaje w składzie.
+- Statystyki sideout: jak często pierwsza, druga i kolejne piłki w rallyu kończą się punktem.
+- Odwrócone P1: poinformuj aplikację, że w P1 atakujący z lewej i prawej zamieniają się strefami; każde zdarzenie to zapisuje.
+- Formacja przyjęcia: gdy zawodnik ma zaraz serwować, zaznacz liczbę przyjmujących (3, 4 lub 2); resetuje się po rallyu.

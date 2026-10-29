@@ -1,0 +1,4 @@
+- Roster della partita: scegli chi è nel referto (da 7 a 14 giocatori); chi ha già giocato un set non può uscire.
+- Statistiche in side out: con quale frequenza il primo, il secondo e i successivi palloni portano al punto.
+- P1 invertito: comunica all'app che nel P1 i posti 4 e 2 sono scambiati; ogni evento lo registra.
+- Formazione in ricezione: mentre un giocatore sta per battere, indica quanti ricevono (3, 4 o 2); si azzera dopo il rally.

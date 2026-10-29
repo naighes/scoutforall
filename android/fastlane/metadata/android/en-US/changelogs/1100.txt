@@ -1,0 +1,4 @@
+- Match roster: choose who is on the score sheet (7 to 14 players) when you create or edit a match; who has played in a set stays on it.
+- Side-out stats: how often the first, second and later balls in a side-out rally lead to a point.
+- Inverted P1: tell the app that outside and opposite swap zones in P1, and every event records it.
+- Reception formation: while a player is about to serve, record how many receive with a tap (3, 4 or 2); it resets after the rally.

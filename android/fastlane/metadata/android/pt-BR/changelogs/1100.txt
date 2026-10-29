@@ -1,0 +1,4 @@
+- Elenco da partida: escolha quem está na súmula (de 7 a 14 jogadores); quem já jogou um set não pode sair.
+- Estatísticas de side-out: com que frequência a primeira, segunda e demais bolas resultam em ponto.
+- P1 invertido: indique ao app que no P1 o ponteiro e o oposto trocam de zona; cada evento registra isso.
+- Formação de recepção: enquanto um jogador está prestes a sacar, registre quantos recebem (3, 4 ou 2); reinicia após o rally.
