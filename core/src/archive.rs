@@ -11,11 +11,18 @@ use crate::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
         set_writer::SetWriter,
-        store::{read_blob, set_reader::read_events},
+        store::{
+            match_reader::{fill_lineup_rules, read_descriptor},
+            read_blob,
+            set_reader::read_events,
+        },
         team_reader::TeamReader,
         team_writer::{TeamInput, TeamWriter},
     },
-    shapes::{r#match::MatchEntry, set::SetEntry, snapshot::EventEntry, team::TeamEntry},
+    shapes::{
+        r#match::MatchEntry, player::PlayerEntry, set::SetEntry, snapshot::EventEntry,
+        team::TeamEntry,
+    },
     storage::{Store, StoreEntry, layout},
 };
 use serde::Deserialize;
@@ -208,25 +215,32 @@ pub async fn import_team(
         .await
 }
 
-/// The players the match refers to, in its lineups and its events.
-fn match_players(m: &MatchEntry) -> impl Iterator<Item = Uuid> + '_ {
-    m.sets.iter().flat_map(|set| {
-        set.initial_positions
-            .iter()
-            .copied()
-            .chain([set.libero, set.setter])
-            .chain(set.fallback_libero)
-            .chain(
-                set.events
-                    .iter()
-                    .flat_map(|e| e.player.into_iter().chain(e.target_player)),
-            )
-    })
+/// Whether the match was scouted for the team: its players, in its lineups
+/// and its events, are the team's.
+pub fn is_match_of(m: &MatchEntry, team: &TeamEntry) -> bool {
+    m.played().iter().all(|id| team.find_player(*id).is_some())
 }
 
-/// Whether the match was scouted for the team: its players are the team's.
-pub fn is_match_of(m: &MatchEntry, team: &TeamEntry) -> bool {
-    match_players(m).all(|id| team.find_player(id).is_some())
+/// The roster of the archive, as the match form would save it for the
+/// team: its players of the team and, after them by number, who played.
+/// None if the archive has none (up to v0.10.1).
+fn roster_for(m: &MatchEntry, team: &TeamEntry) -> Vec<Uuid> {
+    let played = m.played();
+    let mut players: Vec<&PlayerEntry> = team.players.iter().collect();
+    players.sort_by_key(|p| p.number);
+    let kept = m
+        .roster
+        .iter()
+        .copied()
+        .filter(|id| team.find_player(*id).is_some());
+    let missing = players
+        .into_iter()
+        .map(|p| p.id)
+        .filter(|id| played.contains(id) && !m.roster.contains(id));
+    match m.roster.is_empty() {
+        true => vec![],
+        false => kept.chain(missing).collect(),
+    }
 }
 
 /// The teams the match may be imported into, e.g. when the archive is
@@ -288,6 +302,7 @@ pub async fn import_match(
         (true, true) => Err(message(labels.match_already_exists)),
         (true, false) => Ok(()),
     }?;
+    let roster = roster_for(&archived, team);
     let m = match_writer
         .create(
             team,
@@ -296,7 +311,7 @@ pub async fn import_match(
             archived.home,
             archived.max_substitutions,
             archived.notes,
-            archived.roster,
+            roster,
         )
         .await?;
     for mut set in archived.sets {
@@ -345,8 +360,8 @@ fn match_entry(
         }
     }
     let len = set_map.len();
-    let mut match_entry: MatchEntry =
-        serde_json::from_str(descriptor).map_err(|_| import_error())?;
+    let (mut match_entry, rules) =
+        read_descriptor(descriptor.as_bytes()).map_err(|_| import_error())?;
     match_entry.id = MatchEntry::id_of(&match_entry.opponent, &match_entry.date);
     for (set, events) in set_map.into_values() {
         if let (Some(mut set), Some(events)) = (set, events) {
@@ -354,6 +369,7 @@ fn match_entry(
             match_entry.sets.push(set);
         }
     }
+    fill_lineup_rules(&mut match_entry.sets, rules);
     match match_entry.sets.len() == len {
         true => Ok(match_entry),
         false => Err(import_error()),

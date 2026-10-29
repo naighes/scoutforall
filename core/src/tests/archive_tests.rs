@@ -26,7 +26,7 @@ mod tests {
         storage::{Store, layout, memory::MemoryStore},
         tests::EN,
     };
-    use std::sync::Arc;
+    use std::{io::Write, sync::Arc};
     use uuid::Uuid;
 
     const TEAM_ID: &str = "45a589d5-004a-4a50-99f5-6d78fd052a3c";
@@ -132,6 +132,37 @@ mod tests {
         }
     }
 
+    /// The player with `number` in the fixtures.
+    fn numbered(number: u8) -> Uuid {
+        Uuid::from_u128(0x00000000_0000_4000_8000_000000000000 + u128::from(number))
+    }
+
+    /// The archive with the file `name` changed by `edit`, as by hand.
+    fn edited(archive: &[u8], name: &str, edit: impl Fn(String) -> String) -> Vec<u8> {
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
+        let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for i in 0..zip.len() {
+            let file = zip.by_index(i).unwrap();
+            let file_name = file.name().unwrap().to_string();
+            let content = std::io::read_to_string(file).unwrap();
+            let content = match file_name == name {
+                true => edit(content),
+                false => content,
+            };
+            out.start_file::<_, ()>(file_name.as_str(), zip::write::FileOptions::default())
+                .unwrap();
+            out.write_all(content.as_bytes()).unwrap();
+        }
+        out.finish().unwrap().into_inner()
+    }
+
+    /// The match descriptor with `roster`.
+    fn with_roster(json: &str, roster: &[Uuid]) -> String {
+        let mut descriptor: serde_json::Value = serde_json::from_str(json).unwrap();
+        descriptor["roster"] = serde_json::json!(roster);
+        descriptor.to_string()
+    }
+
     fn message(result: Result<impl std::fmt::Debug, AppError>) -> String {
         match result {
             Err(AppError::IO(IOError::Msg(message))) => message,
@@ -198,11 +229,45 @@ mod tests {
     async fn match_archive_up_to_v0_9_0_replays_as_scouted() {
         let (_, m) = Providers::new().legacy_match().await;
         assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V1));
+        assert!(m.roster.is_empty());
         let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!((snapshot.score_us, snapshot.score_them), (3, 1));
         assert_eq!(
             snapshot.current_lineup.get_setter(),
             Uuid::parse_str(MB2).ok()
+        );
+    }
+
+    /// A match created with v0.3.0, which saved the substitutions but not
+    /// the rules of the sets, as exported up to v0.9.0: its set replays with
+    /// the rules of v0.3.0, as from its folder, though those of v0.2.0
+    /// replay it too (with middle blocker 2 serving).
+    #[tokio::test]
+    async fn match_archive_of_v0_3_0_replays_as_scouted() {
+        let p = Providers::new();
+        let team = p
+            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
+            .await
+            .unwrap();
+        let descriptor = edited(MATCH_UP_TO_V0_9_0, "match.json", |json| {
+            let mut descriptor: serde_json::Value = serde_json::from_str(&json).unwrap();
+            descriptor["max_substitutions"] = 6.into();
+            descriptor.to_string()
+        });
+        let archive = edited(&descriptor, "set_1.csv", |csv| {
+            csv.lines().take(4).map(|row| format!("{row}\n")).collect()
+        });
+        let Ok(Archive::Match(read)) = read_archive(&archive, EN) else {
+            panic!("expected a match");
+        };
+        assert_eq!(read.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
+        p.import_match(&archive, &team).await.unwrap();
+        let m = p.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
+        let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
+        assert_eq!(
+            snapshot.current_lineup.get_serving_player(),
+            Some(numbered(8))
         );
     }
 
@@ -246,7 +311,7 @@ mod tests {
                 m.home,
                 m.max_substitutions,
                 "windy".into(),
-                vec![],
+                (1..=8).map(numbered).collect(),
             )
             .await
             .unwrap();
@@ -266,6 +331,7 @@ mod tests {
         );
         let again = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
         assert_eq!(again.notes, "windy");
+        assert_eq!(again.roster, (1..=8).map(numbered).collect::<Vec<_>>());
     }
 
     /// v0.4.3 added an event, without the technique, to a set scouted
@@ -297,6 +363,45 @@ mod tests {
         let result = p.import_match(MATCH_UP_TO_V0_9_0, &other).await;
         assert_eq!(message(result), EN.match_of_another_team);
         assert!(!p.match_reader.exists(&other, MATCH_ID).await.unwrap());
+    }
+
+    /// A substitution that brings in a player who isn't of the team, e.g.
+    /// written by hand: the match is of another team.
+    #[tokio::test]
+    async fn a_match_bringing_in_a_stranger_is_of_another_team() {
+        let p = Providers::new();
+        let team = p
+            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
+            .await
+            .unwrap();
+        let stranger = Uuid::new_v4().to_string();
+        let archive = edited(MATCH_UP_TO_V0_9_0, "set_1.csv", |csv| {
+            csv.replace(&numbered(8).to_string(), &stranger)
+        });
+        assert!(read_archive(&archive, EN).is_ok());
+        let result = p.import_match(&archive, &team).await;
+        assert_eq!(message(result), EN.match_of_another_team);
+        assert!(!p.match_reader.exists(&team, MATCH_ID).await.unwrap());
+    }
+
+    /// A roster written by hand, as no version saves it: without who came
+    /// in and with a player of another team. The match keeps the players of
+    /// the team and who played, as the match form does.
+    #[tokio::test]
+    async fn the_roster_of_the_archive_keeps_who_played() {
+        let p = Providers::new();
+        let team = p
+            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
+            .await
+            .unwrap();
+        let roster: Vec<Uuid> = (1..=7).map(numbered).chain([Uuid::new_v4()]).collect();
+        let archive = edited(MATCH_UP_TO_V0_9_0, "match.json", |json| {
+            with_roster(&json, &roster)
+        });
+        p.import_match(&archive, &team).await.unwrap();
+        let m = p.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        assert_eq!(m.roster, (1..=8).map(numbered).collect::<Vec<_>>());
+        assert_eq!(m.team.active_players().len(), 8);
     }
 
     #[tokio::test]

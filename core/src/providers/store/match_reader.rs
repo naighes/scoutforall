@@ -7,6 +7,7 @@ use crate::{
         enums::LineupRulesEnum,
         listed::{Listed, Unreadable},
         r#match::MatchEntry,
+        set::SetEntry,
         team::TeamEntry,
     },
     storage::{Store, StoreEntry, layout},
@@ -91,23 +92,35 @@ impl StoreMatchReader {
                         .to_string(),
                 ))
             })?;
-        let descriptor: Value = from_slice(&content).map_err(|e| AppError::IO(IOError::from(e)))?;
-        // only matches created since v0.3.0 save the substitutions
-        let created_since_v0_3_0 = descriptor.get("max_substitutions").is_some();
-        let mut entry: MatchEntry =
-            from_value(descriptor).map_err(|e| AppError::IO(IOError::from(e)))?;
+        let (mut entry, rules) = read_descriptor(&content)?;
         entry.id = match_id.to_string();
         entry.team = team.with_roster(&entry.roster);
         entry.sets = self.set_reader.read_all(&entry).await?;
-        if created_since_v0_3_0 {
-            // v0.3.0 didn't save the lineup rules of its sets, but scouted
-            // them with these ones
-            for set in entry.sets.iter_mut() {
-                set.lineup_rules.get_or_insert(LineupRulesEnum::V2);
-            }
-        }
+        fill_lineup_rules(&mut entry.sets, rules);
         // a match whose sets don't replay can't be shown nor scouted
         entry.get_status()?;
         Ok(entry)
+    }
+}
+
+/// The match of a descriptor, as saved in its folder or in an archive,
+/// without its sets; and the lineup rules of its sets saved without them:
+/// only matches created since v0.3.0 save the substitutions, and v0.3.0
+/// didn't save the rules of its sets, but scouted them with V2.
+pub(crate) fn read_descriptor(
+    content: &[u8],
+) -> Result<(MatchEntry, Option<LineupRulesEnum>), AppError> {
+    let descriptor: Value = from_slice(content).map_err(|e| AppError::IO(IOError::from(e)))?;
+    let rules = descriptor
+        .get("max_substitutions")
+        .map(|_| LineupRulesEnum::V2);
+    let entry: MatchEntry = from_value(descriptor).map_err(|e| AppError::IO(IOError::from(e)))?;
+    Ok((entry, rules))
+}
+
+/// The sets saved without their rules get `rules`, from `read_descriptor`.
+pub(crate) fn fill_lineup_rules(sets: &mut [SetEntry], rules: Option<LineupRulesEnum>) {
+    for set in sets.iter_mut() {
+        set.lineup_rules = set.lineup_rules.or(rules);
     }
 }

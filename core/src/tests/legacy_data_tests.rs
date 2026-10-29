@@ -1,10 +1,12 @@
 //! Data saved by older versions: after an update, teams and matches load as
-//! they were, and sets replay as they were scouted (the settings are in the
-//! settings tests of the terminal interface).
+//! they were, and sets replay as they were scouted, also when imported from
+//! the archives of the older versions (the settings are in the settings
+//! tests of the terminal interface).
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        archive::{export_match, import_match, import_team},
         constants::LEGACY_MAX_SUBSTITUTIONS,
         localization::Language,
         providers::{
@@ -14,10 +16,11 @@ mod tests {
             store::{
                 match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
                 set_reader::StoreSetReader, set_writer::StoreSetWriter,
-                team_reader::StoreTeamReader,
+                team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
             },
             team_reader::TeamReader,
         },
+        reporting::model::build_report,
         shapes::{
             enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
@@ -25,13 +28,18 @@ mod tests {
             team::TeamEntry,
             technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
         },
-        tests::fs_store,
+        storage::{Store, memory::MemoryStore},
+        tests::{EN, fs_store},
     };
     use chrono::{DateTime, Utc};
     use csv::ReaderBuilder;
     use serde::Deserialize;
     use serde_json::json;
-    use std::path::{Path, PathBuf};
+    use std::{
+        io::Write,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -172,7 +180,89 @@ mod tests {
         let matches = reader.read_all(&team).await.expect("expected the matches");
         assert_eq!(matches.len(), 1);
         let m = matches.into_iter().next().unwrap();
-        (team, m.expect("expected a readable match"))
+        let m = m.expect("expected a readable match");
+        imports_as_loaded(base, &m).await;
+        (team, m)
+    }
+
+    /// The files of the folder zipped, as exported up to v0.9.0.
+    fn zip_folder(folder: &Path) -> Vec<u8> {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for entry in std::fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                zip.start_file::<_, ()>(name.as_str(), zip::write::FileOptions::default())
+                    .unwrap();
+                zip.write_all(&std::fs::read(&path).unwrap()).unwrap();
+            }
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// What tells two matches apart once replayed: the rules, the events,
+    /// the score and the lineup of each set, and the report.
+    fn replayed(m: &MatchEntry) -> String {
+        let sets: Vec<String> = m
+            .sets
+            .iter()
+            .map(|s| {
+                let snapshot = m.get_set_snapshot(s.set_number).ok().flatten();
+                format!(
+                    "{:?} {:?} {:?} {:?}",
+                    s.find_lineup_rules(m.max_substitutions).ok(),
+                    s.events,
+                    snapshot.as_ref().map(|s| (s.score_us, s.score_them)),
+                    snapshot.map(|s| format!("{:?}", s.current_lineup)),
+                )
+            })
+            .collect();
+        let report = build_report(m, EN).map(|r| serde_json::to_string(&r).ok());
+        format!("{sets:?} {report:?}")
+    }
+
+    /// The team and the match in `base`, zipped as exported up to v0.9.0,
+    /// and the match exported now, are imported into an empty store: the
+    /// match replays as loaded from its folder.
+    async fn imports_as_loaded(base: &Path, m: &MatchEntry) {
+        let from = fs_store(base);
+        let team_archive = zip_folder(&base.join(TEAM_ID));
+        let archives = [
+            zip_folder(&base.join(TEAM_ID).join(MATCH_ID)),
+            export_match(&*from, &m.team.id, &m.id).await.unwrap(),
+        ];
+        for archive in archives {
+            let to: Arc<dyn Store> = Arc::new(MemoryStore::new());
+            let team = import_team(
+                &team_archive,
+                Uuid::parse_str(TEAM_ID).ok(),
+                &StoreTeamReader::new(Arc::clone(&to), Language::default()),
+                &StoreTeamWriter::new(Arc::clone(&to)),
+                EN,
+            )
+            .await
+            .expect("expected the team to import");
+            let reader = StoreMatchReader::new(
+                Arc::clone(&to),
+                Arc::new(StoreSetReader::new(Arc::clone(&to), Language::default())),
+                Language::default(),
+            );
+            let imported = import_match(
+                &archive,
+                &team,
+                &reader,
+                &StoreMatchWriter::new(Arc::clone(&to)),
+                &StoreSetWriter::new(Arc::clone(&to), Language::default()),
+                EN,
+            )
+            .await
+            .expect("expected the match to import");
+            let again = reader
+                .read_single(&team, &imported.id)
+                .await
+                .expect("expected the imported match to load");
+            assert_eq!(replayed(&again), replayed(m));
+        }
     }
 
     #[tokio::test]

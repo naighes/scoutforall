@@ -40,33 +40,44 @@ mod tests {
         players: Vec<Uuid>,
     }
 
+    /// The roles of the team: the starting six, the libero and a middle
+    /// blocker on the bench.
+    const ROLES: [RoleEnum; 8] = [
+        RoleEnum::Setter,
+        RoleEnum::OutsideHitter,
+        RoleEnum::MiddleBlocker,
+        RoleEnum::OppositeHitter,
+        RoleEnum::OutsideHitter,
+        RoleEnum::MiddleBlocker,
+        RoleEnum::Libero,
+        RoleEnum::MiddleBlocker,
+    ];
+
     /// A set in memory where we serve.
     async fn scouting() -> Scouting {
-        use RoleEnum::*;
+        scouting_of(&ROLES, ROLES.len()).await
+    }
+
+    /// A set in memory where we serve, for a team with `roles` and a match
+    /// with its first `roster` players on the roster: without a roster for
+    /// the whole team.
+    async fn scouting_of(roles: &[RoleEnum], roster: usize) -> Scouting {
         let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-        let players: Vec<PlayerEntry> = [
-            Setter,
-            OutsideHitter,
-            MiddleBlocker,
-            OppositeHitter,
-            OutsideHitter,
-            MiddleBlocker,
-            Libero,
-            MiddleBlocker,
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, role)| PlayerEntry {
-            id: Uuid::new_v4(),
-            name: format!("player {}", i + 1),
-            role: Some(role),
-            number: i as u8 + 1,
-            deleted: false,
-            birth_date: None,
-            height_cm: None,
-            notes: String::new(),
-        })
-        .collect();
+        let players: Vec<PlayerEntry> = roles
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(i, role)| PlayerEntry {
+                id: Uuid::new_v4(),
+                name: format!("player {}", i + 1),
+                role: Some(role),
+                number: i as u8 + 1,
+                deleted: false,
+                birth_date: None,
+                height_cm: None,
+                notes: String::new(),
+            })
+            .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
         let team = StoreTeamWriter::new(Arc::clone(&store))
             .save(TeamInput::New {
@@ -87,7 +98,10 @@ mod tests {
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
                 String::new(),
-                vec![],
+                match roster == roles.len() {
+                    true => vec![],
+                    false => ids[..roster].to_vec(),
+                },
             )
             .await
             .unwrap();
@@ -211,6 +225,31 @@ mod tests {
         let saved = saved_events(&s).await;
         assert_eq!(saved[0].player, Some(replaced));
         assert_eq!(saved[0].target_player, Some(bench));
+    }
+
+    /// A player of the team who isn't on the roster of the match can't come
+    /// in: the score sheet is the roster.
+    #[tokio::test]
+    async fn only_the_roster_comes_in() {
+        let roles = [&ROLES[..], &[RoleEnum::OutsideHitter]].concat();
+        let mut s = scouting_of(&roles, ROLES.len()).await;
+        let off_the_sheet = s.players[8];
+        s.session.choose_event(R).await.unwrap();
+        let replaced = s.session.player_choices()[0].id;
+        s.session.choose_player(replaced).await.unwrap();
+        assert_eq!(
+            s.session
+                .replacement_choices()
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<_>>(),
+            vec![s.players[7]]
+        );
+        assert_eq!(
+            s.session.choose_replacement(off_the_sheet).await,
+            Err(ScoutingError::InvalidPlayerSelection)
+        );
+        assert!(saved_events(&s).await.is_empty());
     }
 
     /// The choices that don't fit are refused, and nothing is saved.
