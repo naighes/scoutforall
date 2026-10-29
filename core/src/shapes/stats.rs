@@ -233,6 +233,35 @@ impl FirstRallyKey {
     }
 }
 
+/// A possession of ours in a side out: the ball on our side to play, the
+/// first from their serve, the next ones each time the ball comes back (see
+/// `Snapshot::record_possession`). Won when the rally ends with our point
+/// before the ball comes back again.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PossessionKey {
+    pub rotation: u8,
+    /// 1 for the first possession, after their serve
+    pub possession: u8,
+    pub won: bool,
+}
+
+/// The possessions of the side outs, and the ones finalized.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PossessionSummary {
+    pub total: u32,
+    pub won: u32,
+}
+
+impl PossessionSummary {
+    /// The share of the possessions won.
+    pub fn finalization(&self) -> f64 {
+        percentage(self.won as i32, self.total)
+    }
+}
+
+/// The possessions shown one by one: this one gathers the later ones too.
+pub const LAST_POSSESSION: u8 = 3;
+
 /// The first rallies of the side outs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FirstRallySummary {
@@ -295,6 +324,7 @@ pub struct Stats {
     pub rallies: Counter<RallyKey>,
     pub first_rallies: Counter<FirstRallyKey>,
     pub freeballs: Counter<FreeballKey>,
+    pub possessions: Counter<PossessionKey>,
 }
 
 impl Stats {
@@ -308,6 +338,7 @@ impl Stats {
         self.rallies.merge(&other.rallies);
         self.first_rallies.merge(&other.first_rallies);
         self.freeballs.merge(&other.freeballs);
+        self.possessions.merge(&other.possessions);
     }
 
     /// The statistics since `earlier`, the statistics of the same sets
@@ -320,6 +351,7 @@ impl Stats {
             rallies: self.rallies.since(&earlier.rallies),
             first_rallies: self.first_rallies.since(&earlier.first_rallies),
             freeballs: self.freeballs.since(&earlier.freeballs),
+            possessions: self.possessions.since(&earlier.possessions),
         }
     }
 
@@ -572,6 +604,30 @@ impl Stats {
                 None => {}
             }
         }
+        (summary.total > 0).then_some(summary)
+    }
+
+    /// The possessions of the side outs, of this number (`LAST_POSSESSION`
+    /// with the later ones) or all of them, or `None` when there are none.
+    /// The phase is always side out, and they have no player: a player
+    /// filter leaves none.
+    pub fn side_out_possessions(
+        &self,
+        possession: Option<u8>,
+        filter: &StatsFilter,
+    ) -> Option<PossessionSummary> {
+        let matches = |k: &PossessionKey| {
+            filter.matches(PhaseEnum::SideOut, k.rotation, None)
+                && match possession {
+                    None => true,
+                    Some(LAST_POSSESSION) => k.possession >= LAST_POSSESSION,
+                    Some(n) => k.possession == n,
+                }
+        };
+        let summary = PossessionSummary {
+            total: self.possessions.count(matches),
+            won: self.possessions.count(|k| matches(k) && k.won),
+        };
         (summary.total > 0).then_some(summary)
     }
 

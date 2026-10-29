@@ -71,6 +71,7 @@ mod tests {
             eval,
             target_player: None,
             technique: None,
+            flags: Default::default(),
         }
     }
 

@@ -11,6 +11,7 @@ pub mod import_team_screen;
 pub mod keybindings_change_screen;
 pub mod live_stats_screen;
 pub mod match_list_screen;
+pub mod match_roster_screen;
 pub mod match_stats_screen;
 pub mod report_an_issue_screen;
 pub mod scouting_screen;

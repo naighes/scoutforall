@@ -10,7 +10,7 @@ use crate::screens::{
     },
     screen::{AppAction, Renderable, ScreenAsync},
 };
-use crate::shapes::actions::ScreenActionEnum;
+use crate::shapes::actions::{ScoutingOptionEnum, ScreenActionEnum};
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
 use crate::shapes::settings::Settings;
@@ -34,6 +34,7 @@ use scout4all_core::{
     },
 };
 use std::sync::Arc;
+use unicode_width::UnicodeWidthStr;
 
 /// The scouting of a set: the keys choose the event, the player, the
 /// evaluation and the set or serve of the session of the core.
@@ -334,7 +335,10 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     /// the events, the evaluations, the players or their replacements.
     fn left_list_len(&self) -> usize {
         match self.session.step() {
-            ScoutingStep::Event => self.session.available_events().len(),
+            // the events, then the options
+            ScoutingStep::Event => {
+                self.session.available_events().len() + ScoutingOptionEnum::ALL.len()
+            }
             ScoutingStep::Eval => self.session.available_evals().len(),
             ScoutingStep::Player => self.session.player_choices().len(),
             ScoutingStep::Replacement => self.session.replacement_choices().len(),
@@ -352,27 +356,46 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     /* event handling */
 
     // sequence is event type => player => eval
+    /// An option, as the inverted P1, or the event.
     async fn handle_event_screen(&mut self, key: KeyEvent) -> AppAction {
+        let option = self
+            .settings
+            .option_keybindings
+            .action_for(&combination_of(key))
+            .copied();
         let event = self
             .event_screen_key_bindings
             .transform(key)
             .and_then(|ck| self.event_screen_key_bindings.get(ck))
             .copied();
-        match event {
-            Some(event) => {
+        match (option, event) {
+            (Some(ScoutingOptionEnum::InvertedP1), _) => {
+                let inverted = self.session.inverted_p1();
+                self.session.set_inverted_p1(!inverted);
+                AppAction::None
+            }
+            (Some(ScoutingOptionEnum::Reception), _) => {
+                let told = self.session.next_reception();
+                self.show(told.map(|_| Progress::Choosing))
+            }
+            (None, Some(event)) => {
                 let progress = self.session.choose_event(event).await;
                 self.show(progress)
             }
-            None => AppAction::None,
+            (None, None) => AppAction::None,
         }
     }
 
     async fn handle_replacement_screen(&mut self, key: KeyEvent) -> AppAction {
-        let replacement = Self::digit(key).and_then(|d| {
+        let replacement = match key.code {
+            KeyCode::Char(c) => replacement_index(c),
+            _ => None,
+        }
+        .and_then(|i| {
             self.session
                 .replacement_choices()
                 .into_iter()
-                .find(|p| p.index == d)
+                .find(|p| p.index == i)
         });
         match (key.code, self.session.player(), replacement) {
             // the replaced player is required
@@ -453,6 +476,41 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                     .right_aligned(),
                 ])
             })
+            .chain(ScoutingOptionEnum::ALL.iter().map(|option| {
+                let labels = current_labels();
+                // the reception only before their serve
+                let (text, available) = match option {
+                    ScoutingOptionEnum::InvertedP1 => {
+                        let check = match self.session.inverted_p1() {
+                            true => "[x]",
+                            false => "[ ]",
+                        };
+                        (format!("{check} {}", labels.inverted_p1), true)
+                    }
+                    ScoutingOptionEnum::Reception => (
+                        labels
+                            .reception_with
+                            .replace("{}", &self.session.reception().players().to_string()),
+                        self.session.can_tell_reception(),
+                    ),
+                };
+                let style = match available {
+                    true => Style::default(),
+                    false => Style::default().add_modifier(Modifier::DIM),
+                };
+                Row::new(vec![
+                    Line::from(text),
+                    Line::from(
+                        self.settings
+                            .option_keybindings
+                            .key_for(option)
+                            .map(|kc| scf.to_string(kc))
+                            .unwrap_or_default(),
+                    )
+                    .right_aligned(),
+                ])
+                .style(style)
+            }))
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(60), Constraint::Min(2)]).block(
             panel::section(current_labels().choose_the_event)
@@ -605,13 +663,15 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     }
 
     fn render_lineup_choices(&self, f: &mut Frame, area: Rect) {
-        let rows: Vec<Row> = self
-            .session
-            .player_choices()
-            .iter()
-            .map(Self::format_player_choice_row)
-            .collect();
-        self.render_player_choices_table(f, area, rows, current_labels().player_selection);
+        let choices = self.session.player_choices();
+        let keys = choices.iter().map(|p| p.index.to_string()).collect();
+        Self::render_player_choices_table(
+            f,
+            area,
+            &choices,
+            keys,
+            current_labels().player_selection,
+        );
     }
 
     fn render_replacement_choices(&mut self, f: &mut Frame, area: Rect) {
@@ -621,39 +681,52 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                     .set_error(current_labels().domain.no_player_selected.to_string());
             }
             Some(_) => {
-                let rows: Vec<Row> = self
-                    .session
-                    .replacement_choices()
-                    .iter()
-                    .map(Self::format_player_choice_row)
-                    .collect();
-                self.render_player_choices_table(
+                let choices = self.session.replacement_choices();
+                let keys = choices.iter().map(|p| replacement_key(p.index)).collect();
+                Self::render_player_choices_table(
                     f,
                     area,
-                    rows,
+                    &choices,
+                    keys,
                     current_labels().select_replacement,
                 );
             }
         }
     }
 
-    fn format_player_choice_row<'a>(entry: &PlayerChoice) -> Row<'a> {
-        Row::new(vec![
-            format!(" {:<12}", entry.index),
-            format!(" #{:<12}", entry.number),
-            format!(" {:<12}", entry.name),
-            format!(" {:<20}", entry.role),
-        ])
-    }
-
-    fn render_player_choices_table(&self, f: &mut Frame, area: Rect, rows: Vec<Row>, title: &str) {
+    /// The players with the key choosing each: the key, the number ("#99")
+    /// and the role sized on their content, the name in the rest.
+    fn render_player_choices_table(
+        f: &mut Frame,
+        area: Rect,
+        choices: &[PlayerChoice],
+        keys: Vec<String>,
+        title: &str,
+    ) {
+        let role_width = choices
+            .iter()
+            .map(|p| p.role.width())
+            .max()
+            .map_or(1, |w| u16::try_from(w).unwrap_or(u16::MAX));
+        let rows: Vec<Row> = choices
+            .iter()
+            .zip(keys)
+            .map(|(p, key)| {
+                Row::new(vec![
+                    format!(" {key}"),
+                    format!("#{}", p.number),
+                    p.name.clone(),
+                    p.role.clone(),
+                ])
+            })
+            .collect();
         let table = Table::new(
             rows,
             [
-                Constraint::Percentage(8),
-                Constraint::Percentage(8),
-                Constraint::Percentage(56),
-                Constraint::Percentage(28),
+                Constraint::Length(3),
+                Constraint::Length(4),
+                Constraint::Fill(1),
+                Constraint::Length(role_width),
             ],
         )
         .block(panel::section(title).style(Style::default().add_modifier(Modifier::REVERSED)));
@@ -686,6 +759,30 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .player()
             .and_then(|p| self.session.current_match().team.find_player(p))
             .map(|p| p.name.clone());
-        set_board::render_set_status(f, area, self.session.snapshot(), event, player);
+        set_board::render_set_status(
+            f,
+            area,
+            self.session.snapshot(),
+            event,
+            player,
+            self.session.inverted_p1(),
+        );
+    }
+}
+/// The key of the replacement at `index`, from 1: the digits, then the
+/// letters: 35 keys, more than any bench, also of a match without a roster.
+fn replacement_key(index: u8) -> String {
+    match index {
+        1..=9 => index.to_string(),
+        _ => char::from(b'a'.saturating_add(index.saturating_sub(10))).to_string(),
+    }
+}
+
+/// The index of the replacement of the key, the other way round.
+fn replacement_index(c: char) -> Option<u8> {
+    match c {
+        '1'..='9' => c.to_digit(10).and_then(|d| u8::try_from(d).ok()),
+        'a'..='z' => u8::try_from(c).ok().map(|b| b - b'a' + 10),
+        _ => None,
     }
 }

@@ -7,6 +7,7 @@ mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
+        flags::EventFlags,
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
@@ -115,6 +116,7 @@ mod tests {
             eval: None,
             target_player: target,
             technique: None,
+            flags: Default::default(),
         }
     }
 
@@ -684,6 +686,23 @@ mod tests {
         // in break the opposite plays in 2 again
         let mut scout = Scout::new(&p.set(0, TeamSideEnum::Us));
         serve(&mut scout, EvalEnum::Positive);
+        assert_eq!(
+            scout.snapshot.get_playing_positions(),
+            [p.setter, p.opposite, p.mb2, p.oh1, p.libero, p.oh2]
+        );
+    }
+
+    /// With the P1 inverted the opposite plays in 2 also in side out.
+    #[test]
+    fn the_inverted_p1_attacks_as_in_break() {
+        let p = Players::new();
+        let mut scout = Scout::new(&p.set(0, TeamSideEnum::Them));
+        let receiver = scout.snapshot.current_lineup.get_oh1();
+        scout.add(EventEntry {
+            eval: Some(EvalEnum::Positive),
+            flags: EventFlags::default().with_inverted_p1(true),
+            ..event(EventTypeEnum::P, receiver, None)
+        });
         assert_eq!(
             scout.snapshot.get_playing_positions(),
             [p.setter, p.opposite, p.mb2, p.oh1, p.libero, p.oh2]

@@ -1,5 +1,10 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotEnabled
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.isSelected
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -67,6 +72,34 @@ class ScoutingTest {
         show()
         touch("=")
         rule.waitFor { score(saved()) == 0 to 1 }
+    }
+
+    /** The inverted P1, up in the bar, goes with the events saved from
+     * then on: the set resumed keeps it. */
+    @Test
+    fun theInvertedP1IsSavedWithTheEvents() {
+        show()
+        val chip = hasContentDescription(string(R.string.inverted_p1_description)) and hasClickAction()
+        rule.onNode(chip).assertIsNotSelected().performClick()
+        rule.waitFor { rule.onAllNodes(chip and isSelected()).fetchSemanticsNodes().size == 1 }
+        touch("#")
+        rule.waitFor { score(saved()) == 1 to 0 }
+        assertTrue(saved().invertedP1)
+    }
+
+    /** The reception, up in the bar, only before their serve: 3, 4, 2,
+     * written on their ace, then 3 again. */
+    @Test
+    fun theReceptionIsToldBeforeTheirServe() {
+        show()
+        val chip = { n: Int -> hasContentDescription(string(R.string.reception_description, n)) }
+        rule.onNode(chip(3)).assertIsNotEnabled()
+        // our serve error: they serve
+        touch("=")
+        rule.waitFor { rule.onAllNodes(chip(3) and isEnabled()).fetchSemanticsNodes().size == 1 }
+        rule.onNode(chip(3)).performClick()
+        rule.waitFor { saved().events.size == 1 && rule.onAllNodes(chip(4)).fetchSemanticsNodes().size == 1 }
+        rule.onNode(chip(4)).assertIsSelected()
     }
 
     @Test

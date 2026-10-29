@@ -49,7 +49,7 @@ use unicode_width::UnicodeWidthStr;
 const WIDE: u16 = 100;
 /// The rows of the panels on top: the fundamentals (6 and their header) or
 /// the points and errors (7), with the borders.
-const TOP_HEIGHT: u16 = 9;
+const TOP_HEIGHT: u16 = 10;
 /// The rows of the trend: a figure each and their header, with the borders.
 const TREND_HEIGHT: u16 = Series::ALL.len() as u16 + 3;
 /// The width of a column of the trend.
@@ -338,12 +338,20 @@ impl LiveStatsScreen {
                 .collect::<Vec<_>>()
                 .join(" · ")
         };
+        // the first, second and later possessions of the side out: their
+        // names, the first one's rate, the later ones' rates
+        let by_possession = format!("  {}", domain.possessions.join("·"));
+        let [first, later @ ..] = o
+            .side_out_possessions
+            .map(|(_, summary)| percent(summary.map(|s| s.finalization())));
         let rows = vec![
             phase(
                 PhaseEnum::SideOut.friendly_name(domain),
                 o.side_out,
                 Measure::SideOut,
             ),
+            Row::new([by_possession.clone(), first, later.join(" · ")])
+                .style(Style::new().add_modifier(Modifier::DIM)),
             phase(
                 PhaseEnum::Break.friendly_name(domain),
                 o.break_points,
@@ -366,6 +374,7 @@ impl LiveStatsScreen {
             count(domain.opponent_errors, o.opponent_errors, String::new()),
         ];
         let name_width = [
+            by_possession.as_str(),
             labels.our_aces,
             labels.their_aces,
             labels.unforced_errors,

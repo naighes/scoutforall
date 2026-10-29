@@ -6,6 +6,8 @@ use crate::{
 };
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct MatchStatus {
@@ -24,6 +26,7 @@ pub struct MatchEntry {
     pub date: DateTime<FixedOffset>,
     #[serde(skip_serializing, skip_deserializing)]
     pub id: String,
+    /// The team as the match sees it (`TeamEntry::with_roster`).
     #[serde(skip_serializing, skip_deserializing)]
     pub team: TeamEntry,
     pub home: bool,
@@ -33,6 +36,11 @@ pub struct MatchEntry {
     // since v0.10, written only when given: see `PlayerEntry::notes`
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub notes: String,
+    // since v0.11, the players on the score sheet; written only when given:
+    // the older versions read the file as before, with the whole team, and
+    // the matches saved before have none
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roster: Vec<Uuid>,
     #[serde(skip_serializing, skip_deserializing)]
     pub sets: Vec<SetEntry>,
 }
@@ -105,6 +113,26 @@ impl MatchEntry {
             match_finished: false,
             last_set,
         })
+    }
+
+    /// Who played in a set of the match: on court, the liberos, in an
+    /// event.
+    pub fn played(&self) -> HashSet<Uuid> {
+        self.sets
+            .iter()
+            .flat_map(|s| {
+                s.initial_positions
+                    .iter()
+                    .copied()
+                    .chain([s.libero, s.setter])
+                    .chain(s.fallback_libero)
+                    .chain(
+                        s.events
+                            .iter()
+                            .flat_map(|e| e.player.into_iter().chain(e.target_player)),
+                    )
+            })
+            .collect()
     }
 
     pub fn get_set_snapshot(&self, set_number: u8) -> Result<Option<Snapshot>, AppError> {

@@ -41,6 +41,11 @@
     <string name="birth_date">Data de nascimento</string>
     <string name="height">Altura</string>
     <string name="notes">Notas</string>
+    <string name="roster">Na súmula: %1$d de %2$d</string>
+    <string name="played">jogou</string>
+    <string name="go_on">Continuar</string>
+    <string name="roster_title">Súmula</string>
+    <string name="roster_hint">Toque em um jogador para colocá-lo na súmula ou tirá-lo.</string>
     <string name="remove_birth_date">Remover a data de nascimento</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>
@@ -79,6 +84,10 @@
     <string name="match_lost_cheer">Cabeça erguida, vamos à próxima!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
+    <string name="inverted_p1">P1 inv.</string>
+    <string name="inverted_p1_description">P1 invertida: no side-out a ponteira ataca da 4</string>
+    <string name="reception_n">rec. %d</string>
+    <string name="reception_description">Recepção com %d: toque para 3, 4, 2, antes do saque deles</string>
     <string name="serving">No saque</string>
     <plurals name="players">
         <item quantity="one">%d jogador</item>
@@ -127,6 +136,7 @@
     <string name="set_team_level">Defina o nível e o gênero da equipe para ver as cores</string>
     <string name="stats_detail">Detalhe</string>
     <string name="rotations">Rodízios</string>
+    <string name="side_out_by_possession">Side-out por posse</string>
     <string name="filter_player">Jogador</string>
     <string name="filter_rotation">Rodízio</string>
     <string name="filter_phase">Fase</string>
@@ -213,6 +223,8 @@
     <string name="tutorial_matches">Aqui estão as jogadoras. As partidas estão na outra aba: toque na aba.</string>
     <string name="tutorial_new_match">Toque em + para uma nova partida.</string>
     <string name="tutorial_match_fields">Adversário, data, casa ou fora, substituições: eu já preenchi.</string>
+    <string name="tutorial_match_next">Toque em Continuar: depois as jogadoras na súmula.</string>
+    <string name="tutorial_roster">Todo o time está na súmula, até 14: um toque tira ou recoloca uma jogadora.</string>
     <string name="tutorial_save_match">Toque em Salvar.</string>
     <string name="tutorial_lineup">A escalação do primeiro set está pronta: levantadora na 6 (P6), nós na recepção; Spirito é a líbero, Fersino a segunda líbero. Tocando uma posição, troca-se a jogadora.</string>
     <string name="tutorial_start_set">Toque em Iniciar o set.</string>

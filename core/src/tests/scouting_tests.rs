@@ -20,6 +20,7 @@ mod tests {
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
+            flags::ReceptionSchemeEnum,
             player::PlayerEntry,
             snapshot::EventEntry,
             stats::{Metric, StatsFilter},
@@ -40,33 +41,44 @@ mod tests {
         players: Vec<Uuid>,
     }
 
+    /// The roles of the team: the starting six, the libero and a middle
+    /// blocker on the bench.
+    const ROLES: [RoleEnum; 8] = [
+        RoleEnum::Setter,
+        RoleEnum::OutsideHitter,
+        RoleEnum::MiddleBlocker,
+        RoleEnum::OppositeHitter,
+        RoleEnum::OutsideHitter,
+        RoleEnum::MiddleBlocker,
+        RoleEnum::Libero,
+        RoleEnum::MiddleBlocker,
+    ];
+
     /// A set in memory where we serve.
     async fn scouting() -> Scouting {
-        use RoleEnum::*;
+        scouting_of(&ROLES, ROLES.len()).await
+    }
+
+    /// A set in memory where we serve, for a team with `roles` and a match
+    /// with its first `roster` players on the roster: without a roster for
+    /// the whole team.
+    async fn scouting_of(roles: &[RoleEnum], roster: usize) -> Scouting {
         let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-        let players: Vec<PlayerEntry> = [
-            Setter,
-            OutsideHitter,
-            MiddleBlocker,
-            OppositeHitter,
-            OutsideHitter,
-            MiddleBlocker,
-            Libero,
-            MiddleBlocker,
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, role)| PlayerEntry {
-            id: Uuid::new_v4(),
-            name: format!("player {}", i + 1),
-            role: Some(role),
-            number: i as u8 + 1,
-            deleted: false,
-            birth_date: None,
-            height_cm: None,
-            notes: String::new(),
-        })
-        .collect();
+        let players: Vec<PlayerEntry> = roles
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(i, role)| PlayerEntry {
+                id: Uuid::new_v4(),
+                name: format!("player {}", i + 1),
+                role: Some(role),
+                number: i as u8 + 1,
+                deleted: false,
+                birth_date: None,
+                height_cm: None,
+                notes: String::new(),
+            })
+            .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
         let team = StoreTeamWriter::new(Arc::clone(&store))
             .save(TeamInput::New {
@@ -87,6 +99,10 @@ mod tests {
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
                 String::new(),
+                match roster == roles.len() {
+                    true => vec![],
+                    false => ids[..roster].to_vec(),
+                },
             )
             .await
             .unwrap();
@@ -158,6 +174,134 @@ mod tests {
         assert_eq!(saved[0].technique, Some(spin));
     }
 
+    /// The reception is told before their serve, for that serve only: it
+    /// goes on the reception, or on their ace, then it's three again.
+    #[tokio::test]
+    async fn the_reception_is_told_for_their_next_serve() {
+        use ReceptionSchemeEnum::*;
+        let mut s = scouting().await;
+        // we serve
+        assert_eq!(
+            s.session.next_reception(),
+            Err(ScoutingError::ReceptionNotNow)
+        );
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        // they serve: three, four, two
+        assert!(s.session.can_tell_reception());
+        assert_eq!(s.session.reception(), Three);
+        assert_eq!(s.session.next_reception(), Ok(Four));
+        assert_eq!(s.session.next_reception(), Ok(Two));
+        s.session.choose_event(P).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        // the rally goes on: three, and not to be told
+        assert_eq!(s.session.reception(), Three);
+        assert!(!s.session.can_tell_reception());
+        s.session.choose_event(OE).await.unwrap();
+        // their ace, with four
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        assert_eq!(s.session.next_reception(), Ok(Four));
+        s.session.choose_event(OS).await.unwrap();
+        assert_eq!(s.session.reception(), Three);
+        // their serve error: not written, three again
+        assert_eq!(s.session.next_reception(), Ok(Four));
+        s.session.choose_event(OE).await.unwrap();
+        assert_eq!(s.session.reception(), Three);
+        let receptions: Vec<_> = saved_events(&s)
+            .await
+            .iter()
+            .map(|e| (e.event_type, e.flags.reception()))
+            .collect();
+        assert_eq!(
+            receptions,
+            [
+                (S, Three),
+                (P, Two),
+                (OE, Three),
+                (S, Three),
+                (OS, Four),
+                (OE, Three),
+            ]
+        );
+        assert_eq!(saved_events(&s).await[4].flags.to_string(), "2");
+        // undone, their ace gives back its reception
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.reception(), Three);
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.reception(), Four);
+    }
+
+    /// The inverted P1 is a state: every event saved from when it's set
+    /// says so, until it's unset; a session opened again on the set, or on
+    /// the next one, goes on as the last event says.
+    #[tokio::test]
+    async fn the_inverted_p1_goes_on_until_changed() {
+        let mut s = scouting().await;
+        assert!(!s.session.inverted_p1());
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.set_inverted_p1(true);
+        // our libero digs their attack, they err
+        s.session.choose_event(D).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(OE).await.unwrap();
+        let inverted = |events: &[EventEntry]| {
+            events
+                .iter()
+                .map(|e| e.flags.inverted_p1())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(inverted(&saved_events(&s).await), [false, true, true]);
+        // opened again: still inverted
+        let mut m = s.session.current_match().clone();
+        let set = s.session.set().clone();
+        let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
+        let set_writer = Arc::new(StoreSetWriter::new(
+            Arc::clone(&s.store),
+            Language::default(),
+        ));
+        let mut again = ScoutingSession::new(m.clone(), set.clone(), snapshot, set_writer.clone());
+        assert!(again.inverted_p1());
+        again.set_inverted_p1(false);
+        again.choose_event(OE).await.unwrap();
+        assert_eq!(
+            inverted(&saved_events(&s).await),
+            [false, true, true, false]
+        );
+        // the next set as the last event of the one before
+        m.sets.push(again.set().clone());
+        let next = set_writer
+            .create(
+                &m,
+                2,
+                TeamSideEnum::Us,
+                s.players[..6].try_into().unwrap(),
+                s.players[6],
+                None,
+                s.players[0],
+                vec![],
+            )
+            .await
+            .unwrap();
+        let snapshot = next.compute_snapshot(m.max_substitutions).unwrap();
+        assert!(
+            !ScoutingSession::new(
+                m.clone(),
+                next.clone(),
+                snapshot.clone(),
+                set_writer.clone()
+            )
+            .inverted_p1()
+        );
+        if let Some(last) = m.sets[0].events.last_mut() {
+            last.flags = last.flags.with_inverted_p1(true);
+        }
+        assert!(ScoutingSession::new(m, next, snapshot, set_writer).inverted_p1());
+    }
+
     /// A dig needs the player, then the evaluation; a fault the player only.
     #[tokio::test]
     async fn the_player_comes_before_the_evaluation() {
@@ -212,6 +356,31 @@ mod tests {
         assert_eq!(saved[0].target_player, Some(bench));
     }
 
+    /// A player of the team who isn't on the roster of the match can't come
+    /// in: the score sheet is the roster.
+    #[tokio::test]
+    async fn only_the_roster_comes_in() {
+        let roles = [&ROLES[..], &[RoleEnum::OutsideHitter]].concat();
+        let mut s = scouting_of(&roles, ROLES.len()).await;
+        let off_the_sheet = s.players[8];
+        s.session.choose_event(R).await.unwrap();
+        let replaced = s.session.player_choices()[0].id;
+        s.session.choose_player(replaced).await.unwrap();
+        assert_eq!(
+            s.session
+                .replacement_choices()
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<_>>(),
+            vec![s.players[7]]
+        );
+        assert_eq!(
+            s.session.choose_replacement(off_the_sheet).await,
+            Err(ScoutingError::InvalidPlayerSelection)
+        );
+        assert!(saved_events(&s).await.is_empty());
+    }
+
     /// The choices that don't fit are refused, and nothing is saved.
     #[tokio::test]
     async fn choices_that_dont_fit_are_refused() {
@@ -255,6 +424,7 @@ mod tests {
             eval: None,
             target_player,
             technique: None,
+            flags: Default::default(),
         };
         // a player who isn't on court is substituted
         assert_eq!(

@@ -4,6 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
+use uuid::Uuid;
 
 #[async_trait]
 pub trait MatchWriter {
@@ -15,6 +16,7 @@ pub trait MatchWriter {
         home: bool,
         max_substitutions: u8,
         notes: String,
+        roster: Vec<Uuid>,
     ) -> Result<MatchEntry, AppError>;
 
     async fn update(
@@ -25,5 +27,6 @@ pub trait MatchWriter {
         home: bool,
         max_substitutions: u8,
         notes: String,
+        roster: Vec<Uuid>,
     ) -> Result<(), AppError>;
 }

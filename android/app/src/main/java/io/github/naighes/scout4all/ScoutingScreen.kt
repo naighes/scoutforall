@@ -7,6 +7,7 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Surface
 import androidx.compose.ui.draw.alpha
@@ -59,6 +60,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -192,6 +195,18 @@ class ScoutingViewModel(
 
     fun eval(eval: EvalChoice) = choose("eval ${eval.value}") { it.chooseEval(eval.value) }
 
+    /** The inverted P1, saved with the events from now on. */
+    fun invertedP1(inverted: Boolean) = choose("inverted p1 $inverted") {
+        it.setInvertedP1(inverted)
+        Progress.CHOOSING
+    }
+
+    /** How many receive their next serve: 3, 4, 2, then 3 again. */
+    fun nextReception() = choose("reception") {
+        it.nextReception()
+        Progress.CHOOSING
+    }
+
     fun undo() = choose("undo") {
         it.undo()
         Progress.CHOOSING
@@ -304,6 +319,12 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "", Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
+                actions = {
+                    view?.let {
+                        Reception(it.state, model::nextReception)
+                        InvertedP1(it.state.invertedP1, model::invertedP1)
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -323,6 +344,41 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
         }
     }
     }
+}
+
+/** The inverted P1, kept until changed: in P1 in side out the outside
+ * hitter attacks from 4 and the opposite from 2. Up in the bar, the court
+ * keeps its room. */
+@Composable
+private fun InvertedP1(inverted: Boolean, onChange: (Boolean) -> Unit) {
+    val description = stringResource(R.string.inverted_p1_description)
+    FilterChip(
+        selected = inverted,
+        onClick = { onChange(!inverted) },
+        label = { Text(stringResource(R.string.inverted_p1)) },
+        leadingIcon = if (inverted) {
+            { Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(FilterChipDefaults.IconSize)) }
+        } else {
+            null
+        },
+        // the chip tells TalkBack whether it's selected
+        modifier = Modifier.padding(end = 8.dp).semantics { contentDescription = description },
+    )
+}
+
+/** How many receive their next serve, told before it: stands out when
+ * not three, then three again once received. */
+@Composable
+private fun Reception(state: ScoutingState, onNext: () -> Unit) {
+    val players = state.reception.toInt()
+    val description = stringResource(R.string.reception_description, players)
+    FilterChip(
+        selected = players != 3,
+        onClick = onNext,
+        enabled = state.receptionOpen,
+        label = { Text(stringResource(R.string.reception_n, players)) },
+        modifier = Modifier.padding(end = 8.dp).semantics { contentDescription = description },
+    )
 }
 
 /** The scouting reads at a glance and never scrolls: it grows with the

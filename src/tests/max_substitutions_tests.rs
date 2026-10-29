@@ -126,6 +126,7 @@ mod tests {
                 eval: None,
                 target_player: Some(*r#in),
                 technique: None,
+                flags: Default::default(),
             })
             .collect();
         let mut m: MatchEntry = serde_json::from_str(LEGACY_DESCRIPTOR).unwrap();
@@ -289,7 +290,8 @@ mod tests {
             ui.screen()
         );
         fill_new_match(&mut ui, "Cortona Volley").await;
-        ui.press(KeyCode::Enter).await;
+        // the form, then the roster as it is
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         let saved = ui.saved_matches();
         assert_eq!(saved.len(), 1, "{}", ui.screen());
         assert_eq!(saved[0]["max_substitutions"], 8);
@@ -308,7 +310,8 @@ mod tests {
             "{}",
             ui.screen()
         );
-        ui.press(KeyCode::Enter).await;
+        // the form, then the roster as it is
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         let saved = ui.saved_matches();
         assert_eq!(saved.len(), 1, "{}", ui.screen());
         assert_eq!(saved[0]["max_substitutions"], 10);

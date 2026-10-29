@@ -25,6 +25,7 @@ use ratatui::{
 use scout4all_core::{
     detail::{Breakdown, Detail, Tone},
     errors::AppError,
+    overview::side_out_possessions,
     shapes::{
         enums::{EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum},
         r#match::MatchEntry,
@@ -435,6 +436,59 @@ impl MatchStatsScreen {
             );
             self.render_court_canvas(f, chunks[1], current_labels().conversion_rate, |(_, s)| s);
         }
+        if let (Some(EventTypeEnum::P), None) = (
+            self.event_filter.selected().map(|s| s.event_type),
+            self.player_filter.selected(),
+        ) {
+            self.render_side_out_possessions(f, chunks[0]);
+        }
+    }
+
+    /// After the reception, the side outs by possession: the first, the
+    /// second and the later ones, narrowed by the set, the rotation and the
+    /// phase. They have no player: not with a player selected.
+    fn render_side_out_possessions(&self, f: &mut Frame, area: Rect) {
+        let Some(stats) = self.get_current_stats(self.set_filter.selected().copied()) else {
+            return;
+        };
+        let labels = current_labels();
+        let domain = labels.domain;
+        let filter = self.current_filter();
+        let rows: Vec<Row> = side_out_possessions(&stats, &filter)
+            .iter()
+            .zip(domain.possessions)
+            .map(|((_, summary), name)| {
+                Row::new(vec![
+                    Cell::from(name),
+                    Cell::from(summary.map_or("-".to_string(), |s| s.total.to_string())),
+                    Cell::from(summary.map_or("-".to_string(), |s| s.won.to_string())),
+                    Cell::from(
+                        summary.map_or("-".to_string(), |s| format!("{:.0}%", s.finalization())),
+                    ),
+                ])
+            })
+            .collect();
+        let header = Row::new(vec!["", domain.tot, domain.pt, domain.pt_perc])
+            .style(Style::new().add_modifier(Modifier::DIM));
+        let area = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(rows.len() as u16 + 3),
+                Constraint::Min(0),
+            ])
+            .split(area)[0];
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Fill(1),
+                Constraint::Length(5),
+                Constraint::Length(5),
+                Constraint::Length(5),
+            ],
+        )
+        .header(header)
+        .block(panel::section(domain.sideout_by_possession));
+        f.render_widget(table, area);
     }
 
     pub fn render_court_canvas<F>(&self, f: &mut Frame, area: Rect, label: &str, select_value: F)

@@ -6,6 +6,7 @@
 //! (see `sides`).
 use crate::errors::AppError;
 use crate::localization::Labels;
+use crate::overview::side_out_possessions;
 use crate::shapes::enums::{
     EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
@@ -13,9 +14,10 @@ use crate::shapes::r#match::MatchEntry;
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::Snapshot;
-use crate::shapes::stats::{Metric, Stats, StatsFilter};
+use crate::shapes::stats::{Metric, PossessionSummary, Stats, StatsFilter};
 use serde::Serialize;
 use std::collections::HashSet;
+use std::iter::once;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
@@ -33,6 +35,7 @@ pub struct Report {
     pub set_stats: StatsTable,
     pub courts: Vec<Court>,
     pub first_rallies: Table,
+    pub side_out_possessions: Table,
     pub attack_by_phase: Table,
     pub freeballs: Table,
     pub points_won: Table,
@@ -219,6 +222,7 @@ pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError>
         set_stats: set_stats_table(labels, &replay),
         courts: courts(labels, &replay.stats),
         first_rallies: first_rallies_table(labels, &replay.stats),
+        side_out_possessions: side_out_possessions_table(labels, &replay.stats),
         attack_by_phase: attack_by_phase_table(labels, &replay.stats),
         freeballs: freeballs_table(labels, &replay.stats),
         points_won: points_won_table(labels, &replay.stats),
@@ -745,6 +749,39 @@ fn first_rallies_table(labels: &Labels, stats: &Stats) -> Table {
             labels.pt.to_string(),
             labels.pt_perc.to_string(),
             labels.eff_perc.to_string(),
+        ],
+        rows,
+        total: false,
+    }
+}
+
+/// The side outs by possession: all of them, then the first, the second
+/// and the third with the later ones.
+fn side_out_possessions_table(labels: &Labels, stats: &Stats) -> Table {
+    let all = StatsFilter::default();
+    let row = |label: &str, summary: Option<PossessionSummary>| {
+        vec![
+            label.to_string(),
+            fmt_count(summary.map_or(0, |s| s.total)),
+            fmt_count(summary.map_or(0, |s| s.won)),
+            fmt_num(summary.map(|s| s.finalization())),
+        ]
+    };
+    let rows = once(row(labels.global, stats.side_out_possessions(None, &all)))
+        .chain(
+            side_out_possessions(stats, &all)
+                .iter()
+                .zip(labels.possessions)
+                .map(|((_, summary), label)| row(label, *summary)),
+        )
+        .collect();
+    Table {
+        title: labels.sideout_by_possession.to_string(),
+        columns: vec![
+            String::new(),
+            labels.tot.to_string(),
+            labels.pt.to_string(),
+            labels.pt_perc.to_string(),
         ],
         rows,
         total: false,

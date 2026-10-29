@@ -234,6 +234,7 @@ mod tests {
             eval: Some(Positive),
             target_player: None,
             technique,
+            flags: Default::default(),
         }
     }
 
@@ -368,6 +369,7 @@ mod tests {
             eval,
             target_player: None,
             technique,
+            flags: Default::default(),
         }
     }
 
@@ -389,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn technique_saved_as_the_last_column() {
+    fn technique_saved_before_the_flags() {
         let csv = to_csv(&[
             event(A, Some(Perfect), Some(TechniqueEnum::Set(Super))),
             event(S, Some(Positive), Some(TechniqueEnum::Serve(Float))),
@@ -399,9 +401,9 @@ mod tests {
         assert_eq!(
             csv,
             format!(
-                "2026-10-19T20:00:00Z,A,{nil},#,,S\n\
-                 2026-10-19T20:00:00Z,S,{nil},+,,F\n\
-                 2026-10-19T20:00:00Z,D,{nil},+,,\n"
+                "2026-10-19T20:00:00Z,A,{nil},#,,S,\n\
+                 2026-10-19T20:00:00Z,S,{nil},+,,F,\n\
+                 2026-10-19T20:00:00Z,D,{nil},+,,,\n"
             )
         );
     }
@@ -543,6 +545,7 @@ mod tests {
             eval: Some(eval),
             target_player: None,
             technique,
+            flags: Default::default(),
         }
     }
 
@@ -554,6 +557,7 @@ mod tests {
             eval: None,
             target_player: None,
             technique: None,
+            flags: Default::default(),
         }
     }
 

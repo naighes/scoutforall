@@ -150,6 +150,7 @@ mod tests {
                 technique: None,
                 eval: Some(EvalEnum::Perfect),
                 timestamp: Utc::now(),
+                flags: Default::default(),
             }],
         };
         let mut snapshot = set
@@ -210,6 +211,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -237,6 +239,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -264,6 +267,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -303,6 +307,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -330,6 +335,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -357,6 +363,7 @@ mod tests {
                     technique: None,
                     player: Some(setter),
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -389,6 +396,7 @@ mod tests {
                     technique: None,
                     eval: Some(EvalEnum::Negative),
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -416,6 +424,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -443,6 +452,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -470,6 +480,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -497,6 +508,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -533,6 +545,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -560,6 +573,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -606,6 +620,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(
                     |snapshot: &Snapshot, available_options: &Vec<EventTypeEnum>| {
@@ -647,6 +662,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -674,6 +690,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -701,6 +718,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -740,6 +758,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -767,6 +786,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -794,6 +814,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -821,6 +842,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -848,6 +870,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -875,6 +898,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -902,6 +926,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -929,6 +954,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -956,6 +982,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -983,6 +1010,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1010,6 +1038,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1037,6 +1066,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1073,6 +1103,7 @@ mod tests {
                     technique: None,
                     player: Some(setter_replacement),
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1102,6 +1133,7 @@ mod tests {
                     technique: None,
                     player: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1134,6 +1166,7 @@ mod tests {
                     technique: None,
                     player: Some(opposite),
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1164,6 +1197,7 @@ mod tests {
                     technique: None,
                     player: Some(oh1),
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1191,6 +1225,7 @@ mod tests {
                     technique: None,
                     player: Some(opposite),
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1227,6 +1262,7 @@ mod tests {
                     technique: None,
                     player: None,
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1255,6 +1291,7 @@ mod tests {
                     // the setter, back on court, serves after the rotation
                     player: Some(setter),
                     timestamp: Utc::now(),
+                    flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
                     assert_snapshot(
@@ -1309,6 +1346,7 @@ mod tests {
                 target_player: None,
                 technique: None,
                 timestamp: Utc::now(),
+                flags: Default::default(),
             })
             .expect("expected their error to apply");
 
@@ -1319,6 +1357,7 @@ mod tests {
             target_player: Some(setter_replacement),
             technique: None,
             timestamp: Utc::now(),
+            flags: Default::default(),
         });
         assert!(match setter_already_replaced {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1334,6 +1373,7 @@ mod tests {
             target_player: Some(setter_replacement),
             technique: None,
             timestamp: Utc::now(),
+            flags: Default::default(),
         });
         assert!(match setter_replacement_already_used {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1349,6 +1389,7 @@ mod tests {
             target_player: Some(some_other_replacement),
             technique: None,
             timestamp: Utc::now(),
+            flags: Default::default(),
         });
         assert!(match libero_cannot_be_replaced {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1365,6 +1406,7 @@ mod tests {
                 target_player: Some(some_other_replacement),
                 technique: None,
                 timestamp: Utc::now(),
+                flags: Default::default(),
             })
             .expect("should not throw");
 
@@ -1375,6 +1417,7 @@ mod tests {
             target_player: Some(some_other_player),
             technique: None,
             timestamp: Utc::now(),
+            flags: Default::default(),
         });
         assert!(match unclosed_change_error {
             Err(AppError::Snapshot(SnapshotError::LineupError(error))) => {
@@ -1395,6 +1438,7 @@ mod tests {
                 target_player: Some(oh1),
                 technique: None,
                 timestamp: Utc::now(),
+                flags: Default::default(),
             })
             .expect("should not throw");
 

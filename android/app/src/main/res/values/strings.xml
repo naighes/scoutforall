@@ -42,6 +42,11 @@
     <string name="birth_date">Birth date</string>
     <string name="height">Height</string>
     <string name="notes">Notes</string>
+    <string name="roster">On the score sheet: %1$d of %2$d</string>
+    <string name="played">played</string>
+    <string name="go_on">Continue</string>
+    <string name="roster_title">Score sheet</string>
+    <string name="roster_hint">Tap a player to put them on the score sheet or take them off.</string>
     <string name="remove_birth_date">Remove the birth date</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>
@@ -80,6 +85,10 @@
     <string name="match_lost_cheer">Heads up, on to the next one!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
+    <string name="inverted_p1">inv. S1</string>
+    <string name="inverted_p1_description">Inverted S1: in side out the outside hitter attacks from 4</string>
+    <string name="reception_n">rec. %d</string>
+    <string name="reception_description">Reception with %d players: touch for 3, 4, 2, before their serve</string>
     <string name="serving">Serving</string>
     <plurals name="players">
         <item quantity="one">%d player</item>
@@ -128,6 +137,7 @@
     <string name="set_team_level">Set the level and gender of the team to see the colors</string>
     <string name="stats_detail">Detail</string>
     <string name="rotations">Rotations</string>
+    <string name="side_out_by_possession">Side-out by possession</string>
     <string name="filter_player">Player</string>
     <string name="filter_rotation">Rotation</string>
     <string name="filter_phase">Phase</string>
@@ -214,6 +224,8 @@
     <string name="tutorial_matches">Here are the players. The matches are in the other tab: tap the tab.</string>
     <string name="tutorial_new_match">Tap + for a new match.</string>
     <string name="tutorial_match_fields">Opponent, date, home or away, substitutions: I filled them in.</string>
+    <string name="tutorial_match_next">Tap Continue: then the players on the score sheet.</string>
+    <string name="tutorial_roster">The whole team is on the score sheet, up to 14: a tap takes a player off or puts them back.</string>
     <string name="tutorial_save_match">Tap Save.</string>
     <string name="tutorial_lineup">The lineup of the first set is ready: the setter in 6 (S6), we receive; Spirito is the libero, Fersino the second libero. Tapping a position changes its player.</string>
     <string name="tutorial_start_set">Tap Start the set.</string>

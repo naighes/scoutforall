@@ -1,10 +1,12 @@
 //! Data saved by older versions: after an update, teams and matches load as
-//! they were, and sets replay as they were scouted (the settings are in the
-//! settings tests of the terminal interface).
+//! they were, and sets replay as they were scouted, also when imported from
+//! the archives of the older versions (the settings are in the settings
+//! tests of the terminal interface).
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        archive::{export_match, import_match, import_team},
         constants::LEGACY_MAX_SUBSTITUTIONS,
         localization::Language,
         providers::{
@@ -14,24 +16,31 @@ mod tests {
             store::{
                 match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
                 set_reader::StoreSetReader, set_writer::StoreSetWriter,
-                team_reader::StoreTeamReader,
+                team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
             },
             team_reader::TeamReader,
         },
+        reporting::model::build_report,
         shapes::{
             enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, RoleEnum, TeamSideEnum},
+            flags::{EventFlags, ReceptionSchemeEnum},
             r#match::MatchEntry,
             snapshot::EventEntry,
             team::TeamEntry,
             technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
         },
-        tests::fs_store,
+        storage::{Store, memory::MemoryStore},
+        tests::{EN, fs_store},
     };
     use chrono::{DateTime, Utc};
     use csv::ReaderBuilder;
     use serde::Deserialize;
     use serde_json::json;
-    use std::path::{Path, PathBuf};
+    use std::{
+        io::Write,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -172,7 +181,89 @@ mod tests {
         let matches = reader.read_all(&team).await.expect("expected the matches");
         assert_eq!(matches.len(), 1);
         let m = matches.into_iter().next().unwrap();
-        (team, m.expect("expected a readable match"))
+        let m = m.expect("expected a readable match");
+        imports_as_loaded(base, &m).await;
+        (team, m)
+    }
+
+    /// The files of the folder zipped, as exported up to v0.9.0.
+    fn zip_folder(folder: &Path) -> Vec<u8> {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for entry in std::fs::read_dir(folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_file() {
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                zip.start_file::<_, ()>(name.as_str(), zip::write::FileOptions::default())
+                    .unwrap();
+                zip.write_all(&std::fs::read(&path).unwrap()).unwrap();
+            }
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// What tells two matches apart once replayed: the rules, the events,
+    /// the score and the lineup of each set, and the report.
+    fn replayed(m: &MatchEntry) -> String {
+        let sets: Vec<String> = m
+            .sets
+            .iter()
+            .map(|s| {
+                let snapshot = m.get_set_snapshot(s.set_number).ok().flatten();
+                format!(
+                    "{:?} {:?} {:?} {:?}",
+                    s.find_lineup_rules(m.max_substitutions).ok(),
+                    s.events,
+                    snapshot.as_ref().map(|s| (s.score_us, s.score_them)),
+                    snapshot.map(|s| format!("{:?}", s.current_lineup)),
+                )
+            })
+            .collect();
+        let report = build_report(m, EN).map(|r| serde_json::to_string(&r).ok());
+        format!("{sets:?} {report:?}")
+    }
+
+    /// The team and the match in `base`, zipped as exported up to v0.9.0,
+    /// and the match exported now, are imported into an empty store: the
+    /// match replays as loaded from its folder.
+    async fn imports_as_loaded(base: &Path, m: &MatchEntry) {
+        let from = fs_store(base);
+        let team_archive = zip_folder(&base.join(TEAM_ID));
+        let archives = [
+            zip_folder(&base.join(TEAM_ID).join(MATCH_ID)),
+            export_match(&*from, &m.team.id, &m.id).await.unwrap(),
+        ];
+        for archive in archives {
+            let to: Arc<dyn Store> = Arc::new(MemoryStore::new());
+            let team = import_team(
+                &team_archive,
+                Uuid::parse_str(TEAM_ID).ok(),
+                &StoreTeamReader::new(Arc::clone(&to), Language::default()),
+                &StoreTeamWriter::new(Arc::clone(&to)),
+                EN,
+            )
+            .await
+            .expect("expected the team to import");
+            let reader = StoreMatchReader::new(
+                Arc::clone(&to),
+                Arc::new(StoreSetReader::new(Arc::clone(&to), Language::default())),
+                Language::default(),
+            );
+            let imported = import_match(
+                &archive,
+                &team,
+                &reader,
+                &StoreMatchWriter::new(Arc::clone(&to)),
+                &StoreSetWriter::new(Arc::clone(&to), Language::default()),
+                EN,
+            )
+            .await
+            .expect("expected the match to import");
+            let again = reader
+                .read_single(&team, &imported.id)
+                .await
+                .expect("expected the imported match to load");
+            assert_eq!(replayed(&again), replayed(m));
+        }
     }
 
     #[tokio::test]
@@ -278,6 +369,7 @@ mod tests {
                 true,
                 m.max_substitutions,
                 String::new(),
+                vec![],
             )
             .await
             .expect("expected the match to be updated");
@@ -417,6 +509,7 @@ mod tests {
             eval: Some(eval),
             target_player: None,
             technique,
+            flags: Default::default(),
         }
     }
 
@@ -472,7 +565,7 @@ mod tests {
             .append_event(&m, 1, &float_serve(&p))
             .await
             .expect("expected the event to be saved");
-        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6]);
+        assert_eq!(columns(&events_path(dir.path())), vec![7, 7, 7]);
         // the older rows are the same
         let (_, m) = load(dir.path()).await;
         let events = &m.sets[0].events;
@@ -503,7 +596,7 @@ mod tests {
             )
             .await
             .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6, 6]);
+        assert_eq!(columns(&events_path(dir.path())), vec![7, 7, 7, 7]);
         assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 4);
     }
 
@@ -600,7 +693,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6, 6]);
+        assert_eq!(columns(&events_path(dir.path())), vec![7, 7, 7, 7]);
         assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 4);
     }
 
@@ -653,6 +746,7 @@ mod tests {
             eval: None,
             target_player: None,
             technique: None,
+            flags: Default::default(),
         }
     }
 
@@ -695,12 +789,12 @@ mod tests {
         let rows = std::fs::read_to_string(events_path(dir.path())).unwrap();
         let rows: Vec<_> = rows.lines().collect();
         assert!(
-            rows[1].ends_with(&format!(",FB,{},,,", p.setter)),
+            rows[1].ends_with(&format!(",FB,{},,,,", p.setter)),
             "{}",
             rows[1]
         );
-        assert!(rows[2].ends_with(",OF,,,,"), "{}", rows[2]);
-        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6, 6]);
+        assert!(rows[2].ends_with(",OF,,,,,"), "{}", rows[2]);
+        assert_eq!(columns(&events_path(dir.path())), vec![7, 7, 7, 7]);
         let (_, m) = load(dir.path()).await;
         let loaded: Vec<_> = m.sets[0].events.iter().map(known_fields).collect();
         assert_eq!(
@@ -784,7 +878,7 @@ mod tests {
             m.sets[0].events.last().unwrap().technique,
             Some(TechniqueEnum::Serve(ServeTypeEnum::Float))
         );
-        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6]);
+        assert_eq!(columns(&events_path(dir.path())), vec![7, 7, 7]);
         // the undo of a set of v0.4.3 gives the column to its rows
         let dir = TempDir::new().unwrap();
         legacy_team(dir.path(), &p);
@@ -797,8 +891,101 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(removed.event_type, EventTypeEnum::A);
-        assert_eq!(columns(&events_path(dir.path())), vec![6]);
+        assert_eq!(columns(&events_path(dir.path())), vec![7]);
         assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 1);
+    }
+
+    // --- the flags column, added after v0.10.1 -------------------------------
+
+    /// A set scouted up to v0.10.1 has no flags: it loads with none, the
+    /// first event saved gives the column to its rows, and v0.10.1 (as
+    /// v0.5.0, skipping the columns it doesn't know) and v0.4.3 still read
+    /// it.
+    #[tokio::test]
+    async fn set_scouted_up_to_v0_10_1_gets_the_flags() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        let with_technique =
+            |row: String, technique: &str| format!("{},{}\n", row.trim_end(), technique);
+        legacy_set(
+            dir.path(),
+            &p,
+            &[
+                with_technique(row("P", Some(p.libero), "+", None), ""),
+                with_technique(row("A", Some(p.oh1), "#", None), "5"),
+            ],
+        );
+        let (_, m) = load(dir.path()).await;
+        assert!(
+            m.sets[0]
+                .events
+                .iter()
+                .all(|e| e.flags == EventFlags::default())
+        );
+        let flags = EventFlags::default()
+            .with_inverted_p1(true)
+            .with_reception(ReceptionSchemeEnum::Two);
+        let writer = StoreSetWriter::new(fs_store(dir.path()), Language::default());
+        writer
+            .append_event(
+                &m,
+                1,
+                &EventEntry {
+                    flags,
+                    ..float_serve(&p)
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(columns(&events_path(dir.path())), vec![7, 7, 7]);
+        assert_eq!(read_as_v0_5_0(&events_path(dir.path())).unwrap().len(), 3);
+        assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 3);
+        let (_, m) = load(dir.path()).await;
+        let events = &m.sets[0].events;
+        assert_eq!(
+            events.iter().map(|e| e.flags).collect::<Vec<_>>(),
+            [EventFlags::default(), EventFlags::default(), flags]
+        );
+        assert_eq!(
+            events[1].technique,
+            Some(TechniqueEnum::Set(SetTypeEnum::Five))
+        );
+    }
+
+    /// The undo rewrites the file: the flags stay, also the bits of a later
+    /// version.
+    #[tokio::test]
+    async fn undo_keeps_the_flags() {
+        let dir = TempDir::new().unwrap();
+        let p = Players::new();
+        legacy_team(dir.path(), &p);
+        match_descriptor(dir.path(), Some(6));
+        let later = EventFlags::parse("70").unwrap();
+        legacy_set(
+            dir.path(),
+            &p,
+            &[
+                format!("{},,70\n", row("P", Some(p.libero), "+", None).trim_end()),
+                format!("{},5,1\n", row("A", Some(p.oh1), "#", None).trim_end()),
+            ],
+        );
+        let (_, m) = load(dir.path()).await;
+        StoreSetWriter::new(fs_store(dir.path()), Language::default())
+            .remove_last_event(&m, 1)
+            .await
+            .unwrap();
+        let (_, m) = load(dir.path()).await;
+        assert_eq!(
+            m.sets[0].events.iter().map(|e| e.flags).collect::<Vec<_>>(),
+            [later]
+        );
+        assert!(
+            std::fs::read_to_string(events_path(dir.path()))
+                .unwrap()
+                .ends_with(",,70\n")
+        );
     }
 
     /// The battery runs out while an event is appended: the row cut is left
@@ -827,7 +1014,7 @@ mod tests {
             .append_event(&m, 1, &next)
             .await
             .unwrap();
-        assert_eq!(columns(&events_path(dir.path())), vec![6, 6, 6]);
+        assert_eq!(columns(&events_path(dir.path())), vec![7, 7, 7]);
         let (_, m) = load(dir.path()).await;
         assert_eq!(m.sets[0].events.len(), 3);
     }

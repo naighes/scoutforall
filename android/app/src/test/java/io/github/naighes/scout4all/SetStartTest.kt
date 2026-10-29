@@ -98,17 +98,28 @@ class SetStartTest {
         assertEquals(court.toSet(), state.court.map { it.name }.toSet())
     }
 
+    /** On the score sheet of the match: removed from the team since the
+     * last set, a player is still there. */
     @Test
-    fun aPlayerRemovedSinceTheLastSetIsChosenAgain() {
+    fun aPlayerRemovedFromTheTeamStaysInTheMatch() {
         val match = firstSetWon()
         val orro = core { it.team(team) }.players.first { it.name == "Alessia Orro" }.id
         core { it.removePlayer(team, orro) }
-        core { it.savePlayer(team, null, PlayerForm("Carlotta Cambi", RoleEnum.SETTER, "10")) }
-        // position 1 and the setter empty: position 1 opens by itself
-        show(match, shown = "Carlotta Cambi")
-        pick("Carlotta Cambi")
-        pick("Carlotta Cambi")
+        show(match)
         rule.waitFor { runCatching { start().assertIsEnabled() }.isSuccess }
+    }
+
+    /** A player added to the team plays in the match once on its score
+     * sheet, in place of one who didn't play. */
+    @Test
+    fun aPlayerAddedToTheTeamPlaysOnceOnTheScoreSheet() {
+        val match = firstSetWon()
+        val cambi = core { it.savePlayer(team, null, PlayerForm("Carlotta Cambi", RoleEnum.SETTER, "10")) }
+        val form = core { it.matchForm(team, match) }
+        core { it.saveMatch(team, match, form.copy(roster = form.roster.orEmpty() + cambi)) }
+        show(match)
+        rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
+        pick("Carlotta Cambi")
     }
 
     /** Who serves by the names of the teams; the ball by the one chosen. */

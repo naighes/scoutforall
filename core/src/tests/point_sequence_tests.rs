@@ -25,6 +25,7 @@ mod tests {
             eval,
             target_player: None,
             technique: None,
+            flags: Default::default(),
         }
     }
 
@@ -76,6 +77,7 @@ mod tests {
     #[test]
     fn report_shows_the_point_sequence() {
         let m = MatchEntry {
+            roster: vec![],
             opponent: "them".to_string(),
             date: Utc::now().fixed_offset(),
             id: "match".to_string(),

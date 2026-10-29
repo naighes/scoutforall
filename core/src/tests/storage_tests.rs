@@ -7,6 +7,7 @@ mod tests {
         archive::{export_match, export_team, import_match, import_team},
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         localization::Language,
+        player_form::removal,
         providers::{
             match_reader::MatchReader,
             match_writer::MatchWriter,
@@ -17,7 +18,7 @@ mod tests {
                 team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
             },
             team_reader::TeamReader,
-            team_writer::{TeamInput, TeamWriter},
+            team_writer::{PlayerInput, TeamInput, TeamWriter},
         },
         shapes::{
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
@@ -194,6 +195,7 @@ mod tests {
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
                 String::new(),
+                vec![],
             )
             .await
             .unwrap();
@@ -205,6 +207,7 @@ mod tests {
                 eval: Some(EvalEnum::Positive),
                 target_player: None,
                 technique: Some(TechniqueEnum::Serve(ServeTypeEnum::Float)),
+                flags: Default::default(),
             },
             EventEntry {
                 timestamp: Utc::now(),
@@ -213,6 +216,7 @@ mod tests {
                 eval: None,
                 target_player: None,
                 technique: None,
+                flags: Default::default(),
             },
         ];
         p.set_writer
@@ -265,6 +269,86 @@ mod tests {
         p.set_writer.remove_last_event(&m, 1).await.unwrap();
         let m = p.match_reader.read_single(&team, &m.id).await.unwrap();
         assert_eq!(summary(&m), vec![(vec![EventTypeEnum::S], 0, 0)]);
+    }
+
+    /// A match sees the players of its roster as they were: one removed
+    /// from the team since is still active, one added since is not; the
+    /// roster goes with the match in an archive.
+    #[tokio::test]
+    async fn a_match_keeps_its_roster() {
+        let from = Arc::new(MemoryStore::new());
+        let p = Providers::new(from.clone());
+        let (mut team, m) = scouted_match(&p).await;
+        let roster: Vec<Uuid> = team.players.iter().map(|p| p.id).collect();
+        p.match_writer
+            .update(
+                &m,
+                m.opponent.clone(),
+                m.date,
+                m.home,
+                m.max_substitutions,
+                m.notes.clone(),
+                roster.clone(),
+            )
+            .await
+            .unwrap();
+        let first = team.players[0].clone();
+        p.team_writer
+            .save_player(removal(&first), &mut team)
+            .await
+            .unwrap();
+        let added = p
+            .team_writer
+            .save_player(
+                PlayerInput::New {
+                    name: "new".into(),
+                    role: RoleEnum::Setter,
+                    number: 10,
+                    details: Default::default(),
+                },
+                &mut team,
+            )
+            .await
+            .unwrap();
+        let active = |m: &MatchEntry| -> Vec<Uuid> {
+            m.team.active_players().iter().map(|p| p.id).collect()
+        };
+        let loaded = p.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!(loaded.roster, roster);
+        assert_eq!(active(&loaded), roster);
+        assert!(loaded.team.find_player(added.id).is_some());
+
+        // exported and imported elsewhere, with the team as it is now
+        let target = Providers::new(Arc::new(MemoryStore::new()));
+        let team_zip = export_team(&*from, &team.id).await.unwrap();
+        let match_zip = export_match(&*from, &team.id, &m.id).await.unwrap();
+        let imported_team = import_team(
+            &team_zip,
+            None,
+            &target.team_reader,
+            &target.team_writer,
+            EN,
+        )
+        .await
+        .unwrap();
+        let imported = import_match(
+            &match_zip,
+            &imported_team,
+            &target.match_reader,
+            &target.match_writer,
+            &target.set_writer,
+            EN,
+        )
+        .await
+        .unwrap();
+        let loaded = target
+            .match_reader
+            .read_single(&imported_team, &imported.id)
+            .await
+            .unwrap();
+        assert_eq!(loaded.roster, roster);
+        assert_eq!(active(&loaded), roster);
+        assert_eq!(active(&m).len(), 7);
     }
 
     /// On the file system the data keeps the folders of the older versions.

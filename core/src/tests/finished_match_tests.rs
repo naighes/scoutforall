@@ -41,6 +41,7 @@ mod tests {
                 eval: None,
                 target_player: None,
                 technique: None,
+                flags: Default::default(),
             })
             .collect()
     }
@@ -67,6 +68,7 @@ mod tests {
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
                 String::new(),
+                vec![],
             )
             .await
             .unwrap();

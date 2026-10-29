@@ -5,8 +5,9 @@ mod tests {
     use crate::{
         match_form::{MatchForm, MatchFormError, MatchInput},
         shapes::{
-            enums::{EventTypeEnum, TeamSideEnum},
+            enums::{EventTypeEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
+            player::PlayerEntry,
             set::SetEntry,
             snapshot::EventEntry,
             team::TeamEntry,
@@ -27,7 +28,29 @@ mod tests {
             home: true,
             max_substitutions: max_substitutions.into(),
             notes: String::new(),
+            roster: None,
         }
+    }
+
+    /// A team of `n` players, numbered from 1, each with the same id in
+    /// every team; the seventh is the libero.
+    fn team_of(n: u8) -> TeamEntry {
+        TeamEntry {
+            players: (1..=n)
+                .map(|number| PlayerEntry {
+                    id: Uuid::from_u128(number.into()),
+                    number,
+                    name: format!("player {number}"),
+                    role: (number == 7).then_some(RoleEnum::Libero),
+                    ..PlayerEntry::default()
+                })
+                .collect(),
+            ..TeamEntry::default()
+        }
+    }
+
+    fn team() -> TeamEntry {
+        team_of(7)
     }
 
     fn substitution() -> EventEntry {
@@ -38,6 +61,7 @@ mod tests {
             eval: None,
             target_player: Some(Uuid::new_v4()),
             technique: None,
+            flags: Default::default(),
         }
     }
 
@@ -65,11 +89,12 @@ mod tests {
             max_substitutions: 6,
             sets: vec![set(1, 2), set(2, 4)],
             notes: String::new(),
+            roster: vec![],
         }
     }
 
     fn error(form: MatchForm) -> MatchFormError {
-        match form.validate(None) {
+        match form.validate(&team(), None) {
             Err(e) => e,
             Ok(_) => unreachable!("the form should not be valid"),
         }
@@ -78,13 +103,14 @@ mod tests {
     #[test]
     fn a_valid_form_has_the_opponent_trimmed() {
         assert_eq!(
-            form("6").validate(None),
+            form("6").validate(&team(), None),
             Ok(MatchInput {
                 opponent: "Arezzo".into(),
                 date: date(),
                 home: true,
                 max_substitutions: 6,
                 notes: String::new(),
+                roster: team().players.iter().map(|p| p.id).collect(),
             })
         );
     }
@@ -108,7 +134,7 @@ mod tests {
             );
         }
         for max in ["1", "99", " 6 ", "08"] {
-            assert!(form(max).validate(None).is_ok(), "{max:?}");
+            assert!(form(max).validate(&team(), None).is_ok(), "{max:?}");
         }
     }
 
@@ -116,12 +142,12 @@ mod tests {
     fn editing_keeps_at_least_the_substitutions_of_a_set() {
         let m = played();
         assert_eq!(
-            form("3").validate(Some(&m)),
+            form("3").validate(&team(), Some(&m)),
             Err(MatchFormError::MaxSubstitutionsBelowUsed)
         );
-        assert!(form("4").validate(Some(&m)).is_ok());
+        assert!(form("4").validate(&team(), Some(&m)).is_ok());
         // a new match has no substitutions yet
-        assert!(form("1").validate(None).is_ok());
+        assert!(form("1").validate(&team(), None).is_ok());
     }
 
     #[test]
@@ -133,6 +159,7 @@ mod tests {
                 home: false,
                 max_substitutions: String::new(),
                 notes: String::new(),
+                roster: Some(vec![]),
             }),
             MatchFormError::EmptyOpponent
         );
@@ -156,9 +183,10 @@ mod tests {
                 home: false,
                 max_substitutions: "6".into(),
                 notes: String::new(),
+                roster: None,
             }
         );
-        assert!(MatchForm::of(&m).validate(Some(&m)).is_ok());
+        assert!(MatchForm::of(&m).validate(&team(), Some(&m)).is_ok());
     }
 
     #[test]
@@ -176,7 +204,7 @@ mod tests {
             notes: "  windy, gym cold \n".into(),
             ..form("6")
         }
-        .validate(None)
+        .validate(&team(), None)
         .unwrap();
         assert_eq!(input.notes, "windy, gym cold");
         let m = MatchEntry {
@@ -200,5 +228,261 @@ mod tests {
             ..m
         };
         assert_eq!(serde_json::to_value(&noted).unwrap()["notes"], "windy");
+    }
+
+    fn ids(team: &TeamEntry, numbers: &[u8]) -> Vec<Uuid> {
+        numbers
+            .iter()
+            .filter_map(|n| team.players.iter().find(|p| p.number == *n))
+            .map(|p| p.id)
+            .collect()
+    }
+
+    /// A match of `team` with a set started by players 1 to 7, the libero
+    /// 7, and its roster.
+    fn started(team: &TeamEntry, roster: Vec<Uuid>) -> MatchEntry {
+        let on_court = ids(team, &[1, 2, 3, 4, 5, 6]);
+        MatchEntry {
+            team: team.with_roster(&roster),
+            roster,
+            sets: vec![SetEntry {
+                initial_positions: [
+                    on_court[0],
+                    on_court[1],
+                    on_court[2],
+                    on_court[3],
+                    on_court[4],
+                    on_court[5],
+                ],
+                libero: ids(team, &[7])[0],
+                setter: on_court[0],
+                events: vec![],
+                ..set(1, 0)
+            }],
+            ..played()
+        }
+    }
+
+    /// A new match has the active players of the team on the score sheet,
+    /// by number, the removed ones not.
+    #[test]
+    fn a_new_match_has_the_active_players() {
+        let mut team = team_of(9);
+        team.players.reverse();
+        team.players[0].deleted = true;
+        let input = form("6").validate(&team, None).unwrap();
+        assert_eq!(input.roster, ids(&team, &[1, 2, 3, 4, 5, 6, 7, 8]));
+        let choices = form("6").roster_choices(&team, None);
+        assert_eq!(
+            choices
+                .iter()
+                .map(|c| (c.player.number, c.chosen))
+                .collect::<Vec<_>>(),
+            (1..=8).map(|n| (n, true)).collect::<Vec<_>>()
+        );
+    }
+
+    /// From 7 to 14 players: six and the libero, as many as the score sheet
+    /// takes.
+    #[test]
+    fn the_roster_is_from_7_to_14_players() {
+        assert_eq!(
+            form("6").validate(&team_of(15), None),
+            Err(MatchFormError::RosterTooLarge)
+        );
+        assert_eq!(
+            form("6").validate(&team_of(6), None),
+            Err(MatchFormError::RosterTooSmall)
+        );
+        let team = team_of(15);
+        let mut f = form("6");
+        f.toggle(ids(&team, &[15])[0], &team, None);
+        assert_eq!(f.clone().validate(&team, None).unwrap().roster.len(), 14);
+        for n in 1..=8 {
+            f.toggle(ids(&team, &[n])[0], &team, None);
+        }
+        assert_eq!(f.validate(&team, None), Err(MatchFormError::RosterTooSmall));
+    }
+
+    /// Over 12 players the score sheet needs a libero: up to 12 it doesn't,
+    /// and a libero off the roster doesn't count.
+    #[test]
+    fn over_12_players_the_roster_needs_a_libero() {
+        let mut team = team_of(14);
+        assert_eq!(form("6").validate(&team, None).unwrap().roster.len(), 14);
+        let libero = ids(&team, &[7])[0];
+        let mut f = form("6");
+        f.toggle(libero, &team, None);
+        assert_eq!(
+            f.clone().validate(&team, None),
+            Err(MatchFormError::RosterWithoutLibero)
+        );
+        f.toggle(ids(&team, &[14])[0], &team, None);
+        assert_eq!(f.validate(&team, None).unwrap().roster.len(), 12);
+        team.players[6].role = Some(RoleEnum::Setter);
+        assert_eq!(
+            form("6").validate(&team, None),
+            Err(MatchFormError::RosterWithoutLibero)
+        );
+        assert!(MatchFormError::RosterWithoutLibero.is_roster());
+    }
+
+    /// A match saved before v0.11 without a roster keeps the whole team,
+    /// with or without a libero.
+    #[test]
+    fn a_match_without_roster_needs_no_libero() {
+        let mut team = team_of(14);
+        team.players[6].role = None;
+        let m = MatchEntry {
+            roster: vec![],
+            ..played()
+        };
+        let input = MatchForm::of(&m).validate(&team, Some(&m)).unwrap();
+        assert!(input.roster.is_empty());
+    }
+
+    /// Toggled twice, a player is back as it was; someone not in the team
+    /// changes nothing.
+    #[test]
+    fn toggling_puts_a_player_on_and_off_the_score_sheet() {
+        let team = team_of(9);
+        let mut f = form("6");
+        let eight = ids(&team, &[8])[0];
+        f.toggle(eight, &team, None);
+        assert!(!f.roster.clone().unwrap().contains(&eight));
+        f.toggle(eight, &team, None);
+        assert!(f.roster.clone().unwrap().contains(&eight));
+        let before = f.roster.clone();
+        f.toggle(Uuid::new_v4(), &team, None);
+        assert_eq!(f.roster, before);
+    }
+
+    /// Who played stays on the score sheet, also when removed from the
+    /// team since; who didn't can leave it.
+    #[test]
+    fn who_played_stays_on_the_score_sheet() {
+        let mut team = team_of(9);
+        let m = started(&team, ids(&team, &[1, 2, 3, 4, 5, 6, 7, 8]));
+        team.players[0].deleted = true;
+        let mut f = MatchForm::of(&m);
+        let choices = f.roster_choices(&team, Some(&m));
+        assert_eq!(
+            choices
+                .iter()
+                .map(|c| (c.player.number, c.chosen))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, true),
+                (2, true),
+                (3, true),
+                (4, true),
+                (5, true),
+                (6, true),
+                (7, true),
+                (8, true),
+                (9, false)
+            ]
+        );
+        assert_eq!(
+            choices
+                .iter()
+                .filter(|c| c.played)
+                .map(|c| c.player.number)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6, 7]
+        );
+        // toggled, who played stays
+        f.toggle(ids(&team, &[1])[0], &team, Some(&m));
+        assert_eq!(f, MatchForm::of(&m));
+        // a roster without them, as no form makes it, is refused
+        let without = MatchForm {
+            roster: Some(ids(&team, &[2, 3, 4, 5, 6, 7, 8, 9])),
+            ..f.clone()
+        };
+        assert_eq!(
+            without.validate(&team, Some(&m)),
+            Err(MatchFormError::RosterWithoutPlayed)
+        );
+        f.toggle(ids(&team, &[9])[0], &team, Some(&m));
+        f.toggle(ids(&team, &[8])[0], &team, Some(&m));
+        assert_eq!(
+            f.validate(&team, Some(&m)).unwrap().roster,
+            ids(&team, &[1, 2, 3, 4, 5, 6, 7, 9])
+        );
+    }
+
+    /// A match saved before v0.11 has no roster: edited, it keeps none, with
+    /// the whole team, however many; chosen, the roster is checked.
+    #[test]
+    fn a_match_without_roster_keeps_none_until_chosen() {
+        let team = team_of(16);
+        let m = started(&team, vec![]);
+        let f = MatchForm::of(&m);
+        assert_eq!(f.roster, None);
+        assert!(
+            f.clone()
+                .validate(&team, Some(&m))
+                .unwrap()
+                .roster
+                .is_empty()
+        );
+        let mut chosen = f;
+        chosen.toggle(ids(&team, &[16])[0], &team, Some(&m));
+        assert_eq!(
+            chosen.validate(&team, Some(&m)),
+            Err(MatchFormError::RosterTooLarge)
+        );
+    }
+
+    /// The team as a match with a roster sees it: the roster active, also
+    /// if removed since, the others removed, all still there.
+    #[test]
+    fn a_match_sees_its_roster_as_the_active_players() {
+        let mut team = team_of(9);
+        team.players[0].deleted = true;
+        let roster = ids(&team, &[1, 2, 3, 4, 5, 6, 7]);
+        let seen = team.with_roster(&roster);
+        assert_eq!(
+            seen.active_players()
+                .iter()
+                .map(|p| p.number)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6, 7]
+        );
+        assert_eq!(seen.players.len(), 9);
+        // without a roster, the team as it is
+        assert_eq!(team.with_roster(&[]).active_players().len(), 8);
+    }
+
+    /// The roster is written only when there is one: an older version reads
+    /// the file as before, ignoring it, and a file without one reads as a
+    /// match with the whole team.
+    #[test]
+    fn the_roster_is_written_only_when_given() {
+        let old = r#"{"opponent":"Arezzo","date":"2025-09-15T00:00:00Z","home":true}"#;
+        let m: MatchEntry = serde_json::from_str(old).unwrap();
+        assert!(m.roster.is_empty());
+        assert!(serde_json::to_value(&m).unwrap().get("roster").is_none());
+        let roster = vec![Uuid::new_v4()];
+        let declared = MatchEntry {
+            roster: roster.clone(),
+            ..m
+        };
+        let written = serde_json::to_string(&declared).unwrap();
+        let read: MatchEntry = serde_json::from_str(&written).unwrap();
+        assert_eq!(read.roster, roster);
+        // as v0.10.1 reads it: its fields, without the roster
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct MatchOfV0_10_1 {
+            opponent: String,
+            date: DateTime<FixedOffset>,
+            home: bool,
+            #[serde(default)]
+            max_substitutions: u8,
+            #[serde(default)]
+            notes: String,
+        }
+        assert!(serde_json::from_str::<MatchOfV0_10_1>(&written).is_ok());
     }
 }

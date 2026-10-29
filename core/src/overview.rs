@@ -6,7 +6,9 @@
 use crate::errors::AppError;
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
 use crate::shapes::set::SetEntry;
-use crate::shapes::stats::{AttackSummary, Metric, Stats, StatsFilter};
+use crate::shapes::stats::{
+    AttackSummary, LAST_POSSESSION, Metric, PossessionSummary, Stats, StatsFilter,
+};
 
 /// The zones the setter sets to: the front row (4, 3, 2), the pipe (8) and
 /// the opposite from the back row (9), in the order they're drawn.
@@ -98,6 +100,8 @@ pub struct Overview {
     pub block: Fundamental,
     pub dig: Fundamental,
     pub side_out: RalliesWon,
+    /// as `side_out_possessions`
+    pub side_out_possessions: [(u8, Option<PossessionSummary>); LAST_POSSESSION as usize],
     pub break_points: RalliesWon,
     /// the attacks built on our reception and in counter-attack (see
     /// `Stats::attack_summary`)
@@ -129,6 +133,7 @@ impl Overview {
             block: Fundamental::of(stats, B),
             dig: Fundamental::of(stats, D),
             side_out: phase(PhaseEnum::SideOut),
+            side_out_possessions: side_out_possessions(stats, &all),
             break_points: phase(PhaseEnum::Break),
             first_attack: stats.attack_summary(false, &all),
             counter_attack: stats.attack_summary(true, &all),
@@ -141,6 +146,16 @@ impl Overview {
             opponent_points: stats.event_count(OS, None, &all) - stats.untouched_aces(&all),
         }
     }
+}
+
+/// The side outs by possession: the first, the second, and the third with
+/// the later ones (see `Stats::side_out_possessions`), `None` for the ones
+/// never played.
+pub fn side_out_possessions(
+    stats: &Stats,
+    filter: &StatsFilter,
+) -> [(u8, Option<PossessionSummary>); LAST_POSSESSION as usize] {
+    [1, 2, LAST_POSSESSION].map(|n| (n, stats.side_out_possessions(Some(n), filter)))
 }
 
 /// The statistics of the sets together: a set, or the match so far.

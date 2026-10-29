@@ -8,9 +8,10 @@ use crate::{
         enums::{
             EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
         },
+        flags::EventFlags,
         lineup::Lineup,
         set::SetEntry,
-        stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, RallyKey, Stats},
+        stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, PossessionKey, RallyKey, Stats},
         technique::{SetTypeEnum, TechniqueEnum},
     },
 };
@@ -31,11 +32,13 @@ pub struct EventEntry {
     pub eval: Option<EvalEnum>,
     pub target_player: Option<Uuid>,
     pub technique: Option<TechniqueEnum>,
+    pub flags: EventFlags,
 }
 
-/// An event as it's saved, one row of the events file. The technique is
-/// the last column: the older versions, up to v0.4.3, don't write it and
-/// skip it when reading, as long as every row has it.
+/// An event as it's saved, one row of the events file. The technique and
+/// the flags are the last columns: the older versions, up to v0.4.3 and up
+/// to v0.10.1, don't write them and skip them when reading, as long as
+/// every row has them (v0.5.0 and later skip them anyway).
 #[derive(Serialize, Deserialize)]
 struct EventRecord {
     timestamp: DateTime<Utc>,
@@ -45,6 +48,8 @@ struct EventRecord {
     target_player: Option<Uuid>,
     #[serde(default)]
     technique: Option<String>,
+    #[serde(default)]
+    flags: Option<String>,
 }
 
 impl TryFrom<EventRecord> for EventEntry {
@@ -55,6 +60,7 @@ impl TryFrom<EventRecord> for EventEntry {
             .filter(|code| !code.is_empty())
             .map(|code| TechniqueEnum::parse(record.event_type, &code))
             .transpose()?;
+        let flags = EventFlags::parse(record.flags.as_deref().unwrap_or_default())?;
         Ok(EventEntry {
             timestamp: record.timestamp,
             event_type: record.event_type,
@@ -62,6 +68,7 @@ impl TryFrom<EventRecord> for EventEntry {
             eval: record.eval,
             target_player: record.target_player,
             technique,
+            flags,
         })
     }
 }
@@ -75,6 +82,7 @@ impl From<EventEntry> for EventRecord {
             eval: event.eval,
             target_player: event.target_player,
             technique: event.technique.map(|t| t.to_string()),
+            flags: Some(event.flags.to_string()),
         }
     }
 }
@@ -83,8 +91,8 @@ impl Display for EventEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "event={:?} player={:?} eval={:?} target={:?} technique={:?}",
-            self.event_type, self.player, self.eval, self.target_player, self.technique
+            "event={:?} player={:?} eval={:?} target={:?} technique={:?} flags={:?}",
+            self.event_type, self.player, self.eval, self.target_player, self.technique, self.flags
         )
     }
 }
@@ -116,6 +124,10 @@ pub struct Snapshot {
     available_options: Vec<EventTypeEnum>,
     // their freeball (`OF`) not yet known to be exploited or not
     pending_freeball: bool,
+    // our possession in the side out being played, 0 out of one
+    possession: u8,
+    // the ball on our side to play, in that possession
+    ball_ours: bool,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -156,6 +168,8 @@ impl Snapshot {
             set_number: set_entry.set_number,
             available_options: vec![],
             pending_freeball: false,
+            possession: 0,
+            ball_ours: false,
         };
         // the events available before the first serve: also the ones after a
         // substitution, setter or libero change opening the set
@@ -275,38 +289,34 @@ impl Snapshot {
     /// - in the front row, the setter and the middle blockers attack from
     ///   3, the outside hitter from 4 and the opposite from 2, but in
     ///   rotation 0 (setter in position 1, "S1" in the report) in side
-    ///   out, where they receive
-    ///   and attack from the side they stand on (outside hitter 2,
-    ///   opposite 4);
+    ///   out, where they receive and attack from the side they stand on
+    ///   (outside hitter 2, opposite 4), unless the P1 is inverted;
     /// - in the back row, the outside hitter attacks from 8 (pipe) and the
     ///   opposite from 9 (from position 1);
     /// - the others (back row setter and middle blocker, libero, a player
     ///   not on court) have no zone: their attacks still count, but not in
     ///   the distribution and the counter-attacks.
-    fn get_attack_zone(&self, player_id: &Uuid) -> Option<ZoneEnum> {
+    fn get_attack_zone(&self, player_id: &Uuid, inverted_p1: bool) -> Option<ZoneEnum> {
         use PhaseEnum::*;
         use RoleEnum::*;
         use ZoneEnum::*;
         let role = self.current_lineup.get_role(player_id);
         let back = self.current_lineup.is_back_row_player(player_id);
-        let rotation = self.current_lineup.get_current_rotation();
-        match (role, back, rotation) {
+        // the canonical P1 in side out: the outside hitter from 2, the
+        // opposite from 4; inverted, as everywhere else
+        let canonical_p1 = self
+            .current_lineup
+            .get_current_rotation()
+            .is_ok_and(|r| r == 0)
+            && self.current_lineup.get_current_phase() == SideOut
+            && !inverted_p1;
+        match (role, back, canonical_p1) {
             (Ok(Setter | MiddleBlocker), false, _) => Some(Three),
-            (Ok(OutsideHitter), false, Ok(rotation)) => Some(
-                if rotation == 0 && self.current_lineup.get_current_phase() == SideOut {
-                    Two
-                } else {
-                    Four
-                },
-            ),
+            (Ok(OutsideHitter), false, true) => Some(Two),
+            (Ok(OutsideHitter), false, false) => Some(Four),
             (Ok(OutsideHitter), true, _) => Some(Eight),
-            (Ok(OppositeHitter), false, Ok(rotation)) => Some(
-                if rotation == 0 && self.current_lineup.get_current_phase() == SideOut {
-                    Four
-                } else {
-                    Two
-                },
-            ),
+            (Ok(OppositeHitter), false, true) => Some(Four),
+            (Ok(OppositeHitter), false, false) => Some(Two),
             (Ok(OppositeHitter), true, _) => Some(Nine),
             _ => None,
         }
@@ -414,13 +424,18 @@ impl Snapshot {
 
     /// The players by position as they play now: where they play
     /// (`Lineup::get_rally_positions`) once our serve is made or theirs is
-    /// received, until the rally ends; before, in the order of rotation,
-    /// which the positions must respect at the serve.
+    /// received, until the rally ends, with the P1 as the last event says;
+    /// before, in the order of rotation, which the positions must respect at
+    /// the serve.
     pub fn get_playing_positions(&self) -> [Uuid; 6] {
         let lineup = &self.current_lineup;
         let rotation = lineup.get_positions();
+        let inverted_p1 = self
+            .last_event
+            .as_ref()
+            .is_some_and(|e| e.flags.inverted_p1());
         match self.get_formation() {
-            Formation::Rally => lineup.get_rally_positions().unwrap_or(rotation),
+            Formation::Rally => lineup.get_rally_positions(inverted_p1).unwrap_or(rotation),
             Formation::Serve | Formation::Reception => rotation,
         }
     }
@@ -524,7 +539,9 @@ impl Snapshot {
         let rotation = self.current_lineup.get_current_rotation()?;
         // the zone of an attack comes from the role of the attacker
         let zone = match event.event_type {
-            A => event.player.and_then(|p| self.get_attack_zone(&p)),
+            A => event
+                .player
+                .and_then(|p| self.get_attack_zone(&p, event.flags.inverted_p1())),
             _ => None,
         };
         // every event of the rally: an action missing its evaluation can't
@@ -571,6 +588,7 @@ impl Snapshot {
         }
         self.record_first_rally(event, rotation);
         self.record_freeball(event, phase, rotation);
+        self.record_possession(event, phase, rotation);
         Ok(())
     }
 
@@ -606,6 +624,64 @@ impl Snapshot {
             (_, Some(_)) => false,
             (_, None) => self.pending_freeball,
         };
+    }
+
+    /// The possessions of a side out: the first comes with their serve,
+    /// unless they miss it or we fault before it; another one each time the
+    /// ball comes back to our side to play: our dig keeping it (also over
+    /// the net, `/`), our block keeping it (`+`), their freeball (`OF`), or
+    /// our touch after an attack of ours they couldn't counter (`+`) or
+    /// blocked but covered (`!`), or after a block of theirs. The rally's
+    /// point goes to the last possession, also when scored on their side
+    /// (their error, their kill, our block): the ones before are lost.
+    fn record_possession(&mut self, event: &EventEntry, phase: PhaseEnum, rotation: u8) {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        let kept = |eval: Option<EvalEnum>| {
+            matches!(eval, Some(Perfect | Positive | Exclamative | Negative))
+        };
+        let (possession, starts) = match (
+            phase,
+            self.possession,
+            self.ball_ours,
+            event.event_type,
+            event.eval,
+        ) {
+            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | CS, _) => (self.possession, false),
+            (_, 0, _, P | OS, _) => (1, true),
+            (_, 0, _, _, _) => (0, false),
+            (_, n, false, D, Some(Perfect | Positive | Exclamative | Negative | Over))
+            | (_, n, false, B, Some(Positive))
+            | (_, n, false, OF | A | FB, _) => (n.saturating_add(1), true),
+            (_, n, _, _, _) => (n, false),
+        };
+        if let (true, Some(before @ 1..)) = (starts, possession.checked_sub(1)) {
+            self.stats.possessions.add(PossessionKey {
+                rotation,
+                possession: before,
+                won: false,
+            });
+        }
+        match (possession, event.event_type.rally_winner(event.eval)) {
+            (1.., Some(winner)) => {
+                self.stats.possessions.add(PossessionKey {
+                    rotation,
+                    possession,
+                    won: winner == TeamSideEnum::Us,
+                });
+                self.possession = 0;
+                self.ball_ours = false;
+            }
+            _ => {
+                self.possession = possession;
+                self.ball_ours = match (event.event_type, event.eval) {
+                    (P | D, eval) => kept(eval),
+                    (B, Some(Positive)) | (OF, _) => true,
+                    (A | FB | B, _) => false,
+                    _ => self.ball_ours,
+                };
+            }
+        }
     }
 
     /// The first rally of a side out goes from their serve to the end of

@@ -353,6 +353,7 @@ mod tests {
                 true,
                 DEFAULT_MAX_SUBSTITUTIONS,
                 String::new(),
+                vec![],
             )
             .await
             .unwrap();

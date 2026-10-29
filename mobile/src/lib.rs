@@ -245,7 +245,16 @@ pub struct MatchForm {
     pub max_substitutions: String,
     #[uniffi(default = "")]
     pub notes: String,
+    #[uniffi(default = None)]
+    pub roster: Option<Vec<Uuid>>,
 }
+
+// the id of a player, as text for the app
+uniffi::custom_type!(Uuid, String, {
+    remote,
+    lower: |id| id.to_string(),
+    try_lift: |id| Ok(Uuid::parse_str(&id)?),
+});
 
 /// RFC 3339 text for the app, with the offset of where the match is played.
 pub type MatchDate = DateTime<FixedOffset>;
@@ -331,6 +340,7 @@ pub enum MatchField {
     Opponent,
     Date,
     MaxSubstitutions,
+    Roster,
 }
 
 impl From<MatchFormError> for MatchField {
@@ -341,6 +351,10 @@ impl From<MatchFormError> for MatchField {
             MatchFormError::InvalidMaxSubstitutions | MatchFormError::MaxSubstitutionsBelowUsed => {
                 MatchField::MaxSubstitutions
             }
+            MatchFormError::RosterTooSmall
+            | MatchFormError::RosterTooLarge
+            | MatchFormError::RosterWithoutPlayed
+            | MatchFormError::RosterWithoutLibero => MatchField::Roster,
         }
     }
 }
@@ -350,6 +364,25 @@ impl From<MatchFormError> for MatchField {
 pub struct RoleChoice {
     pub value: RoleEnum,
     pub name: String,
+}
+
+/// A player that can be on the score sheet of a match, and whether it is.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct RosterPlayer {
+    pub id: Uuid,
+    pub name: String,
+    pub number: u8,
+    pub role: Option<String>,
+    pub chosen: bool,
+    /// played in a set of the match: on the score sheet for good
+    pub played: bool,
+}
+
+/// The match form with the players of its roster, by number.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct MatchRoster {
+    pub form: MatchForm,
+    pub players: Vec<RosterPlayer>,
 }
 
 /// A player as the team page shows it.
@@ -949,6 +982,13 @@ pub struct ScoutingState {
     pub ball: TeamSideEnum,
     /// the last touch of the rally being played, none before the serve
     pub last_touch: Option<ScoutedEvent>,
+    /// in P1 in side out the outside hitter attacks from 4 and the opposite
+    /// from 2: kept until changed, also in the next set
+    pub inverted_p1: bool,
+    /// how many receive their next serve, 3 unless told; told only before
+    /// their serve
+    pub reception: u8,
+    pub reception_open: bool,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -982,6 +1022,18 @@ pub struct PhaseStats {
     pub won: u32,
     pub rallies: u32,
     pub grade: Option<f64>,
+}
+
+/// The possessions of the side outs of a number, and the ones won (see
+/// `PossessionSummary` in the core).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PossessionStats {
+    /// 1st, 2nd, 3rd+ in English
+    pub name: String,
+    pub total: u32,
+    pub won: u32,
+    /// `None` with no possessions
+    pub percentage: Option<f64>,
 }
 
 /// Attacks built by us (see `AttackSummary` in the core).
@@ -1061,6 +1113,8 @@ pub struct LiveStats {
     /// reception, attack, serve, block, dig
     pub fundamentals: Vec<FundamentalStats>,
     pub side_out: Option<PhaseStats>,
+    /// the first, second and later possessions of the side outs
+    pub side_out_possessions: Vec<PossessionStats>,
     pub break_points: Option<PhaseStats>,
     pub first_attack: Option<AttackStats>,
     pub counter_attack: Option<AttackStats>,
@@ -1342,6 +1396,9 @@ impl Scouting {
             last_touch: snapshot
                 .get_last_touch()
                 .map(|(e, _)| self.scouted_event(team, e)),
+            inverted_p1: session.inverted_p1(),
+            reception: session.reception().players(),
+            reception_open: session.can_tell_reception(),
         }
     }
 
@@ -1436,6 +1493,17 @@ impl Scouting {
         let player = parse_id(&player)?;
         let mut session = self.session();
         self.scouted(self.runtime.block_on(session.choose_replacement(player)))
+    }
+
+    /// Saved with the events from now on.
+    pub fn set_inverted_p1(&self, inverted: bool) {
+        self.session().set_inverted_p1(inverted);
+    }
+
+    /// The next reception scheme for their serve: 3, 4, 2, then 3 again.
+    pub fn next_reception(&self) -> Result<(), MobileError> {
+        let told = self.session().next_reception().map(|_| ());
+        self.scouted(told)
     }
 
     pub fn choose_technique(&self, technique: TechniqueEnum) -> Result<(), MobileError> {
@@ -1576,6 +1644,17 @@ fn live_stats(
             fundamental(EventTypeEnum::D, o.dig),
         ],
         side_out: phase(o.side_out, Measure::SideOut),
+        side_out_possessions: o
+            .side_out_possessions
+            .iter()
+            .zip(labels.possessions)
+            .map(|((_, summary), name)| PossessionStats {
+                name: name.to_string(),
+                total: summary.map_or(0, |s| s.total),
+                won: summary.map_or(0, |s| s.won),
+                percentage: summary.map(|s| s.finalization()),
+            })
+            .collect(),
         break_points: phase(o.break_points, Measure::BreakPoint),
         first_attack: o.first_attack.map(attack_stats),
         counter_attack: o.counter_attack.map(attack_stats),
@@ -2424,6 +2503,61 @@ impl Scout4All {
         ))
     }
 
+    /// Checks the fields of the form before its roster, the next step: the
+    /// error of the first one not valid.
+    pub fn check_match_fields(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+    ) -> Result<(), MobileError> {
+        let team = self.read_team(&team_id)?;
+        let existing = match_id
+            .map(|id| self.read_match(&team_id, &id))
+            .transpose()?;
+        match form.validate(&team, existing.as_ref()) {
+            Err(e) if !e.is_roster() => Err(MobileError::InvalidMatch {
+                field: e.into(),
+                reason: e.message(self.language.labels()),
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    /// The roster of the form of a match of the team, new (no `match_id`)
+    /// or saved, with `toggled` put on the score sheet or taken off.
+    pub fn match_roster(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+        toggled: Option<Uuid>,
+    ) -> Result<MatchRoster, MobileError> {
+        // the team as it is, also with the players not on the roster
+        let team = self.read_team(&team_id)?;
+        let existing = match_id
+            .map(|id| self.read_match(&team_id, &id))
+            .transpose()?;
+        let mut form = form;
+        if let Some(player) = toggled {
+            form.toggle(player, &team, existing.as_ref());
+        }
+        let labels = self.language.labels();
+        let players = form
+            .roster_choices(&team, existing.as_ref())
+            .into_iter()
+            .map(|c| RosterPlayer {
+                id: c.player.id,
+                name: c.player.name,
+                number: c.player.number,
+                role: c.player.role.map(|r| r.friendly_name(labels).to_string()),
+                chosen: c.chosen,
+                played: c.played,
+            })
+            .collect();
+        Ok(MatchRoster { form, players })
+    }
+
     /// The form of a match of the team, to edit it.
     pub fn match_form(&self, team_id: String, match_id: String) -> Result<MatchForm, MobileError> {
         Ok(MatchForm::of(&self.read_match(&team_id, &match_id)?))
@@ -2444,12 +2578,12 @@ impl Scout4All {
                     .block_on(self.match_reader.read_single(&team, &id))
             })
             .transpose()?;
-        let input = form
-            .validate(existing.as_ref())
-            .map_err(|e| MobileError::InvalidMatch {
-                field: e.into(),
-                reason: e.message(self.language.labels()),
-            })?;
+        let input =
+            form.validate(&team, existing.as_ref())
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(self.language.labels()),
+                })?;
         let saved = match existing {
             Some(m) => self
                 .runtime
@@ -2460,6 +2594,7 @@ impl Scout4All {
                     input.home,
                     input.max_substitutions,
                     input.notes,
+                    input.roster,
                 ))
                 .map(|()| m.id),
             None => self
@@ -2471,6 +2606,7 @@ impl Scout4All {
                     input.home,
                     input.max_substitutions,
                     input.notes,
+                    input.roster,
                 ))
                 .map(|m| m.id),
         };
@@ -3380,7 +3516,15 @@ mod tests {
         ] {
             let date = DateTime::parse_from_rfc3339(date).unwrap();
             app.runtime
-                .block_on(writer.create(&team, opponent.into(), date, home, 6, String::new()))
+                .block_on(writer.create(
+                    &team,
+                    opponent.into(),
+                    date,
+                    home,
+                    6,
+                    String::new(),
+                    vec![],
+                ))
                 .unwrap();
         }
         std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
@@ -3420,6 +3564,7 @@ mod tests {
             home: true,
             max_substitutions: max_substitutions.into(),
             notes: String::new(),
+            roster: None,
         }
     }
 
@@ -3428,6 +3573,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
+        let players: Vec<Uuid> = (1..=7)
+            .map(|n| {
+                app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
+                    .and_then(|id| parse_id(&id))
+                    .unwrap()
+            })
+            .collect();
         let date = "2026-10-24T18:00:00+02:00";
         let new = app.new_match_form(DateTime::parse_from_rfc3339(date).unwrap());
         assert_eq!(new.max_substitutions, "8");
@@ -3439,7 +3591,14 @@ mod tests {
         let edited = match_form("Arezzo Volley", date, "6");
         app.save_match(team.clone(), Some(id.clone()), edited.clone())
             .unwrap();
-        assert_eq!(app.match_form(team.clone(), id.clone()).unwrap(), edited);
+        // the roster of a new match: the players of the team
+        assert_eq!(
+            app.match_form(team.clone(), id.clone()).unwrap(),
+            MatchForm {
+                roster: Some(players),
+                ..edited
+            }
+        );
         match app.matches(team).unwrap().as_slice() {
             [
                 MatchListing::Match {
@@ -3453,6 +3612,56 @@ mod tests {
             }
             other => unreachable!("expected the match, got {other:?}"),
         }
+    }
+
+    /// Over 14 players the roster is chosen: the core says who is on it,
+    /// and refuses too many.
+    #[test]
+    fn a_match_of_a_large_team_chooses_its_roster() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        for n in 1..=15 {
+            // a libero: more than 12 on the score sheet need one
+            let role = Some(match n {
+                7 => RoleEnum::Libero,
+                _ => RoleEnum::Setter,
+            });
+            let player = PlayerForm {
+                role,
+                ..player(&format!("P{n}"), &n.to_string())
+            };
+            app.save_player(team.clone(), None, player).unwrap();
+        }
+        let date = "2026-10-24T18:00:00+02:00";
+        let new = app
+            .match_roster(team.clone(), None, match_form("Arezzo", date, "8"), None)
+            .unwrap();
+        assert_eq!(new.form.roster, None);
+        assert_eq!(new.players.iter().filter(|p| p.chosen).count(), 15);
+        match app.save_match(team.clone(), None, new.form.clone()) {
+            Err(MobileError::InvalidMatch { field, .. }) => assert_eq!(field, MatchField::Roster),
+            other => unreachable!("expected too many players, got {other:?}"),
+        }
+        // the fields are fine: the roster is the next step
+        app.check_match_fields(team.clone(), None, new.form.clone())
+            .unwrap();
+        let first = new.players[0].id;
+        let toggled = app
+            .match_roster(team.clone(), None, new.form, Some(first))
+            .unwrap();
+        assert_eq!(
+            toggled
+                .players
+                .iter()
+                .map(|p| (p.number, p.chosen))
+                .collect::<Vec<_>>(),
+            (1..=15).map(|n| (n, n != 1)).collect::<Vec<_>>()
+        );
+        let id = app.save_match(team.clone(), None, toggled.form).unwrap();
+        let edited = app.match_form(team.clone(), id.clone()).unwrap();
+        let saved = app.match_roster(team, Some(id), edited, None).unwrap();
+        assert_eq!(saved.players.iter().filter(|p| p.chosen).count(), 14);
     }
 
     #[test]
@@ -3696,6 +3905,39 @@ mod tests {
         assert!(state.court[0].setter);
         let receivers: Vec<usize> = (1..=6).filter(|p| state.court[p - 1].receives).collect();
         assert_eq!(receivers, RECEIVERS[0].to_vec());
+    }
+
+    /// The inverted P1 is kept from event to event, until changed.
+    #[test]
+    fn the_inverted_p1_stays_until_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(!scouting.state().inverted_p1);
+        scouting.set_inverted_p1(true);
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        assert!(scouting.state().inverted_p1);
+        scouting.set_inverted_p1(false);
+        assert!(!scouting.state().inverted_p1);
+    }
+
+    /// The reception is told before their serve only, 3, 4, 2.
+    #[test]
+    fn the_reception_is_told_before_their_serve() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(!scouting.state().reception_open);
+        assert!(scouting.next_reception().is_err());
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let state = scouting.state();
+        assert_eq!((state.reception, state.reception_open), (3, true));
+        scouting.next_reception().unwrap();
+        assert_eq!(scouting.state().reception, 4);
+        scouting.next_reception().unwrap();
+        assert_eq!(scouting.state().reception, 2);
     }
 
     #[test]
@@ -4000,6 +4242,16 @@ mod tests {
         );
         assert_eq!(set.forced_errors, 0);
         assert_eq!(phase(&set.side_out), Some((1, 1)));
+        // the side out on their serve error: no possession of ours
+        assert_eq!(
+            set.side_out_possessions,
+            ["1°", "2°", "3°+"].map(|name| PossessionStats {
+                name: name.into(),
+                total: 0,
+                won: 0,
+                percentage: None,
+            })
+        );
         assert_eq!(phase(&set.break_points), Some((0, 2)));
         assert!(set.distribution.is_empty());
         // a regional women's team: graded

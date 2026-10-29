@@ -4,6 +4,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
+import io.github.naighes.scout4all.core.PlayerForm
+import io.github.naighes.scout4all.core.RoleEnum
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -23,14 +27,15 @@ class FormsLayoutTest(private val screen: Size) {
         fun sizes() = sizes.map { arrayOf(it) }
     }
 
-    private fun assertFits(name: String, firstField: Int, content: @Composable () -> Unit) {
+    private fun assertFits(name: String, firstField: Int, button: Int = R.string.save, content: @Composable () -> Unit) {
         rule.setContent { Scout4AllTheme { content() } }
         rule.waitForText(string(firstField))
-        rule.save()
+        rule.onNode(hasText(string(button)) and hasClickAction()).performClick()
+        rule.waitForIdle()
         rule.assertInvalid(string(firstField))
         rule.shot("form-$name-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
-        rule.assertWhole(hasText(string(R.string.save)) and hasClickAction())
+        rule.assertWhole(hasText(string(button)) and hasClickAction())
     }
 
     @Test
@@ -45,6 +50,24 @@ class FormsLayoutTest(private val screen: Size) {
     @Test
     fun theMatch() {
         val team = saveTeam("Italia")
-        assertFits("match", R.string.opponent) { MatchFormScreen(team, null, onBack = {}, onSaved = {}) }
+        assertFits("match", R.string.opponent, R.string.go_on) { MatchFormScreen(team, null, onBack = {}, onSaved = {}) }
+    }
+
+    /** The roster of a team larger than the score sheet, with its error. */
+    @Test
+    fun theRoster() {
+        val team = saveNationalTeam()
+        (1..8).forEach { core { c -> c.savePlayer(team, null, PlayerForm("Giocatrice dal nome lunghissimo $it", RoleEnum.OUTSIDE_HITTER, "${30 + it}")) } }
+        rule.setContent { Scout4AllTheme { MatchFormScreen(team, null, onBack = {}, onSaved = {}) } }
+        rule.waitForText(string(R.string.opponent))
+        rule.type(string(R.string.opponent), "Cortona")
+        rule.goOn()
+        rule.waitForText(string(R.string.roster, 15, 14))
+        rule.save()
+        // the error of the core in place of the hint
+        rule.waitFor { rule.onAllNodesWithText(string(R.string.roster_hint)).fetchSemanticsNodes().isEmpty() }
+        rule.shot("form-roster-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.assertWhole(hasText(string(R.string.save)) and hasClickAction())
     }
 }

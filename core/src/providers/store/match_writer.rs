@@ -7,6 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
 use std::sync::Arc;
+use uuid::Uuid;
 
 pub struct StoreMatchWriter(Arc<dyn Store>);
 
@@ -26,16 +27,18 @@ impl MatchWriter for StoreMatchWriter {
         home: bool,
         max_substitutions: u8,
         notes: String,
+        roster: Vec<Uuid>,
     ) -> Result<MatchEntry, AppError> {
         let match_id = MatchEntry::id_of(&opponent, &date);
         let m = MatchEntry {
             opponent,
             date,
             id: match_id.clone(),
-            team: team.clone(),
+            team: team.with_roster(&roster),
             home,
             max_substitutions,
             notes,
+            roster,
             sets: vec![],
         };
         let key = layout::match_descriptor(&team.id, &match_id);
@@ -54,6 +57,7 @@ impl MatchWriter for StoreMatchWriter {
         home: bool,
         max_substitutions: u8,
         notes: String,
+        roster: Vec<Uuid>,
     ) -> Result<(), AppError> {
         // the reader replays the sets saved without the lineup rules with
         // those of v0.3.0 once the descriptor saves the substitutions: they
@@ -73,6 +77,7 @@ impl MatchWriter for StoreMatchWriter {
             home,
             max_substitutions,
             notes,
+            roster,
             id: m.id.clone(),
             team: m.team.clone(),
             sets: m.sets.clone(),

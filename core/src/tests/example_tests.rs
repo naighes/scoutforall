@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(form.opponent, "Brasile");
         assert!(form.home);
         assert_eq!(form.date, Some(date));
-        assert!(form.validate(None).is_ok());
+        assert!(form.validate(&team(), None).is_ok());
     }
 
     /// Seen again the same day: another match, not one already there.

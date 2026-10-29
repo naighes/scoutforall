@@ -118,6 +118,7 @@ mod tests {
             eval,
             target_player: None,
             technique: None,
+            flags: Default::default(),
         }
     }
 
@@ -912,6 +913,7 @@ mod tests {
                 ..TeamEntry::default()
             },
             home: true,
+            roster: vec![],
             max_substitutions: DEFAULT_MAX_SUBSTITUTIONS,
             sets: vec![set],
             notes: String::new(),

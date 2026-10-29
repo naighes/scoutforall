@@ -41,6 +41,11 @@
     <string name="birth_date">Data urodzenia</string>
     <string name="height">Wzrost</string>
     <string name="notes">Notatki</string>
+    <string name="roster">W protokole: %1$d z %2$d</string>
+    <string name="played">grał(a)</string>
+    <string name="go_on">Kontynuuj</string>
+    <string name="roster_title">Protokół</string>
+    <string name="roster_hint">Dotknij zawodnika, aby dodać go do protokołu lub go usunąć.</string>
     <string name="remove_birth_date">Usuń datę urodzenia</string>
     <string name="centimetres">cm</string>
     <string name="ok">OK</string>
@@ -79,6 +84,10 @@
     <string name="match_lost_cheer">Głowa do góry, następnym razem!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
+    <string name="inverted_p1">odwr. R1</string>
+    <string name="inverted_p1_description">Odwrócona R1: w przyjęciu przyjmujący atakuje z 4</string>
+    <string name="reception_n">przyj. %d</string>
+    <string name="reception_description">Przyjęcie w %d: dotknij, by wybrać 3, 4, 2, przed ich zagrywką</string>
     <string name="serving">Zagrywamy</string>
     <plurals name="players">
         <item quantity="one">%d zawodnik</item>
@@ -129,6 +138,7 @@
     <string name="set_team_level">Ustaw poziom i płeć drużyny, aby zobaczyć kolory</string>
     <string name="stats_detail">Szczegóły</string>
     <string name="rotations">Ustawienia</string>
+    <string name="side_out_by_possession">Side-out według posiadania</string>
     <string name="filter_player">Zawodnik</string>
     <string name="filter_rotation">Ustawienie</string>
     <string name="filter_phase">Faza</string>
@@ -215,6 +225,8 @@
     <string name="tutorial_matches">Tu są zawodniczki. Mecze są w drugiej karcie: dotknij karty.</string>
     <string name="tutorial_new_match">Dotknij +, aby dodać nowy mecz.</string>
     <string name="tutorial_match_fields">Przeciwnik, data, u siebie czy na wyjeździe, zmiany: już wypełniłem.</string>
+    <string name="tutorial_match_next">Dotknij Kontynuuj: potem zawodniczki w protokole.</string>
+    <string name="tutorial_roster">Cała drużyna jest w protokole, do 14: dotknięcie usuwa zawodniczkę lub ją przywraca.</string>
     <string name="tutorial_save_match">Dotknij Zapisz.</string>
     <string name="tutorial_lineup">Skład pierwszego seta jest gotowy: rozgrywająca na 6 (R6), my przyjmujemy; Spirito jest libero, Fersino drugą libero. Dotknięcie pozycji zmienia jej zawodniczkę.</string>
     <string name="tutorial_start_set">Dotknij Rozpocznij seta.</string>

@@ -41,6 +41,11 @@
     <string name="birth_date">Data di nascita</string>
     <string name="height">Altezza</string>
     <string name="notes">Note</string>
+    <string name="roster">A referto: %1$d su %2$d</string>
+    <string name="played">ha giocato</string>
+    <string name="go_on">Continua</string>
+    <string name="roster_title">A referto</string>
+    <string name="roster_hint">Tocca un giocatore per metterlo a referto o toglierlo.</string>
     <string name="remove_birth_date">Togli la data di nascita</string>
     <string name="centimetres">cm</string>
     <string name="set_n">Set %d</string>
@@ -79,6 +84,10 @@
     <string name="ok">OK</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
+    <string name="inverted_p1">P1 inv.</string>
+    <string name="inverted_p1_description">P1 invertita: in cambio palla lo schiacciatore attacca da 4</string>
+    <string name="reception_n">ric. %d</string>
+    <string name="reception_description">Ricezione a %d: tocca per 3, 4, 2, prima della loro battuta</string>
     <string name="serving">Al servizio</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>
@@ -127,6 +136,7 @@
     <string name="set_team_level">Imposta livello e sesso della squadra per vedere i colori</string>
     <string name="stats_detail">Dettaglio</string>
     <string name="rotations">Rotazioni</string>
+    <string name="side_out_by_possession">Cambio palla per possesso</string>
     <string name="filter_player">Giocatore</string>
     <string name="filter_rotation">Rotazione</string>
     <string name="filter_phase">Fase</string>
@@ -213,6 +223,8 @@
     <string name="tutorial_matches">Qui ci sono le giocatrici. Le partite sono nell\'altra scheda: tocca la scheda.</string>
     <string name="tutorial_new_match">Tocca + per una nuova partita.</string>
     <string name="tutorial_match_fields">Avversario, data, casa o trasferta, cambi: li ho già scritti io.</string>
+    <string name="tutorial_match_next">Tocca Continua: poi le giocatrici a referto.</string>
+    <string name="tutorial_roster">Tutta la squadra è a referto, fino a 14: un tocco toglie o rimette una giocatrice.</string>
     <string name="tutorial_save_match">Tocca Salva.</string>
     <string name="tutorial_lineup">La formazione del primo set è pronta: palleggiatrice in 6 (P6), noi in ricezione; Spirito è il libero, Fersino il secondo libero. Toccando una posizione se ne cambia la giocatrice.</string>
     <string name="tutorial_start_set">Tocca Inizia il set.</string>

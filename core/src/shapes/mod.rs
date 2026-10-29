@@ -1,4 +1,5 @@
 pub mod enums;
+pub mod flags;
 pub mod lineup;
 pub mod listed;
 pub mod r#match;

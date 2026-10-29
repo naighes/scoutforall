@@ -10,7 +10,8 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
-        enums::{EvalEnum, EventTypeEnum},
+        enums::{EvalEnum, EventTypeEnum, PhaseEnum},
+        flags::ReceptionSchemeEnum,
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
@@ -85,6 +86,8 @@ pub enum ScoutingError {
     CouldNotAddEvent,
     CouldNotUndo,
     CouldNotComputeSnapshot,
+    /// the reception told while the ball isn't theirs to serve
+    ReceptionNotNow,
 }
 
 impl ScoutingError {
@@ -104,6 +107,7 @@ impl ScoutingError {
             CouldNotAddEvent => labels.could_not_add_event.to_string(),
             CouldNotUndo => labels.could_not_undo.to_string(),
             CouldNotComputeSnapshot => labels.could_not_compute_snapshot.to_string(),
+            ReceptionNotNow => labels.reception_not_now.to_string(),
         }
     }
 }
@@ -119,6 +123,11 @@ pub struct ScoutingSession {
     player: Option<Uuid>,
     /// the set or serve chosen along with the evaluation
     technique: Option<TechniqueEnum>,
+    /// the inverted P1, written on every event saved
+    inverted_p1: bool,
+    /// how many receive their next serve, written on the reception or on
+    /// their ace; three again once the rally is over
+    reception: ReceptionSchemeEnum,
     order: ChoiceOrder,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     finished: Arc<dyn FinishedMatches>,
@@ -154,6 +163,7 @@ impl ScoutingSession {
                 stats.merge(&s.stats);
                 stats
             });
+        let inverted_p1 = last_inverted_p1(&current_match, &set);
         Self {
             current_match,
             set,
@@ -163,6 +173,8 @@ impl ScoutingSession {
             event: None,
             player: None,
             technique: None,
+            inverted_p1,
+            reception: ReceptionSchemeEnum::default(),
             order: ChoiceOrder::EventFirst,
             set_writer,
             finished: Arc::new(GlobalFinishedMatches),
@@ -233,6 +245,48 @@ impl ScoutingSession {
     /// The player of the event, once chosen.
     pub fn player(&self) -> Option<Uuid> {
         self.player
+    }
+
+    /// Whether the P1 is inverted: in side out, the outside hitter attacks
+    /// from 4 and the opposite from 2. As the last event of the match says
+    /// until the scout changes it.
+    pub fn inverted_p1(&self) -> bool {
+        self.inverted_p1
+    }
+
+    /// The scout inverts the P1, or makes it canonical again: the events
+    /// saved from now on say so.
+    pub fn set_inverted_p1(&mut self, inverted: bool) {
+        self.inverted_p1 = inverted;
+    }
+
+    /// How many receive their next serve: three unless told otherwise.
+    pub fn reception(&self) -> ReceptionSchemeEnum {
+        self.reception
+    }
+
+    /// Whether the reception can be told: they serve, the rally not yet
+    /// started.
+    pub fn can_tell_reception(&self) -> bool {
+        self.snapshot.current_lineup.get_current_phase() == PhaseEnum::SideOut
+            && self.snapshot.get_last_touch().is_none()
+    }
+
+    /// The scout tells how many receive their next serve: the next scheme,
+    /// three, four, two, then three again.
+    pub fn next_reception(&mut self) -> Result<ReceptionSchemeEnum, ScoutingError> {
+        use ReceptionSchemeEnum::*;
+        match self.can_tell_reception() {
+            true => {
+                self.reception = match self.reception {
+                    Three => Four,
+                    Four => Two,
+                    Two => Three,
+                };
+                Ok(self.reception)
+            }
+            false => Err(ScoutingError::ReceptionNotNow),
+        }
     }
 
     /// The set or serve that the evaluation saves with the event.
@@ -480,6 +534,7 @@ impl ScoutingSession {
                     player: None,
                     target_player: None,
                     technique: None,
+                    flags: Default::default(),
                 })
                 .await
             }
@@ -515,6 +570,7 @@ impl ScoutingSession {
                     player: Some(player),
                     target_player: None,
                     technique: None,
+                    flags: Default::default(),
                 })
                 .await
             }
@@ -541,6 +597,7 @@ impl ScoutingSession {
                     player: Some(replaced),
                     target_player: Some(replacement),
                     technique: None,
+                    flags: Default::default(),
                 })
                 .await
             }
@@ -576,6 +633,7 @@ impl ScoutingSession {
                     player: self.player,
                     target_player: None,
                     technique: self.technique,
+                    flags: Default::default(),
                 })
                 .await
             }
@@ -694,6 +752,13 @@ impl ScoutingSession {
             .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
         self.snapshot = snapshot;
         self.reset();
+        // the reception told for the serve again, if the event removed
+        // took it
+        self.reception = match (self.can_tell_reception(), removed.event_type) {
+            (true, EventTypeEnum::P | EventTypeEnum::OS) => removed.flags.reception(),
+            (true, _) => self.reception,
+            (false, _) => ReceptionSchemeEnum::default(),
+        };
         match (self.order, removed.event_type, removed.player) {
             (_, A | B | D | P | S, Some(player)) => {
                 self.event = Some(removed.event_type);
@@ -720,6 +785,17 @@ impl ScoutingSession {
 
     /// Saves the event if it applies, then starts the next one.
     pub(crate) async fn save(&mut self, event: EventEntry) -> Result<Progress, ScoutingError> {
+        // the reception goes on the reception, or on their ace before it
+        let received = match (event.event_type, self.can_tell_reception()) {
+            (EventTypeEnum::P, _) | (EventTypeEnum::OS, true) => Some(self.reception),
+            _ => None,
+        };
+        let flags = event.flags.with_inverted_p1(self.inverted_p1);
+        let event = EventEntry {
+            flags: received.map_or(flags, |scheme| flags.with_reception(scheme)),
+            ..event
+        };
+        let points = self.points();
         let mut snapshot = self.snapshot.clone();
         snapshot
             .add_event(&event)
@@ -730,6 +806,10 @@ impl ScoutingSession {
             .map_err(|_| ScoutingError::CouldNotAddEvent)?;
         self.snapshot = snapshot;
         self.set.events.push(event);
+        // told for one serve: written, or the rally over without it
+        if received.is_some() || self.points() != points {
+            self.reception = ReceptionSchemeEnum::default();
+        }
         match self.snapshot.get_set_winner(self.set.set_number) {
             None => {
                 self.start_next();
@@ -741,6 +821,11 @@ impl ScoutingSession {
                 Ok(Progress::SetOver)
             }
         }
+    }
+
+    /// The points of the set so far.
+    fn points(&self) -> u16 {
+        u16::from(self.snapshot.score_us) + u16::from(self.snapshot.score_them)
     }
 
     /// The set joins the match; a finished match is queued for the
@@ -765,4 +850,21 @@ impl ScoutingSession {
                 .await;
         }
     }
+}
+
+/// The inverted P1 of the last event of the match, in this set or in the
+/// sets before: a new set goes on as the last one ended.
+fn last_inverted_p1(current_match: &MatchEntry, set: &SetEntry) -> bool {
+    let mut earlier: Vec<&SetEntry> = current_match
+        .sets
+        .iter()
+        .filter(|s| s.set_number < set.set_number)
+        .collect();
+    earlier.sort_by_key(|s| s.set_number);
+    earlier
+        .iter()
+        .flat_map(|s| s.events.iter())
+        .chain(set.events.iter())
+        .next_back()
+        .is_some_and(|e| e.flags.inverted_p1())
 }

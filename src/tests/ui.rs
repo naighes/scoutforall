@@ -144,7 +144,11 @@ impl Ui {
             for (i, p) in t.players.iter().enumerate() {
                 let input = PlayerInput::New {
                     name: p.to_string(),
-                    role: RoleEnum::OutsideHitter,
+                    // the seventh the libero, as in the sets started
+                    role: match i {
+                        6 => RoleEnum::Libero,
+                        _ => RoleEnum::OutsideHitter,
+                    },
                     number: i as u8 + 1,
                     details: Default::default(),
                 };
@@ -160,6 +164,7 @@ impl Ui {
                         true,
                         DEFAULT_MAX_SUBSTITUTIONS,
                         String::new(),
+                        vec![],
                     )
                     .await
                     .unwrap();

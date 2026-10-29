@@ -155,6 +155,11 @@ mod tests {
             points(&mut ui, PhaseEnum::Break.friendly_name(domain)),
             ["50%", "2/4"]
         );
+        // both on the first ball: one won, one lost
+        assert_eq!(
+            points(&mut ui, &domain.possessions.join("·")),
+            ["50%", "-", "·", "-"]
+        );
         assert_eq!(points(&mut ui, labels.our_aces), ["2"]);
         // the reception error is their ace
         assert_eq!(points(&mut ui, labels.their_aces), ["1"]);
@@ -183,6 +188,47 @@ mod tests {
             |ui: &mut Ui, event: EventTypeEnum| row(ui, labels.trend, event.friendly_name(domain));
         assert_eq!(trend(&mut ui, S), ["0%", "0%", "0%"]);
         assert_eq!(trend(&mut ui, P), ["0%", "0%", "0%"]);
+    }
+
+    /// The match statistics show the side out by possession with the
+    /// reception, not with a player selected.
+    #[tokio::test]
+    async fn match_stats_show_the_side_out_by_possession() {
+        let mut ui = scouted(RALLIES).await;
+        let labels = current_labels();
+        let domain = labels.domain;
+        while !ui.screen().contains(labels.match_list) {
+            ui.press(KeyCode::Esc).await;
+        }
+        ui.press(KeyCode::Char(' ')).await;
+        // the stat filter, its second entry: the reception
+        ui.type_keys(&[KeyCode::Tab, KeyCode::Tab, KeyCode::Tab, KeyCode::Down])
+            .await;
+        let [first, second, later] = domain.possessions;
+        assert_eq!(
+            row(&mut ui, domain.sideout_by_possession, first),
+            ["2", "1", "50%"]
+        );
+        assert_eq!(
+            row(&mut ui, domain.sideout_by_possession, second),
+            ["-", "-", "-"]
+        );
+        assert_eq!(
+            row(&mut ui, domain.sideout_by_possession, later),
+            ["-", "-", "-"]
+        );
+        // the serve: none
+        ui.press(KeyCode::Up).await;
+        assert_eq!(ui.panel(domain.sideout_by_possession), None);
+        // a player: none
+        ui.type_keys(&[KeyCode::Down, KeyCode::Tab, KeyCode::Down])
+            .await;
+        assert_eq!(
+            ui.panel(domain.sideout_by_possession),
+            None,
+            "{}",
+            ui.screen()
+        );
     }
 
     /// Left and right go through the sets and the match, the set being
