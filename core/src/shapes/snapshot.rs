@@ -10,7 +10,7 @@ use crate::{
         },
         lineup::Lineup,
         set::SetEntry,
-        stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, RallyKey, Stats},
+        stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, PossessionKey, RallyKey, Stats},
         technique::{SetTypeEnum, TechniqueEnum},
     },
 };
@@ -116,6 +116,10 @@ pub struct Snapshot {
     available_options: Vec<EventTypeEnum>,
     // their freeball (`OF`) not yet known to be exploited or not
     pending_freeball: bool,
+    // our possession in the side out being played, 0 out of one
+    possession: u8,
+    // the ball on our side to play, in that possession
+    ball_ours: bool,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -156,6 +160,8 @@ impl Snapshot {
             set_number: set_entry.set_number,
             available_options: vec![],
             pending_freeball: false,
+            possession: 0,
+            ball_ours: false,
         };
         // the events available before the first serve: also the ones after a
         // substitution, setter or libero change opening the set
@@ -571,6 +577,7 @@ impl Snapshot {
         }
         self.record_first_rally(event, rotation);
         self.record_freeball(event, phase, rotation);
+        self.record_possession(event, phase, rotation);
         Ok(())
     }
 
@@ -606,6 +613,64 @@ impl Snapshot {
             (_, Some(_)) => false,
             (_, None) => self.pending_freeball,
         };
+    }
+
+    /// The possessions of a side out: the first comes with their serve,
+    /// unless they miss it or we fault before it; another one each time the
+    /// ball comes back to our side to play: our dig keeping it (also over
+    /// the net, `/`), our block keeping it (`+`), their freeball (`OF`), or
+    /// our touch after an attack of ours they couldn't counter (`+`) or
+    /// blocked but covered (`!`), or after a block of theirs. The rally's
+    /// point goes to the last possession, also when scored on their side
+    /// (their error, their kill, our block): the ones before are lost.
+    fn record_possession(&mut self, event: &EventEntry, phase: PhaseEnum, rotation: u8) {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        let kept = |eval: Option<EvalEnum>| {
+            matches!(eval, Some(Perfect | Positive | Exclamative | Negative))
+        };
+        let (possession, starts) = match (
+            phase,
+            self.possession,
+            self.ball_ours,
+            event.event_type,
+            event.eval,
+        ) {
+            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | CS, _) => (self.possession, false),
+            (_, 0, _, P | OS, _) => (1, true),
+            (_, 0, _, _, _) => (0, false),
+            (_, n, false, D, Some(Perfect | Positive | Exclamative | Negative | Over))
+            | (_, n, false, B, Some(Positive))
+            | (_, n, false, OF | A | FB, _) => (n.saturating_add(1), true),
+            (_, n, _, _, _) => (n, false),
+        };
+        if let (true, Some(before @ 1..)) = (starts, possession.checked_sub(1)) {
+            self.stats.possessions.add(PossessionKey {
+                rotation,
+                possession: before,
+                won: false,
+            });
+        }
+        match (possession, event.event_type.rally_winner(event.eval)) {
+            (1.., Some(winner)) => {
+                self.stats.possessions.add(PossessionKey {
+                    rotation,
+                    possession,
+                    won: winner == TeamSideEnum::Us,
+                });
+                self.possession = 0;
+                self.ball_ours = false;
+            }
+            _ => {
+                self.possession = possession;
+                self.ball_ours = match (event.event_type, event.eval) {
+                    (P | D, eval) => kept(eval),
+                    (B, Some(Positive)) | (OF, _) => true,
+                    (A | FB | B, _) => false,
+                    _ => self.ball_ours,
+                };
+            }
+        }
     }
 
     /// The first rally of a side out goes from their serve to the end of

@@ -17,7 +17,10 @@ mod tests {
         },
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        stats::{AttackKey, AttackSummary, EventKey, Metric, Stats, StatsFilter},
+        stats::{
+            AttackKey, AttackSummary, EventKey, LAST_POSSESSION, Metric, PossessionSummary, Stats,
+            StatsFilter,
+        },
     };
     use crate::trend::{RECENT_TOUCHES, Replay, Series, trend};
     use EvalEnum::*;
@@ -1826,6 +1829,169 @@ mod tests {
         // no sets, no figures
         let none = sets_stats(&[], DEFAULT_MAX_SUBSTITUTIONS).expect("expected nothing to replay");
         assert_eq!(Overview::of(&none).reception.total, 0);
+    }
+
+    // --- the side out by possession ----------------------------------------
+
+    /// How the possessions of a side out start and end: the first with
+    /// their serve, another one each time the ball comes back to us; the
+    /// point goes to the last one.
+    #[test]
+    fn side_out_possessions() {
+        let t = Team::new();
+        let possession = |snapshot: &Snapshot, n: u8| {
+            snapshot
+                .stats
+                .side_out_possessions(Some(n), &all())
+                .map(|s| (s.total, s.won))
+                .unwrap_or_default()
+        };
+        // (events, (possessions, won) of the first, second and later ones)
+        let cases = [
+            // their serve error, our fault before it: no possession
+            (vec![opp(OE)], [(0, 0), (0, 0), (0, 0)]),
+            (vec![ev(F, Some(t.oh1), None)], [(0, 0), (0, 0), (0, 0)]),
+            // their ace, our reception error: the first one lost
+            (vec![opp(OS)], [(1, 0), (0, 0), (0, 0)]),
+            (vec![act(P, t.libero, Error)], [(1, 0), (0, 0), (0, 0)]),
+            // a kill on the first ball
+            (
+                vec![act(P, t.libero, Perfect), act(A, t.oh1, Perfect)],
+                [(1, 1), (0, 0), (0, 0)],
+            ),
+            // their error, their kill, our block point after our attack:
+            // still the first one
+            (
+                vec![act(P, t.libero, Positive), act(A, t.oh1, Negative), opp(OE)],
+                [(1, 1), (0, 0), (0, 0)],
+            ),
+            (
+                vec![act(P, t.libero, Positive), act(A, t.oh1, Negative), opp(OS)],
+                [(1, 0), (0, 0), (0, 0)],
+            ),
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Perfect),
+                ],
+                [(1, 1), (0, 0), (0, 0)],
+            ),
+            // a dig error: their attack ends the first one
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(D, t.libero, Error),
+                ],
+                [(1, 0), (0, 0), (0, 0)],
+            ),
+            // a dig: the second one
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(D, t.libero, Positive),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
+            // blocked but covered, or countered badly: a new one
+            (
+                vec![
+                    act(P, t.libero, Perfect),
+                    act(A, t.oh1, Exclamative),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
+            (
+                vec![
+                    act(P, t.libero, Perfect),
+                    act(A, t.oh1, Positive),
+                    act(A, t.opposite, Error),
+                ],
+                [(1, 0), (1, 0), (0, 0)],
+            ),
+            // their freeball after our overpass
+            (
+                vec![act(P, t.libero, Over), opp(OF), act(A, t.oh1, Perfect)],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
+            // our block keeping the ball, then a dig: the third one
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Positive),
+                    act(A, t.oh1, Negative),
+                    act(D, t.libero, Negative),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 0), (1, 1)],
+            ),
+            // the fourth one counts with the third
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(D, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(D, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(D, t.libero, Positive),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 0), (2, 1)],
+            ),
+        ];
+        for (i, (events, expected)) in cases.into_iter().enumerate() {
+            let snapshot = t.receiving(events);
+            let found = [1, 2, LAST_POSSESSION].map(|n| possession(&snapshot, n));
+            assert_eq!(found, expected, "case {}", i);
+            let all_of_them = expected
+                .iter()
+                .fold((0, 0), |(total, won), (t, w)| (total + t, won + w));
+            assert_eq!(
+                snapshot
+                    .stats
+                    .side_out_possessions(None, &all())
+                    .map(|s| (s.total, s.won))
+                    .unwrap_or_default(),
+                all_of_them,
+                "case {}",
+                i
+            );
+        }
+    }
+
+    /// Only the side outs: the rallies we serve have no possessions; the
+    /// rate is the share won.
+    #[test]
+    fn side_out_possessions_only_in_side_out() {
+        let t = Team::new();
+        let serving = t.serving(vec![
+            act(S, t.setter, Negative),
+            act(D, t.oh2, Positive),
+            act(A, t.oh1, Perfect),
+        ]);
+        assert_eq!(serving.stats.side_out_possessions(None, &all()), None);
+        let snapshot = t.receiving(vec![
+            act(P, t.libero, Perfect),
+            act(A, t.oh1, Perfect),
+            // we serve and lose, they serve: a rally lost on the first ball
+            act(S, t.oh1, Error),
+            opp(OS),
+            // won on the first ball again
+            act(P, t.libero, Positive),
+            act(A, t.oh1, Perfect),
+        ]);
+        let first = snapshot.stats.side_out_possessions(Some(1), &all());
+        assert_eq!(first, Some(PossessionSummary { total: 3, won: 2 }));
+        assert!((first.unwrap().finalization() - 200.0 / 3.0).abs() < 1e-9);
+        // no player: a player filter leaves none
+        let player = StatsFilter::new(None, None, Some(t.oh1));
+        assert_eq!(snapshot.stats.side_out_possessions(None, &player), None);
     }
 
     // --- the side out on first rally --------------------------------------

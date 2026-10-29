@@ -247,7 +247,7 @@
   column-gutter: 12pt,
   row-gutter: 10pt,
   simple-table(report.first_rallies), simple-table(report.freeballs),
-  simple-table(report.attack_by_phase),
+  stack(spacing: 10pt, simple-table(report.attack_by_phase), simple-table(report.side_out_possessions)),
   grid(
     columns: (1fr, 1fr),
     column-gutter: 8pt,

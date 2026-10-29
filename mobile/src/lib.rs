@@ -1017,6 +1017,18 @@ pub struct PhaseStats {
     pub grade: Option<f64>,
 }
 
+/// The possessions of the side outs of a number, and the ones won (see
+/// `PossessionSummary` in the core).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PossessionStats {
+    /// 1st, 2nd, 3rd+ in English
+    pub name: String,
+    pub total: u32,
+    pub won: u32,
+    /// `None` with no possessions
+    pub percentage: Option<f64>,
+}
+
 /// Attacks built by us (see `AttackSummary` in the core).
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct AttackStats {
@@ -1094,6 +1106,8 @@ pub struct LiveStats {
     /// reception, attack, serve, block, dig
     pub fundamentals: Vec<FundamentalStats>,
     pub side_out: Option<PhaseStats>,
+    /// the first, second and later possessions of the side outs
+    pub side_out_possessions: Vec<PossessionStats>,
     pub break_points: Option<PhaseStats>,
     pub first_attack: Option<AttackStats>,
     pub counter_attack: Option<AttackStats>,
@@ -1609,6 +1623,17 @@ fn live_stats(
             fundamental(EventTypeEnum::D, o.dig),
         ],
         side_out: phase(o.side_out, Measure::SideOut),
+        side_out_possessions: o
+            .side_out_possessions
+            .iter()
+            .zip(labels.possessions)
+            .map(|((_, summary), name)| PossessionStats {
+                name: name.to_string(),
+                total: summary.map_or(0, |s| s.total),
+                won: summary.map_or(0, |s| s.won),
+                percentage: summary.map(|s| s.finalization()),
+            })
+            .collect(),
         break_points: phase(o.break_points, Measure::BreakPoint),
         first_attack: o.first_attack.map(attack_stats),
         counter_attack: o.counter_attack.map(attack_stats),
@@ -4163,6 +4188,16 @@ mod tests {
         );
         assert_eq!(set.forced_errors, 0);
         assert_eq!(phase(&set.side_out), Some((1, 1)));
+        // the side out on their serve error: no possession of ours
+        assert_eq!(
+            set.side_out_possessions,
+            ["1°", "2°", "3°+"].map(|name| PossessionStats {
+                name: name.into(),
+                total: 0,
+                won: 0,
+                percentage: None,
+            })
+        );
         assert_eq!(phase(&set.break_points), Some((0, 2)));
         assert!(set.distribution.is_empty());
         // a regional women's team: graded

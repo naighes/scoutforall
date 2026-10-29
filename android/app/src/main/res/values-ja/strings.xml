@@ -131,6 +131,7 @@
     <string name="set_team_level">色を表示するにはチームのレベルと性別を設定してください</string>
     <string name="stats_detail">詳細</string>
     <string name="rotations">ローテーション</string>
+    <string name="side_out_by_possession">ポゼッション別サイドアウト</string>
     <string name="filter_player">選手</string>
     <string name="filter_rotation">ローテ</string>
     <string name="filter_phase">フェーズ</string>

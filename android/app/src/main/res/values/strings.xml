@@ -133,6 +133,7 @@
     <string name="set_team_level">Set the level and gender of the team to see the colors</string>
     <string name="stats_detail">Detail</string>
     <string name="rotations">Rotations</string>
+    <string name="side_out_by_possession">Side-out by possession</string>
     <string name="filter_player">Player</string>
     <string name="filter_rotation">Rotation</string>
     <string name="filter_phase">Phase</string>

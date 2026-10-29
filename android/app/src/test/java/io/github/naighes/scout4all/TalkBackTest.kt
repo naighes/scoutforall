@@ -146,6 +146,9 @@ class TalkBackTest {
         assertSpoken("${string(R.string.break_points)}, 100%, ${string(R.string.rallies_detail, 1, 1)}")
         assertSpoken("Serve, 100%, ${string(R.string.touches_spoken, 2, 1, 0)}")
         assertTitle(string(R.string.rotations))
+        // we served: no possession of ours
+        assertTitle(string(R.string.side_out_by_possession))
+        assertSpoken("1st, –")
         rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("Serve, ") && it.contains(string(R.string.set_n, 1) + " ") } }
     }

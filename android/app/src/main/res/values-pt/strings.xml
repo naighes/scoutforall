@@ -132,6 +132,7 @@
     <string name="set_team_level">Defina o nível e o gênero da equipe para ver as cores</string>
     <string name="stats_detail">Detalhe</string>
     <string name="rotations">Rodízios</string>
+    <string name="side_out_by_possession">Side-out por posse</string>
     <string name="filter_player">Jogador</string>
     <string name="filter_rotation">Rodízio</string>
     <string name="filter_phase">Fase</string>

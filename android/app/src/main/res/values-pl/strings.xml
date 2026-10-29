@@ -134,6 +134,7 @@
     <string name="set_team_level">Ustaw poziom i płeć drużyny, aby zobaczyć kolory</string>
     <string name="stats_detail">Szczegóły</string>
     <string name="rotations">Ustawienia</string>
+    <string name="side_out_by_possession">Side-out według posiadania</string>
     <string name="filter_player">Zawodnik</string>
     <string name="filter_rotation">Ustawienie</string>
     <string name="filter_phase">Faza</string>

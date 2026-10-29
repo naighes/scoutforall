@@ -81,6 +81,7 @@ import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.FundamentalStats
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.PhaseStats
+import io.github.naighes.scout4all.core.PossessionStats
 import io.github.naighes.scout4all.core.RotationStats
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.TrendLine
@@ -295,6 +296,31 @@ private fun Summary(stats: LiveStats) {
         Spacer(Modifier.weight(1f))
     }
     Rotations(stats.rotations)
+    Possessions(stats.sideOutPossessions)
+}
+
+/** The side out by possession: how often the first ball, the second and
+ * the later ones end with our point. */
+@Composable
+private fun Possessions(possessions: List<PossessionStats>) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(stringResource(R.string.side_out_by_possession), Modifier.title(), style = MaterialTheme.typography.titleMedium)
+    possessions.forEach { p ->
+        Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Bottom) {
+            Text(p.name, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            if (p.total > 0u) {
+                Text(
+                    stringResource(R.string.rallies_detail, p.won.toInt(), p.total.toInt()) + "  ",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                pct(p.percentage),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
 }
 
 /** The side out and the break points of each rotation, side by side. */

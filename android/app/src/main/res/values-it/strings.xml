@@ -132,6 +132,7 @@
     <string name="set_team_level">Imposta livello e sesso della squadra per vedere i colori</string>
     <string name="stats_detail">Dettaglio</string>
     <string name="rotations">Rotazioni</string>
+    <string name="side_out_by_possession">Cambio palla per possesso</string>
     <string name="filter_player">Giocatore</string>
     <string name="filter_rotation">Rotazione</string>
     <string name="filter_phase">Fase</string>
