@@ -480,6 +480,7 @@ impl ScoutingSession {
                     player: None,
                     target_player: None,
                     technique: None,
+                    flags: Default::default(),
                 })
                 .await
             }
@@ -515,6 +516,7 @@ impl ScoutingSession {
                     player: Some(player),
                     target_player: None,
                     technique: None,
+                    flags: Default::default(),
                 })
                 .await
             }
@@ -541,6 +543,7 @@ impl ScoutingSession {
                     player: Some(replaced),
                     target_player: Some(replacement),
                     technique: None,
+                    flags: Default::default(),
                 })
                 .await
             }
@@ -576,6 +579,7 @@ impl ScoutingSession {
                     player: self.player,
                     target_player: None,
                     technique: self.technique,
+                    flags: Default::default(),
                 })
                 .await
             }

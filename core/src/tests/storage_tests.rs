@@ -207,6 +207,7 @@ mod tests {
                 eval: Some(EvalEnum::Positive),
                 target_player: None,
                 technique: Some(TechniqueEnum::Serve(ServeTypeEnum::Float)),
+                flags: Default::default(),
             },
             EventEntry {
                 timestamp: Utc::now(),
@@ -215,6 +216,7 @@ mod tests {
                 eval: None,
                 target_player: None,
                 technique: None,
+                flags: Default::default(),
             },
         ];
         p.set_writer

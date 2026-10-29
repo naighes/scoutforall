@@ -103,11 +103,12 @@ mod tests {
         serve.describe().1
     }
 
-    /// The technique column of the last event saved.
+    /// The technique column of the last event saved, the one before the
+    /// flags.
     fn last_technique(ui: &Ui) -> String {
         let events = ui.saved_first_set_events();
         let last = events.last().expect("no event saved");
-        last.rsplit(',').next().unwrap().to_string()
+        last.split(',').nth(5).unwrap().to_string()
     }
 
     fn is_choosing_the_evaluation(ui: &mut Ui) -> bool {
@@ -434,9 +435,9 @@ mod tests {
         let events = ui.saved_first_set_events();
         assert_eq!(events.len(), 2, "{events:?}");
         for event in &events {
-            assert_eq!(event.split(',').count(), 6, "{event}");
+            assert_eq!(event.split(',').count(), 7, "{event}");
         }
-        assert!(events[0].ends_with(",-,,"), "{events:?}");
+        assert!(events[0].ends_with(",-,,,"), "{events:?}");
         // undo the dig (back to its evaluation, its player, the events),
         // then the serve saved without technique: it gets the float
         keys(&mut ui, "UUUU").await;

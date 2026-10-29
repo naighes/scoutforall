@@ -113,6 +113,7 @@ mod tests {
             eval,
             target_player,
             technique: None,
+            flags: Default::default(),
         }
     }
 

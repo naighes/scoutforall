@@ -61,6 +61,7 @@ mod tests {
             eval: None,
             target_player: Some(Uuid::new_v4()),
             technique: None,
+            flags: Default::default(),
         }
     }
 

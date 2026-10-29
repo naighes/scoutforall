@@ -70,9 +70,10 @@ impl SetWriter for StoreSetWriter {
         let key = layout::set_events(&m.team.id, &m.id, set_number);
         let saved = self.store.read(&key).await?.unwrap_or_default();
         // the older versions read a file only when all its rows have the
-        // same columns: the rows saved without the technique get it; a last
+        // same columns: the rows saved without the technique or the flags
+        // get them; a last
         // row cut (see read_events) goes, the event isn't appended to it
-        match whole_rows(&saved).len() < saved.len() || has_rows_without_technique(&saved)? {
+        match whole_rows(&saved).len() < saved.len() || has_short_rows(&saved)? {
             true => {
                 let mut events = read_events(&saved)?;
                 events.push(event.clone());
@@ -116,11 +117,12 @@ impl SetWriter for StoreSetWriter {
     }
 }
 
-/// The columns of a saved event, the technique included.
-const EVENT_COLUMNS: usize = 6;
+/// The columns of a saved event, the technique and the flags included.
+const EVENT_COLUMNS: usize = 7;
 
-/// Whether some events were saved without the technique, by v0.4.3 or older.
-fn has_rows_without_technique(csv: &[u8]) -> Result<bool, AppError> {
+/// Whether some events were saved without the technique, by v0.4.3 or
+/// older, or without the flags, by v0.10.1 or older.
+fn has_short_rows(csv: &[u8]) -> Result<bool, AppError> {
     ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)

@@ -295,6 +295,7 @@ mod tests {
             eval: None,
             target_player,
             technique: None,
+            flags: Default::default(),
         };
         // a player who isn't on court is substituted
         assert_eq!(

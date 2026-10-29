@@ -41,6 +41,7 @@ mod tests {
                 eval: None,
                 target_player: None,
                 technique: None,
+                flags: Default::default(),
             })
             .collect()
     }

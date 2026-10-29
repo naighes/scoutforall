@@ -8,6 +8,7 @@ use crate::{
         enums::{
             EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
         },
+        flags::EventFlags,
         lineup::Lineup,
         set::SetEntry,
         stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, PossessionKey, RallyKey, Stats},
@@ -31,11 +32,13 @@ pub struct EventEntry {
     pub eval: Option<EvalEnum>,
     pub target_player: Option<Uuid>,
     pub technique: Option<TechniqueEnum>,
+    pub flags: EventFlags,
 }
 
-/// An event as it's saved, one row of the events file. The technique is
-/// the last column: the older versions, up to v0.4.3, don't write it and
-/// skip it when reading, as long as every row has it.
+/// An event as it's saved, one row of the events file. The technique and
+/// the flags are the last columns: the older versions, up to v0.4.3 and up
+/// to v0.10.1, don't write them and skip them when reading, as long as
+/// every row has them (v0.5.0 and later skip them anyway).
 #[derive(Serialize, Deserialize)]
 struct EventRecord {
     timestamp: DateTime<Utc>,
@@ -45,6 +48,8 @@ struct EventRecord {
     target_player: Option<Uuid>,
     #[serde(default)]
     technique: Option<String>,
+    #[serde(default)]
+    flags: Option<String>,
 }
 
 impl TryFrom<EventRecord> for EventEntry {
@@ -55,6 +60,7 @@ impl TryFrom<EventRecord> for EventEntry {
             .filter(|code| !code.is_empty())
             .map(|code| TechniqueEnum::parse(record.event_type, &code))
             .transpose()?;
+        let flags = EventFlags::parse(record.flags.as_deref().unwrap_or_default())?;
         Ok(EventEntry {
             timestamp: record.timestamp,
             event_type: record.event_type,
@@ -62,6 +68,7 @@ impl TryFrom<EventRecord> for EventEntry {
             eval: record.eval,
             target_player: record.target_player,
             technique,
+            flags,
         })
     }
 }
@@ -75,6 +82,7 @@ impl From<EventEntry> for EventRecord {
             eval: event.eval,
             target_player: event.target_player,
             technique: event.technique.map(|t| t.to_string()),
+            flags: Some(event.flags.to_string()),
         }
     }
 }
@@ -83,8 +91,8 @@ impl Display for EventEntry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "event={:?} player={:?} eval={:?} target={:?} technique={:?}",
-            self.event_type, self.player, self.eval, self.target_player, self.technique
+            "event={:?} player={:?} eval={:?} target={:?} technique={:?} flags={:?}",
+            self.event_type, self.player, self.eval, self.target_player, self.technique, self.flags
         )
     }
 }
