@@ -84,6 +84,8 @@
     <string name="ok">OK</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
+    <string name="inverted_p1">P1 inv.</string>
+    <string name="inverted_p1_description">P1 invertita: in cambio palla lo schiacciatore attacca da 4</string>
     <string name="serving">Al servizio</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>

@@ -84,6 +84,8 @@
     <string name="match_lost_cheer">次の試合に切り替えよう！</string>
     <string name="break_phase">ブレイク</string>
     <string name="side_out_phase">サイドアウト</string>
+    <string name="inverted_p1">S1反転</string>
+    <string name="inverted_p1_description">S1反転：サイドアウトでアウトサイドが4から攻撃</string>
     <string name="serving">サーブ中</string>
     <plurals name="players">
         <item quantity="other">%d 人</item>

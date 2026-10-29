@@ -123,6 +123,7 @@ impl<SSW: SetWriter + Send + Sync> Renderable for EditSetEventsScreen<SSW> {
                 .and_then(|e| e.player)
                 .and_then(|p| self.current_match.team.find_player(p))
                 .map(|p| p.name.clone()),
+            shown.is_some_and(|e| e.flags.inverted_p1()),
         );
         set_board::render_court(f, columns[2], &self.current_match.team, &self.before);
         self.notify_message.render(f, footer_right);

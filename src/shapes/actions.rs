@@ -114,3 +114,23 @@ impl fmt::Display for ScreenActionEnum {
         write!(f, "{}", label)
     }
 }
+
+/// What the scout tells while choosing the event, besides the event: the
+/// inverted P1, a state kept until changed.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScoutingOptionEnum {
+    InvertedP1,
+}
+
+impl ScoutingOptionEnum {
+    pub const ALL: [ScoutingOptionEnum; 1] = [ScoutingOptionEnum::InvertedP1];
+}
+
+impl Describe for ScoutingOptionEnum {
+    fn describe(self) -> (ScoutingOptionEnum, String) {
+        match self {
+            ScoutingOptionEnum::InvertedP1 => (self, current_labels().inverted_p1.to_string()),
+        }
+    }
+}

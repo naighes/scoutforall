@@ -11,7 +11,7 @@ use crate::{
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
     },
     shapes::{
-        actions::ScreenActionEnum,
+        actions::{ScoutingOptionEnum, ScreenActionEnum},
         keybinding::{
             ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, STATS_KEY, UNDO_KEY,
         },
@@ -64,6 +64,7 @@ enum Shortcut {
     Eval(EvalEnum),
     SetType(SetTypeEnum),
     ServeType(ServeTypeEnum),
+    Option(ScoutingOptionEnum),
 }
 
 fn shortcuts() -> Vec<Shortcut> {
@@ -73,6 +74,7 @@ fn shortcuts() -> Vec<Shortcut> {
         .chain(EvalEnum::ALL.into_iter().map(Shortcut::Eval))
         .chain(SetTypeEnum::ALL.into_iter().map(Shortcut::SetType))
         .chain(ServeTypeEnum::ALL.into_iter().map(Shortcut::ServeType))
+        .chain(ScoutingOptionEnum::ALL.into_iter().map(Shortcut::Option))
         .collect()
 }
 
@@ -84,6 +86,9 @@ fn group_title(shortcut: Shortcut) -> Option<&'static str> {
         Shortcut::Eval(eval) if eval == EvalEnum::ALL[0] => Some(labels.evaluations),
         Shortcut::SetType(set) if set == SetTypeEnum::ALL[0] => Some(labels.set_types),
         Shortcut::ServeType(serve) if serve == ServeTypeEnum::ALL[0] => Some(labels.serve_types),
+        Shortcut::Option(option) if option == ScoutingOptionEnum::ALL[0] => {
+            Some(labels.scouting_options)
+        }
         _ => None,
     }
 }
@@ -236,6 +241,7 @@ where
                     eval_keybindings: KeyBindings::default(),
                     set_type_keybindings: KeyBindings::default(),
                     serve_type_keybindings: KeyBindings::default(),
+                    option_keybindings: KeyBindings::default(),
                     ..self.settings.clone()
                 };
                 self.notifier
@@ -375,6 +381,7 @@ where
             Shortcut::Eval(eval) => screen(self, eval),
             Shortcut::SetType(set) => screen(self, set),
             Shortcut::ServeType(serve) => screen(self, serve),
+            Shortcut::Option(option) => screen(self, option),
         }
     }
 
@@ -488,6 +495,7 @@ where
                 Shortcut::Eval(eval) => self.shortcut_row(eval),
                 Shortcut::SetType(set) => self.shortcut_row(set),
                 Shortcut::ServeType(serve) => self.shortcut_row(serve),
+                Shortcut::Option(option) => self.shortcut_row(option),
             });
         }
         self.shortcuts_state.select(match self.panel {

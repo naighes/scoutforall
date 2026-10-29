@@ -1,5 +1,8 @@
 package io.github.naighes.scout4all
 
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.isSelected
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -67,6 +70,19 @@ class ScoutingTest {
         show()
         touch("=")
         rule.waitFor { score(saved()) == 0 to 1 }
+    }
+
+    /** The inverted P1, up in the bar, goes with the events saved from
+     * then on: the set resumed keeps it. */
+    @Test
+    fun theInvertedP1IsSavedWithTheEvents() {
+        show()
+        val chip = hasContentDescription(string(R.string.inverted_p1_description)) and hasClickAction()
+        rule.onNode(chip).assertIsNotSelected().performClick()
+        rule.waitFor { rule.onAllNodes(chip and isSelected()).fetchSemanticsNodes().size == 1 }
+        touch("#")
+        rule.waitFor { score(saved()) == 1 to 0 }
+        assertTrue(saved().invertedP1)
     }
 
     @Test

@@ -289,38 +289,34 @@ impl Snapshot {
     /// - in the front row, the setter and the middle blockers attack from
     ///   3, the outside hitter from 4 and the opposite from 2, but in
     ///   rotation 0 (setter in position 1, "S1" in the report) in side
-    ///   out, where they receive
-    ///   and attack from the side they stand on (outside hitter 2,
-    ///   opposite 4);
+    ///   out, where they receive and attack from the side they stand on
+    ///   (outside hitter 2, opposite 4), unless the P1 is inverted;
     /// - in the back row, the outside hitter attacks from 8 (pipe) and the
     ///   opposite from 9 (from position 1);
     /// - the others (back row setter and middle blocker, libero, a player
     ///   not on court) have no zone: their attacks still count, but not in
     ///   the distribution and the counter-attacks.
-    fn get_attack_zone(&self, player_id: &Uuid) -> Option<ZoneEnum> {
+    fn get_attack_zone(&self, player_id: &Uuid, inverted_p1: bool) -> Option<ZoneEnum> {
         use PhaseEnum::*;
         use RoleEnum::*;
         use ZoneEnum::*;
         let role = self.current_lineup.get_role(player_id);
         let back = self.current_lineup.is_back_row_player(player_id);
-        let rotation = self.current_lineup.get_current_rotation();
-        match (role, back, rotation) {
+        // the canonical P1 in side out: the outside hitter from 2, the
+        // opposite from 4; inverted, as everywhere else
+        let canonical_p1 = self
+            .current_lineup
+            .get_current_rotation()
+            .is_ok_and(|r| r == 0)
+            && self.current_lineup.get_current_phase() == SideOut
+            && !inverted_p1;
+        match (role, back, canonical_p1) {
             (Ok(Setter | MiddleBlocker), false, _) => Some(Three),
-            (Ok(OutsideHitter), false, Ok(rotation)) => Some(
-                if rotation == 0 && self.current_lineup.get_current_phase() == SideOut {
-                    Two
-                } else {
-                    Four
-                },
-            ),
+            (Ok(OutsideHitter), false, true) => Some(Two),
+            (Ok(OutsideHitter), false, false) => Some(Four),
             (Ok(OutsideHitter), true, _) => Some(Eight),
-            (Ok(OppositeHitter), false, Ok(rotation)) => Some(
-                if rotation == 0 && self.current_lineup.get_current_phase() == SideOut {
-                    Four
-                } else {
-                    Two
-                },
-            ),
+            (Ok(OppositeHitter), false, true) => Some(Four),
+            (Ok(OppositeHitter), false, false) => Some(Two),
             (Ok(OppositeHitter), true, _) => Some(Nine),
             _ => None,
         }
@@ -428,13 +424,18 @@ impl Snapshot {
 
     /// The players by position as they play now: where they play
     /// (`Lineup::get_rally_positions`) once our serve is made or theirs is
-    /// received, until the rally ends; before, in the order of rotation,
-    /// which the positions must respect at the serve.
+    /// received, until the rally ends, with the P1 as the last event says;
+    /// before, in the order of rotation, which the positions must respect at
+    /// the serve.
     pub fn get_playing_positions(&self) -> [Uuid; 6] {
         let lineup = &self.current_lineup;
         let rotation = lineup.get_positions();
+        let inverted_p1 = self
+            .last_event
+            .as_ref()
+            .is_some_and(|e| e.flags.inverted_p1());
         match self.get_formation() {
-            Formation::Rally => lineup.get_rally_positions().unwrap_or(rotation),
+            Formation::Rally => lineup.get_rally_positions(inverted_p1).unwrap_or(rotation),
             Formation::Serve | Formation::Reception => rotation,
         }
     }
@@ -538,7 +539,9 @@ impl Snapshot {
         let rotation = self.current_lineup.get_current_rotation()?;
         // the zone of an attack comes from the role of the attacker
         let zone = match event.event_type {
-            A => event.player.and_then(|p| self.get_attack_zone(&p)),
+            A => event
+                .player
+                .and_then(|p| self.get_attack_zone(&p, event.flags.inverted_p1())),
             _ => None,
         };
         // every event of the rally: an action missing its evaluation can't

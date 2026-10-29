@@ -1,4 +1,4 @@
-use crate::localization::current_labels;
+use crate::localization::{Describe, current_labels};
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::live_stats_screen::LiveStatsScreen;
@@ -10,7 +10,7 @@ use crate::screens::{
     },
     screen::{AppAction, Renderable, ScreenAsync},
 };
-use crate::shapes::actions::ScreenActionEnum;
+use crate::shapes::actions::{ScoutingOptionEnum, ScreenActionEnum};
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
 use crate::shapes::settings::Settings;
@@ -335,7 +335,10 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     /// the events, the evaluations, the players or their replacements.
     fn left_list_len(&self) -> usize {
         match self.session.step() {
-            ScoutingStep::Event => self.session.available_events().len(),
+            // the events, then the options
+            ScoutingStep::Event => {
+                self.session.available_events().len() + ScoutingOptionEnum::ALL.len()
+            }
             ScoutingStep::Eval => self.session.available_evals().len(),
             ScoutingStep::Player => self.session.player_choices().len(),
             ScoutingStep::Replacement => self.session.replacement_choices().len(),
@@ -353,18 +356,29 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     /* event handling */
 
     // sequence is event type => player => eval
+    /// An option, as the inverted P1, or the event.
     async fn handle_event_screen(&mut self, key: KeyEvent) -> AppAction {
+        let option = self
+            .settings
+            .option_keybindings
+            .action_for(&combination_of(key))
+            .copied();
         let event = self
             .event_screen_key_bindings
             .transform(key)
             .and_then(|ck| self.event_screen_key_bindings.get(ck))
             .copied();
-        match event {
-            Some(event) => {
+        match (option, event) {
+            (Some(ScoutingOptionEnum::InvertedP1), _) => {
+                let inverted = self.session.inverted_p1();
+                self.session.set_inverted_p1(!inverted);
+                AppAction::None
+            }
+            (None, Some(event)) => {
                 let progress = self.session.choose_event(event).await;
                 self.show(progress)
             }
-            None => AppAction::None,
+            (None, None) => AppAction::None,
         }
     }
 
@@ -458,6 +472,27 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                     .right_aligned(),
                 ])
             })
+            .chain(ScoutingOptionEnum::ALL.iter().map(|option| {
+                let on = match option {
+                    ScoutingOptionEnum::InvertedP1 => self.session.inverted_p1(),
+                };
+                let check = match on {
+                    true => "[x]",
+                    false => "[ ]",
+                };
+                Row::new(vec![
+                    Line::from(format!("{check} {}", option.describe().1)),
+                    Line::from(
+                        self.settings
+                            .option_keybindings
+                            .key_for(option)
+                            .map(|kc| scf.to_string(kc))
+                            .unwrap_or_default(),
+                    )
+                    .right_aligned(),
+                ])
+                .style(Style::default().add_modifier(Modifier::DIM))
+            }))
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(60), Constraint::Min(2)]).block(
             panel::section(current_labels().choose_the_event)
@@ -706,7 +741,14 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .player()
             .and_then(|p| self.session.current_match().team.find_player(p))
             .map(|p| p.name.clone());
-        set_board::render_set_status(f, area, self.session.snapshot(), event, player);
+        set_board::render_set_status(
+            f,
+            area,
+            self.session.snapshot(),
+            event,
+            player,
+            self.session.inverted_p1(),
+        );
     }
 }
 /// The key of the replacement at `index`, from 1: the digits, then the

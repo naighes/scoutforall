@@ -84,6 +84,8 @@
     <string name="match_lost_cheer">Głowa do góry, następnym razem!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
+    <string name="inverted_p1">odwr. R1</string>
+    <string name="inverted_p1_description">Odwrócona R1: w przyjęciu przyjmujący atakuje z 4</string>
     <string name="serving">Zagrywamy</string>
     <plurals name="players">
         <item quantity="one">%d zawodnik</item>

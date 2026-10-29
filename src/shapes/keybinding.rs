@@ -1,5 +1,8 @@
 use {
-    crate::{localization::Describe, shapes::actions::ScreenActionEnum},
+    crate::{
+        localization::Describe,
+        shapes::actions::{ScoutingOptionEnum, ScreenActionEnum},
+    },
     crokey::{
         crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
         *,
@@ -317,6 +320,15 @@ impl Default for KeyBindings<EventTypeEnum> {
         bindings.set(EventTypeEnum::OF, key!(shift - x));
         bindings.set(EventTypeEnum::CL, key!(shift - l));
         bindings.set(EventTypeEnum::CS, key!(shift - c));
+        bindings
+    }
+}
+impl Default for KeyBindings<ScoutingOptionEnum> {
+    fn default() -> Self {
+        let mut bindings = Self {
+            default_bindings: HashMap::new(),
+        };
+        bindings.set(ScoutingOptionEnum::InvertedP1, key!(i));
         bindings
     }
 }

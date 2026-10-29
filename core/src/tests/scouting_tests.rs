@@ -173,6 +173,75 @@ mod tests {
         assert_eq!(saved[0].technique, Some(spin));
     }
 
+    /// The inverted P1 is a state: every event saved from when it's set
+    /// says so, until it's unset; a session opened again on the set, or on
+    /// the next one, goes on as the last event says.
+    #[tokio::test]
+    async fn the_inverted_p1_goes_on_until_changed() {
+        let mut s = scouting().await;
+        assert!(!s.session.inverted_p1());
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.set_inverted_p1(true);
+        // our libero digs their attack, they err
+        s.session.choose_event(D).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(OE).await.unwrap();
+        let inverted = |events: &[EventEntry]| {
+            events
+                .iter()
+                .map(|e| e.flags.inverted_p1())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(inverted(&saved_events(&s).await), [false, true, true]);
+        // opened again: still inverted
+        let mut m = s.session.current_match().clone();
+        let set = s.session.set().clone();
+        let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
+        let set_writer = Arc::new(StoreSetWriter::new(
+            Arc::clone(&s.store),
+            Language::default(),
+        ));
+        let mut again = ScoutingSession::new(m.clone(), set.clone(), snapshot, set_writer.clone());
+        assert!(again.inverted_p1());
+        again.set_inverted_p1(false);
+        again.choose_event(OE).await.unwrap();
+        assert_eq!(
+            inverted(&saved_events(&s).await),
+            [false, true, true, false]
+        );
+        // the next set as the last event of the one before
+        m.sets.push(again.set().clone());
+        let next = set_writer
+            .create(
+                &m,
+                2,
+                TeamSideEnum::Us,
+                s.players[..6].try_into().unwrap(),
+                s.players[6],
+                None,
+                s.players[0],
+                vec![],
+            )
+            .await
+            .unwrap();
+        let snapshot = next.compute_snapshot(m.max_substitutions).unwrap();
+        assert!(
+            !ScoutingSession::new(
+                m.clone(),
+                next.clone(),
+                snapshot.clone(),
+                set_writer.clone()
+            )
+            .inverted_p1()
+        );
+        if let Some(last) = m.sets[0].events.last_mut() {
+            last.flags = last.flags.with_inverted_p1(true);
+        }
+        assert!(ScoutingSession::new(m, next, snapshot, set_writer).inverted_p1());
+    }
+
     /// A dig needs the player, then the evaluation; a fault the player only.
     #[tokio::test]
     async fn the_player_comes_before_the_evaluation() {

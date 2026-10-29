@@ -7,6 +7,7 @@
 #[cfg(test)]
 mod tests {
     use crate::localization::current_labels;
+    use crate::shapes::actions::ScoutingOptionEnum;
     use crate::tests::ui::{TeamFixture, Ui};
     use crokey::crossterm::event::KeyCode;
     use ratatui::style::{Color, Modifier};
@@ -205,9 +206,10 @@ mod tests {
         for height in 20..=60 {
             ui.resize(100, height);
             let events = panel(&mut ui, current_labels().choose_the_event);
+            // the seven events, then the options
             assert_eq!(
                 events.as_ref().map(Vec::len),
-                Some(7),
+                Some(7 + ScoutingOptionEnum::ALL.len()),
                 "at 100x{height}: {events:?}\n{}",
                 ui.screen()
             );

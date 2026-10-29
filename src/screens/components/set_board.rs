@@ -209,6 +209,7 @@ pub fn render_set_status(
     snapshot: &Snapshot,
     event: Option<String>,
     player: Option<String>,
+    inverted_p1: bool,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -241,7 +242,13 @@ pub fn render_set_status(
                 .current_lineup
                 .get_current_rotation()
                 .ok()
-                .map(|r| format!("{}{}", current_labels().domain.setter_prefix, r + 1)),
+                .map(|r| format!("{}{}", current_labels().domain.setter_prefix, r + 1))
+                // the inverted P1 stays until changed, also in the other
+                // rotations
+                .map(|rotation| match inverted_p1 {
+                    true => format!("{rotation} · {}", current_labels().inverted_p1_short),
+                    false => rotation,
+                }),
             Color::Cyan,
             Color::Black,
         ),

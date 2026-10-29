@@ -10,6 +10,7 @@ mod max_substitutions_tests;
 mod navigation_tests;
 mod player_details_tests;
 mod point_sequence_tests;
+mod scouting_options_tests;
 mod scouting_tests;
 mod settings_tests;
 mod start_set_tests;

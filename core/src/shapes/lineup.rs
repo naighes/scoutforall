@@ -343,11 +343,11 @@ impl Lineup {
     /// Each diagonal has a player in each row, so every position is taken.
     /// But in side out with the setter in 1 (the canonical P1, as
     /// `Snapshot::get_attack_zone`) the front row stays as it received: the
-    /// opposite in 4, the outside hitter in 2. `None` if the setter is not
-    /// on court.
-    pub fn get_rally_positions(&self) -> Option<[Uuid; 6]> {
+    /// opposite in 4, the outside hitter in 2; not with the P1 inverted.
+    /// `None` if the setter is not on court.
+    pub fn get_rally_positions(&self, inverted_p1: bool) -> Option<[Uuid; 6]> {
         let setter_index = self.find_position(&self.current_setter)?;
-        let canonical_p1 = self.phase == PhaseEnum::SideOut && setter_index == 0;
+        let canonical_p1 = self.phase == PhaseEnum::SideOut && setter_index == 0 && !inverted_p1;
         let mut positions = self.players;
         for (index, player) in self.players.iter().enumerate() {
             let offset = (index + 6 - setter_index) % 6;

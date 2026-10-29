@@ -982,6 +982,9 @@ pub struct ScoutingState {
     pub ball: TeamSideEnum,
     /// the last touch of the rally being played, none before the serve
     pub last_touch: Option<ScoutedEvent>,
+    /// in P1 in side out the outside hitter attacks from 4 and the opposite
+    /// from 2: kept until changed, also in the next set
+    pub inverted_p1: bool,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -1389,6 +1392,7 @@ impl Scouting {
             last_touch: snapshot
                 .get_last_touch()
                 .map(|(e, _)| self.scouted_event(team, e)),
+            inverted_p1: session.inverted_p1(),
         }
     }
 
@@ -1483,6 +1487,11 @@ impl Scouting {
         let player = parse_id(&player)?;
         let mut session = self.session();
         self.scouted(self.runtime.block_on(session.choose_replacement(player)))
+    }
+
+    /// Saved with the events from now on.
+    pub fn set_inverted_p1(&self, inverted: bool) {
+        self.session().set_inverted_p1(inverted);
     }
 
     pub fn choose_technique(&self, technique: TechniqueEnum) -> Result<(), MobileError> {
@@ -3884,6 +3893,21 @@ mod tests {
         assert!(state.court[0].setter);
         let receivers: Vec<usize> = (1..=6).filter(|p| state.court[p - 1].receives).collect();
         assert_eq!(receivers, RECEIVERS[0].to_vec());
+    }
+
+    /// The inverted P1 is kept from event to event, until changed.
+    #[test]
+    fn the_inverted_p1_stays_until_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(!scouting.state().inverted_p1);
+        scouting.set_inverted_p1(true);
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        assert!(scouting.state().inverted_p1);
+        scouting.set_inverted_p1(false);
+        assert!(!scouting.state().inverted_p1);
     }
 
     #[test]

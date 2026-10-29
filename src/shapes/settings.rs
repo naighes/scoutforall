@@ -1,4 +1,5 @@
 use crate::localization::{Describe, set_language};
+use crate::shapes::actions::ScoutingOptionEnum;
 use crate::shapes::keybinding::{KeyBindings, is_fixed_key, is_reserved_key};
 use crokey::KeyCombination;
 use dirs::home_dir;
@@ -26,6 +27,8 @@ pub struct Settings {
     pub set_type_keybindings: KeyBindings<SetTypeEnum>,
     #[serde(default)]
     pub serve_type_keybindings: KeyBindings<ServeTypeEnum>,
+    #[serde(default)]
+    pub option_keybindings: KeyBindings<ScoutingOptionEnum>,
     /// the terms seen and the choice about the statistics, shared with the
     /// other apps: their fields, at the top level of `config.json`
     #[serde(flatten)]
@@ -46,6 +49,7 @@ impl Default for Settings {
             eval_keybindings: KeyBindings::default(),
             set_type_keybindings: KeyBindings::default(),
             serve_type_keybindings: KeyBindings::default(),
+            option_keybindings: KeyBindings::default(),
             consent: Consent::default(),
             last_used_dir: None,
         }
@@ -97,6 +101,25 @@ impl ScoutingShortcut for EventTypeEnum {
             scouting_keybindings: bindings.clone(),
             ..settings.clone()
         }
+    }
+    /// the options are told while choosing the event
+    fn rival(settings: &Settings, ck: &KeyCombination) -> Option<String> {
+        bound_to(&settings.option_keybindings, ck)
+    }
+}
+
+impl ScoutingShortcut for ScoutingOptionEnum {
+    fn bindings(settings: &Settings) -> KeyBindings<Self> {
+        settings.option_keybindings.clone()
+    }
+    fn with_bindings(settings: &Settings, bindings: &KeyBindings<Self>) -> Settings {
+        Settings {
+            option_keybindings: bindings.clone(),
+            ..settings.clone()
+        }
+    }
+    fn rival(settings: &Settings, ck: &KeyCombination) -> Option<String> {
+        bound_to(&settings.scouting_keybindings, ck)
     }
 }
 

@@ -84,6 +84,8 @@
     <string name="match_lost_cheer">Cabeça erguida, vamos à próxima!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
+    <string name="inverted_p1">P1 inv.</string>
+    <string name="inverted_p1_description">P1 invertida: no side-out a ponteira ataca da 4</string>
     <string name="serving">No saque</string>
     <plurals name="players">
         <item quantity="one">%d jogador</item>

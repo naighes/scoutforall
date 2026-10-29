@@ -12,7 +12,7 @@ mod tests {
             store::{CONFIG, settings_reader::StoreSettingsReader},
         },
         shapes::{
-            actions::ScreenActionEnum,
+            actions::{ScoutingOptionEnum, ScreenActionEnum},
             keybinding::{KeyBindings, SETTINGS_KEY, is_reserved_key, navigation_keybindings},
             settings::Settings,
         },
@@ -153,7 +153,7 @@ mod tests {
         }
         let selected = ui.selected().unwrap_or_default();
         assert!(
-            selected.contains(&ServeTypeEnum::ALL.last().unwrap().describe().1),
+            selected.contains(&ScoutingOptionEnum::ALL.last().unwrap().describe().1),
             "{selected}"
         );
         // still shown at the end of the list
@@ -1044,6 +1044,41 @@ mod tests {
         ui.press(KeyCode::Char('U')).await;
         let message = current_labels().reserved_shortcut.replace("{}", "⇧-u");
         assert!(ui.screen().contains(&message), "{}", ui.screen());
+    }
+
+    /// The options come last, on "i" for the inverted P1; told while
+    /// choosing the event, they don't share keys with the events.
+    #[tokio::test]
+    async fn option_keys_conflict_with_the_events() {
+        let option_index = serve_index(ServeTypeEnum::Spin) + 1;
+        let mut ui = shortcut(option_index).await;
+        let inverted = ScoutingOptionEnum::InvertedP1.describe().1;
+        let selected = ui.selected().unwrap_or_default();
+        assert!(selected.contains(&inverted), "{selected}");
+        assert!(selected.ends_with('i'), "{selected}");
+        assert!(ui.screen().contains(current_labels().scouting_options));
+        // an event's key
+        let mut ui = change_key_for(option_index).await;
+        ui.press(KeyCode::Char('s')).await;
+        let message = assigned_message("s", &EventTypeEnum::S.describe().1);
+        assert!(ui.screen().contains(&message), "{}", ui.screen());
+        ui.press(KeyCode::Enter).await;
+        assert!(ui.saved_settings().await.is_none());
+        // the option's key to an event
+        let mut ui = change_key_for(event_index(EventTypeEnum::S)).await;
+        ui.press(KeyCode::Char('i')).await;
+        let message = assigned_message("i", &inverted);
+        assert!(ui.screen().contains(&message), "{}", ui.screen());
+        // a free key is saved; a set's key is free too
+        let mut ui = change_key_for(option_index).await;
+        ui.type_keys(&[KeyCode::Char('q'), KeyCode::Enter]).await;
+        assert_eq!(
+            saved(&ui)
+                .await
+                .option_keybindings
+                .keybindings_for(&ScoutingOptionEnum::InvertedP1),
+            keys(&[key!(q)])
+        );
     }
 
     /// The reset gives them back their keys.

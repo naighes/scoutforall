@@ -381,6 +381,59 @@ mod tests {
         assert_eq!(zone(&rotation_3(t.oh1), t.oh1), Some(ZoneEnum::Eight));
     }
 
+    /// With the P1 inverted, in side out the outside hitter attacks from 4
+    /// and the opposite from 2, as the attack's own row says; nothing
+    /// changes in break nor in the other rotations.
+    #[test]
+    fn attack_zone_with_the_inverted_p1() {
+        use crate::shapes::flags::EventFlags;
+        let t = Team::new();
+        let inverted = |e: EventEntry| EventEntry {
+            flags: EventFlags::default().with_inverted_p1(true),
+            ..e
+        };
+        let zone = |snapshot: &Snapshot, player: Uuid| {
+            snapshot
+                .stats
+                .events
+                .iter(|k| k.event_type == A && k.player == Some(player))
+                .map(|(k, _)| k.zone)
+                .next()
+                .expect("expected the attack")
+        };
+        let side_out = |player| {
+            t.receiving(vec![
+                act(P, t.libero, Perfect),
+                inverted(act(A, player, Negative)),
+            ])
+        };
+        assert_eq!(zone(&side_out(t.oh1), t.oh1), Some(ZoneEnum::Four));
+        assert_eq!(zone(&side_out(t.opposite), t.opposite), Some(ZoneEnum::Two));
+        assert_eq!(zone(&side_out(t.mb2), t.mb2), Some(ZoneEnum::Three));
+        assert_eq!(zone(&side_out(t.oh2), t.oh2), Some(ZoneEnum::Eight));
+        // the reception's row doesn't count: the attack's does
+        let reception_only = t.receiving(vec![
+            inverted(act(P, t.libero, Perfect)),
+            act(A, t.oh1, Negative),
+        ]);
+        assert_eq!(zone(&reception_only, t.oh1), Some(ZoneEnum::Two));
+        let break_ = |player| {
+            t.serving(vec![
+                act(S, t.setter, Negative),
+                act(D, t.oh2, Positive),
+                inverted(act(A, player, Negative)),
+            ])
+        };
+        assert_eq!(zone(&break_(t.oh1), t.oh1), Some(ZoneEnum::Four));
+        assert_eq!(zone(&break_(t.opposite), t.opposite), Some(ZoneEnum::Two));
+        let rotation_3 = t.replay(
+            TeamSideEnum::Them,
+            t.rotation_3(),
+            vec![act(P, t.oh1, Perfect), inverted(act(A, t.oh2, Negative))],
+        );
+        assert_eq!(zone(&rotation_3, t.oh2), Some(ZoneEnum::Four));
+    }
+
     /// The share of an evaluation is 0% (not "no data") when there are
     /// events but none with that evaluation, and `None` with no events.
     #[test]
