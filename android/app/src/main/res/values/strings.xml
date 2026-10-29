@@ -87,6 +87,8 @@
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">inv. S1</string>
     <string name="inverted_p1_description">Inverted S1: in side out the outside hitter attacks from 4</string>
+    <string name="reception_n">rec. %d</string>
+    <string name="reception_description">Reception with %d players: touch for 3, 4, 2, before their serve</string>
     <string name="serving">Serving</string>
     <plurals name="players">
         <item quantity="one">%d player</item>

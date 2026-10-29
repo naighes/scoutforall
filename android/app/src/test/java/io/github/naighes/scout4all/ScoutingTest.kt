@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotEnabled
 import org.junit.Assert.assertTrue
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.assertIsNotSelected
@@ -83,6 +85,21 @@ class ScoutingTest {
         touch("#")
         rule.waitFor { score(saved()) == 1 to 0 }
         assertTrue(saved().invertedP1)
+    }
+
+    /** The reception, up in the bar, only before their serve: 3, 4, 2,
+     * written on their ace, then 3 again. */
+    @Test
+    fun theReceptionIsToldBeforeTheirServe() {
+        show()
+        val chip = { n: Int -> hasContentDescription(string(R.string.reception_description, n)) }
+        rule.onNode(chip(3)).assertIsNotEnabled()
+        // our serve error: they serve
+        touch("=")
+        rule.waitFor { rule.onAllNodes(chip(3) and isEnabled()).fetchSemanticsNodes().size == 1 }
+        rule.onNode(chip(3)).performClick()
+        rule.waitFor { saved().events.size == 1 && rule.onAllNodes(chip(4)).fetchSemanticsNodes().size == 1 }
+        rule.onNode(chip(4)).assertIsSelected()
     }
 
     @Test

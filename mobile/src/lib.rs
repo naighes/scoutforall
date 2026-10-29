@@ -985,6 +985,10 @@ pub struct ScoutingState {
     /// in P1 in side out the outside hitter attacks from 4 and the opposite
     /// from 2: kept until changed, also in the next set
     pub inverted_p1: bool,
+    /// how many receive their next serve, 3 unless told; told only before
+    /// their serve
+    pub reception: u8,
+    pub reception_open: bool,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -1393,6 +1397,8 @@ impl Scouting {
                 .get_last_touch()
                 .map(|(e, _)| self.scouted_event(team, e)),
             inverted_p1: session.inverted_p1(),
+            reception: session.reception().players(),
+            reception_open: session.can_tell_reception(),
         }
     }
 
@@ -1492,6 +1498,12 @@ impl Scouting {
     /// Saved with the events from now on.
     pub fn set_inverted_p1(&self, inverted: bool) {
         self.session().set_inverted_p1(inverted);
+    }
+
+    /// The next reception scheme for their serve: 3, 4, 2, then 3 again.
+    pub fn next_reception(&self) -> Result<(), MobileError> {
+        let told = self.session().next_reception().map(|_| ());
+        self.scouted(told)
     }
 
     pub fn choose_technique(&self, technique: TechniqueEnum) -> Result<(), MobileError> {
@@ -3908,6 +3920,24 @@ mod tests {
         assert!(scouting.state().inverted_p1);
         scouting.set_inverted_p1(false);
         assert!(!scouting.state().inverted_p1);
+    }
+
+    /// The reception is told before their serve only, 3, 4, 2.
+    #[test]
+    fn the_reception_is_told_before_their_serve() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(!scouting.state().reception_open);
+        assert!(scouting.next_reception().is_err());
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let state = scouting.state();
+        assert_eq!((state.reception, state.reception_open), (3, true));
+        scouting.next_reception().unwrap();
+        assert_eq!(scouting.state().reception, 4);
+        scouting.next_reception().unwrap();
+        assert_eq!(scouting.state().reception, 2);
     }
 
     #[test]

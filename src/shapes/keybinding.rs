@@ -329,6 +329,7 @@ impl Default for KeyBindings<ScoutingOptionEnum> {
             default_bindings: HashMap::new(),
         };
         bindings.set(ScoutingOptionEnum::InvertedP1, key!(i));
+        bindings.set(ScoutingOptionEnum::Reception, key!(c));
         bindings
     }
 }

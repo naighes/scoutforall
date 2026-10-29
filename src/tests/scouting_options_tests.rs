@@ -86,4 +86,57 @@ mod tests {
             ui.screen()
         );
     }
+
+    fn reception_row(ui: &mut Ui) -> Option<String> {
+        let told = current_labels().reception_with;
+        let prefix = told.split("{}").next().unwrap_or_default().to_string();
+        let suffix = told.split("{}").last().unwrap_or_default().to_string();
+        ui.panel(current_labels().choose_the_event)
+            .and_then(|rows| {
+                rows.into_iter()
+                    .find(|r| r.starts_with(&prefix) && r.contains(&format!("{suffix} ")))
+            })
+    }
+
+    /// "c" tells how many receive their next serve, only when they serve:
+    /// 3, 4, 2; written on their ace, then 3 again.
+    #[tokio::test]
+    async fn c_tells_the_reception_before_their_serve() {
+        let mut ui = scouting().await;
+        let with = |n: u8| {
+            current_labels()
+                .reception_with
+                .replace("{}", &n.to_string())
+        };
+        assert!(
+            reception_row(&mut ui).is_some_and(|r| r.starts_with(&with(3))),
+            "{}",
+            ui.screen()
+        );
+        // we serve
+        ui.press(KeyCode::Char('c')).await;
+        assert!(
+            ui.screen()
+                .contains(current_labels().domain.reception_not_now),
+            "{}",
+            ui.screen()
+        );
+        ui.press(KeyCode::Enter).await;
+        // our serve error: they serve
+        keys(&mut ui, "s=").await;
+        keys(&mut ui, "cc").await;
+        assert!(
+            reception_row(&mut ui).is_some_and(|r| r.starts_with(&with(2))),
+            "{}",
+            ui.screen()
+        );
+        // their ace
+        keys(&mut ui, "S").await;
+        assert_eq!(flags(&ui), ["", "4"]);
+        assert!(
+            reception_row(&mut ui).is_some_and(|r| r.starts_with(&with(3))),
+            "{}",
+            ui.screen()
+        );
+    }
 }

@@ -201,6 +201,12 @@ class ScoutingViewModel(
         Progress.CHOOSING
     }
 
+    /** How many receive their next serve: 3, 4, 2, then 3 again. */
+    fun nextReception() = choose("reception") {
+        it.nextReception()
+        Progress.CHOOSING
+    }
+
     fun undo() = choose("undo") {
         it.undo()
         Progress.CHOOSING
@@ -313,7 +319,12 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "", Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
-                actions = { view?.let { InvertedP1(it.state.invertedP1, model::invertedP1) } },
+                actions = {
+                    view?.let {
+                        Reception(it.state, model::nextReception)
+                        InvertedP1(it.state.invertedP1, model::invertedP1)
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -351,6 +362,21 @@ private fun InvertedP1(inverted: Boolean, onChange: (Boolean) -> Unit) {
             null
         },
         // the chip tells TalkBack whether it's selected
+        modifier = Modifier.padding(end = 8.dp).semantics { contentDescription = description },
+    )
+}
+
+/** How many receive their next serve, told before it: stands out when
+ * not three, then three again once received. */
+@Composable
+private fun Reception(state: ScoutingState, onNext: () -> Unit) {
+    val players = state.reception.toInt()
+    val description = stringResource(R.string.reception_description, players)
+    FilterChip(
+        selected = players != 3,
+        onClick = onNext,
+        enabled = state.receptionOpen,
+        label = { Text(stringResource(R.string.reception_n, players)) },
         modifier = Modifier.padding(end = 8.dp).semantics { contentDescription = description },
     )
 }

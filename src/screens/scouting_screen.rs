@@ -1,4 +1,4 @@
-use crate::localization::{Describe, current_labels};
+use crate::localization::current_labels;
 use crate::providers::settings_reader::SettingsReader;
 use crate::providers::settings_writer::SettingsWriter;
 use crate::screens::live_stats_screen::LiveStatsScreen;
@@ -374,6 +374,10 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                 self.session.set_inverted_p1(!inverted);
                 AppAction::None
             }
+            (Some(ScoutingOptionEnum::Reception), _) => {
+                let told = self.session.next_reception();
+                self.show(told.map(|_| Progress::Choosing))
+            }
             (None, Some(event)) => {
                 let progress = self.session.choose_event(event).await;
                 self.show(progress)
@@ -473,15 +477,29 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                 ])
             })
             .chain(ScoutingOptionEnum::ALL.iter().map(|option| {
-                let on = match option {
-                    ScoutingOptionEnum::InvertedP1 => self.session.inverted_p1(),
+                let labels = current_labels();
+                // the reception only before their serve
+                let (text, available) = match option {
+                    ScoutingOptionEnum::InvertedP1 => {
+                        let check = match self.session.inverted_p1() {
+                            true => "[x]",
+                            false => "[ ]",
+                        };
+                        (format!("{check} {}", labels.inverted_p1), true)
+                    }
+                    ScoutingOptionEnum::Reception => (
+                        labels
+                            .reception_with
+                            .replace("{}", &self.session.reception().players().to_string()),
+                        self.session.can_tell_reception(),
+                    ),
                 };
-                let check = match on {
-                    true => "[x]",
-                    false => "[ ]",
+                let style = match available {
+                    true => Style::default(),
+                    false => Style::default().add_modifier(Modifier::DIM),
                 };
                 Row::new(vec![
-                    Line::from(format!("{check} {}", option.describe().1)),
+                    Line::from(text),
                     Line::from(
                         self.settings
                             .option_keybindings
@@ -491,7 +509,7 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                     )
                     .right_aligned(),
                 ])
-                .style(Style::default().add_modifier(Modifier::DIM))
+                .style(style)
             }))
             .collect();
         let table = Table::new(rows, [Constraint::Percentage(60), Constraint::Min(2)]).block(

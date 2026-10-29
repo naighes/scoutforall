@@ -86,6 +86,8 @@
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">P1 inv.</string>
     <string name="inverted_p1_description">P1 invertita: in cambio palla lo schiacciatore attacca da 4</string>
+    <string name="reception_n">ric. %d</string>
+    <string name="reception_description">Ricezione a %d: tocca per 3, 4, 2, prima della loro battuta</string>
     <string name="serving">Al servizio</string>
     <plurals name="players">
         <item quantity="one">%d giocatore</item>

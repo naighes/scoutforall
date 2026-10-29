@@ -86,6 +86,8 @@
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">odwr. R1</string>
     <string name="inverted_p1_description">Odwrócona R1: w przyjęciu przyjmujący atakuje z 4</string>
+    <string name="reception_n">przyj. %d</string>
+    <string name="reception_description">Przyjęcie w %d: dotknij, by wybrać 3, 4, 2, przed ich zagrywką</string>
     <string name="serving">Zagrywamy</string>
     <plurals name="players">
         <item quantity="one">%d zawodnik</item>

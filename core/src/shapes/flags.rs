@@ -23,6 +23,15 @@ impl ReceptionSchemeEnum {
         ReceptionSchemeEnum::Four,
         ReceptionSchemeEnum::Two,
     ];
+
+    /// How many receive.
+    pub fn players(&self) -> u8 {
+        match self {
+            ReceptionSchemeEnum::Three => 3,
+            ReceptionSchemeEnum::Four => 4,
+            ReceptionSchemeEnum::Two => 2,
+        }
+    }
 }
 
 /// The flags of an event. The bits this version doesn't know (written by a

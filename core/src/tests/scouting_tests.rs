@@ -20,6 +20,7 @@ mod tests {
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
+            flags::ReceptionSchemeEnum,
             player::PlayerEntry,
             snapshot::EventEntry,
             stats::{Metric, StatsFilter},
@@ -171,6 +172,65 @@ mod tests {
         let saved = saved_events(&s).await;
         assert_eq!(event_types(&saved), vec![S]);
         assert_eq!(saved[0].technique, Some(spin));
+    }
+
+    /// The reception is told before their serve, for that serve only: it
+    /// goes on the reception, or on their ace, then it's three again.
+    #[tokio::test]
+    async fn the_reception_is_told_for_their_next_serve() {
+        use ReceptionSchemeEnum::*;
+        let mut s = scouting().await;
+        // we serve
+        assert_eq!(
+            s.session.next_reception(),
+            Err(ScoutingError::ReceptionNotNow)
+        );
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        // they serve: three, four, two
+        assert!(s.session.can_tell_reception());
+        assert_eq!(s.session.reception(), Three);
+        assert_eq!(s.session.next_reception(), Ok(Four));
+        assert_eq!(s.session.next_reception(), Ok(Two));
+        s.session.choose_event(P).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        // the rally goes on: three, and not to be told
+        assert_eq!(s.session.reception(), Three);
+        assert!(!s.session.can_tell_reception());
+        s.session.choose_event(OE).await.unwrap();
+        // their ace, with four
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        assert_eq!(s.session.next_reception(), Ok(Four));
+        s.session.choose_event(OS).await.unwrap();
+        assert_eq!(s.session.reception(), Three);
+        // their serve error: not written, three again
+        assert_eq!(s.session.next_reception(), Ok(Four));
+        s.session.choose_event(OE).await.unwrap();
+        assert_eq!(s.session.reception(), Three);
+        let receptions: Vec<_> = saved_events(&s)
+            .await
+            .iter()
+            .map(|e| (e.event_type, e.flags.reception()))
+            .collect();
+        assert_eq!(
+            receptions,
+            [
+                (S, Three),
+                (P, Two),
+                (OE, Three),
+                (S, Three),
+                (OS, Four),
+                (OE, Three),
+            ]
+        );
+        assert_eq!(saved_events(&s).await[4].flags.to_string(), "2");
+        // undone, their ace gives back its reception
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.reception(), Three);
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.reception(), Four);
     }
 
     /// The inverted P1 is a state: every event saved from when it's set

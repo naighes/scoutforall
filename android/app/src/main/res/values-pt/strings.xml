@@ -86,6 +86,8 @@
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">P1 inv.</string>
     <string name="inverted_p1_description">P1 invertida: no side-out a ponteira ataca da 4</string>
+    <string name="reception_n">rec. %d</string>
+    <string name="reception_description">Recepção com %d: toque para 3, 4, 2, antes do saque deles</string>
     <string name="serving">No saque</string>
     <plurals name="players">
         <item quantity="one">%d jogador</item>
