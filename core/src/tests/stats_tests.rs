@@ -732,15 +732,35 @@ mod tests {
             keys.iter()
                 .any(|k| (k.prev_type, k.prev_eval, k.eval) == (A, Some(Exclamative), Perfect))
         );
-        // after our overpass the ball is theirs: an attack then isn't built
-        // by us (but it's still an attack)
-        let overpass = t.serving(vec![
-            act(S, t.setter, Negative),
-            act(D, t.oh2, Over),
-            act(A, t.oh1, Perfect),
-        ]);
-        assert!(attacks(&overpass).is_empty());
-        assert_eq!(overpass.stats.event_count(A, None, &all()), 1);
+        // after our overpass, our serve or our attack they dug, the ball
+        // was theirs: their attack and our dig or block weren't scouted,
+        // the attack is built by us all the same, a counter-attack
+        let ball_theirs = [
+            vec![act(S, t.setter, Negative), act(D, t.oh2, Over)],
+            vec![act(S, t.setter, Positive)],
+            vec![act(S, t.setter, Exclamative)],
+            vec![act(S, t.setter, Negative)],
+            vec![
+                act(S, t.setter, Negative),
+                act(D, t.oh2, Positive),
+                act(A, t.opposite, Negative),
+            ],
+            vec![act(S, t.setter, Negative), act(B, t.opposite, Negative)],
+        ];
+        for before in ball_theirs {
+            let snapshot = t.serving([before.clone(), vec![act(A, t.oh1, Perfect)]].concat());
+            let keys: Vec<_> = attacks(&snapshot)
+                .into_iter()
+                .filter(|k| k.eval == Perfect)
+                .collect();
+            assert_eq!(keys.len(), 1, "{before:?}");
+            assert!(keys[0].is_counter_attack(), "{before:?}");
+        }
+        // after our reception going over too: they played it
+        let overpass = t.receiving(vec![act(P, t.libero, Over), act(A, t.oh1, Perfect)]);
+        let keys = attacks(&overpass);
+        assert_eq!(keys.len(), 1);
+        assert!(keys[0].is_counter_attack());
         // after a reception error the rally is over: no attack
         let error = t.receiving(vec![act(P, t.libero, Error)]);
         assert!(attacks(&error).is_empty());
@@ -955,7 +975,7 @@ mod tests {
         assert_eq!(overview.opponent_points, 1);
         // each fundamental once with each evaluation it can have
         let fundamental = |f: Fundamental| (f.total, f.perfect, f.errors);
-        assert_eq!(fundamental(overview.serve), (5, 1, 1));
+        assert_eq!(fundamental(overview.serve), (6, 1, 1));
         assert_eq!(fundamental(overview.reception), (6, 1, 1));
         assert_eq!(fundamental(overview.attack), (6, 1, 2));
         assert_eq!(fundamental(overview.dig), (6, 1, 1));
@@ -1195,6 +1215,31 @@ mod tests {
         }
     }
 
+    /// Every evaluation of every fundamental has a name of its own, not the
+    /// code of the event (e.g. the serve `!`, new).
+    #[test]
+    fn every_evaluation_has_a_name() {
+        let labels = crate::tests::EN;
+        for event_type in EventTypeEnum::ALL {
+            for eval in event_type.available_evals() {
+                let name = eval.friendly_name(event_type, labels);
+                assert_ne!(name, event_type.to_string(), "{event_type:?} {eval:?}");
+            }
+        }
+        // the serve mirrors their reception, its descriptions too
+        for eval in [
+            EvalEnum::Positive,
+            EvalEnum::Exclamative,
+            EvalEnum::Negative,
+        ] {
+            assert!(
+                eval.friendly_description(EventTypeEnum::S, labels)
+                    .is_some(),
+                "{eval:?}"
+            );
+        }
+    }
+
     /// Every evaluation a fundamental can have is listed once, and only
     /// those: the freeballs and the other events have none.
     #[test]
@@ -1218,7 +1263,7 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        assert_eq!(tones(S), "#Excellent /Excellent +Good -Poor =Bad");
+        assert_eq!(tones(S), "#Excellent /Excellent +Good !Fair -Poor =Bad");
         assert_eq!(tones(P), "#Excellent +Good !Fair -Poor /Poor =Bad");
         assert_eq!(tones(D), tones(P));
         assert_eq!(tones(B), "#Excellent +Good -Poor =Bad /Bad");
@@ -1344,8 +1389,9 @@ mod tests {
         assert_eq!(none.phases_per_point, Some((3.0, 1, 3)));
     }
 
-    /// Their freeball after ours, exploited with a kill: with a player, only
-    /// the ones given.
+    /// Their freeball after ours, exploited with a kill: team events, with
+    /// a player none given and the others not told; also for our freeball
+    /// naming its player, as scouted before.
     #[test]
     fn detail_of_the_freeballs() {
         let t = Team::new();
@@ -1373,7 +1419,7 @@ mod tests {
         assert_eq!(
             freeballs(player(t.setter)),
             Freeballs {
-                given: 1,
+                given: 0,
                 received: None,
                 exploited: None,
             }

@@ -264,14 +264,12 @@ mod tests {
     fn evaluation_not_allowed() {
         let t = Team::new();
         assert_invalid(
-            t.serving(vec![act(S, t.setter, Exclamative)]),
-            "evaluation ! not allowed",
-        );
-        assert_invalid(
             t.serving(vec![act(S, t.setter, Negative), act(B, t.oh1, Exclamative)]),
             "evaluation ! not allowed",
         );
         assert_valid(t.receiving(vec![act(P, t.libero, Exclamative)]));
+        // the serve mirrors their reception: `!` too
+        assert_valid(t.serving(vec![act(S, t.setter, Exclamative)]));
     }
 
     #[test]

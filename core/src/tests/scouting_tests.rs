@@ -648,12 +648,16 @@ mod tests {
         let mut s = player_first().await;
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
         // they receive and attack: the setter is in the back row, a middle
-        // blocker in the front row
+        // blocker in the front row, both can attack (our dig not scouted);
+        // the libero only digs. No freeball of theirs after our serve `+`,
+        // nor ours: the ball is theirs
         let setter = s.players[0];
         let blocker = s.players[2];
-        assert_eq!(s.session.player_events(&setter), vec![D]);
-        assert_eq!(s.session.player_events(&blocker), vec![D, B]);
-        assert_eq!(s.session.other_events(), vec![OS, OE, F, OF]);
+        let libero = s.players[6];
+        assert_eq!(s.session.player_events(&setter), vec![A, D]);
+        assert_eq!(s.session.player_events(&blocker), vec![A, D, B]);
+        assert_eq!(s.session.player_events(&libero), vec![D]);
+        assert_eq!(s.session.other_events(), vec![OS, OE, F]);
 
         assert_eq!(
             s.session.choose_player_first(blocker).await,
@@ -680,7 +684,7 @@ mod tests {
 
         // one event: straight to the evaluation
         assert_eq!(
-            s.session.choose_player_first(setter).await,
+            s.session.choose_player_first(libero).await,
             Ok(Progress::Choosing)
         );
         assert_eq!(
@@ -692,7 +696,7 @@ mod tests {
             (s.session.step(), s.session.player()),
             (ScoutingStep::Event, None)
         );
-        s.session.choose_player_first(setter).await.unwrap();
+        s.session.choose_player_first(libero).await.unwrap();
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
 
         // a player not on court plays nothing
@@ -700,18 +704,20 @@ mod tests {
             s.session.choose_player_first(s.players[7]).await,
             Err(ScoutingError::InvalidPlayerSelection)
         );
-        // the setter can attack or send a freeball: the freeball is saved
-        // with the player
-        assert_eq!(s.session.player_events(&setter), vec![A, FB]);
-        s.session.choose_player_first(setter).await.unwrap();
+        // the setter can attack; our freeball is a team event, among the
+        // other events, saved at once with no player
+        assert_eq!(s.session.player_events(&setter), vec![A]);
+        assert_eq!(s.session.other_events(), vec![OE, F, FB]);
         assert_eq!(s.session.choose_event(FB).await, Ok(Progress::Saved));
-        // undone, back to the events of the player
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![S, D, FB]);
+        assert_eq!(saved.last().and_then(|e| e.player), None);
+        // undone, back to the choice of the player
         s.session.undo().await.unwrap();
         assert_eq!(
-            (s.session.step(), s.session.player()),
-            (ScoutingStep::Event, Some(setter))
+            (s.session.step(), s.session.event(), s.session.player()),
+            (ScoutingStep::Event, None, None)
         );
-        // another event drops the player
         assert_eq!(s.session.choose_event(OE).await, Ok(Progress::Saved));
         assert_eq!(event_types(&saved_events(&s).await), vec![S, D, OE]);
     }

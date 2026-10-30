@@ -158,8 +158,7 @@ pub struct EventKey {
     pub eval: Option<EvalEnum>,
 }
 
-/// An attack built by us (see `Snapshot::is_attack_setup`), with the zone
-/// told by the role of the attacker.
+/// An attack of ours, with the zone told by the role of the attacker.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AttackKey {
     pub phase: PhaseEnum,
@@ -168,26 +167,21 @@ pub struct AttackKey {
     pub zone: ZoneEnum,
     pub eval: EvalEnum,
     /// the event before the attack: the reception, dig, serve, attack or
-    /// block the attack was built on, or their freeball
+    /// block the attack was built on, our freeball, or their freeball
     pub prev_type: EventTypeEnum,
     /// `None` after their freeball (`OF`)
     pub prev_eval: Option<EvalEnum>,
 }
 
 impl AttackKey {
-    /// A counter-attack: an attack built on a dig, on their freeball, on
-    /// their reception coming straight back (serve `/`), or on our attack or
-    /// block they couldn't counter (attack `+` or `!`, block `+`), i.e.
-    /// everything but the attack built on our reception (side out on first
-    /// rally).
+    /// A counter-attack: every attack but the one built on our reception
+    /// keeping the ball (side out on first rally). After our reception going
+    /// straight over (`/`) they played the ball, and our dig or block
+    /// wasn't scouted.
     pub fn is_counter_attack(&self) -> bool {
-        matches!(
-            self.prev_type,
-            EventTypeEnum::S
-                | EventTypeEnum::D
-                | EventTypeEnum::OF
-                | EventTypeEnum::A
-                | EventTypeEnum::B
+        !matches!(
+            (self.prev_type, self.prev_eval),
+            (EventTypeEnum::P, Some(eval)) if eval != EvalEnum::Over
         )
     }
 

@@ -1,5 +1,6 @@
 use crate::{
     errors::{AppError, MatchError},
+    localization::Labels,
     shapes::{
         enums::{LineupRulesEnum, TeamSideEnum},
         snapshot::{EventEntry, Snapshot},
@@ -22,6 +23,42 @@ pub struct SetEntry {
     pub lineup_rules: Option<LineupRulesEnum>,
     #[serde(skip_serializing, skip_deserializing)]
     pub events: Vec<EventEntry>,
+}
+
+/// The first event of a set that doesn't replay: saved by a version whose
+/// scouting allowed it, and no more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayIssue {
+    pub set_number: u8,
+    /// the row of the event in the file of the set, from 1
+    pub row: usize,
+    /// the event and the one before it, as the scouts write them, e.g.
+    /// `OF` and `A-`
+    pub event: String,
+    pub previous: Option<String>,
+}
+
+impl ReplayIssue {
+    pub fn describe(&self, labels: &Labels) -> String {
+        let template = match self.previous {
+            Some(_) => labels.set_event_not_valid,
+            None => labels.set_first_event_not_valid,
+        };
+        template
+            .replace("{set}", &self.set_number.to_string())
+            .replace("{row}", &self.row.to_string())
+            .replace("{event}", &self.event)
+            .replace("{previous}", self.previous.as_deref().unwrap_or_default())
+    }
+}
+
+/// An event as the scouts write it: its code and its evaluation.
+fn code(event: &EventEntry) -> String {
+    format!(
+        "{}{}",
+        event.event_type,
+        event.eval.map(|e| e.to_string()).unwrap_or_default()
+    )
 }
 
 impl SetEntry {
@@ -69,6 +106,28 @@ impl SetEntry {
                 .replay(max_substitutions, LineupRulesEnum::V1)
                 .or_else(|_| self.replay(max_substitutions, LineupRulesEnum::V2)),
         }
+    }
+
+    /// The first event that doesn't replay, if any: with the rules of the
+    /// set, the current ones if none replays it.
+    pub fn replay_issue(&self, max_substitutions: u8) -> Option<ReplayIssue> {
+        let rules = self
+            .find_lineup_rules(max_substitutions)
+            .unwrap_or(LineupRulesEnum::CURRENT);
+        let mut snapshot = Snapshot::with_rules(self, max_substitutions, rules).ok()?;
+        let issue = self
+            .events
+            .iter()
+            .position(|event| snapshot.add_event(event).is_err())?;
+        Some(ReplayIssue {
+            set_number: self.set_number,
+            row: issue + 1,
+            event: self.events.get(issue).map(code)?,
+            previous: issue
+                .checked_sub(1)
+                .and_then(|previous| self.events.get(previous))
+                .map(code),
+        })
     }
 
     /// The rules the set replays with, found as `compute_snapshot` does: to

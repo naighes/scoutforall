@@ -57,10 +57,11 @@ pub enum ChoiceOrder {
 }
 
 /// The events a player plays touching the ball, but the serve: with the
-/// player first, they're chosen after the player.
+/// player first, they're chosen after the player. Not our freeball, a team
+/// event.
 fn played_by_the_player(event: EventTypeEnum) -> bool {
     use EventTypeEnum::*;
-    matches!(event, P | A | D | B | FB)
+    matches!(event, P | A | D | B)
 }
 
 /// How a choice went on.
@@ -526,7 +527,7 @@ impl ScoutingSession {
                 self.step = ScoutingStep::Player;
                 Ok(Progress::Choosing)
             }
-            (ScoutingStep::Event, true, OE | OS | OF | CL) => {
+            (ScoutingStep::Event, true, OE | OS | OF | FB | CL) => {
                 self.save(EventEntry {
                     timestamp: Utc::now(),
                     event_type: event,
@@ -772,7 +773,9 @@ impl ScoutingSession {
                 self.player = Some(player);
                 self.step = ScoutingStep::Replacement;
             }
-            (ChoiceOrder::PlayerFirst, FB, Some(player)) => self.back_to_player(player),
+            // our freeball, also one naming its player (scouted before it
+            // became a team event), is chosen again with the others
+            (_, FB, _) => self.start_next(),
             (_, _, Some(player)) => {
                 self.event = Some(removed.event_type);
                 self.player = Some(player);

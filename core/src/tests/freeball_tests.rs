@@ -8,7 +8,7 @@ mod tests {
     use crate::errors::{AppError, SnapshotError};
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum, ZoneEnum},
-        set::SetEntry,
+        set::{ReplayIssue, SetEntry},
         snapshot::{EventEntry, Snapshot},
         stats::StatsFilter,
     };
@@ -127,8 +127,14 @@ mod tests {
         ev(event_type, Some(player), Some(eval))
     }
 
-    /// Our freeball, sent by the player.
-    fn fb(player: Uuid) -> EventEntry {
+    /// Our freeball, a team event.
+    fn fb() -> EventEntry {
+        ev(FB, None, None)
+    }
+
+    /// Our freeball naming its player, as scouted before it became a team
+    /// event.
+    fn fb_named(player: Uuid) -> EventEntry {
         ev(FB, Some(player), None)
     }
 
@@ -153,10 +159,12 @@ mod tests {
         assert_eq!(OF.to_string(), "OF");
         assert_eq!(EventTypeEnum::from_str("FB").unwrap(), FB);
         assert_eq!(EventTypeEnum::from_str("of").unwrap(), OF);
-        // our freeball has a player, theirs doesn't; neither has an
-        // evaluation nor wins the rally
-        assert!(FB.requires_player());
+        // team events: no player (ours named it once, still accepted);
+        // neither has an evaluation nor wins the rally
+        assert!(!FB.requires_player());
+        assert!(FB.accepts_player());
         assert!(!OF.requires_player());
+        assert!(!OF.accepts_player());
         for event_type in [FB, OF] {
             assert!(!event_type.requires_evaluation());
             assert!(event_type.available_evals().is_empty());
@@ -176,18 +184,29 @@ mod tests {
     fn available_events_within_the_rally() {
         let t = Team::new();
         let ball_ours_to_play = vec![OE, F, A, FB];
+        // we play it again, after their freeball or not
+        let ball_ours_or_their_freeball = vec![OE, F, A, FB, OF];
+        // sent over without an attack: they attack, or send it back easy
         let ball_theirs = vec![OS, OE, F, A, D, B, OF];
+        // they attack: our dig or block, or our attack when they weren't
+        // scouted; a freeball of theirs would tell another evaluation
+        let ball_theirs_to_attack = vec![OS, OE, F, A, D, B];
         let cases: Vec<(&str, Snapshot, Vec<EventTypeEnum>)> = vec![
-            // our serve: they receive, and may send it back easy
+            // our serve: they receive and attack
             (
                 "S+",
                 t.serving(vec![t.serve(Positive)]),
-                vec![OS, OE, F, D, B, OF],
+                ball_theirs_to_attack.clone(),
+            ),
+            (
+                "S!",
+                t.serving(vec![t.serve(Exclamative)]),
+                ball_theirs_to_attack.clone(),
             ),
             (
                 "S-",
                 t.serving(vec![t.serve(Negative)]),
-                vec![OS, OE, F, D, B, OF],
+                ball_theirs_to_attack.clone(),
             ),
             // their reception comes back: our first touch isn't scouted
             ("S/", t.serving(vec![t.serve(Over)]), vec![OE, A, F, FB]),
@@ -248,7 +267,7 @@ mod tests {
             (
                 "A+",
                 t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Positive)]),
-                ball_ours_to_play.clone(),
+                ball_ours_or_their_freeball.clone(),
             ),
             (
                 "A!",
@@ -258,30 +277,30 @@ mod tests {
             (
                 "A-",
                 t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Negative)]),
-                ball_theirs.clone(),
+                ball_theirs_to_attack.clone(),
             ),
             // our block
             (
                 "B+",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Positive)]),
-                ball_ours_to_play.clone(),
+                ball_ours_or_their_freeball.clone(),
             ),
             (
                 "B-",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Negative)]),
-                ball_theirs.clone(),
+                ball_theirs_to_attack.clone(),
             ),
             // our freeball: they play it, and may send one back
             (
                 "FB",
-                t.receiving(vec![act(P, t.libero, Negative), fb(t.setter)]),
+                t.receiving(vec![act(P, t.libero, Negative), fb()]),
                 ball_theirs.clone(),
             ),
             // their freeball: no dig of ours, but the same as after one;
             // their point if it falls untouched
             (
                 "OF",
-                t.serving(vec![t.serve(Negative), opp(OF)]),
+                t.serving(vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)]),
                 vec![OS, OE, F, A, FB],
             ),
         ];
@@ -298,8 +317,18 @@ mod tests {
             t.serving(vec![]),
             t.receiving(vec![]),
             t.serving(vec![t.serve(Perfect)]),
-            t.serving(vec![t.serve(Negative), opp(OF), opp(OS)]),
-            t.serving(vec![t.serve(Negative), opp(OF), act(A, t.oh1, Perfect)]),
+            t.serving(vec![
+                t.serve(Negative),
+                act(B, t.oh1, Positive),
+                opp(OF),
+                opp(OS),
+            ]),
+            t.serving(vec![
+                t.serve(Negative),
+                act(B, t.oh1, Positive),
+                opp(OF),
+                act(A, t.oh1, Perfect),
+            ]),
         ];
         for snapshot in rally_starts {
             let options = snapshot.get_available_options();
@@ -317,11 +346,11 @@ mod tests {
         let t = Team::new();
         let cases = [
             // a first touch: the ball just came over
-            (TeamSideEnum::Us, vec![t.serve(Negative), fb(t.oh1)]),
-            (TeamSideEnum::Them, vec![act(P, t.libero, Over), fb(t.oh1)]),
+            (TeamSideEnum::Us, vec![t.serve(Negative), fb()]),
+            (TeamSideEnum::Them, vec![act(P, t.libero, Over), fb()]),
             (
                 TeamSideEnum::Us,
-                vec![t.serve(Negative), act(D, t.libero, Over), fb(t.oh1)],
+                vec![t.serve(Negative), act(D, t.libero, Over), fb()],
             ),
             // the ball on our side: they can't send it
             (TeamSideEnum::Us, vec![t.serve(Over), opp(OF)]),
@@ -329,7 +358,10 @@ mod tests {
                 TeamSideEnum::Them,
                 vec![act(P, t.libero, Positive), opp(OF)],
             ),
-            (TeamSideEnum::Us, vec![t.serve(Negative), opp(OF), opp(OF)]),
+            (
+                TeamSideEnum::Us,
+                vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF), opp(OF)],
+            ),
             (
                 TeamSideEnum::Them,
                 vec![
@@ -341,19 +373,29 @@ mod tests {
             // and no dig of ours on their freeball, nor a block
             (
                 TeamSideEnum::Us,
-                vec![t.serve(Negative), opp(OF), act(D, t.libero, Positive)],
+                vec![
+                    t.serve(Negative),
+                    act(B, t.oh1, Positive),
+                    opp(OF),
+                    act(D, t.libero, Positive),
+                ],
             ),
             (
                 TeamSideEnum::Us,
-                vec![t.serve(Negative), opp(OF), act(B, t.oh1, Positive)],
+                vec![
+                    t.serve(Negative),
+                    act(B, t.oh1, Positive),
+                    opp(OF),
+                    act(B, t.oh1, Positive),
+                ],
             ),
             // a second freeball of ours in a row
             (
                 TeamSideEnum::Them,
-                vec![act(P, t.libero, Positive), fb(t.setter), fb(t.oh1)],
+                vec![act(P, t.libero, Positive), fb(), fb()],
             ),
             // before the serve
-            (TeamSideEnum::Us, vec![fb(t.setter)]),
+            (TeamSideEnum::Us, vec![fb()]),
             (TeamSideEnum::Them, vec![opp(OF)]),
         ];
         for (serving, events) in cases {
@@ -363,44 +405,121 @@ mod tests {
         }
     }
 
+    /// Our freeball has no evaluation, and the player only as scouted
+    /// before (one on court); theirs neither.
     #[test]
-    fn freeball_without_its_player_or_with_an_evaluation_is_rejected() {
+    fn freeball_with_an_evaluation_or_a_player_off_court_is_rejected() {
         let t = Team::new();
         let reception = act(P, t.libero, Positive);
         let cases = [
-            (ev(FB, None, None), "missing player"),
+            (ev(FB, None, Some(Positive)), "unexpected evaluation"),
             (
                 ev(FB, Some(t.setter), Some(Positive)),
                 "unexpected evaluation",
             ),
-            (ev(FB, Some(Uuid::new_v4()), None), "can't play it"),
+            (fb_named(Uuid::new_v4()), "can't play it"),
         ];
         for (event, expected) in cases {
             let reason = t.rejected(TeamSideEnum::Them, vec![reception.clone(), event]);
             assert!(reason.contains(expected), "{reason}");
         }
-        let after_serve = t.serve(Negative);
+        let block = vec![t.serve(Negative), act(B, t.oh1, Positive)];
         let cases = [
             (ev(OF, Some(t.oh1), None), "unexpected player"),
             (ev(OF, None, Some(Positive)), "unexpected evaluation"),
         ];
         for (event, expected) in cases {
-            let reason = t.rejected(TeamSideEnum::Us, vec![after_serve.clone(), event]);
+            let reason = t.rejected(TeamSideEnum::Us, [block.clone(), vec![event]].concat());
             assert!(reason.contains(expected), "{reason}");
         }
     }
 
-    /// Anyone on court can send it, the libero too.
+    /// Their freeball after our attack they dug, or after our serve `+`, as
+    /// scouted up to v0.11: no more valid, the set tells the first event
+    /// that doesn't replay; a set that replays tells none.
     #[test]
-    fn every_player_on_court_can_send_a_freeball() {
+    fn their_freeball_where_they_attack_no_more_is_told() {
+        let t = Team::new();
+        let dug = t.set(
+            TeamSideEnum::Them,
+            vec![
+                act(P, t.libero, Positive),
+                act(A, t.oh1, Negative),
+                opp(OF),
+                act(A, t.opposite, Perfect),
+            ],
+        );
+        let issue = dug.replay_issue(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        assert_eq!(
+            issue,
+            ReplayIssue {
+                set_number: 1,
+                row: 3,
+                event: "OF".into(),
+                previous: Some("A-".into()),
+            }
+        );
+        assert_eq!(
+            issue.describe(crate::tests::EN),
+            "set 1, row 3: OF after A- isn't valid in this version"
+        );
+        let served = t.set(TeamSideEnum::Us, vec![t.serve(Positive), opp(OF)]);
+        let issue = served.replay_issue(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        assert_eq!((issue.row, issue.previous), (2, Some("S+".into())));
+        let fine = t.set(
+            TeamSideEnum::Us,
+            vec![t.serve(Positive), act(A, t.oh1, Perfect)],
+        );
+        assert_eq!(fine.replay_issue(DEFAULT_MAX_SUBSTITUTIONS), None);
+    }
+
+    /// A freeball scouted before it became a team event names its player:
+    /// it still replays, anyone on court, the libero too, and the
+    /// statistics ignore the player.
+    #[test]
+    fn freeball_naming_its_player_still_replays() {
         let t = Team::new();
         for player in [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.libero] {
-            let snapshot = t.receiving(vec![act(P, t.oh2, Positive), fb(player)]);
+            let snapshot = t.receiving(vec![act(P, t.oh2, Positive), fb_named(player)]);
             assert_eq!(snapshot.last_event.as_ref().unwrap().event_type, FB);
+            assert_eq!(snapshot.stats.event_count(FB, None, &all()), 1);
+            assert_eq!(snapshot.stats.event_count(FB, None, &by(player)), 0);
         }
         // middle blocker 1 is on the bench for the libero
-        let reason = t.rejected(TeamSideEnum::Them, vec![act(P, t.oh2, Positive), fb(t.mb1)]);
+        let reason = t.rejected(
+            TeamSideEnum::Them,
+            vec![act(P, t.oh2, Positive), fb_named(t.mb1)],
+        );
         assert!(reason.contains("can't play it"), "{reason}");
+    }
+
+    /// The same rallies replay alike with our freeball naming its player or
+    /// not: the score, the rotations and the statistics.
+    #[test]
+    fn freeball_naming_its_player_replays_as_a_team_one() {
+        let t = Team::new();
+        let rally = |freeball: EventEntry| {
+            vec![
+                act(P, t.oh2, Positive),
+                freeball,
+                act(D, t.libero, Positive),
+                act(A, t.oh1, Perfect),
+            ]
+        };
+        let team = t.receiving(rally(fb()));
+        let named = t.receiving(rally(fb_named(t.setter)));
+        assert_eq!(state(&t, &team), state(&t, &named));
+        let counts = |s: &Snapshot| {
+            EventTypeEnum::ALL
+                .iter()
+                .map(|e| s.stats.event_count(*e, None, &all()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(counts(&team), counts(&named));
+        assert_eq!(
+            team.stats.attacks.iter(|_| true).count(),
+            named.stats.attacks.iter(|_| true).count()
+        );
     }
 
     // --- the replay ------------------------------------------------------------
@@ -435,19 +554,19 @@ mod tests {
                 vec![act(P, t.libero, Positive)],
                 middle(
                     vec![act(A, t.oh1, Negative), act(D, t.libero, Positive)],
-                    vec![fb(t.setter), opp(OF)],
+                    vec![fb(), opp(OF)],
                 ),
                 vec![act(A, t.opposite, Perfect)],
                 // we serve: their freeball, ours, and their point
                 vec![act(S, t.oh1, Negative)],
                 middle(
                     vec![act(D, t.libero, Positive), act(A, t.mb2, Negative)],
-                    vec![opp(OF), fb(t.libero), opp(OF), fb(t.oh2)],
+                    vec![act(D, t.libero, Over), opp(OF), fb(), opp(OF), fb()],
                 ),
                 vec![opp(OS)],
                 // they serve again: their error after our freeball
                 vec![act(P, t.libero, Perfect)],
-                middle(vec![act(A, t.oh1, Negative)], vec![fb(t.setter)]),
+                middle(vec![act(A, t.oh1, Negative)], vec![fb()]),
                 vec![opp(OE)],
             ]
             .concat()
@@ -471,7 +590,12 @@ mod tests {
     #[test]
     fn their_freeball_untouched_is_their_point() {
         let t = Team::new();
-        let snapshot = t.serving(vec![t.serve(Positive), opp(OF), opp(OS)]);
+        let snapshot = t.serving(vec![
+            t.serve(Positive),
+            act(B, t.oh1, Positive),
+            opp(OF),
+            opp(OS),
+        ]);
         assert_eq!((snapshot.score_us, snapshot.score_them), (0, 1));
         assert_eq!(snapshot.get_serving_team(), Some(TeamSideEnum::Them));
     }
@@ -482,7 +606,7 @@ mod tests {
         let t = Team::new();
         let snapshot = t.receiving(vec![
             act(P, t.libero, Positive),
-            fb(t.setter),
+            fb(),
             ev(F, Some(t.setter), None),
         ]);
         assert_eq!((snapshot.score_us, snapshot.score_them), (0, 1));
@@ -497,21 +621,23 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Negative),
+            act(B, t.oh1, Positive),
             opp(OF),
-            fb(t.libero),
+            fb(),
             opp(OF),
-            fb(t.oh1),
+            fb(),
             act(D, t.libero, Positive),
-            fb(t.libero),
+            fb(),
             opp(OS),
         ]);
         let stats = &snapshot.stats;
         assert_eq!(stats.event_count(FB, None, &all()), 3);
-        assert_eq!(stats.event_count(FB, None, &by(t.libero)), 2);
-        assert_eq!(stats.event_count(FB, None, &by(t.oh1)), 1);
         assert_eq!(stats.event_count(OF, None, &all()), 2);
-        // no player on theirs
-        assert_eq!(stats.event_count(OF, None, &by(t.libero)), 0);
+        // team events: none by player
+        for player in t.players() {
+            assert_eq!(stats.event_count(FB, None, &by(player)), 0);
+            assert_eq!(stats.event_count(OF, None, &by(player)), 0);
+        }
         // in the phase and rotation they were played in
         let in_break = StatsFilter::new(Some(PhaseEnum::Break), Some(0), None);
         assert_eq!(stats.event_count(FB, None, &in_break), 3);
@@ -525,8 +651,9 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Negative),
+            act(B, t.oh1, Positive),
             opp(OF),
-            fb(t.setter),
+            fb(),
             opp(OF),
             act(A, t.oh1, Perfect),
         ]);
@@ -546,24 +673,24 @@ mod tests {
         let cases = [
             // after our serve
             (
-                t.serving(vec![t.serve(Negative), opp(OF), act(A, t.oh1, Perfect)]),
+                t.serving(vec![
+                    t.serve(Negative),
+                    act(B, t.oh1, Positive),
+                    opp(OF),
+                    act(A, t.oh1, Perfect),
+                ]),
                 PhaseEnum::Break,
             ),
             // after their reception came back and we sent a freeball
             (
-                t.serving(vec![
-                    t.serve(Over),
-                    fb(t.setter),
-                    opp(OF),
-                    act(A, t.oh1, Perfect),
-                ]),
+                t.serving(vec![t.serve(Over), fb(), opp(OF), act(A, t.oh1, Perfect)]),
                 PhaseEnum::Break,
             ),
             // in side out, after they dug our attack
             (
                 t.receiving(vec![
                     act(P, t.libero, Perfect),
-                    act(A, t.opposite, Negative),
+                    act(A, t.opposite, Positive),
                     opp(OF),
                     act(A, t.oh1, Perfect),
                 ]),
@@ -617,7 +744,7 @@ mod tests {
         let snapshot = t.serving(vec![
             t.serve(Negative),
             act(D, t.libero, Positive),
-            act(A, t.oh1, Negative),
+            act(A, t.oh1, Positive),
             opp(OF),
             act(A, t.oh1, Perfect),
         ]);
@@ -638,21 +765,24 @@ mod tests {
     }
 
     /// After our freeball the ball is theirs: an attack of ours coming
-    /// straight after it (their first touch came over) isn't built by us,
-    /// as after their dig of our attack. The dig of their attack counts.
+    /// straight after it (their attack and our dig not scouted) is built by
+    /// us all the same, a counter-attack. The dig of their attack counts.
     #[test]
     fn after_our_freeball_as_after_our_attack_they_dug() {
         let t = Team::new();
         let snapshot = t.receiving(vec![
             act(P, t.libero, Negative),
-            fb(t.setter),
+            fb(),
             act(A, t.oh1, Perfect),
         ]);
-        assert_eq!(snapshot.stats.attacks.count(|_| true), 0);
+        let attacks: Vec<_> = snapshot.stats.attacks.iter(|_| true).collect();
+        assert_eq!(attacks.len(), 1);
+        assert_eq!(attacks[0].0.prev_type, FB);
+        assert!(attacks[0].0.is_counter_attack());
         assert_eq!(snapshot.stats.event_count(A, Some(Perfect), &all()), 1);
         let snapshot = t.receiving(vec![
             act(P, t.libero, Negative),
-            fb(t.setter),
+            fb(),
             act(D, t.libero, Positive),
             act(A, t.oh1, Perfect),
         ]);
@@ -675,7 +805,7 @@ mod tests {
         for eval in [Perfect, Positive, Exclamative, Negative] {
             let snapshot = t.receiving(vec![
                 act(P, t.libero, eval),
-                fb(t.setter),
+                fb(),
                 opp(OF),
                 act(A, t.oh1, Perfect),
             ]);
@@ -709,7 +839,13 @@ mod tests {
     #[test]
     fn freeballs_in_break_are_not_first_rallies() {
         let t = Team::new();
-        let snapshot = t.serving(vec![t.serve(Negative), opp(OF), fb(t.setter), opp(OS)]);
+        let snapshot = t.serving(vec![
+            t.serve(Negative),
+            act(B, t.oh1, Positive),
+            opp(OF),
+            fb(),
+            opp(OS),
+        ]);
         assert!(snapshot.stats.first_rallies(None, &all()).is_none());
     }
 
@@ -751,13 +887,14 @@ mod tests {
                 "our attack on their overpass",
                 vec![act(A, t.oh1, Negative), act(A, t.mb2, Perfect)],
             ),
-            (
-                "our freeball back, their error",
-                vec![fb(t.setter), opp(OE)],
-            ),
+            ("our freeball back, their error", vec![fb(), opp(OE)]),
         ];
         for (case, after) in cases {
-            let events = [vec![t.serve(Negative), opp(OF)], after].concat();
+            let events = [
+                vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)],
+                after,
+            ]
+            .concat();
             let snapshot = t.serving(events);
             assert_eq!(snapshot.score_us, 1, "{case}");
             assert_eq!(exploited(&snapshot), vec![true], "{case}");
@@ -797,7 +934,11 @@ mod tests {
             ),
         ];
         for (case, after) in cases {
-            let events = [vec![t.serve(Negative), opp(OF)], after].concat();
+            let events = [
+                vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)],
+                after,
+            ]
+            .concat();
             let snapshot = t.serving(events);
             assert_eq!(exploited(&snapshot), vec![false], "{case}");
             assert_eq!(
@@ -815,8 +956,9 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Negative),
+            act(B, t.oh1, Positive),
             opp(OF),
-            act(A, t.oh1, Negative),
+            act(A, t.oh1, Positive),
             opp(OF),
             act(A, t.oh1, Perfect),
         ]);
@@ -840,6 +982,7 @@ mod tests {
             act(A, t.oh1, Perfect),
             // break: outside hitter 1 serves, in the new rotation
             act(S, t.oh1, Negative),
+            act(D, t.libero, Over),
             opp(OF),
         ]);
         let stats = &snapshot.stats;
@@ -859,8 +1002,18 @@ mod tests {
     #[test]
     fn freeball_exploitation_merges() {
         let t = Team::new();
-        let won = t.serving(vec![t.serve(Negative), opp(OF), act(A, t.oh1, Perfect)]);
-        let lost = t.serving(vec![t.serve(Negative), opp(OF), opp(OS)]);
+        let won = t.serving(vec![
+            t.serve(Negative),
+            act(B, t.oh1, Positive),
+            opp(OF),
+            act(A, t.oh1, Perfect),
+        ]);
+        let lost = t.serving(vec![
+            t.serve(Negative),
+            act(B, t.oh1, Positive),
+            opp(OF),
+            opp(OS),
+        ]);
         let mut stats = won.stats.clone();
         stats.merge(&lost.stats);
         assert_eq!(stats.freeball_exploitation(&all()), Some((50.0, 2, 1)));
@@ -892,11 +1045,12 @@ mod tests {
             TeamSideEnum::Us,
             vec![
                 t.serve(Negative),
+                act(B, t.oh1, Positive),
                 opp(OF),
                 act(A, t.oh1, Perfect),
                 t.serve(Negative),
                 act(D, t.libero, Positive),
-                fb(t.setter),
+                fb(),
                 opp(OF),
                 act(A, t.oh1, Negative),
                 act(D, t.libero, Positive),

@@ -1,7 +1,12 @@
 use crate::{
     constants::LEGACY_MAX_SUBSTITUTIONS,
     errors::AppError,
-    shapes::{enums::TeamSideEnum, set::SetEntry, snapshot::Snapshot, team::TeamEntry},
+    shapes::{
+        enums::TeamSideEnum,
+        set::{ReplayIssue, SetEntry},
+        snapshot::Snapshot,
+        team::TeamEntry,
+    },
     util::sanitize_filename,
 };
 use chrono::{DateTime, FixedOffset};
@@ -57,6 +62,13 @@ impl MatchEntry {
             date.format("%Y-%m-%d"),
             sanitize_filename(opponent)
         )
+    }
+
+    /// The first event of its sets that doesn't replay, if any.
+    pub fn replay_issue(&self) -> Option<ReplayIssue> {
+        self.sets
+            .iter()
+            .find_map(|s| s.replay_issue(self.max_substitutions))
     }
 
     pub fn get_status(&self) -> Result<MatchStatus, AppError> {

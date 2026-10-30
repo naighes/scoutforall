@@ -439,13 +439,18 @@ fn stats_groups(labels: &Labels) -> Vec<Group> {
 /// - block: points, touches;
 /// - defense: total, positiveness;
 /// - faults, freeballs given (the ones received are in `freeballs_table`),
-///   opponent errors: they have no player, a player row shows none.
+///   opponent errors: the freeballs and the opponent errors are team
+///   events, a player row shows none.
 fn stats_values(stats: &Stats, filter: &StatsFilter) -> Vec<String> {
     use EvalEnum::*;
     use EventTypeEnum::*;
     let count = |event_type, eval| fmt_count(stats.event_count(event_type, eval, filter));
     let pct = |event_type, eval| fmt_num(stats.event_percentage(event_type, eval, filter));
     let metric = |event_type, metric| fmt_num(stats.metric_percentage(event_type, metric, filter));
+    let team_count = |event_type| match filter.player {
+        Some(_) => "-".to_string(),
+        None => count(event_type, None),
+    };
     let break_filter = StatsFilter {
         phase: Some(PhaseEnum::Break),
         ..*filter
@@ -476,11 +481,8 @@ fn stats_values(stats: &Stats, filter: &StatsFilter) -> Vec<String> {
         count(D, None),
         metric(D, Metric::Positive),
         count(F, None),
-        count(FB, None),
-        match filter.player {
-            Some(_) => "-".to_string(),
-            None => count(OE, None),
-        },
+        team_count(FB),
+        team_count(OE),
     ]
 }
 

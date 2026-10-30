@@ -773,6 +773,7 @@ private val rallyEvents = mapOf(
     EventTypeEnum.OS to (R.drawable.ic_their_point to R.string.their_point),
     EventTypeEnum.OE to (R.drawable.ic_their_error to R.string.their_error),
     EventTypeEnum.OF to (R.drawable.ic_their_freeball to R.string.their_freeball),
+    EventTypeEnum.FB to (R.drawable.ic_our_freeball to R.string.our_freeball),
     EventTypeEnum.F to (R.drawable.ic_fault to R.string.fault),
 )
 

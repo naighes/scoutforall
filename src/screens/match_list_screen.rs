@@ -467,7 +467,14 @@ impl<
                 actions.push(Sba::Simple(ScreenActionEnum::MatchStats));
                 actions.push(Sba::Simple(ScreenActionEnum::PrintReport));
             }
-            Some(Err(_)) => actions.push(Sba::Simple(ScreenActionEnum::Export)),
+            Some(Err(unreadable)) => {
+                if unreadable.reason.is_some() {
+                    actions.push(Sba::Redacted(ScreenActionEnum::Select, |_| {
+                        current_labels().why.to_string()
+                    }));
+                }
+                actions.push(Sba::Simple(ScreenActionEnum::Export));
+            }
             None => {}
         }
         if self.team.players.len() >= 6 {
@@ -497,6 +504,15 @@ impl<
     }
 
     fn handle_enter_key(&mut self) -> AppAction {
+        // an unreadable match: why, e.g. a set this version doesn't replay
+        if let Some(Err(unreadable)) = self.get_selected() {
+            let reason = unreadable
+                .reason
+                .clone()
+                .unwrap_or_else(|| current_labels().domain.unreadable_match.to_string());
+            self.notify_message.set_error(reason);
+            return AppAction::None;
+        }
         let selected = self.get_selected_match().map(|(m, s)| (m.clone(), s));
         if let Some((match_entry, status)) = selected {
             match next_set(status, &match_entry.team) {
@@ -566,14 +582,19 @@ impl<
 }
 
 /// The matches with their status: a match whose sets don't replay is
-/// unreadable.
+/// unreadable, with the first event that doesn't.
 fn with_status(matches: Vec<Listed<MatchEntry>>) -> Vec<Listed<(MatchEntry, MatchStatus)>> {
     matches
         .into_iter()
         .map(|m| {
             m.and_then(|m| match m.get_status() {
                 Ok(status) => Ok((m, status)),
-                Err(_) => Err(Unreadable { id: m.id }),
+                Err(_) => Err(Unreadable {
+                    reason: m
+                        .replay_issue()
+                        .map(|issue| issue.describe(current_labels().domain)),
+                    id: m.id,
+                }),
             })
         })
         .collect()

@@ -263,12 +263,17 @@ impl Snapshot {
     }
 
     fn player_issue(&self, event: &EventEntry) -> Option<String> {
-        match (event.event_type.requires_player(), event.player) {
-            (true, None) => Some("missing player".to_string()),
-            (true, Some(player)) if !self.can_play(event.event_type, &player) => {
+        let event_type = event.event_type;
+        match (
+            event_type.requires_player(),
+            event_type.accepts_player(),
+            event.player,
+        ) {
+            (true, _, None) => Some("missing player".to_string()),
+            (_, true, Some(player)) if !self.can_play(event_type, &player) => {
                 Some(format!("player {player} can't play it"))
             }
-            (false, Some(_)) => Some("unexpected player".to_string()),
+            (_, false, Some(_)) => Some("unexpected player".to_string()),
             _ => None,
         }
     }
@@ -509,27 +514,6 @@ impl Snapshot {
         }
     }
 
-    /// Whether an attack after this event was built by us: after a
-    /// reception or a dig keeping the ball on our side (`#`, `+`, `!`, `-`),
-    /// after their reception coming straight back to us (serve `/`), after
-    /// their freeball (`OF`), after an attack or block of ours they couldn't
-    /// counter (`+`, we play the ball again), or after an attack of ours
-    /// blocked but covered (`!`). An attack after anything else (e.g. after
-    /// an overpass of ours) still counts among the attacks, but not in the
-    /// distribution and the counter-attacks.
-    fn is_attack_setup(prev_type: EventTypeEnum, prev_eval: Option<EvalEnum>) -> bool {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        matches!(
-            (prev_type, prev_eval),
-            (D | P, Some(Perfect | Positive | Exclamative | Negative))
-                | (S, Some(Over))
-                | (OF, None)
-                | (A | B, Some(Positive))
-                | (A, Some(Exclamative))
-        )
-    }
-
     /// Collects the statistics of an event, in the phase and rotation it was
     /// played in: called before the event updates the lineup, and with the
     /// event before it still in `last_event`.
@@ -546,7 +530,8 @@ impl Snapshot {
         };
         // every event of the rally: an action missing its evaluation can't
         // be scored, and the substitutions and libero and setter changes
-        // aren't part of the rally
+        // aren't part of the rally; the player only of the events requiring
+        // one (our freeball named it once)
         let skip = matches!(event.event_type, R | CL | CS)
             || (event.event_type.requires_evaluation() && event.eval.is_none());
         if !skip {
@@ -554,7 +539,7 @@ impl Snapshot {
                 event_type: event.event_type,
                 phase,
                 rotation,
-                player: event.player,
+                player: event.player.filter(|_| event.event_type.requires_player()),
                 zone,
                 eval: event.eval,
             });
@@ -566,16 +551,17 @@ impl Snapshot {
                 winner,
             });
         }
-        // the attacks built by us, for the distribution and the
-        // counter-attacks: they need the zone of the attack
+        // the attacks, for the distribution and the counter-attacks: they
+        // need the zone of the attack. Every attack of ours is built by us:
+        // with the ball on their side before it, their attack and our dig or
+        // block weren't scouted
         if let (A, Some(player), Some(zone), Some(eval), Some(prev)) = (
             event.event_type,
             event.player,
             zone,
             event.eval,
             &self.last_event,
-        ) && Self::is_attack_setup(prev.event_type, prev.eval)
-        {
+        ) {
             self.stats.attacks.add(AttackKey {
                 phase,
                 rotation,
@@ -738,21 +724,28 @@ impl Snapshot {
             // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, CS
             //
             // the ball on our side, to play on our second or third touch:
-            // our attack or our freeball (`FB`); on their side: their
-            // freeball (`OF`) besides their attack. Never a freeball on a
-            // first touch: our reception or dig going straight over is `/`.
+            // our attack or our freeball (`FB`). Never a freeball on a first
+            // touch: our reception or dig going straight over is `/`.
+            //
+            // on their side, they attack (our dig or block comes next) or
+            // they don't: after our attack or block `+` we play the ball
+            // again, their freeball (`OF`) optional; after our serve `/`
+            // their reception came back, not a freeball; after our serve
+            // `+`, `!` or `-`, our attack or block `-` they attack, no
+            // freeball. Our attack can still come when their attack and our
+            // dig or block weren't scouted (our serve, attack `-`...).
             ((OS, None), serve_them.clone()),
             ((OE, None), serve_us.clone()),
             ((B, Some(Error)), serve_them.clone()),
             ((B, Some(Over)), serve_them.clone()),
             ((B, Some(Perfect)), serve_us.clone()),
-            ((B, Some(Positive)), vec![OE, F, A, FB]),
-            ((B, Some(Negative)), vec![OS, OE, F, A, D, B, OF]),
+            ((B, Some(Positive)), vec![OE, F, A, FB, OF]),
+            ((B, Some(Negative)), vec![OS, OE, F, A, D, B]),
             ((A, Some(Error)), serve_them.clone()),
             ((A, Some(Over)), serve_them.clone()),
-            ((A, Some(Negative)), vec![OS, OE, F, A, D, B, OF]),
+            ((A, Some(Negative)), vec![OS, OE, F, A, D, B]),
             ((A, Some(Perfect)), serve_us.clone()),
-            ((A, Some(Positive)), vec![OE, F, A, FB]),
+            ((A, Some(Positive)), vec![OE, F, A, FB, OF]),
             ((A, Some(Exclamative)), vec![OE, F, A, FB]),
             ((D, Some(Error)), serve_them.clone()),
             ((D, Some(Over)), vec![OS, OE, F, A, D, B, OF]),
@@ -769,11 +762,12 @@ impl Snapshot {
             ((P, Some(Perfect)), vec![OE, F, A, FB]),
             ((S, Some(Error)), serve_them.clone()),
             ((S, Some(Perfect)), serve_us.clone()),
-            ((S, Some(Positive)), vec![OS, OE, F, D, B, OF]),
+            ((S, Some(Positive)), vec![OS, OE, F, A, D, B]),
+            ((S, Some(Exclamative)), vec![OS, OE, F, A, D, B]),
             ((S, Some(Over)), vec![OE, A, F, FB]),
-            ((S, Some(Negative)), vec![OS, OE, F, D, B, OF]),
-            // our freeball: as after our attack they dig (`A-`), and they
-            // can send another one back
+            ((S, Some(Negative)), vec![OS, OE, F, A, D, B]),
+            // our freeball, our reception or dig going straight over: they
+            // attack, or mess it up and send a freeball back
             ((FB, None), vec![OS, OE, F, A, D, B, OF]),
             // their freeball isn't a dig of ours, but what comes next is the
             // same as after one keeping the ball, and their point when it

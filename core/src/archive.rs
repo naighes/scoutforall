@@ -303,6 +303,10 @@ pub async fn import_match(
         (true, true) => Err(message(labels.match_already_exists)),
         (true, false) => Ok(()),
     }?;
+    // a set this version doesn't replay: nothing is written
+    if let Some(issue) = archived.replay_issue() {
+        return Err(message(&issue.describe(labels)));
+    }
     let roster = roster_for(&archived, team);
     let m = match_writer
         .create(

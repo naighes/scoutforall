@@ -170,12 +170,17 @@ mod tests {
     #[test]
     fn a_freeball_crosses_the_net() {
         let t = Team::new();
-        let events = vec![act(P, t.oh1, Positive), ev(FB, Some(t.oh1), None)];
+        let events = vec![act(P, t.oh1, Positive), ev(FB, None, None)];
         assert_eq!(
             ball(&t.replay(Them, events)),
-            (Them, Some((FB, Some(t.oh1), None)))
+            (Them, Some((FB, None, None)))
         );
-        let events = vec![act(S, t.setter, Positive), ev(OF, None, None)];
+        // after our block touch they couldn't counter
+        let events = vec![
+            act(S, t.setter, Positive),
+            act(B, t.oh1, Positive),
+            ev(OF, None, None),
+        ];
         assert_eq!(ball(&t.replay(Us, events)), (Us, Some((OF, None, None))));
     }
 

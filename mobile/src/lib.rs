@@ -478,6 +478,8 @@ pub enum MatchListing {
     },
     Unreadable {
         folder: String,
+        /// why, when it's known: e.g. a set this version doesn't replay
+        reason: Option<String>,
     },
 }
 
@@ -1269,8 +1271,9 @@ pub struct Exploited {
     pub total: u32,
 }
 
-/// The freeballs we gave, the ones they gave us (none with a player:
-/// theirs have none) and how many of these we exploited.
+/// The freeballs we gave, the ones they gave us and how many of these we
+/// exploited: team events, with a player none given and the others not
+/// told.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct FreeballStats {
     pub given: u32,
@@ -2241,9 +2244,15 @@ impl Scout4All {
                     lost: status.them_wins,
                     finished: status.match_finished,
                 },
-                Ok((Err(_), m)) => MatchListing::Unreadable { folder: m.id },
+                Ok((Err(_), m)) => MatchListing::Unreadable {
+                    reason: m
+                        .replay_issue()
+                        .map(|issue| issue.describe(self.language.labels())),
+                    folder: m.id,
+                },
                 Err(unreadable) => MatchListing::Unreadable {
                     folder: unreadable.id,
+                    reason: unreadable.reason,
                 },
             })
             .collect())
@@ -3713,7 +3722,8 @@ mod tests {
                     finished: false,
                 },
                 MatchListing::Unreadable {
-                    folder: "not-a-match".into()
+                    folder: "not-a-match".into(),
+                    reason: None,
                 },
             ]
         );
@@ -4047,6 +4057,79 @@ mod tests {
                 .any(|t| t.chosen && t.value == TechniqueEnum::Serve(ServeTypeEnum::Spin))
         );
         assert_eq!(app.scouting(team, m).unwrap().state().events, vec![]);
+    }
+
+    /// A set this version doesn't replay, e.g. saved by a version whose
+    /// scouting allowed an event no more: the match is unreadable, and
+    /// tells why.
+    #[test]
+    fn a_match_whose_set_does_not_replay_tells_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        // their freeball after our serve `+`, as scouted up to v0.11
+        let set = dir.path().join(&team).join(&m).join("set_1.csv");
+        let mut rows = std::fs::read_to_string(&set).unwrap();
+        rows.push_str("2026-10-24T18:00:00Z,OF,,,\n");
+        std::fs::write(&set, rows).unwrap();
+        let listed = app.matches(team).unwrap();
+        assert_eq!(
+            listed,
+            vec![MatchListing::Unreadable {
+                folder: m,
+                reason: Some("set 1, row 2: OF after S+ isn't valid in this version".into()),
+            }]
+        );
+    }
+
+    /// Our serve `!`, their reception and attack, our dig: our freeball is
+    /// a team event, among the other events and not the player's, saved
+    /// with no player.
+    #[test]
+    fn our_freeball_is_a_team_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(
+            scouting
+                .available_evals()
+                .iter()
+                .any(|e| e.value == EvalEnum::Exclamative && e.symbol == "!")
+        );
+        scouting.choose_eval(EvalEnum::Exclamative).unwrap();
+        let state = scouting.state();
+        let digger = state.court.iter().find(|p| p.selectable).unwrap();
+        scouting.choose_player_first(digger.id.clone()).unwrap();
+        if scouting.state().step == ScoutingStep::Event {
+            scouting.choose_event(EventTypeEnum::D).unwrap();
+        }
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        for player in state.court.iter().filter(|p| p.selectable) {
+            let events = scouting.player_events(player.id.clone()).unwrap();
+            assert!(events.iter().all(|e| e.value != EventTypeEnum::FB));
+        }
+        assert!(
+            scouting
+                .other_events()
+                .iter()
+                .any(|e| e.value == EventTypeEnum::FB)
+        );
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::FB).unwrap(),
+            Progress::Saved
+        );
+        // the latest first
+        match scouting.state().events.as_slice() {
+            [freeball, ..] => {
+                assert_eq!(freeball.event, EventTypeEnum::FB);
+                assert_eq!(freeball.player, None);
+            }
+            other => unreachable!("expected the freeball, got {other:?}"),
+        }
     }
 
     #[test]
@@ -4717,7 +4800,7 @@ mod tests {
             vec![EditField::EventType, EditField::Eval, EditField::Technique]
         );
         assert_eq!(state.eval, Some(EvalEnum::Perfect));
-        assert_eq!(state.evals.len(), 5);
+        assert_eq!(state.evals.len(), 6);
         // the serve type the scouting preselected
         let chosen: Vec<String> = state
             .techniques

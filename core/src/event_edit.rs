@@ -173,6 +173,8 @@ impl EventEdit {
         let techniques = Self::techniques_of(&self.before, event_type, &self.event);
         let event = &mut self.event;
         event.event_type = event_type;
+        // our freeball named its player once: not another event
+        event.player = event.player.filter(|_| event_type.requires_player());
         event.eval = event
             .eval
             .filter(|e| evals.contains(e))

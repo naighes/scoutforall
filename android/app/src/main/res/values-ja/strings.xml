@@ -77,6 +77,7 @@
     <string name="their_point">相手の得点</string>
     <string name="their_error">相手のミス</string>
     <string name="their_freeball">相手のフリー</string>
+    <string name="our_freeball">味方のフリー</string>
     <string name="fault">反則</string>
     <string name="lineup">スタメン</string>
     <string name="substitution_short">交代</string>

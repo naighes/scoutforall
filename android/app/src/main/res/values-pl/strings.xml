@@ -77,6 +77,7 @@
     <string name="their_point">Punkt rywala</string>
     <string name="their_error">Błąd rywala</string>
     <string name="their_freeball">Wolna rywala</string>
+    <string name="our_freeball">Nasza wolna</string>
     <string name="fault">Błąd techniczny</string>
     <string name="lineup">Skład</string>
     <string name="substitution_short">Zmiana</string>

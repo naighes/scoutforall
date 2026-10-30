@@ -23,6 +23,9 @@ pub enum MatchError {
     MatchAlreadyExists(String),
     #[error("set outcome changed: {0}")]
     SetOutcomeChanged(String),
+    /// a set this version doesn't replay, why in the language of the app
+    #[error("set not valid: {0}")]
+    SetNotValid(String),
 }
 
 #[derive(Debug, Error)]

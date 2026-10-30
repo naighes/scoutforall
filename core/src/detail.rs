@@ -38,10 +38,12 @@ pub fn evaluations(event_type: EventTypeEnum) -> &'static [(EvalEnum, Tone)] {
     use Tone::*;
     match event_type {
         // their reception coming straight back (`/`) is as good as an ace
+        // `!` as their reception `!`, between the two
         S => &[
             (Perfect, Excellent),
             (Over, Excellent),
             (Positive, Good),
+            (Exclamative, Fair),
             (Negative, Poor),
             (Error, Bad),
         ],
@@ -198,12 +200,14 @@ impl Detail {
 }
 
 impl Freeballs {
+    /// Team events, ours and theirs: with a player, none given and the
+    /// others not told.
     fn of(stats: &Stats, filter: &StatsFilter) -> Self {
-        let theirs = filter.player.is_none();
+        let team = filter.player.is_none();
         Freeballs {
             given: stats.event_count(EventTypeEnum::FB, None, filter),
-            received: theirs.then(|| stats.event_count(EventTypeEnum::OF, None, filter)),
-            exploited: match theirs {
+            received: team.then(|| stats.event_count(EventTypeEnum::OF, None, filter)),
+            exploited: match team {
                 true => stats.freeball_exploitation(filter),
                 false => None,
             },

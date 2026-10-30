@@ -285,9 +285,7 @@ mod tests {
             (serve.event().eval, serve.event().technique),
             (Some(Over), float)
         );
-        // an evaluation of the attack only, and a set: ignored
-        serve.choose_eval(Exclamative);
-        assert_eq!(serve.event().eval, Some(Over));
+        // a set: ignored
         let set_type = edit(&set, 1).techniques().into_iter().flatten().next();
         serve.choose_technique(set_type);
         assert_eq!(serve.event().technique, float);
@@ -309,17 +307,10 @@ mod tests {
         // a reception can't come before our serve: ignored
         serve.choose_event_type(P);
         assert_eq!(serve.event().event_type, S);
-        // after our reception: an attack, a freeball, a fault
-        let mut attack = edit(&set, 1);
-        assert_eq!(attack.event_types(), vec![F, A, FB]);
-        // the freeball has no evaluation nor set
-        attack.choose_technique(attack.techniques().into_iter().flatten().next());
-        assert!(attack.event().technique.is_some());
-        attack.choose_event_type(FB);
-        assert_eq!(
-            (attack.event().eval, attack.event().technique),
-            (None, None)
-        );
+        // after our reception: an attack or a fault, events of a player;
+        // not our freeball, a team event
+        let attack = edit(&set, 1);
+        assert_eq!(attack.event_types(), vec![F, A]);
     }
 
     #[test]

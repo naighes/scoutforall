@@ -835,6 +835,9 @@ mod tests {
         writer.append_event(&m, 1, &float_serve(&p)).await.unwrap();
         assert_eq!(read_as_v0_5_0(&events_path(dir.path())).unwrap().len(), 3);
         assert_eq!(read_as_v0_4_3(&events_path(dir.path())).unwrap().len(), 3);
+        // their attack, our dig going over, their freeball
+        let dig = event(EventTypeEnum::D, p.libero, EvalEnum::Over, None);
+        writer.append_event(&m, 1, &dig).await.unwrap();
         writer
             .append_event(&m, 1, &freeball(EventTypeEnum::OF, None))
             .await
@@ -843,9 +846,9 @@ mod tests {
         assert!(read_as_v0_5_0(&events_path(dir.path())).is_err());
         // this version reads it, and the undo makes it readable again
         let (_, m) = load(dir.path()).await;
-        assert_eq!(m.sets[0].events.len(), 4);
+        assert_eq!(m.sets[0].events.len(), 5);
         writer.remove_last_event(&m, 1).await.unwrap();
-        assert_eq!(read_as_v0_5_0(&events_path(dir.path())).unwrap().len(), 3);
+        assert_eq!(read_as_v0_5_0(&events_path(dir.path())).unwrap().len(), 4);
     }
 
     /// The undo rewrites the file: the techniques stay, and the rows of

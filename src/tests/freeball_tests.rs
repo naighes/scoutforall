@@ -1,6 +1,6 @@
-//! The freeballs while scouting: ours (`x`, then the player sending it) and
-//! theirs (`X`, nothing else to choose), listed and accepted only where
-//! they can be, saved as events of their own, undone like the others.
+//! The freeballs while scouting: ours (`x`) and theirs (`X`), team events
+//! with nothing else to choose, listed and accepted only where they can be,
+//! saved as events of their own, undone like the others.
 
 #[cfg(test)]
 mod tests {
@@ -73,15 +73,11 @@ mod tests {
         ui.screen().contains(current_labels().choose_the_event)
     }
 
-    fn choosing_the_player(ui: &mut Ui) -> bool {
-        ui.screen().contains(current_labels().player_selection)
-    }
-
     // the rallies so far, by the keys typed: after "s=" (our serve error)
     // they serve, and the libero receives
 
     /// The ball on our side to play: our freeball, not theirs.
-    const BALL_OURS_TO_PLAY: [(&str, &str); 14] = [
+    const BALL_OURS_TO_PLAY: [(&str, &str); 12] = [
         ("s/", "their reception came back"),
         ("s=p7#", "reception #"),
         ("s=p7+", "reception +"),
@@ -91,24 +87,34 @@ mod tests {
         ("s-d7+", "dig +"),
         ("s-d7!", "dig !"),
         ("s-d7-", "dig -"),
-        ("s-d7+a2+", "attack +"),
         ("s-d7+a2!", "attack !"),
-        ("s-b2+", "block +"),
-        ("s-X", "their freeball"),
-        ("s-Xx1X", "their freeball, after ours"),
+        ("s-b2+X", "their freeball"),
+        ("s-b2+XxX", "their freeball, after ours"),
     ];
 
-    /// The ball on their side: their freeball, not ours.
-    const BALL_THEIRS: [(&str, &str); 9] = [
-        ("s+", "our serve +"),
-        ("s-", "our serve -"),
+    /// Our attack or block they couldn't counter: we play the ball again,
+    /// after their freeball or not (both freeballs).
+    const BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT: [(&str, &str); 2] =
+        [("s-d7+a2+", "attack +"), ("s-b2+", "block +")];
+
+    /// The ball on their side, sent over without an attack: their freeball,
+    /// not ours.
+    const BALL_THEIRS: [(&str, &str); 5] = [
         ("s=p7/", "our reception over"),
         ("s-d7/", "our dig over"),
+        ("s-d7+x", "our freeball"),
+        ("s-b2+Xx", "our freeball, after theirs"),
+        ("s=p7+x", "our freeball, after the reception"),
+    ];
+
+    /// The ball on their side, to attack: neither freeball (theirs would
+    /// make our serve `/`, our attack or block `+`).
+    const BALL_THEIRS_TO_ATTACK: [(&str, &str); 5] = [
+        ("s+", "our serve +"),
+        ("s!", "our serve !"),
+        ("s-", "our serve -"),
         ("s-d7+a2-", "our attack dug"),
         ("s-b2-", "block -"),
-        ("s-d7+x1", "our freeball"),
-        ("s-Xx1", "our freeball, after theirs"),
-        ("s=p7+x1", "our freeball, after the reception"),
     ];
 
     fn not_available(event: EventTypeEnum) -> String {
@@ -120,11 +126,13 @@ mod tests {
 
     // --- our freeball -------------------------------------------------------------
 
-    /// Wherever the ball is on our side to play, "x" asks who sent it, and
-    /// saves it with no evaluation.
+    /// Wherever the ball is on our side to play, "x" saves our freeball at
+    /// once: a team event, no player, no evaluation.
     #[tokio::test]
-    async fn our_freeball_asks_the_player() {
-        let cases = BALL_OURS_TO_PLAY;
+    async fn our_freeball_is_saved_at_once() {
+        let cases = BALL_OURS_TO_PLAY
+            .iter()
+            .chain(&BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT);
         for (before, case) in cases {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
@@ -133,15 +141,13 @@ mod tests {
             assert!(row.ends_with('x'), "{case}: {row}");
             let saved = saved_count(&ui);
             keys(&mut ui, "x").await;
-            assert!(choosing_the_player(&mut ui), "{case}: {}", ui.screen());
-            assert_eq!(saved_count(&ui), saved, "{case}: saved before the player");
-            // the libero too
-            keys(&mut ui, "7").await;
             assert!(choosing_the_event(&mut ui), "{case}: {}", ui.screen());
-            let (event, player, eval) = last_saved(&ui);
-            assert_eq!(event, "FB", "{case}");
-            assert!(!player.is_empty(), "{case}");
-            assert_eq!(eval, "", "{case}");
+            assert_eq!(saved_count(&ui), saved + 1, "{case}");
+            assert_eq!(
+                last_saved(&ui),
+                ("FB".to_string(), String::new(), String::new()),
+                "{case}"
+            );
             // the ball is theirs now: they can send it back
             assert!(
                 event_row(&mut ui, EventTypeEnum::OF).is_some(),
@@ -155,7 +161,7 @@ mod tests {
     /// isn't listed, and its key says so.
     #[tokio::test]
     async fn no_freeball_of_ours_where_the_ball_is_theirs() {
-        let cases = BALL_THEIRS;
+        let cases = BALL_THEIRS.iter().chain(&BALL_THEIRS_TO_ATTACK);
         for (before, case) in cases {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
@@ -187,11 +193,13 @@ mod tests {
 
     // --- their freeball -----------------------------------------------------------
 
-    /// Wherever the ball is on their side, "X" saves their freeball at
-    /// once: no player, no evaluation.
+    /// Wherever they can send it, "X" saves their freeball at once: no
+    /// player, no evaluation.
     #[tokio::test]
     async fn their_freeball_is_saved_at_once() {
-        let cases = BALL_THEIRS;
+        let cases = BALL_THEIRS
+            .iter()
+            .chain(&BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT);
         for (before, case) in cases {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
@@ -216,9 +224,10 @@ mod tests {
         }
     }
 
+    /// Where the ball is ours to play, or theirs to attack.
     #[tokio::test]
-    async fn no_freeball_of_theirs_where_the_ball_is_ours() {
-        let cases = BALL_OURS_TO_PLAY;
+    async fn no_freeball_of_theirs_where_the_ball_is_ours_or_they_attack() {
+        let cases = BALL_OURS_TO_PLAY.iter().chain(&BALL_THEIRS_TO_ATTACK);
         for (before, case) in cases {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
@@ -239,7 +248,7 @@ mod tests {
     #[tokio::test]
     async fn super_chosen_for_the_attack_on_their_freeball() {
         let mut ui = scouting().await;
-        keys(&mut ui, "s-Xa2").await;
+        keys(&mut ui, "s-b2+Xa2").await;
         let set_type = current_labels().set_type;
         assert!(ui.screen().contains(set_type), "{}", ui.screen());
         let selected = ui
@@ -266,7 +275,7 @@ mod tests {
     #[tokio::test]
     async fn their_freeball_untouched_is_their_point() {
         let mut ui = scouting().await;
-        keys(&mut ui, "s-X").await;
+        keys(&mut ui, "s-b2+X").await;
         ui.press(KeyCode::Char('S')).await;
         assert_eq!(last_saved(&ui).0, "OS");
         // they serve now: our reception
@@ -279,18 +288,17 @@ mod tests {
 
     // --- undo and the latest events -----------------------------------------------
 
-    /// The undo of our freeball goes back to the player choice, of theirs
-    /// to the event choice.
+    /// The undo of either freeball goes back to the event choice.
     #[tokio::test]
     async fn undo_of_the_freeballs() {
         let mut ui = scouting().await;
-        keys(&mut ui, "s-d7+x1").await;
+        keys(&mut ui, "s-d7+x").await;
         let saved = saved_count(&ui);
         keys(&mut ui, "U").await;
-        assert!(choosing_the_player(&mut ui), "{}", ui.screen());
+        assert!(choosing_the_event(&mut ui), "{}", ui.screen());
         assert_eq!(saved_count(&ui), saved - 1);
-        // another player sent it
-        keys(&mut ui, "2").await;
+        assert!(event_row(&mut ui, EventTypeEnum::FB).is_some());
+        keys(&mut ui, "x").await;
         assert_eq!(last_saved(&ui).0, "FB");
         assert_eq!(saved_count(&ui), saved);
         keys(&mut ui, "X").await;
@@ -298,25 +306,20 @@ mod tests {
         assert!(choosing_the_event(&mut ui), "{}", ui.screen());
         assert_eq!(saved_count(&ui), saved);
         assert!(event_row(&mut ui, EventTypeEnum::OF).is_some());
-        // back to the event choice from the player choice
-        let mut ui = scouting().await;
-        keys(&mut ui, "s-d7+x").await;
-        keys(&mut ui, "U").await;
-        assert!(choosing_the_event(&mut ui), "{}", ui.screen());
-        assert!(event_row(&mut ui, EventTypeEnum::FB).is_some());
     }
 
     #[tokio::test]
     async fn latest_events_show_the_freeballs() {
         let mut ui = scouting().await;
-        keys(&mut ui, "s-d7+x2X").await;
+        keys(&mut ui, "s-d7+xX").await;
         let labels = current_labels();
         let lines = ui.lines();
-        let ours = lines
-            .iter()
-            .find(|l| l.contains(labels.domain.freeball) && l.contains("Bea"))
-            .unwrap_or_else(|| panic!("{}", ui.screen()));
-        assert!(!ours.contains(labels.domain.opponent_freeball), "{ours}");
+        assert!(
+            lines.iter().any(|l| l.contains(labels.domain.freeball)
+                && !l.contains(labels.domain.opponent_freeball)),
+            "{}",
+            ui.screen()
+        );
         assert!(
             lines
                 .iter()
@@ -346,19 +349,19 @@ mod tests {
             ui.press(KeyCode::Esc).await;
             assert!(choosing_the_event(&mut ui), "{}", ui.screen());
         }
-        keys(&mut ui, "s-").await;
+        keys(&mut ui, "s-b2+").await;
         let row = event_row(&mut ui, EventTypeEnum::OF).unwrap();
         assert!(row.ends_with("Shift-z"), "{row}");
         // the old key is gone
         keys(&mut ui, "X").await;
-        assert_eq!(saved_count(&ui), 1);
+        assert_eq!(saved_count(&ui), 2);
         keys(&mut ui, "Z").await;
         assert_eq!(last_saved(&ui).0, "OF");
         let row = event_row(&mut ui, EventTypeEnum::FB).unwrap();
         assert!(row.ends_with('z'), "{row}");
         keys(&mut ui, "x").await;
         assert!(choosing_the_event(&mut ui), "{}", ui.screen());
-        keys(&mut ui, "z1").await;
+        keys(&mut ui, "z").await;
         assert_eq!(last_saved(&ui).0, "FB");
     }
 
@@ -392,7 +395,7 @@ mod tests {
         keys(&mut ui, "sx").await;
         let (event, _, eval) = last_saved(&ui);
         assert_eq!((event.as_str(), eval.as_str()), ("S", "+"));
-        keys(&mut ui, "d7#x1").await;
+        keys(&mut ui, "d7#x").await;
         assert_eq!(last_saved(&ui).0, "FB");
     }
 
@@ -417,22 +420,23 @@ mod tests {
             Some(SetTypeEnum::High.to_string().as_str()),
             "{attack}"
         );
-        keys(&mut ui, "x1").await;
+        keys(&mut ui, "x").await;
         assert_eq!(last_saved(&ui).0, "FB");
     }
 
     // --- the statistics -------------------------------------------------------------
 
-    /// The match statistics list the freeballs: the ones given, by player
-    /// too, the ones received and how many of these we exploited.
+    /// The match statistics list the freeballs: the ones given, the ones
+    /// received and how many of these we exploited; team events, none by
+    /// player.
     #[tokio::test]
     async fn match_stats_show_the_freeballs() {
         let mut ui = scouting().await;
         // their freeball exploited: our kill
-        keys(&mut ui, "s-Xa2#").await;
+        keys(&mut ui, "s-b2+Xa2#").await;
         // their freeball not exploited: they dig and attack again; then our
         // freeball, and their point
-        keys(&mut ui, "s-Xa2-d7+x1S").await;
+        keys(&mut ui, "s-b2+Xa2-d7+xS").await;
         let labels = current_labels();
         while !ui.screen().contains(labels.match_list) {
             ui.press(KeyCode::Esc).await;
@@ -470,10 +474,9 @@ mod tests {
             "{}",
             ui.screen()
         );
-        // with a player: only the ones given, theirs have no player. Anna
-        // sent it, Bea didn't
+        // with a player: none given, the others not shown
         ui.press(KeyCode::Tab).await;
-        for (player, given) in [("Anna", "1"), ("Bea", "-")] {
+        for (player, given) in [("Anna", "-"), ("Bea", "-")] {
             for _ in 0..8 {
                 // the player selected: the highlighted one in the list
                 let selected = ui
