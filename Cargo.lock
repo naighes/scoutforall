@@ -3999,6 +3999,7 @@ dependencies = [
  "chrono",
  "csv",
  "dirs 7.0.0",
+ "encoding_rs",
  "futures",
  "regex",
  "reqwest",
