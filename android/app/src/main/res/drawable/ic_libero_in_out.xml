@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The libero out or in: its jersey, going off court or coming back. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group android:scaleX="0.7" android:scaleY="0.7" android:pivotX="12" android:pivotY="0">
+        <path android:fillColor="#FF000000" android:pathData="M8.5,3L3.5,5.5L1.5,10.5L5.5,12V21H18.5V12L22.5,10.5L20.5,5.5L15.5,3Q12,6 8.5,3z" />
+    </group>
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M5,19.5H19M7.5,17L5,19.5L7.5,22M16.5,17L19,19.5L16.5,22" />
+</vector>

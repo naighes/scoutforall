@@ -767,10 +767,11 @@ private fun Title(text: String) = Text(
 private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /** The changes of the lineup, rare and at stopped play, each with its icon
- * and a short name. */
+ * and a short name; the libero out or in by its own, saying which. */
 private val lineupChanges = mapOf(
     EventTypeEnum.R to (R.drawable.ic_substitution to R.string.substitution_short),
     EventTypeEnum.CL to (R.drawable.ic_libero to R.string.libero),
+    EventTypeEnum.LR to (R.drawable.ic_libero_in_out to null),
     EventTypeEnum.CS to (R.drawable.ic_setter to R.string.setter_change_short),
 )
 
@@ -820,7 +821,7 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                         ) {
                             looks?.let { (icon, _) -> Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) }
                             Text(
-                                looks?.let { (_, name) -> stringResource(name) } ?: event.name,
+                                looks?.second?.let { stringResource(it) } ?: event.name.replaceFirstChar { it.uppercase() },
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                             )

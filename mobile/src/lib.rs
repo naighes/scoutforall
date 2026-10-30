@@ -1410,7 +1410,7 @@ impl Scouting {
                 .saturating_sub(u8::try_from(lineup.get_substitutions().len()).unwrap_or(u8::MAX)),
             step: session.step(),
             halfway: session.is_halfway(),
-            event: session.event().map(|e| self.event_choice(e)),
+            event: session.event().map(|e| self.event_choice(&session, e)),
             player: session
                 .player()
                 .and_then(|id| team.find_player(id))
@@ -1433,31 +1433,33 @@ impl Scouting {
 
     /// The events that can follow.
     pub fn available_events(&self) -> Vec<EventChoice> {
-        self.session()
+        let session = self.session();
+        session
             .available_events()
             .iter()
-            .map(|e| self.event_choice(*e))
+            .map(|e| self.event_choice(&session, *e))
             .collect()
     }
 
     /// The events the player can play now, before an event is chosen.
     pub fn player_events(&self, player: String) -> Result<Vec<EventChoice>, MobileError> {
         let player = parse_id(&player)?;
-        Ok(self
-            .session()
+        let session = self.session();
+        Ok(session
             .player_events(&player)
             .into_iter()
-            .map(|e| self.event_choice(e))
+            .map(|e| self.event_choice(&session, e))
             .collect())
     }
 
     /// The events that come before their player: the opponent's, the
     /// faults, the changes of the lineup.
     pub fn other_events(&self) -> Vec<EventChoice> {
-        self.session()
+        let session = self.session();
+        session
             .other_events()
             .into_iter()
-            .map(|e| self.event_choice(e))
+            .map(|e| self.event_choice(&session, e))
             .collect()
     }
 
@@ -2034,10 +2036,15 @@ impl Scouting {
             .collect()
     }
 
-    fn event_choice(&self, event: EventTypeEnum) -> EventChoice {
+    /// The event with its name, the libero replacement saying what it does
+    /// now: out, or back in. Of the session already locked by the caller.
+    fn event_choice(&self, session: &ScoutingSession, event: EventTypeEnum) -> EventChoice {
         EventChoice {
             value: event,
-            name: event.friendly_name(self.labels).to_string(),
+            name: session
+                .snapshot()
+                .next_event_name(event, self.labels)
+                .to_string(),
         }
     }
 
@@ -4186,6 +4193,48 @@ mod tests {
             }
             other => unreachable!("expected the fault, got {other:?}"),
         }
+    }
+
+    /// Before the serve the libero goes out, then back in: the event says
+    /// which, saved at once; never within the rally.
+    #[test]
+    fn the_libero_goes_out_and_back_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let name = |scouting: &Scouting| {
+            scouting
+                .other_events()
+                .into_iter()
+                .find(|e| e.value == EventTypeEnum::LR)
+                .map(|e| e.name)
+        };
+        let en = labels(LanguageEnum::En);
+        assert_eq!(name(&scouting).as_deref(), Some(en.libero_out));
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::LR).unwrap(),
+            Progress::Saved
+        );
+        assert_eq!(name(&scouting).as_deref(), Some(en.libero_in));
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::LR).unwrap(),
+            Progress::Saved
+        );
+        assert_eq!(name(&scouting).as_deref(), Some(en.libero_out));
+        match scouting.state().events.as_slice() {
+            [first, second] => {
+                assert_eq!(
+                    (first.event, second.event),
+                    (EventTypeEnum::LR, EventTypeEnum::LR)
+                );
+                assert_eq!((first.player.clone(), second.player.clone()), (None, None));
+            }
+            other => unreachable!("expected the libero out and in, got {other:?}"),
+        }
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        assert_eq!(name(&scouting), None);
+        assert!(scouting.choose_event(EventTypeEnum::LR).is_err());
     }
 
     #[test]
