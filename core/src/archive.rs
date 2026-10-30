@@ -210,6 +210,7 @@ pub async fn import_team(
             year: team.year,
             classification: team.classification,
             gender: team.gender,
+            country: team.country,
             players: team.players,
         })
         .await

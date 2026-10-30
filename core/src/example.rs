@@ -9,6 +9,7 @@ use crate::{
     providers::team_writer::{TeamInput, TeamWriter},
     set_start::SetStartForm,
     shapes::{
+        country::CountryCode,
         enums::{GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
@@ -44,6 +45,7 @@ pub fn example_team(labels: &Labels, year: u16) -> TeamInput {
         year,
         classification: Some(TeamClassificationEnum::TopInternational),
         gender: Some(GenderEnum::Women),
+        country: CountryCode::known("IT"),
         players: PLAYERS
             .iter()
             .map(|(number, name, role)| PlayerEntry {

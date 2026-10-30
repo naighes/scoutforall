@@ -130,6 +130,7 @@ mod tests {
             name: "My Team".to_owned(),
             classification: Some(TeamClassificationEnum::HighNational),
             gender: Some(GenderEnum::Men),
+            country: None,
             players: vec![
                 PlayerEntry {
                     id: setter,

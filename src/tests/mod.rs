@@ -1,4 +1,5 @@
 mod archive_tests;
+mod country_tests;
 mod edit_match_tests;
 mod edit_set_events_tests;
 mod form_navigation_tests;

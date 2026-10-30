@@ -52,6 +52,7 @@ mod tests {
             id: Uuid::new_v4(),
             classification: None,
             gender: None,
+            country: None,
         }
     }
 

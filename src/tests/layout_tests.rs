@@ -29,7 +29,7 @@ mod tests {
     const SCOUTED: &str = "s#s#s=p7=s=p7#a2#";
 
     /// The keys typed, a char each: `\n` is Enter, `\x1b` Esc, `\x02` F2,
-    /// `\x03` F3, `\t` Tab, `>` the right arrow.
+    /// `\x03` F3, `\t` Tab, `>` the right arrow, `↓` the down arrow.
     fn code(c: char) -> KeyCode {
         match c {
             '\n' => KeyCode::Enter,
@@ -38,6 +38,7 @@ mod tests {
             '\x03' => KeyCode::F(3),
             '\t' => KeyCode::Tab,
             '>' => KeyCode::Right,
+            '↓' => KeyCode::Down,
             c => KeyCode::Char(c),
         }
     }
@@ -53,6 +54,7 @@ mod tests {
             ("settings", true, "\x02".into()),
             ("settings shortcuts", true, "\x02\t".into()),
             ("report an issue", true, "\x02i".into()),
+            ("settings country", true, "\x02↓\n".into()),
             ("team details", true, "\n".into()),
             ("edit team", true, "\ne".into()),
             ("edit player", true, "\n\n".into()),
@@ -95,6 +97,34 @@ mod tests {
             ui.press(code(c)).await;
         }
         ui
+    }
+
+    /// Every field of the team form at every size, whichever is being
+    /// changed (it takes more lines).
+    #[tokio::test]
+    async fn the_team_form_shows_every_field_at_every_size() {
+        let labels = current_labels();
+        let fields = [
+            labels.name,
+            labels.team_classification,
+            labels.gender,
+            labels.country,
+            labels.year,
+        ];
+        let mut ui = open(true, "\ne").await;
+        for field in fields {
+            for (width, height) in SIZES {
+                ui.resize(width, height);
+                let screen = ui.screen();
+                for label in fields {
+                    assert!(
+                        screen.contains(label),
+                        "on {field} at {width}x{height}: {label} not shown\n{screen}"
+                    );
+                }
+            }
+            ui.press(KeyCode::Down).await;
+        }
     }
 
     #[tokio::test]

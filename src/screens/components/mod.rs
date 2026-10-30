@@ -1,4 +1,5 @@
 pub mod checkbox;
+pub mod country_picker;
 pub mod date_picker;
 pub mod form_fields;
 pub mod navigation_footer;

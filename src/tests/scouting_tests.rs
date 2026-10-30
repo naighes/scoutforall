@@ -184,6 +184,7 @@ mod tests {
             KeyCode::F(2),
             KeyCode::BackTab,
             KeyCode::Down,
+            KeyCode::Down,
             KeyCode::Char(' '),
             KeyCode::Char(' '),
             KeyCode::Esc,

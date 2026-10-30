@@ -130,7 +130,10 @@ impl<
                 },
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::New), _, _) => {
-                    AppAction::SwitchScreen(Box::new(EditTeamScreen::new(self.team_writer.clone())))
+                    AppAction::SwitchScreen(Box::new(EditTeamScreen::new(
+                        self.team_writer.clone(),
+                        self.settings.team_defaults.country,
+                    )))
                 }
                 (Some(ScreenActionEnum::Import), _, _) => {
                     let default_path = self.settings.get_default_path();

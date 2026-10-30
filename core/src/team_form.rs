@@ -6,6 +6,7 @@ use crate::{
     localization::Labels,
     providers::team_writer::TeamInput,
     shapes::{
+        country::CountryCode,
         enums::{GenderEnum, TeamClassificationEnum},
         team::TeamEntry,
     },
@@ -17,6 +18,7 @@ pub struct TeamForm {
     pub name: String,
     pub classification: Option<TeamClassificationEnum>,
     pub gender: Option<GenderEnum>,
+    pub country: Option<CountryCode>,
     pub year: String,
 }
 
@@ -25,6 +27,7 @@ pub enum TeamFormError {
     EmptyName,
     MissingClassification,
     MissingGender,
+    MissingCountry,
     /// not a number of 4 digits
     InvalidYear,
 }
@@ -36,6 +39,7 @@ impl TeamFormError {
             EmptyName => labels.name_cannot_be_empty,
             MissingClassification => labels.classification_is_required,
             MissingGender => labels.gender_is_required,
+            MissingCountry => labels.country_is_required,
             InvalidYear => labels.year_must_be_a_four_digit_number,
         }
         .to_string()
@@ -49,6 +53,7 @@ impl TeamForm {
             name: team.name.clone(),
             classification: team.classification,
             gender: team.gender,
+            country: team.country,
             year: team.year.to_string(),
         }
     }
@@ -59,28 +64,39 @@ impl TeamForm {
     pub fn validate(self, existing: Option<&TeamEntry>) -> Result<TeamInput, TeamFormError> {
         let name = self.name.trim().to_string();
         let year = parse_year(&self.year);
-        match (name.is_empty(), self.classification, self.gender, year) {
-            (true, _, _, _) => Err(TeamFormError::EmptyName),
-            (_, None, _, _) => Err(TeamFormError::MissingClassification),
-            (_, _, None, _) => Err(TeamFormError::MissingGender),
-            (_, _, _, None) => Err(TeamFormError::InvalidYear),
-            (false, Some(classification), Some(gender), Some(year)) => Ok(match existing {
-                Some(team) => TeamInput::Existing(TeamEntry {
-                    name,
-                    year,
-                    classification: Some(classification),
-                    gender: Some(gender),
-                    ..team.clone()
-                }),
-                None => TeamInput::New {
-                    id: None,
-                    name,
-                    year,
-                    classification: Some(classification),
-                    gender: Some(gender),
-                    players: vec![],
-                },
-            }),
+        match (
+            name.is_empty(),
+            self.classification,
+            self.gender,
+            self.country,
+            year,
+        ) {
+            (true, _, _, _, _) => Err(TeamFormError::EmptyName),
+            (_, None, _, _, _) => Err(TeamFormError::MissingClassification),
+            (_, _, None, _, _) => Err(TeamFormError::MissingGender),
+            (_, _, _, None, _) => Err(TeamFormError::MissingCountry),
+            (_, _, _, _, None) => Err(TeamFormError::InvalidYear),
+            (false, Some(classification), Some(gender), Some(country), Some(year)) => {
+                Ok(match existing {
+                    Some(team) => TeamInput::Existing(TeamEntry {
+                        name,
+                        year,
+                        classification: Some(classification),
+                        gender: Some(gender),
+                        country: Some(country),
+                        ..team.clone()
+                    }),
+                    None => TeamInput::New {
+                        id: None,
+                        name,
+                        year,
+                        classification: Some(classification),
+                        gender: Some(gender),
+                        country: Some(country),
+                        players: vec![],
+                    },
+                })
+            }
         }
     }
 }

@@ -7,6 +7,7 @@ use crate::{
         team_reader::TeamReader,
     },
     shapes::{
+        country::CountryCode,
         enums::{GenderEnum, TeamClassificationEnum},
         r#match::MatchEntry,
     },
@@ -42,6 +43,9 @@ pub struct MatchMetadata {
     pub gender: Option<GenderEnum>,
     pub year: u16,
     pub classification: Option<TeamClassificationEnum>,
+    /// missing for the teams without one
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<CountryCode>,
     pub max_substitutions: u8,
 }
 
@@ -129,6 +133,7 @@ pub(crate) async fn create_match_archive(
         gender: m.team.gender,
         year: m.team.year,
         classification: m.team.classification,
+        country: m.team.country,
         max_substitutions: m.max_substitutions,
     };
     let metadata_json = to_string_pretty(&metadata).map_err(|e| AppError::IO(IOError::from(e)))?;

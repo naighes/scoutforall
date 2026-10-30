@@ -17,6 +17,7 @@ use crate::{
     localization::{current_labels, language},
     providers::{
         settings_reader::SettingsReader,
+        settings_writer::SettingsWriter,
         store::{settings_reader::StoreSettingsReader, settings_writer::StoreSettingsWriter},
     },
     shapes::settings::{Settings, init_settings},
@@ -132,6 +133,12 @@ async fn run() -> Result<(), String> {
     {
         log_error(&format!("could not add the example team: {e}"));
     }
+    // after the example team: a new installation is one without config.json
+    let locales: Vec<String> = sys_locale::get_locales().collect();
+    let settings = match settings.with_guessed_country(&locales) {
+        Some(guessed) => settings_writer.save(guessed).await.unwrap_or(settings),
+        None => settings,
+    };
     let teams = team_reader.read_all().await.unwrap_or_else(|_| vec![]);
     maybe_check_update().await;
     let team_reader_arc = Arc::new(team_reader);

@@ -1,7 +1,8 @@
-//! The settings every app shares: the terms of use seen and the choice about
-//! the statistics. Each app keeps them in its `config.json`, along with its
-//! own settings.
+//! The settings every app shares: the terms of use seen, the choice about
+//! the statistics, the country of a new team. Each app keeps them in its
+//! `config.json`, along with its own settings.
 
+use crate::shapes::country::{self, CountryCode};
 use serde::{Deserialize, Serialize};
 
 /// The version of the terms of use (license and data collection): raise it
@@ -50,4 +51,16 @@ impl Consent {
             ..self
         }
     }
+}
+
+/// What a new team starts with: the country chosen in the settings, guessed
+/// from the system on the first start (`CountryCode::guess`).
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TeamDefaults {
+    #[serde(
+        default,
+        deserialize_with = "country::lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub country: Option<CountryCode>,
 }

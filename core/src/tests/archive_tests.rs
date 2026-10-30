@@ -119,6 +119,7 @@ mod tests {
                     year: 2025,
                     classification: None,
                     gender: None,
+                    country: None,
                     players: players
                         .into_iter()
                         .map(|mut p| {

@@ -39,8 +39,9 @@ use scout4all_core::{
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::Consent,
+    settings::{Consent, TeamDefaults},
     shapes::{
+        country::CountryCode,
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
@@ -234,6 +235,7 @@ pub struct TeamForm {
     pub name: String,
     pub classification: Option<TeamClassificationEnum>,
     pub gender: Option<GenderEnum>,
+    pub country: Option<CountryCode>,
     pub year: String,
 }
 
@@ -254,6 +256,15 @@ uniffi::custom_type!(Uuid, String, {
     remote,
     lower: |id| id.to_string(),
     try_lift: |id| Ok(Uuid::parse_str(&id)?),
+});
+
+// the ISO 3166-1 code of a country, as text for the app
+uniffi::custom_type!(CountryCode, String, {
+    remote,
+    lower: |code| code.to_string(),
+    try_lift: |code| Ok(CountryCode::parse(&code).ok_or_else(|| {
+        AppError::IO(IOError::Msg(format!("invalid country: {code}")))
+    })?),
 });
 
 /// RFC 3339 text for the app, with the offset of where the match is played.
@@ -300,6 +311,7 @@ pub enum TeamField {
     Name,
     Classification,
     Gender,
+    Country,
     Year,
 }
 
@@ -309,6 +321,7 @@ impl From<TeamFormError> for TeamField {
             TeamFormError::EmptyName => TeamField::Name,
             TeamFormError::MissingClassification => TeamField::Classification,
             TeamFormError::MissingGender => TeamField::Gender,
+            TeamFormError::MissingCountry => TeamField::Country,
             TeamFormError::InvalidYear => TeamField::Year,
         }
     }
@@ -404,6 +417,13 @@ pub struct ClassificationChoice {
     pub description: String,
 }
 
+/// A country as the form and the settings offer it.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct CountryChoice {
+    pub value: CountryCode,
+    pub name: String,
+}
+
 /// A gender as the form offers it.
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct GenderChoice {
@@ -419,6 +439,7 @@ pub struct TeamDetails {
     pub year: u16,
     pub classification: Option<String>,
     pub gender: Option<String>,
+    pub country: Option<String>,
     /// the active players, by number
     pub players: Vec<Player>,
     /// what the form starts from, to edit the team
@@ -2190,8 +2211,15 @@ impl Scout4All {
                 .classification
                 .map(|c| c.friendly_name(labels).to_string()),
             gender: team.gender.map(|g| g.friendly_name(labels).to_string()),
+            country: team.country.map(|c| c.name(self.language.get())),
             players: players(&team, labels),
-            form: TeamForm::of(&team),
+            // a team saved before v0.12: the country of the settings
+            form: TeamForm {
+                country: team
+                    .country
+                    .or_else(|| self.default_country().map(|c| c.value)),
+                ..TeamForm::of(&team)
+            },
         })
     }
 
@@ -2613,14 +2641,34 @@ impl Scout4All {
         Ok(saved?)
     }
 
-    /// An empty form for a new team, with the year given.
+    /// An empty form for a new team, with the year given and the country
+    /// of the settings.
     pub fn new_team_form(&self, year: u16) -> TeamForm {
         TeamForm {
             name: String::new(),
             classification: None,
             gender: None,
+            country: self.default_country().map(|c| c.value),
             year: year.to_string(),
         }
+    }
+
+    /// The countries whose code is `query`, then those whose name has it
+    /// in it, by name in the language of the app; all of them for an empty
+    /// query.
+    pub fn countries(&self, query: String) -> Vec<CountryChoice> {
+        CountryCode::search(&query, self.language.get())
+            .into_iter()
+            .map(|(value, name)| CountryChoice {
+                value,
+                name: name.to_string(),
+            })
+            .collect()
+    }
+
+    /// The name of the country in the language of the app.
+    pub fn country_name(&self, country: CountryCode) -> String {
+        country.name(self.language.get())
     }
 
     pub fn classifications(&self) -> Vec<ClassificationChoice> {
@@ -2915,6 +2963,38 @@ impl Scout4All {
         }
     }
 
+    /// The country a new team starts with, from the settings.
+    pub fn default_country(&self) -> Option<CountryChoice> {
+        self.read_config()
+            .ok()
+            .and_then(|config| config.team_defaults.country)
+            .map(|value| CountryChoice {
+                value,
+                name: value.name(self.language.get()),
+            })
+    }
+
+    /// Saves the country a new team starts with, keeping the other
+    /// settings as `accept_terms`.
+    pub fn set_default_country(&self, country: CountryCode) -> Result<(), MobileError> {
+        self.update_team_defaults(|_| TeamDefaults {
+            country: Some(country),
+        })
+    }
+
+    /// When the settings have no country for a new team yet, the first of
+    /// the `hints` of the system telling one (the SIM, the network, the
+    /// locale, in this order), else the one of the language. To call at
+    /// startup after `add_example_team_if_new`, which tells a new
+    /// installation by its missing `config.json`.
+    pub fn guess_default_country(&self, hints: Vec<String>) -> Result<(), MobileError> {
+        let guess = CountryCode::guess(hints.iter().map(String::as_str), self.language.get());
+        match (self.default_country(), guess) {
+            (None, Some(country)) => self.set_default_country(country),
+            _ => Ok(()),
+        }
+    }
+
     /// Whether the user allows sending the statistics of the matches.
     pub fn analytics_enabled(&self) -> bool {
         self.read_config()
@@ -2985,6 +3065,8 @@ struct AppConfig {
     #[serde(flatten)]
     tutorial: Tutorial,
     #[serde(flatten)]
+    team_defaults: TeamDefaults,
+    #[serde(flatten)]
     other: Map<String, Value>,
 }
 
@@ -3044,6 +3126,18 @@ impl Scout4All {
     fn update_consent(&self, change: impl FnOnce(Consent) -> Consent) -> Result<(), MobileError> {
         self.update_config(|config| AppConfig {
             consent: change(config.consent),
+            ..config
+        })
+    }
+
+    /// Changes the country of a new team in `config.json`, as
+    /// `update_consent`.
+    fn update_team_defaults(
+        &self,
+        change: impl FnOnce(TeamDefaults) -> TeamDefaults,
+    ) -> Result<(), MobileError> {
+        self.update_config(|config| AppConfig {
+            team_defaults: change(config.team_defaults),
             ..config
         })
     }
@@ -3398,6 +3492,7 @@ mod tests {
             name: name.into(),
             classification: Some(TeamClassificationEnum::Regional),
             gender: Some(GenderEnum::Women),
+            country: CountryCode::known("IT"),
             year: "2026".into(),
         }
     }
@@ -3446,6 +3541,73 @@ mod tests {
             other => unreachable!("expected an invalid year, got {other:?}"),
         }
         assert_eq!(app.teams().unwrap(), vec![]);
+    }
+
+    #[test]
+    fn the_country_is_guessed_once_and_offered_to_a_new_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().into_owned();
+        let app = Scout4All::new(path.clone(), "it".into()).unwrap();
+        assert_eq!(app.new_team_form(2026).country, None);
+        // no SIM, the network in France
+        app.guess_default_country(vec!["".into(), "fr".into(), "it-IT".into()])
+            .unwrap();
+        assert_eq!(app.default_country().unwrap().name, "Francia");
+        assert_eq!(app.new_team_form(2026).country, CountryCode::known("FR"));
+        // guessed once: what the user chose stays
+        app.set_default_country(CountryCode::known("JP").unwrap())
+            .unwrap();
+        app.guess_default_country(vec!["fr".into()]).unwrap();
+        let config: Value = from_slice(&std::fs::read(dir.path().join(CONFIG)).unwrap()).unwrap();
+        assert_eq!(config["country"], "JP");
+        // the TUI reads the same config.json
+        assert_eq!(config["language"], "it");
+    }
+
+    #[test]
+    fn without_hints_the_country_of_the_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pt".into()).unwrap();
+        app.guess_default_country(vec![]).unwrap();
+        assert_eq!(app.default_country().unwrap().name, "Brasil");
+        let english = tempfile::tempdir().unwrap();
+        let app =
+            Scout4All::new(english.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        app.guess_default_country(vec!["".into()]).unwrap();
+        assert_eq!(app.default_country(), None);
+    }
+
+    #[test]
+    fn countries_by_code_or_name_in_the_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pl".into()).unwrap();
+        assert_eq!(app.countries(String::new()).len(), 249);
+        let found = app.countries("wło".into());
+        assert_eq!(found[0].name, "Włochy");
+        assert_eq!(found[0].value.as_str(), "IT");
+        assert_eq!(app.country_name(found[0].value), "Włochy");
+        let id = app.save_team(None, form("Cortona")).unwrap();
+        assert_eq!(app.team(id).unwrap().country.as_deref(), Some("Włochy"));
+    }
+
+    #[test]
+    fn a_team_without_country_names_the_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let result = app.save_team(
+            None,
+            TeamForm {
+                country: None,
+                ..form("Cortona")
+            },
+        );
+        match result {
+            Err(MobileError::InvalidTeam { field, reason }) => {
+                assert_eq!(field, TeamField::Country);
+                assert_eq!(reason, "country is required");
+            }
+            other => unreachable!("expected a missing country, got {other:?}"),
+        }
     }
 
     #[test]

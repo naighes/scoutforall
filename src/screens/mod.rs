@@ -1,5 +1,6 @@
 pub mod add_match_screen;
 pub mod components;
+pub mod country_screen;
 pub mod edit_player_screen;
 pub mod edit_set_events_screen;
 pub mod edit_team_screen;

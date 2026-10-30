@@ -32,6 +32,7 @@ impl TeamWriter for StoreTeamWriter {
                 name,
                 classification,
                 gender,
+                country,
                 year,
                 players,
             } => TeamEntry {
@@ -43,6 +44,7 @@ impl TeamWriter for StoreTeamWriter {
                 name,
                 classification,
                 gender,
+                country,
                 year,
                 players,
             },

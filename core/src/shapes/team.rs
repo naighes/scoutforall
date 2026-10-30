@@ -1,4 +1,5 @@
 use crate::shapes::{
+    country::{self, CountryCode},
     enums::{GenderEnum, TeamClassificationEnum},
     player::PlayerEntry,
 };
@@ -16,6 +17,13 @@ pub struct TeamEntry {
     pub classification: Option<TeamClassificationEnum>,
     #[serde(default)]
     pub gender: Option<GenderEnum>,
+    /// written only when known: missing in the teams saved before v0.12
+    #[serde(
+        default,
+        deserialize_with = "country::lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub country: Option<CountryCode>,
 }
 
 impl TeamEntry {

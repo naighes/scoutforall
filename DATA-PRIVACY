@@ -16,8 +16,8 @@ Match data. Unless you turn it off (see 4), when you finish scouting a
 match, or correct one already finished, the program and the app upload an
 archive with:
 
-- the match: date, home or away, gender, year and classification of the
-  team, maximum number of substitutions;
+- the match: date, home or away, gender, year, classification and country
+  of the team, maximum number of substitutions;
 - each set: the lineup and the scouted events (time, type, evaluation);
 - the identifier of the team.
 

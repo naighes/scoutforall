@@ -92,6 +92,7 @@ tokio.workspace = true
 unicode-width = "0.2"
 uuid.workspace = true
 zip.workspace = true
+sys-locale = "0.3"
 
 [dev-dependencies]
 tempfile.workspace = true
