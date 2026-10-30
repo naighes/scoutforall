@@ -87,7 +87,10 @@ class LongNamesLayoutTest(private val screen: Size) {
         val player = hasText("28") and hasClickAction() and isEnabled()
         rule.waitFor { rule.onAllNodes(player).fetchSemanticsNodes().size == 1 }
         rule.onNode(player).performSemanticsAction(SemanticsActions.OnClick)
-        // in the back row: only the defense, straight to its evaluation
+        // in the back row: the defense, or the attack (the dig is optional)
+        val defense = hasText("defense") and hasClickAction()
+        rule.waitFor { rule.onAllNodes(defense).fetchSemanticsNodes().size == 1 }
+        rule.onNode(defense).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText("defense · 28", substring = true)
         assertFits("evaluation")
     }

@@ -240,8 +240,7 @@
     <string name="tutorial_reception">Nervini receives: tap her name.</string>
     <string name="tutorial_reception_eval">A perfect reception: tap #.</string>
     <string name="tutorial_attack">The setter sets her and she attacks: tap her name again.</string>
-    <string name="tutorial_attack_event">Tap Attack.</string>
-    <string name="tutorial_attack_point">Her point: tap #.</string>
+    <string name="tutorial_attack_point">She can only attack now, so the rating comes at once. Her point: tap #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. We rotate to S5 and Fahr serves.</string>
     <string name="tutorial_serve">The serve is ready to rate: a negative one, tap −.</string>
     <string name="tutorial_block">They attack and Danesi blocks: tap her name.</string>
@@ -251,7 +250,8 @@
     <string name="tutorial_dig_event">Tap Defense.</string>
     <string name="tutorial_dig_eval">A good dig: tap +.</string>
     <string name="tutorial_opposite">Egonu attacks: tap her name.</string>
-    <string name="tutorial_attack_dug">They dig it: tap −.</string>
+    <string name="tutorial_attack_kept">They dig it, but can\'t attack: the ball is ours again, tap +.</string>
+    <string name="tutorial_attack_dug">They dig it and attack: tap −.</string>
     <string name="tutorial_their_freeball">They send it back easy, a freeball: tap Their free.</string>
     <string name="tutorial_opposite_again">Egonu attacks again: tap her name.</string>
     <string name="tutorial_their_error">Their attack goes out: tap Their error. 2–0.</string>

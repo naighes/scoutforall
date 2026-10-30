@@ -119,8 +119,8 @@ class ScoutingTest {
         touch("18")
         touch("defense")
         touch("+")
+        // the setter can only attack: straight to the evaluation
         touch("8")
-        touch("attack")
         touch("#")
         rule.waitFor { score(saved()) == 1 to 0 }
         // the last first: the attack of the setter, on the second touch

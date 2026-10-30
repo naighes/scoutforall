@@ -239,8 +239,7 @@
     <string name="tutorial_reception">Riceve Nervini: tocca il suo nome.</string>
     <string name="tutorial_reception_eval">Ricezione perfetta: tocca #.</string>
     <string name="tutorial_attack">L\'alzata è per lei, che attacca: tocca di nuovo il suo nome.</string>
-    <string name="tutorial_attack_event">Tocca Attacco.</string>
-    <string name="tutorial_attack_point">Punto suo: tocca #.</string>
+    <string name="tutorial_attack_point">Ora può solo attaccare, quindi la valutazione arriva subito. Punto suo: tocca #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. Si ruota in P5 e batte Fahr.</string>
     <string name="tutorial_serve">La battuta è già pronta da valutare: negativa, tocca −.</string>
     <string name="tutorial_block">Attaccano loro e mura Danesi: tocca il suo nome.</string>
@@ -250,7 +249,8 @@
     <string name="tutorial_dig_event">Tocca Difesa.</string>
     <string name="tutorial_dig_eval">Una buona difesa: tocca +.</string>
     <string name="tutorial_opposite">Attacca Egonu: tocca il suo nome.</string>
-    <string name="tutorial_attack_dug">Loro la difendono: tocca −.</string>
+    <string name="tutorial_attack_kept">La difendono, ma non riescono ad attaccare: la palla torna a noi, tocca +.</string>
+    <string name="tutorial_attack_dug">La difendono e attaccano: tocca −.</string>
     <string name="tutorial_their_freeball">La rimandano facile, una freeball: tocca Free loro.</string>
     <string name="tutorial_opposite_again">Attacca ancora Egonu: tocca il suo nome.</string>
     <string name="tutorial_their_error">Il loro attacco finisce fuori: tocca Errore loro. 2–0.</string>

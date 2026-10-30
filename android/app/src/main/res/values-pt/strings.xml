@@ -239,8 +239,7 @@
     <string name="tutorial_reception">Nervini recebe: toque no nome dela.</string>
     <string name="tutorial_reception_eval">Recepção perfeita: toque em #.</string>
     <string name="tutorial_attack">O levantamento é para ela, que ataca: toque no nome dela de novo.</string>
-    <string name="tutorial_attack_event">Toque em Ataque.</string>
-    <string name="tutorial_attack_point">Ponto dela: toque em #.</string>
+    <string name="tutorial_attack_point">Agora ela só pode atacar, então a avaliação vem logo. Ponto dela: toque em #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. Rodamos para P5 e Fahr saca.</string>
     <string name="tutorial_serve">O saque já está pronto para avaliar: negativo, toque em −.</string>
     <string name="tutorial_block">Elas atacam e Danesi bloqueia: toque no nome dela.</string>
@@ -250,7 +249,8 @@
     <string name="tutorial_dig_event">Toque em Defesa.</string>
     <string name="tutorial_dig_eval">Uma boa defesa: toque em +.</string>
     <string name="tutorial_opposite">Egonu ataca: toque no nome dela.</string>
-    <string name="tutorial_attack_dug">Elas defendem: toque em −.</string>
+    <string name="tutorial_attack_kept">Elas defendem, mas não conseguem atacar: a bola volta para nós, toque em +.</string>
+    <string name="tutorial_attack_dug">Elas defendem e atacam: toque em −.</string>
     <string name="tutorial_their_freeball">Elas devolvem fácil, uma bola de graça: toque em Bola de graça deles.</string>
     <string name="tutorial_opposite_again">Egonu ataca de novo: toque no nome dela.</string>
     <string name="tutorial_their_error">O ataque delas sai: toque em Erro deles. 2–0.</string>

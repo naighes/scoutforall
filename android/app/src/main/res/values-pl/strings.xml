@@ -241,8 +241,7 @@
     <string name="tutorial_reception">Przyjmuje Nervini: dotknij jej nazwiska.</string>
     <string name="tutorial_reception_eval">Idealne przyjęcie: dotknij #.</string>
     <string name="tutorial_attack">Wystawa do niej, atakuje: znowu dotknij jej nazwiska.</string>
-    <string name="tutorial_attack_event">Dotknij Atak.</string>
-    <string name="tutorial_attack_point">Jej punkt: dotknij #.</string>
+    <string name="tutorial_attack_point">Teraz może tylko atakować, więc ocena pojawia się od razu. Jej punkt: dotknij #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. Przechodzimy na R5, zagrywa Fahr.</string>
     <string name="tutorial_serve">Zagrywka czeka na ocenę: negatywna, dotknij −.</string>
     <string name="tutorial_block">One atakują, blokuje Danesi: dotknij jej nazwiska.</string>
@@ -252,7 +251,8 @@
     <string name="tutorial_dig_event">Dotknij Obrona.</string>
     <string name="tutorial_dig_eval">Dobra obrona: dotknij +.</string>
     <string name="tutorial_opposite">Atakuje Egonu: dotknij jej nazwiska.</string>
-    <string name="tutorial_attack_dug">One bronią: dotknij −.</string>
+    <string name="tutorial_attack_kept">One bronią, ale nie mogą zaatakować: piłka wraca do nas, dotknij +.</string>
+    <string name="tutorial_attack_dug">One bronią i atakują: dotknij −.</string>
     <string name="tutorial_their_freeball">Odbijają łatwo, wolna piłka: dotknij Wolna rywala.</string>
     <string name="tutorial_opposite_again">Znowu atakuje Egonu: dotknij jej nazwiska.</string>
     <string name="tutorial_their_error">Ich atak w aut: dotknij Błąd rywala. 2–0.</string>

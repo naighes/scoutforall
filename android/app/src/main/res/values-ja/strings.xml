@@ -238,8 +238,7 @@
     <string name="tutorial_reception">ネルヴィーニがレシーブ:名前をタップしてください。</string>
     <string name="tutorial_reception_eval">完璧なレシーブ:# をタップ。</string>
     <string name="tutorial_attack">トスが上がり、彼女がアタック:もう一度名前をタップ。</string>
-    <string name="tutorial_attack_event">「アタック」をタップ。</string>
-    <string name="tutorial_attack_point">得点:# をタップ。</string>
+    <string name="tutorial_attack_point">今はアタックだけなので、すぐに評価になる。得点:# をタップ。</string>
     <string name="tutorial_side_out">サイドアウト:1–0。S5にローテーションし、ファールのサーブ。</string>
     <string name="tutorial_serve">サーブを評価します:ネガティブ、− をタップ。</string>
     <string name="tutorial_block">相手のアタックをダネージがブロック:名前をタップ。</string>
@@ -249,7 +248,8 @@
     <string name="tutorial_dig_event">「ディグ」をタップ。</string>
     <string name="tutorial_dig_eval">良いディグ:+ をタップ。</string>
     <string name="tutorial_opposite">エゴヌがアタック:名前をタップ。</string>
-    <string name="tutorial_attack_dug">相手が拾った:− をタップ。</string>
+    <string name="tutorial_attack_kept">相手は拾ったが攻撃できない:ボールはこちらに戻る。+ をタップ。</string>
+    <string name="tutorial_attack_dug">相手が拾って攻撃:− をタップ。</string>
     <string name="tutorial_their_freeball">相手がフリーボールで返球:「相手のフリー」をタップ。</string>
     <string name="tutorial_opposite_again">再びエゴヌがアタック:名前をタップ。</string>
     <string name="tutorial_their_error">相手のアタックがアウト:「相手のミス」をタップ。2–0。</string>
