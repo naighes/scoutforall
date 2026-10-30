@@ -187,10 +187,11 @@ mod tests {
         // we play it again, after their freeball or not
         let ball_ours_or_their_freeball = vec![OE, F, A, FB, OF];
         // sent over without an attack: they attack, or send it back easy
-        let ball_theirs = vec![OS, OE, F, A, D, B, OF];
-        // they attack: our dig or block, or our attack when they weren't
-        // scouted; a freeball of theirs would tell another evaluation
-        let ball_theirs_to_attack = vec![OS, OE, F, A, D, B];
+        let ball_theirs = vec![OS, OE, F, A, D, B, FB, OF];
+        // they attack: our dig or block, or our attack or freeball after
+        // our dig not scouted; a freeball of theirs would tell another
+        // evaluation
+        let ball_theirs_to_attack = vec![OS, OE, F, A, D, B, FB];
         let cases: Vec<(&str, Snapshot, Vec<EventTypeEnum>)> = vec![
             // our serve: they receive and attack
             (
@@ -344,14 +345,9 @@ mod tests {
     #[test]
     fn freeball_where_it_cant_be_is_rejected() {
         let t = Team::new();
+        // ours only before the serve: wherever the ball is theirs, after
+        // their attack and our dig not scouted
         let cases = [
-            // a first touch: the ball just came over
-            (TeamSideEnum::Us, vec![t.serve(Negative), fb()]),
-            (TeamSideEnum::Them, vec![act(P, t.libero, Over), fb()]),
-            (
-                TeamSideEnum::Us,
-                vec![t.serve(Negative), act(D, t.libero, Over), fb()],
-            ),
             // the ball on our side: they can't send it
             (TeamSideEnum::Us, vec![t.serve(Over), opp(OF)]),
             (
@@ -388,11 +384,6 @@ mod tests {
                     opp(OF),
                     act(B, t.oh1, Positive),
                 ],
-            ),
-            // a second freeball of ours in a row
-            (
-                TeamSideEnum::Them,
-                vec![act(P, t.libero, Positive), fb(), fb()],
             ),
             // before the serve
             (TeamSideEnum::Us, vec![fb()]),

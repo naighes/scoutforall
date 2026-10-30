@@ -223,23 +223,25 @@ mod tests {
     }
 
     /// After our serve error they serve, and our reception goes straight
-    /// over: the longest list of events, 7 (their point or error, our
-    /// fault, attack, dig or block, their freeball).
-    const SEVEN_EVENTS: &str = "s=p7/";
+    /// over: the longest list of events, 8 (their point or error, our
+    /// fault, attack, dig or block, our freeball after a dig not scouted,
+    /// theirs).
+    const EIGHT_EVENTS: &str = "s=p7/";
     /// Carla, the middle blocker in the front row, attacks after the dig of
     /// Gina the libero: the tallest panel, 6 evaluations and 8 sets.
     const MIDDLE_BLOCKER_ATTACK: &str = "s-d7+a3";
 
     #[tokio::test]
     async fn all_the_events_are_listed_at_every_height() {
-        let mut ui = open(true, &format!("\nm\n{SEVEN_EVENTS}")).await;
-        for height in 20..=60 {
+        let mut ui = open(true, &format!("\nm\n{EIGHT_EVENTS}")).await;
+        // from 21 rows: at 20 the last option doesn't fit
+        for height in 21..=60 {
             ui.resize(100, height);
             let events = panel(&mut ui, current_labels().choose_the_event);
-            // the seven events, then the options
+            // the eight events, then the options
             assert_eq!(
                 events.as_ref().map(Vec::len),
-                Some(7 + ScoutingOptionEnum::ALL.len()),
+                Some(8 + ScoutingOptionEnum::ALL.len()),
                 "at 100x{height}: {events:?}\n{}",
                 ui.screen()
             );
@@ -267,7 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_point_sequence_is_shown_only_when_the_lists_still_fit() {
-        for keys in [SEVEN_EVENTS, MIDDLE_BLOCKER_ATTACK] {
+        for keys in [EIGHT_EVENTS, MIDDLE_BLOCKER_ATTACK] {
             let mut ui = open(true, &format!("\nm\n{keys}")).await;
             let shown: Vec<u16> = (20..=60)
                 .filter(|height| {

@@ -649,15 +649,15 @@ mod tests {
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
         // they receive and attack: the setter is in the back row, a middle
         // blocker in the front row, both can attack (our dig not scouted);
-        // the libero only digs. No freeball of theirs after our serve `+`,
-        // nor ours: the ball is theirs
+        // the libero only digs. No freeball of theirs after our serve `+`;
+        // ours, a team event, after our dig not scouted
         let setter = s.players[0];
         let blocker = s.players[2];
         let libero = s.players[6];
         assert_eq!(s.session.player_events(&setter), vec![A, D]);
         assert_eq!(s.session.player_events(&blocker), vec![A, D, B]);
         assert_eq!(s.session.player_events(&libero), vec![D]);
-        assert_eq!(s.session.other_events(), vec![OS, OE, F]);
+        assert_eq!(s.session.other_events(), vec![OS, OE, F, FB]);
 
         assert_eq!(
             s.session.choose_player_first(blocker).await,

@@ -97,8 +97,8 @@ mod tests {
     const BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT: [(&str, &str); 2] =
         [("s-d7+a2+", "attack +"), ("s-b2+", "block +")];
 
-    /// The ball on their side, sent over without an attack: their freeball,
-    /// not ours.
+    /// The ball on their side, sent over without an attack: their freeball;
+    /// ours too, after their attack and our dig not scouted.
     const BALL_THEIRS: [(&str, &str); 5] = [
         ("s=p7/", "our reception over"),
         ("s-d7/", "our dig over"),
@@ -107,8 +107,9 @@ mod tests {
         ("s=p7+x", "our freeball, after the reception"),
     ];
 
-    /// The ball on their side, to attack: neither freeball (theirs would
-    /// make our serve `/`, our attack or block `+`).
+    /// The ball on their side, to attack: not their freeball (it would make
+    /// our serve `/`, our attack or block `+`); ours, after their attack and
+    /// our dig not scouted.
     const BALL_THEIRS_TO_ATTACK: [(&str, &str); 5] = [
         ("s+", "our serve +"),
         ("s!", "our serve !"),
@@ -127,12 +128,15 @@ mod tests {
     // --- our freeball -------------------------------------------------------------
 
     /// Wherever the ball is on our side to play, "x" saves our freeball at
-    /// once: a team event, no player, no evaluation.
+    /// once: a team event, no player, no evaluation. On their side too, our
+    /// dig being optional: they attacked, we dug without scouting it.
     #[tokio::test]
     async fn our_freeball_is_saved_at_once() {
         let cases = BALL_OURS_TO_PLAY
             .iter()
-            .chain(&BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT);
+            .chain(&BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT)
+            .chain(&BALL_THEIRS)
+            .chain(&BALL_THEIRS_TO_ATTACK);
         for (before, case) in cases {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
@@ -154,27 +158,6 @@ mod tests {
                 "{case}: {}",
                 ui.screen()
             );
-        }
-    }
-
-    /// Where the ball is on their side or just came over, our freeball
-    /// isn't listed, and its key says so.
-    #[tokio::test]
-    async fn no_freeball_of_ours_where_the_ball_is_theirs() {
-        let cases = BALL_THEIRS.iter().chain(&BALL_THEIRS_TO_ATTACK);
-        for (before, case) in cases {
-            let mut ui = scouting().await;
-            keys(&mut ui, before).await;
-            assert_eq!(event_row(&mut ui, EventTypeEnum::FB), None, "{case}");
-            let saved = saved_count(&ui);
-            keys(&mut ui, "x").await;
-            assert!(
-                ui.screen().contains(&not_available(EventTypeEnum::FB)),
-                "{case}: {}",
-                ui.screen()
-            );
-            assert!(choosing_the_event(&mut ui), "{case}");
-            assert_eq!(saved_count(&ui), saved, "{case}");
         }
     }
 
