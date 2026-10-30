@@ -243,8 +243,8 @@ pub fn render_set_status(
                 .get_current_rotation()
                 .ok()
                 .map(|r| format!("{}{}", current_labels().domain.setter_prefix, r + 1))
-                // the inverted P1 stays until changed, also in the other
-                // rotations
+                // the inverted P1, told where it makes a difference: in P1
+                // in side out
                 .map(|rotation| match inverted_p1 {
                     true => format!("{rotation} · {}", current_labels().inverted_p1_short),
                     false => rotation,

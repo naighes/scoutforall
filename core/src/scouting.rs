@@ -255,6 +255,14 @@ impl ScoutingSession {
         self.inverted_p1
     }
 
+    /// Whether the inverted P1 makes a difference now: in P1 (the setter in
+    /// position 1) in side out only, as the scouting shows it.
+    pub fn inverted_p1_applies(&self) -> bool {
+        let lineup = &self.snapshot.current_lineup;
+        lineup.get_current_phase() == PhaseEnum::SideOut
+            && lineup.get_current_rotation().is_ok_and(|r| r == 0)
+    }
+
     /// The scout inverts the P1, or makes it canonical again: the events
     /// saved from now on say so.
     pub fn set_inverted_p1(&mut self, inverted: bool) {

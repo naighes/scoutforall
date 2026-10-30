@@ -45,14 +45,19 @@ mod tests {
             .and_then(|rows| rows.into_iter().find(|r| r.contains(name)))
     }
 
-    /// "i" inverts the P1 and back: the row of the option and the rotation
-    /// tell it, and the events saved meanwhile say so.
+    /// "i" inverts the P1 and back, in P1 in side out only, where it makes
+    /// a difference: the row of the option and the rotation tell it, and
+    /// the events saved meanwhile say so.
     #[tokio::test]
     async fn i_inverts_the_p1_until_pressed_again() {
         let mut ui = scouting().await;
         let short = current_labels().inverted_p1_short;
+        // we serve in P1: "i" does nothing
+        ui.press(KeyCode::Char('i')).await;
         assert!(inverted_row(&mut ui).is_some_and(|r| r.starts_with("[ ]")));
         assert!(!ui.screen().contains(short), "{}", ui.screen());
+        // our serve error: they serve, P1 in side out
+        keys(&mut ui, "s=").await;
         ui.press(KeyCode::Char('i')).await;
         assert!(
             inverted_row(&mut ui).is_some_and(|r| r.starts_with("[x]")),
@@ -64,12 +69,12 @@ mod tests {
             "{}",
             ui.screen()
         );
-        // our serve error, then their serve error
-        keys(&mut ui, "s=E").await;
-        // nothing else was chosen: still choosing the event
+        // their serve error: we rotate and serve, "i" does nothing
+        keys(&mut ui, "E").await;
         ui.press(KeyCode::Char('i')).await;
+        assert!(inverted_row(&mut ui).is_some_and(|r| r.starts_with("[x]")));
         keys(&mut ui, "s=").await;
-        assert_eq!(flags(&ui), ["1", "1", ""]);
+        assert_eq!(flags(&ui), ["", "1", "1"]);
         assert!(!ui.screen().contains(short), "{}", ui.screen());
     }
 
@@ -77,7 +82,8 @@ mod tests {
     #[tokio::test]
     async fn the_inverted_p1_is_kept_when_the_set_is_opened_again() {
         let mut ui = scouting().await;
-        keys(&mut ui, "is=").await;
+        // our serve error, the P1 inverted in side out, their serve error
+        keys(&mut ui, "s=iE").await;
         ui.press(KeyCode::Esc).await;
         ui.press(KeyCode::Enter).await;
         assert!(

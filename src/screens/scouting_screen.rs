@@ -375,11 +375,12 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .and_then(|ck| self.event_screen_key_bindings.get(ck))
             .copied();
         match (option, event) {
-            (Some(ScoutingOptionEnum::InvertedP1), _) => {
+            (Some(ScoutingOptionEnum::InvertedP1), _) if self.session.inverted_p1_applies() => {
                 let inverted = self.session.inverted_p1();
                 self.session.set_inverted_p1(!inverted);
                 AppAction::None
             }
+            (Some(ScoutingOptionEnum::InvertedP1), _) => AppAction::None,
             (Some(ScoutingOptionEnum::Reception), _) => {
                 let told = self.session.next_reception();
                 self.show(told.map(|_| Progress::Choosing))
@@ -488,14 +489,18 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             })
             .chain(ScoutingOptionEnum::ALL.iter().map(|option| {
                 let labels = current_labels();
-                // the reception only before their serve
+                // the inverted P1 only in P1 in side out, the reception only
+                // before their serve
                 let (text, available) = match option {
                     ScoutingOptionEnum::InvertedP1 => {
                         let check = match self.session.inverted_p1() {
                             true => "[x]",
                             false => "[ ]",
                         };
-                        (format!("{check} {}", labels.inverted_p1), true)
+                        (
+                            format!("{check} {}", labels.inverted_p1),
+                            self.session.inverted_p1_applies(),
+                        )
                     }
                     ScoutingOptionEnum::Reception => (
                         labels
@@ -783,7 +788,8 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             self.session.snapshot(),
             event,
             player,
-            self.session.inverted_p1(),
+            // told where it makes a difference only
+            self.session.inverted_p1() && self.session.inverted_p1_applies(),
         );
     }
 }

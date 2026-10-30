@@ -325,7 +325,7 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
                 actions = {
                     view?.let {
                         Reception(it.state, model::nextReception)
-                        InvertedP1(it.state.invertedP1, model::invertedP1)
+                        if (it.state.invertedP1Applies) InvertedP1(it.state.invertedP1, model::invertedP1)
                     }
                 },
             )
@@ -350,8 +350,8 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
 }
 
 /** The inverted P1, kept until changed: in P1 in side out the outside
- * hitter attacks from 4 and the opposite from 2. Up in the bar, the court
- * keeps its room. */
+ * hitter attacks from 4 and the opposite from 2, so shown then only. Up in
+ * the bar, the court keeps its room. */
 @Composable
 private fun InvertedP1(inverted: Boolean, onChange: (Boolean) -> Unit) {
     val description = stringResource(R.string.inverted_p1_description)

@@ -1009,6 +1009,9 @@ pub struct ScoutingState {
     /// in P1 in side out the outside hitter attacks from 4 and the opposite
     /// from 2: kept until changed, also in the next set
     pub inverted_p1: bool,
+    /// whether the inverted P1 makes a difference now, in P1 in side out
+    /// only: shown then
+    pub inverted_p1_applies: bool,
     /// how many receive their next serve, 3 unless told; told only before
     /// their serve
     pub reception: u8,
@@ -1425,6 +1428,7 @@ impl Scouting {
                 .get_last_touch()
                 .map(|(e, _)| self.scouted_event(team, e)),
             inverted_p1: session.inverted_p1(),
+            inverted_p1_applies: session.inverted_p1_applies(),
             reception: session.reception().players(),
             reception_open: session.can_tell_reception(),
             team_choice: session.team_choice(),
@@ -4264,12 +4268,21 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
-        assert!(!scouting.state().inverted_p1);
+        let state = scouting.state();
+        assert!(!state.inverted_p1);
+        // we serve in P1: no difference, not shown
+        assert!(!state.inverted_p1_applies);
         scouting.set_inverted_p1(true);
         scouting.choose_eval(EvalEnum::Error).unwrap();
-        assert!(scouting.state().inverted_p1);
+        let state = scouting.state();
+        assert!(state.inverted_p1);
+        // they serve, P1 in side out: shown
+        assert!(state.inverted_p1_applies);
         scouting.set_inverted_p1(false);
         assert!(!scouting.state().inverted_p1);
+        // their error: we rotate and serve, not shown again
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+        assert!(!scouting.state().inverted_p1_applies);
     }
 
     /// The reception is told before their serve only, 3, 4, 2.

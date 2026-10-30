@@ -74,17 +74,26 @@ class ScoutingTest {
         rule.waitFor { score(saved()) == 0 to 1 }
     }
 
-    /** The inverted P1, up in the bar, goes with the events saved from
-     * then on: the set resumed keeps it. */
+    /** The inverted P1, up in the bar in P1 in side out only, where it
+     * makes a difference, goes with the events saved from then on: the set
+     * resumed keeps it. */
     @Test
     fun theInvertedP1IsSavedWithTheEvents() {
         show()
         val chip = hasContentDescription(string(R.string.inverted_p1_description)) and hasClickAction()
+        val chips = { rule.onAllNodes(chip).fetchSemanticsNodes().size }
+        // we serve in P1: not there
+        assertEquals(0, chips())
+        // our serve error: they serve, P1 in side out
+        touch("=")
+        rule.waitFor { chips() == 1 }
         rule.onNode(chip).assertIsNotSelected().performClick()
         rule.waitFor { rule.onAllNodes(chip and isSelected()).fetchSemanticsNodes().size == 1 }
-        touch("#")
-        rule.waitFor { score(saved()) == 1 to 0 }
+        touch(string(R.string.their_error))
+        rule.waitFor { score(saved()) == 1 to 1 }
         assertTrue(saved().invertedP1)
+        // we rotate and serve: gone again
+        rule.waitFor { chips() == 0 }
     }
 
     /** The reception, up in the bar, only before their serve: 3, 4, 2,
