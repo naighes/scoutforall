@@ -10,6 +10,11 @@
     <string name="year">Rok</string>
     <string name="gender">Płeć</string>
     <string name="classification">Poziom</string>
+    <string name="country">Kraj</string>
+    <string name="search_country">Szukaj kraju</string>
+    <string name="no_country_found">Nie znaleziono kraju</string>
+    <string name="default_country">Kraj nowych drużyn</string>
+    <string name="default_country_none">Nie ustawiono</string>
     <string name="save">Zapisz</string>
     <string name="new_player">Nowy zawodnik</string>
     <string name="edit_player">Edytuj zawodnika</string>

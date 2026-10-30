@@ -29,6 +29,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +45,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.ClassificationChoice
+import io.github.naighes.scout4all.core.CountryChoice
 import io.github.naighes.scout4all.core.GenderChoice
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.TeamField
@@ -59,6 +63,8 @@ sealed interface TeamFormState {
         val form: TeamForm,
         val classifications: List<ClassificationChoice>,
         val genders: List<GenderChoice>,
+        /** the country of the form, with its name */
+        val country: CountryChoice?,
         /** the field the core rejected, with why */
         val invalid: Pair<TeamField, String>? = null,
         /** an error of the save itself */
@@ -82,11 +88,13 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
         viewModelScope.launch {
             mutableState.value = try {
                 app.core { core ->
+                    val form = id?.let { core.team(it).form }
+                        ?: core.newTeamForm(Year.now().value.toUShort())
                     TeamFormState.Editing(
-                        form = id?.let { core.team(it).form }
-                            ?: core.newTeamForm(Year.now().value.toUShort()),
+                        form = form,
                         classifications = core.classifications(),
                         genders = core.genders(),
+                        country = form.country?.let { CountryChoice(it, core.countryName(it)) },
                     )
                 }
             } catch (e: MobileException) {
@@ -105,6 +113,12 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
             )
             else -> s
         }
+    }
+
+    /** The country chosen in the list. */
+    fun pickCountry(choice: CountryChoice) {
+        change(TeamField.COUNTRY) { it.copy(country = choice.value) }
+        mutableState.update { s -> (s as? TeamFormState.Editing)?.copy(country = choice) ?: s }
     }
 
     fun save() {
@@ -156,6 +170,19 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
     Column(modifier) {
         val form = state.form
         val error = { field: TeamField -> state.invalid?.takeIf { it.first == field }?.second }
+        var choosingCountry by rememberSaveable { mutableStateOf(false) }
+        val country = stringResource(R.string.country)
+        if (choosingCountry) {
+            CountryDialog(
+                title = country,
+                current = form.country,
+                onPick = {
+                    model.pickCountry(it)
+                    choosingCountry = false
+                },
+                onDismiss = { choosingCountry = false },
+            )
+        }
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -193,6 +220,7 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
                     ) { Text(choice.name) }
                 }
             }
+            CountryField(country, state.country, error(TeamField.COUNTRY)) { choosingCountry = true }
             FieldTitle(stringResource(R.string.classification), error(TeamField.CLASSIFICATION))
             Column(Modifier.selectableGroup()) {
                 state.classifications.forEach { choice ->

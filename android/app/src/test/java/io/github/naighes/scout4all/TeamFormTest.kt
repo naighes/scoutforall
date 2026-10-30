@@ -1,6 +1,10 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -52,8 +56,66 @@ class TeamFormTest {
         rule.onNodeWithText(core { it.classifications() }.first { it.value == classification }.name).performScrollTo().performClick()
     }
 
+    /** The country field opens the list; typing narrows it. */
+    private fun chooseCountry(typed: String, name: String) {
+        rule.onNode(hasText(string(R.string.country)) and hasClickAction()).performScrollTo().performClick()
+        rule.onNode(hasSetTextAction() and hasText(string(R.string.search_country))).performTextInput(typed)
+        rule.waitUntil(5_000) {
+            rule.onAllNodes(hasText(name) and hasClickAction()).fetchSemanticsNodes().size == 1
+        }
+        rule.onNode(hasText(name) and hasClickAction()).performClick()
+        rule.waitForIdle()
+    }
+
+    private fun fill(name: String) {
+        rule.type(string(R.string.name), name)
+        rule.type(string(R.string.year), "2026")
+        choose(GenderEnum.WOMEN, TeamClassificationEnum.REGIONAL)
+    }
+
+    @Test
+    fun aTeamNeedsACountry() {
+        show()
+        fill("Italia")
+        rule.save()
+        rule.waitForText("country is required")
+        assertEquals(0, saved)
+        // chosen, the error goes and the team is saved
+        chooseCountry("ital", "Italy")
+        rule.onAllNodesWithText("country is required").assertCountEquals(0)
+        rule.save()
+        rule.waitFor { saved == 1 }
+        assertEquals("IT", core { it.team(teams().single().id) }.form.country)
+    }
+
+    @Test
+    fun aNewTeamStartsWithTheCountryOfTheSettings() {
+        core { it.setDefaultCountry("PL") }
+        show()
+        rule.onNodeWithText("Poland", substring = true).assertExists()
+        fill("Chemik")
+        rule.save()
+        rule.waitFor { saved == 1 }
+        assertEquals("PL", core { it.team(teams().single().id) }.form.country)
+    }
+
+    @Test
+    fun theCountryIsChangedFromTheList() {
+        core { it.setDefaultCountry("PL") }
+        show()
+        fill("Osasco")
+        // by the code too
+        chooseCountry("br", "Brazil")
+        rule.onNodeWithText("Brazil", substring = true).assertExists()
+        rule.save()
+        rule.waitFor { saved == 1 }
+        assertEquals("BR", core { it.team(teams().single().id) }.form.country)
+    }
+
     @Test
     fun aYearThatIsNotOneIsRejected() {
+        // the country comes before the year
+        core { it.setDefaultCountry("IT") }
         show()
         rule.type(string(R.string.name), "Italia")
         rule.type(string(R.string.year), "twenty")
@@ -70,6 +132,7 @@ class TeamFormTest {
         rule.type(string(R.string.name), "Italia")
         rule.type(string(R.string.year), "2026")
         choose(GenderEnum.WOMEN, TeamClassificationEnum.TOP_INTERNATIONAL)
+        chooseCountry("ital", "Italy")
         rule.save()
         rule.waitFor { saved == 1 }
         val team = teams().single()

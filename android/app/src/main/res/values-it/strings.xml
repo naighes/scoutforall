@@ -10,6 +10,11 @@
     <string name="year">Anno</string>
     <string name="gender">Genere</string>
     <string name="classification">Classificazione</string>
+    <string name="country">Paese</string>
+    <string name="search_country">Cerca un paese</string>
+    <string name="no_country_found">Nessun paese trovato</string>
+    <string name="default_country">Paese delle nuove squadre</string>
+    <string name="default_country_none">Non impostato</string>
     <string name="save">Salva</string>
     <string name="new_player">Nuovo giocatore</string>
     <string name="edit_player">Modifica giocatore</string>

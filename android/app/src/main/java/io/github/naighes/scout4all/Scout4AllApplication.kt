@@ -2,7 +2,9 @@ package io.github.naighes.scout4all
 
 import android.app.Application
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.telephony.TelephonyManager
 import io.github.naighes.scout4all.core.InternalException
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Scout4All
@@ -32,12 +34,26 @@ open class Scout4AllApplication : Application() {
     protected open fun startLog(dataDir: String) = startCoreLog(dataDir)
 
     /** A new installation starts with the example team, before the teams
-     * are listed; without it the app works all the same. */
+     * are listed; without it the app works all the same. Then, once, the
+     * country of a new team, from the phone: after the example team, which
+     * tells a new installation by its missing config.json. */
     protected open fun addExampleTeam(core: Scout4All) {
         try {
             core.addExampleTeamIfNew()
+            core.guessDefaultCountry(countryHints())
         } catch (_: MobileException) {
         }
+    }
+
+    /** Where the phone is, best first: the country of the SIM, of the
+     * network, of the locale. No permission needed; empty when unknown. */
+    internal fun countryHints(): List<String> {
+        val telephony = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        return listOf(
+            telephony?.simCountryIso.orEmpty(),
+            telephony?.networkCountryIso.orEmpty(),
+            Locale.getDefault().toLanguageTag(),
+        )
     }
     private val core: Scout4All by lazyCore
 

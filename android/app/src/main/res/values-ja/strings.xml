@@ -10,6 +10,11 @@
     <string name="year">年</string>
     <string name="gender">性別</string>
     <string name="classification">レベル</string>
+    <string name="country">国</string>
+    <string name="search_country">国を検索</string>
+    <string name="no_country_found">国が見つかりません</string>
+    <string name="default_country">新しいチームの国</string>
+    <string name="default_country_none">未設定</string>
     <string name="save">保存</string>
     <string name="new_player">新しい選手</string>
     <string name="edit_player">選手を編集</string>

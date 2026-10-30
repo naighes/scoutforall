@@ -11,6 +11,11 @@
     <string name="year">Year</string>
     <string name="gender">Gender</string>
     <string name="classification">Classification</string>
+    <string name="country">Country</string>
+    <string name="search_country">Search country</string>
+    <string name="no_country_found">No country found</string>
+    <string name="default_country">Country of new teams</string>
+    <string name="default_country_none">Not set</string>
     <string name="save">Save</string>
     <string name="new_player">New player</string>
     <string name="edit_player">Edit player</string>

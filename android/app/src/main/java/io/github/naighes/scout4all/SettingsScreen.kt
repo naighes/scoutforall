@@ -20,11 +20,21 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import io.github.naighes.scout4all.core.CountryChoice
+import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.version
+import kotlinx.coroutines.launch
 
 private const val REPOSITORY = "https://github.com/naighes/scoutforall"
 // the privacy policy, also the one on Google Play: the text of DATA-PRIVACY
@@ -33,7 +43,8 @@ private const val PRIVACY = "https://naighes.github.io/scoutforall/privacy/"
 private const val REPORTS = "scout4all-0fd59357fbe3@intake.linear.app"
 
 /** The settings: the language of the app (the system chooses it), the
- * statistics sent, the terms of use, the information on the app. */
+ * country of a new team, the statistics sent, the terms of use, the
+ * information on the app. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit, onTutorial: () -> Unit = {}) {
@@ -63,12 +74,50 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit,
                     )
                 }
             }
+            DefaultCountry()
             StatisticsSwitch()
             Row(stringResource(R.string.tutorial), stringResource(R.string.tutorial_detail), onTutorial)
             Row(stringResource(R.string.terms_of_use), null, onTerms)
             Row(stringResource(R.string.about), null, onAbout)
         }
     }
+}
+
+/** The country a new team starts with: guessed at the first start, chosen
+ * from the list. */
+@Composable
+private fun DefaultCountry() {
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val scope = rememberCoroutineScope()
+    // null while reading, then the country, if any
+    var country by remember { mutableStateOf<Result<CountryChoice?>?>(null) }
+    LaunchedEffect(Unit) { country = Result.success(app.core { it.defaultCountry() }) }
+    var choosing by rememberSaveable { mutableStateOf(false) }
+    val chosen = country?.getOrNull()
+    val title = stringResource(R.string.default_country)
+    if (choosing) {
+        CountryDialog(
+            title = title,
+            current = chosen?.value,
+            onPick = { picked ->
+                choosing = false
+                scope.launch {
+                    try {
+                        app.core { it.setDefaultCountry(picked.value) }
+                        country = Result.success(picked)
+                    } catch (_: MobileException) {
+                        // not saved: it stays as it was
+                    }
+                }
+            },
+            onDismiss = { choosing = false },
+        )
+    }
+    country ?: return
+    Row(
+        title,
+        chosen?.let { "${flag(it.value)}  ${it.name}" } ?: stringResource(R.string.default_country_none),
+    ) { choosing = true }
 }
 
 /** The version, the license, the data, the code, and how to report a
