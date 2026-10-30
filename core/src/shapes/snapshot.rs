@@ -185,26 +185,29 @@ impl Snapshot {
 
     /// Whether the player can play the event: a player on court, but the
     /// libero doesn't attack, block or become the setter, a back row player
-    /// doesn't block, and the serve is of the player in position 1.
+    /// doesn't block, and the serve is of the player in position 1. The
+    /// player out for the libero can be substituted too (the libero never,
+    /// as the lineup checks).
     pub fn can_play(&self, event_type: EventTypeEnum, player_id: &Uuid) -> bool {
         use EventTypeEnum::*;
         let lineup = &self.current_lineup;
         let is_libero = lineup.get_current_libero() == *player_id;
-        lineup.find_position(player_id).is_some()
-            && match event_type {
-                S => lineup.get_serving_player() == Some(*player_id),
-                A | CS => !is_libero,
-                B => !is_libero && !lineup.is_back_row_player(player_id),
-                _ => true,
-            }
+        match (event_type, lineup.find_position(player_id).is_some()) {
+            (R, _) => lineup.is_in_the_game(player_id),
+            (_, false) => false,
+            (S, true) => lineup.get_serving_player() == Some(*player_id),
+            (A | CS, true) => !is_libero,
+            (B, true) => !is_libero && !lineup.is_back_row_player(player_id),
+            (_, true) => true,
+        }
     }
 
-    /// Whether the player can come in for a substitution: a player not on
-    /// court, and not a libero (the other substitution rules are checked by
-    /// the lineup).
+    /// Whether the player can come in for a substitution: a player not in
+    /// the game (on court or out for the libero), and not a libero (the
+    /// other substitution rules are checked by the lineup).
     fn can_come_in(&self, player_id: &Uuid) -> bool {
         let lineup = &self.current_lineup;
-        lineup.find_position(player_id).is_none()
+        !lineup.is_in_the_game(player_id)
             && lineup.get_current_libero() != *player_id
             && lineup.get_fallback_libero() != Some(*player_id)
     }

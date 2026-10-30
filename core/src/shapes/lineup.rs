@@ -377,6 +377,16 @@ impl Lineup {
         self.players
     }
 
+    /// The players by position as if the libero weren't on court: the
+    /// player the libero replaces in its place. DataVolley writes the six
+    /// on court so.
+    pub fn get_positions_without_libero(&self) -> [Uuid; 6] {
+        self.players.map(|id| match self.idle_player {
+            Some(idle) if id == self.current_libero => idle,
+            _ => id,
+        })
+    }
+
     pub fn get(&self, index: usize) -> Option<Uuid> {
         self.players.get(index).copied()
     }
@@ -463,12 +473,26 @@ impl Lineup {
         self.substitutions.len() >= self.max_substitutions as usize
     }
 
+    /// The player out of the court while the libero plays in their place:
+    /// still in the game, and can be substituted (e.g. the substitute who
+    /// served and the libero replaced on the side out, back to the bench for
+    /// the middle blocker).
+    pub fn is_out_for_the_libero(&self, player_id: &Uuid) -> bool {
+        self.idle_player == Some(*player_id)
+    }
+
+    /// Whether the player is in the game: on court, or out of it for the
+    /// libero.
+    pub fn is_in_the_game(&self, player_id: &Uuid) -> bool {
+        self.find_position(player_id).is_some() || self.is_out_for_the_libero(player_id)
+    }
+
     pub fn add_substitution(
         &mut self,
         replaced: &Uuid,
         replacement: &Uuid,
     ) -> Result<(), AppError> {
-        if let Some(pos) = self.find_position(replaced) {
+        if self.is_in_the_game(replaced) {
             // check if already replaced previously
             if self.was_player_already_replaced(replaced) {
                 return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
@@ -505,7 +529,12 @@ impl Lineup {
                 ))));
             }
 
-            self.try_set(replacement, pos)?;
+            // on court, or in the place of the player out for the libero:
+            // the libero stays on court
+            match self.find_position(replaced) {
+                Some(pos) => self.try_set(replacement, pos)?,
+                None => self.idle_player = Some(*replacement),
+            }
             // add entry into substitutions
             self.substitutions.push(SubstitutionRecord {
                 replaced: *replaced,

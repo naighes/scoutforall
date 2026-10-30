@@ -430,7 +430,8 @@ mod tests {
             t.receiving(vec![sub(t.subs[1], t.subs[0])]),
             "can't play it",
         );
-        assert_invalid(t.receiving(vec![sub(t.mb1, t.subs[0])]), "can't play it");
+        // the middle blocker out for the libero is still in the game
+        assert_valid(t.receiving(vec![sub(t.mb1, t.subs[0])]));
     }
 
     #[test]
@@ -536,7 +537,7 @@ mod tests {
     fn offered(t: &Team, snapshot: &Snapshot) -> Vec<EventEntry> {
         let lineup = &snapshot.current_lineup;
         let can_come_in = |p: &Uuid| {
-            lineup.find_position(p).is_none()
+            !lineup.is_in_the_game(p)
                 && *p != lineup.get_current_libero()
                 && Some(*p) != lineup.get_fallback_libero()
         };

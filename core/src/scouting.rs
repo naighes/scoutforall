@@ -301,7 +301,8 @@ impl ScoutingSession {
     }
 
     /// The players to choose for the event: the ones on court who can play
-    /// it, or the ones who can be replaced.
+    /// it, or the ones who can be replaced (the one out for the libero
+    /// too).
     pub fn player_choices(&self) -> Vec<PlayerChoice> {
         self.choices_for(self.event)
     }
@@ -316,7 +317,9 @@ impl ScoutingSession {
             .into_iter()
             .filter_map(|(index, (role, id))| {
                 id.filter(|id| match event {
-                    Some(EventTypeEnum::R) | None => lineup.find_position(id).is_some(),
+                    // on court, or out for the libero: still in the game
+                    Some(EventTypeEnum::R) => lineup.is_in_the_game(id),
+                    None => lineup.find_position(id).is_some(),
                     // only the diagonal: the libero follows the setter, so
                     // anyone else would move it, even to the front row; the
                     // saved sets with another one stay readable
