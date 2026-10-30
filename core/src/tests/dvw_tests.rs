@@ -473,4 +473,110 @@ mod tests {
             })
             .collect()
     }
+
+    /// How the sets of a folder of files translate, for both teams:
+    /// `DVW_DIR=... cargo test -p scout4all-core dvw_translate_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn dvw_translate_probe() {
+        use crate::dvw::{
+            model::{DvwRole, MatchDate},
+            translate::{Issue, Us, translate_set},
+        };
+        use std::collections::{BTreeMap, HashMap};
+        let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
+        let max_substitutions: u8 = std::env::var("DVW_MAX_SUBSTITUTIONS")
+            .ok()
+            .and_then(|m| m.parse().ok())
+            .unwrap_or(6);
+        let uuid =
+            regex::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+                .unwrap();
+        let mut paths = walk(std::path::Path::new(&dir));
+        paths.sort();
+        let (mut sets_ok, mut sets_failed, mut sides_ok, mut sides) = (0, 0, 0, 0);
+        let mut issues: BTreeMap<String, (usize, String)> = BTreeMap::new();
+        let mut mappings: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut events = 0;
+        for path in &paths {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let file = parse(&std::fs::read(path).unwrap()).unwrap();
+            let date = match file.match_info.date {
+                MatchDate::Known(d) | MatchDate::Ambiguous(d, _) => d,
+                MatchDate::Missing => date(2000, 1, 1),
+            };
+            for side in [Side::Home, Side::Visiting] {
+                sides += 1;
+                let players: HashMap<u8, uuid::Uuid> = file
+                    .players(side)
+                    .iter()
+                    .map(|p| (p.number, uuid::Uuid::new_v4()))
+                    .collect();
+                let liberos: Vec<u8> = file
+                    .players(side)
+                    .iter()
+                    .filter(|p| p.libero || p.role == Some(DvwRole::Libero))
+                    .map(|p| p.number)
+                    .collect();
+                let us = Us {
+                    side,
+                    players: &players,
+                    liberos: &liberos,
+                };
+                let mut all_ok = true;
+                for set in &file.sets {
+                    match translate_set(&file, &us, set.set_number, date, max_substitutions) {
+                        Ok((entry, used)) => {
+                            sets_ok += 1;
+                            events += entry.events.len();
+                            for (k, v) in used {
+                                *mappings.entry(k).or_default() += v;
+                            }
+                        }
+                        Err(e) => {
+                            sets_failed += 1;
+                            all_ok = false;
+                            let key = match &e.issue {
+                                Issue::Event(text) => {
+                                    format!("Event({})", uuid.replace_all(text, "<id>"))
+                                }
+                                Issue::LineupMismatch { .. } => "LineupMismatch".to_string(),
+                                Issue::Score { .. } => "Score".to_string(),
+                                Issue::UnknownPlayer(_) => "UnknownPlayer".to_string(),
+                                other => format!("{other:?}"),
+                            };
+                            let example = format!(
+                                "{name} {side:?} set {} line {:?}: {:?}",
+                                e.set_number, e.line, e.issue
+                            );
+                            if std::env::var("DVW_ALL").is_ok() {
+                                println!(
+                                    "FAIL\t{name}\t{side:?}\t{}\t{:?}\t{key}",
+                                    e.set_number, e.line
+                                );
+                            }
+                            let entry = issues.entry(key).or_insert((0, example));
+                            entry.0 += 1;
+                        }
+                    }
+                }
+                if all_ok {
+                    sides_ok += 1;
+                }
+            }
+        }
+        println!(
+            "{} files, max substitutions {max_substitutions}",
+            paths.len()
+        );
+        println!("sets: {sets_ok} translated ({events} events), {sets_failed} failed");
+        println!("matches (one team): {sides_ok} of {sides} translated whole");
+        println!("\nissues (count, first example):");
+        let mut sorted: Vec<_> = issues.into_iter().collect();
+        sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1.0));
+        for (key, (count, example)) in sorted {
+            println!("{count:5}  {key}\n       {example}");
+        }
+        println!("\nmappings: {mappings:#?}");
+    }
 }

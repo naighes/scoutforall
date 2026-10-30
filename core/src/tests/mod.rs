@@ -11,6 +11,7 @@ mod benchmark_tests;
 mod config_tests;
 mod country_tests;
 mod dvw_tests;
+mod dvw_translate_tests;
 mod edit_event_tests;
 mod event_validation_tests;
 mod example_tests;
