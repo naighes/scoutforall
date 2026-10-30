@@ -73,14 +73,26 @@ impl CountryCode {
 
     /// The country of a locale of the system (`it_IT.UTF-8`, `pt-BR`,
     /// `zh-Hant-TW`) or a country code alone (`it`, from the SIM): the
-    /// first part after the language that's a country of the table.
+    /// first part after the language that's a country of the table. The
+    /// region the user chose apart from the language comes first (`rg`:
+    /// `en_US@rg=itzzzz` on macOS, `en-US-u-rg-itzzzz`).
     pub fn from_locale(locale: &str) -> Option<Self> {
-        let tag = locale.split(['.', '@']).next().unwrap_or_default();
-        match tag.split(['-', '_']).collect::<Vec<_>>().as_slice() {
-            [code] => Self::known(code),
-            [_, rest @ ..] => rest.iter().find_map(|part| Self::known(part)),
-            [] => None,
-        }
+        Self::region_override(locale).or_else(|| {
+            let tag = locale.split(['.', '@']).next().unwrap_or_default();
+            match tag.split(['-', '_']).collect::<Vec<_>>().as_slice() {
+                [code] => Self::known(code),
+                [_, rest @ ..] => rest.iter().find_map(|part| Self::known(part)),
+                [] => None,
+            }
+        })
+    }
+
+    /// The country of the `rg` key of a locale: its first two letters.
+    fn region_override(locale: &str) -> Option<Self> {
+        let (_, after) = locale
+            .split_once("rg=")
+            .or_else(|| locale.split_once("-rg-"))?;
+        Self::known(after.get(..2)?)
     }
 
     /// The country most users of `language` play in: none for English.

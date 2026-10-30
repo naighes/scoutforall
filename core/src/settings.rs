@@ -6,8 +6,9 @@ use crate::shapes::country::{self, CountryCode};
 use serde::{Deserialize, Serialize};
 
 /// The version of the terms of use (license and data collection): raise it
-/// when they change, to show them again to every user.
-pub const TERMS_VERSION: u8 = 2;
+/// when they change, to show them again to every user. 3: the country of
+/// the team among the data sent.
+pub const TERMS_VERSION: u8 = 3;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Consent {

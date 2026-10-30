@@ -122,11 +122,14 @@ async fn run() -> Result<(), String> {
     let set_writer = StoreSetWriter::new(Arc::clone(&store), language());
     let queue_reader = StoreQueueReader::new(Arc::clone(&store));
     let queue_writer = StoreQueueWriter::new(Arc::clone(&store));
+    let locales: Vec<String> = sys_locale::get_locales().collect();
+    // without config.json (a new installation, or one that can't be read)
+    // the language of the system
     let settings = settings_reader
         .read()
         .await
         .ok()
-        .unwrap_or_else(Settings::default);
+        .unwrap_or_else(|| Settings::default().in_system_language(&locales));
     init_settings(settings.clone());
     // a new installation starts with a team, to try the app at once
     if let Err(e) = add_example_team_if_new(store.as_ref(), &team_writer, language().labels()).await
@@ -134,8 +137,8 @@ async fn run() -> Result<(), String> {
         log_error(&format!("could not add the example team: {e}"));
     }
     // after the example team: a new installation is one without config.json
-    let locales: Vec<String> = sys_locale::get_locales().collect();
-    let settings = match settings.with_guessed_country(&locales) {
+    let hints: Vec<String> = system_region().into_iter().chain(locales).collect();
+    let settings = match settings.with_guessed_country(&hints) {
         Some(guessed) => settings_writer.save(guessed).await.unwrap_or(settings),
         None => settings,
     };
@@ -206,4 +209,22 @@ async fn run_app<B: Backend<Error = std::io::Error>>(
             return result;
         }
     }
+}
+
+/// The region chosen in the settings of macOS, apart from the language
+/// (`en_US@rg=itzzzz`): the language list of `sys_locale` doesn't tell it.
+#[cfg(target_os = "macos")]
+fn system_region() -> Option<String> {
+    std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleLocale"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|locale| locale.trim().to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_region() -> Option<String> {
+    None
 }

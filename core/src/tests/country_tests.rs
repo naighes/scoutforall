@@ -100,6 +100,10 @@ mod tests {
         assert_eq!(of("pt-BR"), Some("BR".into()));
         assert_eq!(of("zh-Hant-TW"), Some("TW".into()));
         assert_eq!(of("en_US@euro"), Some("US".into()));
+        // the region chosen apart from the language
+        assert_eq!(of("en_US@rg=itzzzz"), Some("IT".into()));
+        assert_eq!(of("en-US-u-rg-brzzzz"), Some("BR".into()));
+        assert_eq!(of("en_US@rg=zz"), Some("US".into()));
         // the country code of the SIM, lower case
         assert_eq!(of("pl"), Some("PL".into()));
         // a language alone, the region a number, nothing

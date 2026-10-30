@@ -109,6 +109,40 @@ mod tests {
         assert!(shows_teams(&mut ui), "{}", ui.screen());
     }
 
+    /// The terms of v0.11 didn't name the country of the team among the
+    /// data sent: seen then, they're shown again, and nothing is sent
+    /// until they are.
+    #[tokio::test]
+    async fn the_terms_seen_before_the_country_are_shown_again() {
+        let settings = Settings {
+            consent: Consent {
+                terms_version: 2,
+                ..Consent::default()
+            },
+            ..Settings::default()
+        };
+        assert!(!settings.uploads_enabled());
+        let mut ui = Ui::start_as(TEAM, settings).await;
+        assert!(shows_terms(&mut ui), "{}", ui.screen());
+        let country = "country";
+        assert!(ui.screen().contains(country), "{}", ui.screen());
+        ui.press(KeyCode::Enter).await;
+        assert_eq!(ui.saved_settings().await.unwrap().consent.terms_version, 3);
+    }
+
+    #[test]
+    fn a_new_installation_speaks_the_language_of_the_system() {
+        let speaks = |locales: &[&str]| {
+            let locales: Vec<String> = locales.iter().map(|l| l.to_string()).collect();
+            Settings::default().in_system_language(&locales).language
+        };
+        assert_eq!(speaks(&["it-IT", "en-US"]), LanguageEnum::It);
+        // the first one the app speaks, in the order of the user
+        assert_eq!(speaks(&["fr-FR", "ja-JP"]), LanguageEnum::Ja);
+        assert_eq!(speaks(&["fr-FR"]), LanguageEnum::En);
+        assert_eq!(speaks(&[]), LanguageEnum::En);
+    }
+
     #[test]
     fn no_statistics_are_sent_before_the_terms_are_seen() {
         let unseen = Settings::default();

@@ -874,6 +874,23 @@ impl LanguageEnum {
         LanguageEnum::Pl,
         LanguageEnum::Ja,
     ];
+
+    /// The language of a locale of the system (`it_IT.UTF-8`, `pt-BR`,
+    /// `ja`), if the app speaks it: the part before the region.
+    pub fn of_locale(locale: &str) -> Option<Self> {
+        let language = locale
+            .split(['-', '_', '.', '@'])
+            .next()
+            .unwrap_or_default();
+        match language.to_lowercase().as_str() {
+            "en" => Some(LanguageEnum::En),
+            "it" => Some(LanguageEnum::It),
+            "pt" => Some(LanguageEnum::Pt),
+            "pl" => Some(LanguageEnum::Pl),
+            "ja" => Some(LanguageEnum::Ja),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for LanguageEnum {

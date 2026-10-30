@@ -77,6 +77,19 @@ impl Settings {
         self.last_used_dir.clone().or_else(home_dir)
     }
 
+    /// The settings of a new installation in the language of the system:
+    /// the first of its locales (as `it-IT`), in the order of the user,
+    /// the app speaks; English if none.
+    pub fn in_system_language(self, locales: &[String]) -> Settings {
+        Settings {
+            language: locales
+                .iter()
+                .find_map(|l| LanguageEnum::of_locale(l))
+                .unwrap_or(self.language),
+            ..self
+        }
+    }
+
     /// The settings with the country of a new team guessed, when they have
     /// none and something tells it: the locales of the system (as
     /// `it-IT`), in the order of the user, then the language.
