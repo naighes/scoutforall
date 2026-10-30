@@ -14,6 +14,7 @@ mod dvw_tests;
 mod edit_event_tests;
 mod event_validation_tests;
 mod example_tests;
+mod fault_tests;
 mod finished_match_tests;
 mod flags_tests;
 mod freeball_tests;

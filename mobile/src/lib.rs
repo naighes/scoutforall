@@ -1012,6 +1012,9 @@ pub struct ScoutingState {
     /// their serve
     pub reception: u8,
     pub reception_open: bool,
+    /// whether the team can make the event chosen, no player: our fault
+    /// (e.g. a rotation fault), see `choose_team`
+    pub team_choice: bool,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -1423,6 +1426,7 @@ impl Scouting {
             inverted_p1: session.inverted_p1(),
             reception: session.reception().players(),
             reception_open: session.can_tell_reception(),
+            team_choice: session.team_choice(),
         }
     }
 
@@ -1511,6 +1515,12 @@ impl Scouting {
         let player = parse_id(&player)?;
         let mut session = self.session();
         self.scouted(self.runtime.block_on(session.choose_player(player)))
+    }
+
+    /// The team makes the event, no player: our fault.
+    pub fn choose_team(&self) -> Result<Progress, MobileError> {
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_team()))
     }
 
     pub fn choose_replacement(&self, player: String) -> Result<Progress, MobileError> {
@@ -4129,6 +4139,48 @@ mod tests {
                 assert_eq!(freeball.player, None);
             }
             other => unreachable!("expected the freeball, got {other:?}"),
+        }
+    }
+
+    /// Our fault, among the other events: the team can make it (e.g. a
+    /// rotation fault), saved with no player; only the fault offers the
+    /// team.
+    #[test]
+    fn our_fault_can_be_the_teams() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        assert!(!scouting.state().team_choice);
+        assert!(scouting.choose_team().is_err());
+        scouting.choose_event(EventTypeEnum::D).unwrap();
+        let state = scouting.state();
+        assert_eq!(state.step, ScoutingStep::Player);
+        assert!(!state.team_choice);
+        assert!(scouting.choose_team().is_err());
+        scouting.undo().unwrap();
+        assert!(
+            scouting
+                .other_events()
+                .iter()
+                .any(|e| e.value == EventTypeEnum::F)
+        );
+        scouting.choose_event(EventTypeEnum::F).unwrap();
+        let state = scouting.state();
+        assert_eq!(state.step, ScoutingStep::Player);
+        assert!(state.team_choice);
+        assert_eq!(scouting.choose_team().unwrap(), Progress::Saved);
+        let state = scouting.state();
+        assert!(!state.team_choice);
+        assert_eq!(state.score_them, 1);
+        // the latest first
+        match state.events.as_slice() {
+            [fault, ..] => {
+                assert_eq!(fault.event, EventTypeEnum::F);
+                assert_eq!(fault.player, None);
+            }
+            other => unreachable!("expected the fault, got {other:?}"),
         }
     }
 

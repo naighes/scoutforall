@@ -60,6 +60,9 @@ pub struct ScoutingScreen<
 const SCORE_HEADER_HEIGHT: u16 = 3;
 /// The point sequence, below the score: a row per team and the borders.
 const POINT_SEQUENCE_HEIGHT: u16 = 4;
+/// Chooses the team among the players, for our fault (e.g. a rotation
+/// fault): the players have 1 to 7.
+const TEAM_KEY: u8 = 0;
 
 /// The rows the tallest panel of the left column takes: the evaluations
 /// of an event with, below, the sets or serves to choose from (the attack
@@ -340,7 +343,10 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                 self.session.available_events().len() + ScoutingOptionEnum::ALL.len()
             }
             ScoutingStep::Eval => self.session.available_evals().len(),
-            ScoutingStep::Player => self.session.player_choices().len(),
+            // the team first, for our fault
+            ScoutingStep::Player => {
+                usize::from(self.session.team_choice()) + self.session.player_choices().len()
+            }
             ScoutingStep::Replacement => self.session.replacement_choices().len(),
         }
     }
@@ -409,17 +415,17 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     }
 
     async fn handle_player_screen(&mut self, key: KeyEvent) -> AppAction {
-        let player = Self::digit(key)
-            .filter(|d| (1..=7).contains(d))
-            .and_then(|d| {
-                self.session
-                    .player_choices()
-                    .into_iter()
-                    .find(|p| p.index == d)
-            });
-        let progress = match player {
-            Some(player) => self.session.choose_player(player.id).await,
-            None => Err(ScoutingError::InvalidPlayerSelection),
+        let digit = Self::digit(key);
+        let player = digit.filter(|d| (1..=7).contains(d)).and_then(|d| {
+            self.session
+                .player_choices()
+                .into_iter()
+                .find(|p| p.index == d)
+        });
+        let progress = match (digit, player) {
+            (_, Some(player)) => self.session.choose_player(player.id).await,
+            (Some(TEAM_KEY), None) => self.session.choose_team().await,
+            _ => Err(ScoutingError::InvalidPlayerSelection),
         };
         self.show(progress)
     }
@@ -662,12 +668,19 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
         f.render_widget(table, area);
     }
 
+    /// The players, after the team when the event can be the team's (our
+    /// fault).
     fn render_lineup_choices(&self, f: &mut Frame, area: Rect) {
         let choices = self.session.player_choices();
         let keys = choices.iter().map(|p| p.index.to_string()).collect();
+        let team = self
+            .session
+            .team_choice()
+            .then(|| [TEAM_KEY.to_string(), current_labels().team.to_string()]);
         Self::render_player_choices_table(
             f,
             area,
+            team,
             &choices,
             keys,
             current_labels().player_selection,
@@ -686,6 +699,7 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
                 Self::render_player_choices_table(
                     f,
                     area,
+                    None,
                     &choices,
                     keys,
                     current_labels().select_replacement,
@@ -695,10 +709,12 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
     }
 
     /// The players with the key choosing each: the key, the number ("#99")
-    /// and the role sized on their content, the name in the rest.
+    /// and the role sized on their content, the name in the rest. First the
+    /// team, if given: its key and name.
     fn render_player_choices_table(
         f: &mut Frame,
         area: Rect,
+        team: Option<[String; 2]>,
         choices: &[PlayerChoice],
         keys: Vec<String>,
         title: &str,
@@ -708,18 +724,16 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .map(|p| p.role.width())
             .max()
             .map_or(1, |w| u16::try_from(w).unwrap_or(u16::MAX));
-        let rows: Vec<Row> = choices
-            .iter()
-            .zip(keys)
-            .map(|(p, key)| {
-                Row::new(vec![
-                    format!(" {key}"),
-                    format!("#{}", p.number),
-                    p.name.clone(),
-                    p.role.clone(),
-                ])
-            })
-            .collect();
+        let team = team.map(|[key, name]| Row::new(vec![format!(" {key}"), String::new(), name]));
+        let players = choices.iter().zip(keys).map(|(p, key)| {
+            Row::new(vec![
+                format!(" {key}"),
+                format!("#{}", p.number),
+                p.name.clone(),
+                p.role.clone(),
+            ])
+        });
+        let rows: Vec<Row> = team.into_iter().chain(players).collect();
         let table = Table::new(
             rows,
             [

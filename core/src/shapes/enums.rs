@@ -152,7 +152,9 @@ impl FromStr for TeamSideEnum {
 ///   A defensive net action to stop or deflect the opponent's attack.
 ///
 /// - **F**: Fault  
-///   A team error resulting in a lost point (e.g., net touch, rotation fault).
+///   A team error resulting in a lost point (e.g., net touch, rotation fault,
+///   a setter's fault). It names the player making it, or none: the team's
+///   (e.g. a rotation fault).
 ///
 /// - **OS**: Opponent Score  
 ///   A point scored directly by the opponent (not caused by our own fault).
@@ -251,17 +253,25 @@ impl EventTypeEnum {
     }
 
     /// Our freeball (`FB`) is a team event: the player isn't asked, but the
-    /// sets scouted before keep it (see `accepts_player`).
+    /// sets scouted before keep it (see `accepts_player`). Our fault (`F`)
+    /// asks it, the team's having none (see `asks_player`).
     pub fn requires_player(&self) -> bool {
         use EventTypeEnum::*;
-        matches!(self, A | B | P | F | D | R | S | CS)
+        matches!(self, A | B | P | D | R | S | CS)
     }
 
-    /// Whether a saved event can name its player: the events requiring one,
+    /// Whether scouting asks the player: the events requiring one, and our
+    /// fault, a player's (e.g. a setter's double) or the team's (e.g. a
+    /// rotation fault).
+    pub fn asks_player(&self) -> bool {
+        self.requires_player() || *self == EventTypeEnum::F
+    }
+
+    /// Whether a saved event can name its player: the events asking one,
     /// and our freeball, which named it before it became a team event (the
     /// statistics ignore it).
     pub fn accepts_player(&self) -> bool {
-        self.requires_player() || *self == EventTypeEnum::FB
+        self.asks_player() || *self == EventTypeEnum::FB
     }
 
     pub fn available_evals(&self) -> Vec<EvalEnum> {

@@ -74,6 +74,7 @@
     <string name="close">Close</string>
     <string name="undo">Undo</string>
     <string name="touch_the_player">Touch the player on court</string>
+    <string name="the_team">The team</string>
     <string name="who_comes_in">Who comes in?</string>
     <string name="their_point">Their point</string>
     <string name="their_error">Their error</string>

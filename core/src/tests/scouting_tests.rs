@@ -327,6 +327,75 @@ mod tests {
         assert_eq!(s.session.snapshot().score_them, 1);
     }
 
+    /// Our fault: the player making it (e.g. a setter's double), or the
+    /// team, no player (e.g. a rotation fault). Only the fault can be the
+    /// team's: the events requiring the player refuse it.
+    #[tokio::test]
+    async fn a_fault_is_a_players_or_the_teams() {
+        let mut s = scouting().await;
+        let refused = Err(ScoutingError::InvalidPlayerSelection);
+        // nothing chosen yet, and the serve: no team
+        assert!(!s.session.team_choice());
+        assert_eq!(s.session.choose_team().await, refused);
+        s.session.choose_event(S).await.unwrap();
+        assert!(!s.session.team_choice());
+        assert_eq!(s.session.choose_team().await, refused);
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        for event in [D, B, A] {
+            s.session.choose_event(event).await.unwrap();
+            assert_eq!(s.session.step(), ScoutingStep::Player, "{event}");
+            assert!(!s.session.team_choice(), "{event}");
+            assert_eq!(s.session.choose_team().await, refused, "{event}");
+            s.session.undo().await.unwrap();
+        }
+        assert_eq!(event_types(&saved_events(&s).await), vec![S]);
+        // the fault: the team, or the players on court
+        s.session.choose_event(F).await.unwrap();
+        assert_eq!(s.session.step(), ScoutingStep::Player);
+        assert!(s.session.team_choice());
+        assert_eq!(s.session.player_choices().len(), 6);
+        assert_eq!(s.session.choose_team().await, Ok(Progress::Saved));
+        assert!(!s.session.team_choice());
+        assert_eq!(s.session.step(), ScoutingStep::Event);
+        // they serve: a fault of the setter, named
+        s.session.choose_event(F).await.unwrap();
+        assert!(s.session.team_choice());
+        let setter = s.players[0];
+        assert_eq!(s.session.choose_player(setter).await, Ok(Progress::Saved));
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![S, F, F]);
+        assert_eq!(
+            saved.iter().map(|e| e.player).collect::<Vec<_>>(),
+            vec![Some(setter), None, Some(setter)]
+        );
+        assert_eq!(s.session.snapshot().score_them, 2);
+        // the team's fault undone, back to the team choice
+        s.session.choose_event(F).await.unwrap();
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.step(), ScoutingStep::Event);
+        assert!(!s.session.team_choice());
+    }
+
+    /// With the player first, the fault comes before its player: the team
+    /// can make it too.
+    #[tokio::test]
+    async fn with_the_player_first_the_fault_can_be_the_teams() {
+        let mut s = player_first().await;
+        assert!(s.session.other_events().contains(&F));
+        s.session.choose_event(F).await.unwrap();
+        assert!(s.session.team_choice());
+        assert_eq!(s.session.choose_team().await, Ok(Progress::Saved));
+        let saved = saved_events(&s).await;
+        assert_eq!(
+            saved
+                .iter()
+                .map(|e| (e.event_type, e.player))
+                .collect::<Vec<_>>(),
+            vec![(F, None)]
+        );
+        assert_eq!(s.session.snapshot().score_them, 1);
+    }
+
     /// A substitution: the player who leaves, then the one who comes in.
     #[tokio::test]
     async fn a_substitution_needs_the_replacement() {

@@ -186,6 +186,9 @@ class ScoutingViewModel(
 
     fun event(event: EventChoice) = choose("event ${event.value}") { it.chooseEvent(event.value) }
 
+    /** The team makes the fault, no player (e.g. a rotation fault). */
+    fun team() = choose("team") { it.chooseTeam() }
+
     fun replacement(player: ScoutingPlayer) = choose("replacement ${player.id}") { it.chooseReplacement(player.id) }
 
     fun technique(technique: TechniqueChoice) = choose("technique ${technique.value}") {
@@ -723,6 +726,10 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
         ScoutingStep.PLAYER -> {
             Title(state.event?.name.orEmpty())
             Hint(stringResource(R.string.touch_the_player))
+            // our fault: the player's, or the team's
+            if (state.teamChoice) {
+                Buttons(listOf(Triple("team", stringResource(R.string.the_team)) { model.team() }))
+            }
         }
         ScoutingStep.REPLACEMENT -> {
             Title(listOfNotNull(state.event?.name, player).joinToString(" · "))

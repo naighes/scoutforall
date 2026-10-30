@@ -296,12 +296,13 @@ mod tests {
         let t = Team::new();
         for event in [
             ev(P, None, Some(Perfect), None),
-            ev(F, None, None, None),
             ev(CS, None, None, None),
             ev(R, None, None, Some(t.subs[0])),
         ] {
             assert_invalid(t.receiving(vec![event]), "missing player");
         }
+        // the team's fault (e.g. a rotation fault) names none
+        assert_valid(t.receiving(vec![ev(F, None, None, None)]));
     }
 
     #[test]

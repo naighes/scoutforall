@@ -525,7 +525,7 @@ impl ScoutingSession {
                 self.technique = self.preselected_technique();
                 Ok(Progress::Choosing)
             }
-            (ScoutingStep::Event, true, e) if e.requires_player() => {
+            (ScoutingStep::Event, true, e) if e.asks_player() => {
                 self.event = Some(e);
                 self.step = ScoutingStep::Player;
                 Ok(Progress::Choosing)
@@ -572,6 +572,34 @@ impl ScoutingSession {
                     event_type: event,
                     eval: None,
                     player: Some(player),
+                    target_player: None,
+                    technique: None,
+                    flags: Default::default(),
+                })
+                .await
+            }
+            _ => Err(ScoutingError::InvalidPlayerSelection),
+        }
+    }
+
+    /// Whether the event can be the team's, no player chosen (see
+    /// `choose_team`): our fault, e.g. a rotation fault.
+    pub fn team_choice(&self) -> bool {
+        matches!(
+            (self.step, self.event),
+            (ScoutingStep::Player, Some(event)) if !event.requires_player()
+        )
+    }
+
+    /// The team makes the event, no player: it's saved.
+    pub async fn choose_team(&mut self) -> Result<Progress, ScoutingError> {
+        match (self.team_choice(), self.event) {
+            (true, Some(event)) => {
+                self.save(EventEntry {
+                    timestamp: Utc::now(),
+                    event_type: event,
+                    eval: None,
+                    player: None,
                     target_player: None,
                     technique: None,
                     flags: Default::default(),

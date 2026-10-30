@@ -533,7 +533,7 @@ impl Snapshot {
         };
         // every event of the rally: an action missing its evaluation can't
         // be scored, and the substitutions and libero and setter changes
-        // aren't part of the rally; the player only of the events requiring
+        // aren't part of the rally; the player only of the events asking
         // one (our freeball named it once)
         let skip = matches!(event.event_type, R | CL | CS)
             || (event.event_type.requires_evaluation() && event.eval.is_none());
@@ -542,7 +542,7 @@ impl Snapshot {
                 event_type: event.event_type,
                 phase,
                 rotation,
-                player: event.player.filter(|_| event.event_type.requires_player()),
+                player: event.player.filter(|_| event.event_type.asks_player()),
                 zone,
                 eval: event.eval,
             });
