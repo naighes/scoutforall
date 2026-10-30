@@ -941,7 +941,7 @@ mod tests {
     fn overview_counts_every_event_once() {
         let events: Vec<(EventTypeEnum, Option<EvalEnum>)> = EventTypeEnum::ALL
             .iter()
-            .filter(|et| !matches!(et, R | CL | CS))
+            .filter(|et| !matches!(et, R | CL | LR | CS))
             .flat_map(|et| match et.requires_evaluation() {
                 true => et
                     .available_evals()

@@ -426,6 +426,38 @@ mod tests {
         assert_eq!(saved[0].target_player, Some(bench));
     }
 
+    /// The libero out, then back in: saved at once, no player, the scout
+    /// still choosing the event; the middle blocker back on court meanwhile.
+    #[tokio::test]
+    async fn the_libero_goes_out_and_back_in() {
+        let mut s = scouting().await;
+        let (middle, libero) = (s.players[5], s.players[6]);
+        let on_court = |s: &Scouting, id: Uuid| {
+            s.session
+                .snapshot()
+                .current_lineup
+                .find_position(&id)
+                .is_some()
+        };
+        assert!(on_court(&s, libero) && !on_court(&s, middle));
+        assert_eq!(s.session.choose_event(LR).await, Ok(Progress::Saved));
+        assert_eq!(s.session.step(), ScoutingStep::Event);
+        assert!(!on_court(&s, libero) && on_court(&s, middle));
+        assert!(s.session.available_events().contains(&LR));
+        assert_eq!(s.session.choose_event(LR).await, Ok(Progress::Saved));
+        assert!(on_court(&s, libero) && !on_court(&s, middle));
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![LR, LR]);
+        assert!(saved.iter().all(|e| e.player.is_none() && e.eval.is_none()));
+        // within the rally, never
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        assert_eq!(
+            s.session.choose_event(LR).await,
+            Err(ScoutingError::EventNotAvailable(LR))
+        );
+    }
+
     /// A player of the team who isn't on the roster of the match can't come
     /// in: the score sheet is the roster.
     #[tokio::test]
@@ -591,7 +623,7 @@ mod tests {
             (s.session.step(), s.session.event(), s.session.player()),
             (ScoutingStep::Eval, Some(S), Some(s.players[0]))
         );
-        assert_eq!(s.session.other_events(), vec![OE, F, R, CS]);
+        assert_eq!(s.session.other_events(), vec![OE, F, R, LR, CS]);
         assert_eq!(s.session.player_events(&s.players[0]), vec![]);
         assert_eq!(
             s.session.choose_eval(EvalEnum::Perfect).await,

@@ -181,6 +181,11 @@ impl FromStr for TeamSideEnum {
 /// - **CL**: Change Libero  
 ///   A libero change performed by either team.
 ///
+/// - **LR**: Libero Replacement  
+///   The libero goes out, the middle blocker staying on court in the back
+///   row, or comes back in for them. It lasts until the next one: until
+///   then the libero doesn't come in (or doesn't go out) by itself.
+///
 /// - **CS**: Change Setter
 ///   A setter change performed by either team.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -198,6 +203,7 @@ pub enum EventTypeEnum {
     OF,
     R,
     CL,
+    LR,
     CS,
 }
 
@@ -217,6 +223,7 @@ impl fmt::Display for EventTypeEnum {
             OF => "OF",
             R => "R",
             CL => "CL",
+            LR => "LR",
             CS => "CS",
         };
         write!(f, "{}", label)
@@ -231,7 +238,7 @@ impl WithDesc<EventTypeEnum> for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub const ALL: [EventTypeEnum; 13] = [
+    pub const ALL: [EventTypeEnum; 14] = [
         EventTypeEnum::S,  // serve
         EventTypeEnum::P,  // pass/reception
         EventTypeEnum::A,  // attack
@@ -244,6 +251,7 @@ impl EventTypeEnum {
         EventTypeEnum::OF, // opponent freeball, sent to us
         EventTypeEnum::R,  // substitution/replacement
         EventTypeEnum::CL, // change libero
+        EventTypeEnum::LR, // libero replacement, in or out
         EventTypeEnum::CS, // change setter
     ];
 
@@ -326,7 +334,7 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self.rally_winner(eval), self, eval) {
-            (Some(_), _, _) | (None, R | CL | CS | F | OS | OE, _) => None,
+            (Some(_), _, _) | (None, R | CL | LR | CS | F | OS | OE, _) => None,
             (None, S, Some(Over))
             | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
             | (None, A, Some(Positive | Exclamative))
@@ -367,6 +375,7 @@ impl FriendlyName for EventTypeEnum {
             OF => labels.opponent_freeball,
             R => labels.substitution,
             CL => labels.change_libero,
+            LR => labels.libero_in_out,
             CS => labels.change_setter,
         }
     }
@@ -389,6 +398,7 @@ impl FromStr for EventTypeEnum {
             "OF" => Ok(OF),
             "R" => Ok(R),
             "CL" => Ok(CL),
+            "LR" => Ok(LR),
             "CS" => Ok(CS),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",

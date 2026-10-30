@@ -604,7 +604,7 @@ mod tests {
                 // the changes are rare, as in a real set
                 let rally: Vec<&EventEntry> = offered
                     .iter()
-                    .filter(|e| !matches!(e.event_type, R | CL | CS))
+                    .filter(|e| !matches!(e.event_type, R | CL | LR | CS))
                     .collect();
                 let event = match (rng.next(10), rally.is_empty()) {
                     (0, _) | (_, true) => offered[rng.next(offered.len())].clone(),

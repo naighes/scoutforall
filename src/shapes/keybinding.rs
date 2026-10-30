@@ -319,6 +319,7 @@ impl Default for KeyBindings<EventTypeEnum> {
         bindings.set(EventTypeEnum::FB, key!(x));
         bindings.set(EventTypeEnum::OF, key!(shift - x));
         bindings.set(EventTypeEnum::CL, key!(shift - l));
+        bindings.set(EventTypeEnum::LR, key!(l));
         bindings.set(EventTypeEnum::CS, key!(shift - c));
         bindings
     }

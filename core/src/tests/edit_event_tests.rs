@@ -238,7 +238,7 @@ mod tests {
         assert!(
             types
                 .iter()
-                .all(|t| !matches!(t, R | CL | CS) && t.asks_player()),
+                .all(|t| !matches!(t, R | CL | LR | CS) && t.asks_player()),
             "{types:?}"
         );
         assert_eq!(reception.evals(), P.available_evals());

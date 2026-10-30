@@ -4,9 +4,11 @@ use crate::{
         TIE_BREAK_SET_TARGET_SCORE,
     },
     errors::{AppError, SnapshotError},
+    localization::Labels,
     shapes::{
         enums::{
-            EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
+            EvalEnum, EventTypeEnum, FriendlyName, LineupRulesEnum, PhaseEnum, RoleEnum,
+            TeamSideEnum, ZoneEnum,
         },
         flags::EventFlags,
         lineup::Lineup,
@@ -181,6 +183,16 @@ impl Snapshot {
     /// The events that can come next.
     pub fn get_available_options(&self) -> &[EventTypeEnum] {
         &self.available_options
+    }
+
+    /// The name of the event to choose next: the libero replacement says
+    /// what it does now, the libero going out or coming back in.
+    pub fn next_event_name(&self, event: EventTypeEnum, labels: &Labels) -> &'static str {
+        match (event, self.current_lineup.is_libero_out()) {
+            (EventTypeEnum::LR, false) => labels.libero_out,
+            (EventTypeEnum::LR, true) => labels.libero_in,
+            _ => event.friendly_name(labels),
+        }
     }
 
     /// Whether the player can play the event: a player on court, but the
@@ -535,7 +547,7 @@ impl Snapshot {
         // be scored, and the substitutions and libero and setter changes
         // aren't part of the rally; the player only of the events asking
         // one (our freeball named it once)
-        let skip = matches!(event.event_type, R | CL | CS)
+        let skip = matches!(event.event_type, R | CL | LR | CS)
             || (event.event_type.requires_evaluation() && event.eval.is_none());
         if !skip {
             self.stats.events.add(EventKey {
@@ -636,7 +648,9 @@ impl Snapshot {
             event.event_type,
             event.eval,
         ) {
-            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | CS, _) => (self.possession, false),
+            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | LR | CS, _) => {
+                (self.possession, false)
+            }
             (_, 0, _, P | OS, _) => (1, true),
             (_, 0, _, _, _) => (0, false),
             (_, n, false, D, Some(Perfect | Positive | Exclamative | Negative | Over))
@@ -709,8 +723,8 @@ impl Snapshot {
     pub fn get_rally_start_options(&self, phase: PhaseEnum) -> Vec<EventTypeEnum> {
         use EventTypeEnum::*;
         let mut options = match phase {
-            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, CS],
-            PhaseEnum::Break => vec![OE, F, S, R, CL, CS],
+            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, LR, CS],
+            PhaseEnum::Break => vec![OE, F, S, R, CL, LR, CS],
         };
         if self.current_lineup.get_fallback_libero().is_none() {
             options.retain(|o| *o != CL);
@@ -724,7 +738,7 @@ impl Snapshot {
         let serve_them = self.get_rally_start_options(PhaseEnum::SideOut);
         let serve_us = self.get_rally_start_options(PhaseEnum::Break);
         let options_map: HashMap<_, _> = [
-            // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, CS
+            // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS
             //
             // the ball on our side, to play on our second or third touch:
             // our attack or our freeball (`FB`). Never a freeball on a first
@@ -781,7 +795,7 @@ impl Snapshot {
         .into_iter()
         .collect();
         match (event.event_type, event.eval) {
-            (R | CL | CS, _) => self.available_options.clone(),
+            (R | CL | LR | CS, _) => self.available_options.clone(),
             key => options_map.get(&key).cloned().unwrap_or_default(),
         }
     }
@@ -807,6 +821,10 @@ impl Snapshot {
             // change libero
             self.current_lineup.swap_libero()?;
         }
+        if event.event_type == EventTypeEnum::LR {
+            // the libero out, or back in
+            self.current_lineup.toggle_libero()?;
+        }
         if event.event_type == EventTypeEnum::CS {
             // change setter
             if let Some(new_setter) = event.player {
@@ -814,10 +832,10 @@ impl Snapshot {
             }
         }
         self.current_lineup.update(event)?;
-        if event.event_type != EventTypeEnum::R
-            && event.event_type != EventTypeEnum::CL
-            && event.event_type != EventTypeEnum::CS
-        {
+        if !matches!(
+            event.event_type,
+            EventTypeEnum::R | EventTypeEnum::CL | EventTypeEnum::LR | EventTypeEnum::CS
+        ) {
             self.last_event = Some(event.clone());
         }
         Ok(())

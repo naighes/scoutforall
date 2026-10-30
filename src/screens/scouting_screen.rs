@@ -473,7 +473,11 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .iter()
             .map(|ev| {
                 Row::new(vec![
-                    Line::from(ev.friendly_name(current_labels().domain)),
+                    Line::from(
+                        self.session
+                            .snapshot()
+                            .next_event_name(*ev, current_labels().domain),
+                    ),
                     Line::from(
                         se.key_for(ev)
                             .map(|kc| scf.to_string(kc))

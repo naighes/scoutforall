@@ -30,6 +30,9 @@ pub struct Lineup {
     libero_replacement: Option<Uuid>,
     idle_player: Option<Uuid>,
     liberos_played: Vec<Uuid>,
+    // the libero out by the scout's choice (`LR`): the middle blocker plays
+    // in the back row until the libero comes back in
+    libero_out: bool,
 }
 
 impl Lineup {
@@ -69,6 +72,7 @@ impl Lineup {
             },
             idle_player: if has_libero { Some(idle_player) } else { None },
             liberos_played: vec![current_libero],
+            libero_out: false,
         };
         if has_libero {
             // set is started: put the libero in
@@ -136,7 +140,9 @@ impl Lineup {
                 self.idle_player = None;
             }
             (PhaseEnum::SideOut, 1, None, _, Some(player_at_libero_slot))
-            | (PhaseEnum::SideOut, 4, None, _, Some(player_at_libero_slot)) => {
+            | (PhaseEnum::SideOut, 4, None, _, Some(player_at_libero_slot))
+                if !self.libero_out =>
+            {
                 // player who served pulled out
                 self.idle_player = Some(player_at_libero_slot);
                 // ...so replace this player with the libero
@@ -156,9 +162,7 @@ impl Lineup {
             if !self.liberos_played.contains(&fallback) {
                 self.liberos_played.push(fallback);
             }
-            let has_libero = self
-                .get_current_rotation()
-                .map(|r| Lineup::has_libero(r, self.get_current_phase()));
+            let has_libero = self.get_current_rotation().map(|r| self.libero_plays(r));
             let libero_slot = self
                 .get_current_rotation()
                 .and_then(Lineup::get_libero_slot);
@@ -168,6 +172,49 @@ impl Lineup {
             }
         }
         Ok(())
+    }
+
+    /// The libero goes out, the player it replaces back in its place (the
+    /// middle blocker, or the one serving for them), or comes back in: on
+    /// court at once in the back row, otherwise when the middle blocker
+    /// serving loses the serve. It lasts until the next change.
+    pub fn toggle_libero(&mut self) -> Result<(), AppError> {
+        let rotation = self.get_current_rotation()?;
+        let slot = Lineup::get_libero_slot(rotation)?;
+        let libero = self.current_libero;
+        match (
+            self.libero_out,
+            self.find_position(&libero),
+            self.idle_player,
+        ) {
+            (false, Some(position), Some(idle)) => {
+                self.try_set(&idle, position)?;
+                self.idle_player = None;
+            }
+            (false, _, _) => {}
+            (true, _, _) => {
+                // the middle blocker in the front row serves the next time
+                // the libero would reach it
+                self.libero_replacement = self.get((slot + 3) % 6);
+                if Lineup::has_libero(rotation, self.phase) {
+                    self.idle_player = self.get(slot);
+                    self.try_set(&libero, slot)?;
+                }
+            }
+        }
+        self.libero_out = !self.libero_out;
+        Ok(())
+    }
+
+    /// Whether the libero is out by the scout's choice (see `toggle_libero`).
+    pub fn is_libero_out(&self) -> bool {
+        self.libero_out
+    }
+
+    /// Whether the libero plays in the rotation, in the current phase: not
+    /// while the middle blocker it replaces serves, nor while out.
+    fn libero_plays(&self, rotation: u8) -> bool {
+        !self.libero_out && Lineup::has_libero(rotation, self.phase)
     }
 
     pub fn get_fallback_libero(&self) -> Option<Uuid> {
@@ -272,7 +319,7 @@ impl Lineup {
             1 | 4 => RoleEnum::OutsideHitter,
             3 => RoleEnum::OppositeHitter,
             2 | 5 => {
-                if Lineup::has_libero(rotation, self.phase) && self.is_back_row_player(player) {
+                if self.libero_plays(rotation) && self.is_back_row_player(player) {
                     RoleEnum::Libero
                 } else {
                     RoleEnum::MiddleBlocker

@@ -124,6 +124,7 @@ pub enum EventTypeEnum {
     OF,
     R,
     CL,
+    LR,
     CS,
 }
 
@@ -2406,7 +2407,10 @@ impl Scout4All {
                     score_them,
                     editable: !matches!(
                         e.event_type,
-                        EventTypeEnum::R | EventTypeEnum::CL | EventTypeEnum::CS
+                        EventTypeEnum::R
+                            | EventTypeEnum::CL
+                            | EventTypeEnum::LR
+                            | EventTypeEnum::CS
                     ),
                 })
                 .collect(),
