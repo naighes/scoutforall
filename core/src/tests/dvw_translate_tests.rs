@@ -29,6 +29,8 @@ mod tests {
         visiting: [u8; 6],
         score: (u8, u8),
         home_serves: bool,
+        /// The final scores of the sets ended (home, visiting).
+        sets: Vec<(u8, u8)>,
     }
 
     impl File {
@@ -40,6 +42,7 @@ mod tests {
                 visiting: [11, 12, 13, 14, 15, 16],
                 score: (0, 0),
                 home_serves: false,
+                sets: vec![],
             };
             file.line("*P01>LUp");
             file.line("aP11>LUp");
@@ -116,8 +119,40 @@ mod tests {
                     false => self.their_serve_error(),
                 }
             }
-            self.lines.push("**1set".to_string());
+            self.end_set()
+        }
+
+        /// The end of the set at its score.
+        fn end_set(mut self) -> Self {
+            self.sets.push(self.score);
+            self.lines.push(format!("**{}set", self.sets.len()));
             self
+        }
+
+        /// The next set: the six of the first one, the visiting team
+        /// serving.
+        fn next_set(mut self) -> Self {
+            self.home = [1, 2, 3, 4, 5, 6];
+            self.visiting = [11, 12, 13, 14, 15, 16];
+            self.score = (0, 0);
+            self.home_serves = false;
+            self.line("*P01>LUp");
+            self.line("aP11>LUp");
+            self
+        }
+
+        /// Their aces to the end of the set.
+        fn lost(mut self) -> Self {
+            while self.score.1 < 25 {
+                match self.home_serves {
+                    true => {
+                        let serve = format!("{}SM=", self.server());
+                        self.rally(&[&serve], false);
+                    }
+                    false => self.ace(),
+                }
+            }
+            self.end_set()
         }
 
         fn text(&self) -> String {
@@ -136,8 +171,16 @@ mod tests {
                 "[3DATAVOLLEYSCOUT]\nFILEFORMAT: 2.0\nGENERATOR-PRG: Data Volley".to_string(),
                 "[3MATCH]\n01/25/2015;;2014/2015;Test;;;;;1;1;Z;0;".to_string(),
                 "[3TEAMS]\nH;Home;1;;;;\nV;Visiting;0;;;;".to_string(),
-                "[3SET]\nTrue;;;;25-0;;\nTrue;;;;;;\nTrue;;;;;;\nTrue;;;;;;\nTrue;;;;;;"
-                    .to_string(),
+                format!(
+                    "[3SET]\n{}",
+                    (0..5)
+                        .map(|i| match self.sets.get(i) {
+                            Some((h, v)) => format!("True;;;;{h}-{v};;"),
+                            None => "True;;;;;;".to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
                 format!("[3PLAYERS-H]\n{}", players(0, 1)),
                 format!("[3PLAYERS-V]\n{}", players(1, 11)),
                 format!("[3SCOUT]\n{}", self.lines.join("\n")),
@@ -796,5 +839,120 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
         let (set, _) = translate_set(&dvw, &us, 1, date, 6).expect("the set");
         assert_eq!(set.events[0].eval, Some(EvalEnum::Positive));
+    }
+
+    /// The match of a side, as the import plans it: a new team, the day of
+    /// the file at midnight, six substitutions.
+    fn planned(
+        text: &str,
+        side: Side,
+    ) -> Result<crate::dvw::import::MatchPlan, crate::dvw::import::MatchIssue> {
+        use crate::dvw::import::{TeamChoice, match_date, match_plan, team_plan};
+        let dvw = parse(text.as_bytes()).expect("expected a DataVolley file");
+        let choice = TeamChoice::New {
+            gender: None,
+            country: None,
+        };
+        let team = team_plan(&dvw, side, choice).expect("a team");
+        let day = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let offset = chrono::FixedOffset::east_opt(3600).expect("an offset");
+        match_plan(&dvw, side, &team, match_date(&dvw, day, offset), 6)
+    }
+
+    fn three_sets_won() -> File {
+        let mut file = File::new();
+        file.received_by(5);
+        file.finished().next_set().finished().next_set().finished()
+    }
+
+    /// Three sets won: the match against the other team, at home, every
+    /// set with its events, the roster of the file, finished.
+    #[test]
+    fn the_match_of_the_home_team() {
+        let plan = planned(&three_sets_won().text(), Side::Home).expect("a match");
+        let m = &plan.entry;
+        assert_eq!(m.opponent, "Visiting");
+        assert!(m.home);
+        assert_eq!(m.max_substitutions, 6);
+        assert_eq!(m.date.to_rfc3339(), "2015-01-25T00:00:00+01:00");
+        assert_eq!(
+            m.id,
+            crate::shapes::r#match::MatchEntry::id_of("Visiting", &m.date)
+        );
+        assert_eq!(m.sets.len(), 3);
+        assert!(m.sets.iter().all(|s| !s.events.is_empty()));
+        assert_eq!(m.roster.len(), 7);
+        assert_eq!(m.team.players.len(), 7);
+        let status = m.get_status().expect("a status");
+        assert!(status.match_finished);
+        assert_eq!((status.us_wins, status.them_wins), (3, 0));
+    }
+
+    /// The same file for the visiting team: away, against the home team,
+    /// three sets lost.
+    #[test]
+    fn the_match_of_the_visiting_team() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let file = file.finished().next_set().finished().next_set().finished();
+        let plan = planned(&file.text(), Side::Visiting).expect("a match");
+        assert_eq!(plan.entry.opponent, "Home");
+        assert!(!plan.entry.home);
+        let status = plan.entry.get_status().expect("a status");
+        assert_eq!((status.us_wins, status.them_wins), (0, 3));
+    }
+
+    /// Two sets: the match isn't finished, nothing to import.
+    #[test]
+    fn an_unfinished_match_is_refused() {
+        let file = File::new().finished().next_set().lost();
+        assert_eq!(
+            planned(&file.text(), Side::Home).map(|p| p.entry.sets.len()),
+            Err(crate::dvw::import::MatchIssue::Unfinished)
+        );
+    }
+
+    /// A set that doesn't translate: the match isn't imported, the set and
+    /// the issue said.
+    #[test]
+    fn a_set_not_translated_refuses_the_match() {
+        let mut file = File::new().finished().next_set();
+        file.rally(&["a11SM+", "*07RM+", "*02AH=", "*04DH="], false);
+        let file = file.finished().next_set().finished();
+        match planned(&file.text(), Side::Home) {
+            Err(crate::dvw::import::MatchIssue::Set(e)) => {
+                assert_eq!(e.set_number, 2);
+                assert_eq!(e.issue, Issue::Untranslatable("our touch after the end"));
+            }
+            other => panic!("expected the set refused: {other:?}"),
+        }
+    }
+
+    /// The final score of `[3SET]` not the one of the rallies: refused.
+    #[test]
+    fn a_final_score_not_the_rallies_is_refused() {
+        let text = three_sets_won()
+            .text()
+            .replacen("True;;;;25-0;;", "True;;;;25-2;;", 1);
+        assert_eq!(
+            planned(&text, Side::Home).map(|p| p.entry.sets.len()),
+            Err(crate::dvw::import::MatchIssue::SetScore {
+                set_number: 1,
+                file: (25, 2),
+                ours: (25, 0),
+            })
+        );
+    }
+
+    /// The time of the file, when it has one.
+    #[test]
+    fn the_time_of_the_file() {
+        let text = three_sets_won().text().replacen(
+            "01/25/2015;;2014/2015",
+            "01/25/2015;20.30.00;2014/2015",
+            1,
+        );
+        let plan = planned(&text, Side::Home).expect("a match");
+        assert_eq!(plan.entry.date.to_rfc3339(), "2015-01-25T20:30:00+01:00");
     }
 }

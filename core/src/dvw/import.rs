@@ -3,15 +3,20 @@
 //! Nothing is merged without the user: the similar teams say why they are.
 
 use crate::{
-    dvw::model::{DvwFile, DvwRole, MatchDate, Player, Side},
+    dvw::{
+        model::{DvwFile, DvwRole, MatchDate, Player, Side},
+        translate::{Issue, Mappings, TranslateError, Us, translate_set},
+    },
     shapes::{
         country::CountryCode,
         enums::{GenderEnum, RoleEnum},
+        r#match::MatchEntry,
         player::PlayerEntry,
+        set::ReplayIssue,
         team::TeamEntry,
     },
 };
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveTime};
 use std::collections::HashMap;
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
@@ -275,5 +280,120 @@ fn role(p: &Player) -> Option<RoleEnum> {
         (_, Some(DvwRole::MiddleBlocker)) => Some(RoleEnum::MiddleBlocker),
         (_, Some(DvwRole::Setter)) => Some(RoleEnum::Setter),
         (false, None) => None,
+    }
+}
+
+/// Why the match of a side can't be imported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchIssue {
+    /// The file has no set.
+    NoSets,
+    /// A set doesn't translate exactly.
+    Set(TranslateError),
+    /// The final score of a set (us, them): the one of `[3SET]` and ours.
+    SetScore {
+        set_number: u8,
+        file: (u8, u8),
+        ours: (u8, u8),
+    },
+    /// The sets of the file don't finish the match.
+    Unfinished,
+    /// A translated set our version doesn't replay.
+    Replay(ReplayIssue),
+}
+
+/// The match of the side for the team of the plan, ready to be saved, and
+/// the mappings used by its sets, for the summary.
+#[derive(Debug, Clone)]
+pub struct MatchPlan {
+    pub entry: MatchEntry,
+    pub mappings: Mappings,
+}
+
+/// When the match was played: the day (chosen by the user when the file
+/// can't tell it), at the time of the file or midnight, in `offset`.
+pub fn match_date(file: &DvwFile, day: NaiveDate, offset: FixedOffset) -> DateTime<FixedOffset> {
+    let time = file.match_info.time.unwrap_or(NaiveTime::MIN);
+    day.and_time(time)
+        .and_local_timezone(offset)
+        .single()
+        .unwrap_or_else(|| day.and_time(NaiveTime::MIN).and_utc().fixed_offset())
+}
+
+/// The match of the side: every set of the file translated exactly, with
+/// its final score as `[3SET]` writes it, and the match finished; against
+/// the other team of the file.
+pub fn match_plan(
+    file: &DvwFile,
+    side: Side,
+    team: &TeamPlan,
+    date: DateTime<FixedOffset>,
+    max_substitutions: u8,
+) -> Result<MatchPlan, MatchIssue> {
+    let us = Us {
+        side,
+        players: &team.numbers,
+        liberos: &team.liberos,
+    };
+    let other = match side {
+        Side::Home => Side::Visiting,
+        Side::Visiting => Side::Home,
+    };
+    let opponent = file.team(other).name.trim().to_string();
+    let mut sets = vec![];
+    let mut mappings = Mappings::new();
+    for result in &file.sets {
+        let (set, used) = translate_set(
+            file,
+            &us,
+            result.set_number,
+            date.date_naive(),
+            max_substitutions,
+        )
+        .map_err(MatchIssue::Set)?;
+        let snapshot = set.compute_snapshot(max_substitutions).map_err(|e| {
+            MatchIssue::Set(TranslateError {
+                set_number: result.set_number,
+                line: None,
+                issue: Issue::Event(e.to_string()),
+            })
+        })?;
+        let ours = (snapshot.score_us, snapshot.score_them);
+        let written = match side {
+            Side::Home => result.final_score,
+            Side::Visiting => (result.final_score.1, result.final_score.0),
+        };
+        if ours != written {
+            return Err(MatchIssue::SetScore {
+                set_number: result.set_number,
+                file: written,
+                ours,
+            });
+        }
+        for (name, count) in used {
+            *mappings.entry(name).or_default() += count;
+        }
+        sets.push(set);
+    }
+    if sets.is_empty() {
+        return Err(MatchIssue::NoSets);
+    }
+    let entry = MatchEntry {
+        id: MatchEntry::id_of(&opponent, &date),
+        opponent,
+        date,
+        team: team.team.with_roster(&team.roster),
+        home: side == Side::Home,
+        max_substitutions,
+        notes: String::new(),
+        roster: team.roster.clone(),
+        sets,
+    };
+    if let Some(issue) = entry.replay_issue() {
+        return Err(MatchIssue::Replay(issue));
+    }
+    match entry.get_status() {
+        Ok(status) if status.match_finished => Ok(MatchPlan { entry, mappings }),
+        _ => Err(MatchIssue::Unfinished),
     }
 }

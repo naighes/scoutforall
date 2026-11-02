@@ -480,7 +480,11 @@ mod tests {
     #[test]
     #[ignore]
     fn dvw_import_probe() {
-        use crate::dvw::import::{TeamChoice, season_year, similar_teams, team_plan};
+        use crate::dvw::import::{
+            MatchIssue, TeamChoice, match_date, match_plan, season_year, similar_teams, team_plan,
+        };
+        use crate::dvw::model::MatchDate;
+        let mut matches: std::collections::BTreeMap<String, usize> = Default::default();
         let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
         let mut paths = walk(std::path::Path::new(&dir));
         paths.sort();
@@ -516,12 +520,34 @@ mod tests {
                                 .map(|p| p.name.as_str())
                                 .collect::<Vec<_>>()
                         );
+                        let day = match file.match_info.date {
+                            MatchDate::Known(d) | MatchDate::Ambiguous(d, _) => d,
+                            MatchDate::Missing => date(2000, 1, 1),
+                        };
+                        let offset = chrono::FixedOffset::east_opt(0).unwrap();
+                        let when = match_date(&file, day, offset);
+                        let outcome = match match_plan(&file, side, &plan, when, 6) {
+                            Ok(_) => "ok".to_string(),
+                            Err(MatchIssue::Set(e)) => {
+                                format!("set {:?}", std::mem::discriminant(&e.issue))
+                            }
+                            Err(e) => {
+                                println!("MATCH\t{name}\t{side:?}\t{e:?}");
+                                format!("{e:?}")
+                                    .split([' ', '(', '{'])
+                                    .next()
+                                    .unwrap_or_default()
+                                    .to_string()
+                            }
+                        };
+                        *matches.entry(outcome).or_default() += 1;
                         teams.push(plan.team);
                     }
                     Err(e) => println!("{name}\t{side:?}\tFAIL {e}"),
                 }
             }
         }
+        println!("matches: {matches:?}");
     }
 
     /// How the sets of a folder of files translate, for both teams:
