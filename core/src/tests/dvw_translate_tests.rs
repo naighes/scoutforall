@@ -10,6 +10,7 @@ mod tests {
         translate::{Issue, Us, translate_set},
     };
     use crate::shapes::enums::{EvalEnum, EventTypeEnum};
+    use crate::shapes::snapshot::EventEntry;
     use EventTypeEnum::*;
     use chrono::NaiveDate;
     use std::collections::HashMap;
@@ -145,9 +146,9 @@ mod tests {
         }
     }
 
-    /// The set translated for the home team: the events, by type and
-    /// player number.
-    fn translated(file: &File) -> Result<Vec<(EventTypeEnum, Option<u8>)>, Issue> {
+    /// The set translated for the home team: the events, and the number of
+    /// each player.
+    fn translated_events(file: &File) -> Result<(Vec<EventEntry>, HashMap<Uuid, u8>), Issue> {
         let dvw = parse(file.text().as_bytes()).expect("expected a DataVolley file");
         let players: HashMap<u8, Uuid> = (1..=7).map(|n| (n, Uuid::new_v4())).collect();
         let numbers: HashMap<Uuid, u8> = players.iter().map(|(n, id)| (*id, *n)).collect();
@@ -158,18 +159,31 @@ mod tests {
         };
         let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
         translate_set(&dvw, &us, 1, date, 6)
-            .map(|(set, _)| {
-                set.events
-                    .iter()
-                    .map(|e| {
-                        (
-                            e.event_type,
-                            e.player.and_then(|p| numbers.get(&p).copied()),
-                        )
-                    })
-                    .collect()
-            })
+            .map(|(set, _)| (set.events, numbers))
             .map_err(|e| e.issue)
+    }
+
+    /// The set translated for the home team: the events, by type and
+    /// player number.
+    fn translated(file: &File) -> Result<Vec<(EventTypeEnum, Option<u8>)>, Issue> {
+        translated_events(file).map(|(events, numbers)| {
+            events
+                .iter()
+                .map(|e| {
+                    (
+                        e.event_type,
+                        e.player.and_then(|p| numbers.get(&p).copied()),
+                    )
+                })
+                .collect()
+        })
+    }
+
+    /// The set translated for the home team: the events, by type and
+    /// evaluation.
+    fn evaluated(file: &File) -> Result<Vec<(EventTypeEnum, Option<EvalEnum>)>, Issue> {
+        translated_events(file)
+            .map(|(events, _)| events.iter().map(|e| (e.event_type, e.eval)).collect())
     }
 
     /// The events of the set up to the first `count`.
@@ -348,6 +362,147 @@ mod tests {
             Err(Issue::Event(text)) => assert!(text.contains("can't play it"), "{text}"),
             other => panic!("expected the serve refused, got {other:?}"),
         }
+    }
+
+    /// Their attack blocked (`/`) with our point by nobody (`$$&`), as
+    /// files scouted without blocks write it: our block wants the player,
+    /// the set is refused.
+    #[test]
+    fn their_attack_blocked_without_our_block_is_refused() {
+        let mut file = File::new();
+        file.rally(&["a11SM+", "*07RM+", "*02AH+", "a14AH/", "*$$&H#"], true);
+        assert_eq!(
+            translated(&file.finished()),
+            Err(Issue::Untranslatable(
+                "their attack blocked without our block"
+            ))
+        );
+    }
+
+    /// Their attack, then their freeball sent: the ball came back to them,
+    /// our touch not scouted (a dig over, a freeball): our freeball
+    /// (`FB`), then theirs (`OF`).
+    #[test]
+    fn their_freeball_right_after_their_attack_follows_ours() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM+", "*07RM+", "*02AH+", "a14AH+", "a13FH+", "*01EH+", "*04AH#",
+            ],
+            true,
+        );
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 6),
+            vec![
+                (P, Some(7)),
+                (A, Some(2)),
+                (FB, None),
+                (OF, None),
+                (A, Some(4)),
+                (S, Some(2))
+            ]
+        );
+    }
+
+    /// Our serve `-`, their reception, their set and their freeball sent:
+    /// the serve keeps its evaluation, their freeball (`OF`) follows.
+    #[test]
+    fn their_freeball_after_their_reception_of_our_serve() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM-", file.server());
+        file.rally(
+            &[&serve, "a11RM#", "a13EH+", "a14FH+", "*07FH+", "*04AH#"],
+            true,
+        );
+        let file = file.finished();
+        let events = translated(&file).expect("expected the set");
+        assert_eq!(
+            first(&events, 4),
+            vec![(OE, None), (S, Some(2)), (OF, None), (A, Some(4))]
+        );
+        let evals = evaluated(&file).expect("expected the set");
+        assert_eq!(evals.get(1), Some(&(S, Some(EvalEnum::Negative))));
+    }
+
+    /// Our serve `+`, their reception `-` and our attack, their touches
+    /// after the reception not scouted: the ball came back without their
+    /// attack, a freeball (`OF`), the serve keeping its evaluation.
+    #[test]
+    fn their_freeball_not_scouted_after_their_reception() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "a11RM-", "*04AH#"], true);
+        let file = file.finished();
+        let events = translated(&file).expect("expected the set");
+        assert_eq!(
+            first(&events, 4),
+            vec![(OE, None), (S, Some(2)), (OF, None), (A, Some(4))]
+        );
+        let evals = evaluated(&file).expect("expected the set");
+        assert_eq!(evals.get(1), Some(&(S, Some(EvalEnum::Positive))));
+    }
+
+    /// Their reception `/`, straight over: our serve `/`, no freeball.
+    #[test]
+    fn their_reception_over_is_our_serve_over() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "a11RM/", "*04AH#"], true);
+        let file = file.finished();
+        let events = translated(&file).expect("expected the set");
+        assert_eq!(
+            first(&events, 3),
+            vec![(OE, None), (S, Some(2)), (A, Some(4))]
+        );
+        let evals = evaluated(&file).expect("expected the set");
+        assert_eq!(evals.get(1), Some(&(S, Some(EvalEnum::Over))));
+    }
+
+    /// Our attack `-`, their dig and their freeball sent: our attack keeps
+    /// `-`, their freeball (`OF`) follows; scouted or not.
+    #[test]
+    fn their_freeball_after_digging_our_attack() {
+        for touches in [
+            vec!["a11SM+", "*07RM+", "*02AH-", "a12DH+", "a13FH+", "*04AH#"],
+            vec!["a11SM+", "*07RM+", "*02AH-", "a12DH+", "*04AH#"],
+        ] {
+            let mut file = File::new();
+            file.rally(&touches, true);
+            let file = file.finished();
+            let events = translated(&file).expect("expected the set");
+            assert_eq!(
+                first(&events, 4),
+                vec![(P, Some(7)), (A, Some(2)), (OF, None), (A, Some(4))],
+                "{touches:?}"
+            );
+            let evals = evaluated(&file).expect("expected the set");
+            assert_eq!(
+                evals.get(1),
+                Some(&(A, Some(EvalEnum::Negative))),
+                "{touches:?}"
+            );
+        }
+    }
+
+    /// Their attack `!`, back from our block, then their freeball: our
+    /// block wants the player, the set is refused.
+    #[test]
+    fn their_freeball_after_their_attack_back_from_our_block_is_refused() {
+        let mut file = File::new();
+        file.rally(
+            &["a11SM+", "*07RM+", "*02AH+", "a14AH!", "a13FH+", "*04AH#"],
+            true,
+        );
+        assert_eq!(
+            translated(&file.finished()),
+            Err(Issue::Untranslatable(
+                "their attack back from our block without our block"
+            ))
+        );
     }
 
     /// Our `F` after our reception, theirs touching next: our freeball
