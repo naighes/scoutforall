@@ -613,6 +613,121 @@ mod tests {
         );
     }
 
+    /// Their winning attack off our hands ("mani fuori", our block `=`),
+    /// then our dig `=` trying to reach it: the point is the block's, the
+    /// dig dropped.
+    #[test]
+    fn our_dig_after_our_block_out_is_dropped() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM+", "*07RM+", "*02AH-", "a13DH+", "a14AH#", "*03BH=", "*04DH=",
+            ],
+            false,
+        );
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 3),
+            vec![(P, Some(7)), (A, Some(2)), (B, Some(3))]
+        );
+        assert!(!events.iter().any(|(e, _)| *e == D), "{events:?}");
+    }
+
+    /// Our attack blocked (`/`, their block `#`), then our dig `=` trying
+    /// to cover it: the point is the block's, the dig dropped.
+    #[test]
+    fn our_dig_after_our_attack_blocked_is_dropped() {
+        let mut file = File::new();
+        file.rally(&["a11SM+", "*07RM+", "*02AH/", "a13BH#", "*04DH="], false);
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(first(&events, 2), vec![(P, Some(7)), (A, Some(2))]);
+        assert!(!events.iter().any(|(e, _)| *e == D), "{events:?}");
+    }
+
+    /// After our block `=` or our attack `/` only our dig `=` is dropped:
+    /// a dig keeping the ball, or a dig `=` after another end, is still our
+    /// touch after the end.
+    #[test]
+    fn our_touch_after_the_end_otherwise_is_refused() {
+        for rally in [
+            vec![
+                "a11SM+", "*07RM+", "*02AH-", "a13DH+", "a14AH#", "*03BH=", "*04DH+",
+            ],
+            vec!["a11SM+", "*07RM+", "*02AH=", "*04DH="],
+            vec![
+                "a11SM+", "*07RM+", "*02AH-", "a13DH+", "a14AH#", "*04DH=", "*03BH=",
+            ],
+            vec![
+                "a11SM+", "*07RM+", "*02AH-", "a13DH+", "a14AH#", "*03BH=", "*04AH=",
+            ],
+            vec!["a11SM+", "*07RM+", "*02AH/", "a13BH#", "*04DH+"],
+            vec!["a11SM+", "*07RM+", "*02AH/", "a13BH#", "*04AH="],
+        ] {
+            let mut file = File::new();
+            file.rally(&rally, false);
+            assert_eq!(
+                translated(&file.finished()),
+                Err(Issue::Untranslatable("our touch after the end")),
+                "{rally:?}"
+            );
+        }
+    }
+
+    /// Our set `=` then our attack: the rally went on, the set is no fault
+    /// and the attack ends it as the file says.
+    #[test]
+    fn our_set_error_attacked_is_no_fault() {
+        let mut file = File::new();
+        file.rally(&["a11SM!", "*07RM+", "*01EM=", "*02AM="], false);
+        let events = evaluated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            events.iter().take(2).copied().collect::<Vec<_>>(),
+            vec![(P, Some(EvalEnum::Positive)), (A, Some(EvalEnum::Error))]
+        );
+        assert!(!events.iter().any(|(e, _)| *e == F), "{events:?}");
+    }
+
+    /// Our set `=` with nothing after it: our fault, as before.
+    #[test]
+    fn our_set_error_alone_is_a_fault() {
+        let mut file = File::new();
+        file.rally(&["a11SM!", "*07RM+", "*01EM="], false);
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(first(&events, 2), vec![(P, Some(7)), (F, Some(1))]);
+    }
+
+    /// Our attack `=` then their block `=`, our point: the ball off their
+    /// hands ("mani fuori"), our winning attack.
+    #[test]
+    fn our_attack_error_off_their_block_out_is_our_winning_attack() {
+        let mut file = File::new();
+        file.rally(&["a11SM+", "*07RM+", "*02AM=", "a13BN="], true);
+        let events = evaluated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            events.iter().take(2).copied().collect::<Vec<_>>(),
+            vec![(P, Some(EvalEnum::Positive)), (A, Some(EvalEnum::Perfect))]
+        );
+    }
+
+    /// Our attack `=` with their block `/` (invasion) or nothing after it:
+    /// still our error, the file's point theirs.
+    #[test]
+    fn our_attack_error_otherwise_stays_an_error() {
+        for touches in [
+            vec!["a11SM+", "*07RM+", "*02AM="],
+            vec!["a11SM+", "*07RM+", "*02AM=", "a13BN/"],
+        ] {
+            let mut file = File::new();
+            file.rally(&touches, false);
+            let events = evaluated(&file.finished()).expect("expected the set");
+            assert_eq!(
+                events.iter().take(2).copied().collect::<Vec<_>>(),
+                vec![(P, Some(EvalEnum::Positive)), (A, Some(EvalEnum::Error))],
+                "{touches:?}"
+            );
+        }
+    }
+
     /// Their attack `!`, back from our block, then their freeball: our
     /// block wants the player, the set is refused.
     #[test]

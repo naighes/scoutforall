@@ -289,6 +289,19 @@ impl<'a> Touch<'a> {
     }
 }
 
+// the last touch of ours played before is our block `=` (the ball off our
+// hands) or our attack `/` (blocked: their block comes after it)
+fn after_ball_off_a_block(before: &[(&ScoutLine, Touch)], us: Side) -> bool {
+    matches!(
+        before
+            .iter()
+            .rev()
+            .filter_map(|(_, t)| t.played())
+            .find(|(side, _)| *side == us),
+        Some((_, skill)) if matches!((skill.skill, skill.evaluation), (Skill::Block, '=') | (Skill::Attack, '/'))
+    )
+}
+
 /// The file's `F` is the freeball received, except right after a touch of
 /// the same side with the other side touching next (or nobody, after a
 /// touch keeping the ball): then it's the freeball sent over, as some
@@ -577,6 +590,20 @@ impl SetTranslator<'_> {
                     }
                 }
                 (true, Touch::Green(_, _)) => {}
+                // our block `=` (the ball off our hands, "mani fuori") or our
+                // attack `/` (blocked): the point is already told, our dig
+                // `=` trying to reach the ball after it says nothing more
+                (true, Touch::Skill(side, skill))
+                    if *side == self.us.side
+                        && skill.skill == Skill::Dig
+                        && skill.evaluation == '='
+                        && after_ball_off_a_block(
+                            touches.get(..index).unwrap_or_default(),
+                            self.us.side,
+                        ) =>
+                {
+                    self.mapped("dig after a ball off a block: dropped");
+                }
                 (true, _) => return Err(Issue::Untranslatable("our touch after the end")),
                 (false, Touch::Skill(side, skill) | Touch::Sent(side, skill))
                     if *side == self.us.side =>
@@ -825,7 +852,37 @@ impl SetTranslator<'_> {
             .player
             .ok_or(Issue::Untranslatable("our touch without a player"))?;
         let player = player(self.us, number)?;
-        let ending = self.ending(skill.skill, skill.evaluation);
+        // our set `=` attacked by us next: the rally went on, the `=` is
+        // how bad the set was, not a fault
+        let attacked_next = next
+            .iter()
+            .find_map(|(_, t)| t.played())
+            .is_some_and(|(side, s)| side == self.us.side && s.skill == Skill::Attack);
+        // our attack `=` with their block `=` next: the ball off their
+        // hands ("mani fuori"), our winning attack
+        let their_block_out_next =
+            next.iter()
+                .find_map(|(_, t)| t.played())
+                .is_some_and(|(side, s)| {
+                    side != self.us.side && s.skill == Skill::Block && s.evaluation == '='
+                });
+        let ending = match (
+            kind,
+            self.ending(skill.skill, skill.evaluation),
+            skill.evaluation,
+            attacked_next,
+            their_block_out_next,
+        ) {
+            (Skill::Set, Ending::Lost, _, true, _) => {
+                self.mapped("set error attacked: no fault");
+                Ending::Goes
+            }
+            (Skill::Attack, Ending::Lost, '=', _, true) => {
+                self.mapped("attack error off their block out: A#");
+                Ending::Won
+            }
+            (_, ending, _, _, _) => ending,
+        };
         let touched = self
             .rally_events()
             .iter()
