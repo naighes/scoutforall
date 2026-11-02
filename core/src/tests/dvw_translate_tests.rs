@@ -588,6 +588,31 @@ mod tests {
         );
     }
 
+    /// Our block on their reception straight over and on their freeball:
+    /// a block, as the file tells, not an attack.
+    #[test]
+    fn our_block_on_a_ball_not_attacked() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "a11RM/", "*03BH#"], true);
+        let serve = format!("{}SM-", file.server());
+        file.rally(&[&serve, "a11RM+", "a13EH+", "a14FH+", "*03BH="], false);
+        let file = file.finished();
+        let events = evaluated(&file).expect("expected the set");
+        assert_eq!(
+            events.iter().take(6).copied().collect::<Vec<_>>(),
+            vec![
+                (OE, None),
+                (S, Some(EvalEnum::Over)),
+                (B, Some(EvalEnum::Perfect)),
+                (S, Some(EvalEnum::Negative)),
+                (OF, None),
+                (B, Some(EvalEnum::Error))
+            ]
+        );
+    }
+
     /// Their attack `!`, back from our block, then their freeball: our
     /// block wants the player, the set is refused.
     #[test]
