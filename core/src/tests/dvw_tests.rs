@@ -474,6 +474,56 @@ mod tests {
             .collect()
     }
 
+    /// The teams of a folder of files as new teams: the season, the names
+    /// of the players, the conflicts and the similar teams between files:
+    /// `DVW_DIR=... cargo test -p scout4all-core dvw_import_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn dvw_import_probe() {
+        use crate::dvw::import::{TeamChoice, season_year, similar_teams, team_plan};
+        let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
+        let mut paths = walk(std::path::Path::new(&dir));
+        paths.sort();
+        let mut teams = vec![];
+        for path in &paths {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let file = parse(&std::fs::read(path).unwrap()).unwrap();
+            for side in [Side::Home, Side::Visiting] {
+                let similar: Vec<String> = similar_teams(&file, side, &teams)
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{} ({}, {}/{})",
+                            s.team.name, s.same_name, s.same_players, s.players
+                        )
+                    })
+                    .collect();
+                let choice = TeamChoice::New {
+                    gender: None,
+                    country: None,
+                };
+                match team_plan(&file, side, choice) {
+                    Ok(plan) => {
+                        println!(
+                            "{name}\t{side:?}\t{:?}\t{}\t{}\tliberos {:?}\tsimilar {similar:?}\t{:?}",
+                            season_year(&file),
+                            plan.team.name,
+                            plan.team.players.len(),
+                            plan.liberos,
+                            plan.team
+                                .players
+                                .iter()
+                                .map(|p| p.name.as_str())
+                                .collect::<Vec<_>>()
+                        );
+                        teams.push(plan.team);
+                    }
+                    Err(e) => println!("{name}\t{side:?}\tFAIL {e}"),
+                }
+            }
+        }
+    }
+
     /// How the sets of a folder of files translate, for both teams:
     /// `DVW_DIR=... cargo test -p scout4all-core dvw_translate_probe -- --ignored --nocapture`
     #[test]

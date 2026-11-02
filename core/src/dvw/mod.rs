@@ -4,6 +4,7 @@
 //! public specification: the reference is the parser of openvolley
 //! (`datavolley`, R).
 
+pub mod import;
 pub mod model;
 pub mod translate;
 

@@ -27,6 +27,8 @@ typst.workspace = true
 typst-kit.workspace = true
 typst-layout.workspace = true
 typst-pdf.workspace = true
+# names compared without accents (the import of DataVolley)
+unicode-normalization.workspace = true
 uuid.workspace = true
 zip.workspace = true
 

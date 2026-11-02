@@ -43,6 +43,7 @@ typst = "0.15"
 typst-kit = { version = "0.15", default-features = false, features = ["datetime", "embedded-fonts", "scan-fonts"] }
 typst-layout = "0.15"
 typst-pdf = "0.15"
+unicode-normalization = "0.1"
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 zip = "9"
 
