@@ -540,7 +540,6 @@ mod tests {
                                 Issue::Event(text) => {
                                     format!("Event({})", uuid.replace_all(text, "<id>"))
                                 }
-                                Issue::LineupMismatch { .. } => "LineupMismatch".to_string(),
                                 Issue::Score { .. } => "Score".to_string(),
                                 Issue::UnknownPlayer(_) => "UnknownPlayer".to_string(),
                                 other => format!("{other:?}"),

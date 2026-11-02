@@ -242,17 +242,147 @@ mod tests {
         assert_eq!(events.iter().filter(|(t, _)| *t == LR).count(), 4);
     }
 
-    /// The libero and the middle blocker it replaces in the same rally:
-    /// one of them can't be on court, the set isn't translated.
+    /// The libero and the middle blocker it replaces in the same rally,
+    /// receiving: the libero for another player of the back row, but two
+    /// don't touch (the setter, the outside hitter 5): who is out can't be
+    /// told, the set isn't translated.
     #[test]
-    fn the_libero_and_the_player_it_replaces_both_touching_is_refused() {
+    fn the_libero_for_one_of_two_players_is_refused() {
         let mut file = File::new();
         file.rally(&["a11SM+", "*07RM+", "*06AH#"], true);
         assert_eq!(
             translated(&file.finished()),
             Err(Issue::Untranslatable(
-                "the libero and the player it replaces both touch"
+                "the libero for more than one player: who is out can't be told"
             ))
+        );
+    }
+
+    /// The libero and the middle blocker it replaces touching, the only
+    /// other player who can be out the outside hitter 2: the libero for
+    /// them, chosen a rally earlier (the libero out for that rally, a
+    /// rally between two libero replacements).
+    #[test]
+    fn the_libero_for_the_only_player_out_a_rally_earlier() {
+        let mut file = File::new();
+        // their serve error: we serve, outside hitter 2 in position 1
+        file.their_serve_error();
+        // our serve error: they serve, 2 in position 1 receiving
+        file.rally(&["*02SM="], false);
+        // the libero receives, the setter (6) and the middle blocker (5)
+        // touch: 2 is out
+        file.rally(&["a12SM+", "*07RM+", "*01EM+", "*06AH#"], true);
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 7),
+            vec![
+                (OE, None),
+                (LF, Some(2)),
+                (S, Some(2)),
+                (P, Some(7)),
+                (A, Some(6)),
+                (S, Some(3)),
+                (S, Some(3)),
+            ]
+        );
+    }
+
+    /// The same in the first rally: no rally before to choose the player
+    /// in, the set isn't translated.
+    #[test]
+    fn the_libero_for_another_player_in_the_first_rally_is_refused() {
+        let mut file = File::new();
+        // receiving: the setter, the middle blocker and the libero touch,
+        // the outside hitter 5 the only one out
+        file.rally(&["a11SM+", "*07RM+", "*01EM+", "*06AH#"], true);
+        assert_eq!(
+            translated(&file.finished()),
+            Err(Issue::Untranslatable(
+                "the libero can't change player in time"
+            ))
+        );
+    }
+
+    /// The libero touching in the rally before too: it can't go out to
+    /// come back for the other player, the set isn't translated.
+    #[test]
+    fn the_libero_touching_the_rally_before_is_refused() {
+        let mut file = File::new();
+        file.their_serve_error();
+        // our serve, their attack dug by the libero, our attack out: they
+        // serve, the libero on court in the rally just before
+        file.rally(&["*02SM+", "a12AM+", "*07DM+", "*03AH="], false);
+        file.rally(&["a12SM+", "*07RM+", "*01EM+", "*06AH#"], true);
+        assert_eq!(
+            translated(&file.finished()),
+            Err(Issue::Untranslatable(
+                "the libero can't change player in time"
+            ))
+        );
+    }
+
+    /// The libero touching with the three players of the back row: it
+    /// can't be on court, the set isn't translated.
+    #[test]
+    fn the_libero_with_the_whole_back_row_is_refused() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM+", "*07RM+", "*01EM+", "*05AH+", "a12DM+", "a13AM+", "*06DM+", "*02AH#",
+            ],
+            true,
+        );
+        assert_eq!(
+            translated(&file.finished()),
+            Err(Issue::Untranslatable("the libero has nobody to replace"))
+        );
+    }
+
+    /// The server of the file not in zone 1 by the rules: refused.
+    #[test]
+    fn a_server_not_in_zone_1_is_refused() {
+        let mut file = File::new();
+        file.their_serve_error();
+        file.rally(&["*03SM#"], true);
+        match translated(&file.finished()) {
+            Err(Issue::Event(text)) => assert!(text.contains("can't play it"), "{text}"),
+            other => panic!("expected the serve refused, got {other:?}"),
+        }
+    }
+
+    /// Our `F` after our reception, theirs touching next: our freeball
+    /// sent over (`FB`), the reception keeping its evaluation; their `F`
+    /// receiving it tells nothing more.
+    #[test]
+    fn our_freeball_sent_is_ours() {
+        let mut file = File::new();
+        file.rally(
+            &["a11SM+", "*07RM+", "*01FH+", "a12FH+", "a13EH+", "a14AH#"],
+            false,
+        );
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 3),
+            vec![(P, Some(7)), (FB, None), (OS, None)]
+        );
+    }
+
+    /// Their `F` after their dig, ours touching next: their freeball sent
+    /// over (`OF`), after our attack `+`; our `F` receiving it tells
+    /// nothing more.
+    #[test]
+    fn their_freeball_sent_is_theirs() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM+", "*07RM+", "*02AH+", "a12DH+", "a13FH+", "*07FH+", "*01EH+", "*04AH#",
+            ],
+            true,
+        );
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 4),
+            vec![(P, Some(7)), (A, Some(2)), (OF, None), (A, Some(4))]
         );
     }
 
