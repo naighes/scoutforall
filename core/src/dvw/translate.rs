@@ -606,6 +606,17 @@ impl SetTranslator<'_> {
             (true, _, _) => Ok(()),
             // their point: their ace, kill or block point, or their point
             // without a touch
+            // the ball ours: our fault, though the file tells their point
+            (false, TeamSideEnum::Them, Some((side, Ending::Won)))
+                if side != self.us.side
+                    && !self
+                        .snapshot
+                        .get_available_options()
+                        .contains(&EventTypeEnum::OS) =>
+            {
+                self.mapped("their point with the ball ours: F");
+                self.apply(EventTypeEnum::F, None, None, None, None)
+            }
             (false, TeamSideEnum::Them, Some((side, Ending::Won))) if side != self.us.side => {
                 self.apply(EventTypeEnum::OS, None, None, None, None)
             }
@@ -759,6 +770,14 @@ impl SetTranslator<'_> {
             .iter()
             .find(|(side, _)| ours(side))
             .map(|(_, skill)| *skill);
+        // their reception or dig straight over
+        let their_first_over = next
+            .iter()
+            .find_map(|(_, t)| t.played())
+            .filter(|(side, _)| !ours(side))
+            .is_some_and(|(_, s)| {
+                matches!(s.skill, Skill::Reception | Skill::Dig) && s.evaluation == '/'
+            });
         match (
             theirs.first(),
             theirs.contains(&Some(Skill::Attack)),
@@ -770,8 +789,9 @@ impl SetTranslator<'_> {
             (_, _, Some(Some(Skill::Freeball))) => After::TheirFreeball,
             // their freeball sent over
             _ if theirs.contains(&None) => After::TheirFreeball,
-            // our block next: they attacked, not in the file
-            (None, _, Some(Some(Skill::Block))) => After::TheyAttack,
+            // our block next: they attacked, not in the file (their
+            // reception or dig over isn't an attack)
+            (_, _, Some(Some(Skill::Block))) if !their_first_over => After::TheyAttack,
             (None, _, Some(_)) => After::Kept,
             (Some(_), _, Some(_)) => After::BackWithoutAttack,
             (_, _, None) => After::Ended,
@@ -822,7 +842,21 @@ impl SetTranslator<'_> {
             .is_some_and(|(_, s)| {
                 matches!(s.skill, Skill::Reception | Skill::Dig) && s.evaluation == '/'
             });
-        let mut then_their_freeball = false;
+        // their block sent it back: no freeball of theirs
+        let their_block = next
+            .iter()
+            .filter_map(|(_, t)| t.played())
+            .take_while(|(side, _)| *side != self.us.side)
+            .any(|(_, s)| s.skill == Skill::Block);
+        // our freeball received going back over
+        let over = kind == Skill::Freeball
+            && (skill.evaluation == '/'
+                || matches!(
+                    after,
+                    After::TheyAttack | After::TheirFreeball | After::BackWithoutAttack
+                ));
+        // a team event following the one of the touch
+        let mut then: Option<EventTypeEnum> = None;
         let event = match (kind, ending, skill.evaluation, ball_ours, after) {
             // the ending touches: as the file says, `/` blocked or invasion
             (Skill::Serve, Ending::Won, _, _, _) => Some((S, Some(Perfect))),
@@ -867,10 +901,10 @@ impl SetTranslator<'_> {
             // back to us without their attack: their reception not over,
             // their freeball not scouted
             (Skill::Serve, Ending::Goes, e, _, After::BackWithoutAttack)
-                if e != '/' && !their_first_over =>
+                if e != '/' && !their_first_over && !their_block =>
             {
                 self.mapped("S back without attack: their freeball OF");
-                then_their_freeball = true;
+                then = Some(OF);
                 Some((S, Some(eval(e)?)))
             }
             // back to us with their reception over
@@ -906,10 +940,10 @@ impl SetTranslator<'_> {
                 Some((attack_or_block(skill.skill), Some(Negative)))
             }
             (Skill::Attack | Skill::Block, Ending::Goes, '-', _, After::BackWithoutAttack)
-                if !their_first_over =>
+                if !their_first_over && !their_block =>
             {
                 self.mapped("A or B dug, back without attack: their freeball OF");
-                then_their_freeball = true;
+                then = Some(OF);
                 Some((attack_or_block(skill.skill), Some(Negative)))
             }
             (
@@ -936,6 +970,16 @@ impl SetTranslator<'_> {
                 self.mapped("cover over the net: FB");
                 Some((FB, None))
             }
+            (
+                Skill::Dig,
+                Ending::Goes,
+                _,
+                true,
+                After::TheyAttack | After::TheirFreeball | After::BackWithoutAttack,
+            ) => {
+                self.mapped("cover played by them: FB");
+                Some((FB, None))
+            }
             (Skill::Dig, Ending::Goes, _, true, _) => {
                 self.mapped("cover skipped");
                 None
@@ -960,12 +1004,22 @@ impl SetTranslator<'_> {
             }
             // their freeball, received by us: told by our serve `/` already,
             // or by their freeball sent
-            (Skill::Freeball, Ending::Goes, _, _, _) => match last {
-                Some((S, Some(Over))) => {
+            (Skill::Freeball, Ending::Goes, e, _, _) => match (last, e) {
+                (Some((S, Some(Over))), _) => {
                     self.mapped("their freeball after S/: in the serve");
                     None
                 }
-                Some((OF, None)) => None,
+                // received straight over (or they play it next): our freeball
+                (Some((OF, None)), _) if over => {
+                    self.mapped("their freeball received over: FB");
+                    Some((FB, None))
+                }
+                (Some((OF, None)), _) => None,
+                _ if over => {
+                    self.mapped("their freeball received over: OF, FB");
+                    then = Some(FB);
+                    Some((OF, None))
+                }
                 _ => Some((OF, None)),
             },
             // the set: not scouted, unless it goes over without an attack,
@@ -997,9 +1051,9 @@ impl SetTranslator<'_> {
             }
             None => Ok(()),
         }?;
-        match then_their_freeball {
-            true => self.apply(OF, None, None, None, None),
-            false => Ok(()),
+        match then {
+            Some(event_type) => self.apply(event_type, None, None, None, None),
+            None => Ok(()),
         }
     }
 

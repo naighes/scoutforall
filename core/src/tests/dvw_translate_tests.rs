@@ -488,6 +488,106 @@ mod tests {
         }
     }
 
+    /// Our serve, their reception and set, our block: they attacked, not
+    /// in the file; our serve keeps its evaluation.
+    #[test]
+    fn our_block_after_their_reception_tells_their_attack() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM-", file.server());
+        file.rally(&[&serve, "a11RM+", "a13EH+", "*03BH="], false);
+        let file = file.finished();
+        let events = evaluated(&file).expect("expected the set");
+        assert_eq!(
+            events.iter().skip(1).take(2).copied().collect::<Vec<_>>(),
+            vec![(S, Some(EvalEnum::Negative)), (B, Some(EvalEnum::Error))]
+        );
+    }
+
+    /// Our attack `-` back from their block, our dig: no freeball of
+    /// theirs, the ball back to us without their attack (our `+`).
+    #[test]
+    fn our_attack_back_from_their_block_is_no_freeball() {
+        let mut file = File::new();
+        file.rally(
+            &["a11SM+", "*07RM+", "*02AH-", "a13BH+", "*07DH+", "*04AH#"],
+            true,
+        );
+        let file = file.finished();
+        let events = evaluated(&file).expect("expected the set");
+        assert_eq!(
+            events.iter().take(3).copied().collect::<Vec<_>>(),
+            vec![
+                (P, Some(EvalEnum::Positive)),
+                (A, Some(EvalEnum::Positive)),
+                (A, Some(EvalEnum::Perfect))
+            ]
+        );
+    }
+
+    /// Their freeball received by us and sent straight back (they play it
+    /// next): their freeball, then ours; told by their set going over too.
+    #[test]
+    fn their_freeball_received_back_over_is_ours() {
+        for touches in [
+            vec![
+                "a11SM+", "*07RM+", "*02AH+", "a12DH+", "a13FH+", "*07FH-", "a14AH#",
+            ],
+            vec![
+                "a11SM+", "*07RM+", "*02AH+", "a12DH+", "a13EH-", "*07FH/", "a14AH#",
+            ],
+        ] {
+            let mut file = File::new();
+            file.rally(&touches, false);
+            let events = translated(&file.finished()).expect("expected the set");
+            assert_eq!(
+                first(&events, 5),
+                vec![
+                    (P, Some(7)),
+                    (A, Some(2)),
+                    (OF, None),
+                    (FB, None),
+                    (OS, None)
+                ],
+                "{touches:?}"
+            );
+        }
+    }
+
+    /// Our cover after their block going over, their attack next: our
+    /// freeball.
+    #[test]
+    fn our_cover_played_by_them_is_our_freeball() {
+        let mut file = File::new();
+        file.rally(
+            &["a11SM+", "*07RM+", "*02AH-", "a13BH+", "*07DH+", "a14AH#"],
+            false,
+        );
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 4),
+            vec![(P, Some(7)), (A, Some(2)), (FB, None), (OS, None)]
+        );
+    }
+
+    /// Our error and their point, both without a player, the ball ours:
+    /// our fault.
+    #[test]
+    fn their_point_with_the_ball_ours_is_our_fault() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM+", "*07RM+", "*02AH-", "a13BH+", "*07DH-", "*$$&H=", "a$$&H#",
+            ],
+            false,
+        );
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 3),
+            vec![(P, Some(7)), (A, Some(2)), (F, None)]
+        );
+    }
+
     /// Their attack `!`, back from our block, then their freeball: our
     /// block wants the player, the set is refused.
     #[test]
