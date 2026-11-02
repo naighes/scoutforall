@@ -199,12 +199,39 @@ mod tests {
                 ("OF".to_string(), String::new(), String::new()),
                 "{case}"
             );
-            // the ball is ours: no dig nor block on it, an attack or our
-            // freeball
+            // the ball is ours: no dig on it, an attack or our freeball, or
+            // our block as it crosses the net
             assert_eq!(event_row(&mut ui, EventTypeEnum::D), None, "{case}");
-            assert_eq!(event_row(&mut ui, EventTypeEnum::B), None, "{case}");
+            assert!(event_row(&mut ui, EventTypeEnum::B).is_some(), "{case}");
             assert!(event_row(&mut ui, EventTypeEnum::A).is_some(), "{case}");
             assert!(event_row(&mut ui, EventTypeEnum::FB).is_some(), "{case}");
+        }
+    }
+
+    /// Their reception straight over (our serve `/`) or their freeball:
+    /// our block listed on "b", and
+    /// saved with its evaluation.
+    #[tokio::test]
+    async fn our_block_on_a_ball_not_attacked() {
+        for (before, case) in [
+            ("s/", "their reception came back"),
+            ("s-b2+X", "their freeball"),
+        ] {
+            let mut ui = scouting().await;
+            keys(&mut ui, before).await;
+            let row = event_row(&mut ui, EventTypeEnum::B)
+                .unwrap_or_else(|| panic!("{case}: not listed: {}", ui.screen()));
+            assert!(row.ends_with('b'), "{case}: {row}");
+            let saved = saved_count(&ui);
+            // Carla, middle blocker 2, in the front row
+            keys(&mut ui, "b3#").await;
+            assert_eq!(saved_count(&ui), saved + 1, "{case}");
+            assert_eq!(
+                last_saved(&ui).0,
+                "B".to_string(),
+                "{case}: {}",
+                ui.screen()
+            );
         }
     }
 

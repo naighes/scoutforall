@@ -210,7 +210,8 @@ mod tests {
                 ball_theirs_received_or_dug.clone(),
             ),
             // their reception comes back: our first touch isn't scouted
-            ("S/", t.serving(vec![t.serve(Over)]), vec![OE, A, F, FB]),
+            // or our block as it crosses the net, as on their freeball
+            ("S/", t.serving(vec![t.serve(Over)]), vec![OE, A, F, B, FB]),
             // our dig keeping the ball
             (
                 "D#",
@@ -302,12 +303,82 @@ mod tests {
             (
                 "OF",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)]),
-                vec![OS, OE, F, A, FB],
+                vec![OS, OE, F, A, B, FB],
             ),
         ];
         for (case, snapshot, expected) in cases {
             assert_eq!(snapshot.get_available_options(), expected, "after {case}");
         }
+    }
+
+    /// Our block on a ball crossing the net without their attack: their
+    /// reception straight over (our serve `/`) or their freeball. Each
+    /// evaluation tells what comes next, as after their attack: our point,
+    /// the ball ours, theirs to counter, their point.
+    #[test]
+    fn our_block_on_a_ball_not_attacked() {
+        let t = Team::new();
+        let before: [Vec<EventEntry>; 2] = [
+            vec![t.serve(Over)],
+            vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)],
+        ];
+        for events in before {
+            let block = |eval| t.serving([events.clone(), vec![act(B, t.oh1, eval)]].concat());
+            let won = block(Perfect);
+            assert_eq!(won.score_us, 1, "{events:?}");
+            assert_eq!(
+                block(Positive).get_available_options(),
+                vec![OE, F, A, FB, OF]
+            );
+            assert_eq!(
+                block(Negative).get_available_options(),
+                vec![OS, OE, F, A, D, B, FB, OF]
+            );
+            assert_eq!(block(Over).score_them, 1, "{events:?}");
+            assert_eq!(block(Error).score_them, 1, "{events:?}");
+            // in the back row, not on court: no block
+            for player in [t.setter, t.mb1] {
+                let reason = t.rejected(
+                    TeamSideEnum::Us,
+                    [events.clone(), vec![act(B, player, Positive)]].concat(),
+                );
+                assert!(reason.contains("can't play it"), "{reason}");
+            }
+        }
+    }
+
+    /// Our block on their freeball itself: exploited when we win the rally
+    /// (our block point too); on an attack after their freeball, it isn't.
+    #[test]
+    fn our_block_on_their_freeball_is_no_attack_of_theirs() {
+        let t = Team::new();
+        let freeball = vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)];
+        let point = t.serving([freeball.clone(), vec![act(B, t.oh1, Perfect)]].concat());
+        assert_eq!(exploited(&point), vec![true]);
+        let kept = t.serving(
+            [
+                freeball.clone(),
+                vec![act(B, t.oh1, Positive), act(A, t.opposite, Perfect)],
+            ]
+            .concat(),
+        );
+        assert_eq!(exploited(&kept), vec![true]);
+        let countered = t.serving(
+            [
+                freeball.clone(),
+                vec![act(B, t.oh1, Negative), act(B, t.oh1, Perfect)],
+            ]
+            .concat(),
+        );
+        assert_eq!(exploited(&countered), vec![false]);
+        let attacked = t.serving(
+            [
+                freeball,
+                vec![act(A, t.opposite, Negative), act(B, t.oh1, Perfect)],
+            ]
+            .concat(),
+        );
+        assert_eq!(exploited(&attacked), vec![false]);
     }
 
     /// Before a serve neither freeball: the rally hasn't started.
@@ -366,7 +437,7 @@ mod tests {
                     opp(OF),
                 ],
             ),
-            // and no dig of ours on their freeball, nor a block
+            // and no dig of ours on their freeball
             (
                 TeamSideEnum::Us,
                 vec![
@@ -374,15 +445,6 @@ mod tests {
                     act(B, t.oh1, Positive),
                     opp(OF),
                     act(D, t.libero, Positive),
-                ],
-            ),
-            (
-                TeamSideEnum::Us,
-                vec![
-                    t.serve(Negative),
-                    act(B, t.oh1, Positive),
-                    opp(OF),
-                    act(B, t.oh1, Positive),
                 ],
             ),
             // before the serve

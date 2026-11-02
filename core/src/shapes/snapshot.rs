@@ -596,23 +596,27 @@ impl Snapshot {
 
     /// Their freeball (`OF`) is exploited when we win the rally before they
     /// attack again, whoever scores the point (our kill, their error, their
-    /// fault). It isn't when they win the rally, when they attack again (our
-    /// dig or block comes next, even a block point) or when they send us
-    /// another freeball, which is counted on its own. Their error after
+    /// fault, our block on the freeball itself). It isn't when they win the
+    /// rally, when they attack again (our dig or block comes next, even a
+    /// block point) or when they send us another freeball, which is counted
+    /// on its own. Their error after
     /// digging our attack (`A-`, `OE`) counts as exploited: the scouting
     /// doesn't tell whether they attacked.
     fn record_freeball(&mut self, event: &EventEntry, phase: PhaseEnum, rotation: u8) {
         use EventTypeEnum::*;
+        // our block on their freeball itself, not on an attack after it
+        let on_the_freeball = self.last_event.as_ref().is_some_and(|e| e.event_type == OF);
         let exploited = match (
             self.pending_freeball,
             event.event_type,
             event.event_type.rally_winner(event.eval),
+            on_the_freeball,
         ) {
-            (false, _, _) => None,
+            (false, _, _, _) => None,
             // even our block point comes after their attack
-            (true, D | B | OF, _) => Some(false),
-            (true, _, Some(winner)) => Some(winner == TeamSideEnum::Us),
-            (true, _, None) => None,
+            (true, D | OF, _, _) | (true, B, _, false) => Some(false),
+            (true, _, Some(winner), _) => Some(winner == TeamSideEnum::Us),
+            (true, _, None, _) => None,
         };
         if let Some(exploited) = exploited {
             self.stats.freeballs.add(FreeballKey {
@@ -789,15 +793,17 @@ impl Snapshot {
             ((S, Some(Perfect)), serve_us.clone()),
             ((S, Some(Positive)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((S, Some(Exclamative)), vec![OS, OE, F, A, D, B, FB, OF]),
-            ((S, Some(Over)), vec![OE, A, F, FB]),
+            ((S, Some(Over)), vec![OE, A, F, B, FB]),
             ((S, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
             // our freeball, our reception or dig going straight over: they
             // attack, or mess it up and send a freeball back
             ((FB, None), vec![OS, OE, F, A, D, B, FB, OF]),
             // their freeball isn't a dig of ours, but what comes next is the
             // same as after one keeping the ball, and their point when it
-            // falls on our court untouched
-            ((OF, None), vec![OS, OE, F, A, FB]),
+            // falls on our court untouched; our block too, a ball crossing
+            // the net close to it, as after their reception straight over
+            // (our serve `/`): the scout tells a block from an attack
+            ((OF, None), vec![OS, OE, F, A, B, FB]),
         ]
         .into_iter()
         .collect();

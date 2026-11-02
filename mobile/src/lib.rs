@@ -4111,6 +4111,44 @@ mod tests {
         );
     }
 
+    /// Our serve `/`, their reception straight over: our block among the
+    /// events of the players in the front row, saved with its evaluation.
+    #[test]
+    fn our_block_on_their_reception_straight_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Over).unwrap();
+        let state = scouting.state();
+        let blockers: Vec<_> = state
+            .court
+            .iter()
+            .filter(|p| {
+                scouting
+                    .player_events(p.id.clone())
+                    .unwrap()
+                    .iter()
+                    .any(|e| e.value == EventTypeEnum::B)
+            })
+            .collect();
+        assert_eq!(blockers.len(), 3);
+        scouting
+            .choose_player_first(blockers[0].id.clone())
+            .unwrap();
+        if scouting.state().step == ScoutingStep::Event {
+            scouting.choose_event(EventTypeEnum::B).unwrap();
+        }
+        assert_eq!(
+            scouting.choose_eval(EvalEnum::Perfect).unwrap(),
+            Progress::Saved
+        );
+        match scouting.state().events.as_slice() {
+            [block, ..] => assert_eq!(block.event, EventTypeEnum::B),
+            other => unreachable!("expected the block, got {other:?}"),
+        }
+    }
+
     /// Our serve `!`, their reception and attack, our dig: our freeball is
     /// a team event, among the other events and not the player's, saved
     /// with no player.
