@@ -83,6 +83,7 @@
     <string name="lineup">Skład</string>
     <string name="substitution_short">Zmiana</string>
     <string name="setter_change_short">Rozgr.</string>
+    <string name="libero_for_short">Libero za</string>
     <string name="set_won">Set %d wygrany</string>
     <string name="set_lost">Set %d przegrany</string>
     <string name="match_won">Mecz wygrany</string>

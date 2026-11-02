@@ -206,6 +206,7 @@ impl Snapshot {
         let is_libero = lineup.get_current_libero() == *player_id;
         match (event_type, lineup.find_position(player_id).is_some()) {
             (R, _) => lineup.is_in_the_game(player_id),
+            (LF, _) => lineup.is_in_the_game(player_id) && !is_libero,
             (_, false) => false,
             (S, true) => lineup.get_serving_player() == Some(*player_id),
             (A | CS, true) => !is_libero,
@@ -547,7 +548,7 @@ impl Snapshot {
         // be scored, and the substitutions and libero and setter changes
         // aren't part of the rally; the player only of the events asking
         // one (our freeball named it once)
-        let skip = matches!(event.event_type, R | CL | LR | CS)
+        let skip = matches!(event.event_type, R | CL | LR | LF | CS)
             || (event.event_type.requires_evaluation() && event.eval.is_none());
         if !skip {
             self.stats.events.add(EventKey {
@@ -648,7 +649,7 @@ impl Snapshot {
             event.event_type,
             event.eval,
         ) {
-            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | LR | CS, _) => {
+            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | LR | LF | CS, _) => {
                 (self.possession, false)
             }
             (_, 0, _, P | OS, _) => (1, true),
@@ -723,8 +724,9 @@ impl Snapshot {
     pub fn get_rally_start_options(&self, phase: PhaseEnum) -> Vec<EventTypeEnum> {
         use EventTypeEnum::*;
         let mut options = match phase {
-            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, LR, CS],
-            PhaseEnum::Break => vec![OE, F, S, R, CL, LR, CS],
+            // the libero for a player last: the rarest
+            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, LR, CS, LF],
+            PhaseEnum::Break => vec![OE, F, S, R, CL, LR, CS, LF],
         };
         if self.current_lineup.get_fallback_libero().is_none() {
             options.retain(|o| *o != CL);
@@ -738,7 +740,7 @@ impl Snapshot {
         let serve_them = self.get_rally_start_options(PhaseEnum::SideOut);
         let serve_us = self.get_rally_start_options(PhaseEnum::Break);
         let options_map: HashMap<_, _> = [
-            // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS
+            // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS, LF
             //
             // the ball on our side, to play on our second or third touch:
             // our attack or our freeball (`FB`). Never a freeball on a first
@@ -795,7 +797,7 @@ impl Snapshot {
         .into_iter()
         .collect();
         match (event.event_type, event.eval) {
-            (R | CL | LR | CS, _) => self.available_options.clone(),
+            (R | CL | LR | LF | CS, _) => self.available_options.clone(),
             key => options_map.get(&key).cloned().unwrap_or_default(),
         }
     }
@@ -825,6 +827,10 @@ impl Snapshot {
             // the libero out, or back in
             self.current_lineup.toggle_libero()?;
         }
+        if let (EventTypeEnum::LF, Some(player)) = (event.event_type, event.player) {
+            // the libero for the player, in the back row
+            self.current_lineup.set_libero_for(&player)?;
+        }
         if event.event_type == EventTypeEnum::CS {
             // change setter
             if let Some(new_setter) = event.player {
@@ -834,7 +840,11 @@ impl Snapshot {
         self.current_lineup.update(event)?;
         if !matches!(
             event.event_type,
-            EventTypeEnum::R | EventTypeEnum::CL | EventTypeEnum::LR | EventTypeEnum::CS
+            EventTypeEnum::R
+                | EventTypeEnum::CL
+                | EventTypeEnum::LR
+                | EventTypeEnum::LF
+                | EventTypeEnum::CS
         ) {
             self.last_event = Some(event.clone());
         }

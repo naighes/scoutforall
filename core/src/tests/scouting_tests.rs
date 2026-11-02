@@ -623,7 +623,7 @@ mod tests {
             (s.session.step(), s.session.event(), s.session.player()),
             (ScoutingStep::Eval, Some(S), Some(s.players[0]))
         );
-        assert_eq!(s.session.other_events(), vec![OE, F, R, LR, CS]);
+        assert_eq!(s.session.other_events(), vec![OE, F, R, LR, CS, LF]);
         assert_eq!(s.session.player_events(&s.players[0]), vec![]);
         assert_eq!(
             s.session.choose_eval(EvalEnum::Perfect).await,

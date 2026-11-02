@@ -84,6 +84,7 @@
     <string name="lineup">Lineup</string>
     <string name="substitution_short">Sub</string>
     <string name="setter_change_short">Setter</string>
+    <string name="libero_for_short">Libero for</string>
     <string name="set_won">Set %d won</string>
     <string name="set_lost">Set %d lost</string>
     <string name="match_won">Match won</string>

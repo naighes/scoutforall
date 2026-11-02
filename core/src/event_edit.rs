@@ -62,7 +62,7 @@ impl EventEdit {
         use EventTypeEnum::*;
         let event = set.events.get(index).ok_or(EventEditError::Unreadable)?;
         match event.event_type {
-            R | CL | LR | CS => Err(EventEditError::NotEditable),
+            R | CL | LR | LF | CS => Err(EventEditError::NotEditable),
             _ => set
                 .snapshot_before(index, max_substitutions)
                 .map(|before| EventEdit {
@@ -117,7 +117,7 @@ impl EventEdit {
             .get_available_options()
             .iter()
             .copied()
-            .filter(|t| !matches!(t, R | CL | LR | CS))
+            .filter(|t| !matches!(t, R | CL | LR | LF | CS))
             .filter(|t| t.asks_player() == event.event_type.asks_player())
             .filter(|t| match event.player {
                 Some(p) => self.before.can_play(*t, &p),

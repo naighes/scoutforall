@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -767,11 +768,13 @@ private fun Title(text: String) = Text(
 private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /** The changes of the lineup, rare and at stopped play, each with its icon
- * and a short name; the libero out or in by its own, saying which. */
+ * and a short name; the libero out or in by its own, saying which; the
+ * libero for a player of the back row, touched on court. */
 private val lineupChanges = mapOf(
     EventTypeEnum.R to (R.drawable.ic_substitution to R.string.substitution_short),
     EventTypeEnum.CL to (R.drawable.ic_libero to R.string.libero),
     EventTypeEnum.LR to (R.drawable.ic_libero_in_out to null),
+    EventTypeEnum.LF to (R.drawable.ic_libero_for to R.string.libero_for_short),
     EventTypeEnum.CS to (R.drawable.ic_setter to R.string.setter_change_short),
 )
 
@@ -800,12 +803,14 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
         contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
         Row(Modifier.height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            // on a narrow screen the changes scroll, the close button stays
             AnimatedVisibility(
                 expanded,
+                modifier = Modifier.weight(1f, fill = false),
                 enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
                 exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
             ) {
-                Row(Modifier.padding(start = 12.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 12.dp)) {
                     events.forEach { event ->
                         val looks = lineupChanges[event.value]
                         Column(

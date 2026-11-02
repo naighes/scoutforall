@@ -83,6 +83,7 @@
     <string name="lineup">Escalação</string>
     <string name="substitution_short">Subst</string>
     <string name="setter_change_short">Levant.</string>
+    <string name="libero_for_short">Líbero p/</string>
     <string name="set_won">Set %d ganho</string>
     <string name="set_lost">Set %d perdido</string>
     <string name="match_won">Partida ganha</string>

@@ -125,6 +125,7 @@ pub enum EventTypeEnum {
     R,
     CL,
     LR,
+    LF,
     CS,
 }
 
@@ -2421,6 +2422,7 @@ impl Scout4All {
                         EventTypeEnum::R
                             | EventTypeEnum::CL
                             | EventTypeEnum::LR
+                            | EventTypeEnum::LF
                             | EventTypeEnum::CS
                     ),
                 })
@@ -4239,6 +4241,74 @@ mod tests {
         scouting.choose_eval(EvalEnum::Positive).unwrap();
         assert_eq!(name(&scouting), None);
         assert!(scouting.choose_event(EventTypeEnum::LR).is_err());
+    }
+
+    /// Before the serve, the libero for a player touched on court (the
+    /// libero aside): saved with the player; on court for the middle
+    /// blocker, the libero goes out at once and comes in for the player
+    /// after a rally.
+    #[test]
+    fn the_libero_for_a_player_of_the_back_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let ids: Vec<String> = scouting
+            .state()
+            .court
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        let libero = scouting
+            .state()
+            .court
+            .iter()
+            .find(|p| p.libero)
+            .map(|p| p.id.clone())
+            .expect("the libero on court");
+        let outside_hitter = ids[4].clone();
+        let en = labels(LanguageEnum::En);
+        let name = scouting
+            .other_events()
+            .into_iter()
+            .find(|e| e.value == EventTypeEnum::LF)
+            .map(|e| e.name);
+        assert_eq!(name.as_deref(), Some(en.libero_for));
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::LF).unwrap(),
+            Progress::Choosing
+        );
+        let choices: Vec<String> = scouting
+            .player_choices()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert!(choices.contains(&outside_hitter));
+        assert!(!choices.contains(&libero));
+        assert_eq!(
+            scouting.choose_player(outside_hitter.clone()).unwrap(),
+            Progress::Saved
+        );
+        let on_court = |scouting: &Scouting| -> Vec<String> {
+            scouting.state().court.into_iter().map(|p| p.id).collect()
+        };
+        assert!(!on_court(&scouting).contains(&libero), "out at once");
+        assert!(on_court(&scouting).contains(&outside_hitter));
+        match scouting.state().events.as_slice() {
+            [first] => {
+                assert_eq!(first.event, EventTypeEnum::LF);
+                assert_eq!(
+                    first.player.as_ref().map(|p| p.id.clone()),
+                    Some(outside_hitter.clone())
+                );
+            }
+            other => unreachable!("expected the libero for, got {other:?}"),
+        }
+        // our ace (the serve waits for its evaluation): the libero for the
+        // outside hitter
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        assert!(on_court(&scouting).contains(&libero));
+        assert!(!on_court(&scouting).contains(&outside_hitter));
     }
 
     #[test]

@@ -186,6 +186,11 @@ impl FromStr for TeamSideEnum {
 ///   row, or comes back in for them. It lasts until the next one: until
 ///   then the libero doesn't come in (or doesn't go out) by itself.
 ///
+/// - **LF**: Libero For
+///   The libero for the player named, when in the back row and not
+///   serving; for the middle blocker of the back row otherwise, as ever (a
+///   middle blocker named brings that back). It lasts until the next one.
+///
 /// - **CS**: Change Setter
 ///   A setter change performed by either team.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -204,6 +209,7 @@ pub enum EventTypeEnum {
     R,
     CL,
     LR,
+    LF,
     CS,
 }
 
@@ -224,6 +230,7 @@ impl fmt::Display for EventTypeEnum {
             R => "R",
             CL => "CL",
             LR => "LR",
+            LF => "LF",
             CS => "CS",
         };
         write!(f, "{}", label)
@@ -238,7 +245,7 @@ impl WithDesc<EventTypeEnum> for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub const ALL: [EventTypeEnum; 14] = [
+    pub const ALL: [EventTypeEnum; 15] = [
         EventTypeEnum::S,  // serve
         EventTypeEnum::P,  // pass/reception
         EventTypeEnum::A,  // attack
@@ -252,6 +259,7 @@ impl EventTypeEnum {
         EventTypeEnum::R,  // substitution/replacement
         EventTypeEnum::CL, // change libero
         EventTypeEnum::LR, // libero replacement, in or out
+        EventTypeEnum::LF, // the libero for a player of the back row
         EventTypeEnum::CS, // change setter
     ];
 
@@ -265,7 +273,7 @@ impl EventTypeEnum {
     /// asks it, the team's having none (see `asks_player`).
     pub fn requires_player(&self) -> bool {
         use EventTypeEnum::*;
-        matches!(self, A | B | P | D | R | S | CS)
+        matches!(self, A | B | P | D | R | S | CS | LF)
     }
 
     /// Whether scouting asks the player: the events requiring one, and our
@@ -334,7 +342,7 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self.rally_winner(eval), self, eval) {
-            (Some(_), _, _) | (None, R | CL | LR | CS | F | OS | OE, _) => None,
+            (Some(_), _, _) | (None, R | CL | LR | LF | CS | F | OS | OE, _) => None,
             (None, S, Some(Over))
             | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
             | (None, A, Some(Positive | Exclamative))
@@ -376,6 +384,7 @@ impl FriendlyName for EventTypeEnum {
             R => labels.substitution,
             CL => labels.change_libero,
             LR => labels.libero_in_out,
+            LF => labels.libero_for,
             CS => labels.change_setter,
         }
     }
@@ -399,6 +408,7 @@ impl FromStr for EventTypeEnum {
             "R" => Ok(R),
             "CL" => Ok(CL),
             "LR" => Ok(LR),
+            "LF" => Ok(LF),
             "CS" => Ok(CS),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",

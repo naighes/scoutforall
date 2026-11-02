@@ -138,6 +138,29 @@ class ScoutingTest {
         assertEquals(3, events.size)
     }
 
+    /** From the changes of the lineup, the libero for a player touched on
+     * court: saved with the player; in their place after a rally. */
+    @Test
+    fun theLiberoForAPlayerOfTheBackRow() {
+        show()
+        rule.onNode(hasContentDescription(string(R.string.lineup)) and hasClickAction()).performClick()
+        touch(string(R.string.libero_for_short))
+        // Ekaterina Antropova, outside hitter 2, in position 5
+        touch("9")
+        rule.waitFor { saved().events.size == 1 }
+        val first = saved().events.first()
+        assertEquals(EventTypeEnum.LF, first.event)
+        assertEquals("Ekaterina Antropova", first.player?.name)
+        // out of the middle blocker at once, in for her after our ace
+        assertTrue(saved().court.none { it.libero })
+        touch("#")
+        rule.waitFor { score(saved()) == 1 to 0 }
+        val court = saved().court
+        assertTrue(court.any { it.libero })
+        assertTrue(court.none { it.name == "Ekaterina Antropova" })
+        assertTrue(court.any { it.name == "Anna Danesi" })
+    }
+
     @Test
     fun theSetOverAsksToGoBackOrUndo() {
         show()

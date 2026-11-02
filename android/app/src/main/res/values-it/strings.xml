@@ -82,6 +82,7 @@
     <string name="lineup">Formazione</string>
     <string name="substitution_short">Sostituzione</string>
     <string name="setter_change_short">Palleggiatore</string>
+    <string name="libero_for_short">Libero per</string>
     <string name="set_won">Set %d vinto</string>
     <string name="set_lost">Set %d perso</string>
     <string name="match_won">Partita vinta</string>
