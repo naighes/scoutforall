@@ -4095,8 +4095,8 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
-        scouting.choose_eval(EvalEnum::Positive).unwrap();
-        // their freeball after our serve `+`, as scouted up to v0.11
+        scouting.choose_eval(EvalEnum::Over).unwrap();
+        // their freeball after our serve `/`: their reception came back
         let set = dir.path().join(&team).join(&m).join("set_1.csv");
         let mut rows = std::fs::read_to_string(&set).unwrap();
         rows.push_str("2026-10-24T18:00:00Z,OF,,,\n");
@@ -4106,7 +4106,7 @@ mod tests {
             listed,
             vec![MatchListing::Unreadable {
                 folder: m,
-                reason: Some("set 1, row 2: OF after S+ isn't valid in this version".into()),
+                reason: Some("set 1, row 2: OF after S/ isn't valid in this version".into()),
             }]
         );
     }

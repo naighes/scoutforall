@@ -750,20 +750,25 @@ impl Snapshot {
             // they don't: after our attack or block `+` we play the ball
             // again, their freeball (`OF`) optional; after our serve `/`
             // their reception came back, not a freeball; after our serve
-            // `+`, `!` or `-`, our attack or block `-` they attack, no
-            // freeball. Our attack or our freeball can still come when their
-            // attack and our dig or block weren't scouted: the dig is
-            // optional.
+            // `+`, `!` or `-`, our attack or block `-` they attack or send
+            // a freeball (`OF`): the evaluation tells their reception or
+            // dig, the freeball what they made of it, as our reception or
+            // dig and our freeball (`FB`) do: a perfect reception the setter
+            // sends over is `#`, then the freeball. A ball sent over on
+            // purpose to score (the setter's dump) is an attack; one sent
+            // out is an error. Our attack or our freeball
+            // can still come when their attack and our dig or block weren't
+            // scouted: the dig is optional.
             ((OS, None), serve_them.clone()),
             ((OE, None), serve_us.clone()),
             ((B, Some(Error)), serve_them.clone()),
             ((B, Some(Over)), serve_them.clone()),
             ((B, Some(Perfect)), serve_us.clone()),
             ((B, Some(Positive)), vec![OE, F, A, FB, OF]),
-            ((B, Some(Negative)), vec![OS, OE, F, A, D, B, FB]),
+            ((B, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((A, Some(Error)), serve_them.clone()),
             ((A, Some(Over)), serve_them.clone()),
-            ((A, Some(Negative)), vec![OS, OE, F, A, D, B, FB]),
+            ((A, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((A, Some(Perfect)), serve_us.clone()),
             ((A, Some(Positive)), vec![OE, F, A, FB, OF]),
             ((A, Some(Exclamative)), vec![OE, F, A, FB]),
@@ -782,10 +787,10 @@ impl Snapshot {
             ((P, Some(Perfect)), vec![OE, F, A, FB]),
             ((S, Some(Error)), serve_them.clone()),
             ((S, Some(Perfect)), serve_us.clone()),
-            ((S, Some(Positive)), vec![OS, OE, F, A, D, B, FB]),
-            ((S, Some(Exclamative)), vec![OS, OE, F, A, D, B, FB]),
+            ((S, Some(Positive)), vec![OS, OE, F, A, D, B, FB, OF]),
+            ((S, Some(Exclamative)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((S, Some(Over)), vec![OE, A, F, FB]),
-            ((S, Some(Negative)), vec![OS, OE, F, A, D, B, FB]),
+            ((S, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
             // our freeball, our reception or dig going straight over: they
             // attack, or mess it up and send a freeball back
             ((FB, None), vec![OS, OE, F, A, D, B, FB, OF]),

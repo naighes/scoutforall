@@ -188,26 +188,26 @@ mod tests {
         let ball_ours_or_their_freeball = vec![OE, F, A, FB, OF];
         // sent over without an attack: they attack, or send it back easy
         let ball_theirs = vec![OS, OE, F, A, D, B, FB, OF];
-        // they attack: our dig or block, or our attack or freeball after
-        // our dig not scouted; a freeball of theirs would tell another
-        // evaluation
-        let ball_theirs_to_attack = vec![OS, OE, F, A, D, B, FB];
+        // after their reception or dig they attack (our dig or block, or
+        // our attack or freeball after our dig not scouted) or send a
+        // freeball: the evaluation tells their reception or dig
+        let ball_theirs_received_or_dug = vec![OS, OE, F, A, D, B, FB, OF];
         let cases: Vec<(&str, Snapshot, Vec<EventTypeEnum>)> = vec![
             // our serve: they receive and attack
             (
                 "S+",
                 t.serving(vec![t.serve(Positive)]),
-                ball_theirs_to_attack.clone(),
+                ball_theirs_received_or_dug.clone(),
             ),
             (
                 "S!",
                 t.serving(vec![t.serve(Exclamative)]),
-                ball_theirs_to_attack.clone(),
+                ball_theirs_received_or_dug.clone(),
             ),
             (
                 "S-",
                 t.serving(vec![t.serve(Negative)]),
-                ball_theirs_to_attack.clone(),
+                ball_theirs_received_or_dug.clone(),
             ),
             // their reception comes back: our first touch isn't scouted
             ("S/", t.serving(vec![t.serve(Over)]), vec![OE, A, F, FB]),
@@ -278,7 +278,7 @@ mod tests {
             (
                 "A-",
                 t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Negative)]),
-                ball_theirs_to_attack.clone(),
+                ball_theirs_received_or_dug.clone(),
             ),
             // our block
             (
@@ -289,7 +289,7 @@ mod tests {
             (
                 "B-",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Negative)]),
-                ball_theirs_to_attack.clone(),
+                ball_theirs_received_or_dug.clone(),
             ),
             // our freeball: they play it, and may send one back
             (
@@ -425,11 +425,12 @@ mod tests {
         }
     }
 
-    /// Their freeball after our attack they dug, or after our serve `+`, as
-    /// scouted up to v0.11: no more valid, the set tells the first event
-    /// that doesn't replay; a set that replays tells none.
+    /// Their freeball after our attack they dug, or after our serve `+`,
+    /// as scouted up to v0.11 and refused from v0.12: valid again, the
+    /// evaluation telling their reception or dig, the freeball what they
+    /// made of it; exploited when we win the rally.
     #[test]
-    fn their_freeball_where_they_attack_no_more_is_told() {
+    fn their_freeball_after_their_reception_or_dig_replays() {
         let t = Team::new();
         let dug = t.set(
             TeamSideEnum::Them,
@@ -440,28 +441,53 @@ mod tests {
                 act(A, t.opposite, Perfect),
             ],
         );
-        let issue = dug.replay_issue(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        assert_eq!(dug.replay_issue(DEFAULT_MAX_SUBSTITUTIONS), None);
+        for eval in [Positive, Exclamative, Negative] {
+            let served = t.serving(vec![t.serve(eval), opp(OF), act(A, t.oh1, Perfect)]);
+            assert_eq!(served.stats.event_count(OF, None, &all()), 1, "S{eval:?}");
+            assert_eq!(served.stats.event_count(S, None, &all()), 1, "S{eval:?}");
+            assert_eq!(exploited(&served), vec![true], "S{eval:?}");
+            let attacked = t.serving(vec![
+                t.serve(eval),
+                opp(OF),
+                act(A, t.oh1, Negative),
+                act(D, t.libero, Positive),
+            ]);
+            assert_eq!(exploited(&attacked), vec![false], "S{eval:?}");
+        }
+        let blocked = t.serving(vec![
+            t.serve(Negative),
+            act(B, t.oh1, Negative),
+            opp(OF),
+            act(A, t.oh1, Perfect),
+        ]);
+        assert_eq!(blocked.stats.event_count(OF, None, &all()), 1);
+        assert_eq!(exploited(&blocked), vec![true]);
+    }
+
+    /// Their freeball where the ball came straight back (our serve `/`) or
+    /// is ours to play: refused while scouting, told replaying a set.
+    #[test]
+    fn their_freeball_where_it_cant_be_is_told() {
+        let t = Team::new();
+        let served = t.set(TeamSideEnum::Us, vec![t.serve(Over), opp(OF)]);
+        let issue = served.replay_issue(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
         assert_eq!(
             issue,
             ReplayIssue {
                 set_number: 1,
-                row: 3,
+                row: 2,
                 event: "OF".into(),
-                previous: Some("A-".into()),
+                previous: Some("S/".into()),
             }
         );
         assert_eq!(
             issue.describe(crate::tests::EN),
-            "set 1, row 3: OF after A- isn't valid in this version"
+            "set 1, row 2: OF after S/ isn't valid in this version"
         );
-        let served = t.set(TeamSideEnum::Us, vec![t.serve(Positive), opp(OF)]);
-        let issue = served.replay_issue(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
-        assert_eq!((issue.row, issue.previous), (2, Some("S+".into())));
-        let fine = t.set(
-            TeamSideEnum::Us,
-            vec![t.serve(Positive), act(A, t.oh1, Perfect)],
-        );
-        assert_eq!(fine.replay_issue(DEFAULT_MAX_SUBSTITUTIONS), None);
+        let received = t.set(TeamSideEnum::Them, vec![act(P, t.libero, Perfect), opp(OF)]);
+        let issue = received.replay_issue(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        assert_eq!((issue.row, issue.previous), (2, Some("P#".into())));
     }
 
     /// A freeball scouted before it became a team event names its player:

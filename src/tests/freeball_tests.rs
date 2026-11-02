@@ -107,10 +107,10 @@ mod tests {
         ("s=p7+x", "our freeball, after the reception"),
     ];
 
-    /// The ball on their side, to attack: not their freeball (it would make
-    /// our serve `/`, our attack or block `+`); ours, after their attack and
-    /// our dig not scouted.
-    const BALL_THEIRS_TO_ATTACK: [(&str, &str); 5] = [
+    /// The ball on their side, after their reception or dig: they attack or
+    /// send a freeball (`OF`), the evaluation of ours telling their
+    /// reception or dig; ours, after their attack and our dig not scouted.
+    const BALL_THEIRS_RECEIVED_OR_DUG: [(&str, &str); 5] = [
         ("s+", "our serve +"),
         ("s!", "our serve !"),
         ("s-", "our serve -"),
@@ -136,7 +136,7 @@ mod tests {
             .iter()
             .chain(&BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT)
             .chain(&BALL_THEIRS)
-            .chain(&BALL_THEIRS_TO_ATTACK);
+            .chain(&BALL_THEIRS_RECEIVED_OR_DUG);
         for (before, case) in cases {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
@@ -182,7 +182,8 @@ mod tests {
     async fn their_freeball_is_saved_at_once() {
         let cases = BALL_THEIRS
             .iter()
-            .chain(&BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT);
+            .chain(&BALL_OURS_AFTER_THEIR_FREEBALL_OR_NOT)
+            .chain(&BALL_THEIRS_RECEIVED_OR_DUG);
         for (before, case) in cases {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
@@ -207,11 +208,10 @@ mod tests {
         }
     }
 
-    /// Where the ball is ours to play, or theirs to attack.
+    /// Where the ball is ours to play.
     #[tokio::test]
-    async fn no_freeball_of_theirs_where_the_ball_is_ours_or_they_attack() {
-        let cases = BALL_OURS_TO_PLAY.iter().chain(&BALL_THEIRS_TO_ATTACK);
-        for (before, case) in cases {
+    async fn no_freeball_of_theirs_where_the_ball_is_ours() {
+        for (before, case) in BALL_OURS_TO_PLAY {
             let mut ui = scouting().await;
             keys(&mut ui, before).await;
             assert_eq!(event_row(&mut ui, EventTypeEnum::OF), None, "{case}");
