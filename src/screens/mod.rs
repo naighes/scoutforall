@@ -7,6 +7,7 @@ pub mod edit_team_screen;
 pub mod export_match_screen;
 pub mod export_team_screen;
 pub mod file_system_screen;
+pub mod import_dvw_screen;
 pub mod import_match_screen;
 pub mod import_team_screen;
 pub mod keybindings_change_screen;

@@ -9,6 +9,7 @@ use crate::{
         translate::{Issue, Mappings, TranslateError, Us, translate_set},
     },
     errors::{AppError, MatchError},
+    localization::Labels,
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -251,18 +252,21 @@ fn same(ours: &PlayerEntry, p: &Player) -> bool {
     !surname.is_empty() && (name == surname || name.ends_with(&format!(" {surname}")))
 }
 
-/// "Nome Cognome", the surname written in capitals by DataVolley as a name.
+/// "Nome Cognome", a part written in capitals (the surname, as DataVolley
+/// writes it, or the name, as some scouts do) as a name.
 fn full_name(p: &Player) -> String {
-    let surname = match p.surname.chars().any(char::is_lowercase) {
-        true => p.surname.trim().to_string(),
-        false => capitalized(p.surname.trim()),
-    };
-    [p.name.trim(), surname.as_str()]
-        .iter()
+    [as_name(&p.name), as_name(&p.surname)]
+        .into_iter()
         .filter(|part| !part.is_empty())
-        .copied()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn as_name(text: &str) -> String {
+    match text.chars().any(char::is_lowercase) {
+        true => text.trim().to_string(),
+        false => capitalized(text.trim()),
+    }
 }
 
 // each word capitalized, also after a hyphen or an apostrophe
@@ -483,4 +487,76 @@ pub async fn save_import(
         sets: entry.sets.clone(),
         ..m
     })
+}
+
+impl TeamIssue {
+    pub fn describe(&self, labels: &Labels) -> String {
+        match self {
+            TeamIssue::NoYear => labels.dvw_no_year.to_string(),
+            TeamIssue::PlayerConflict { number, file, team } => labels
+                .dvw_player_conflict
+                .replace("{number}", &number.to_string())
+                .replace("{file}", file)
+                .replace("{team}", team),
+        }
+    }
+}
+
+fn score((us, them): (u8, u8)) -> String {
+    format!("{us}-{them}")
+}
+
+impl MatchIssue {
+    pub fn describe(&self, labels: &Labels) -> String {
+        match self {
+            MatchIssue::NoSets => labels.dvw_no_sets.to_string(),
+            MatchIssue::Unfinished => labels.dvw_unfinished.to_string(),
+            MatchIssue::Replay(issue) => issue.describe(labels),
+            MatchIssue::SetScore {
+                set_number,
+                file,
+                ours,
+            } => labels
+                .dvw_set_score
+                .replace("{set}", &set_number.to_string())
+                .replace("{file}", &score(*file))
+                .replace("{ours}", &score(*ours)),
+            MatchIssue::Set(e) => {
+                let template = match e.line {
+                    Some(_) => labels.dvw_set_issue_at,
+                    None => labels.dvw_set_issue,
+                };
+                template
+                    .replace("{set}", &e.set_number.to_string())
+                    .replace("{line}", &e.line.map(|l| l.to_string()).unwrap_or_default())
+                    .replace("{reason}", &reason(&e.issue, labels))
+            }
+        }
+    }
+}
+
+// why a set doesn't translate; the technical detail, in English, kept for
+// the cases the scout has to look into the file
+fn reason(issue: &Issue, labels: &Labels) -> String {
+    match issue {
+        Issue::NoSet => labels.dvw_no_set.to_string(),
+        Issue::NoLineup => labels.dvw_no_lineup.to_string(),
+        Issue::NoServe => labels.dvw_no_serve.to_string(),
+        Issue::NoSetter => labels.dvw_no_setter.to_string(),
+        Issue::NoLibero => labels.dvw_no_libero.to_string(),
+        Issue::UnknownPlayer(number) => labels
+            .dvw_unknown_player
+            .replace("{number}", &number.to_string()),
+        Issue::UnknownCode(code) => labels.dvw_unknown_code.replace("{code}", code),
+        Issue::Ending { skill, evaluation } => labels
+            .dvw_ending
+            .replace("{code}", &format!("{}{evaluation}", skill.code())),
+        Issue::Untranslatable(detail) => labels.dvw_untranslatable.replace("{detail}", detail),
+        Issue::Event(detail) => labels.dvw_event.replace("{detail}", detail),
+        Issue::Score { file, ours } => labels
+            .dvw_score
+            .replace("{file}", &score(*file))
+            .replace("{ours}", &score(*ours)),
+        Issue::Unfinished => labels.dvw_set_unfinished.to_string(),
+    }
 }

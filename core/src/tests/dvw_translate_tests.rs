@@ -980,6 +980,15 @@ mod tests {
         assert_eq!(plan.entry.date.to_rfc3339(), "2015-01-25T20:30:00+01:00");
     }
 
+    /// Writes the match of three sets won to `DVW_OUT`, the fixture of the
+    /// import tests of the TUI and the app.
+    #[test]
+    #[ignore]
+    fn write_three_sets_won() {
+        let path = std::env::var("DVW_OUT").expect("DVW_OUT");
+        std::fs::write(path, three_sets_won().text()).expect("written");
+    }
+
     /// Saving an import into a store in memory: the matches queued for
     /// the statistics, as the finished ones.
     mod saving {

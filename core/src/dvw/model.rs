@@ -165,6 +165,19 @@ impl Skill {
         Skill::Freeball,
     ];
 
+    /// The letter of the skill in the codes, e.g. `A` for the attack.
+    pub fn code(self) -> char {
+        match self {
+            Skill::Serve => 'S',
+            Skill::Reception => 'R',
+            Skill::Attack => 'A',
+            Skill::Block => 'B',
+            Skill::Dig => 'D',
+            Skill::Set => 'E',
+            Skill::Freeball => 'F',
+        }
+    }
+
     pub(crate) fn from_code(code: char) -> Option<Skill> {
         match code {
             'S' => Some(Skill::Serve),

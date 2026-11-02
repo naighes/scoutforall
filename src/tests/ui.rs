@@ -219,6 +219,13 @@ impl Ui {
         ui
     }
 
+    /// Puts a file in the folder the file system screens open on.
+    pub fn browse_file(&self, name: &str, content: &[u8]) {
+        let browse = self._dir.path().join("browse");
+        std::fs::create_dir_all(&browse).unwrap();
+        std::fs::write(browse.join(name), content).unwrap();
+    }
+
     pub fn render(&mut self) -> Buffer {
         let app = &mut self.app;
         self.terminal.draw(|f| app.draw(f)).unwrap().buffer.clone()

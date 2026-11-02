@@ -51,6 +51,8 @@ mod tests {
             ("team list", true, "".into()),
             ("new team", true, "n".into()),
             ("import team", true, "i".into()),
+            (DVW, true, "i\n".into()),
+            (DVW_NEW_TEAM, true, "i\n\n\n".into()),
             ("settings", true, "\x02".into()),
             ("settings shortcuts", true, "\x02\t".into()),
             ("report an issue", true, "\x02i".into()),
@@ -79,11 +81,23 @@ mod tests {
 
     /// The terms of use, shown at the first startup.
     const TERMS: &str = "terms of use";
+    /// The import of a DataVolley file: its first step, and the form of a
+    /// new team.
+    const DVW: &str = "import DataVolley";
+    const DVW_NEW_TEAM: &str = "import DataVolley new team";
 
     /// The screen of `screens()` with the name.
     async fn open_screen(name: &str, started: bool, keys: &str) -> Ui {
         match name {
             TERMS => Ui::first_startup(TEAM).await,
+            DVW | DVW_NEW_TEAM => {
+                let mut ui = Ui::start_with_sets(TEAM).await;
+                ui.browse_file("match.dvw", include_bytes!("fixtures/three_sets.dvw"));
+                for c in keys.chars() {
+                    ui.press(code(c)).await;
+                }
+                ui
+            }
             _ => open(started, keys).await,
         }
     }

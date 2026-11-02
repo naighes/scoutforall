@@ -1,5 +1,6 @@
 mod archive_tests;
 mod country_tests;
+mod dvw_import_tests;
 mod edit_match_tests;
 mod edit_set_events_tests;
 mod fault_tests;

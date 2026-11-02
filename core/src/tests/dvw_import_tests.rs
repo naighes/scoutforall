@@ -377,8 +377,9 @@ mod tests {
         assert_eq!(plan.numbers.get(&16), Some(&chosen.players[0].id));
     }
 
-    /// A surname written in lowercase is kept as written; an empty first
-    /// name leaves the surname alone.
+    /// A part written in lowercase is kept as written, one in capitals (the
+    /// surname or the name) written as a name; an empty first name leaves
+    /// the surname alone.
     #[test]
     fn names_as_written() {
         let f = file(
@@ -387,11 +388,95 @@ mod tests {
             vec![
                 player(3, "de Rossi", "Anna", None),
                 player(4, "O'BRIEN", "", None),
+                player(5, "Bednjanič", "ŠPELA", None),
+                player(6, "VOVK", "ANA MARIJA", None),
             ],
         );
         let plan = team_plan(&f, Side::Home, new_team()).expect("a plan");
         let names: Vec<&str> = plan.team.players.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["Anna de Rossi", "O'Brien"]);
+        assert_eq!(
+            names,
+            vec![
+                "Anna de Rossi",
+                "O'Brien",
+                "Špela Bednjanič",
+                "Ana Marija Vovk"
+            ]
+        );
         assert_eq!(plan.team.players[0].role, None);
+    }
+
+    /// The issues as the user reads them, in the language chosen; the
+    /// detail of the translator kept as it is.
+    #[test]
+    fn the_issues_described() {
+        use crate::dvw::{
+            import::MatchIssue,
+            model::Skill,
+            translate::{Issue, TranslateError},
+        };
+        use crate::localization::labels;
+        use crate::shapes::enums::LanguageEnum;
+        let (en, it) = (labels(LanguageEnum::En), labels(LanguageEnum::It));
+        let conflict = TeamIssue::PlayerConflict {
+            number: 7,
+            file: "Aida Mehic".to_string(),
+            team: "Anna Huber".to_string(),
+        };
+        assert_eq!(
+            conflict.describe(it),
+            "numero 7: Aida Mehic nel file, Anna Huber nella squadra"
+        );
+        let set = |line, issue| {
+            MatchIssue::Set(TranslateError {
+                set_number: 2,
+                line,
+                issue,
+            })
+        };
+        for (issue, text) in [
+            (
+                set(Some(761), Issue::Untranslatable("our touch after the end")),
+                "set 2, line 761: a rally that can't be translated exactly (our touch after the end)",
+            ),
+            (
+                set(None, Issue::NoLibero),
+                "set 2: no libero: the matches without one can't be imported",
+            ),
+            (
+                set(
+                    Some(12),
+                    Issue::Ending {
+                        skill: Skill::Attack,
+                        evaluation: '!',
+                    },
+                ),
+                "set 2, line 12: A! ends the rally differently from our evaluations",
+            ),
+            (
+                set(
+                    Some(80),
+                    Issue::Score {
+                        file: (3, 1),
+                        ours: (2, 2),
+                    },
+                ),
+                "set 2, line 80: the score: 3-1 in the file, 2-2 ours",
+            ),
+            (
+                MatchIssue::SetScore {
+                    set_number: 1,
+                    file: (25, 2),
+                    ours: (25, 0),
+                },
+                "set 1: 25-2 in the file, 25-0 from its rallies",
+            ),
+            (
+                MatchIssue::Unfinished,
+                "the sets of the file don't finish the match",
+            ),
+        ] {
+            assert_eq!(issue.describe(en), text);
+        }
     }
 }
