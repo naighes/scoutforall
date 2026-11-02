@@ -113,13 +113,21 @@ mod tests {
 
         /// Aces of ours to the end of the set.
         fn finished(mut self) -> Self {
-            while self.score.0 < 25 {
+            while self.score.0 < self.target() {
                 match self.home_serves {
                     true => self.ace(),
                     false => self.their_serve_error(),
                 }
             }
             self.end_set()
+        }
+
+        /// The points to win the set: 15 in the fifth.
+        fn target(&self) -> u8 {
+            match self.sets.len() {
+                4 => 15,
+                _ => 25,
+            }
         }
 
         /// The end of the set at its score.
@@ -143,7 +151,7 @@ mod tests {
 
         /// Their aces to the end of the set.
         fn lost(mut self) -> Self {
-            while self.score.1 < 25 {
+            while self.score.1 < self.target() {
                 match self.home_serves {
                     true => {
                         let serve = format!("{}SM=", self.server());
@@ -847,16 +855,32 @@ mod tests {
         text: &str,
         side: Side,
     ) -> Result<crate::dvw::import::MatchPlan, crate::dvw::import::MatchIssue> {
-        use crate::dvw::import::{TeamChoice, match_date, match_plan, team_plan};
+        planned_for(
+            text,
+            side,
+            crate::dvw::import::TeamChoice::New {
+                gender: None,
+                country: None,
+            },
+        )
+        .map(|(_, plan)| plan)
+    }
+
+    /// The team and the match of a side, the team as chosen.
+    fn planned_for(
+        text: &str,
+        side: Side,
+        choice: crate::dvw::import::TeamChoice,
+    ) -> Result<
+        (crate::dvw::import::TeamPlan, crate::dvw::import::MatchPlan),
+        crate::dvw::import::MatchIssue,
+    > {
+        use crate::dvw::import::{match_date, match_plan, team_plan};
         let dvw = parse(text.as_bytes()).expect("expected a DataVolley file");
-        let choice = TeamChoice::New {
-            gender: None,
-            country: None,
-        };
         let team = team_plan(&dvw, side, choice).expect("a team");
         let day = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
         let offset = chrono::FixedOffset::east_opt(3600).expect("an offset");
-        match_plan(&dvw, side, &team, match_date(&dvw, day, offset), 6)
+        match_plan(&dvw, side, &team, match_date(&dvw, day, offset), 6).map(|m| (team, m))
     }
 
     fn three_sets_won() -> File {
@@ -954,5 +978,223 @@ mod tests {
         );
         let plan = planned(&text, Side::Home).expect("a match");
         assert_eq!(plan.entry.date.to_rfc3339(), "2015-01-25T20:30:00+01:00");
+    }
+
+    /// Saving an import into a store in memory: the matches queued for
+    /// the statistics, as the finished ones.
+    mod saving {
+        use super::*;
+        use crate::{
+            analytics::finished::FinishedMatches,
+            dvw::import::{MatchPlan, TeamChoice, TeamPlan, match_exists, save_import},
+            errors::{AppError, MatchError},
+            localization::Language,
+            providers::{
+                match_reader::MatchReader,
+                store::{
+                    match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
+                    set_reader::StoreSetReader, set_writer::StoreSetWriter,
+                    team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
+                },
+                team_reader::TeamReader,
+            },
+            storage::{Store, layout, memory::MemoryStore},
+        };
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct Queued(Mutex<Vec<(Uuid, String)>>);
+
+        #[async_trait::async_trait]
+        impl FinishedMatches for Queued {
+            async fn finished(&self, team_id: Uuid, match_id: String) {
+                if let Ok(mut queued) = self.0.lock() {
+                    queued.push((team_id, match_id));
+                }
+            }
+        }
+
+        struct Providers {
+            store: Arc<dyn Store>,
+            team_reader: StoreTeamReader,
+            team_writer: StoreTeamWriter,
+            match_reader: StoreMatchReader,
+            match_writer: StoreMatchWriter,
+            set_writer: StoreSetWriter,
+            queued: Queued,
+        }
+
+        impl Providers {
+            fn new() -> Self {
+                let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
+                Self {
+                    team_reader: StoreTeamReader::new(Arc::clone(&store), Language::default()),
+                    team_writer: StoreTeamWriter::new(Arc::clone(&store)),
+                    match_reader: StoreMatchReader::new(
+                        Arc::clone(&store),
+                        Arc::new(StoreSetReader::new(Arc::clone(&store), Language::default())),
+                        Language::default(),
+                    ),
+                    match_writer: StoreMatchWriter::new(Arc::clone(&store)),
+                    set_writer: StoreSetWriter::new(Arc::clone(&store), Language::default()),
+                    queued: Queued::default(),
+                    store,
+                }
+            }
+
+            async fn save(
+                &self,
+                team: &TeamPlan,
+                plan: &MatchPlan,
+                overwrite: bool,
+            ) -> Result<crate::shapes::r#match::MatchEntry, AppError> {
+                save_import(
+                    team,
+                    plan,
+                    overwrite,
+                    &self.team_writer,
+                    &self.match_reader,
+                    &self.match_writer,
+                    &self.set_writer,
+                    &self.queued,
+                )
+                .await
+            }
+
+            fn queued(&self) -> Vec<(Uuid, String)> {
+                self.queued.0.lock().map(|q| q.clone()).unwrap_or_default()
+            }
+        }
+
+        fn new_team() -> TeamChoice<'static> {
+            TeamChoice::New {
+                gender: None,
+                country: None,
+            }
+        }
+
+        /// Five sets: won, lost, won, lost, won.
+        fn five_sets() -> File {
+            File::new()
+                .finished()
+                .next_set()
+                .lost()
+                .next_set()
+                .finished()
+                .next_set()
+                .lost()
+                .next_set()
+                .finished()
+        }
+
+        /// A new team: saved with the players of the file, the match with
+        /// its sets as translated, queued once.
+        #[tokio::test]
+        async fn a_new_team_and_its_match() {
+            let p = Providers::new();
+            let (team, plan) =
+                planned_for(&three_sets_won().text(), Side::Home, new_team()).expect("a match");
+            let saved = p.save(&team, &plan, false).await.expect("saved");
+            let read_team = p
+                .team_reader
+                .read_single(&team.team.id)
+                .await
+                .expect("the team");
+            assert_eq!(read_team.players.len(), 7);
+            let read = p
+                .match_reader
+                .read_single(&read_team, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.opponent, "Visiting");
+            assert_eq!(read.roster, team.roster);
+            assert_eq!(read.sets.len(), 3);
+            for (read, planned) in read.sets.iter().zip(&plan.entry.sets) {
+                assert_eq!(read.events.len(), planned.events.len());
+            }
+            assert!(read.get_status().expect("a status").match_finished);
+            assert_eq!(p.queued(), vec![(team.team.id, saved.id)]);
+        }
+
+        /// The match saved already and the user not confirming: nothing
+        /// saved, the team neither, nothing queued.
+        #[tokio::test]
+        async fn a_match_saved_already_is_kept_unless_confirmed() {
+            let p = Providers::new();
+            let text = three_sets_won().text();
+            let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
+            p.save(&team, &plan, false).await.expect("saved");
+            let saved_team = p
+                .team_reader
+                .read_single(&team.team.id)
+                .await
+                .expect("the team");
+            assert!(
+                match_exists(&plan, &p.match_reader)
+                    .await
+                    .expect("an answer")
+            );
+            let dvw = parse(text.as_bytes()).expect("a file");
+            let again =
+                crate::dvw::import::team_plan(&dvw, Side::Home, TeamChoice::Existing(&saved_team))
+                    .expect("a team");
+            let mut more = again.clone();
+            more.team.players.push(crate::shapes::player::PlayerEntry {
+                name: "Anna Huber".to_string(),
+                number: 30,
+                ..Default::default()
+            });
+            assert!(matches!(
+                p.save(&more, &plan, false).await,
+                Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
+            ));
+            let kept = p
+                .team_reader
+                .read_single(&team.team.id)
+                .await
+                .expect("the team");
+            assert_eq!(kept.players.len(), 7);
+            assert_eq!(p.queued().len(), 1);
+        }
+
+        /// Confirmed: the match in place of the saved one, its sets beyond
+        /// the imported ones removed.
+        #[tokio::test]
+        async fn a_match_overwritten_when_confirmed() {
+            let p = Providers::new();
+            let (team, five) =
+                planned_for(&five_sets().text(), Side::Home, new_team()).expect("a match");
+            let saved = p.save(&team, &five, false).await.expect("saved");
+            let saved_team = p
+                .team_reader
+                .read_single(&team.team.id)
+                .await
+                .expect("the team");
+            let (again, three) = planned_for(
+                &three_sets_won().text(),
+                Side::Home,
+                TeamChoice::Existing(&saved_team),
+            )
+            .expect("a match");
+            assert_eq!(three.entry.id, saved.id);
+            p.save(&again, &three, true).await.expect("overwritten");
+            let read = p
+                .match_reader
+                .read_single(&saved_team, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.sets.len(), 3);
+            let status = read.get_status().expect("a status");
+            assert_eq!((status.us_wins, status.them_wins), (3, 0));
+            for set_number in [4, 5] {
+                for key in [
+                    layout::set_descriptor(&saved_team.id, &saved.id, set_number),
+                    layout::set_events(&saved_team.id, &saved.id, set_number),
+                ] {
+                    assert!(!p.store.exists(&key).await.expect("an answer"), "{key}");
+                }
+            }
+            assert_eq!(p.queued().len(), 2);
+        }
     }
 }

@@ -3,9 +3,17 @@
 //! Nothing is merged without the user: the similar teams say why they are.
 
 use crate::{
+    analytics::finished::FinishedMatches,
     dvw::{
         model::{DvwFile, DvwRole, MatchDate, Player, Side},
         translate::{Issue, Mappings, TranslateError, Us, translate_set},
+    },
+    errors::{AppError, MatchError},
+    providers::{
+        match_reader::MatchReader,
+        match_writer::MatchWriter,
+        set_writer::SetWriter,
+        team_writer::{TeamInput, TeamWriter},
     },
     shapes::{
         country::CountryCode,
@@ -396,4 +404,83 @@ pub fn match_plan(
         Ok(status) if status.match_finished => Ok(MatchPlan { entry, mappings }),
         _ => Err(MatchIssue::Unfinished),
     }
+}
+
+/// Whether the team has the match already: the import overwrites it only
+/// when the user confirms.
+pub async fn match_exists(
+    plan: &MatchPlan,
+    match_reader: &(impl MatchReader + Sync + ?Sized),
+) -> Result<bool, AppError> {
+    match_reader.exists(&plan.entry.team, &plan.entry.id).await
+}
+
+/// Saves the import: the team with its new players, then the match and
+/// its sets, in place of the one saved when `overwrite` (its sets beyond
+/// the imported ones removed), and the match queued for the statistics as
+/// any finished match. A match saved and not to overwrite: nothing saved.
+#[allow(clippy::too_many_arguments)]
+pub async fn save_import(
+    team: &TeamPlan,
+    plan: &MatchPlan,
+    overwrite: bool,
+    team_writer: &(impl TeamWriter + Sync + ?Sized),
+    match_reader: &(impl MatchReader + Sync + ?Sized),
+    match_writer: &(impl MatchWriter + Sync + ?Sized),
+    set_writer: &(impl SetWriter + Sync + ?Sized),
+    finished: &(impl FinishedMatches + ?Sized),
+) -> Result<MatchEntry, AppError> {
+    let entry = &plan.entry;
+    let exists = match_exists(plan, match_reader).await?;
+    if exists && !overwrite {
+        return Err(AppError::Match(MatchError::MatchAlreadyExists(
+            entry.id.clone(),
+        )));
+    }
+    let saved_team = team_writer
+        .save(TeamInput::Existing(team.team.clone()))
+        .await?;
+    let m = match exists {
+        true => {
+            match_writer
+                .update(
+                    entry,
+                    entry.opponent.clone(),
+                    entry.date,
+                    entry.home,
+                    entry.max_substitutions,
+                    entry.notes.clone(),
+                    entry.roster.clone(),
+                )
+                .await?;
+            MatchEntry {
+                sets: vec![],
+                ..entry.clone()
+            }
+        }
+        false => {
+            match_writer
+                .create(
+                    &saved_team,
+                    entry.opponent.clone(),
+                    entry.date,
+                    entry.home,
+                    entry.max_substitutions,
+                    entry.notes.clone(),
+                    entry.roster.clone(),
+                )
+                .await?
+        }
+    };
+    for set_number in 1..=5u8 {
+        match entry.sets.iter().find(|s| s.set_number == set_number) {
+            Some(set) => set_writer.update(&m, set).await?,
+            None => set_writer.remove(&m, set_number).await?,
+        }
+    }
+    finished.finished(saved_team.id, m.id.clone()).await;
+    Ok(MatchEntry {
+        sets: entry.sets.clone(),
+        ..m
+    })
 }

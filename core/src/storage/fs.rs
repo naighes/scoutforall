@@ -10,7 +10,10 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::{
-    fs::{File, OpenOptions, create_dir_all, metadata, read, read_dir, rename, try_exists},
+    fs::{
+        File, OpenOptions, create_dir_all, metadata, read, read_dir, remove_file, rename,
+        try_exists,
+    },
     io::AsyncWriteExt,
 };
 
@@ -163,5 +166,14 @@ impl Store for FsStore {
         }
         entries.sort();
         Ok(entries)
+    }
+
+    async fn remove(&self, key: &str) -> Result<(), AppError> {
+        let path = self.path(key)?;
+        match remove_file(&path).await {
+            Ok(()) => Self::sync_folder(&path).await,
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(AppError::IO(IOError::from(e))),
+        }
     }
 }

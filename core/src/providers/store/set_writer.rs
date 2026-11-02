@@ -115,6 +115,16 @@ impl SetWriter for StoreSetWriter {
             )
             .await
     }
+
+    async fn remove(&self, m: &MatchEntry, set_number: u8) -> Result<(), AppError> {
+        // the descriptor first: without it the set isn't read
+        self.store
+            .remove(&layout::set_descriptor(&m.team.id, &m.id, set_number))
+            .await?;
+        self.store
+            .remove(&layout::set_events(&m.team.id, &m.id, set_number))
+            .await
+    }
 }
 
 /// The columns of a saved event, the technique and the flags included.

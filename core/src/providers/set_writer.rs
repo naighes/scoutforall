@@ -35,4 +35,6 @@ pub trait SetWriter {
     /// Saves the set, its descriptor and its events, in place of the one
     /// saved.
     async fn update(&self, m: &MatchEntry, set: &SetEntry) -> Result<(), AppError>;
+    /// Removes the set, if saved: its descriptor, then its events.
+    async fn remove(&self, m: &MatchEntry, set_number: u8) -> Result<(), AppError>;
 }
