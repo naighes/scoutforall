@@ -6,7 +6,7 @@ use dirs::home_dir;
 use scout4all_core::{
     analytics::global::set_uploads_enabled,
     constants::DEFAULT_LANGUAGE,
-    settings::{Consent, TeamDefaults},
+    settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
         enums::{EvalEnum, EventTypeEnum, LanguageEnum},
@@ -37,6 +37,10 @@ pub struct Settings {
     /// the country of a new team, shared with the other apps as `consent`
     #[serde(flatten)]
     pub team_defaults: TeamDefaults,
+    /// the teams at the top of the list, shared with the other apps as
+    /// `consent`
+    #[serde(flatten)]
+    pub pinned: PinnedTeams,
     #[serde(default = "default_last_used_dir")]
     pub last_used_dir: Option<PathBuf>,
 }
@@ -56,6 +60,7 @@ impl Default for Settings {
             option_keybindings: KeyBindings::default(),
             consent: Consent::default(),
             team_defaults: TeamDefaults::default(),
+            pinned: PinnedTeams::default(),
             last_used_dir: None,
         }
     }

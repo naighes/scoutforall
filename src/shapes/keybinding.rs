@@ -291,6 +291,7 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::Settings, SETTINGS_KEY);
         bindings.set(ScreenActionEnum::OneLevelUp, key!(backspace));
         bindings.set(ScreenActionEnum::EnterDirectory, key!(space));
+        bindings.set(ScreenActionEnum::Pin, key!(space));
         bindings.set(ScreenActionEnum::ScrollDown, key!(down));
         bindings.set(ScreenActionEnum::ScrollUp, key!(up));
         bindings.set(ScreenActionEnum::ReportAnIssue, key!(i));

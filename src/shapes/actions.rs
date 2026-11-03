@@ -36,6 +36,7 @@ pub enum ScreenActionEnum {
     Undo,
     EditEvents,
     LiveStats,
+    Pin,
 }
 
 impl Describe for ScreenActionEnum {
@@ -63,6 +64,7 @@ impl Describe for ScreenActionEnum {
             Down => (Down, current_labels().next.to_string()),
             ReportAnIssue => (ReportAnIssue, current_labels().report_an_issue.to_string()),
             Settings => (Settings, current_labels().settings.to_string()),
+            Pin => (Pin, current_labels().pin.to_string()),
             OneLevelUp => (OneLevelUp, current_labels().up_one_level.to_string()),
             EnterDirectory => (EnterDirectory, current_labels().enter_directory.to_string()),
             ScrollUp => (ScrollUp, current_labels().scroll_up.to_string()),
@@ -110,6 +112,7 @@ impl fmt::Display for ScreenActionEnum {
             Undo => "undo",
             EditEvents => "edit-events",
             LiveStats => "live-stats",
+            Pin => "pin",
         };
         write!(f, "{}", label)
     }

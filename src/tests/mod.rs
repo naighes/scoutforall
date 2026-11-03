@@ -13,6 +13,7 @@ mod live_stats_tests;
 mod match_roster_tests;
 mod max_substitutions_tests;
 mod navigation_tests;
+mod pinned_teams_tests;
 mod player_details_tests;
 mod point_sequence_tests;
 mod scouting_options_tests;
