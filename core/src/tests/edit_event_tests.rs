@@ -9,6 +9,7 @@ mod tests {
     use crate::localization::labels;
     use crate::shapes::enums::LanguageEnum;
     use crate::shapes::{
+        court_zone::CourtZoneEnum,
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         set::SetEntry,
         snapshot::EventEntry,
@@ -269,6 +270,21 @@ mod tests {
                 .flatten()
                 .all(|t| matches!(t, TechniqueEnum::Set(_)))
         );
+    }
+
+    /// Where a serve went stays while it's a serve, and goes with another
+    /// type.
+    #[test]
+    fn the_target_stays_with_the_serve_only() {
+        let team = Team::new();
+        let mut set = side_out(&team);
+        let zone = Some(CourtZoneEnum::Z56);
+        set.events[2].flags = set.events[2].flags.with_target(zone);
+        let mut serve = edit(&set, 2);
+        serve.choose_event_type(S);
+        assert_eq!(serve.event().flags.target(), zone);
+        serve.choose_event_type(F);
+        assert_eq!(serve.event().flags.target(), None);
     }
 
     /// Changing the type keeps what the new one allows; what isn't among

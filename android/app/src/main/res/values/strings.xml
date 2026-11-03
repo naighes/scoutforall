@@ -131,6 +131,11 @@
     <string name="first_attack">On reception</string>
     <string name="counter_attack">Counter-attack</string>
     <string name="zone_attacks">%d att</string>
+    <string name="serve_zone">Serve zone</string>
+    <string name="zone_chosen">chosen</string>
+    <string name="serves_by_zone">Serves by zone</string>
+    <string name="zones_told">zone told for %1$d of %2$d serves</string>
+    <string name="zone_density">density</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>
     <string name="no_attacks">No attacks yet</string>
     <string name="no_rallies">No rallies yet</string>

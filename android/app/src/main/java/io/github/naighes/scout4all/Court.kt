@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.CourtZoneChoice
+import androidx.compose.ui.semantics.contentDescription
 
 /** What a position of the court shows. */
 data class CourtSlot(
@@ -122,13 +125,23 @@ fun Court(
     showPositions: Boolean = false,
     serveZone: Boolean = false,
     ball: CourtBall? = null,
+    targets: List<List<CourtZoneChoice>> = emptyList(),
+    onTarget: (CourtZoneChoice) -> Unit = {},
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
-    val zone = if (serveZone) ServeZone else 0.dp
+    // the zones where our serve went on a square court (its true
+    // proportions), to leave them room to touch; the server is told above
+    val aiming = targets.isNotEmpty()
+    val zone = when {
+        aiming -> 0.dp
+        serveZone -> ServeZone
+        else -> 0.dp
+    }
+    val aspect = if (aiming) 1f else 1.4f
     val width = when {
-        constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * 1.4f)
+        constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * aspect)
         else -> maxWidth
     }
-    CourtColumn(slot, onPosition, showPositions, serveZone, ball, Modifier.width(width))
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, onTarget, Modifier.width(width))
 }
 
 @Composable
@@ -138,23 +151,29 @@ private fun CourtColumn(
     showPositions: Boolean,
     serveZone: Boolean,
     ball: CourtBall?,
+    targets: List<List<CourtZoneChoice>>,
+    onTarget: (CourtZoneChoice) -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
     val lines = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
     val net = MaterialTheme.colorScheme.onSurface
     val server = slot(1).takeIf { serveZone && it.serving }
-    Box(Modifier.fillMaxWidth().aspectRatio(1.4f)) {
+    val aiming = targets.isNotEmpty()
+    Box(Modifier.fillMaxWidth().aspectRatio(if (aiming) 1f else 1.4f)) {
         Canvas(Modifier.fillMaxSize()) {
             val line = 2.dp.toPx()
             drawRect(floor)
             drawRect(lines, topLeft = Offset(line / 2, line / 2), style = Stroke(line),
                 size = size.copy(width = size.width - line, height = size.height - line))
+            // the zones show the attack line, between their rows
             val attack = size.height / 3
-            drawLine(lines, Offset(0f, attack), Offset(size.width, attack), strokeWidth = line)
+            if (!aiming) drawLine(lines, Offset(0f, attack), Offset(size.width, attack), strokeWidth = line)
             drawLine(net, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 4.dp.toPx())
         }
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        // where our serve went, in place of the players
+        if (targets.isNotEmpty()) TargetZones(targets, onTarget)
+        else BoxWithConstraints(Modifier.fillMaxSize()) {
             // the player on the spot, the name under the jersey in two
             // lines, a third of the court wide; on a court narrower than a
             // phone's (360dp), the jersey smaller, so that the players don't
@@ -222,7 +241,7 @@ private fun CourtColumn(
             }
         }
     }
-    if (serveZone) {
+    if (serveZone && !aiming) {
         // behind the end line, under position 1
         Row(Modifier.fillMaxWidth().height(ServeZone)) {
             Box(Modifier.weight(2f))
@@ -235,6 +254,73 @@ private fun CourtColumn(
 }
 
 private val ServeZone = 72.dp
+
+/** The sizes of the zones and of the conflict zones between them across
+ * `side`, the zones of a row of three after: a conflict zone a meter wide
+ * astride the line between two zones (the attack line too, between the
+ * rows), wider if the middles of two neighbours would be closer than
+ * `TouchApart`. The middles are as far apart as can be when all five are
+ * as wide: then a fifth of the side. */
+private fun spans(side: Dp): Pair<List<Dp>, List<Dp>> {
+    // two neighbours' middles are `apart` from each other with a conflict
+    // zone `conflict` wide: 6 apart less a conflict zone make the side
+    val conflict = maxOf(side / 9, TouchApart * 6 - side).coerceAtMost(side / 5)
+    val apart = (side + conflict) / 6
+    val outer = apart * 2 - conflict / 2 - conflict / 2
+    val middle = side - outer * 2 - conflict * 2
+    return listOf(outer, conflict, middle, conflict, outer) to listOf(outer + conflict, middle, conflict + outer)
+}
+
+/** Two neighbours to touch, middle to middle (see `inaccessible` in the
+ * tests). */
+private val TouchApart = 48.dp
+
+/** The court of the opponent, as ours (the net at the top, 4 on the left):
+ * the nine zones and the conflict zones between them, to touch where the
+ * ball went; the zone chosen filled, touched again to take it back. */
+@Composable
+private fun TargetZones(rows: List<List<CourtZoneChoice>>, onTarget: (CourtZoneChoice) -> Unit) =
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val zoneDescription = stringResource(R.string.serve_zone)
+        val chosenState = stringResource(R.string.zone_chosen)
+        val (fives, threes) = spans(maxWidth)
+        val (heights, _) = spans(maxHeight)
+        Column {
+            rows.forEachIndexed { r, row ->
+                Row(Modifier.fillMaxWidth().height(heights.getOrElse(r) { 0.dp })) {
+                    val widths = if (row.size == 5) fives else threes
+                    row.forEachIndexed { c, zone ->
+                        val colors = MaterialTheme.colorScheme
+                        val (background, content) = when {
+                            zone.chosen -> colors.primary to colors.onPrimary
+                            zone.zone -> Color.Transparent to colors.onSurface
+                            else -> colors.onSurface.copy(alpha = 0.06f) to colors.onSurfaceVariant
+                        }
+                        Box(
+                            Modifier.width(widths.getOrElse(c) { 0.dp }).fillMaxHeight().padding(1.dp)
+                                .tutorial("zone:${zone.label}")
+                                .clickable(role = Role.Button) { onTarget(zone) }
+                                .semantics {
+                                    contentDescription = "$zoneDescription ${zone.label}"
+                                    if (zone.chosen) stateDescription = chosenState
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Surface(Modifier.fillMaxSize(), shape = MaterialTheme.shapes.small, color = background) {}
+                            Text(
+                                zone.label,
+                                style = if (zone.zone) MaterialTheme.typography.titleLarge else MaterialTheme.typography.labelMedium,
+                                fontWeight = if (zone.zone || zone.chosen) FontWeight.Bold else FontWeight.Normal,
+                                color = content,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 /** The player of a position, all of it to touch: the jersey at the top,
  * the name under it. TalkBack reads the number, the name, then what the

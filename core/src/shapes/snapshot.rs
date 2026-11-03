@@ -585,6 +585,8 @@ impl Snapshot {
                 rotation,
                 player: event.player.filter(|_| event.event_type.asks_player()),
                 zone,
+                // where our serve went, if told
+                target: event.flags.target().filter(|_| event.event_type == S),
                 eval: event.eval,
             });
         }

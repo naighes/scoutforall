@@ -130,6 +130,11 @@
     <string name="first_attack">Su ricezione</string>
     <string name="counter_attack">Contrattacco</string>
     <string name="zone_attacks">%d att</string>
+    <string name="serve_zone">Zona di battuta</string>
+    <string name="zone_chosen">scelta</string>
+    <string name="serves_by_zone">Battute per zona</string>
+    <string name="zones_told">zona indicata in %1$d battute su %2$d</string>
+    <string name="zone_density">densità</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>
     <string name="no_attacks">Ancora nessun attacco</string>
     <string name="no_rallies">Ancora nessuno scambio</string>

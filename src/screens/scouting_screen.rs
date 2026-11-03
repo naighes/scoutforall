@@ -7,17 +7,18 @@ use crate::screens::settings_screen::{SettingsPanel, SettingsScreen};
 use crate::screens::{
     components::{
         navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel, set_board,
+        target_court,
     },
     screen::{AppAction, Renderable, ScreenAsync},
 };
 use crate::shapes::actions::{ScoutingOptionEnum, ScreenActionEnum};
-use crate::shapes::keybinding::navigation_keybindings;
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
+use crate::shapes::keybinding::{ZONE_CURSOR_KEYS, ZONE_KEY, navigation_keybindings};
 use crate::shapes::settings::Settings;
 use crate::shapes::symbol::KeyCombinationFormatExt;
 use async_trait::async_trait;
 use crokey::crossterm::event::{KeyCode, KeyEvent};
-use crokey::{KeyCombination, KeyCombinationFormat};
+use crokey::{KeyCombination, KeyCombinationFormat, OneToThree};
 use ratatui::text::Line;
 use ratatui::{
     Frame,
@@ -28,6 +29,7 @@ use ratatui::{
 use scout4all_core::{
     scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     shapes::{
+        court_zone::{CourtZoneEnum, Direction as CourtDirection},
         enums::{EventTypeEnum, FriendlyName, RoleEnum},
         snapshot::EventEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
@@ -52,6 +54,9 @@ pub struct ScoutingScreen<
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
     event_screen_key_bindings: ActionsKeyBindings<EventTypeEnum>,
     event_key_bindings: KeyBindings<EventTypeEnum>,
+    /// the cursor on the court where the ball went: `None` until moved, on
+    /// the zone chosen or in the middle
+    target_cursor: Option<CourtZoneEnum>,
     settings_writer: Arc<SW>,
     settings_reader: Arc<SR>,
 }
@@ -95,7 +100,32 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
     for ScoutingScreen<SW, SR>
 {
     fn footer_entries(&self) -> Vec<(String, String)> {
-        get_keybinding_actions(navigation_keybindings(), &self.get_screen_actions())
+        let fmt = KeyCombinationFormat::default();
+        let fmt = KeyCombinationFormatExt::new(&fmt);
+        let labels = current_labels();
+        // the court where the ball went, along with the evaluation
+        let zone = match self.session.targets_apply() {
+            true => {
+                let toggle = match self.session.target() == Some(self.cursor()) {
+                    true => labels.remove_zone,
+                    false => labels.choose_zone,
+                };
+                vec![
+                    (
+                        ZONE_CURSOR_KEYS.map(|k| fmt.to_string(k)).join(""),
+                        labels.target_zone.to_string(),
+                    ),
+                    (fmt.to_string(ZONE_KEY), toggle.to_string()),
+                ]
+            }
+            false => vec![],
+        };
+        zone.into_iter()
+            .chain(get_keybinding_actions(
+                navigation_keybindings(),
+                &self.get_screen_actions(),
+            ))
+            .collect()
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
@@ -186,7 +216,16 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
         self.footer.render(f, footer_left, self.footer_entries());
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
-        self.render_court(f, right);
+        match self.session.targets_apply() {
+            true => target_court::render(
+                f,
+                right,
+                current_labels().serve_target,
+                self.cursor(),
+                self.session.target(),
+            ),
+            false => self.render_court(f, right),
+        }
         self.notify_message.render(f, footer_right);
         self.screen_key_bindings = screen_key_bindings;
     }
@@ -197,6 +236,55 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenA
     for ScoutingScreen<SW, SR>
 {
     async fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        let action = self.handle_scouting_key(key).await;
+        // the cursor starts again from the zone chosen, or the middle
+        if !self.session.targets_apply() {
+            self.target_cursor = None;
+        }
+        action
+    }
+
+    async fn refresh_data(&mut self) {
+        if let Ok(settings) = &self.settings_reader.read().await {
+            self.settings = settings.to_owned();
+            self.event_key_bindings = settings.scouting_keybindings.clone();
+            // all the events: the available ones change along the set, and the
+            // others get "not available" when pressed
+            self.event_screen_key_bindings =
+                ActionsKeyBindings::from(self.event_key_bindings.reverse_map().iter().collect());
+        }
+    }
+}
+
+impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScoutingScreen<SW, SR> {
+    pub fn new(
+        settings_reader: Arc<SR>,
+        settings_writer: Arc<SW>,
+        settings: Settings,
+        session: ScoutingSession,
+        back_stack_count: Option<u8>,
+    ) -> Self {
+        let event_key_bindings = settings.scouting_keybindings.clone();
+        ScoutingScreen {
+            settings_reader,
+            settings_writer,
+            settings,
+            session,
+            notify_message: NotifyBanner::new(),
+            back_stack_count,
+            back: false,
+            footer: NavigationFooter::new(),
+            target_cursor: None,
+            screen_key_bindings: ActionsKeyBindings::empty(),
+            event_key_bindings: event_key_bindings.to_owned(),
+            event_screen_key_bindings: ActionsKeyBindings::from(
+                event_key_bindings.reverse_map().iter().collect(),
+            ),
+        }
+    }
+
+    /// The key, as the step of the scouting takes it.
+    async fn handle_scouting_key(&mut self, key: KeyEvent) -> AppAction {
         use ScoutingStep::*;
         if let Some(key_combination) = self.screen_key_bindings.transform(key) {
             match (
@@ -249,44 +337,6 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenA
             }
         } else {
             AppAction::None
-        }
-    }
-
-    async fn refresh_data(&mut self) {
-        if let Ok(settings) = &self.settings_reader.read().await {
-            self.settings = settings.to_owned();
-            self.event_key_bindings = settings.scouting_keybindings.clone();
-            // all the events: the available ones change along the set, and the
-            // others get "not available" when pressed
-            self.event_screen_key_bindings =
-                ActionsKeyBindings::from(self.event_key_bindings.reverse_map().iter().collect());
-        }
-    }
-}
-
-impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScoutingScreen<SW, SR> {
-    pub fn new(
-        settings_reader: Arc<SR>,
-        settings_writer: Arc<SW>,
-        settings: Settings,
-        session: ScoutingSession,
-        back_stack_count: Option<u8>,
-    ) -> Self {
-        let event_key_bindings = settings.scouting_keybindings.clone();
-        ScoutingScreen {
-            settings_reader,
-            settings_writer,
-            settings,
-            session,
-            notify_message: NotifyBanner::new(),
-            back_stack_count,
-            back: false,
-            footer: NavigationFooter::new(),
-            screen_key_bindings: ActionsKeyBindings::empty(),
-            event_key_bindings: event_key_bindings.to_owned(),
-            event_screen_key_bindings: ActionsKeyBindings::from(
-                event_key_bindings.reverse_map().iter().collect(),
-            ),
         }
     }
 
@@ -431,8 +481,27 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
         self.show(progress)
     }
 
+    /// Where the cursor on the court is: where moved, or on the zone
+    /// chosen, or in the middle.
+    fn cursor(&self) -> CourtZoneEnum {
+        self.target_cursor
+            .or(self.session.target())
+            .unwrap_or(CourtZoneEnum::CENTER)
+    }
+
     async fn handle_eval_screen(&mut self, key: KeyEvent) -> AppAction {
         let ck = combination_of(key);
+        // the court where the ball went: the arrows move on it, the space
+        // bar chooses the zone or takes it back
+        let direction = match ck.codes {
+            OneToThree::One(KeyCode::Up) => Some(CourtDirection::Up),
+            OneToThree::One(KeyCode::Down) => Some(CourtDirection::Down),
+            OneToThree::One(KeyCode::Left) => Some(CourtDirection::Left),
+            OneToThree::One(KeyCode::Right) => Some(CourtDirection::Right),
+            _ => None,
+        }
+        .filter(|_| self.session.targets_apply() && ZONE_CURSOR_KEYS.contains(&ck));
+        let toggle = self.session.targets_apply() && ck == ZONE_KEY;
         // the evaluation bound to the key, if the event allows it
         let eval = self
             .settings
@@ -440,13 +509,27 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .action_for(&ck)
             .copied()
             .filter(|eval| self.session.available_evals().contains(eval));
-        match (eval, self.technique_for(&ck)) {
-            (Some(eval), _) => {
+        match (direction, toggle, eval, self.technique_for(&ck)) {
+            (Some(direction), _, _, _) => {
+                self.target_cursor = Some(self.cursor().moved(direction));
+                AppAction::None
+            }
+            (None, true, _, _) => {
+                let cursor = self.cursor();
+                let target = match self.session.target() == Some(cursor) {
+                    true => None,
+                    false => Some(cursor),
+                };
+                self.target_cursor = Some(cursor);
+                let chosen = self.session.choose_target(target);
+                self.show(chosen.map(|_| Progress::Choosing))
+            }
+            (None, false, Some(eval), _) => {
                 let progress = self.session.choose_eval(eval).await;
                 self.show(progress)
             }
             // the set or serve changes, the evaluation saves the event
-            (None, Some(technique)) => {
+            (None, false, None, Some(technique)) => {
                 let chosen = self.session.choose_technique(technique);
                 self.show(chosen.map(|_| Progress::Choosing))
             }

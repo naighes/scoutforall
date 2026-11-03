@@ -130,6 +130,11 @@
     <string name="first_attack">Após a recepção</string>
     <string name="counter_attack">Contra-ataque</string>
     <string name="zone_attacks">%d atq</string>
+    <string name="serve_zone">Zona do saque</string>
+    <string name="zone_chosen">escolhida</string>
+    <string name="serves_by_zone">Saques por zona</string>
+    <string name="zones_told">zona indicada em %1$d de %2$d saques</string>
+    <string name="zone_density">densidade</string>
     <string name="attacks_detail">%1$d at · efi %2$s</string>
     <string name="no_attacks">Nenhum ataque ainda</string>
     <string name="no_rallies">Nenhum rali ainda</string>

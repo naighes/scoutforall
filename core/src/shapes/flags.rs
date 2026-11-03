@@ -1,10 +1,12 @@
 //! What the scout tells about an event besides its type, player, evaluation
 //! and technique, saved as one number in the last column of the events:
-//! bit 0 the inverted P1, bits 1 and 2 the reception formation. Empty or
-//! missing (the sets scouted up to v0.10.1) is 0: the canonical P1, the
-//! reception with three players.
+//! bit 0 the inverted P1, bits 1 and 2 the reception formation, bits 3 to 7
+//! where the ball went (the code of a `CourtZoneEnum`, 0 when not told).
+//! Empty or missing (the sets scouted up to v0.10.1) is 0: the canonical
+//! P1, the reception with three players, no zone.
 
 use crate::errors::{AppError, IOError};
+use crate::shapes::court_zone::CourtZoneEnum;
 use std::fmt;
 
 /// How many receive the serve: three by default, four or two when the
@@ -43,6 +45,8 @@ const INVERTED_P1: u16 = 1;
 const RECEPTION: u16 = 0b110;
 const RECEPTION_FOUR: u16 = 0b010;
 const RECEPTION_TWO: u16 = 0b100;
+const TARGET_SHIFT: u16 = 3;
+const TARGET: u16 = 0b1_1111 << TARGET_SHIFT;
 
 impl EventFlags {
     /// In P1 in side out, the outside hitter attacks from 4 and the
@@ -76,6 +80,17 @@ impl EventFlags {
             ReceptionSchemeEnum::Two => RECEPTION_TWO,
         };
         Self(self.0 & !RECEPTION | bits)
+    }
+
+    /// Where the ball went, if the scout told it (and told it in a way
+    /// this version knows).
+    pub fn target(&self) -> Option<CourtZoneEnum> {
+        CourtZoneEnum::from_code((self.0 & TARGET) >> TARGET_SHIFT)
+    }
+
+    pub fn with_target(self, target: Option<CourtZoneEnum>) -> Self {
+        let bits = target.map_or(0, |zone| zone.code() << TARGET_SHIFT);
+        Self(self.0 & !TARGET | bits)
     }
 
     /// The flags of the column: empty is none.

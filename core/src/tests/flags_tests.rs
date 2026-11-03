@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod tests {
     use crate::shapes::{
+        court_zone::{CourtZoneEnum, Direction},
         enums::{EvalEnum, EventTypeEnum},
         flags::{EventFlags, ReceptionSchemeEnum},
         snapshot::EventEntry,
@@ -84,15 +85,83 @@ mod tests {
     fn unknown_bits_are_kept() {
         let later = EventFlags::parse("0").unwrap();
         assert_eq!(later, EventFlags::default());
-        let later = EventFlags::parse("70").unwrap();
-        assert_eq!(later.to_string(), "70");
+        // bit 8 and a reception with both its bits
+        let later = EventFlags::parse("262").unwrap();
+        assert_eq!(later.to_string(), "262");
         assert_eq!(later.reception(), ReceptionSchemeEnum::Three);
+        assert_eq!(later.target(), None);
         let changed = later
             .with_inverted_p1(true)
-            .with_reception(ReceptionSchemeEnum::Four);
-        assert_eq!(changed.to_string(), "67");
+            .with_reception(ReceptionSchemeEnum::Four)
+            .with_target(Some(CourtZoneEnum::Z1));
+        assert_eq!(changed.to_string(), "267");
+        // a zone this version doesn't know (code 31) is none, and kept
+        let later = EventFlags::parse("248").unwrap();
+        assert_eq!(later.target(), None);
+        assert_eq!(later.with_inverted_p1(true).to_string(), "249");
         assert!(EventFlags::parse("x").is_err());
         assert!(EventFlags::parse("70000").is_err());
+    }
+
+    /// Every zone in bits 3 to 7, apart from the other flags; none by
+    /// default, and taken away.
+    #[test]
+    fn the_target_zone() {
+        let base = EventFlags::default()
+            .with_inverted_p1(true)
+            .with_reception(ReceptionSchemeEnum::Two);
+        for (i, zone) in CourtZoneEnum::ALL.into_iter().enumerate() {
+            let flags = base.with_target(Some(zone));
+            assert_eq!(flags.target(), Some(zone));
+            assert!(flags.inverted_p1());
+            assert_eq!(flags.reception(), ReceptionSchemeEnum::Two);
+            assert_eq!(flags.to_string(), ((i + 1) * 8 + 5).to_string());
+            assert_eq!(flags.with_target(None), base);
+        }
+        assert_eq!(EventFlags::default().target(), None);
+        assert_eq!(
+            EventFlags::parse("8").unwrap().target(),
+            Some(CourtZoneEnum::Z1)
+        );
+        assert_eq!(
+            EventFlags::parse("168").unwrap().target(),
+            Some(CourtZoneEnum::Z19)
+        );
+    }
+
+    /// The cursor on the court: along the rows, between the rows of five
+    /// and the rows of three, still at the edges.
+    #[test]
+    fn the_cursor_moves_on_the_court() {
+        use CourtZoneEnum::*;
+        use Direction::*;
+        let path =
+            |from: CourtZoneEnum, moves: &[Direction]| moves.iter().fold(from, |z, d| z.moved(*d));
+        assert_eq!(path(Z8, &[Up]), Z38);
+        assert_eq!(path(Z8, &[Up, Up]), Z3);
+        assert_eq!(path(Z8, &[Left]), Z78);
+        assert_eq!(path(Z4, &[Down]), Z47);
+        assert_eq!(path(Z43, &[Down]), Z47);
+        assert_eq!(path(Z32, &[Down]), Z29);
+        assert_eq!(path(Z47, &[Right]), Z38);
+        assert_eq!(path(Z29, &[Down]), Z9);
+        assert_eq!(path(Z68, &[Down]), Z6);
+        assert_eq!(path(Z1, &[Up, Up, Up, Up]), Z2);
+        assert_eq!(path(Z4, &[Up, Left]), Z4);
+        assert_eq!(path(Z1, &[Down, Right]), Z1);
+        assert_eq!(path(Z19, &[Right]), Z19);
+        // every zone reachable from the center
+        let mut seen = std::collections::HashSet::from([CourtZoneEnum::CENTER]);
+        let mut todo = vec![CourtZoneEnum::CENTER];
+        while let Some(z) = todo.pop() {
+            for d in [Up, Down, Left, Right] {
+                if seen.insert(z.moved(d)) {
+                    todo.push(z.moved(d));
+                }
+            }
+        }
+        assert_eq!(seen.len(), CourtZoneEnum::ALL.len());
+        assert_eq!(CourtZoneEnum::ALL.iter().filter(|z| z.is_zone()).count(), 9);
     }
 
     /// Saved last, after the technique, and read back; a row of v0.10.1 or

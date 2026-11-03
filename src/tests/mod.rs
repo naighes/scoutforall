@@ -18,6 +18,7 @@ mod player_details_tests;
 mod point_sequence_tests;
 mod scouting_options_tests;
 mod scouting_tests;
+mod serve_zone_tests;
 mod settings_tests;
 mod start_set_tests;
 mod team_list_tests;

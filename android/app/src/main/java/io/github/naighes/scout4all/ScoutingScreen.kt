@@ -120,6 +120,7 @@ import io.github.naighes.scout4all.core.ScoutingStep
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.ServeTypeEnum
 import io.github.naighes.scout4all.core.TechniqueChoice
+import io.github.naighes.scout4all.core.CourtZoneChoice
 import io.github.naighes.scout4all.core.TechniqueEnum
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -135,6 +136,9 @@ data class ScoutingView(
     val evals: List<EvalChoice>,
     val techniques: List<TechniqueChoice>,
     val replacements: List<ScoutingPlayer>,
+    /** the court where our serve went, a row each from the net: empty
+     * when it can't be told now */
+    val targets: List<List<CourtZoneChoice>> = emptyList(),
 )
 
 sealed interface ScoutingUi {
@@ -198,6 +202,12 @@ class ScoutingViewModel(
     }
 
     fun eval(eval: EvalChoice) = choose("eval ${eval.value}") { it.chooseEval(eval.value) }
+
+    /** Where the ball went: touching the zone chosen takes it back. */
+    fun target(zone: CourtZoneChoice) = choose("target ${zone.label}") {
+        it.chooseTarget(zone.value.takeUnless { zone.chosen })
+        Progress.CHOOSING
+    }
 
     /** The inverted P1, saved with the events from now on. */
     fun invertedP1(inverted: Boolean) = choose("inverted p1 $inverted") {
@@ -288,6 +298,7 @@ class ScoutingViewModel(
             evals = s.availableEvals(),
             techniques = s.availableTechniques(),
             replacements = s.replacementChoices(),
+            targets = s.targetCourt(),
         )
     }
 }
@@ -418,9 +429,15 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
             }
         }
         // the court fits what's left: the same at every step
+        // choosing where the serve went, the court shows the zones: the
+        // server is told under the score; in landscape, low, the zones take
+        // the room of the server, of the phase (break, as we serve) and of
+        // the margins
+        val aiming = view.targets.isNotEmpty()
+        val low = aiming && maxWidth > maxHeight
         val court = @Composable { m: Modifier ->
-            Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Score(view.state)
+            Column(m.padding(vertical = if (low) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (low) 4.dp else 16.dp)) {
+                Score(view.state, server = aiming && !low, phase = !low)
                 // where they stand: spread to receive, then where they
                 // play once our serve is made or theirs received
                 val players = view.state.court
@@ -454,6 +471,8 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },
                     modifier = Modifier.weight(1f, fill = false),
                     serveZone = true,
+                    targets = view.targets,
+                    onTarget = model::target,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
                         position = players.indexOfFirst { it.id == touched }.takeIf { it >= 0 }?.plus(1),
@@ -507,7 +526,12 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
             else -> {
                 val height = maxHeight
                 Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    CourtAbove(height, court = { court(Modifier) }, panel = { panel(Modifier.fillMaxWidth(), true) })
+                    CourtAbove(
+                        height,
+                        min = if (aiming) MinAimingCourt else MinCourt,
+                        court = { court(Modifier) },
+                        panel = { panel(Modifier.fillMaxWidth(), true) },
+                    )
                 }
             }
         }
@@ -516,15 +540,20 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
 /** The court, the score with it, never lower than on a phone of 360×800. */
 private val MinCourt = 360.dp
 
+/** The court with the zones where the serve went, the score above them:
+ * the zones a square of about 250dp, to touch them apart. No more: a
+ * screen of 360×800 has just 1dp left before it scrolls. */
+private val MinAimingCourt = 370.dp
+
 /** `court` over `panel`, as high as `height` all together: the court takes
- * what the panel leaves, but not less than `MinCourt`; on a shorter screen,
+ * what the panel leaves, but not less than `min`; on a shorter screen,
  * it all scrolls. */
 @Composable
-private fun CourtAbove(height: Dp, court: @Composable () -> Unit, panel: @Composable () -> Unit) =
+private fun CourtAbove(height: Dp, min: Dp, court: @Composable () -> Unit, panel: @Composable () -> Unit) =
     Layout(contents = listOf(court, panel)) { (courts, panels), constraints ->
         val loose = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
         val below = panels.map { it.measure(loose) }
-        val left = (height.roundToPx() - below.sumOf { it.height }).coerceAtLeast(MinCourt.roundToPx())
+        val left = (height.roundToPx() - below.sumOf { it.height }).coerceAtLeast(min.roundToPx())
         val above = courts.map { it.measure(constraints.copy(minHeight = left, maxHeight = left)) }
         layout(constraints.maxWidth, left + below.sumOf { it.height }) {
             above.forEach { it.place(0, 0) }
@@ -564,7 +593,7 @@ private fun AsHighAs(reference: @Composable () -> Unit, content: @Composable () 
  * they do) and the rotation. A point stands out: the score turns, in green for ours, in
  * red for theirs, and the phone vibrates. */
 @Composable
-private fun Score(state: ScoutingState) {
+private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean = true) {
     val weServe = state.servingTeam == TeamSideEnum.US
     val us = Side(state.team, state.scoreUs.toInt(), weServe, Won)
     val them = Side(state.opponent, state.scoreThem.toInt(), !weServe, Lost)
@@ -592,7 +621,7 @@ private fun Score(state: ScoutingState) {
             Points(right)
             TeamName(right, TextAlign.End, Modifier.weight(1f))
         }
-        Crossfade(weServe to state.rotation, label = "phase") { (serving, rotation) ->
+        if (phase) Crossfade(weServe to state.rotation, label = "phase") { (serving, rotation) ->
             Text(
                 stringResource(if (serving) R.string.break_phase else R.string.side_out_phase) + " · " + rotation,
                 style = MaterialTheme.typography.labelLarge,
@@ -602,8 +631,21 @@ private fun Score(state: ScoutingState) {
             )
         }
         LastEvent(state.events.firstOrNull())
+        if (server) Serving(state)
     }
 }
+
+/** The serve being scouted and its server, where the last event is: the
+ * court shows where it went. */
+@Composable
+private fun Serving(state: ScoutingState) = Text(
+    listOfNotNull(state.event?.name, state.player?.let { "${it.number} · ${it.name}" }).joinToString(" · "),
+    modifier = Modifier.padding(top = 2.dp),
+    style = MaterialTheme.typography.labelMedium,
+    fontWeight = FontWeight.Bold,
+    maxLines = 1,
+    overflow = TextOverflow.Ellipsis,
+)
 
 /** The last event saved, what undo takes back: the event, its evaluation
  * and its player. One line, kept also before the first. */

@@ -3,6 +3,7 @@
 //! points, where the attacks were set; the freeballs given and received;
 //! the players compared in a fundamental; the phases won in each rotation.
 use crate::overview::{DISTRIBUTION_ZONES, RalliesWon};
+use crate::shapes::court_zone::CourtZoneEnum;
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
 use crate::shapes::stats::{Metric, Stats, StatsFilter};
 use std::cmp::Reverse;
@@ -97,6 +98,23 @@ pub struct ZoneDetail {
     pub conversion: f64,
 }
 
+/// The serves needed for the efficiency of a zone: on fewer, it would
+/// mislead.
+pub const MIN_SERVES_FOR_EFFICIENCY: u32 = 3;
+
+/// Our serves sent to a zone of their court (see `CourtZoneEnum`), among
+/// the ones whose zone was told.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TargetDetail {
+    pub zone: CourtZoneEnum,
+    pub count: u32,
+    /// of the serves whose zone was told, 0 to 100
+    pub share: f64,
+    /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
+    /// `MIN_SERVES_FOR_EFFICIENCY` serves
+    pub efficiency: Option<f64>,
+}
+
 /// A fundamental in detail.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Detail {
@@ -118,6 +136,11 @@ pub struct Detail {
     pub points: Option<u32>,
     /// for an attack, the zones of `DISTRIBUTION_ZONES` set to
     pub zones: Vec<ZoneDetail>,
+    /// for a serve, how many had their zone told, and each zone of their
+    /// court (`CourtZoneEnum::ALL`, the ones never served to too); none
+    /// for the other fundamentals
+    pub targets_told: u32,
+    pub targets: Vec<TargetDetail>,
 }
 
 /// The freeballs: the ones we gave (`FB`), the ones they gave us (`OF`)
@@ -182,6 +205,25 @@ impl Detail {
                 .collect(),
             _ => Vec::new(),
         };
+        let targets_told = match event_type {
+            EventTypeEnum::S => stats.serves_with_target(filter),
+            _ => 0,
+        };
+        let targets = match (event_type, targets_told) {
+            (EventTypeEnum::S, 1..) => CourtZoneEnum::ALL
+                .iter()
+                .map(|zone| {
+                    let (count, efficiency) = stats.serves_to(*zone, filter);
+                    TargetDetail {
+                        zone: *zone,
+                        count,
+                        share: f64::from(count) / f64::from(targets_told) * 100.0,
+                        efficiency: (count >= MIN_SERVES_FOR_EFFICIENCY).then_some(efficiency),
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
         Detail {
             total,
             evals,
@@ -195,6 +237,8 @@ impl Detail {
                 .provides_direct_points()
                 .then(|| stats.event_count(event_type, Some(EvalEnum::Perfect), filter)),
             zones,
+            targets_told,
+            targets,
         }
     }
 }

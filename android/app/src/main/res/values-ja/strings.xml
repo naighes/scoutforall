@@ -129,6 +129,11 @@
     <string name="first_attack">レセプションから</string>
     <string name="counter_attack">切り返し</string>
     <string name="zone_attacks">%d本</string>
+    <string name="serve_zone">サーブのゾーン</string>
+    <string name="zone_chosen">選択済み</string>
+    <string name="serves_by_zone">ゾーン別サーブ</string>
+    <string name="zones_told">ゾーン指定 %1$d/%2$d本</string>
+    <string name="zone_density">密度</string>
     <string name="attacks_detail">%1$d 本 · 効果率 %2$s</string>
     <string name="no_attacks">アタックはまだありません</string>
     <string name="no_rallies">ラリーはまだありません</string>

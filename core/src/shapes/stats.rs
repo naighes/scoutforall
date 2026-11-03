@@ -8,6 +8,7 @@
 //!
 //! Every query takes a [`StatsFilter`] narrowing it to a phase, a rotation
 //! (the index of the setter's position, 0 to 5) and a player.
+use crate::shapes::court_zone::CourtZoneEnum;
 use crate::shapes::enums::{
     ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
@@ -153,6 +154,8 @@ pub struct EventKey {
     pub player: Option<Uuid>,
     /// the zone of an attack, when the role of the attacker tells it
     pub zone: Option<ZoneEnum>,
+    /// where our serve went, when the scout told it
+    pub target: Option<CourtZoneEnum>,
     /// `None` for the events with no evaluation (`F`, `OS`, `OE`, `FB`,
     /// `OF`)
     pub eval: Option<EvalEnum>,
@@ -404,6 +407,33 @@ impl Stats {
                 (score + s * v as i32, total + v)
             });
         (total > 0).then(|| percentage(score, total))
+    }
+
+    /// Our serves sent to a zone, among the ones whose zone was told: how
+    /// many, and their efficiency (as `Metric::Efficiency`).
+    pub fn serves_to(&self, target: CourtZoneEnum, filter: &StatsFilter) -> (u32, f64) {
+        let (score, total) = self
+            .events(EventTypeEnum::S, filter)
+            .filter(|(k, _)| k.target == Some(target))
+            .filter_map(|(k, v)| {
+                k.eval
+                    .map(|eval| (Metric::Efficiency.score(EventTypeEnum::S, eval), v))
+            })
+            .fold((0, 0), |(score, total), (s, v)| {
+                (score + s * v as i32, total + v)
+            });
+        match total {
+            0 => (0, 0.0),
+            _ => (total, percentage(score, total)),
+        }
+    }
+
+    /// Our serves whose zone was told.
+    pub fn serves_with_target(&self, filter: &StatsFilter) -> u32 {
+        self.events(EventTypeEnum::S, filter)
+            .filter(|(k, _)| k.target.is_some())
+            .map(|(_, v)| v)
+            .sum()
     }
 
     /// The errors made with this type of event (of this type of error, when

@@ -19,6 +19,7 @@ mod tests {
         },
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
+            court_zone::CourtZoneEnum,
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
             flags::ReceptionSchemeEnum,
             player::PlayerEntry,
@@ -173,6 +174,59 @@ mod tests {
         let saved = saved_events(&s).await;
         assert_eq!(event_types(&saved), vec![S]);
         assert_eq!(saved[0].technique, Some(spin));
+    }
+
+    /// Where our serve went is told along with its evaluation, or not:
+    /// saved in the flags, none when not told; not for another event.
+    #[tokio::test]
+    async fn the_serve_target_is_optional() {
+        let mut s = scouting().await;
+        assert!(!s.session.targets_apply());
+        assert_eq!(
+            s.session.choose_target(Some(CourtZoneEnum::Z1)),
+            Err(ScoutingError::InvalidSelection)
+        );
+        s.session.choose_event(S).await.unwrap();
+        assert!(s.session.targets_apply());
+        assert_eq!(s.session.target(), None);
+        assert_eq!(s.session.choose_target(Some(CourtZoneEnum::Z43)), Ok(()));
+        assert_eq!(s.session.target(), Some(CourtZoneEnum::Z43));
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        // not told: their dig and their attack, our dig, our serve again
+        s.session.choose_event(OE).await.ok();
+        assert_eq!(s.session.target(), None);
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_target(Some(CourtZoneEnum::Z6)).unwrap();
+        s.session.choose_target(None).unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        // their serve: our reception has none
+        s.session.choose_event(P).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert!(!s.session.targets_apply());
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        assert_eq!(
+            saved.iter().map(|e| e.flags.target()).collect::<Vec<_>>(),
+            vec![Some(CourtZoneEnum::Z43), None, None, None]
+        );
+    }
+
+    /// Undo resumes the serve with where it went; going back from the
+    /// evaluation forgets it.
+    #[tokio::test]
+    async fn undo_resumes_the_serve_with_its_target() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_target(Some(CourtZoneEnum::Z19)).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        assert_eq!(s.session.target(), None);
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.step(), s.session.target()),
+            (ScoutingStep::Eval, Some(CourtZoneEnum::Z19))
+        );
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.target(), None);
     }
 
     /// The reception is told before their serve, for that serve only: it

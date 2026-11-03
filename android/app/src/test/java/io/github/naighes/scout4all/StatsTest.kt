@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
+import io.github.naighes.scout4all.core.CourtZoneEnum
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
@@ -30,6 +31,15 @@ class StatsLayoutTest(private val screen: Size) {
     fun theStatisticsOfTheMatch() {
         val team = saveNationalTeam()
         val match = startFirstSet(team)
+        // the serves by zone in the detail: to 4/3, to 1, then without one
+        core { c ->
+            c.scouting(team, match).use { s ->
+                s.chooseTarget(CourtZoneEnum.Z43)
+                s.chooseEval(EvalEnum.PERFECT)
+                s.chooseTarget(CourtZoneEnum.Z1)
+                s.chooseEval(EvalEnum.PERFECT)
+            }
+        }
         serve(team, match, EvalEnum.PERFECT, EvalEnum.POSITIVE)
         rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
         rule.waitForText(string(R.string.stats_summary))
@@ -42,6 +52,13 @@ class StatsLayoutTest(private val screen: Size) {
             string(page) to rule.misfits(scrolls = true) + rule.inaccessible()
         }
         assertEquals(pages.associate { string(it) to emptyList<String>() }, misfits)
+        // the detail of the serve: the zones, then their efficiency
+        rule.waitForText(string(R.string.serves_by_zone))
+        val efficiency = string(R.string.efficiency).replaceFirstChar { it.uppercase() }
+        rule.onNode(hasText(efficiency) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.shot("stats-zone-efficiency-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 }
 

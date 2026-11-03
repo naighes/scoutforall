@@ -10,8 +10,9 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
+        court_zone::CourtZoneEnum,
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
-        flags::ReceptionSchemeEnum,
+        flags::{EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
@@ -124,6 +125,9 @@ pub struct ScoutingSession {
     player: Option<Uuid>,
     /// the set or serve chosen along with the evaluation
     technique: Option<TechniqueEnum>,
+    /// where the ball went, if the scout tells it along with the
+    /// evaluation
+    target: Option<CourtZoneEnum>,
     /// the inverted P1, written on every event saved
     inverted_p1: bool,
     /// how many receive their next serve, written on the reception or on
@@ -143,6 +147,7 @@ impl fmt::Debug for ScoutingSession {
             .field("event", &self.event)
             .field("player", &self.player)
             .field("technique", &self.technique)
+            .field("target", &self.target)
             .field("order", &self.order)
             .finish_non_exhaustive()
     }
@@ -174,6 +179,7 @@ impl ScoutingSession {
             event: None,
             player: None,
             technique: None,
+            target: None,
             inverted_p1,
             reception: ReceptionSchemeEnum::default(),
             order: ChoiceOrder::EventFirst,
@@ -301,6 +307,32 @@ impl ScoutingSession {
     /// The set or serve that the evaluation saves with the event.
     pub fn technique(&self) -> Option<TechniqueEnum> {
         self.technique
+    }
+
+    /// Where the ball went, if told.
+    pub fn target(&self) -> Option<CourtZoneEnum> {
+        self.target
+    }
+
+    /// Whether the scout can tell where the ball went, along with the
+    /// evaluation: for our serve.
+    pub fn targets_apply(&self) -> bool {
+        matches!(
+            (self.step, self.event),
+            (ScoutingStep::Eval, Some(EventTypeEnum::S))
+        )
+    }
+
+    /// The scout tells where the ball went, or takes it back (`None`): the
+    /// evaluation saves it with the event. Never required.
+    pub fn choose_target(&mut self, target: Option<CourtZoneEnum>) -> Result<(), ScoutingError> {
+        match self.targets_apply() {
+            true => {
+                self.target = target;
+                Ok(())
+            }
+            false => Err(ScoutingError::InvalidSelection),
+        }
     }
 
     /// The events that can follow.
@@ -673,7 +705,8 @@ impl ScoutingSession {
                     player: self.player,
                     target_player: None,
                     technique: self.technique,
-                    flags: Default::default(),
+                    flags: EventFlags::default()
+                        .with_target(self.target.filter(|_| self.targets_apply())),
                 })
                 .await
             }
@@ -721,6 +754,7 @@ impl ScoutingSession {
             (EventFirst, Eval, _, _) => {
                 self.player = None;
                 self.technique = None;
+                self.target = None;
                 self.step = Player;
                 Ok(())
             }
@@ -737,6 +771,7 @@ impl ScoutingSession {
         self.event = None;
         self.player = None;
         self.technique = None;
+        self.target = None;
         self.step = ScoutingStep::Event;
     }
 
@@ -806,6 +841,8 @@ impl ScoutingSession {
                 self.step = ScoutingStep::Eval;
                 // the set or serve of the removed event, if it was saved
                 self.technique = removed.technique.or_else(|| self.preselected_technique());
+                // and where it went, if told
+                self.target = removed.flags.target().filter(|_| self.targets_apply());
             }
             (_, R, Some(player)) => {
                 self.event = Some(R);

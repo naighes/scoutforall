@@ -8,6 +8,8 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -48,6 +50,9 @@ class ScoutingTest {
         rule.onNode(touchable).performClick()
     }
 
+    private fun hasStateDescription(state: String) =
+        SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state)
+
     private fun undo() {
         rule.onNode(hasContentDescription(string(R.string.undo)) and hasClickAction()).performClick()
     }
@@ -65,6 +70,34 @@ class ScoutingTest {
         touch("#")
         rule.waitFor { score(saved()) == 1 to 0 }
         rule.waitForText("serve #", substring = true)
+    }
+
+    /** Where our serve went, touched on the court while it waits for its
+     * evaluation: saved with it, taken back touching it again; never
+     * required. */
+    @Test
+    fun theServeZoneIsTouchedOnTheCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.serve_zone)} $label") and hasClickAction() }
+        rule.waitFor { rule.onAllNodes(zone("4/3")).fetchSemanticsNodes().size == 1 }
+        // chosen, taken back, another one chosen
+        rule.onNode(zone("4/3")).performClick()
+        rule.waitFor { rule.onAllNodes(zone("4/3") and hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().size == 1 }
+        rule.onNode(zone("4/3")).performClick()
+        rule.waitFor { rule.onAllNodes(hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().isEmpty() }
+        rule.onNode(zone("1/9")).performClick()
+        rule.waitFor { rule.onAllNodes(zone("1/9") and hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().size == 1 }
+        touch("#")
+        rule.waitFor { saved().events.size == 1 }
+        assertEquals("1/9", saved().events[0].target)
+        // the next serve, without one
+        rule.waitFor { rule.onAllNodes(hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().isEmpty() }
+        touch("=")
+        rule.waitFor { saved().events.size == 2 }
+        // the last first
+        assertEquals(listOf(null, "1/9"), saved().events.map { it.target })
+        // their serve: the players again, no zones
+        rule.waitFor { rule.onAllNodes(zone("8")).fetchSemanticsNodes().isEmpty() }
     }
 
     @Test

@@ -8,6 +8,7 @@
 use crate::{
     dvw::model::{Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols},
     shapes::{
+        court_zone::CourtZoneEnum,
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum},
         flags::EventFlags,
         lineup::Lineup,
@@ -569,6 +570,25 @@ impl SetTranslator<'_> {
         target_player: Option<Uuid>,
         technique: Option<TechniqueEnum>,
     ) -> Result<(), Issue> {
+        self.apply_flagged(
+            event_type,
+            player,
+            eval,
+            target_player,
+            technique,
+            EventFlags::default(),
+        )
+    }
+
+    fn apply_flagged(
+        &mut self,
+        event_type: EventTypeEnum,
+        player: Option<Uuid>,
+        eval: Option<EvalEnum>,
+        target_player: Option<Uuid>,
+        technique: Option<TechniqueEnum>,
+        flags: EventFlags,
+    ) -> Result<(), Issue> {
         let event = EventEntry {
             timestamp: self.clock,
             event_type,
@@ -576,7 +596,7 @@ impl SetTranslator<'_> {
             eval,
             target_player,
             technique,
-            flags: EventFlags::default(),
+            flags,
         };
         if let Some(refusal) = self.snapshot.refusal(&event) {
             return Err(Issue::Refused {
@@ -1182,7 +1202,20 @@ impl SetTranslator<'_> {
                     S => serve_type(skill.skill_type).map(TechniqueEnum::Serve),
                     _ => None,
                 };
-                self.apply(event_type, Some(player), eval, None, technique)
+                // where the serve went: the zone, not its quadrant (the
+                // subzone, no conflict zone of ours)
+                let target = match event_type {
+                    S => skill.end_zone.and_then(CourtZoneEnum::numbered),
+                    _ => None,
+                };
+                self.apply_flagged(
+                    event_type,
+                    Some(player),
+                    eval,
+                    None,
+                    technique,
+                    EventFlags::default().with_target(target),
+                )
             }
             None => Ok(()),
         }?;

@@ -103,4 +103,15 @@ class ContrastTest {
                 ),
         )
     }
+
+    /** The zones of the serves: their text on the amber of how many went
+     * there, and on the red to green of their efficiency. */
+    @Test
+    fun theZonesOfTheServesAreReadable() {
+        val shades = (0..20).map { densityColor(it / 20.0) } + grades
+        assertEquals(
+            emptyList<String>(),
+            below(4.5, shades.map { Triple("zone text on $it", readableOn(it), it) }),
+        )
+    }
 }

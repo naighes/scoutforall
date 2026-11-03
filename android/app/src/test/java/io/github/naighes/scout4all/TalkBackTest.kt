@@ -55,9 +55,14 @@ class TalkBackTest {
         val match = startFirstSet(team)
         show("Cortona") { ScoutingScreen(team, match, onBack = {}) }
         assertSpoken("Italia 0, Cortona 0, " + string(R.string.serves, "Italia"))
-        // the server in the serve zone: the setter, with the ball
-        assertSpoken("8, Alessia Orro, ${string(R.string.setter)}, ${string(R.string.serving)}")
+        // our serve: the server under the score, where it went on the
+        // court
+        assertSpoken("serve · 8 · Alessia Orro")
+        assertSpoken("${string(R.string.serve_zone)} 4/3")
+        // the rally goes on: the players
+        rule.onNode(hasContentDescription("positive") and hasClickAction()).performClick()
         assertSpoken("18, Paola Egonu")
+        spoken().let { read -> assertTrue("$read", read.any { it.startsWith("8, Alessia Orro, ${string(R.string.setter)}") }) }
     }
 
     /** The score in a live region: TalkBack says it when it changes. */

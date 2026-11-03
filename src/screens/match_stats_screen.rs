@@ -2,7 +2,9 @@ use crate::localization::current_labels;
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::{
     screens::{
-        components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
+        components::{
+            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel, target_court,
+        },
         screen::{
             AppAction, Renderable, Sba, ScreenAsync, cycle, get_keybinding_actions,
             panel_navigation_entries,
@@ -16,17 +18,18 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Span,
+    text::{Line, Span},
     widgets::{
         Bar, BarChart, BarGroup, Cell, Gauge, List, ListItem, ListState, Padding, Row, Table,
         canvas::Canvas,
     },
 };
 use scout4all_core::{
-    detail::{Breakdown, Detail, Tone},
+    detail::{Breakdown, Detail, TargetDetail, Tone},
     errors::AppError,
     overview::side_out_possessions,
     shapes::{
+        court_zone::CourtZoneEnum,
         enums::{EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
@@ -436,6 +439,13 @@ impl MatchStatsScreen {
             );
             self.render_court_canvas(f, chunks[1], current_labels().conversion_rate, |(_, s)| s);
         }
+        if let Some(EventTypeEnum::S) = self
+            .event_filter
+            .selected()
+            .map(|selection| selection.event_type)
+        {
+            self.render_serve_targets(f, chunks[0], chunks[1]);
+        }
         if let (Some(EventTypeEnum::P), None) = (
             self.event_filter.selected().map(|s| s.event_type),
             self.player_filter.selected(),
@@ -489,6 +499,67 @@ impl MatchStatsScreen {
         .header(header)
         .block(panel::section(domain.sideout_by_possession));
         f.render_widget(table, area);
+    }
+
+    /// Where our serves went, of the ones whose zone was told: how many to
+    /// each zone, in a shade of one color, the more the brighter; and their
+    /// efficiency there, red to green, only from a few serves on.
+    fn render_serve_targets(&self, f: &mut Frame, density: Rect, efficiency: Rect) {
+        let Some(Breakdown::Fundamental(detail)) = self.breakdown(EventTypeEnum::S) else {
+            return;
+        };
+        let domain = current_labels().domain;
+        let told = domain
+            .zones_told
+            .replace("{told}", &detail.targets_told.to_string())
+            .replace("{total}", &detail.total.to_string());
+        let target = |zone: CourtZoneEnum| detail.targets.iter().find(|t| t.zone == zone).copied();
+        let most = detail.targets.iter().map(|t| t.count).max().unwrap_or(0);
+        target_court::render_court(
+            f,
+            density,
+            panel::section(format!("{} · {told}", domain.serves_by_zone)),
+            false,
+            |zone| {
+                let shown = target(zone).filter(|t| t.count > 0);
+                let lines = match shown {
+                    Some(t) => vec![
+                        Line::from(zone.to_string()),
+                        Line::from(format!("{:.0}%", t.share)),
+                        Line::from(format!("({})", t.count)),
+                    ],
+                    None => vec![Line::from(zone.to_string())],
+                };
+                (lines, density_style(zone, shown, most))
+            },
+        );
+        target_court::render_court(
+            f,
+            efficiency,
+            panel::section(domain.efficiency_by_zone),
+            false,
+            |zone| {
+                let lines = match target(zone).filter(|t| t.count > 0) {
+                    Some(TargetDetail {
+                        efficiency: Some(e),
+                        count,
+                        ..
+                    }) => vec![
+                        Line::from(zone.to_string()),
+                        Line::from(format!("{e:+.0}%")),
+                        Line::from(format!("n={count}")),
+                    ],
+                    // too few to tell
+                    Some(t) => vec![
+                        Line::from(zone.to_string()),
+                        Line::from(format!("({})", t.count)),
+                    ],
+                    None => vec![Line::from(zone.to_string())],
+                };
+                let style = efficiency_style(zone, target(zone).and_then(|t| t.efficiency));
+                (lines, style)
+            },
+        );
     }
 
     pub fn render_court_canvas<F>(&self, f: &mut Frame, area: Rect, label: &str, select_value: F)
@@ -749,6 +820,57 @@ impl MatchStatsScreen {
         self.event_filter.render(f, chunks[3]);
         self.player_filter.render(f, chunks[4]);
     }
+}
+
+/// The shades of the serves to a zone, from few to the most: of amber,
+/// darker to brighter (the colors of 256, as terminals show them all).
+const DENSITY_SHADES: [u8; 4] = [94, 136, 172, 214];
+
+/// A zone of the serves: none, or a shade by how many went there, the most
+/// the brightest.
+fn density_style(zone: CourtZoneEnum, target: Option<TargetDetail>, most: u32) -> Style {
+    let shade = target
+        .filter(|_| most > 0)
+        .map(|t| (t.count * DENSITY_SHADES.len() as u32).div_ceil(most))
+        .and_then(|step| DENSITY_SHADES.get((step as usize).saturating_sub(1)));
+    match shade {
+        Some(&color) => Style::default()
+            .bg(Color::Indexed(color))
+            .fg(Color::Black)
+            .add_modifier(Modifier::BOLD),
+        None => empty_zone(zone),
+    }
+}
+
+/// The efficiency of a zone, red when negative, green when positive, the
+/// more the brighter; gray about zero; none without it.
+fn efficiency_style(zone: CourtZoneEnum, efficiency: Option<f64>) -> Style {
+    let color = efficiency.map(|e| match e {
+        e if e <= -50.0 => 160,
+        e if e <= -10.0 => 131,
+        e if e < 10.0 => 245,
+        e if e < 50.0 => 71,
+        _ => 34,
+    });
+    match color {
+        Some(color) => Style::default()
+            .bg(Color::Indexed(color))
+            .fg(Color::Black)
+            .add_modifier(Modifier::BOLD),
+        None => empty_zone(zone),
+    }
+}
+
+/// A zone with nothing to show: gray, to see the court, the conflict zones
+/// darker.
+fn empty_zone(zone: CourtZoneEnum) -> Style {
+    let background = match zone.is_zone() {
+        true => 238,
+        false => 236,
+    };
+    Style::default()
+        .bg(Color::Indexed(background))
+        .fg(Color::Gray)
 }
 
 /// The color of an evaluation, by how good it is for the fundamental.

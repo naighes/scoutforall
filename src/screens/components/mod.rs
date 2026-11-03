@@ -8,5 +8,6 @@ pub mod notify_dialogue;
 pub mod panel;
 pub mod select;
 pub mod set_board;
+pub mod target_court;
 pub mod team_header;
 pub mod text_box;

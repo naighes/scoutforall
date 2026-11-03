@@ -9,6 +9,7 @@ mod tests {
         parse,
         translate::{Issue, Untranslatable, Us, translate_set},
     };
+    use crate::shapes::court_zone::CourtZoneEnum;
     use crate::shapes::enums::{EvalEnum, EventTypeEnum};
     use crate::shapes::refusal::Refusal;
     use crate::shapes::snapshot::EventEntry;
@@ -515,6 +516,38 @@ mod tests {
         );
         let evals = evaluated(&file).expect("expected the set");
         assert_eq!(evals.get(1), Some(&(S, Some(EvalEnum::Negative))));
+    }
+
+    /// Our serves with the zone where they went: the zone, its quadrant
+    /// (the subzone) left out; none when the file doesn't tell it, nor for
+    /// the other touches.
+    #[test]
+    fn the_zone_of_our_serves() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let to = |zone: &str| format!("{}SM#~~~1{zone}", file.server());
+        // the same server all along: we keep serving
+        let (to_4, to_6) = (to("4C"), to("6"));
+        file.rally(&[&to_4], true);
+        file.rally(&[&to_6], true);
+        let plain = format!("{}SM#", file.server());
+        file.rally(&[&plain], true);
+        let file = file.finished();
+        let (events, _) = translated_events(&file).expect("expected the set");
+        let targets: Vec<_> = events
+            .iter()
+            .take(4)
+            .map(|e| (e.event_type, e.flags.target()))
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                (OE, None),
+                (S, Some(CourtZoneEnum::Z4)),
+                (S, Some(CourtZoneEnum::Z6)),
+                (S, None),
+            ]
+        );
     }
 
     /// Our serve `+`, their reception `-` and our attack, their touches

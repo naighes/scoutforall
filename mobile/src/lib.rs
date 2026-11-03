@@ -51,6 +51,7 @@ use scout4all_core::{
     settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
+        court_zone::CourtZoneEnum,
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
@@ -172,6 +173,31 @@ pub enum SetTypeEnum {
 pub enum ServeTypeEnum {
     Float,
     Spin,
+}
+
+#[uniffi::remote(Enum)]
+pub enum CourtZoneEnum {
+    Z1,
+    Z2,
+    Z3,
+    Z4,
+    Z5,
+    Z6,
+    Z7,
+    Z8,
+    Z9,
+    Z43,
+    Z32,
+    Z78,
+    Z89,
+    Z56,
+    Z61,
+    Z47,
+    Z38,
+    Z29,
+    Z57,
+    Z68,
+    Z19,
 }
 
 #[uniffi::remote(Enum)]
@@ -1007,6 +1033,18 @@ pub struct TechniqueChoice {
     pub chosen: bool,
 }
 
+/// A zone of the court of the opponent, to tell where the ball went.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CourtZoneChoice {
+    pub value: CourtZoneEnum,
+    /// as the scout reads it: "4", "4/3"
+    pub label: String,
+    /// one of the nine zones, not a conflict zone
+    pub zone: bool,
+    /// what the evaluation saves now
+    pub chosen: bool,
+}
+
 /// An event saved in the set.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ScoutedEvent {
@@ -1018,6 +1056,8 @@ pub struct ScoutedEvent {
     pub symbol: Option<String>,
     /// e.g. "A" or "F"
     pub technique: Option<String>,
+    /// where the ball went, if told: e.g. "4" or "4/3"
+    pub target: Option<String>,
 }
 
 /// An event of a set, in the list to correct it.
@@ -1358,9 +1398,29 @@ pub struct FundamentalDetail {
     pub points: Option<u32>,
     /// for an attack
     pub zones: Vec<DetailZone>,
+    /// for a serve: how many had their zone told, and their court, a row
+    /// each from the net (as `Scouting::target_court`); empty with no zone
+    /// told
+    pub targets_told: u32,
+    pub targets: Vec<Vec<TargetStats>>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
     pub players: Vec<PlayerStats>,
+}
+
+/// Our serves to a zone of their court, of the ones whose zone was told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TargetStats {
+    pub value: CourtZoneEnum,
+    /// as the scout reads it: "4", "4/3"
+    pub label: String,
+    /// one of the nine zones, not a conflict zone
+    pub zone: bool,
+    pub count: u32,
+    /// of the serves whose zone was told, 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few serves to tell
+    pub efficiency: Option<f64>,
 }
 
 /// Their freeballs we exploited.
@@ -1645,6 +1705,37 @@ impl Scouting {
         self.scouted(chosen)
     }
 
+    /// The court where our serve went, a row each from the net (the
+    /// zones with the conflict zones between them, then the conflict zones
+    /// between two rows): empty when it can't be told now.
+    pub fn target_court(&self) -> Vec<Vec<CourtZoneChoice>> {
+        let session = self.session();
+        let chosen = session.target();
+        match session.targets_apply() {
+            true => CourtZoneEnum::grid()
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|zone| CourtZoneChoice {
+                            value: *zone,
+                            label: zone.to_string(),
+                            zone: zone.is_zone(),
+                            chosen: chosen == Some(*zone),
+                        })
+                        .collect()
+                })
+                .collect(),
+            false => vec![],
+        }
+    }
+
+    /// Where the ball went, or none: saved with the evaluation, never
+    /// required.
+    pub fn choose_target(&self, target: Option<CourtZoneEnum>) -> Result<(), MobileError> {
+        let chosen = self.session().choose_target(target);
+        self.scouted(chosen)
+    }
+
     pub fn choose_eval(&self, eval: EvalEnum) -> Result<Progress, MobileError> {
         let mut session = self.session();
         self.scouted(self.runtime.block_on(session.choose_eval(eval)))
@@ -1888,6 +1979,26 @@ fn detail_stats(
                         conversion: z.conversion,
                     })
                     .collect(),
+                targets_told: d.targets_told,
+                targets: match d.targets.is_empty() {
+                    true => vec![],
+                    false => CourtZoneEnum::grid()
+                        .iter()
+                        .map(|row| {
+                            row.iter()
+                                .filter_map(|zone| d.targets.iter().find(|t| t.zone == *zone))
+                                .map(|t| TargetStats {
+                                    value: t.zone,
+                                    label: t.zone.to_string(),
+                                    zone: t.zone.is_zone(),
+                                    count: t.count,
+                                    share: t.share,
+                                    efficiency: t.efficiency,
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                },
                 players: by_player(&stats, event, &narrowed)
                     .into_iter()
                     .filter_map(|line| {
@@ -2010,6 +2121,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         eval: e.eval.map(|v| v.friendly_name(e.event_type, labels)),
         symbol: e.eval.map(|v| v.to_string()),
         technique: e.technique.map(|t| t.to_string()),
+        target: e.flags.target().map(|z| z.to_string()),
     }
 }
 
@@ -4279,6 +4391,53 @@ mod tests {
         app.scouting(team.into(), m.into()).unwrap()
     }
 
+    /// Where our serve went: the court while it waits for its evaluation,
+    /// the zone chosen or taken back, never required; none for the
+    /// reception.
+    #[test]
+    fn the_serve_target_is_told_on_the_court() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let court = scouting.target_court();
+        let labels: Vec<Vec<&str>> = court
+            .iter()
+            .map(|row| row.iter().map(|z| z.label.as_str()).collect())
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                vec!["4", "4/3", "3", "3/2", "2"],
+                vec!["4/7", "3/8", "2/9"],
+                vec!["7", "7/8", "8", "8/9", "9"],
+                vec!["5/7", "6/8", "1/9"],
+                vec!["5", "5/6", "6", "6/1", "1"],
+            ]
+        );
+        assert_eq!(court.iter().flatten().filter(|z| z.zone).count(), 9);
+        assert!(court.iter().flatten().all(|z| !z.chosen));
+        scouting.choose_target(Some(CourtZoneEnum::Z43)).unwrap();
+        let chosen: Vec<CourtZoneEnum> = scouting
+            .target_court()
+            .into_iter()
+            .flatten()
+            .filter(|z| z.chosen)
+            .map(|z| z.value)
+            .collect();
+        assert_eq!(chosen, vec![CourtZoneEnum::Z43]);
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let state = scouting.state();
+        let targets: Vec<Option<&str>> = state.events.iter().map(|e| e.target.as_deref()).collect();
+        assert_eq!(targets, vec![Some("4/3")]);
+        // their serve: our reception has no court
+        assert!(scouting.target_court().is_empty());
+        assert!(matches!(
+            scouting.choose_target(Some(CourtZoneEnum::Z1)),
+            Err(MobileError::Scouting { .. })
+        ));
+    }
+
     #[test]
     fn a_set_in_progress_is_scouted_and_undone() {
         let dir = tempfile::tempdir().unwrap();
@@ -5116,6 +5275,61 @@ mod tests {
         assert_eq!(saved(StatsScope::Set { number: 1 }), first);
         assert_eq!(saved(StatsScope::Match), all);
         assert_eq!(saved(StatsScope::Set { number: 3 }), none);
+    }
+
+    /// The serves by zone, of the ones whose zone was told: their court a
+    /// row each, how many to each zone and the efficiency from three on.
+    #[test]
+    fn the_serves_by_zone() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        for zone in [
+            Some(CourtZoneEnum::Z1),
+            Some(CourtZoneEnum::Z1),
+            None,
+            Some(CourtZoneEnum::Z1),
+        ] {
+            scouting.choose_target(zone).unwrap();
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        }
+        let serve = scouting
+            .detail(StatsScope::Match, EventTypeEnum::S, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        assert_eq!((serve.total, serve.targets_told), (4, 3));
+        assert_eq!(
+            serve
+                .targets
+                .iter()
+                .map(|row| row.len())
+                .collect::<Vec<_>>(),
+            vec![5, 3, 5, 3, 5]
+        );
+        let z1 = serve
+            .targets
+            .iter()
+            .flatten()
+            .find(|t| t.label == "1")
+            .unwrap();
+        assert_eq!((z1.count, z1.share, z1.efficiency), (3, 100.0, Some(100.0)));
+        assert!(
+            serve
+                .targets
+                .iter()
+                .flatten()
+                .filter(|t| t.label != "1")
+                .all(|t| t.count == 0 && t.efficiency.is_none())
+        );
+        // none for another fundamental
+        let reception = scouting
+            .detail(StatsScope::Match, EventTypeEnum::P, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        assert!(reception.targets.is_empty());
     }
 
     #[test]

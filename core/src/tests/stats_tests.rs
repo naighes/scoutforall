@@ -156,6 +156,7 @@ mod tests {
                 rotation: 0,
                 player: None,
                 zone: None,
+                target: None,
                 eval: *eval,
             });
         }
@@ -1298,6 +1299,8 @@ mod tests {
                 phases_per_point: Some((3.0, 3, 9)),
                 faults: 1,
                 points: Some(2),
+                targets_told: 0,
+                targets: vec![],
                 zones: vec![
                     ZoneDetail {
                         zone: ZoneEnum::Four,
@@ -1335,6 +1338,8 @@ mod tests {
                 phases_per_point: None,
                 faults: 0,
                 points: Some(1),
+                targets_told: 0,
+                targets: vec![],
                 zones: vec![ZoneDetail {
                     zone: ZoneEnum::Two,
                     share: 100.0,
@@ -1375,6 +1380,8 @@ mod tests {
                 faults: 0,
                 // a reception scores no point
                 points: None,
+                targets_told: 0,
+                targets: vec![],
                 zones: vec![],
             }
         );
@@ -1387,6 +1394,50 @@ mod tests {
         assert!(none.evals.is_empty());
         assert_eq!(none.faults, 1);
         assert_eq!(none.phases_per_point, Some((3.0, 1, 3)));
+    }
+
+    /// Our serves where their zone was told: how many to each zone, the
+    /// share of the ones told, the efficiency only from three serves on;
+    /// the serves without a zone left out.
+    #[test]
+    fn detail_of_the_serve_targets() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z43};
+        let t = Team::new();
+        let serve = |eval, zone| {
+            let mut e = act(S, t.setter, eval);
+            e.flags = e.flags.with_target(zone);
+            e
+        };
+        let stats = t
+            .serving(vec![
+                serve(Perfect, Some(Z1)),
+                serve(Perfect, Some(Z43)),
+                serve(Perfect, None),
+                serve(Perfect, Some(Z1)),
+                serve(Error, Some(Z1)),
+            ])
+            .stats;
+        let serves = detail(&stats, S, &all());
+        assert_eq!((serves.total, serves.targets_told), (5, 4));
+        assert_eq!(serves.targets.len(), 21);
+        let of = |zone| serves.targets.iter().find(|t| t.zone == zone).copied();
+        let z1 = of(Z1).unwrap();
+        assert_eq!((z1.count, z1.share), (3, 75.0));
+        // (2 aces - 1 error) / 3
+        assert!((z1.efficiency.unwrap() - 100.0 / 3.0).abs() < 1e-9);
+        let z43 = of(Z43).unwrap();
+        assert_eq!((z43.count, z43.share, z43.efficiency), (1, 25.0, None));
+        assert!(
+            serves
+                .targets
+                .iter()
+                .filter(|t| t.zone != Z1 && t.zone != Z43)
+                .all(|t| t.count == 0 && t.share == 0.0 && t.efficiency.is_none())
+        );
+        // not for another fundamental, nor with no zone told
+        assert!(detail(&stats, A, &all()).targets.is_empty());
+        let none = t.serving(vec![serve(Perfect, None)]).stats;
+        assert!(detail(&none, S, &all()).targets.is_empty());
     }
 
     /// Their freeball after ours, exploited with a kill: team events, with

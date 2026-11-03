@@ -15,6 +15,7 @@ use crate::{
         actions::{ScoutingOptionEnum, ScreenActionEnum},
         keybinding::{
             ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, STATS_KEY, UNDO_KEY,
+            ZONE_CURSOR_KEYS, ZONE_KEY,
         },
         settings::{ScoutingShortcut, Settings, set_settings},
         symbol::KeyCombinationFormatExt,
@@ -476,6 +477,14 @@ where
             (labels.back, fmt.to_string(BACK_KEY)),
             (labels.live_stats, fmt.to_string(STATS_KEY)),
             (labels.player_number, "0-9".to_string()),
+            (
+                labels.serve_target,
+                format!(
+                    "{} {}",
+                    ZONE_CURSOR_KEYS.map(|k| fmt.to_string(k)).join(""),
+                    fmt.to_string(ZONE_KEY)
+                ),
+            ),
         ]
     }
 
