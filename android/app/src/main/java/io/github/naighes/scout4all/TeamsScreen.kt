@@ -19,6 +19,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -29,6 +30,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -200,7 +205,11 @@ private fun TeamRow(
     onPin: (teamId: String, pinned: Boolean) -> Unit,
 ) = when (team) {
     is TeamListing.Team -> ListItem(
-        modifier = Modifier.clickable { onTeam(team.id) }.tutorial("team:${team.id}"),
+        modifier = Modifier.clickable { onTeam(team.id) }.tutorial("team:${team.id}").pinnedRow(team.pinned),
+        // pinned: on a tile, as the pinned chats of the messaging apps
+        colors = ListItemDefaults.colors(
+            containerColor = if (team.pinned) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+        ),
         headlineContent = { Text(team.name) },
         supportingContent = {
             val players = team.players.toInt()
@@ -221,6 +230,19 @@ private fun TeamRow(
         headlineContent = { Text(stringResource(R.string.unreadable_team)) },
         supportingContent = { Text(team.folder) },
     )
+}
+
+/** A pinned row: an amber bar along its start edge, above the tile. */
+@Composable
+private fun Modifier.pinnedRow(pinned: Boolean): Modifier {
+    if (!pinned) return this
+    val bar = MaterialTheme.colorScheme.primary
+    return drawWithContent {
+        drawContent()
+        val width = 4.dp.toPx()
+        val x = if (layoutDirection == LayoutDirection.Ltr) 0f else size.width - width
+        drawRect(bar, topLeft = Offset(x, 0f), size = Size(width, size.height))
+    }
 }
 
 @Composable
