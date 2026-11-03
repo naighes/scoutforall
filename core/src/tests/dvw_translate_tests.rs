@@ -695,6 +695,56 @@ mod tests {
         assert!(!events.iter().any(|(e, _)| *e == D), "{events:?}");
     }
 
+    /// Our kill touched by their block (`a13BH-`, then their dig `=`, as
+    /// in a file of Cortona vs Cascina): the point is ours, their block
+    /// dropped.
+    #[test]
+    fn their_block_on_our_kill_is_dropped() {
+        for rally in [
+            vec!["a11SM+", "*07RM+", "*02AH#", "a13BH-"],
+            vec!["a11SM+", "*07RM+", "*02AH#", "a13BH-", "a15DH="],
+            vec!["a11SM+", "*07RM+", "*02AH#", "a13BH!"],
+        ] {
+            let mut file = File::new();
+            file.rally(&rally, true);
+            let events = translated(&file.finished()).expect("expected the set");
+            assert_eq!(
+                first(&events, 2),
+                vec![(P, Some(7)), (A, Some(2))],
+                "{rally:?}"
+            );
+            assert!(!events.iter().any(|(e, _)| *e == B), "{events:?}");
+        }
+    }
+
+    /// Their touch after the end that keeps the ball is still refused when
+    /// it isn't their block on our kill: a dig after our kill, a block
+    /// after our ace.
+    #[test]
+    fn their_touch_after_the_end_otherwise_is_refused() {
+        let mut ace = File::new();
+        ace.their_serve_error();
+        let serve = format!("{}SM#", ace.server());
+        ace.rally(&[&serve, "a13BH-"], true);
+        let mut files = vec![ace];
+        for rally in [
+            vec!["a11SM+", "*07RM+", "*02AH#", "a15DH+"],
+            vec!["a11SM+", "*07RM+", "*02AH#", "a15DH+", "a13BH-"],
+        ] {
+            let mut file = File::new();
+            file.rally(&rally, true);
+            files.push(file);
+        }
+        for file in files {
+            let rally = file.lines.clone();
+            assert_eq!(
+                translated(&file.finished()),
+                Err(Issue::Untranslatable("their touch after the end")),
+                "{rally:?}"
+            );
+        }
+    }
+
     /// After our block `=` or our attack `/` only our dig `=` is dropped:
     /// a dig keeping the ball, or a dig `=` after another end, is still our
     /// touch after the end.

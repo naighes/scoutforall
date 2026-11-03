@@ -548,6 +548,17 @@ impl SetTranslator<'_> {
         }
     }
 
+    // the last touch played before is our attack winning the point
+    fn after_our_kill(&self, before: &[(&ScoutLine, Touch)]) -> bool {
+        matches!(
+            before.iter().rev().find_map(|(_, t)| t.played()),
+            Some((side, skill))
+                if side == self.us.side
+                    && skill.skill == Skill::Attack
+                    && self.ending(skill.skill, skill.evaluation) == Ending::Won
+        )
+    }
+
     // the events of the rally being translated
     fn rally_events(&self) -> &[EventEntry] {
         self.events.get(self.rally_start..).unwrap_or_default()
@@ -582,11 +593,19 @@ impl SetTranslator<'_> {
                 (true, Touch::Skill(side, skill) | Touch::Sent(side, skill))
                     if *side != self.us.side =>
                 {
-                    match self.ending(skill.skill, skill.evaluation) {
-                        Ending::Goes => {
+                    let block_on_our_kill = skill.skill == Skill::Block
+                        && self.after_our_kill(touches.get(..index).unwrap_or_default());
+                    match (
+                        self.ending(skill.skill, skill.evaluation),
+                        block_on_our_kill,
+                    ) {
+                        // their block touching our kill (`*02AH#`, then
+                        // `a13BH-`): the ball went down all the same
+                        (Ending::Goes, true) => self.mapped("their block on our kill: dropped"),
+                        (Ending::Goes, false) => {
                             return Err(Issue::Untranslatable("their touch after the end"));
                         }
-                        Ending::Won | Ending::Lost => {}
+                        (Ending::Won | Ending::Lost, _) => {}
                     }
                 }
                 (true, Touch::Green(_, _)) => {}
