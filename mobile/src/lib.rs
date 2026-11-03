@@ -3436,11 +3436,7 @@ impl Scout4All {
     /// The teams that can be read.
     fn parse_dvw(&self, bytes: &[u8]) -> Result<DvwFile, MobileError> {
         dvw::parse(bytes).map_err(|e| MobileError::Failed {
-            reason: self
-                .language
-                .labels()
-                .dvw_unreadable
-                .replace("{detail}", &e.to_string()),
+            reason: e.describe(self.language.labels()),
         })
     }
 
@@ -5745,8 +5741,14 @@ mod tests {
         let app = app(&dir, "it");
         let it = labels(LanguageEnum::It);
         let message = reason(app.preview_dvw(b"nothing here".to_vec()));
-        let frame = it.dvw_unreadable.split(" (").next().unwrap();
-        assert!(message.starts_with(frame), "{message}");
+        assert_eq!(
+            message,
+            "il file non si legge come DataVolley (non è un file DataVolley)"
+        );
+        assert_eq!(
+            message,
+            it.dvw_unreadable.replace("{detail}", it.dvw_not_dvw)
+        );
     }
 
     /// A new team: checked, then saved with its match, queued for the

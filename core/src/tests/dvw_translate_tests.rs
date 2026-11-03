@@ -7,9 +7,10 @@ mod tests {
     use crate::dvw::{
         model::Side,
         parse,
-        translate::{Issue, Us, translate_set},
+        translate::{Issue, Untranslatable, Us, translate_set},
     };
     use crate::shapes::enums::{EvalEnum, EventTypeEnum};
+    use crate::shapes::refusal::Refusal;
     use crate::shapes::snapshot::EventEntry;
     use EventTypeEnum::*;
     use chrono::NaiveDate;
@@ -168,9 +169,9 @@ mod tests {
                 let libero = if role == 1 { "L" } else { "" };
                 format!("{team};{n};{n};*;;;;;P{n};Surname{n};Name{n};;{libero};{role};False;;;")
             };
-            let roles = [5, 2, 4, 3, 2, 4, 1];
+            let roles = [5, 2, 4, 3, 2, 4, 1, 2];
             let players = |team: u8, first: u8| {
-                (0..7u8)
+                (0..8u8)
                     .map(|i| player(team, first + i, roles[usize::from(i)]))
                     .collect::<Vec<_>>()
                     .join("\n")
@@ -201,7 +202,7 @@ mod tests {
     /// each player.
     fn translated_events(file: &File) -> Result<(Vec<EventEntry>, HashMap<Uuid, u8>), Issue> {
         let dvw = parse(file.text().as_bytes()).expect("expected a DataVolley file");
-        let players: HashMap<u8, Uuid> = (1..=7).map(|n| (n, Uuid::new_v4())).collect();
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
         let numbers: HashMap<Uuid, u8> = players.iter().map(|(n, id)| (*id, *n)).collect();
         let us = Us {
             side: Side::Home,
@@ -317,9 +318,9 @@ mod tests {
         file.rally(&["a11SM+", "*07RM+", "*06AH#"], true);
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                "the libero for more than one player: who is out can't be told"
-            ))
+            Err(Issue::Untranslatable(Untranslatable::LiberoForWhom(vec![
+                1, 5
+            ])))
         );
     }
 
@@ -362,9 +363,7 @@ mod tests {
         file.rally(&["a11SM+", "*07RM+", "*01EM+", "*06AH#"], true);
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                "the libero can't change player in time"
-            ))
+            Err(Issue::Untranslatable(Untranslatable::LiberoTooLate))
         );
     }
 
@@ -380,9 +379,7 @@ mod tests {
         file.rally(&["a12SM+", "*07RM+", "*01EM+", "*06AH#"], true);
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                "the libero can't change player in time"
-            ))
+            Err(Issue::Untranslatable(Untranslatable::LiberoTooLate))
         );
     }
 
@@ -399,8 +396,48 @@ mod tests {
         );
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable("the libero has nobody to replace"))
+            Err(Issue::Untranslatable(Untranslatable::LiberoForNobody))
         );
+    }
+
+    /// A player substituted, then touching the ball (as in a file of
+    /// Cortona vs Pol Remo, the substitute's touch given to the player out):
+    /// the touch refused, at its own line, the player by number.
+    #[test]
+    fn a_touch_of_a_player_substituted_is_refused_at_its_line() {
+        let mut file = File::new();
+        file.their_serve_error();
+        file.line("*c04:08");
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "a12RM+", "a13AH+", "*04DH+", "*02AH#"], true);
+        let dig = file
+            .lines
+            .iter()
+            .position(|l| l.starts_with("*04DH+"))
+            .expect("the dig");
+        let text = file.finished().text();
+        // the scout's lines after its header, numbered from 1
+        let scout = text
+            .lines()
+            .position(|l| l == "[3SCOUT]")
+            .expect("the scout");
+        let dvw = parse(text.as_bytes()).expect("expected a DataVolley file");
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
+        let us = Us {
+            side: Side::Home,
+            players: &players,
+            liberos: &[HOME_LIBERO],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let error = translate_set(&dvw, &us, 1, date, 6).expect_err("the dig refused");
+        assert_eq!(
+            error.issue,
+            Issue::Refused {
+                event: D,
+                refusal: Refusal::NotOnCourt(4),
+            }
+        );
+        assert_eq!(error.line, Some(scout + 2 + dig));
     }
 
     /// The server of the file not in zone 1 by the rules: refused.
@@ -410,7 +447,10 @@ mod tests {
         file.their_serve_error();
         file.rally(&["*03SM#"], true);
         match translated(&file.finished()) {
-            Err(Issue::Event(text)) => assert!(text.contains("can't play it"), "{text}"),
+            Err(Issue::Refused {
+                event: S,
+                refusal: Refusal::NotServing(3),
+            }) => {}
             other => panic!("expected the serve refused, got {other:?}"),
         }
     }
@@ -425,7 +465,7 @@ mod tests {
         assert_eq!(
             translated(&file.finished()),
             Err(Issue::Untranslatable(
-                "their attack blocked without our block"
+                Untranslatable::TheirAttackBlockedWithoutOurBlock
             ))
         );
     }
@@ -739,7 +779,7 @@ mod tests {
             let rally = file.lines.clone();
             assert_eq!(
                 translated(&file.finished()),
-                Err(Issue::Untranslatable("their touch after the end")),
+                Err(Issue::Untranslatable(Untranslatable::TheirTouchAfterTheEnd)),
                 "{rally:?}"
             );
         }
@@ -768,7 +808,7 @@ mod tests {
             file.rally(&rally, false);
             assert_eq!(
                 translated(&file.finished()),
-                Err(Issue::Untranslatable("our touch after the end")),
+                Err(Issue::Untranslatable(Untranslatable::OurTouchAfterTheEnd)),
                 "{rally:?}"
             );
         }
@@ -841,7 +881,7 @@ mod tests {
         assert_eq!(
             translated(&file.finished()),
             Err(Issue::Untranslatable(
-                "their attack back from our block without our block"
+                Untranslatable::TheirAttackBackWithoutOurBlock
             ))
         );
     }
@@ -888,7 +928,7 @@ mod tests {
         let mut file = File::new();
         file.received_by(HOME_LIBERO);
         let dvw = parse(file.finished().text().as_bytes()).expect("a file");
-        let players: HashMap<u8, Uuid> = (1..=7).map(|n| (n, Uuid::new_v4())).collect();
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
         let us = Us {
             side: Side::Home,
             players: &players,
@@ -956,8 +996,8 @@ mod tests {
         );
         assert_eq!(m.sets.len(), 3);
         assert!(m.sets.iter().all(|s| !s.events.is_empty()));
-        assert_eq!(m.roster.len(), 7);
-        assert_eq!(m.team.players.len(), 7);
+        assert_eq!(m.roster.len(), 8);
+        assert_eq!(m.team.players.len(), 8);
         let status = m.get_status().expect("a status");
         assert!(status.match_finished);
         assert_eq!((status.us_wins, status.them_wins), (3, 0));
@@ -997,7 +1037,10 @@ mod tests {
         match planned(&file.text(), Side::Home) {
             Err(crate::dvw::import::MatchIssue::Set(e)) => {
                 assert_eq!(e.set_number, 2);
-                assert_eq!(e.issue, Issue::Untranslatable("our touch after the end"));
+                assert_eq!(
+                    e.issue,
+                    Issue::Untranslatable(Untranslatable::OurTouchAfterTheEnd)
+                );
             }
             other => panic!("expected the set refused: {other:?}"),
         }
@@ -1162,7 +1205,7 @@ mod tests {
                 .read_single(&team.team.id)
                 .await
                 .expect("the team");
-            assert_eq!(read_team.players.len(), 7);
+            assert_eq!(read_team.players.len(), 8);
             let read = p
                 .match_reader
                 .read_single(&read_team, &saved.id)
@@ -1258,7 +1301,7 @@ mod tests {
                 .read_single(&team.team.id)
                 .await
                 .expect("the team");
-            assert_eq!(kept.players.len(), 7);
+            assert_eq!(kept.players.len(), 8);
             assert_eq!(p.queued().len(), 1);
         }
 

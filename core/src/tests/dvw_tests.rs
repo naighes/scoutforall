@@ -436,7 +436,7 @@ mod tests {
         );
         assert!(matches!(
             parse(bad_score.as_bytes()),
-            Err(DvwError::Invalid { reason, .. }) if reason.contains("25-x")
+            Err(DvwError::Invalid { text, .. }) if text.contains("25-x")
         ));
     }
 

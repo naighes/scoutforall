@@ -463,10 +463,13 @@ mod tests {
         use crate::dvw::{
             import::MatchIssue,
             model::Skill,
-            translate::{Issue, TranslateError},
+            translate::{Issue, TranslateError, Untranslatable},
         };
         use crate::localization::labels;
-        use crate::shapes::enums::LanguageEnum;
+        use crate::shapes::{
+            enums::{EventTypeEnum, LanguageEnum},
+            refusal::Refusal,
+        };
         let (en, it) = (labels(LanguageEnum::En), labels(LanguageEnum::It));
         let conflict = TeamIssue::PlayerConflict {
             number: 7,
@@ -486,8 +489,11 @@ mod tests {
         };
         for (issue, text) in [
             (
-                set(Some(761), Issue::Untranslatable("our touch after the end")),
-                "set 2, line 761: a rally that can't be translated exactly (our touch after the end)",
+                set(
+                    Some(761),
+                    Issue::Untranslatable(Untranslatable::OurTouchAfterTheEnd),
+                ),
+                "set 2, line 761: a touch of ours after the point",
             ),
             (
                 set(None, Issue::NoLibero),
@@ -528,6 +534,80 @@ mod tests {
         ] {
             assert_eq!(issue.describe(en), text);
         }
+        // the issues of two files of Cortona: in the language of the app,
+        // the players by number
+        for (issue, text) in [
+            (
+                set(
+                    Some(728),
+                    Issue::Untranslatable(Untranslatable::LiberoForWhom(vec![4, 5])),
+                ),
+                "set 2, riga 728: il libero può sostituire il numero 4 o 5: il file non dice quale",
+            ),
+            (
+                set(
+                    Some(1279),
+                    Issue::Refused {
+                        event: EventTypeEnum::D,
+                        refusal: Refusal::NotOnCourt(23),
+                    },
+                ),
+                "set 2, riga 1279: difesa: il numero 23 non è in campo",
+            ),
+            (
+                set(
+                    Some(40),
+                    Issue::Refused {
+                        event: EventTypeEnum::R,
+                        refusal: Refusal::OnlyReplacedBy { replaced: 9, by: 4 },
+                    },
+                ),
+                "set 2, riga 40: sostituzione: il numero 9 può uscire solo per il numero 4",
+            ),
+            (
+                set(
+                    Some(51),
+                    Issue::Refused {
+                        event: EventTypeEnum::A,
+                        refusal: Refusal::MissingPlayer,
+                    },
+                ),
+                "set 2, riga 51: attacco: un evento sbagliato dall'importazione, non dal file: segnalacelo",
+            ),
+        ] {
+            assert_eq!(issue.describe(it), text);
+        }
+    }
+
+    /// A file that can't be read, said in the language of the app: no
+    /// detail in English.
+    #[test]
+    fn the_unreadable_files_described() {
+        use crate::dvw::{DvwError, Field, parse};
+        use crate::localization::labels;
+        use crate::shapes::enums::LanguageEnum;
+        let it = labels(LanguageEnum::It);
+        for (error, text) in [
+            (
+                DvwError::NotDvw,
+                "il file non si legge come DataVolley (non è un file DataVolley)",
+            ),
+            (
+                DvwError::MissingSection("[3SCOUT]"),
+                "il file non si legge come DataVolley (manca la sezione [3SCOUT])",
+            ),
+            (
+                DvwError::Invalid {
+                    line: 7,
+                    field: Field::Score,
+                    text: "25-x".to_string(),
+                },
+                "il file non si legge come DataVolley (riga 7: punteggio non riconosciuto: 25-x)",
+            ),
+        ] {
+            assert_eq!(error.describe(it), text);
+        }
+        assert_eq!(parse(b"nothing"), Err(DvwError::NotDvw));
     }
 }
 

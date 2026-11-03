@@ -7,7 +7,7 @@ use crate::{
     constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
     dvw::{
         model::{DvwFile, DvwRole, MatchDate, Player, Side},
-        translate::{Issue, Mappings, TranslateError, Us, translate_set},
+        translate::{Issue, Mappings, TranslateError, Untranslatable, Us, translate_set},
     },
     errors::{AppError, MatchError},
     localization::Labels,
@@ -19,9 +19,10 @@ use crate::{
     },
     shapes::{
         country::CountryCode,
-        enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
+        enums::{FriendlyName, GenderEnum, RoleEnum, TeamClassificationEnum},
         r#match::{MatchEntry, MatchSource},
         player::PlayerEntry,
+        refusal::Refusal,
         set::ReplayIssue,
         team::TeamEntry,
     },
@@ -562,8 +563,8 @@ impl MatchIssue {
     }
 }
 
-// why a set doesn't translate; the technical detail, in English, kept for
-// the cases the scout has to look into the file
+// why a set doesn't translate, in the language of the app; the technical
+// detail, in English, only for an event refused for a reason of ours
 fn reason(issue: &Issue, labels: &Labels) -> String {
     match issue {
         Issue::NoSet => labels.dvw_no_set.to_string(),
@@ -578,12 +579,75 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
         Issue::Ending { skill, evaluation } => labels
             .dvw_ending
             .replace("{code}", &format!("{}{evaluation}", skill.code())),
-        Issue::Untranslatable(detail) => labels.dvw_untranslatable.replace("{detail}", detail),
+        Issue::Untranslatable(what) => untranslatable(what, labels),
+        Issue::Refused { event, refusal } => labels
+            .dvw_refused
+            .replace("{event}", event.friendly_name(labels))
+            .replace("{reason}", &refused(refusal, labels)),
         Issue::Event(detail) => labels.dvw_event.replace("{detail}", detail),
         Issue::Score { file, ours } => labels
             .dvw_score
             .replace("{file}", &score(*file))
             .replace("{ours}", &score(*ours)),
         Issue::Unfinished => labels.dvw_set_unfinished.to_string(),
+    }
+}
+
+fn untranslatable(what: &Untranslatable, labels: &Labels) -> String {
+    use Untranslatable::*;
+    match what {
+        SubstitutionInRally => labels.dvw_substitution_in_rally.to_string(),
+        SetterChangeInRally => labels.dvw_setter_change_in_rally.to_string(),
+        TheirTouchAfterTheEnd => labels.dvw_their_touch_after_end.to_string(),
+        OurTouchAfterTheEnd => labels.dvw_our_touch_after_end.to_string(),
+        PointWithoutCause => labels.dvw_point_without_cause.to_string(),
+        LiberoTooLate => labels.dvw_libero_too_late.to_string(),
+        LiberoForNobody => labels.dvw_libero_for_nobody.to_string(),
+        LiberoForWhom(numbers) => labels.dvw_libero_for_whom.replace(
+            "{numbers}",
+            &numbers
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(labels.dvw_or),
+        ),
+        OurTouchWithoutPlayer => labels.dvw_our_touch_without_player.to_string(),
+        TheirAttackBackWithoutOurBlock => labels.dvw_their_attack_back_without_block.to_string(),
+        TheirAttackBlockedWithoutOurBlock => {
+            labels.dvw_their_attack_blocked_without_block.to_string()
+        }
+        UnknownEvaluation(code) => labels
+            .dvw_unknown_evaluation
+            .replace("{code}", &code.to_string()),
+    }
+}
+
+fn refused(refusal: &Refusal<u8>, labels: &Labels) -> String {
+    use Refusal::*;
+    let of = |template: &str, number: &u8| template.replace("{number}", &number.to_string());
+    match refusal {
+        SetOver => labels.dvw_refused_set_over.to_string(),
+        NotNow { .. } => labels.dvw_refused_not_now.to_string(),
+        NotOnCourt(n) => of(labels.dvw_refused_not_on_court, n),
+        Libero(n) => of(labels.dvw_refused_libero, n),
+        BackRowBlock(n) => of(labels.dvw_refused_back_row_block, n),
+        NotServing(n) => of(labels.dvw_refused_not_serving, n),
+        CantComeIn(n) => of(labels.dvw_refused_cant_come_in, n),
+        AlreadyReplaced(n) => of(labels.dvw_refused_already_replaced, n),
+        AlreadyReplacement(n) => of(labels.dvw_refused_already_replacement, n),
+        LiberoReplaced => labels.dvw_refused_libero_replaced.to_string(),
+        MaxSubstitutions => labels.dvw_refused_max_substitutions.to_string(),
+        OnlyReplacedBy { replaced, by } => {
+            of(labels.dvw_refused_only_replaced_by, replaced).replace("{by}", &by.to_string())
+        }
+        // the events of the translation, not of the file
+        MissingEvaluation
+        | EvaluationNotAllowed(_)
+        | UnexpectedEvaluation
+        | TechniqueNotAllowed(_)
+        | MissingPlayer
+        | UnexpectedPlayer
+        | MissingReplacement
+        | UnexpectedReplacement => labels.dvw_refused_invalid.to_string(),
     }
 }

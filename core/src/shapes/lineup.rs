@@ -3,6 +3,7 @@ use crate::{
     shapes::{
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum},
         player::PlayerEntry,
+        refusal::Refusal,
         snapshot::EventEntry,
         team::TeamEntry,
     },
@@ -726,46 +727,40 @@ impl Lineup {
         self.find_position(player_id).is_some() || self.is_out_for_the_libero(player_id)
     }
 
+    /// Why the substitution of a player in the game breaks the rules: out
+    /// or in once already, the libero, the substitutions used up, the one
+    /// who came in going out for another than the one they replaced.
+    pub fn substitution_refusal(&self, replaced: &Uuid, replacement: &Uuid) -> Option<Refusal> {
+        let enforced = self.get_enforced_replacement(replaced);
+        match (
+            self.was_player_already_replaced(replaced),
+            self.was_player_already_used(replacement),
+            self.get_current_libero() == *replaced,
+            self.was_max_number_of_substitutions_reached(),
+            enforced,
+        ) {
+            (true, _, _, _, _) => Some(Refusal::AlreadyReplaced(*replaced)),
+            (_, true, _, _, _) => Some(Refusal::AlreadyReplacement(*replacement)),
+            (_, _, true, _, _) => Some(Refusal::LiberoReplaced),
+            (_, _, _, true, _) => Some(Refusal::MaxSubstitutions),
+            (_, _, _, _, Some(by)) if by != *replacement => Some(Refusal::OnlyReplacedBy {
+                replaced: *replaced,
+                by,
+            }),
+            _ => None,
+        }
+    }
+
     pub fn add_substitution(
         &mut self,
         replaced: &Uuid,
         replacement: &Uuid,
     ) -> Result<(), AppError> {
         if self.is_in_the_game(replaced) {
-            // check if already replaced previously
-            if self.was_player_already_replaced(replaced) {
-                return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
-                    "player {:?} was already replaced",
-                    replaced
-                ))));
-            }
-            // check if the replacement was already used
-            if self.was_player_already_used(replacement) {
-                return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
-                    "player {:?} was already a replacement",
-                    replacement
-                ))));
-            }
-            // libero cannot be replaced
-            if self.get_current_libero() == *replaced {
+            if let Some(refusal) = self.substitution_refusal(replaced, replacement) {
                 return Err(AppError::Snapshot(SnapshotError::LineupError(
-                    "cannot replace the libero player".to_string(),
+                    refusal.to_string(),
                 )));
-            }
-            // check if max substitutions count was reached
-            if self.was_max_number_of_substitutions_reached() {
-                return Err(AppError::Snapshot(SnapshotError::LineupError(
-                    "max number of substitutions was reached".to_string(),
-                )));
-            }
-            // closed change
-            if let Some(enforced) = self.get_enforced_replacement(replaced)
-                && enforced != *replacement
-            {
-                return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
-                    "player {:?} can be only replaced by player {:?}",
-                    replaced, enforced,
-                ))));
             }
 
             // on court, or in the place of the player out for the libero:

@@ -6,6 +6,7 @@ pub mod lineup;
 pub mod listed;
 pub mod r#match;
 pub mod player;
+pub mod refusal;
 pub mod set;
 pub mod snapshot;
 pub mod stats;

@@ -17,6 +17,7 @@ use crate::dvw::{
     model::DvwFile,
     scout::scout_lines,
 };
+use crate::localization::Labels;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -26,8 +27,43 @@ pub enum DvwError {
     NotDvw,
     #[error("missing section {0}")]
     MissingSection(&'static str),
-    #[error("line {line}: {reason}")]
-    Invalid { line: usize, reason: String },
+    /// A field not recognized, as the file writes it.
+    #[error("line {line}: unknown {field:?} '{text}'")]
+    Invalid {
+        line: usize,
+        field: Field,
+        text: String,
+    },
+}
+
+/// The fields of the file that the import reads strictly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Date,
+    Score,
+    PlayerNumber,
+    WinningSymbols,
+}
+
+impl DvwError {
+    /// Why the file can't be read, in the language of the app.
+    pub fn describe(&self, labels: &Labels) -> String {
+        let detail = match self {
+            DvwError::NotDvw => labels.dvw_not_dvw.to_string(),
+            DvwError::MissingSection(section) => {
+                labels.dvw_missing_section.replace("{section}", section)
+            }
+            DvwError::Invalid { line, field, text } => match field {
+                Field::Date => labels.dvw_invalid_date,
+                Field::Score => labels.dvw_invalid_score,
+                Field::PlayerNumber => labels.dvw_invalid_player_number,
+                Field::WinningSymbols => labels.dvw_invalid_winning_symbols,
+            }
+            .replace("{line}", &line.to_string())
+            .replace("{text}", text),
+        };
+        labels.dvw_unreadable.replace("{detail}", &detail)
+    }
 }
 
 /// Reads a file, as it's written: the meaning of the codes is up to the
