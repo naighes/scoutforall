@@ -254,6 +254,7 @@
     <string name="tutorial_attack_dug">La difendono e attaccano: tocca −.</string>
     <string name="tutorial_their_freeball">La rimandano facile, una freeball: tocca Free loro.</string>
     <string name="tutorial_opposite_again">Attacca ancora Egonu: tocca il suo nome.</string>
+    <string name="tutorial_attack_event">Tocca Attacco.</string>
     <string name="tutorial_their_error">Il loro attacco finisce fuori: tocca Errore loro. 2–0.</string>
     <string name="tutorial_lineup_menu">Ora un doppio cambio. I cambi di formazione sono nella mezzaluna: tocca la mezzaluna.</string>
     <string name="tutorial_substitution">Tocca Sostituzione.</string>

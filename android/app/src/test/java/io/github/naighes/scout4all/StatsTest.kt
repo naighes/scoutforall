@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
 import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -65,8 +66,10 @@ class ZoneAttacksLanguageTest(private val language: String, private val count: S
         core { c ->
             val egonu = c.team(team).players.first { it.name == "Paola Egonu" }.id
             c.scouting(team, match).use { s ->
-                // she can only attack: straight to the evaluation
+                // in the front row she may attack or block the ball
+                // coming over
                 s.choosePlayerFirst(egonu)
+                s.chooseEvent(EventTypeEnum.A)
                 s.chooseEval(EvalEnum.PERFECT)
             }
         }

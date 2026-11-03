@@ -255,6 +255,7 @@
     <string name="tutorial_attack_dug">They dig it and attack: tap −.</string>
     <string name="tutorial_their_freeball">They send it back easy, a freeball: tap Their free.</string>
     <string name="tutorial_opposite_again">Egonu attacks again: tap her name.</string>
+    <string name="tutorial_attack_event">Tap Attack.</string>
     <string name="tutorial_their_error">Their attack goes out: tap Their error. 2–0.</string>
     <string name="tutorial_lineup_menu">Now a double substitution. The changes of the lineup are in the half moon: tap the half moon.</string>
     <string name="tutorial_substitution">Tap Sub.</string>

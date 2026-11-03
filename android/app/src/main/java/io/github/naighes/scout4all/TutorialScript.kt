@@ -99,7 +99,9 @@ private val rallies = listOf(
     touch("player:18", R.string.tutorial_opposite),
     touch("eval:POSITIVE", R.string.tutorial_attack_kept),
     touch("event:OF", R.string.tutorial_their_freeball),
+    // in the front row after their freeball she may attack or block
     touch("player:18", R.string.tutorial_opposite_again),
+    touch("event:A", R.string.tutorial_attack_event),
     touch("eval:NEGATIVE", R.string.tutorial_attack_dug),
     touch("event:OE", R.string.tutorial_their_error),
 )

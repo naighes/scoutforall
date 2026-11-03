@@ -253,6 +253,7 @@
     <string name="tutorial_attack_dug">相手が拾って攻撃:− をタップ。</string>
     <string name="tutorial_their_freeball">相手がフリーボールで返球:「相手のフリー」をタップ。</string>
     <string name="tutorial_opposite_again">再びエゴヌがアタック:名前をタップ。</string>
+    <string name="tutorial_attack_event">「アタック」をタップ。</string>
     <string name="tutorial_their_error">相手のアタックがアウト:「相手のミス」をタップ。2–0。</string>
     <string name="tutorial_lineup_menu">次はダブルチェンジ。メンバー変更は半月のボタンにあります:半月をタップ。</string>
     <string name="tutorial_substitution">「交代」をタップ。</string>

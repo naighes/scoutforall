@@ -254,6 +254,7 @@
     <string name="tutorial_attack_dug">Elas defendem e atacam: toque em −.</string>
     <string name="tutorial_their_freeball">Elas devolvem fácil, uma bola de graça: toque em Bola de graça deles.</string>
     <string name="tutorial_opposite_again">Egonu ataca de novo: toque no nome dela.</string>
+    <string name="tutorial_attack_event">Toque em Ataque.</string>
     <string name="tutorial_their_error">O ataque delas sai: toque em Erro deles. 2–0.</string>
     <string name="tutorial_lineup_menu">Agora uma dupla substituição. As mudanças de escalação estão na meia-lua: toque na meia-lua.</string>
     <string name="tutorial_substitution">Toque em Subst.</string>

@@ -256,6 +256,7 @@
     <string name="tutorial_attack_dug">One bronią i atakują: dotknij −.</string>
     <string name="tutorial_their_freeball">Odbijają łatwo, wolna piłka: dotknij Wolna rywala.</string>
     <string name="tutorial_opposite_again">Znowu atakuje Egonu: dotknij jej nazwiska.</string>
+    <string name="tutorial_attack_event">Dotknij Atak.</string>
     <string name="tutorial_their_error">Ich atak w aut: dotknij Błąd rywala. 2–0.</string>
     <string name="tutorial_lineup_menu">Teraz podwójna zmiana. Zmiany składu są w półksiężycu: dotknij półksiężyca.</string>
     <string name="tutorial_substitution">Dotknij Zmiana.</string>
