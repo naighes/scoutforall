@@ -81,6 +81,7 @@ mod tests {
     /// A match with 2 substitutions in the first set and 4 in the second.
     fn played() -> MatchEntry {
         MatchEntry {
+            source: Default::default(),
             opponent: "Arezzo".into(),
             date: date(),
             id: "2026-10-24_arezzo".into(),

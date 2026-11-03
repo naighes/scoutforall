@@ -48,6 +48,27 @@ pub struct MatchEntry {
     pub roster: Vec<Uuid>,
     #[serde(skip_serializing, skip_deserializing)]
     pub sets: Vec<SetEntry>,
+    // since v0.12, written only for the matches not scouted here: the older
+    // versions ignore it
+    #[serde(default, skip_serializing_if = "MatchSource::is_scouted")]
+    pub source: MatchSource,
+}
+
+/// Where the events of a match come from.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MatchSource {
+    /// scouted with this application
+    #[default]
+    Scout4all,
+    /// imported from a DataVolley file
+    Dvw,
+}
+
+impl MatchSource {
+    pub fn is_scouted(&self) -> bool {
+        *self == MatchSource::Scout4all
+    }
 }
 
 fn legacy_max_substitutions() -> u8 {
@@ -143,6 +164,18 @@ impl MatchEntry {
                             .iter()
                             .flat_map(|e| e.player.into_iter().chain(e.target_player)),
                     )
+            })
+            .collect()
+    }
+
+    /// The score of each set, ours first, in the order of the sets.
+    pub fn set_scores(&self) -> Result<Vec<(u8, u8)>, AppError> {
+        let mut sets: Vec<&SetEntry> = self.sets.iter().collect();
+        sets.sort_by_key(|s| s.set_number);
+        sets.into_iter()
+            .map(|s| {
+                s.compute_snapshot(self.max_substitutions)
+                    .map(|snapshot| (snapshot.score_us, snapshot.score_them))
             })
             .collect()
     }

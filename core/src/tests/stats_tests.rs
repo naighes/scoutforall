@@ -2403,6 +2403,7 @@ mod tests {
             ],
         };
         let m = MatchEntry {
+            source: Default::default(),
             roster: vec![],
             opponent: "them".to_string(),
             date: Utc::now().fixed_offset(),
@@ -2458,6 +2459,7 @@ mod tests {
             events: vec![act(P, t.libero, Positive), opp(OE), opp(OE)],
         };
         let m = MatchEntry {
+            source: Default::default(),
             roster: vec![],
             opponent: "them".to_string(),
             date: Utc::now().fixed_offset(),

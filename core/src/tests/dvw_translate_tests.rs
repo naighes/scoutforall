@@ -1008,6 +1008,7 @@ mod tests {
                 },
                 team_reader::TeamReader,
             },
+            shapes::r#match::MatchSource,
             storage::{Store, layout, memory::MemoryStore},
         };
         use std::sync::{Arc, Mutex};
@@ -1124,7 +1125,50 @@ mod tests {
                 assert_eq!(read.events.len(), planned.events.len());
             }
             assert!(read.get_status().expect("a status").match_finished);
+            assert_eq!(read.source, MatchSource::Dvw);
             assert_eq!(p.queued(), vec![(team.team.id, saved.id)]);
+        }
+
+        /// The match exported and imported on another device: still
+        /// imported from DataVolley.
+        #[tokio::test]
+        async fn an_imported_match_stays_one_through_the_archives() {
+            let p = Providers::new();
+            let (team, plan) =
+                planned_for(&three_sets_won().text(), Side::Home, new_team()).expect("a match");
+            let saved = p.save(&team, &plan, false).await.expect("saved");
+            let team_zip = crate::archive::export_team(&*p.store, &team.team.id)
+                .await
+                .expect("the team archive");
+            let match_zip = crate::archive::export_match(&*p.store, &team.team.id, &saved.id)
+                .await
+                .expect("the match archive");
+            let other = Providers::new();
+            let imported_team = crate::archive::import_team(
+                &team_zip,
+                Some(team.team.id),
+                &other.team_reader,
+                &other.team_writer,
+                crate::tests::EN,
+            )
+            .await
+            .expect("the team imported");
+            let imported = crate::archive::import_match(
+                &match_zip,
+                &imported_team,
+                &other.match_reader,
+                &other.match_writer,
+                &other.set_writer,
+                crate::tests::EN,
+            )
+            .await
+            .expect("the match imported");
+            let read = other
+                .match_reader
+                .read_single(&imported_team, &imported.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.source, MatchSource::Dvw);
         }
 
         /// The match saved already and the user not confirming: nothing
@@ -1197,6 +1241,7 @@ mod tests {
             assert_eq!(read.sets.len(), 3);
             let status = read.get_status().expect("a status");
             assert_eq!((status.us_wins, status.them_wins), (3, 0));
+            assert_eq!(read.source, MatchSource::Dvw);
             for set_number in [4, 5] {
                 for key in [
                     layout::set_descriptor(&saved_team.id, &saved.id, set_number),

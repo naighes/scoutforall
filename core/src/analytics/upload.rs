@@ -9,7 +9,7 @@ use crate::{
     shapes::{
         country::CountryCode,
         enums::{GenderEnum, TeamClassificationEnum},
-        r#match::MatchEntry,
+        r#match::{MatchEntry, MatchSource},
     },
     storage::{Store, layout},
     util::config_var,
@@ -33,6 +33,43 @@ use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 #[derive(Debug, Serialize)]
 pub struct UploadRequest {
     pub filename: String,
+    /// for the keys of the match, when its team has gender and country
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
+    pub match_keys: Option<KeysRequest>,
+}
+
+/// What the API needs for the keys of a match: the names leave the device
+/// for this only, and the API keeps nothing.
+#[derive(Debug, Serialize)]
+pub struct KeysRequest {
+    pub team: KeysTeam,
+    pub opponent: KeysOpponent,
+    /// the day of the match, `YYYY-MM-DD`
+    pub date: String,
+    /// the score of each set, ours first
+    pub sets: Vec<(u8, u8)>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct KeysTeam {
+    pub name: String,
+    pub country: String,
+    pub gender: String,
+    pub year: u16,
+}
+
+#[derive(Debug, Serialize)]
+pub struct KeysOpponent {
+    pub name: String,
+}
+
+/// The keys the API gives back: the same team, and the same match, have
+/// the same keys among the uploads of different clients.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MatchKeys {
+    pub team_key: String,
+    pub opponent_key: String,
+    pub match_key: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -47,6 +84,31 @@ pub struct MatchMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<CountryCode>,
     pub max_substitutions: u8,
+    /// since v0.12
+    pub source: MatchSource,
+    /// since v0.12, when the API gave them
+    #[serde(default, flatten, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<MatchKeys>,
+}
+
+/// The request of the keys of `m`: none when its team lacks gender or
+/// country, or a set doesn't replay.
+pub(crate) fn keys_request(m: &MatchEntry) -> Option<KeysRequest> {
+    let (country, gender) = (m.team.country?, m.team.gender?);
+    let sets = m.set_scores().ok().filter(|s| !s.is_empty())?;
+    Some(KeysRequest {
+        team: KeysTeam {
+            name: m.team.name.clone(),
+            country: country.to_string(),
+            gender: gender.to_string(),
+            year: m.team.year,
+        },
+        opponent: KeysOpponent {
+            name: m.opponent.clone(),
+        },
+        date: m.date.format("%Y-%m-%d").to_string(),
+        sets,
+    })
 }
 
 // generate a deterministic UUID v5 from team_id and match_id
@@ -124,6 +186,7 @@ async fn upload_to_signed_url(signed_url: &str, archive: Vec<u8>) -> Result<(), 
 pub(crate) async fn create_match_archive(
     m: &MatchEntry,
     store: &dyn Store,
+    keys: Option<MatchKeys>,
 ) -> Result<Vec<u8>, AppError> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let metadata = MatchMetadata {
@@ -135,6 +198,8 @@ pub(crate) async fn create_match_archive(
         classification: m.team.classification,
         country: m.team.country,
         max_substitutions: m.max_substitutions,
+        source: m.source,
+        keys,
     };
     let metadata_json = to_string_pretty(&metadata).map_err(|e| AppError::IO(IOError::from(e)))?;
     let set_files = m.sets.iter().flat_map(|set| {
@@ -175,12 +240,19 @@ pub fn upload_url() -> Option<String> {
     config_var("ANALYTICS_UPLOAD_URL", option_env!("ANALYTICS_UPLOAD_URL"))
 }
 
-// retrieve signed URL for sending analytics data
-async fn get_signed_url(m: &MatchEntry, upload_url: &str) -> Result<(String, Uuid), AppError> {
+// retrieve signed URL for sending analytics data, and the keys of the match
+// when asked
+async fn get_signed_url(
+    m: &MatchEntry,
+    upload_url: &str,
+) -> Result<(String, Option<MatchKeys>), AppError> {
     let client = http_client()?;
     let uuid = generate_upload_id(m.team.id, m.id.as_str());
+    let match_keys = keys_request(m);
+    let asked = match_keys.is_some();
     let payload = UploadRequest {
         filename: format!("{}.zip", uuid),
+        match_keys,
     };
     let response = client
         .post(upload_url)
@@ -210,7 +282,19 @@ async fn get_signed_url(m: &MatchEntry, upload_url: &str) -> Result<(String, Uui
             )
             .as_str(),
         );
-        Ok((signed_url, uuid))
+        // keys asked and not given (an API not updated yet): the match
+        // goes without, as before
+        let keys = match asked {
+            true => response.json::<MatchKeys>().await.map_or_else(
+                |e| {
+                    log_error(&format!("no keys for file '{uuid}.zip': {e}"));
+                    None
+                },
+                Some,
+            ),
+            false => None,
+        };
+        Ok((signed_url, keys))
     }
 }
 
@@ -341,6 +425,6 @@ async fn process_single_upload(
     store: &dyn Store,
     upload_url: &str,
 ) -> Result<(), AppError> {
-    let (signed_url, _) = get_signed_url(m, upload_url).await?;
-    upload_to_signed_url(&signed_url, create_match_archive(m, store).await?).await
+    let (signed_url, keys) = get_signed_url(m, upload_url).await?;
+    upload_to_signed_url(&signed_url, create_match_archive(m, store, keys).await?).await
 }

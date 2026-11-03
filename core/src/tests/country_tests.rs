@@ -207,7 +207,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let zip = create_match_archive(&m, &*store).await.unwrap();
+        let zip = create_match_archive(&m, &*store, None).await.unwrap();
         let mut archive = zip::ZipArchive::new(Cursor::new(zip)).unwrap();
         let mut content = String::new();
         archive

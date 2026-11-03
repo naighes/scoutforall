@@ -20,7 +20,10 @@ use crate::{
         team_writer::{TeamInput, TeamWriter},
     },
     shapes::{
-        r#match::MatchEntry, player::PlayerEntry, set::SetEntry, snapshot::EventEntry,
+        r#match::{MatchEntry, MatchSource},
+        player::PlayerEntry,
+        set::SetEntry,
+        snapshot::EventEntry,
         team::TeamEntry,
     },
     storage::{Store, StoreEntry, layout},
@@ -319,6 +322,11 @@ pub async fn import_match(
             roster,
         )
         .await?;
+    // an imported match exported, and imported again: still imported
+    let m = match archived.source {
+        MatchSource::Scout4all => m,
+        source => match_writer.save_source(&m, source).await?,
+    };
     for mut set in archived.sets {
         // the new descriptor has the substitutions, so the sets saved
         // without their rules, up to v0.3.0, save the ones they replay with

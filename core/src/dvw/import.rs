@@ -20,7 +20,7 @@ use crate::{
     shapes::{
         country::CountryCode,
         enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
-        r#match::MatchEntry,
+        r#match::{MatchEntry, MatchSource},
         player::PlayerEntry,
         set::ReplayIssue,
         team::TeamEntry,
@@ -424,6 +424,7 @@ pub fn match_plan(
         notes: String::new(),
         roster: team.roster.clone(),
         sets,
+        source: MatchSource::Dvw,
     };
     if let Some(issue) = entry.replay_issue() {
         return Err(MatchIssue::Replay(issue));
@@ -487,7 +488,7 @@ pub async fn save_import(
             }
         }
         false => {
-            match_writer
+            let created = match_writer
                 .create(
                     &saved_team,
                     entry.opponent.clone(),
@@ -497,7 +498,8 @@ pub async fn save_import(
                     entry.notes.clone(),
                     entry.roster.clone(),
                 )
-                .await?
+                .await?;
+            match_writer.save_source(&created, entry.source).await?
         }
     };
     for set_number in 1..=5u8 {

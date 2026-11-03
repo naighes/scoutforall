@@ -77,6 +77,7 @@ mod tests {
     #[test]
     fn report_shows_the_point_sequence() {
         let m = MatchEntry {
+            source: Default::default(),
             roster: vec![],
             opponent: "them".to_string(),
             date: Utc::now().fixed_offset(),
