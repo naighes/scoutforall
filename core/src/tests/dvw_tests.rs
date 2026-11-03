@@ -655,4 +655,205 @@ mod tests {
         }
         println!("\nmappings: {mappings:#?}");
     }
+
+    /// The statistics of the translated sets against the codes of the file,
+    /// as DataVolley counts them in its match report: per player of our
+    /// team, serve (total, errors, aces), reception (total, errors, `#`,
+    /// `+`), attack (total, errors, blocked, kills), block points. Every
+    /// difference is a translation to explain. `DVW_MATCH=MIL-1` prints the
+    /// table of that file, to compare with its report.
+    #[test]
+    #[ignore = "needs the MEVZA files: DVW_DIR=..."]
+    fn dvw_stats_probe() {
+        use crate::dvw::{
+            model::{DvwRole, MatchDate},
+            translate::{Us, translate_set},
+        };
+        use crate::shapes::{
+            enums::{EvalEnum, EventTypeEnum},
+            stats::StatsFilter,
+        };
+        use std::collections::{BTreeMap, HashMap};
+        const COLUMNS: [&str; 13] = [
+            "S", "S=", "S#", "R", "R=", "R#", "R+", "A", "A=", "A/", "A#", "B#", "B",
+        ];
+        let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
+        let only = std::env::var("DVW_MATCH").ok();
+        let mut paths = walk(std::path::Path::new(&dir));
+        paths.sort();
+        let mut cells = 0usize;
+        let mut totals = [0i64; 13];
+        let mut differences: BTreeMap<&str, (usize, i64, Vec<String>)> = BTreeMap::new();
+        for path in &paths {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if only
+                .as_ref()
+                .is_some_and(|m| !name.contains(&format!("{m}.dvw")))
+            {
+                continue;
+            }
+            let file = parse(&std::fs::read(path).unwrap()).unwrap();
+            let date = match file.match_info.date {
+                MatchDate::Known(d) | MatchDate::Ambiguous(d, _) => d,
+                MatchDate::Missing => date(2000, 1, 1),
+            };
+            for side in [Side::Home, Side::Visiting] {
+                let players: HashMap<u8, uuid::Uuid> = file
+                    .players(side)
+                    .iter()
+                    .map(|p| (p.number, uuid::Uuid::new_v4()))
+                    .collect();
+                let liberos: Vec<u8> = file
+                    .players(side)
+                    .iter()
+                    .filter(|p| p.libero || p.role == Some(DvwRole::Libero))
+                    .map(|p| p.number)
+                    .collect();
+                let us = Us {
+                    side,
+                    players: &players,
+                    liberos: &liberos,
+                };
+                // per number: the file's counts and ours, translated sets only
+                let mut theirs: BTreeMap<u8, [i64; 13]> = BTreeMap::new();
+                let mut ours: BTreeMap<u8, [i64; 13]> = BTreeMap::new();
+                let mut translated = 0;
+                for set in &file.sets {
+                    let Ok((entry, _)) = translate_set(&file, &us, set.set_number, date, 6) else {
+                        continue;
+                    };
+                    let Ok(snapshot) = entry.compute_snapshot(6) else {
+                        continue;
+                    };
+                    translated += 1;
+                    let stats = &snapshot.stats;
+                    for (number, id) in &players {
+                        let f = StatsFilter::new(None, None, Some(*id));
+                        let c = |t, e| stats.event_count(t, e, &f) as i64;
+                        use EvalEnum::*;
+                        use EventTypeEnum::*;
+                        let row = [
+                            c(S, None),
+                            c(S, Some(Error)),
+                            c(S, Some(Perfect)),
+                            c(P, None),
+                            c(P, Some(Error)),
+                            c(P, Some(Perfect)),
+                            c(P, Some(Positive)),
+                            c(A, None),
+                            c(A, Some(Error)),
+                            c(A, Some(Over)),
+                            c(A, Some(Perfect)),
+                            c(B, Some(Perfect)),
+                            c(B, None),
+                        ];
+                        let o = ours.entry(*number).or_default();
+                        for (a, b) in o.iter_mut().zip(row) {
+                            *a += b;
+                        }
+                    }
+                    for line in file
+                        .scout
+                        .iter()
+                        .filter(|l| l.set_number == Some(set.set_number))
+                    {
+                        let Code::Skill(s, code) = &line.code else {
+                            continue;
+                        };
+                        let (true, Some(number)) = (*s == side, code.player) else {
+                            continue;
+                        };
+                        let e = code.evaluation;
+                        let row = theirs.entry(number).or_default();
+                        let mut add = |i: usize| row[i] += 1;
+                        match code.skill {
+                            Skill::Serve => {
+                                add(0);
+                                if e == '=' {
+                                    add(1)
+                                }
+                                if e == '#' {
+                                    add(2)
+                                }
+                            }
+                            Skill::Reception => {
+                                add(3);
+                                if e == '=' {
+                                    add(4)
+                                }
+                                if e == '#' {
+                                    add(5)
+                                }
+                                if e == '+' {
+                                    add(6)
+                                }
+                            }
+                            Skill::Attack => {
+                                add(7);
+                                if e == '=' {
+                                    add(8)
+                                }
+                                if e == '/' {
+                                    add(9)
+                                }
+                                if e == '#' {
+                                    add(10)
+                                }
+                            }
+                            Skill::Block => {
+                                add(12);
+                                if e == '#' {
+                                    add(11)
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if only.is_some() {
+                    println!(
+                        "\n{name} {side:?}, sets translated {translated} of {}\n  #  {}",
+                        file.sets.len(),
+                        COLUMNS.join("\t")
+                    );
+                }
+                for (number, mine) in &ours {
+                    let file_row = theirs.get(number).copied().unwrap_or_default();
+                    if only.is_some() {
+                        let show: Vec<String> = mine
+                            .iter()
+                            .zip(file_row)
+                            .map(|(a, b)| match a == &b {
+                                true => a.to_string(),
+                                false => format!("{a}≠{b}"),
+                            })
+                            .collect();
+                        println!("{number:3}  {}", show.join("\t"));
+                    }
+                    for (i, (a, b)) in mine.iter().zip(file_row).enumerate() {
+                        cells += 1;
+                        totals[i] += b;
+                        if *a != b {
+                            let d = differences.entry(COLUMNS[i]).or_default();
+                            d.0 += 1;
+                            d.1 += a - b;
+                            if d.2.len() < 5 {
+                                d.2.push(format!("{name} {side:?} #{number}: ours {a}, file {b}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let named: Vec<String> = COLUMNS
+            .iter()
+            .zip(totals)
+            .map(|(c, t)| format!("{c} {t}"))
+            .collect();
+        println!("\nthe file, translated sets: {}", named.join(", "));
+        println!("\n{cells} cells; differing (cells, ours minus file, examples):");
+        for (column, (count, sum, examples)) in differences {
+            println!("{column:3} {count:5} {sum:+6}  {}", examples.join("; "));
+        }
+    }
 }
