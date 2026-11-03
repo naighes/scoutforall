@@ -290,7 +290,13 @@ async fn get_signed_url(
                     log_error(&format!("no keys for file '{uuid}.zip': {e}"));
                     None
                 },
-                Some,
+                |keys| {
+                    log_info(&format!(
+                        "keys for file '{uuid}.zip': match {}",
+                        keys.match_key
+                    ));
+                    Some(keys)
+                },
             ),
             false => None,
         };
