@@ -6,7 +6,7 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use chrono::{DateTime, FixedOffset, Local};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate};
 use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
@@ -16,6 +16,15 @@ use scout4all_core::{
     archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
     detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
+    dvw::{
+        self,
+        import::{
+            MatchPlan, TeamChoice as DvwTeamChoice, TeamPlan, default_max_substitutions,
+            match_date, match_exists, match_plan, save_import, season_year, similar_teams,
+            team_plan,
+        },
+        model::{DvwFile, MatchDate as DvwDate, Side},
+    },
     errors::{AppError, IOError},
     event_edit::{EditField, EventEdit},
     example,
@@ -535,6 +544,86 @@ pub const RECENT_MATCHES: usize = 5;
 pub struct ExportedArchive {
     pub file_name: String,
     pub bytes: Vec<u8>,
+}
+
+/// A team of a DataVolley file: the one playing at home or the visiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum DvwSide {
+    Home,
+    Visiting,
+}
+
+impl From<DvwSide> for Side {
+    fn from(side: DvwSide) -> Self {
+        match side {
+            DvwSide::Home => Side::Home,
+            DvwSide::Visiting => Side::Visiting,
+        }
+    }
+}
+
+/// The final score of a set of a DataVolley file.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwSetScore {
+    pub home: u8,
+    pub visiting: u8,
+}
+
+/// What a DataVolley file holds, to choose what to import.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwPreview {
+    pub home: String,
+    pub visiting: String,
+    /// The day of the match, `YYYY-MM-DD`: one when the file tells it, two
+    /// when it reads two ways (day first, then month first), none when it
+    /// has none: the user chooses or writes it.
+    pub days: Vec<String>,
+    /// The first year of the season, when it can be told.
+    pub season: Option<u16>,
+    pub sets: Vec<DvwSetScore>,
+}
+
+/// A team of ours like the one of the file, and why.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwSimilarTeam {
+    pub id: String,
+    pub name: String,
+    pub year: u16,
+    pub same_name: bool,
+    /// the players of the file found in the team, of `players`
+    pub same_players: u32,
+    pub players: u32,
+}
+
+/// How a team of a DataVolley file is imported, as the user chose.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct DvwChoice {
+    pub side: DvwSide,
+    /// `YYYY-MM-DD`
+    pub day: String,
+    pub max_substitutions: u8,
+    /// The team of ours it goes into; a new team when none.
+    pub team_id: Option<String>,
+    /// Of the new team.
+    pub gender: Option<GenderEnum>,
+    pub country: Option<CountryCode>,
+}
+
+/// The import checked, ready to save.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwReady {
+    pub team: String,
+    pub sets: u32,
+    pub new_players: u32,
+    /// The team has the match already: saved only when the user confirms.
+    pub saved_already: bool,
+}
+
+/// What an import saved.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwImported {
+    pub team_id: String,
+    pub match_id: String,
 }
 
 /// A team a match may be imported into.
@@ -2889,6 +2978,98 @@ impl Scout4All {
         Ok(team.id.to_string())
     }
 
+    /// What the DataVolley file holds.
+    pub fn preview_dvw(&self, bytes: Vec<u8>) -> Result<DvwPreview, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let day = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+        Ok(DvwPreview {
+            home: file.home.name.trim().to_string(),
+            visiting: file.visiting.name.trim().to_string(),
+            days: match file.match_info.date {
+                DvwDate::Known(d) => vec![day(d)],
+                DvwDate::Ambiguous(a, b) => vec![day(a), day(b)],
+                DvwDate::Missing => vec![],
+            },
+            season: season_year(&file),
+            sets: file
+                .sets
+                .iter()
+                .map(|s| DvwSetScore {
+                    home: s.final_score.0,
+                    visiting: s.final_score.1,
+                })
+                .collect(),
+        })
+    }
+
+    /// The substitutions per set proposed for a match of the day
+    /// (`YYYY-MM-DD`, none when not known): the rules of the time.
+    pub fn dvw_max_substitutions(&self, day: Option<String>) -> u8 {
+        default_max_substitutions(day.as_deref().and_then(|d| parse_day(d).ok()))
+    }
+
+    /// Our teams like the one of the side, the most alike first.
+    pub fn dvw_similar_teams(
+        &self,
+        bytes: Vec<u8>,
+        side: DvwSide,
+    ) -> Result<Vec<DvwSimilarTeam>, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let teams = self.readable_teams()?;
+        Ok(similar_teams(&file, side.into(), &teams)
+            .into_iter()
+            .map(|s| DvwSimilarTeam {
+                id: s.team.id.to_string(),
+                name: s.team.name.clone(),
+                year: s.team.year,
+                same_name: s.same_name,
+                same_players: count_of(s.same_players),
+                players: count_of(s.players),
+            })
+            .collect())
+    }
+
+    /// The import as chosen, checked: what it saves, or why it can't.
+    pub fn plan_dvw(&self, bytes: Vec<u8>, choice: DvwChoice) -> Result<DvwReady, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let saved_already = self
+            .runtime
+            .block_on(match_exists(&plan, &self.match_reader))?;
+        Ok(DvwReady {
+            team: team.team.name.clone(),
+            sets: count_of(plan.entry.sets.len()),
+            new_players: count_of(team.new_players.len()),
+            saved_already,
+        })
+    }
+
+    /// Saves the import as chosen; a match saved already only when
+    /// `overwrite`.
+    pub fn import_dvw(
+        &self,
+        bytes: Vec<u8>,
+        choice: DvwChoice,
+        overwrite: bool,
+    ) -> Result<DvwImported, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let m = self.runtime.block_on(save_import(
+            &team,
+            &plan,
+            overwrite,
+            &self.team_writer,
+            &self.match_reader,
+            &self.match_writer,
+            &*self.set_writer,
+            &*self.finished_matches(),
+        ))?;
+        Ok(DvwImported {
+            team_id: team.team.id.to_string(),
+            match_id: m.id,
+        })
+    }
+
     /// Adds the match of the archive to the team; its id.
     pub fn import_match(&self, bytes: Vec<u8>, team_id: String) -> Result<String, MobileError> {
         let team = self.read_team(&team_id)?;
@@ -3234,6 +3415,46 @@ impl Scout4All {
     }
 
     /// The teams that can be read.
+    fn parse_dvw(&self, bytes: &[u8]) -> Result<DvwFile, MobileError> {
+        dvw::parse(bytes).map_err(|e| MobileError::Failed {
+            reason: self
+                .language
+                .labels()
+                .dvw_unreadable
+                .replace("{detail}", &e.to_string()),
+        })
+    }
+
+    /// The team and the match of the import as chosen, or why not, in the
+    /// language of the app.
+    fn dvw_plans(
+        &self,
+        file: &DvwFile,
+        choice: &DvwChoice,
+    ) -> Result<(TeamPlan, MatchPlan), MobileError> {
+        let labels = self.language.labels();
+        let failed = |reason| MobileError::Failed { reason };
+        let day = parse_day(&choice.day)?;
+        let existing = choice
+            .team_id
+            .as_deref()
+            .map(|id| self.read_team(id))
+            .transpose()?;
+        let team_choice = match &existing {
+            Some(team) => DvwTeamChoice::Existing(team),
+            None => DvwTeamChoice::New {
+                gender: choice.gender,
+                country: choice.country,
+            },
+        };
+        let side = choice.side.into();
+        let team = team_plan(file, side, team_choice).map_err(|e| failed(e.describe(labels)))?;
+        let date = match_date(file, day, *Local::now().offset());
+        let plan = match_plan(file, side, &team, date, choice.max_substitutions)
+            .map_err(|e| failed(e.describe(labels)))?;
+        Ok((team, plan))
+    }
+
     fn readable_teams(&self) -> Result<Vec<TeamEntry>, MobileError> {
         Ok(self
             .runtime
@@ -3290,6 +3511,18 @@ fn find_set(m: &MatchEntry, set_number: u8) -> Result<&SetEntry, MobileError> {
         .ok_or_else(|| MobileError::Failed {
             reason: format!("no set {set_number} in {}", m.id),
         })
+}
+
+/// A day as `YYYY-MM-DD`.
+fn parse_day(day: &str) -> Result<NaiveDate, MobileError> {
+    NaiveDate::parse_from_str(day, "%Y-%m-%d").map_err(|e| MobileError::Failed {
+        reason: e.to_string(),
+    })
+}
+
+/// A count for the app, which has no larger ones.
+fn count_of(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 fn parse_id(id: &str) -> Result<Uuid, MobileError> {
@@ -5387,5 +5620,165 @@ mod tests {
             Uploads::Retry
         );
         assert_eq!(queued(&dir), vec![(m, 1)]);
+    }
+
+    /// Three sets won by the home team ("Home", players 1 to 7, the libero
+    /// 7) against "Visiting", on 2015-01-25: the fixture of the TUI.
+    const THREE_SETS: &[u8] = include_bytes!("../../src/tests/fixtures/three_sets.dvw");
+
+    fn dvw_choice(side: DvwSide, team_id: Option<String>) -> DvwChoice {
+        DvwChoice {
+            side,
+            day: "2015-01-25".into(),
+            max_substitutions: 6,
+            team_id,
+            gender: Some(GenderEnum::Women),
+            country: CountryCode::known("SI"),
+        }
+    }
+
+    #[test]
+    fn a_datavolley_file_previewed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let preview = app.preview_dvw(THREE_SETS.to_vec()).unwrap();
+        assert_eq!(
+            preview,
+            DvwPreview {
+                home: "Home".into(),
+                visiting: "Visiting".into(),
+                days: vec!["2015-01-25".into()],
+                season: Some(2014),
+                sets: (0..3)
+                    .map(|_| DvwSetScore {
+                        home: 25,
+                        visiting: 0
+                    })
+                    .collect(),
+            }
+        );
+        // day first, then month first
+        let text = String::from_utf8_lossy(THREE_SETS).replacen("01/25/2015", "02/03/2015", 1);
+        let preview = app.preview_dvw(text.into_bytes()).unwrap();
+        assert_eq!(preview.days, vec!["2015-03-02", "2015-02-03"]);
+        assert_eq!(app.dvw_max_substitutions(Some("2025-12-31".into())), 6);
+        assert_eq!(app.dvw_max_substitutions(Some("2026-01-01".into())), 8);
+        assert_eq!(app.dvw_max_substitutions(None), 8);
+    }
+
+    #[test]
+    fn a_file_not_datavolley_is_said_in_the_language_of_the_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let it = labels(LanguageEnum::It);
+        let message = reason(app.preview_dvw(b"nothing here".to_vec()));
+        let frame = it.dvw_unreadable.split(" (").next().unwrap();
+        assert!(message.starts_with(frame), "{message}");
+    }
+
+    /// A new team: checked, then saved with its match, queued for the
+    /// statistics as any finished match; the gender and country chosen.
+    #[test]
+    fn a_datavolley_team_imported_as_a_new_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = dvw_choice(DvwSide::Home, None);
+        assert!(
+            app.dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Home)
+                .unwrap()
+                .is_empty()
+        );
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), choice.clone()).unwrap();
+        assert_eq!(
+            ready,
+            DvwReady {
+                team: "Home".into(),
+                sets: 3,
+                new_players: 7,
+                saved_already: false,
+            }
+        );
+        assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice, false).unwrap();
+        let team = app.team(imported.team_id.clone()).unwrap();
+        assert_eq!((team.name.as_str(), team.year), ("Home", 2014));
+        assert_eq!(team.gender.as_deref(), Some("women"));
+        assert_eq!(team.players.len(), 7);
+        let matches = app.matches(imported.team_id).unwrap();
+        assert!(
+            matches!(
+                &matches[..],
+                [MatchListing::Match { id, opponent, home: true, won: 3, lost: 0, finished: true, .. }]
+                    if *id == imported.match_id && opponent == "Visiting"
+            ),
+            "{matches:?}"
+        );
+    }
+
+    /// The visiting team into a team of ours like it; then again: the match
+    /// saved already, overwritten only when confirmed.
+    #[test]
+    fn a_datavolley_team_into_a_similar_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let first = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                dvw_choice(DvwSide::Visiting, None),
+                false,
+            )
+            .unwrap();
+        let similar = app
+            .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting)
+            .unwrap();
+        assert_eq!(
+            similar,
+            vec![DvwSimilarTeam {
+                id: first.team_id.clone(),
+                name: "Visiting".into(),
+                year: 2014,
+                same_name: true,
+                same_players: 7,
+                players: 7,
+            }]
+        );
+        let choice = dvw_choice(DvwSide::Visiting, Some(first.team_id.clone()));
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), choice.clone()).unwrap();
+        assert_eq!((ready.new_players, ready.saved_already), (0, true));
+        // not overwritten unless confirmed
+        reason(app.import_dvw(THREE_SETS.to_vec(), choice.clone(), false));
+        let again = app.import_dvw(THREE_SETS.to_vec(), choice, true).unwrap();
+        assert_eq!(again, first);
+        let matches = app.matches(first.team_id).unwrap();
+        assert!(
+            matches!(
+                &matches[..],
+                [MatchListing::Match {
+                    home: false,
+                    won: 0,
+                    lost: 3,
+                    ..
+                }]
+            ),
+            "{matches:?}"
+        );
+    }
+
+    /// Why a side can't be imported, in the language of the app: nothing
+    /// saved.
+    #[test]
+    fn a_datavolley_team_not_imported_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let text =
+            String::from_utf8_lossy(THREE_SETS).replacen("True;;;;25-0;;", "True;;;;25-3;;", 1);
+        let choice = dvw_choice(DvwSide::Home, None);
+        let message = reason(app.plan_dvw(text.clone().into_bytes(), choice.clone()));
+        assert!(
+            message.contains("25-3 in the file, 25-0 from its rallies"),
+            "{message}"
+        );
+        assert!(app.import_dvw(text.into_bytes(), choice, false).is_err());
+        assert!(app.teams().unwrap().is_empty());
     }
 }

@@ -129,25 +129,31 @@ fun ImportButton(
     teamId: String?,
     onTeam: (String) -> Unit,
     onMatch: (teamId: String, matchId: String) -> Unit,
+    onDvw: (() -> Unit)? = null,
 ) {
-    val import = rememberImport(teamId, onTeam, onMatch)
-    // some apps don't say a zip is a zip
+    val import = rememberImport(teamId, onTeam, onMatch, onDvw)
+    // some apps don't say a zip is a zip; a DataVolley file has no type of
+    // its own
+    val types = listOfNotNull(ZIP, "application/x-zip-compressed", "application/octet-stream", onDvw?.let { "text/plain" })
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(import)
     }
-    IconButton(onClick = { open.launch(arrayOf(ZIP, "application/x-zip-compressed", "application/octet-stream")) }) {
+    IconButton(onClick = { open.launch(types.toTypedArray()) }) {
         Icon(painterResource(R.drawable.ic_import), contentDescription = description)
     }
 }
 
 /** Reads the archive at a uri and shows what it holds; imported once
  * confirmed, then shows what was imported. Also for the archives another
- * app opens with this one ("Open with", Quick Share, WhatsApp…). */
+ * app opens with this one ("Open with", Quick Share, WhatsApp…). A
+ * DataVolley file, given `onDvw`, is kept by the app and imported on a
+ * screen of its own. */
 @Composable
 fun rememberImport(
     teamId: String?,
     onTeam: (String) -> Unit,
     onMatch: (teamId: String, matchId: String) -> Unit,
+    onDvw: (() -> Unit)? = null,
 ): (Uri) -> Unit {
     val context = LocalContext.current
     val app = context.applicationContext as Scout4AllApplication
@@ -179,8 +185,17 @@ fun rememberImport(
         scope.launch {
             context.report({ state.error = it }) {
                 val (bytes, fileName) = context.read(uri)
-                val preview = app.core { core -> core.previewArchive(bytes, fileName, teamId) }
-                state.chosen = Chosen(bytes, fileName, preview)
+                when {
+                    onDvw != null && isDvw(fileName) -> {
+                        app.dvw = DvwOpened(bytes, fileName)
+                        // the navigation, on the main thread only
+                        withContext(Dispatchers.Main) { onDvw() }
+                    }
+                    else -> {
+                        val preview = app.core { core -> core.previewArchive(bytes, fileName, teamId) }
+                        state.chosen = Chosen(bytes, fileName, preview)
+                    }
+                }
                 null
             }
         }
@@ -259,7 +274,8 @@ private suspend fun Context.read(uri: Uri): Pair<ByteArray, String?> = withConte
     val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
         if (it.moveToFirst()) it.getString(0) else null
     }
-    bytes to name
+    // a file of the phone (file://) has no provider to tell it
+    bytes to (name ?: uri.lastPathSegment)
 }
 
 /** Runs `action`, then shows the message it returns, briefly; what went

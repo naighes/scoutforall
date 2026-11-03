@@ -57,6 +57,9 @@ open class Scout4AllApplication : Application() {
     }
     private val core: Scout4All by lazyCore
 
+    /** The DataVolley file being imported, if any: gone with the process. */
+    @Volatile var dvw: DvwOpened? = null
+
     /** What was done last, for a report. */
     val journal = Journal()
 

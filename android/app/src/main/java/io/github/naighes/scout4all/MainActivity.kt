@@ -147,7 +147,12 @@ private fun Navigation(
     LaunchedEffect(seen) { if (seen) tutorials.startIfPending() }
     val tutorial = LocalTutorial.current?.active == true
     // over any screen, once the terms are accepted
-    val import = rememberImport(teamId = null, onTeam = { nav.navigate("team/$it") }, onMatch = nav::openMatch)
+    val import = rememberImport(
+        teamId = null,
+        onTeam = { nav.navigate("team/$it") },
+        onMatch = nav::openMatch,
+        onDvw = { nav.navigate("dvw") },
+    )
     val archive = opened.collectAsState().value
     LaunchedEffect(archive, seen) {
         if (seen && archive != null) {
@@ -177,6 +182,20 @@ private fun Navigation(
                     nav.openMatch(team, match)
                     val scouting = if (next is NextSetKind.Resume) "scouting" else "start-set"
                     nav.navigate("team/$team/match/${Uri.encode(match)}/$scouting")
+                },
+                onDvw = { nav.navigate("dvw") },
+            )
+        }
+        composable("dvw") { entry ->
+            DvwImportScreen(
+                app.dvw,
+                onBack = {
+                    app.dvw = null
+                    nav.back(entry)
+                },
+                onTeam = { id ->
+                    app.dvw = null
+                    nav.navigate("team/$id") { popUpTo("dvw") { inclusive = true } }
                 },
             )
         }

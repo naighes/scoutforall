@@ -18,7 +18,7 @@ use crate::screens::{
 use crate::shapes::keybinding::navigation_keybindings;
 use crate::shapes::{actions::ScreenActionEnum, keybinding::ActionsKeyBindings};
 use async_trait::async_trait;
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Local, NaiveDate};
 use crokey::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -29,11 +29,11 @@ use ratatui::{
 };
 use scout4all_core::{
     analytics::finished::GlobalFinishedMatches,
-    constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
+    constants::DEFAULT_MAX_SUBSTITUTIONS,
     dvw::{
         import::{
-            MatchPlan, TeamChoice, TeamPlan, match_date, match_exists, match_plan, save_import,
-            season_year, similar_teams, team_plan,
+            MatchPlan, TeamChoice, TeamPlan, default_max_substitutions, match_date, match_exists,
+            match_plan, save_import, season_year, similar_teams, team_plan,
         },
         model::{DvwFile, MatchDate, Side},
     },
@@ -199,10 +199,7 @@ impl DvwImportScreen {
 
     /// The rules of the time of the match: six substitutions before 2026.
     fn show_substitutions(&mut self) {
-        let max = match self.day.map(|d| d.year()) {
-            Some(year) if year < 2026 => LEGACY_MAX_SUBSTITUTIONS,
-            _ => DEFAULT_MAX_SUBSTITUTIONS,
-        };
+        let max = default_max_substitutions(self.day);
         self.substitutions = TextBox::with_validator(
             current_labels().max_substitutions.to_owned(),
             true,

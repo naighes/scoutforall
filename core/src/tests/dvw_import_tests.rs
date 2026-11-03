@@ -480,3 +480,16 @@ mod tests {
         }
     }
 }
+
+/// Six substitutions for the matches before the rules of 2026, eight from
+/// then on and when the day isn't known.
+#[test]
+fn the_substitutions_of_the_rules_of_the_time() {
+    use crate::dvw::import::default_max_substitutions;
+    use chrono::NaiveDate;
+    let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d);
+    assert_eq!(default_max_substitutions(day(2015, 1, 25)), 6);
+    assert_eq!(default_max_substitutions(day(2025, 12, 31)), 6);
+    assert_eq!(default_max_substitutions(day(2026, 1, 1)), 8);
+    assert_eq!(default_max_substitutions(None), 8);
+}

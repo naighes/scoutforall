@@ -4,6 +4,7 @@
 
 use crate::{
     analytics::finished::FinishedMatches,
+    constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
     dvw::{
         model::{DvwFile, DvwRole, MatchDate, Player, Side},
         translate::{Issue, Mappings, TranslateError, Us, translate_set},
@@ -292,6 +293,15 @@ fn role(p: &Player) -> Option<RoleEnum> {
         (_, Some(DvwRole::MiddleBlocker)) => Some(RoleEnum::MiddleBlocker),
         (_, Some(DvwRole::Setter)) => Some(RoleEnum::Setter),
         (false, None) => None,
+    }
+}
+
+/// The substitutions per set proposed for a match of the day: six before
+/// the rules of 2026, then eight; the user may change them.
+pub fn default_max_substitutions(day: Option<NaiveDate>) -> u8 {
+    match day.map(|d| d.year()) {
+        Some(year) if year < 2026 => LEGACY_MAX_SUBSTITUTIONS,
+        _ => DEFAULT_MAX_SUBSTITUTIONS,
     }
 }
 
