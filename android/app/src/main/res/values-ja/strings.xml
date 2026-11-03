@@ -3,6 +3,8 @@
     <string name="teams">チーム</string>
     <string name="no_teams">チームはまだありません</string>
     <string name="unreadable_team">読み込めないチーム</string>
+    <string name="pin_team">ピン留め</string>
+    <string name="unpin_team">ピン留めを解除</string>
     <string name="new_team">新しいチーム</string>
     <string name="edit_team">チームを編集</string>
     <string name="back">戻る</string>

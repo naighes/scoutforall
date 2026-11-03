@@ -29,6 +29,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +59,19 @@ class TeamsViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refresh()
+    }
+
+    /** Pins the team at the top of the list, or unpins it. */
+    fun setPinned(teamId: String, pinned: Boolean) {
+        viewModelScope.launch {
+            try {
+                getApplication<Scout4AllApplication>().core { it.setPinned(teamId, pinned) }
+            } catch (e: MobileException) {
+                mutableState.value = TeamsState.Failed(e.reason)
+                return@launch
+            }
+            refresh()
+        }
     }
 
     /** Reads them again, showing the old ones meanwhile. */
@@ -122,7 +136,7 @@ fun TeamsScreen(
                         RecentRow(it) { onMatch(it.teamId, it.id) }
                     }
                     item { SectionTitle(R.string.teams) }
-                    items(s.home.teams) { TeamRow(it, onTeam) }
+                    items(s.home.teams) { TeamRow(it, onTeam, teams::setPinned) }
                 }
             }
         }
@@ -180,13 +194,27 @@ private fun RecentRow(m: HomeMatch, onOpen: () -> Unit) = ListItem(
 )
 
 @Composable
-private fun TeamRow(team: TeamListing, onTeam: (String) -> Unit) = when (team) {
+private fun TeamRow(
+    team: TeamListing,
+    onTeam: (String) -> Unit,
+    onPin: (teamId: String, pinned: Boolean) -> Unit,
+) = when (team) {
     is TeamListing.Team -> ListItem(
         modifier = Modifier.clickable { onTeam(team.id) }.tutorial("team:${team.id}"),
         headlineContent = { Text(team.name) },
         supportingContent = {
             val players = team.players.toInt()
             Text("${team.year} · ${pluralStringResource(R.plurals.players, players, players)}")
+        },
+        // full when pinned, at the top of the list: a touch changes it
+        trailingContent = {
+            IconButton(onClick = { onPin(team.id, !team.pinned) }) {
+                Icon(
+                    painterResource(if (team.pinned) R.drawable.ic_pin else R.drawable.ic_pin_outline),
+                    contentDescription = stringResource(if (team.pinned) R.string.unpin_team else R.string.pin_team),
+                    tint = if (team.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         },
     )
     is TeamListing.Unreadable -> ListItem(

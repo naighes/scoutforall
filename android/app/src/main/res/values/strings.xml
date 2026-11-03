@@ -4,6 +4,8 @@
     <string name="teams">Teams</string>
     <string name="no_teams">No teams yet</string>
     <string name="unreadable_team">Unreadable team</string>
+    <string name="pin_team">Pin</string>
+    <string name="unpin_team">Unpin</string>
     <string name="new_team">New team</string>
     <string name="edit_team">Edit team</string>
     <string name="back">Back</string>

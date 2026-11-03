@@ -48,7 +48,7 @@ use scout4all_core::{
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::{Consent, TeamDefaults},
+    settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
         enums::{
@@ -465,6 +465,8 @@ pub enum TeamListing {
         name: String,
         year: u16,
         players: u32,
+        /// kept at the top of the list (see `set_pinned`)
+        pinned: bool,
     },
     Unreadable {
         folder: String,
@@ -2290,16 +2292,19 @@ impl Scout4All {
         Ok(Arc::new(app))
     }
 
-    /// The teams, sorted by name.
+    /// The teams, the pinned ones at the top, each group by name.
     pub fn teams(&self) -> Result<Vec<TeamListing>, MobileError> {
-        let mut teams: Vec<TeamListing> = self
-            .runtime
-            .block_on(self.team_reader.read_all())?
+        // settings that can't be read: no pins, the teams all the same
+        let pins = self.read_config().map(|c| c.pinned).unwrap_or_default();
+        let teams = self.runtime.block_on(self.team_reader.read_all())?;
+        Ok(pins
+            .sorted(teams)
             .into_iter()
             .map(|listed| match listed {
                 Ok(team) => TeamListing::Team {
                     id: team.id.to_string(),
                     players: count(&team),
+                    pinned: pins.is_pinned(&team.id),
                     name: team.name,
                     year: team.year,
                 },
@@ -2307,12 +2312,16 @@ impl Scout4All {
                     folder: unreadable.id,
                 },
             })
-            .collect();
-        teams.sort_by_key(|t| match t {
-            TeamListing::Team { name, .. } => name.to_lowercase(),
-            TeamListing::Unreadable { folder } => folder.to_lowercase(),
-        });
-        Ok(teams)
+            .collect())
+    }
+
+    /// Pins the team at the top of the list, or unpins it.
+    pub fn set_pinned(&self, team_id: String, pinned: bool) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.update_config(|config| AppConfig {
+            pinned: config.pinned.with(id, pinned),
+            ..config
+        })
     }
 
     /// The team with this id.
@@ -2872,6 +2881,13 @@ impl Scout4All {
                 reason: e.message(self.language.labels()),
             })?;
         let team = self.runtime.block_on(self.team_writer.save(input))?;
+        // created by hand: at the top of the list; the team is there all
+        // the same when the settings can't be written
+        if existing.is_none()
+            && let Err(e) = self.set_pinned(team.id.to_string(), true)
+        {
+            log_error(&format!("could not pin the new team: {e:?}"));
+        }
         Ok(team.id.to_string())
     }
 
@@ -3284,6 +3300,8 @@ struct AppConfig {
     tutorial: Tutorial,
     #[serde(flatten)]
     team_defaults: TeamDefaults,
+    #[serde(flatten)]
+    pinned: PinnedTeams,
     #[serde(flatten)]
     other: Map<String, Value>,
 }
@@ -3796,8 +3814,53 @@ mod tests {
                 name: "Cortona Volley".into(),
                 year: 2026,
                 players: 0,
+                // created by hand
+                pinned: true,
             }]
         );
+    }
+
+    /// The pinned teams at the top, each group by name; kept in
+    /// `config.json` with the settings of the TUI.
+    #[test]
+    fn the_pinned_teams_come_first_and_keep_the_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        app.accept_terms().unwrap();
+        let ids: Vec<String> = ["Zeta", "alfa", "Beta"]
+            .into_iter()
+            .map(|name| app.save_team(None, form(name)).unwrap())
+            .collect();
+        let listed = |app: &Scout4All| -> Vec<(String, bool)> {
+            app.teams()
+                .unwrap()
+                .into_iter()
+                .filter_map(|t| match t {
+                    TeamListing::Team { name, pinned, .. } => Some((name, pinned)),
+                    TeamListing::Unreadable { .. } => None,
+                })
+                .collect()
+        };
+        let all = |pinned| {
+            ["alfa", "Beta", "Zeta"]
+                .map(|n| (n.to_string(), pinned))
+                .to_vec()
+        };
+        assert_eq!(listed(&app), all(true));
+        for id in &ids[1..] {
+            app.set_pinned(id.clone(), false).unwrap();
+        }
+        assert_eq!(
+            listed(&app),
+            [("Zeta", true), ("alfa", false), ("Beta", false)]
+                .map(|(n, p)| (n.to_string(), p))
+                .to_vec()
+        );
+        app.set_pinned(ids[0].clone(), false).unwrap();
+        assert_eq!(listed(&app), all(false));
+        let config = config(&dir);
+        assert_eq!(config.get("pinned_teams"), None, "{config}");
+        assert!(config.get("language").is_some(), "{config}");
     }
 
     #[test]

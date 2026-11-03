@@ -3,6 +3,8 @@
     <string name="teams">Drużyny</string>
     <string name="no_teams">Brak drużyn</string>
     <string name="unreadable_team">Nieczytelna drużyna</string>
+    <string name="pin_team">Przypnij</string>
+    <string name="unpin_team">Odepnij</string>
     <string name="new_team">Nowa drużyna</string>
     <string name="edit_team">Edytuj drużynę</string>
     <string name="back">Wstecz</string>
