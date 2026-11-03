@@ -278,12 +278,54 @@ mod tests {
         );
         assert!(file.visiting_players.iter().any(|p| p.surname == "Šmitran"));
         assert!(file.visiting_players.iter().any(|p| p.name == "Aljaž"));
-        // in 1250 and 1252 alike: from one to the other only some letters
-        // change (č, ć, đ...), not in this file
+        // Š and Ž tell central Europe: č and ć of 1250, not è and æ of 1252
+        let surnames: Vec<&str> = file
+            .home_players
+            .iter()
+            .chain(&file.visiting_players)
+            .map(|p| p.surname.as_str())
+            .collect();
+        for surname in ["Klobučar", "Vidovič", "Petrović"] {
+            assert!(surnames.contains(&surname), "{surname}: {surnames:?}");
+        }
+        assert!(
+            !surnames.iter().any(|s| s.contains(['è', 'æ'])),
+            "{surnames:?}"
+        );
         assert_eq!(
             file.winning_symbols.unwrap().losing(Skill::Reception),
             ['=', '/']
         );
+    }
+
+    /// No code page declared: 1250 when a letter of central Europe says so,
+    /// otherwise 1252, as western files are.
+    #[test]
+    fn the_code_page_told_by_the_letters() {
+        use crate::dvw::text::decode;
+        let file = |name: &[u8]| {
+            let mut bytes = b"[3MATCH]\r\n01/02/2013;;;;;;;;1;\r\n".to_vec();
+            bytes.extend_from_slice(name);
+            bytes
+        };
+        for (bytes, text) in [
+            // Šket, Klobučar: 1250
+            (&b"\x8Aket Klobu\xE8ar"[..], "Šket Klobučar"),
+            // Łukasz Wąs: 1250
+            (b"\xA3ukasz W\xB9s", "Łukasz Wąs"),
+            // Ruž Mihajlović
+            (b"Ru\x9E Mihajlovi\xE6", "Ruž Mihajlović"),
+            // nothing of central Europe: 1252
+            (b"Mos\xE8 Bj\xF6rn \xE6\xF0", "Mosè Björn æð"),
+            // 1º and ¿: western
+            (b"1\xBA Ni\xF1o \xBF", "1º Niño ¿"),
+        ] {
+            let decoded = decode(&file(bytes));
+            assert!(decoded.ends_with(text), "{decoded:?} for {text}");
+        }
+        // declared, as declared
+        let declared = b"[3MATCH]\r\n01/02/2013;;;;;;;;1252;\r\n\x8Aket Klobu\xE8ar";
+        assert!(decode(declared).ends_with("Šket Klobuèar"));
     }
 
     #[test]

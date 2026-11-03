@@ -3,18 +3,38 @@
 //! the central one...), which the file may declare in `[3MATCH]`.
 //! DataVolley 4 adds a UTF-8 copy of the names, whatever the code page.
 
-use encoding_rs::{Encoding, WINDOWS_1252};
+use encoding_rs::{Encoding, WINDOWS_1250, WINDOWS_1252};
 
 /// The bytes as text: UTF-8 when they are, otherwise the declared code page
-/// or, without one, Windows-1252.
+/// or, without one, the one its letters tell (`undeclared_encoding`).
 pub(crate) fn decode(bytes: &[u8]) -> String {
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
     match std::str::from_utf8(bytes) {
         Ok(text) => text.to_string(),
         Err(_) => {
-            let encoding = declared_encoding(bytes).unwrap_or(WINDOWS_1252);
+            let encoding = declared_encoding(bytes).unwrap_or_else(|| undeclared_encoding(bytes));
             encoding.decode_without_bom_handling(bytes).0.into_owned()
         }
+    }
+}
+
+/// The bytes that are letters of central Europe in Windows-1250 (Š, Ž, Ś,
+/// Ť, Ź, Ł, Ą, Ż, ł, ą, Ľ, ľ, and their small ones) and, in Windows-1252,
+/// letters seldom seen in western names (Š, Ž, Œ, Ÿ), symbols (£, ¥, ¯, ³,
+/// ¹, ¼, ¾) or nothing at all. `ª`, `º` and `¿` are left out: written in
+/// Spain or Italy (`1º`).
+const CENTRAL_EUROPE: [u8; 17] = [
+    0x8A, 0x8C, 0x8D, 0x8E, 0x8F, 0x9A, 0x9C, 0x9D, 0x9E, 0x9F, 0xA3, 0xA5, 0xAF, 0xB3, 0xB9, 0xBC,
+    0xBE,
+];
+
+// a file not saying its code page: Windows-1250 when one of its bytes is a
+// letter of central Europe only there, so that `è`, `æ`, `ð` of 1252 are
+// read as the `č`, `ć`, `đ` of the names around them; otherwise 1252
+fn undeclared_encoding(bytes: &[u8]) -> &'static Encoding {
+    match bytes.iter().any(|b| CENTRAL_EUROPE.contains(b)) {
+        true => WINDOWS_1250,
+        false => WINDOWS_1252,
     }
 }
 
