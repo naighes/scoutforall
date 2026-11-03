@@ -1,0 +1,6 @@
+- Import DataVolley: otwórz plik .dvw z listy drużyn; drużyny, zawodnicy i sety stają się twoimi meczami.
+- Kraj drużyny: każda drużyna ma swój, proponowany z ustawień.
+- Libero za dowolnego zawodnika drugiej linii, a schodzący za libero może zostać zmieniony.
+- Błąd drużyny: błąd bez konkretnego zawodnika (np. ustawienia) nie trafia już na zawodnika.
+- Oceny mówią, kto gra piłkę następny; bloki i freeballe za nimi.
+- Nowy regulamin: zaakceptuj go ponownie.

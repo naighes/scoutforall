@@ -1,0 +1,6 @@
+- Importação DataVolley: abra um arquivo .dvw na lista de times; times, jogadores e sets viram suas partidas.
+- País do time: cada time tem um, sugerido pelas configurações.
+- Líbero para qualquer jogador do fundo, e quem sai pelo líbero pode ser substituído.
+- Falta do time: uma falta de nenhum jogador em particular (ex. rodízio) não vai mais para um jogador.
+- As avaliações dizem quem joga a bola em seguida; bloqueios e freeballs também.
+- Novos termos de uso: aceite-os novamente.

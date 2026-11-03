@@ -1,0 +1,6 @@
+- Import DataVolley: apri un .dvw dalla lista squadre; squadre, giocatori e set diventano partite.
+- Nazione della squadra: ogni squadra ne ha una, proposta dalle impostazioni.
+- Libero per qualsiasi giocatore di seconda linea; chi esce per il libero può essere sostituito.
+- Fallo di squadra: un fallo di nessun giocatore (es. rotazione) non finisce più su un giocatore.
+- Le valutazioni dicono chi gioca la palla dopo; muri e freeball di conseguenza.
+- Nuovi termini d'uso: accettali di nuovo.

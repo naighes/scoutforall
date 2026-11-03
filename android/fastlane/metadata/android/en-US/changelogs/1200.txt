@@ -1,0 +1,6 @@
+- DataVolley import: open a .dvw file from the team list; its teams, players and sets become your matches.
+- Team country: every team has one, proposed from the settings.
+- Libero for any back-row player, and the player out for the libero can be substituted.
+- Team fault: a fault of no player in particular (e.g. rotation) no longer goes on a player.
+- Evaluations tell who plays the ball next; blocks and freeballs follow.
+- New terms of use: please accept them again.
