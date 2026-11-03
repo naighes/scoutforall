@@ -1,6 +1,6 @@
 Scout4all - Data collection and privacy
 
-Last updated: 2026-10-26
+Last updated: 2026-11-03
 
 Data controller: Nicola Baldi, nic.baldi@gmail.com
 
@@ -16,16 +16,30 @@ Match data. Unless you turn it off (see 4), when you finish scouting a
 match, or correct one already finished, the program and the app upload an
 archive with:
 
-- the match: date, home or away, gender, year and classification of the
-  team, maximum number of substitutions;
+- the match: date, home or away, gender, year, classification and country
+  of the team, maximum number of substitutions, where the events come from
+  (scouted, or imported from a DataVolley file);
 - each set: the lineup and the scouted events (time, type, evaluation);
-- the identifier of the team.
+- the identifier of the team;
+- the keys of the team, of the opponent and of the match (see below).
 
 Teams and players appear only as random identifiers, generated on your
-computer or phone. The names of players, teams and opponents, and any other
-text you type, are never sent. Without the files on your computer or phone
-the identifiers cannot be linked to real people: this is pseudonymous data,
-not anonymous.
+computer or phone. The archive holds no names. The names of players, and
+any other text you type, are never sent. Without the files on your computer
+or phone the identifiers cannot be linked to real people: this is
+pseudonymous data, not anonymous.
+
+Keys of teams and matches. So that the same team, and the same match, can
+be recognized among the uploads of different users, when the team has a
+gender and a country, before the archive the program and the app send to
+the upload server the name of the team and of the opponent, with the
+country, gender and season of the team, the date of the match and the score
+of each set. The server writes the names in lowercase, without accents and
+punctuation, and turns all of this into three codes (keys) with a secret
+that only the server knows; it sends the keys back to be put in the
+archive, and keeps nothing of the request, neither in its logs nor
+elsewhere. The keys cannot be turned back into the names. With the secret,
+the developer could only check whether a given name gives a given key.
 
 The app sends the archive when the phone is connected to the Internet, also
 later if it wasn't when the match ended: Android does it in the background.
@@ -73,6 +87,8 @@ developer of crashes, without your data, under the terms of Google.
 2. Why
 
 - Statistics on the use of the program and on volleyball scouting.
+- Recognizing the same team and the same match among the uploads of
+  different users (the keys), so that they are not counted twice.
 - Diagnosis of bugs and improvement of the program.
 - Aggregate statistics, which can be used in future services of the
   project, also paid ones (e.g. a cloud version).

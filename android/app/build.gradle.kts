@@ -87,6 +87,8 @@ android {
 
     // the screens on the JVM, with Robolectric: no emulator
     testOptions { unitTests.isIncludeAndroidResources = true }
+    // the DataVolley file of the tests of the TUI, for the import
+    sourceSets["test"].resources.srcDir("../../src/tests/fixtures")
 }
 
 dependencies {

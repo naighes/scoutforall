@@ -36,4 +36,7 @@ pub trait Store: Debug + Send + Sync {
     /// What's right in the folder (`""` is the root), sorted by name: none
     /// when there's no folder.
     async fn list(&self, folder: &str) -> Result<Vec<StoreEntry>, AppError>;
+
+    /// Removes the blob under the key, if any.
+    async fn remove(&self, key: &str) -> Result<(), AppError>;
 }

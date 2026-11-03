@@ -4,9 +4,11 @@ use crate::{
         TIE_BREAK_SET_TARGET_SCORE,
     },
     errors::{AppError, SnapshotError},
+    localization::Labels,
     shapes::{
         enums::{
-            EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
+            EvalEnum, EventTypeEnum, FriendlyName, LineupRulesEnum, PhaseEnum, RoleEnum,
+            TeamSideEnum, ZoneEnum,
         },
         flags::EventFlags,
         lineup::Lineup,
@@ -183,28 +185,42 @@ impl Snapshot {
         &self.available_options
     }
 
+    /// The name of the event to choose next: the libero replacement says
+    /// what it does now, the libero going out or coming back in.
+    pub fn next_event_name(&self, event: EventTypeEnum, labels: &Labels) -> &'static str {
+        match (event, self.current_lineup.is_libero_out()) {
+            (EventTypeEnum::LR, false) => labels.libero_out,
+            (EventTypeEnum::LR, true) => labels.libero_in,
+            _ => event.friendly_name(labels),
+        }
+    }
+
     /// Whether the player can play the event: a player on court, but the
     /// libero doesn't attack, block or become the setter, a back row player
-    /// doesn't block, and the serve is of the player in position 1.
+    /// doesn't block, and the serve is of the player in position 1. The
+    /// player out for the libero can be substituted too (the libero never,
+    /// as the lineup checks).
     pub fn can_play(&self, event_type: EventTypeEnum, player_id: &Uuid) -> bool {
         use EventTypeEnum::*;
         let lineup = &self.current_lineup;
         let is_libero = lineup.get_current_libero() == *player_id;
-        lineup.find_position(player_id).is_some()
-            && match event_type {
-                S => lineup.get_serving_player() == Some(*player_id),
-                A | CS => !is_libero,
-                B => !is_libero && !lineup.is_back_row_player(player_id),
-                _ => true,
-            }
+        match (event_type, lineup.find_position(player_id).is_some()) {
+            (R, _) => lineup.is_in_the_game(player_id),
+            (LF, _) => lineup.is_in_the_game(player_id) && !is_libero,
+            (_, false) => false,
+            (S, true) => lineup.get_serving_player() == Some(*player_id),
+            (A | CS, true) => !is_libero,
+            (B, true) => !is_libero && !lineup.is_back_row_player(player_id),
+            (_, true) => true,
+        }
     }
 
-    /// Whether the player can come in for a substitution: a player not on
-    /// court, and not a libero (the other substitution rules are checked by
-    /// the lineup).
+    /// Whether the player can come in for a substitution: a player not in
+    /// the game (on court or out for the libero), and not a libero (the
+    /// other substitution rules are checked by the lineup).
     fn can_come_in(&self, player_id: &Uuid) -> bool {
         let lineup = &self.current_lineup;
-        lineup.find_position(player_id).is_none()
+        !lineup.is_in_the_game(player_id)
             && lineup.get_current_libero() != *player_id
             && lineup.get_fallback_libero() != Some(*player_id)
     }
@@ -263,12 +279,17 @@ impl Snapshot {
     }
 
     fn player_issue(&self, event: &EventEntry) -> Option<String> {
-        match (event.event_type.requires_player(), event.player) {
-            (true, None) => Some("missing player".to_string()),
-            (true, Some(player)) if !self.can_play(event.event_type, &player) => {
+        let event_type = event.event_type;
+        match (
+            event_type.requires_player(),
+            event_type.accepts_player(),
+            event.player,
+        ) {
+            (true, _, None) => Some("missing player".to_string()),
+            (_, true, Some(player)) if !self.can_play(event_type, &player) => {
                 Some(format!("player {player} can't play it"))
             }
-            (false, Some(_)) => Some("unexpected player".to_string()),
+            (_, false, Some(_)) => Some("unexpected player".to_string()),
             _ => None,
         }
     }
@@ -509,27 +530,6 @@ impl Snapshot {
         }
     }
 
-    /// Whether an attack after this event was built by us: after a
-    /// reception or a dig keeping the ball on our side (`#`, `+`, `!`, `-`),
-    /// after their reception coming straight back to us (serve `/`), after
-    /// their freeball (`OF`), after an attack or block of ours they couldn't
-    /// counter (`+`, we play the ball again), or after an attack of ours
-    /// blocked but covered (`!`). An attack after anything else (e.g. after
-    /// an overpass of ours) still counts among the attacks, but not in the
-    /// distribution and the counter-attacks.
-    fn is_attack_setup(prev_type: EventTypeEnum, prev_eval: Option<EvalEnum>) -> bool {
-        use EvalEnum::*;
-        use EventTypeEnum::*;
-        matches!(
-            (prev_type, prev_eval),
-            (D | P, Some(Perfect | Positive | Exclamative | Negative))
-                | (S, Some(Over))
-                | (OF, None)
-                | (A | B, Some(Positive))
-                | (A, Some(Exclamative))
-        )
-    }
-
     /// Collects the statistics of an event, in the phase and rotation it was
     /// played in: called before the event updates the lineup, and with the
     /// event before it still in `last_event`.
@@ -546,15 +546,16 @@ impl Snapshot {
         };
         // every event of the rally: an action missing its evaluation can't
         // be scored, and the substitutions and libero and setter changes
-        // aren't part of the rally
-        let skip = matches!(event.event_type, R | CL | CS)
+        // aren't part of the rally; the player only of the events asking
+        // one (our freeball named it once)
+        let skip = matches!(event.event_type, R | CL | LR | LF | CS)
             || (event.event_type.requires_evaluation() && event.eval.is_none());
         if !skip {
             self.stats.events.add(EventKey {
                 event_type: event.event_type,
                 phase,
                 rotation,
-                player: event.player,
+                player: event.player.filter(|_| event.event_type.asks_player()),
                 zone,
                 eval: event.eval,
             });
@@ -566,16 +567,17 @@ impl Snapshot {
                 winner,
             });
         }
-        // the attacks built by us, for the distribution and the
-        // counter-attacks: they need the zone of the attack
+        // the attacks, for the distribution and the counter-attacks: they
+        // need the zone of the attack. Every attack of ours is built by us:
+        // with the ball on their side before it, their attack and our dig or
+        // block weren't scouted
         if let (A, Some(player), Some(zone), Some(eval), Some(prev)) = (
             event.event_type,
             event.player,
             zone,
             event.eval,
             &self.last_event,
-        ) && Self::is_attack_setup(prev.event_type, prev.eval)
-        {
+        ) {
             self.stats.attacks.add(AttackKey {
                 phase,
                 rotation,
@@ -594,23 +596,27 @@ impl Snapshot {
 
     /// Their freeball (`OF`) is exploited when we win the rally before they
     /// attack again, whoever scores the point (our kill, their error, their
-    /// fault). It isn't when they win the rally, when they attack again (our
-    /// dig or block comes next, even a block point) or when they send us
-    /// another freeball, which is counted on its own. Their error after
+    /// fault, our block on the freeball itself). It isn't when they win the
+    /// rally, when they attack again (our dig or block comes next, even a
+    /// block point) or when they send us another freeball, which is counted
+    /// on its own. Their error after
     /// digging our attack (`A-`, `OE`) counts as exploited: the scouting
     /// doesn't tell whether they attacked.
     fn record_freeball(&mut self, event: &EventEntry, phase: PhaseEnum, rotation: u8) {
         use EventTypeEnum::*;
+        // our block on their freeball itself, not on an attack after it
+        let on_the_freeball = self.last_event.as_ref().is_some_and(|e| e.event_type == OF);
         let exploited = match (
             self.pending_freeball,
             event.event_type,
             event.event_type.rally_winner(event.eval),
+            on_the_freeball,
         ) {
-            (false, _, _) => None,
+            (false, _, _, _) => None,
             // even our block point comes after their attack
-            (true, D | B | OF, _) => Some(false),
-            (true, _, Some(winner)) => Some(winner == TeamSideEnum::Us),
-            (true, _, None) => None,
+            (true, D | OF, _, _) | (true, B, _, false) => Some(false),
+            (true, _, Some(winner), _) => Some(winner == TeamSideEnum::Us),
+            (true, _, None, _) => None,
         };
         if let Some(exploited) = exploited {
             self.stats.freeballs.add(FreeballKey {
@@ -647,7 +653,9 @@ impl Snapshot {
             event.event_type,
             event.eval,
         ) {
-            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | CS, _) => (self.possession, false),
+            (PhaseEnum::Break, _, _, _, _) | (_, _, _, R | CL | LR | LF | CS, _) => {
+                (self.possession, false)
+            }
             (_, 0, _, P | OS, _) => (1, true),
             (_, 0, _, _, _) => (0, false),
             (_, n, false, D, Some(Perfect | Positive | Exclamative | Negative | Over))
@@ -720,8 +728,9 @@ impl Snapshot {
     pub fn get_rally_start_options(&self, phase: PhaseEnum) -> Vec<EventTypeEnum> {
         use EventTypeEnum::*;
         let mut options = match phase {
-            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, CS],
-            PhaseEnum::Break => vec![OE, F, S, R, CL, CS],
+            // the libero for a player last: the rarest
+            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, LR, CS, LF],
+            PhaseEnum::Break => vec![OE, F, S, R, CL, LR, CS, LF],
         };
         if self.current_lineup.get_fallback_libero().is_none() {
             options.retain(|o| *o != CL);
@@ -735,55 +744,71 @@ impl Snapshot {
         let serve_them = self.get_rally_start_options(PhaseEnum::SideOut);
         let serve_us = self.get_rally_start_options(PhaseEnum::Break);
         let options_map: HashMap<_, _> = [
-            // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, CS
+            // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS, LF
             //
             // the ball on our side, to play on our second or third touch:
-            // our attack or our freeball (`FB`); on their side: their
-            // freeball (`OF`) besides their attack. Never a freeball on a
-            // first touch: our reception or dig going straight over is `/`.
+            // our attack or our freeball (`FB`). Never a freeball on a first
+            // touch: our reception or dig going straight over is `/`.
+            //
+            // on their side, they attack (our dig or block comes next) or
+            // they don't: after our attack or block `+` we play the ball
+            // again, their freeball (`OF`) optional; after our serve `/`
+            // their reception came back, not a freeball; after our serve
+            // `+`, `!` or `-`, our attack or block `-` they attack or send
+            // a freeball (`OF`): the evaluation tells their reception or
+            // dig, the freeball what they made of it, as our reception or
+            // dig and our freeball (`FB`) do: a perfect reception the setter
+            // sends over is `#`, then the freeball. A ball sent over on
+            // purpose to score (the setter's dump) is an attack; one sent
+            // out is an error. Our attack or our freeball
+            // can still come when their attack and our dig or block weren't
+            // scouted: the dig is optional.
             ((OS, None), serve_them.clone()),
             ((OE, None), serve_us.clone()),
             ((B, Some(Error)), serve_them.clone()),
             ((B, Some(Over)), serve_them.clone()),
             ((B, Some(Perfect)), serve_us.clone()),
-            ((B, Some(Positive)), vec![OE, F, A, FB]),
-            ((B, Some(Negative)), vec![OS, OE, F, A, D, B, OF]),
+            ((B, Some(Positive)), vec![OE, F, A, FB, OF]),
+            ((B, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((A, Some(Error)), serve_them.clone()),
             ((A, Some(Over)), serve_them.clone()),
-            ((A, Some(Negative)), vec![OS, OE, F, A, D, B, OF]),
+            ((A, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((A, Some(Perfect)), serve_us.clone()),
-            ((A, Some(Positive)), vec![OE, F, A, FB]),
+            ((A, Some(Positive)), vec![OE, F, A, FB, OF]),
             ((A, Some(Exclamative)), vec![OE, F, A, FB]),
             ((D, Some(Error)), serve_them.clone()),
-            ((D, Some(Over)), vec![OS, OE, F, A, D, B, OF]),
+            ((D, Some(Over)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((D, Some(Exclamative)), vec![OE, F, A, FB]),
             ((D, Some(Negative)), vec![OE, F, A, FB]),
             ((D, Some(Positive)), vec![OE, F, A, FB]),
             ((D, Some(Perfect)), vec![OE, F, A, FB]),
             ((F, None), serve_them.clone()),
             ((P, Some(Error)), serve_them.clone()),
-            ((P, Some(Over)), vec![OS, OE, F, A, D, B, OF]),
+            ((P, Some(Over)), vec![OS, OE, F, A, D, B, FB, OF]),
             ((P, Some(Exclamative)), vec![OE, F, A, FB]),
             ((P, Some(Negative)), vec![OE, F, A, FB]),
             ((P, Some(Positive)), vec![OE, F, A, FB]),
             ((P, Some(Perfect)), vec![OE, F, A, FB]),
             ((S, Some(Error)), serve_them.clone()),
             ((S, Some(Perfect)), serve_us.clone()),
-            ((S, Some(Positive)), vec![OS, OE, F, D, B, OF]),
-            ((S, Some(Over)), vec![OE, A, F, FB]),
-            ((S, Some(Negative)), vec![OS, OE, F, D, B, OF]),
-            // our freeball: as after our attack they dig (`A-`), and they
-            // can send another one back
-            ((FB, None), vec![OS, OE, F, A, D, B, OF]),
+            ((S, Some(Positive)), vec![OS, OE, F, A, D, B, FB, OF]),
+            ((S, Some(Exclamative)), vec![OS, OE, F, A, D, B, FB, OF]),
+            ((S, Some(Over)), vec![OE, A, F, B, FB]),
+            ((S, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
+            // our freeball, our reception or dig going straight over: they
+            // attack, or mess it up and send a freeball back
+            ((FB, None), vec![OS, OE, F, A, D, B, FB, OF]),
             // their freeball isn't a dig of ours, but what comes next is the
             // same as after one keeping the ball, and their point when it
-            // falls on our court untouched
-            ((OF, None), vec![OS, OE, F, A, FB]),
+            // falls on our court untouched; our block too, a ball crossing
+            // the net close to it, as after their reception straight over
+            // (our serve `/`): the scout tells a block from an attack
+            ((OF, None), vec![OS, OE, F, A, B, FB]),
         ]
         .into_iter()
         .collect();
         match (event.event_type, event.eval) {
-            (R | CL | CS, _) => self.available_options.clone(),
+            (R | CL | LR | LF | CS, _) => self.available_options.clone(),
             key => options_map.get(&key).cloned().unwrap_or_default(),
         }
     }
@@ -809,6 +834,14 @@ impl Snapshot {
             // change libero
             self.current_lineup.swap_libero()?;
         }
+        if event.event_type == EventTypeEnum::LR {
+            // the libero out, or back in
+            self.current_lineup.toggle_libero()?;
+        }
+        if let (EventTypeEnum::LF, Some(player)) = (event.event_type, event.player) {
+            // the libero for the player, in the back row
+            self.current_lineup.set_libero_for(&player)?;
+        }
         if event.event_type == EventTypeEnum::CS {
             // change setter
             if let Some(new_setter) = event.player {
@@ -816,10 +849,14 @@ impl Snapshot {
             }
         }
         self.current_lineup.update(event)?;
-        if event.event_type != EventTypeEnum::R
-            && event.event_type != EventTypeEnum::CL
-            && event.event_type != EventTypeEnum::CS
-        {
+        if !matches!(
+            event.event_type,
+            EventTypeEnum::R
+                | EventTypeEnum::CL
+                | EventTypeEnum::LR
+                | EventTypeEnum::LF
+                | EventTypeEnum::CS
+        ) {
             self.last_event = Some(event.clone());
         }
         Ok(())

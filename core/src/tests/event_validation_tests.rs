@@ -264,14 +264,12 @@ mod tests {
     fn evaluation_not_allowed() {
         let t = Team::new();
         assert_invalid(
-            t.serving(vec![act(S, t.setter, Exclamative)]),
-            "evaluation ! not allowed",
-        );
-        assert_invalid(
             t.serving(vec![act(S, t.setter, Negative), act(B, t.oh1, Exclamative)]),
             "evaluation ! not allowed",
         );
         assert_valid(t.receiving(vec![act(P, t.libero, Exclamative)]));
+        // the serve mirrors their reception: `!` too
+        assert_valid(t.serving(vec![act(S, t.setter, Exclamative)]));
     }
 
     #[test]
@@ -298,12 +296,13 @@ mod tests {
         let t = Team::new();
         for event in [
             ev(P, None, Some(Perfect), None),
-            ev(F, None, None, None),
             ev(CS, None, None, None),
             ev(R, None, None, Some(t.subs[0])),
         ] {
             assert_invalid(t.receiving(vec![event]), "missing player");
         }
+        // the team's fault (e.g. a rotation fault) names none
+        assert_valid(t.receiving(vec![ev(F, None, None, None)]));
     }
 
     #[test]
@@ -432,7 +431,8 @@ mod tests {
             t.receiving(vec![sub(t.subs[1], t.subs[0])]),
             "can't play it",
         );
-        assert_invalid(t.receiving(vec![sub(t.mb1, t.subs[0])]), "can't play it");
+        // the middle blocker out for the libero is still in the game
+        assert_valid(t.receiving(vec![sub(t.mb1, t.subs[0])]));
     }
 
     #[test]
@@ -538,7 +538,7 @@ mod tests {
     fn offered(t: &Team, snapshot: &Snapshot) -> Vec<EventEntry> {
         let lineup = &snapshot.current_lineup;
         let can_come_in = |p: &Uuid| {
-            lineup.find_position(p).is_none()
+            !lineup.is_in_the_game(p)
                 && *p != lineup.get_current_libero()
                 && Some(*p) != lineup.get_fallback_libero()
         };
@@ -604,7 +604,7 @@ mod tests {
                 // the changes are rare, as in a real set
                 let rally: Vec<&EventEntry> = offered
                     .iter()
-                    .filter(|e| !matches!(e.event_type, R | CL | CS))
+                    .filter(|e| !matches!(e.event_type, R | CL | LR | LF | CS))
                     .collect();
                 let event = match (rng.next(10), rally.is_empty()) {
                     (0, _) | (_, true) => offered[rng.next(offered.len())].clone(),

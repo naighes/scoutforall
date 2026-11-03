@@ -184,6 +184,7 @@ mod tests {
             KeyCode::F(2),
             KeyCode::BackTab,
             KeyCode::Down,
+            KeyCode::Down,
             KeyCode::Char(' '),
             KeyCode::Char(' '),
             KeyCode::Esc,
@@ -212,10 +213,59 @@ mod tests {
     #[tokio::test]
     async fn evaluation_not_available_for_the_event() {
         let mut ui = scouting().await;
-        // "!" only evaluates passes, digs and attacks
+        // "!" doesn't evaluate the block
+        ui.type_keys(&[
+            KeyCode::Char('s'),
+            KeyCode::Char('-'),
+            KeyCode::Char('b'),
+            KeyCode::Char('2'),
+            KeyCode::Char('!'),
+        ])
+        .await;
+        assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+    }
+
+    /// Our serve `!`, as their reception `!`: saved with its evaluation.
+    #[tokio::test]
+    async fn serve_exclamative() {
+        let mut ui = scouting().await;
         ui.type_keys(&[KeyCode::Char('s'), KeyCode::Char('!')])
             .await;
-        assert!(is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+        assert!(!is_choosing_the_evaluation(&mut ui), "{}", ui.screen());
+        let events = ui.saved_first_set_events();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(
+            events[0].contains(",S,") && events[0].contains(",!,"),
+            "{events:?}"
+        );
+    }
+
+    /// After our serve `+`, `!` or `-` our attack comes too: their attack
+    /// and our dig or block weren't scouted.
+    #[tokio::test]
+    async fn attack_after_our_serve() {
+        for eval in ['+', '!', '-'] {
+            let mut ui = scouting().await;
+            ui.type_keys(&[
+                KeyCode::Char('s'),
+                KeyCode::Char(eval),
+                KeyCode::Char('a'),
+                KeyCode::Char('2'),
+            ])
+            .await;
+            assert!(
+                is_choosing_the_evaluation(&mut ui),
+                "{eval}: {}",
+                ui.screen()
+            );
+            ui.press(KeyCode::Char('#')).await;
+            let events = ui.saved_first_set_events();
+            assert_eq!(events.len(), 2, "{eval}: {events:?}");
+            assert!(
+                events[1].contains(",A,") && events[1].contains(",#,"),
+                "{eval}: {events:?}"
+            );
+        }
     }
 
     /// An attack blocked but covered (`!`) is saved, and the rally goes on

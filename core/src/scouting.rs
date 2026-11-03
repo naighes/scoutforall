@@ -57,10 +57,11 @@ pub enum ChoiceOrder {
 }
 
 /// The events a player plays touching the ball, but the serve: with the
-/// player first, they're chosen after the player.
+/// player first, they're chosen after the player. Not our freeball, a team
+/// event.
 fn played_by_the_player(event: EventTypeEnum) -> bool {
     use EventTypeEnum::*;
-    matches!(event, P | A | D | B | FB)
+    matches!(event, P | A | D | B)
 }
 
 /// How a choice went on.
@@ -254,6 +255,14 @@ impl ScoutingSession {
         self.inverted_p1
     }
 
+    /// Whether the inverted P1 makes a difference now: in P1 (the setter in
+    /// position 1) in side out only, as the scouting shows it.
+    pub fn inverted_p1_applies(&self) -> bool {
+        let lineup = &self.snapshot.current_lineup;
+        lineup.get_current_phase() == PhaseEnum::SideOut
+            && lineup.get_current_rotation().is_ok_and(|r| r == 0)
+    }
+
     /// The scout inverts the P1, or makes it canonical again: the events
     /// saved from now on say so.
     pub fn set_inverted_p1(&mut self, inverted: bool) {
@@ -300,7 +309,8 @@ impl ScoutingSession {
     }
 
     /// The players to choose for the event: the ones on court who can play
-    /// it, or the ones who can be replaced.
+    /// it, or the ones who can be replaced (the one out for the libero
+    /// too).
     pub fn player_choices(&self) -> Vec<PlayerChoice> {
         self.choices_for(self.event)
     }
@@ -315,7 +325,9 @@ impl ScoutingSession {
             .into_iter()
             .filter_map(|(index, (role, id))| {
                 id.filter(|id| match event {
-                    Some(EventTypeEnum::R) | None => lineup.find_position(id).is_some(),
+                    // on court, or out for the libero: still in the game
+                    Some(EventTypeEnum::R) => lineup.is_in_the_game(id),
+                    None => lineup.find_position(id).is_some(),
                     // only the diagonal: the libero follows the setter, so
                     // anyone else would move it, even to the front row; the
                     // saved sets with another one stay readable
@@ -521,12 +533,12 @@ impl ScoutingSession {
                 self.technique = self.preselected_technique();
                 Ok(Progress::Choosing)
             }
-            (ScoutingStep::Event, true, e) if e.requires_player() => {
+            (ScoutingStep::Event, true, e) if e.asks_player() => {
                 self.event = Some(e);
                 self.step = ScoutingStep::Player;
                 Ok(Progress::Choosing)
             }
-            (ScoutingStep::Event, true, OE | OS | OF | CL) => {
+            (ScoutingStep::Event, true, OE | OS | OF | FB | CL | LR) => {
                 self.save(EventEntry {
                     timestamp: Utc::now(),
                     event_type: event,
@@ -568,6 +580,34 @@ impl ScoutingSession {
                     event_type: event,
                     eval: None,
                     player: Some(player),
+                    target_player: None,
+                    technique: None,
+                    flags: Default::default(),
+                })
+                .await
+            }
+            _ => Err(ScoutingError::InvalidPlayerSelection),
+        }
+    }
+
+    /// Whether the event can be the team's, no player chosen (see
+    /// `choose_team`): our fault, e.g. a rotation fault.
+    pub fn team_choice(&self) -> bool {
+        matches!(
+            (self.step, self.event),
+            (ScoutingStep::Player, Some(event)) if !event.requires_player()
+        )
+    }
+
+    /// The team makes the event, no player: it's saved.
+    pub async fn choose_team(&mut self) -> Result<Progress, ScoutingError> {
+        match (self.team_choice(), self.event) {
+            (true, Some(event)) => {
+                self.save(EventEntry {
+                    timestamp: Utc::now(),
+                    event_type: event,
+                    eval: None,
+                    player: None,
                     target_player: None,
                     technique: None,
                     flags: Default::default(),
@@ -772,7 +812,9 @@ impl ScoutingSession {
                 self.player = Some(player);
                 self.step = ScoutingStep::Replacement;
             }
-            (ChoiceOrder::PlayerFirst, FB, Some(player)) => self.back_to_player(player),
+            // our freeball, also one naming its player (scouted before it
+            // became a team event), is chosen again with the others
+            (_, FB, _) => self.start_next(),
             (_, _, Some(player)) => {
                 self.event = Some(removed.event_type);
                 self.player = Some(player);

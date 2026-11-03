@@ -119,6 +119,7 @@ mod tests {
                     year: 2025,
                     classification: None,
                     gender: None,
+                    country: None,
                     players: players
                         .into_iter()
                         .map(|mut p| {
@@ -351,6 +352,36 @@ mod tests {
         let imported = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
         let snapshot = imported.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!((snapshot.score_us, snapshot.score_them), (4, 1));
+    }
+
+    /// A set this version doesn't replay, e.g. saved by a version whose
+    /// scouting allowed an event no more: the import says which and writes
+    /// nothing.
+    #[tokio::test]
+    async fn match_archive_with_a_set_that_does_not_replay_is_refused() {
+        let from = Providers::new();
+        let (team, m) = from.legacy_match().await;
+        let rows = m.sets[0].events.len();
+        let events = layout::set_events(&team.id, &m.id, 1);
+        // their error gives us the serve: they can't score an ace
+        let rows_added = "2025-09-20T20:01:00.000000Z,OE,,,\n2025-09-20T20:01:01.000000Z,OS,,,\n";
+        from.store
+            .append(&events, rows_added.as_bytes())
+            .await
+            .unwrap();
+        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
+        let to = Providers::new();
+        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
+        let team = to.import_team(&team_archive, None).await.unwrap();
+        let result = to.import_match(&archive, &team).await;
+        let why = EN
+            .set_event_not_valid
+            .replace("{set}", "1")
+            .replace("{row}", &(rows + 2).to_string())
+            .replace("{event}", "OS")
+            .replace("{previous}", "OE");
+        assert_eq!(message(result), why);
+        assert!(!to.match_reader.exists(&team, MATCH_ID).await.unwrap());
     }
 
     #[tokio::test]

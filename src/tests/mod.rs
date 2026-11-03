@@ -1,9 +1,14 @@
 mod archive_tests;
+mod country_tests;
+mod dvw_import_tests;
 mod edit_match_tests;
 mod edit_set_events_tests;
+mod fault_tests;
 mod form_navigation_tests;
 mod freeball_tests;
 mod layout_tests;
+mod libero_for_tests;
+mod libero_out_tests;
 mod live_stats_tests;
 mod match_roster_tests;
 mod max_substitutions_tests;

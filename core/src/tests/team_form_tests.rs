@@ -5,6 +5,7 @@ mod tests {
     use crate::{
         providers::team_writer::TeamInput,
         shapes::{
+            country::CountryCode,
             enums::{GenderEnum, TeamClassificationEnum},
             player::PlayerEntry,
             team::TeamEntry,
@@ -19,6 +20,7 @@ mod tests {
             name: "  Cortona Volley ".into(),
             classification: Some(TeamClassificationEnum::Regional),
             gender: Some(GenderEnum::Women),
+            country: CountryCode::known("IT"),
             year: "2026".into(),
         }
     }
@@ -39,9 +41,11 @@ mod tests {
                 year: 2026,
                 classification: Some(TeamClassificationEnum::Regional),
                 gender: Some(GenderEnum::Women),
+                country: Some(country),
                 players,
             }) => {
                 assert_eq!(name, "Cortona Volley");
+                assert_eq!(country.as_str(), "IT");
                 assert!(players.is_empty());
             }
             _ => unreachable!("expected a new team"),
@@ -58,6 +62,7 @@ mod tests {
             players: vec![PlayerEntry::default()],
             classification: None,
             gender: None,
+            country: None,
         };
         match form().validate(Some(&team)) {
             Ok(TeamInput::Existing(updated)) => {
@@ -66,6 +71,7 @@ mod tests {
                 assert_eq!(updated.name, "Cortona Volley");
                 assert_eq!(updated.year, 2026);
                 assert_eq!(updated.gender, Some(GenderEnum::Women));
+                assert_eq!(updated.country, CountryCode::known("IT"));
             }
             _ => unreachable!("expected the existing team"),
         }
@@ -78,6 +84,7 @@ mod tests {
             year: 2024,
             classification: Some(TeamClassificationEnum::TopInternational),
             gender: Some(GenderEnum::Men),
+            country: CountryCode::known("JP"),
             ..Default::default()
         };
         assert_eq!(
@@ -86,6 +93,7 @@ mod tests {
                 name: "Italy".into(),
                 classification: Some(TeamClassificationEnum::TopInternational),
                 gender: Some(GenderEnum::Men),
+                country: CountryCode::known("JP"),
                 year: "2024".into(),
             }
         );
@@ -103,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn classification_and_gender_are_required() {
+    fn classification_gender_and_country_are_required() {
         assert_eq!(
             error(TeamForm {
                 classification: None,
@@ -117,6 +125,13 @@ mod tests {
                 ..form()
             }),
             TeamFormError::MissingGender
+        );
+        assert_eq!(
+            error(TeamForm {
+                country: None,
+                ..form()
+            }),
+            TeamFormError::MissingCountry
         );
     }
 
@@ -148,6 +163,7 @@ mod tests {
             name: String::new(),
             classification: None,
             gender: None,
+            country: None,
             year: String::new(),
         };
         assert_eq!(error(empty), TeamFormError::EmptyName);

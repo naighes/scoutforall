@@ -1,6 +1,7 @@
 use crate::{
     errors::AppError,
     shapes::{
+        country::CountryCode,
         enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
         player::PlayerEntry,
         team::TeamEntry,
@@ -17,6 +18,7 @@ pub enum TeamInput {
         year: u16,
         classification: Option<TeamClassificationEnum>,
         gender: Option<GenderEnum>,
+        country: Option<CountryCode>,
         players: Vec<PlayerEntry>,
     },
     Existing(TeamEntry),

@@ -138,9 +138,13 @@ impl<
                         None => AppAction::None,
                     }
                 }
-                (Some(ScreenActionEnum::EditTeam), _, _, _) => AppAction::SwitchScreen(Box::new(
-                    EditTeamScreen::edit(&self.team, self.team_writer.clone()),
-                )),
+                (Some(ScreenActionEnum::EditTeam), _, _, _) => {
+                    AppAction::SwitchScreen(Box::new(EditTeamScreen::edit(
+                        &self.team,
+                        self.team_writer.clone(),
+                        self.settings.team_defaults.country,
+                    )))
+                }
                 (Some(ScreenActionEnum::MatchList), _, _, _) => {
                     let match_list = self.match_reader.read_all(&self.team).await;
                     match match_list {

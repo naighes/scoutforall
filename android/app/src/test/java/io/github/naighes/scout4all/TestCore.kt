@@ -28,7 +28,7 @@ fun string(id: Int, vararg args: Any): String = app.getString(id, *args)
 
 /** A team saved by the core; its id. */
 fun saveTeam(name: String, year: Int = 2026): String = core {
-    it.saveTeam(null, TeamForm(name, TeamClassificationEnum.REGIONAL, GenderEnum.WOMEN, year.toString()))
+    it.saveTeam(null, TeamForm(name, TeamClassificationEnum.REGIONAL, GenderEnum.WOMEN, "IT", year.toString()))
 }
 
 /** The players of `team`, as the national team: names of every length. */

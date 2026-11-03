@@ -20,7 +20,10 @@ use crate::{
         team_writer::{TeamInput, TeamWriter},
     },
     shapes::{
-        r#match::MatchEntry, player::PlayerEntry, set::SetEntry, snapshot::EventEntry,
+        r#match::{MatchEntry, MatchSource},
+        player::PlayerEntry,
+        set::SetEntry,
+        snapshot::EventEntry,
         team::TeamEntry,
     },
     storage::{Store, StoreEntry, layout},
@@ -210,6 +213,7 @@ pub async fn import_team(
             year: team.year,
             classification: team.classification,
             gender: team.gender,
+            country: team.country,
             players: team.players,
         })
         .await
@@ -302,6 +306,10 @@ pub async fn import_match(
         (true, true) => Err(message(labels.match_already_exists)),
         (true, false) => Ok(()),
     }?;
+    // a set this version doesn't replay: nothing is written
+    if let Some(issue) = archived.replay_issue() {
+        return Err(message(&issue.describe(labels)));
+    }
     let roster = roster_for(&archived, team);
     let m = match_writer
         .create(
@@ -314,6 +322,11 @@ pub async fn import_match(
             roster,
         )
         .await?;
+    // an imported match exported, and imported again: still imported
+    let m = match archived.source {
+        MatchSource::Scout4all => m,
+        source => match_writer.save_source(&m, source).await?,
+    };
     for mut set in archived.sets {
         // the new descriptor has the substitutions, so the sets saved
         // without their rules, up to v0.3.0, save the ones they replay with

@@ -62,7 +62,7 @@ impl EventEdit {
         use EventTypeEnum::*;
         let event = set.events.get(index).ok_or(EventEditError::Unreadable)?;
         match event.event_type {
-            R | CL | CS => Err(EventEditError::NotEditable),
+            R | CL | LR | LF | CS => Err(EventEditError::NotEditable),
             _ => set
                 .snapshot_before(index, max_substitutions)
                 .map(|before| EventEdit {
@@ -117,9 +117,13 @@ impl EventEdit {
             .get_available_options()
             .iter()
             .copied()
-            .filter(|t| !matches!(t, R | CL | CS))
-            .filter(|t| t.requires_player() == event.event_type.requires_player())
-            .filter(|t| event.player.is_none_or(|p| self.before.can_play(*t, &p)))
+            .filter(|t| !matches!(t, R | CL | LR | LF | CS))
+            .filter(|t| t.asks_player() == event.event_type.asks_player())
+            .filter(|t| match event.player {
+                Some(p) => self.before.can_play(*t, &p),
+                // the team's fault: no event of a player
+                None => !t.requires_player(),
+            })
             .collect()
     }
 
@@ -173,6 +177,8 @@ impl EventEdit {
         let techniques = Self::techniques_of(&self.before, event_type, &self.event);
         let event = &mut self.event;
         event.event_type = event_type;
+        // our freeball named its player once: not another event
+        event.player = event.player.filter(|_| event_type.asks_player());
         event.eval = event
             .eval
             .filter(|e| evals.contains(e))

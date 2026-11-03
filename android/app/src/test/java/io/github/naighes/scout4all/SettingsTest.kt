@@ -1,7 +1,11 @@
 package io.github.naighes.scout4all
 
+import android.content.Context
+import android.telephony.TelephonyManager
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
@@ -10,6 +14,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
 class SettingsTest {
@@ -32,6 +37,51 @@ class SettingsTest {
         rule.onNode(hasText(string(R.string.terms_of_use)) and hasClickAction()).performClick()
         rule.onNode(hasText(string(R.string.about)) and hasClickAction()).performClick()
         assertEquals(listOf("terms", "about"), opened)
+    }
+}
+
+/** The country of a new team: guessed from the phone, chosen in the
+ * settings. */
+@RunWith(RobolectricTestRunner::class)
+class DefaultCountryTest {
+    @get:Rule val rule = createComposeRule()
+
+    private fun show() {
+        rule.setContent { Scout4AllTheme { SettingsScreen(onBack = {}, onTerms = {}, onAbout = {}) } }
+        rule.waitForText(string(R.string.default_country))
+    }
+
+    @Test
+    fun chosenFromTheList() {
+        show()
+        rule.waitForText(string(R.string.default_country_none))
+        rule.onNode(hasText(string(R.string.default_country)) and hasClickAction()).performClick()
+        rule.onNode(hasSetTextAction() and hasText(string(R.string.search_country))).performTextInput("japa")
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Japan") and hasClickAction()).fetchSemanticsNodes().size == 1 }
+        rule.onNode(hasText("Japan") and hasClickAction()).performClick()
+        rule.waitFor { core { it.defaultCountry() }?.value == "JP" }
+        rule.waitForText("🇯🇵  Japan")
+    }
+
+    @Test
+    fun guessedFromTheSimFirst() {
+        val telephony = app.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        shadowOf(telephony).setSimCountryIso("br")
+        shadowOf(telephony).setNetworkCountryIso("ar")
+        assertEquals("br", app.countryHints().first())
+        core { it.guessDefaultCountry(app.countryHints()) }
+        assertEquals("BR", core { it.defaultCountry() }?.value)
+        // once: the SIM of another country changes nothing
+        shadowOf(telephony).setSimCountryIso("it")
+        core { it.guessDefaultCountry(app.countryHints()) }
+        assertEquals("BR", core { it.defaultCountry() }?.value)
+    }
+
+    @Test
+    fun withoutSimTheLocale() {
+        assertEquals(listOf("", "", "en-US"), app.countryHints())
+        core { it.guessDefaultCountry(app.countryHints()) }
+        assertEquals("US", core { it.defaultCountry() }?.value)
     }
 }
 

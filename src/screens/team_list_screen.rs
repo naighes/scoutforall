@@ -8,6 +8,7 @@ use crate::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         edit_team_screen::EditTeamScreen,
         file_system_screen::FileSystemScreen,
+        import_dvw_screen::DvwProviders,
         import_team_screen::ImportTeamAction,
         screen::{AppAction, LIST_NAVIGATION, Renderable, Sba, ScreenAsync, list_entries, step},
         settings_screen::{SettingsPanel, SettingsScreen},
@@ -130,7 +131,10 @@ impl<
                 },
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::New), _, _) => {
-                    AppAction::SwitchScreen(Box::new(EditTeamScreen::new(self.team_writer.clone())))
+                    AppAction::SwitchScreen(Box::new(EditTeamScreen::new(
+                        self.team_writer.clone(),
+                        self.settings.team_defaults.country,
+                    )))
                 }
                 (Some(ScreenActionEnum::Import), _, _) => {
                     let default_path = self.settings.get_default_path();
@@ -141,7 +145,15 @@ impl<
                             ImportTeamAction::new(
                                 self.team_reader.clone(),
                                 self.team_writer.clone(),
-                            ),
+                            )
+                            .with_dvw(DvwProviders {
+                                team_reader: self.team_reader.clone(),
+                                team_writer: self.team_writer.clone(),
+                                match_reader: self.match_reader.clone(),
+                                match_writer: self.match_writer.clone(),
+                                set_writer: self.set_writer.clone(),
+                                country: self.settings.team_defaults.country,
+                            }),
                             self.settings_reader.clone(),
                             self.settings_writer.clone(),
                         ))),

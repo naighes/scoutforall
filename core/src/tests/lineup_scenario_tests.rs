@@ -725,4 +725,283 @@ mod tests {
             assert!([p.oh1, p.oh2].contains(&positions[5]), "{context}");
         }
     }
+
+    // --- the player out for the libero ------------------------------------
+    //
+    // While the libero plays in place of a middle blocker (or of whoever
+    // took their place), that player is out of the court but still in the
+    // game: they can be substituted, the libero staying on court and the
+    // substitute taking their place for when the libero leaves. The libero
+    // is never substituted, and the player out for the libero can't come in
+    // for anyone else.
+
+    impl Scout {
+        /// The event refused, the snapshot unchanged: why.
+        fn refused(&mut self, event: EventEntry) -> String {
+            let (court, out) = (self.on_court(), self.out_for_the_libero());
+            let reason = match self.snapshot.add_event(&event) {
+                Ok(()) => panic!("expected {event} to be refused"),
+                Err(e) => e.to_string(),
+            };
+            assert_eq!(self.on_court(), court, "{reason}");
+            assert_eq!(self.out_for_the_libero(), out, "{reason}");
+            reason
+        }
+
+        fn refused_substitution(&mut self, replaced: Uuid, replacement: Uuid) -> String {
+            self.refused(event(EventTypeEnum::R, Some(replaced), Some(replacement)))
+        }
+
+        /// The player the libero plays for, if it's on court.
+        fn out_for_the_libero(&self) -> Option<Uuid> {
+            let lineup = &self.snapshot.current_lineup;
+            let libero = lineup.get_current_libero();
+            lineup.find_position(&libero).map(|_| {
+                lineup
+                    .get_involved_players()
+                    .into_iter()
+                    .find(|p| lineup.is_out_for_the_libero(p))
+                    .expect("a player out for the libero")
+            })
+        }
+
+        /// The same set saved and read back: the same court, and the same
+        /// player out for the libero.
+        fn assert_replays(&self, p: &Players, rotation: usize, serving: TeamSideEnum) {
+            let set = SetEntry {
+                events: self.events.clone(),
+                ..p.set(rotation, serving)
+            };
+            let replayed = Scout::new(&set);
+            assert_eq!(replayed.on_court(), self.on_court());
+            assert_eq!(replayed.out_for_the_libero(), self.out_for_the_libero());
+            assert_eq!(
+                replayed
+                    .snapshot
+                    .current_lineup
+                    .get_positions_without_libero(),
+                self.snapshot.current_lineup.get_positions_without_libero()
+            );
+        }
+    }
+
+    /// Middle blocker 1 serves first (setter in position 2): substituted
+    /// for the serve, the substitute loses it and the libero goes in for
+    /// them, then the middle blocker comes back for the substitute, the
+    /// libero on court. The most common substitution of all.
+    #[test]
+    fn the_substitute_for_the_serve_goes_back_while_the_libero_plays() {
+        let p = Players::new();
+        let sub = p.bench[0];
+        let mut scout = Scout::new(&p.set(1, TeamSideEnum::Us));
+        scout.substitute(p.mb1, sub);
+        assert_eq!(scout.on_court()[0], sub, "the substitute serves");
+        scout.they_score();
+        assert_eq!(scout.on_court()[0], p.libero);
+        assert_eq!(scout.out_for_the_libero(), Some(sub));
+        // the middle blocker back, the libero still on court
+        scout.substitute(sub, p.mb1);
+        assert_eq!(scout.on_court()[0], p.libero);
+        assert_eq!(scout.out_for_the_libero(), Some(p.mb1));
+        assert!(!scout.snapshot.current_lineup.is_in_the_game(&sub));
+        assert_eq!(scout.snapshot.current_lineup.get_mb1(), Some(p.mb1));
+        assert_eq!(scout.snapshot.current_lineup.get_substitutions().len(), 2);
+        scout.assert_replays(&p, 1, TeamSideEnum::Us);
+        // around the court: the middle blocker goes back in front for the
+        // libero, never the substitute
+        for rally in 0..18 {
+            match rally % 3 {
+                0 | 1 => scout.we_score(),
+                _ => scout.they_score(),
+            }
+            let context = format!("rally {}", rally + 1);
+            scout.assert_libero_rules(p.libero, [p.mb1, p.mb2], &context);
+            assert!(!scout.on_court().contains(&sub), "{context}");
+        }
+        scout.assert_replays(&p, 1, TeamSideEnum::Us);
+        // the change is closed: neither plays again for someone else
+        assert!(
+            scout
+                .refused_substitution(p.mb1, p.bench[1])
+                .contains("already replaced")
+        );
+    }
+
+    /// A starting middle blocker out for the libero substituted by a bench
+    /// player: the libero stays, the substitute takes the court when the
+    /// libero leaves it, and only the middle blocker can come back for them.
+    #[test]
+    fn the_middle_blocker_out_for_the_libero_is_substituted() {
+        let p = Players::new();
+        let sub = p.bench[0];
+        let mut scout = Scout::new(&p.set(0, TeamSideEnum::Them));
+        assert_eq!(scout.out_for_the_libero(), Some(p.mb1));
+        let court = scout.on_court();
+        scout.substitute(p.mb1, sub);
+        assert_eq!(scout.on_court(), court, "the libero stays on court");
+        assert_eq!(scout.out_for_the_libero(), Some(sub));
+        assert_eq!(scout.snapshot.current_lineup.get_mb1(), Some(sub));
+        assert!(!scout.snapshot.current_lineup.is_in_the_game(&p.mb1));
+        scout.assert_replays(&p, 0, TeamSideEnum::Them);
+        // until the libero would go to the front row: the other middle
+        // blocker serves, the substitute back in the front row
+        scout.we_score();
+        scout.they_score();
+        scout.we_score();
+        assert_eq!(scout.rotation(), 4);
+        assert_eq!(scout.phase(), PhaseEnum::Break);
+        assert_eq!(scout.on_court()[0], p.mb2);
+        assert_eq!(
+            scout.on_court()[3],
+            sub,
+            "the substitute in place of the libero"
+        );
+        assert!(!scout.on_court().contains(&p.mb1));
+        assert!(!scout.on_court().contains(&p.libero));
+        scout.assert_libero_rules(p.libero, [sub, p.mb2], "after the side out");
+        // closed change: only the middle blocker for the substitute
+        assert!(
+            scout
+                .refused_substitution(sub, p.bench[1])
+                .contains("can be only replaced by")
+        );
+        scout.substitute(sub, p.mb1);
+        assert_eq!(scout.on_court()[3], p.mb1);
+        scout.assert_replays(&p, 0, TeamSideEnum::Them);
+    }
+
+    /// The libero is never substituted, on court or not, nor comes in as a
+    /// substitute; and the player out for the libero doesn't come in for
+    /// someone else, already being in the game.
+    #[test]
+    fn the_libero_is_never_substituted() {
+        let p = Players::new();
+        let mut scout = Scout::new(&p.set(0, TeamSideEnum::Them));
+        assert!(scout.on_court().contains(&p.libero));
+        assert!(
+            scout
+                .refused_substitution(p.libero, p.bench[0])
+                .contains("cannot replace the libero")
+        );
+        // the other libero isn't in the game
+        assert!(
+            scout
+                .refused_substitution(p.fallback_libero, p.bench[0])
+                .contains("can't play it")
+        );
+        for libero in [p.libero, p.fallback_libero] {
+            assert!(
+                scout
+                    .refused_substitution(p.oh1, libero)
+                    .contains("can't come in")
+            );
+        }
+        // the middle blocker the libero plays for
+        assert!(
+            scout
+                .refused_substitution(p.oh1, p.mb1)
+                .contains("can't come in")
+        );
+        // the substitute out for the libero neither
+        scout.substitute(p.mb1, p.bench[0]);
+        assert!(
+            scout
+                .refused_substitution(p.oh1, p.bench[0])
+                .contains("can't come in")
+        );
+        // the libero changed: still never substituted
+        scout.we_score();
+        scout.they_score();
+        scout.add(event(EventTypeEnum::CL, None, None));
+        assert!(scout.on_court().contains(&p.fallback_libero));
+        assert_eq!(scout.out_for_the_libero(), Some(p.bench[0]));
+        assert!(
+            scout
+                .refused_substitution(p.fallback_libero, p.bench[1])
+                .contains("cannot replace the libero")
+        );
+        // and the libero not on court not in the game
+        assert!(
+            scout
+                .refused_substitution(p.libero, p.bench[1])
+                .contains("can't play it")
+        );
+    }
+
+    /// The substitution of the player out for the libero counts as any
+    /// other: up to the maximum.
+    #[test]
+    fn the_player_out_for_the_libero_counts_among_the_substitutions() {
+        let p = Players::new();
+        let set = p.set(0, TeamSideEnum::Them);
+        let snapshot = set.compute_snapshot(1).expect("a snapshot");
+        let mut scout = Scout {
+            snapshot,
+            events: vec![],
+        };
+        scout.substitute(p.mb1, p.bench[0]);
+        assert!(
+            scout
+                .refused_substitution(p.oh1, p.bench[1])
+                .contains("max number of substitutions")
+        );
+        assert!(
+            scout
+                .refused_substitution(p.bench[0], p.mb1)
+                .contains("max number of substitutions")
+        );
+    }
+
+    /// The scouting offers the player out for the libero among the ones who
+    /// can leave, by their role, and the bench (or the one who left, once
+    /// substituted) to come in.
+    #[test]
+    fn the_scouting_offers_the_player_out_for_the_libero() {
+        let p = Players::new();
+        let team = p.team();
+        let sub = p.bench[0];
+        let mut scout = Scout::new(&p.set(1, TeamSideEnum::Us));
+        let leaving = |scout: &Scout| -> Vec<Uuid> {
+            scout
+                .snapshot
+                .current_lineup
+                .get_replaceable_lineup_choices()
+                .into_iter()
+                .filter_map(|(_, (_, id))| id)
+                .collect()
+        };
+        let coming_in = |scout: &Scout, replaced: Uuid| -> Vec<Uuid> {
+            scout
+                .snapshot
+                .current_lineup
+                .get_available_replacements(&team, replaced)
+                .iter()
+                .map(|(_, player)| player.id)
+                .collect()
+        };
+        scout.substitute(p.mb1, sub);
+        scout.they_score();
+        // the substitute, out for the libero, can leave; the libero can't
+        assert!(leaving(&scout).contains(&sub), "{:?}", leaving(&scout));
+        assert!(!leaving(&scout).contains(&p.libero));
+        // only for the middle blocker
+        assert_eq!(coming_in(&scout, sub), vec![p.mb1]);
+        // and every player offered can play the substitution
+        for player in leaving(&scout) {
+            assert!(
+                scout.snapshot.can_play(EventTypeEnum::R, &player),
+                "{player}"
+            );
+        }
+        scout.substitute(sub, p.mb1);
+        // the change closed: neither offered again
+        assert!(!leaving(&scout).contains(&p.mb1));
+        assert_eq!(coming_in(&scout, p.mb1), Vec::<Uuid>::new());
+        // a middle blocker out for the libero never substituted: the bench
+        let mut scout = Scout::new(&p.set(0, TeamSideEnum::Them));
+        assert!(leaving(&scout).contains(&p.mb1));
+        assert_eq!(coming_in(&scout, p.mb1), p.bench.to_vec());
+        scout.substitute(p.mb1, sub);
+        assert_eq!(coming_in(&scout, sub), vec![p.mb1]);
+    }
 }

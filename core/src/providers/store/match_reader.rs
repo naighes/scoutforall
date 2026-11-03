@@ -1,5 +1,5 @@
 use crate::{
-    errors::{AppError, IOError},
+    errors::{AppError, IOError, MatchError},
     localization::Language,
     logging::logger::log_error,
     providers::{match_reader::MatchReader, set_reader::SetReader},
@@ -41,7 +41,13 @@ impl MatchReader for StoreMatchReader {
                     "match {:?} of team {} is unreadable: {}",
                     match_id, team.id, e
                 ));
-                Unreadable { id: match_id }
+                Unreadable {
+                    id: match_id,
+                    reason: match e {
+                        AppError::Match(MatchError::SetNotValid(reason)) => Some(reason),
+                        _ => None,
+                    },
+                }
             })
         }))
         .await;
@@ -97,8 +103,14 @@ impl StoreMatchReader {
         entry.team = team.with_roster(&entry.roster);
         entry.sets = self.set_reader.read_all(&entry).await?;
         fill_lineup_rules(&mut entry.sets, rules);
-        // a match whose sets don't replay can't be shown nor scouted
-        entry.get_status()?;
+        // a match whose sets don't replay can't be shown nor scouted: the
+        // first event that doesn't tells why
+        entry.get_status().map_err(|e| match entry.replay_issue() {
+            Some(issue) => AppError::Match(MatchError::SetNotValid(
+                issue.describe(self.language.labels()),
+            )),
+            None => e,
+        })?;
         Ok(entry)
     }
 }

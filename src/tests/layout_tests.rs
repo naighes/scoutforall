@@ -29,7 +29,7 @@ mod tests {
     const SCOUTED: &str = "s#s#s=p7=s=p7#a2#";
 
     /// The keys typed, a char each: `\n` is Enter, `\x1b` Esc, `\x02` F2,
-    /// `\x03` F3, `\t` Tab, `>` the right arrow.
+    /// `\x03` F3, `\t` Tab, `>` the right arrow, `↓` the down arrow.
     fn code(c: char) -> KeyCode {
         match c {
             '\n' => KeyCode::Enter,
@@ -38,6 +38,7 @@ mod tests {
             '\x03' => KeyCode::F(3),
             '\t' => KeyCode::Tab,
             '>' => KeyCode::Right,
+            '↓' => KeyCode::Down,
             c => KeyCode::Char(c),
         }
     }
@@ -50,9 +51,12 @@ mod tests {
             ("team list", true, "".into()),
             ("new team", true, "n".into()),
             ("import team", true, "i".into()),
+            (DVW, true, "i\n".into()),
+            (DVW_NEW_TEAM, true, "i\n\n\n".into()),
             ("settings", true, "\x02".into()),
             ("settings shortcuts", true, "\x02\t".into()),
             ("report an issue", true, "\x02i".into()),
+            ("settings country", true, "\x02↓\n".into()),
             ("team details", true, "\n".into()),
             ("edit team", true, "\ne".into()),
             ("edit player", true, "\n\n".into()),
@@ -77,11 +81,23 @@ mod tests {
 
     /// The terms of use, shown at the first startup.
     const TERMS: &str = "terms of use";
+    /// The import of a DataVolley file: its first step, and the form of a
+    /// new team.
+    const DVW: &str = "import DataVolley";
+    const DVW_NEW_TEAM: &str = "import DataVolley new team";
 
     /// The screen of `screens()` with the name.
     async fn open_screen(name: &str, started: bool, keys: &str) -> Ui {
         match name {
             TERMS => Ui::first_startup(TEAM).await,
+            DVW | DVW_NEW_TEAM => {
+                let mut ui = Ui::start_with_sets(TEAM).await;
+                ui.browse_file("match.dvw", include_bytes!("fixtures/three_sets.dvw"));
+                for c in keys.chars() {
+                    ui.press(code(c)).await;
+                }
+                ui
+            }
             _ => open(started, keys).await,
         }
     }
@@ -95,6 +111,34 @@ mod tests {
             ui.press(code(c)).await;
         }
         ui
+    }
+
+    /// Every field of the team form at every size, whichever is being
+    /// changed (it takes more lines).
+    #[tokio::test]
+    async fn the_team_form_shows_every_field_at_every_size() {
+        let labels = current_labels();
+        let fields = [
+            labels.name,
+            labels.team_classification,
+            labels.gender,
+            labels.country,
+            labels.year,
+        ];
+        let mut ui = open(true, "\ne").await;
+        for field in fields {
+            for (width, height) in SIZES {
+                ui.resize(width, height);
+                let screen = ui.screen();
+                for label in fields {
+                    assert!(
+                        screen.contains(label),
+                        "on {field} at {width}x{height}: {label} not shown\n{screen}"
+                    );
+                }
+            }
+            ui.press(KeyCode::Down).await;
+        }
     }
 
     #[tokio::test]
@@ -193,23 +237,25 @@ mod tests {
     }
 
     /// After our serve error they serve, and our reception goes straight
-    /// over: the longest list of events, 7 (their point or error, our
-    /// fault, attack, dig or block, their freeball).
-    const SEVEN_EVENTS: &str = "s=p7/";
+    /// over: the longest list of events, 8 (their point or error, our
+    /// fault, attack, dig or block, our freeball after a dig not scouted,
+    /// theirs).
+    const EIGHT_EVENTS: &str = "s=p7/";
     /// Carla, the middle blocker in the front row, attacks after the dig of
     /// Gina the libero: the tallest panel, 6 evaluations and 8 sets.
     const MIDDLE_BLOCKER_ATTACK: &str = "s-d7+a3";
 
     #[tokio::test]
     async fn all_the_events_are_listed_at_every_height() {
-        let mut ui = open(true, &format!("\nm\n{SEVEN_EVENTS}")).await;
-        for height in 20..=60 {
+        let mut ui = open(true, &format!("\nm\n{EIGHT_EVENTS}")).await;
+        // from 21 rows: at 20 the last option doesn't fit
+        for height in 21..=60 {
             ui.resize(100, height);
             let events = panel(&mut ui, current_labels().choose_the_event);
-            // the seven events, then the options
+            // the eight events, then the options
             assert_eq!(
                 events.as_ref().map(Vec::len),
-                Some(7 + ScoutingOptionEnum::ALL.len()),
+                Some(8 + ScoutingOptionEnum::ALL.len()),
                 "at 100x{height}: {events:?}\n{}",
                 ui.screen()
             );
@@ -237,7 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_point_sequence_is_shown_only_when_the_lists_still_fit() {
-        for keys in [SEVEN_EVENTS, MIDDLE_BLOCKER_ATTACK] {
+        for keys in [EIGHT_EVENTS, MIDDLE_BLOCKER_ATTACK] {
             let mut ui = open(true, &format!("\nm\n{keys}")).await;
             let shown: Vec<u16> = (20..=60)
                 .filter(|height| {

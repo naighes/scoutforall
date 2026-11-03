@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -185,6 +186,9 @@ class ScoutingViewModel(
     }
 
     fun event(event: EventChoice) = choose("event ${event.value}") { it.chooseEvent(event.value) }
+
+    /** The team makes the fault, no player (e.g. a rotation fault). */
+    fun team() = choose("team") { it.chooseTeam() }
 
     fun replacement(player: ScoutingPlayer) = choose("replacement ${player.id}") { it.chooseReplacement(player.id) }
 
@@ -322,7 +326,7 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
                 actions = {
                     view?.let {
                         Reception(it.state, model::nextReception)
-                        InvertedP1(it.state.invertedP1, model::invertedP1)
+                        if (it.state.invertedP1Applies) InvertedP1(it.state.invertedP1, model::invertedP1)
                     }
                 },
             )
@@ -347,8 +351,8 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
 }
 
 /** The inverted P1, kept until changed: in P1 in side out the outside
- * hitter attacks from 4 and the opposite from 2. Up in the bar, the court
- * keeps its room. */
+ * hitter attacks from 4 and the opposite from 2, so shown then only. Up in
+ * the bar, the court keeps its room. */
 @Composable
 private fun InvertedP1(inverted: Boolean, onChange: (Boolean) -> Unit) {
     val description = stringResource(R.string.inverted_p1_description)
@@ -723,6 +727,10 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
         ScoutingStep.PLAYER -> {
             Title(state.event?.name.orEmpty())
             Hint(stringResource(R.string.touch_the_player))
+            // our fault: the player's, or the team's
+            if (state.teamChoice) {
+                Buttons(listOf(Triple("team", stringResource(R.string.the_team)) { model.team() }))
+            }
         }
         ScoutingStep.REPLACEMENT -> {
             Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
@@ -760,10 +768,13 @@ private fun Title(text: String) = Text(
 private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /** The changes of the lineup, rare and at stopped play, each with its icon
- * and a short name. */
+ * and a short name; the libero out or in by its own, saying which; the
+ * libero for a player of the back row, touched on court. */
 private val lineupChanges = mapOf(
     EventTypeEnum.R to (R.drawable.ic_substitution to R.string.substitution_short),
     EventTypeEnum.CL to (R.drawable.ic_libero to R.string.libero),
+    EventTypeEnum.LR to (R.drawable.ic_libero_in_out to null),
+    EventTypeEnum.LF to (R.drawable.ic_libero_for to R.string.libero_for_short),
     EventTypeEnum.CS to (R.drawable.ic_setter to R.string.setter_change_short),
 )
 
@@ -773,6 +784,7 @@ private val rallyEvents = mapOf(
     EventTypeEnum.OS to (R.drawable.ic_their_point to R.string.their_point),
     EventTypeEnum.OE to (R.drawable.ic_their_error to R.string.their_error),
     EventTypeEnum.OF to (R.drawable.ic_their_freeball to R.string.their_freeball),
+    EventTypeEnum.FB to (R.drawable.ic_our_freeball to R.string.our_freeball),
     EventTypeEnum.F to (R.drawable.ic_fault to R.string.fault),
 )
 
@@ -791,12 +803,14 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
         contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
         Row(Modifier.height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+            // on a narrow screen the changes scroll, the close button stays
             AnimatedVisibility(
                 expanded,
+                modifier = Modifier.weight(1f, fill = false),
                 enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
                 exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
             ) {
-                Row(Modifier.padding(start = 12.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 12.dp)) {
                     events.forEach { event ->
                         val looks = lineupChanges[event.value]
                         Column(
@@ -812,7 +826,7 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                         ) {
                             looks?.let { (icon, _) -> Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) }
                             Text(
-                                looks?.let { (_, name) -> stringResource(name) } ?: event.name,
+                                looks?.second?.let { stringResource(it) } ?: event.name.replaceFirstChar { it.uppercase() },
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                             )

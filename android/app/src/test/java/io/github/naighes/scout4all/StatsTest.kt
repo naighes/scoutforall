@@ -66,6 +66,8 @@ class ZoneAttacksLanguageTest(private val language: String, private val count: S
         core { c ->
             val egonu = c.team(team).players.first { it.name == "Paola Egonu" }.id
             c.scouting(team, match).use { s ->
+                // in the front row she may attack or block the ball
+                // coming over
                 s.choosePlayerFirst(egonu)
                 s.chooseEvent(EventTypeEnum.A)
                 s.chooseEval(EvalEnum.PERFECT)

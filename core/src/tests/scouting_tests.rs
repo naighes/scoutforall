@@ -87,6 +87,7 @@ mod tests {
                 year: 2025,
                 classification: None,
                 gender: None,
+                country: None,
                 players,
             })
             .await
@@ -326,6 +327,75 @@ mod tests {
         assert_eq!(s.session.snapshot().score_them, 1);
     }
 
+    /// Our fault: the player making it (e.g. a setter's double), or the
+    /// team, no player (e.g. a rotation fault). Only the fault can be the
+    /// team's: the events requiring the player refuse it.
+    #[tokio::test]
+    async fn a_fault_is_a_players_or_the_teams() {
+        let mut s = scouting().await;
+        let refused = Err(ScoutingError::InvalidPlayerSelection);
+        // nothing chosen yet, and the serve: no team
+        assert!(!s.session.team_choice());
+        assert_eq!(s.session.choose_team().await, refused);
+        s.session.choose_event(S).await.unwrap();
+        assert!(!s.session.team_choice());
+        assert_eq!(s.session.choose_team().await, refused);
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        for event in [D, B, A] {
+            s.session.choose_event(event).await.unwrap();
+            assert_eq!(s.session.step(), ScoutingStep::Player, "{event}");
+            assert!(!s.session.team_choice(), "{event}");
+            assert_eq!(s.session.choose_team().await, refused, "{event}");
+            s.session.undo().await.unwrap();
+        }
+        assert_eq!(event_types(&saved_events(&s).await), vec![S]);
+        // the fault: the team, or the players on court
+        s.session.choose_event(F).await.unwrap();
+        assert_eq!(s.session.step(), ScoutingStep::Player);
+        assert!(s.session.team_choice());
+        assert_eq!(s.session.player_choices().len(), 6);
+        assert_eq!(s.session.choose_team().await, Ok(Progress::Saved));
+        assert!(!s.session.team_choice());
+        assert_eq!(s.session.step(), ScoutingStep::Event);
+        // they serve: a fault of the setter, named
+        s.session.choose_event(F).await.unwrap();
+        assert!(s.session.team_choice());
+        let setter = s.players[0];
+        assert_eq!(s.session.choose_player(setter).await, Ok(Progress::Saved));
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![S, F, F]);
+        assert_eq!(
+            saved.iter().map(|e| e.player).collect::<Vec<_>>(),
+            vec![Some(setter), None, Some(setter)]
+        );
+        assert_eq!(s.session.snapshot().score_them, 2);
+        // the team's fault undone, back to the team choice
+        s.session.choose_event(F).await.unwrap();
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.step(), ScoutingStep::Event);
+        assert!(!s.session.team_choice());
+    }
+
+    /// With the player first, the fault comes before its player: the team
+    /// can make it too.
+    #[tokio::test]
+    async fn with_the_player_first_the_fault_can_be_the_teams() {
+        let mut s = player_first().await;
+        assert!(s.session.other_events().contains(&F));
+        s.session.choose_event(F).await.unwrap();
+        assert!(s.session.team_choice());
+        assert_eq!(s.session.choose_team().await, Ok(Progress::Saved));
+        let saved = saved_events(&s).await;
+        assert_eq!(
+            saved
+                .iter()
+                .map(|e| (e.event_type, e.player))
+                .collect::<Vec<_>>(),
+            vec![(F, None)]
+        );
+        assert_eq!(s.session.snapshot().score_them, 1);
+    }
+
     /// A substitution: the player who leaves, then the one who comes in.
     #[tokio::test]
     async fn a_substitution_needs_the_replacement() {
@@ -354,6 +424,38 @@ mod tests {
         let saved = saved_events(&s).await;
         assert_eq!(saved[0].player, Some(replaced));
         assert_eq!(saved[0].target_player, Some(bench));
+    }
+
+    /// The libero out, then back in: saved at once, no player, the scout
+    /// still choosing the event; the middle blocker back on court meanwhile.
+    #[tokio::test]
+    async fn the_libero_goes_out_and_back_in() {
+        let mut s = scouting().await;
+        let (middle, libero) = (s.players[5], s.players[6]);
+        let on_court = |s: &Scouting, id: Uuid| {
+            s.session
+                .snapshot()
+                .current_lineup
+                .find_position(&id)
+                .is_some()
+        };
+        assert!(on_court(&s, libero) && !on_court(&s, middle));
+        assert_eq!(s.session.choose_event(LR).await, Ok(Progress::Saved));
+        assert_eq!(s.session.step(), ScoutingStep::Event);
+        assert!(!on_court(&s, libero) && on_court(&s, middle));
+        assert!(s.session.available_events().contains(&LR));
+        assert_eq!(s.session.choose_event(LR).await, Ok(Progress::Saved));
+        assert!(on_court(&s, libero) && !on_court(&s, middle));
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![LR, LR]);
+        assert!(saved.iter().all(|e| e.player.is_none() && e.eval.is_none()));
+        // within the rally, never
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        assert_eq!(
+            s.session.choose_event(LR).await,
+            Err(ScoutingError::EventNotAvailable(LR))
+        );
     }
 
     /// A player of the team who isn't on the roster of the match can't come
@@ -521,7 +623,7 @@ mod tests {
             (s.session.step(), s.session.event(), s.session.player()),
             (ScoutingStep::Eval, Some(S), Some(s.players[0]))
         );
-        assert_eq!(s.session.other_events(), vec![OE, F, R, CS]);
+        assert_eq!(s.session.other_events(), vec![OE, F, R, LR, CS, LF]);
         assert_eq!(s.session.player_events(&s.players[0]), vec![]);
         assert_eq!(
             s.session.choose_eval(EvalEnum::Perfect).await,
@@ -647,12 +749,16 @@ mod tests {
         let mut s = player_first().await;
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
         // they receive and attack: the setter is in the back row, a middle
-        // blocker in the front row
+        // blocker in the front row, both can attack (our dig not scouted);
+        // the libero only digs. Their freeball after their reception, a
+        // team event; ours too, after our dig not scouted
         let setter = s.players[0];
         let blocker = s.players[2];
-        assert_eq!(s.session.player_events(&setter), vec![D]);
-        assert_eq!(s.session.player_events(&blocker), vec![D, B]);
-        assert_eq!(s.session.other_events(), vec![OS, OE, F, OF]);
+        let libero = s.players[6];
+        assert_eq!(s.session.player_events(&setter), vec![A, D]);
+        assert_eq!(s.session.player_events(&blocker), vec![A, D, B]);
+        assert_eq!(s.session.player_events(&libero), vec![D]);
+        assert_eq!(s.session.other_events(), vec![OS, OE, F, FB, OF]);
 
         assert_eq!(
             s.session.choose_player_first(blocker).await,
@@ -679,7 +785,7 @@ mod tests {
 
         // one event: straight to the evaluation
         assert_eq!(
-            s.session.choose_player_first(setter).await,
+            s.session.choose_player_first(libero).await,
             Ok(Progress::Choosing)
         );
         assert_eq!(
@@ -691,7 +797,7 @@ mod tests {
             (s.session.step(), s.session.player()),
             (ScoutingStep::Event, None)
         );
-        s.session.choose_player_first(setter).await.unwrap();
+        s.session.choose_player_first(libero).await.unwrap();
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
 
         // a player not on court plays nothing
@@ -699,18 +805,20 @@ mod tests {
             s.session.choose_player_first(s.players[7]).await,
             Err(ScoutingError::InvalidPlayerSelection)
         );
-        // the setter can attack or send a freeball: the freeball is saved
-        // with the player
-        assert_eq!(s.session.player_events(&setter), vec![A, FB]);
-        s.session.choose_player_first(setter).await.unwrap();
+        // the setter can attack; our freeball is a team event, among the
+        // other events, saved at once with no player
+        assert_eq!(s.session.player_events(&setter), vec![A]);
+        assert_eq!(s.session.other_events(), vec![OE, F, FB]);
         assert_eq!(s.session.choose_event(FB).await, Ok(Progress::Saved));
-        // undone, back to the events of the player
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![S, D, FB]);
+        assert_eq!(saved.last().and_then(|e| e.player), None);
+        // undone, back to the choice of the player
         s.session.undo().await.unwrap();
         assert_eq!(
-            (s.session.step(), s.session.player()),
-            (ScoutingStep::Event, Some(setter))
+            (s.session.step(), s.session.event(), s.session.player()),
+            (ScoutingStep::Event, None, None)
         );
-        // another event drops the player
         assert_eq!(s.session.choose_event(OE).await, Ok(Progress::Saved));
         assert_eq!(event_types(&saved_events(&s).await), vec![S, D, OE]);
     }

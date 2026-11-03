@@ -241,6 +241,8 @@ mod tests {
     #[tokio::test]
     async fn analytics_are_saved_right_away() {
         let mut ui = settings().await;
+        // past the country
+        ui.press(KeyCode::Down).await;
         ui.press(KeyCode::Down).await;
         ui.press(KeyCode::Char(' ')).await;
         assert!(!saved(&ui).await.consent.analytics_enabled);

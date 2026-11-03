@@ -70,6 +70,29 @@ mod tests {
         );
     }
 
+    /// A blob removed: gone, its folder listing without it; a blob that
+    /// isn't there removed without an error.
+    async fn removing(store: &dyn Store) {
+        store.write("a/b.json", b"{}").await.unwrap();
+        store.write("a/c.csv", b"1").await.unwrap();
+        store.remove("a/b.json").await.unwrap();
+        assert_eq!(store.read("a/b.json").await.unwrap(), None);
+        assert!(!store.exists("a/b.json").await.unwrap());
+        assert_eq!(
+            store.list("a").await.unwrap(),
+            vec![StoreEntry::Blob("c.csv".into())]
+        );
+        store.remove("a/b.json").await.unwrap();
+        store.remove("nowhere/x.json").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_stores_remove_blobs_alike() {
+        let dir = TempDir::new().unwrap();
+        removing(&FsStore::new(dir.path())).await;
+        removing(&MemoryStore::new()).await;
+    }
+
     #[tokio::test]
     async fn the_stores_keep_blobs_and_folders_alike() {
         let dir = TempDir::new().unwrap();
@@ -182,6 +205,7 @@ mod tests {
                 year: 2025,
                 classification: None,
                 gender: None,
+                country: None,
                 players,
             })
             .await

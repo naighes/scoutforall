@@ -239,9 +239,10 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
             )
         },
     )
+    // why, when it's known: e.g. a set this version doesn't replay
     is MatchListing.Unreadable -> ListItem(
         headlineContent = { Text(stringResource(R.string.unreadable_match)) },
-        supportingContent = { Text(m.folder) },
+        supportingContent = { Text(m.reason?.let { "${m.folder}\n$it" } ?: m.folder) },
     )
 }
 

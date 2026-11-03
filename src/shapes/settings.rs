@@ -6,8 +6,9 @@ use dirs::home_dir;
 use scout4all_core::{
     analytics::global::set_uploads_enabled,
     constants::DEFAULT_LANGUAGE,
-    settings::Consent,
+    settings::{Consent, TeamDefaults},
     shapes::{
+        country::CountryCode,
         enums::{EvalEnum, EventTypeEnum, LanguageEnum},
         technique::{ServeTypeEnum, SetTypeEnum},
     },
@@ -33,6 +34,9 @@ pub struct Settings {
     /// other apps: their fields, at the top level of `config.json`
     #[serde(flatten)]
     pub consent: Consent,
+    /// the country of a new team, shared with the other apps as `consent`
+    #[serde(flatten)]
+    pub team_defaults: TeamDefaults,
     #[serde(default = "default_last_used_dir")]
     pub last_used_dir: Option<PathBuf>,
 }
@@ -51,6 +55,7 @@ impl Default for Settings {
             serve_type_keybindings: KeyBindings::default(),
             option_keybindings: KeyBindings::default(),
             consent: Consent::default(),
+            team_defaults: TeamDefaults::default(),
             last_used_dir: None,
         }
     }
@@ -70,6 +75,35 @@ impl Settings {
 
     pub fn get_default_path(&self) -> Option<PathBuf> {
         self.last_used_dir.clone().or_else(home_dir)
+    }
+
+    /// The settings of a new installation in the language of the system:
+    /// the first of its locales (as `it-IT`), in the order of the user,
+    /// the app speaks; English if none.
+    pub fn in_system_language(self, locales: &[String]) -> Settings {
+        Settings {
+            language: locales
+                .iter()
+                .find_map(|l| LanguageEnum::of_locale(l))
+                .unwrap_or(self.language),
+            ..self
+        }
+    }
+
+    /// The settings with the country of a new team guessed, when they have
+    /// none and something tells it: the locales of the system (as
+    /// `it-IT`), in the order of the user, then the language.
+    pub fn with_guessed_country(&self, locales: &[String]) -> Option<Settings> {
+        let guess = || CountryCode::guess(locales.iter().map(String::as_str), self.language);
+        match self.team_defaults.country {
+            Some(_) => None,
+            None => guess().map(|country| Settings {
+                team_defaults: TeamDefaults {
+                    country: Some(country),
+                },
+                ..self.clone()
+            }),
+        }
     }
 }
 

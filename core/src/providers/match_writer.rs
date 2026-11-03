@@ -1,6 +1,9 @@
 use crate::{
     errors::AppError,
-    shapes::{r#match::MatchEntry, team::TeamEntry},
+    shapes::{
+        r#match::{MatchEntry, MatchSource},
+        team::TeamEntry,
+    },
 };
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
@@ -29,4 +32,12 @@ pub trait MatchWriter {
         notes: String,
         roster: Vec<Uuid>,
     ) -> Result<(), AppError>;
+
+    /// The match, saved, coming from `source`: a match is created as
+    /// scouted here.
+    async fn save_source(
+        &self,
+        m: &MatchEntry,
+        source: MatchSource,
+    ) -> Result<MatchEntry, AppError>;
 }

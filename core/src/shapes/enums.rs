@@ -152,7 +152,9 @@ impl FromStr for TeamSideEnum {
 ///   A defensive net action to stop or deflect the opponent's attack.
 ///
 /// - **F**: Fault  
-///   A team error resulting in a lost point (e.g., net touch, rotation fault).
+///   A team error resulting in a lost point (e.g., net touch, rotation fault,
+///   a setter's fault). It names the player making it, or none: the team's
+///   (e.g. a rotation fault).
 ///
 /// - **OS**: Opponent Score  
 ///   A point scored directly by the opponent (not caused by our own fault).
@@ -179,6 +181,16 @@ impl FromStr for TeamSideEnum {
 /// - **CL**: Change Libero  
 ///   A libero change performed by either team.
 ///
+/// - **LR**: Libero Replacement  
+///   The libero goes out, the middle blocker staying on court in the back
+///   row, or comes back in for them. It lasts until the next one: until
+///   then the libero doesn't come in (or doesn't go out) by itself.
+///
+/// - **LF**: Libero For
+///   The libero for the player named, when in the back row and not
+///   serving; for the middle blocker of the back row otherwise, as ever (a
+///   middle blocker named brings that back). It lasts until the next one.
+///
 /// - **CS**: Change Setter
 ///   A setter change performed by either team.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -196,6 +208,8 @@ pub enum EventTypeEnum {
     OF,
     R,
     CL,
+    LR,
+    LF,
     CS,
 }
 
@@ -215,6 +229,8 @@ impl fmt::Display for EventTypeEnum {
             OF => "OF",
             R => "R",
             CL => "CL",
+            LR => "LR",
+            LF => "LF",
             CS => "CS",
         };
         write!(f, "{}", label)
@@ -229,7 +245,7 @@ impl WithDesc<EventTypeEnum> for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub const ALL: [EventTypeEnum; 13] = [
+    pub const ALL: [EventTypeEnum; 15] = [
         EventTypeEnum::S,  // serve
         EventTypeEnum::P,  // pass/reception
         EventTypeEnum::A,  // attack
@@ -242,6 +258,8 @@ impl EventTypeEnum {
         EventTypeEnum::OF, // opponent freeball, sent to us
         EventTypeEnum::R,  // substitution/replacement
         EventTypeEnum::CL, // change libero
+        EventTypeEnum::LR, // libero replacement, in or out
+        EventTypeEnum::LF, // the libero for a player of the back row
         EventTypeEnum::CS, // change setter
     ];
 
@@ -250,17 +268,34 @@ impl EventTypeEnum {
         matches!(self, S | P | A | D | B)
     }
 
+    /// Our freeball (`FB`) is a team event: the player isn't asked, but the
+    /// sets scouted before keep it (see `accepts_player`). Our fault (`F`)
+    /// asks it, the team's having none (see `asks_player`).
     pub fn requires_player(&self) -> bool {
         use EventTypeEnum::*;
-        matches!(self, A | B | P | F | D | FB | R | S | CS)
+        matches!(self, A | B | P | D | R | S | CS | LF)
+    }
+
+    /// Whether scouting asks the player: the events requiring one, and our
+    /// fault, a player's (e.g. a setter's double) or the team's (e.g. a
+    /// rotation fault).
+    pub fn asks_player(&self) -> bool {
+        self.requires_player() || *self == EventTypeEnum::F
+    }
+
+    /// Whether a saved event can name its player: the events asking one,
+    /// and our freeball, which named it before it became a team event (the
+    /// statistics ignore it).
+    pub fn accepts_player(&self) -> bool {
+        self.asks_player() || *self == EventTypeEnum::FB
     }
 
     pub fn available_evals(&self) -> Vec<EvalEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match self {
-            S | B => vec![Perfect, Positive, Over, Negative, Error],
-            A | D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
+            B => vec![Perfect, Positive, Over, Negative, Error],
+            S | A | D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
             _ => vec![],
         }
     }
@@ -307,7 +342,7 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self.rally_winner(eval), self, eval) {
-            (Some(_), _, _) | (None, R | CL | CS | F | OS | OE, _) => None,
+            (Some(_), _, _) | (None, R | CL | LR | LF | CS | F | OS | OE, _) => None,
             (None, S, Some(Over))
             | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
             | (None, A, Some(Positive | Exclamative))
@@ -348,6 +383,8 @@ impl FriendlyName for EventTypeEnum {
             OF => labels.opponent_freeball,
             R => labels.substitution,
             CL => labels.change_libero,
+            LR => labels.libero_in_out,
+            LF => labels.libero_for,
             CS => labels.change_setter,
         }
     }
@@ -370,6 +407,8 @@ impl FromStr for EventTypeEnum {
             "OF" => Ok(OF),
             "R" => Ok(R),
             "CL" => Ok(CL),
+            "LR" => Ok(LR),
+            "LF" => Ok(LF),
             "CS" => Ok(CS),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",
@@ -386,6 +425,11 @@ impl FromStr for EventTypeEnum {
 /// quality or outcome of a play. These evaluations are applied across
 /// all fundamentals (serve, reception, attack, block, dig/defense).
 ///
+/// A rally going on, `+` and `-` tell who plays the ball next: `+` us, `-`
+/// them (attacking), however hard the touch was. The serve mirrors their
+/// reception: `+` is their `-`, `!` their `!`, `-` their `+` or `#`, `/`
+/// their `/`.
+///
 /// The supported evaluations are:
 ///
 /// - **Perfect (`#`)**
@@ -401,17 +445,16 @@ impl FromStr for EventTypeEnum {
 ///   - Serve: puts the opponent in trouble, limiting their attack.
 ///   - Reception: accurate pass, but not perfect — still allows
 ///     first-tempo attacks.  
-///   - Attack: does not score, but keeps the rally alive and allows
-///     our team to continue the play (a chance for a re-attack), e.g. the
-///     ball rebounds off their block and comes back easy, with no need
-///     of our coverage.
-///   - Block: successful, but does not score - the ball remains
-///     playable and allows a re-attack.
+///   - Attack: does not score, but we play the ball again without their
+///     attack: it rebounds off their block, their dig goes straight over,
+///     or they send a freeball (`OF`, optional).
+///   - Block: does not score, but we play the ball again without their
+///     attack (they can send a freeball, `OF`, optional).
 ///   - Defense: playable ball, but with limited attacking transition.
 ///
 /// - **Exclamative (`!`)**  
 ///   An action worth highlighting, often unusual or remarkable.
-///   - Serve: not used.
+///   - Serve: their reception is `!`, neither good nor bad.
 ///   - Reception: between `+` and `-` - pass is neither perfect nor bad.
 ///   - Attack: blocked, but kept alive by our team coverage, allowing a
 ///     possible re-attack (still a positive attack).
@@ -442,7 +485,8 @@ impl FromStr for EventTypeEnum {
 ///   A weak action that puts the team at disadvantage, though play continues.
 ///   - Serve: too easy, giving full control to the opponent.
 ///   - Reception: poor pass, only one predictable attack available.
-///   - Attack: easily defended.
+///   - Attack: defended, they attack again.
+///   - Block: touched, they attack again.
 ///   - Defense: keeps the ball in play, but no chance for a strong counter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EvalEnum {
@@ -544,6 +588,7 @@ impl EvalEnum {
 
             (Perfect, S) => None,
             (Positive, S) => Some(labels.opponent_with_limited_attack_options.to_string()),
+            (Exclamative, S) => Some(labels.opponent_with_few_attack_options.to_string()),
             (Negative, S) => Some(labels.opponent_with_full_attack_options.to_string()),
             (Over, S) => Some(labels.ball_goes_straight_back_to_our_court.to_string()),
             _ => None,
@@ -583,6 +628,7 @@ impl EvalEnum {
 
             (Perfect, S) => labels.ace.to_string(),
             (Positive, S) => labels.positive.to_string(),
+            (Exclamative, S) => labels.subpositive.to_string(),
             (Negative, S) => labels.negative.to_string(),
             (Error, S) => labels.error.to_string(),
             (Over, S) => labels.overpass.to_string(),
@@ -874,6 +920,23 @@ impl LanguageEnum {
         LanguageEnum::Pl,
         LanguageEnum::Ja,
     ];
+
+    /// The language of a locale of the system (`it_IT.UTF-8`, `pt-BR`,
+    /// `ja`), if the app speaks it: the part before the region.
+    pub fn of_locale(locale: &str) -> Option<Self> {
+        let language = locale
+            .split(['-', '_', '.', '@'])
+            .next()
+            .unwrap_or_default();
+        match language.to_lowercase().as_str() {
+            "en" => Some(LanguageEnum::En),
+            "it" => Some(LanguageEnum::It),
+            "pt" => Some(LanguageEnum::Pt),
+            "pl" => Some(LanguageEnum::Pl),
+            "ja" => Some(LanguageEnum::Ja),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for LanguageEnum {

@@ -153,6 +153,7 @@ mod tests {
                 year: 2025,
                 classification: None,
                 gender: None,
+                country: None,
                 players: vec![],
             })
             .await
@@ -438,5 +439,46 @@ mod tests {
         // the banner goes away, still choosing the event
         ui.press(KeyCode::Char('r')).await;
         assert!(ui.screen().contains(current_labels().choose_the_event));
+    }
+
+    /// We serve with the setter in position 1: the libero plays for Fede,
+    /// middle blocker 1 (6 among the players). Fede, out for the libero, is
+    /// substituted, then back for the substitute, the libero on court:
+    /// up to v0.11 the scouting offered her and then refused the change.
+    #[tokio::test]
+    async fn the_player_out_for_the_libero_is_substituted() {
+        let mut ui = scouting(false).await;
+        let court = |ui: &mut Ui| {
+            ui.lines()
+                .iter()
+                .skip_while(|l| !l.contains(&counter(0, 8)) && !l.contains("(L)"))
+                .any(|l| l.contains("(L)"))
+        };
+        assert!(court(&mut ui), "{}", ui.screen());
+        substitute(&mut ui, '6').await;
+        assert!(ui.screen().contains(&counter(1, 8)), "{}", ui.screen());
+        assert!(court(&mut ui), "the libero left: {}", ui.screen());
+        // back: only Fede can come in for her substitute
+        ui.type_keys(&[KeyCode::Char('r'), KeyCode::Char('6')])
+            .await;
+        let replacements = ui.panel(current_labels().select_replacement);
+        assert_eq!(
+            replacements.as_ref().map(Vec::len),
+            Some(1),
+            "{replacements:?}\n{}",
+            ui.screen()
+        );
+        assert!(
+            replacements.iter().flatten().any(|r| r.contains("Fede")),
+            "{replacements:?}"
+        );
+        ui.press(KeyCode::Char('1')).await;
+        assert!(ui.screen().contains(&counter(2, 8)), "{}", ui.screen());
+        let events = ui.saved_first_set_events();
+        assert_eq!(
+            events.iter().filter(|e| e.contains(",R,")).count(),
+            2,
+            "{events:?}"
+        );
     }
 }

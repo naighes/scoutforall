@@ -6,6 +6,7 @@ pub mod archive;
 pub mod benchmark;
 pub mod constants;
 pub mod detail;
+pub mod dvw;
 pub mod errors;
 pub mod event_edit;
 pub mod example;

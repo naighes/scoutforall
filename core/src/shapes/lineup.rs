@@ -30,6 +30,19 @@ pub struct Lineup {
     libero_replacement: Option<Uuid>,
     idle_player: Option<Uuid>,
     liberos_played: Vec<Uuid>,
+    // the libero out by the scout's choice (`LR`): the middle blocker plays
+    // in the back row until the libero comes back in
+    libero_out: bool,
+    // the libero for the player of the scout's choice (`LF`): from the first
+    // one of the set, where the libero plays is told by the rules (see
+    // `wanted_libero_place`), not by the rotation as up to then
+    chosen: bool,
+    // the player the libero is for when in the back row, the middle blocker
+    // otherwise (`None`: the middle blocker always)
+    libero_for: Option<Uuid>,
+    // the libero went out in this dead ball: it comes back in, for whoever,
+    // after a rally (a completed rally between two libero replacements)
+    libero_waiting: bool,
 }
 
 impl Lineup {
@@ -69,6 +82,10 @@ impl Lineup {
             },
             idle_player: if has_libero { Some(idle_player) } else { None },
             liberos_played: vec![current_libero],
+            libero_out: false,
+            chosen: false,
+            libero_for: None,
+            libero_waiting: false,
         };
         if has_libero {
             // set is started: put the libero in
@@ -90,7 +107,23 @@ impl Lineup {
     }
 
     pub fn get_current_rotation(&self) -> Result<u8, AppError> {
-        Lineup::get_rotation(self.players, &self.current_setter)
+        Lineup::get_rotation(self.rotation_positions(), &self.current_setter)
+    }
+
+    // the places telling the rotation: once the libero is chosen (see
+    // `set_libero_for`) it can play for the setter too, so the player it
+    // replaces in its place; up to then it never does
+    fn rotation_positions(&self) -> [Uuid; 6] {
+        match self.chosen {
+            true => self.get_positions_without_libero(),
+            false => self.players,
+        }
+    }
+
+    fn setter_index(&self) -> Option<usize> {
+        self.rotation_positions()
+            .iter()
+            .position(|id| *id == self.current_setter)
     }
 
     fn get_next_phase(&mut self, event: &EventEntry) -> Option<PhaseEnum> {
@@ -110,7 +143,136 @@ impl Lineup {
 
     pub fn update(&mut self, event: &EventEntry) -> Result<(), AppError> {
         self.update_phase(event);
-        self.update_libero()
+        if event.event_type.rally_winner(event.eval).is_some() {
+            self.libero_waiting = false;
+        }
+        match self.chosen {
+            true => self.place_libero(),
+            false => self.update_libero(),
+        }
+    }
+
+    /// The libero for a player of the scout's choice (`LF`), in the back row
+    /// or not yet: when in the back row, and not serving, the libero plays
+    /// in their place, otherwise in the place of the middle blocker of the
+    /// back row, as ever. A middle blocker brings back the default, the
+    /// middle blocker of the back row always. It lasts until the next one,
+    /// following the player substituted.
+    pub fn set_libero_for(&mut self, player_id: &Uuid) -> Result<(), AppError> {
+        let middle_blocker = self.is_middle_blocker(player_id)?;
+        self.libero_for = match middle_blocker {
+            true => None,
+            false => Some(*player_id),
+        };
+        self.chosen = true;
+        self.place_libero()
+    }
+
+    /// The player the libero is for when in the back row (see
+    /// `set_libero_for`): `None` for the middle blocker.
+    pub fn get_libero_for(&self) -> Option<Uuid> {
+        self.libero_for
+    }
+
+    /// Whether the player, on court or out for the libero, plays as a
+    /// middle blocker: two or five places from the setter.
+    pub fn is_middle_blocker(&self, player_id: &Uuid) -> Result<bool, AppError> {
+        let positions = self.get_positions_without_libero();
+        let not_found = || {
+            AppError::Snapshot(SnapshotError::LineupError(
+                "could not find the player in the lineup".to_string(),
+            ))
+        };
+        let setter = positions
+            .iter()
+            .position(|id| *id == self.current_setter)
+            .ok_or_else(not_found)?;
+        let player = positions
+            .iter()
+            .position(|id| id == player_id)
+            .ok_or_else(not_found)?;
+        Ok(matches!((player + 6 - setter) % 6, 2 | 5))
+    }
+
+    /// Where the libero plays once chosen (see `set_libero_for`), by the
+    /// rules: the player it's for, in the back row and not serving, or else
+    /// the middle blocker of the back row, not serving; nobody while out
+    /// (`LR`).
+    fn wanted_libero_place(&self) -> Result<Option<Uuid>, AppError> {
+        let positions = self.get_positions_without_libero();
+        let setter = positions
+            .iter()
+            .position(|id| *id == self.current_setter)
+            .ok_or_else(|| {
+                AppError::Snapshot(SnapshotError::LineupError(
+                    "could not find the setter in the lineup".to_string(),
+                ))
+            })?;
+        let serving = self.phase == PhaseEnum::Break;
+        // in the back row (positions 1, 6, 5), and not serving from 1
+        let back_row = |index: usize| matches!((index, serving), (4 | 5, _) | (0, false));
+        let in_back_row = |id: &Uuid| {
+            positions
+                .iter()
+                .position(|p| p == id)
+                .is_some_and(|index| matches!(index, 0 | 4 | 5))
+        };
+        let middle_blocker = [2, 5]
+            .iter()
+            .map(|offset| (setter + offset) % 6)
+            .find(|index| matches!(index, 0 | 4 | 5))
+            .filter(|index| back_row(*index))
+            .and_then(|index| positions.get(index).copied());
+        let chosen = self.libero_for.filter(in_back_row);
+        let not_serving = |id: Uuid| {
+            positions
+                .iter()
+                .position(|p| *p == id)
+                .filter(|index| back_row(*index))
+                .map(|_| id)
+        };
+        Ok(match (self.libero_out, chosen) {
+            (true, _) => None,
+            (false, Some(player)) => not_serving(player),
+            (false, None) => middle_blocker,
+        })
+    }
+
+    /// The libero where the rules want it (see `wanted_libero_place`): out
+    /// at once when it has to, in only after a rally since it went out.
+    fn place_libero(&mut self) -> Result<(), AppError> {
+        let wanted = self.wanted_libero_place()?;
+        match (self.idle_player, wanted, self.libero_waiting) {
+            (current, wanted, _) if current == wanted => Ok(()),
+            (Some(_), _, _) => self.libero_goes_out(),
+            (None, Some(player), false) => self.libero_comes_in(&player),
+            (None, _, _) => Ok(()),
+        }
+    }
+
+    // the player it replaces back in its place
+    fn libero_goes_out(&mut self) -> Result<(), AppError> {
+        let libero = self.current_libero;
+        if let (Some(position), Some(idle)) = (self.find_position(&libero), self.idle_player) {
+            self.try_set(&idle, position)?;
+        }
+        self.idle_player = None;
+        self.libero_waiting = true;
+        Ok(())
+    }
+
+    fn libero_comes_in(&mut self, player_id: &Uuid) -> Result<(), AppError> {
+        let libero = self.current_libero;
+        match self.find_position(player_id) {
+            Some(position) => {
+                self.try_set(&libero, position)?;
+                self.idle_player = Some(*player_id);
+                Ok(())
+            }
+            None => Err(AppError::Snapshot(SnapshotError::LineupError(
+                "could not find the player the libero replaces".to_string(),
+            ))),
+        }
     }
 
     fn update_libero(&mut self) -> Result<(), AppError> {
@@ -134,9 +296,12 @@ impl Lineup {
                 self.libero_replacement = Some(idle);
                 // no idle player
                 self.idle_player = None;
+                self.libero_waiting = true;
             }
             (PhaseEnum::SideOut, 1, None, _, Some(player_at_libero_slot))
-            | (PhaseEnum::SideOut, 4, None, _, Some(player_at_libero_slot)) => {
+            | (PhaseEnum::SideOut, 4, None, _, Some(player_at_libero_slot))
+                if !self.libero_out =>
+            {
                 // player who served pulled out
                 self.idle_player = Some(player_at_libero_slot);
                 // ...so replace this player with the libero
@@ -149,6 +314,18 @@ impl Lineup {
     }
 
     pub fn swap_libero(&mut self) -> Result<(), AppError> {
+        if let (true, Some(fallback)) = (self.chosen, self.fallback_libero) {
+            // the other libero in its place, if on court
+            if let Some(position) = self.find_position(&self.current_libero) {
+                self.try_set(&fallback, position)?;
+            }
+            self.fallback_libero = Some(self.current_libero);
+            self.current_libero = fallback;
+            if !self.liberos_played.contains(&fallback) {
+                self.liberos_played.push(fallback);
+            }
+            return Ok(());
+        }
         if let Some(fallback) = self.fallback_libero {
             let old_current = self.current_libero;
             self.current_libero = fallback;
@@ -156,9 +333,7 @@ impl Lineup {
             if !self.liberos_played.contains(&fallback) {
                 self.liberos_played.push(fallback);
             }
-            let has_libero = self
-                .get_current_rotation()
-                .map(|r| Lineup::has_libero(r, self.get_current_phase()));
+            let has_libero = self.get_current_rotation().map(|r| self.libero_plays(r));
             let libero_slot = self
                 .get_current_rotation()
                 .and_then(Lineup::get_libero_slot);
@@ -168,6 +343,54 @@ impl Lineup {
             }
         }
         Ok(())
+    }
+
+    /// The libero goes out, the player it replaces back in its place (the
+    /// middle blocker, or the one serving for them), or comes back in: on
+    /// court at once in the back row, otherwise when the middle blocker
+    /// serving loses the serve. It lasts until the next change.
+    pub fn toggle_libero(&mut self) -> Result<(), AppError> {
+        if self.chosen {
+            self.libero_out = !self.libero_out;
+            return self.place_libero();
+        }
+        let rotation = self.get_current_rotation()?;
+        let slot = Lineup::get_libero_slot(rotation)?;
+        let libero = self.current_libero;
+        match (
+            self.libero_out,
+            self.find_position(&libero),
+            self.idle_player,
+        ) {
+            (false, Some(position), Some(idle)) => {
+                self.try_set(&idle, position)?;
+                self.idle_player = None;
+                self.libero_waiting = true;
+            }
+            (false, _, _) => {}
+            (true, _, _) => {
+                // the middle blocker in the front row serves the next time
+                // the libero would reach it
+                self.libero_replacement = self.get((slot + 3) % 6);
+                if Lineup::has_libero(rotation, self.phase) {
+                    self.idle_player = self.get(slot);
+                    self.try_set(&libero, slot)?;
+                }
+            }
+        }
+        self.libero_out = !self.libero_out;
+        Ok(())
+    }
+
+    /// Whether the libero is out by the scout's choice (see `toggle_libero`).
+    pub fn is_libero_out(&self) -> bool {
+        self.libero_out
+    }
+
+    /// Whether the libero plays in the rotation, in the current phase: not
+    /// while the middle blocker it replaces serves, nor while out.
+    fn libero_plays(&self, rotation: u8) -> bool {
+        !self.libero_out && Lineup::has_libero(rotation, self.phase)
     }
 
     pub fn get_fallback_libero(&self) -> Option<Uuid> {
@@ -211,9 +434,8 @@ impl Lineup {
     /// only one who can become the setter keeping the libero in place (its
     /// slot depends on the rotation modulo 3, see `get_libero_slot`).
     pub fn get_setter_diagonal(&self) -> Option<Uuid> {
-        self.find_position(&self.current_setter)
-            .and_then(|setter| self.players.get((setter + 3) % 6))
-            .copied()
+        self.setter_index()
+            .and_then(|setter| self.rotation_positions().get((setter + 3) % 6).copied())
     }
 
     fn try_set(&mut self, player_id: &Uuid, position: usize) -> Result<(), AppError> {
@@ -256,12 +478,20 @@ impl Lineup {
                 "could not get the role: player not found".to_string(),
             ))
         };
-        let setter_index = self
-            .find_position(&self.current_setter)
-            .ok_or_else(not_found_error)?;
+        let setter_index = self.setter_index().ok_or_else(not_found_error)?;
         let player_index = self.find_position(player_id).ok_or_else(not_found_error)?;
         let player = self.players.get(player_index).ok_or_else(not_found_error)?;
         let offset = (player_index + 6 - setter_index) % 6;
+        if self.chosen {
+            // the libero wherever it plays, the others by their place
+            return match (*player == self.current_libero, offset) {
+                (true, _) => Ok(RoleEnum::Libero),
+                (false, 0) => Ok(RoleEnum::Setter),
+                (false, 1 | 4) => Ok(RoleEnum::OutsideHitter),
+                (false, 3) => Ok(RoleEnum::OppositeHitter),
+                (false, _) => Ok(RoleEnum::MiddleBlocker),
+            };
+        }
         let rotation = self.get_current_rotation().map_err(|_| {
             AppError::Snapshot(SnapshotError::LineupError(
                 "could not get the current rotation".to_string(),
@@ -272,7 +502,7 @@ impl Lineup {
             1 | 4 => RoleEnum::OutsideHitter,
             3 => RoleEnum::OppositeHitter,
             2 | 5 => {
-                if Lineup::has_libero(rotation, self.phase) && self.is_back_row_player(player) {
+                if self.libero_plays(rotation) && self.is_back_row_player(player) {
                     RoleEnum::Libero
                 } else {
                     RoleEnum::MiddleBlocker
@@ -288,11 +518,11 @@ impl Lineup {
     }
 
     pub fn get_oh2(&self) -> Option<Uuid> {
-        self.get_role_from_offset(4)
+        self.get_player_from_offset(4)
     }
 
     pub fn get_oh1(&self) -> Option<Uuid> {
-        self.get_role_from_offset(1)
+        self.get_player_from_offset(1)
     }
 
     pub fn get_mb1(&self) -> Option<Uuid> {
@@ -318,18 +548,27 @@ impl Lineup {
     }
 
     pub fn get_opposite(&self) -> Option<Uuid> {
-        self.get_role_from_offset(3)
+        self.get_player_from_offset(3)
     }
 
     pub fn get_setter(&self) -> Option<Uuid> {
-        self.get_role_from_offset(6)
+        self.get_player_from_offset(6)
+    }
+
+    // the player playing there, the one out for the libero when the libero
+    // plays in their place (once chosen, see `set_libero_for`: up to then
+    // the libero is in the place of a middle blocker only)
+    fn get_player_from_offset(&self, offset_from_setter: usize) -> Option<Uuid> {
+        self.get_role_from_offset(offset_from_setter).map(|id| {
+            match (self.chosen, id == self.current_libero, self.idle_player) {
+                (true, true, Some(idle)) => idle,
+                _ => id,
+            }
+        })
     }
 
     fn get_role_from_offset(&self, offset_from_setter: usize) -> Option<Uuid> {
-        let setter_index = self
-            .players
-            .iter()
-            .position(|id| *id == self.current_setter)?;
+        let setter_index = self.setter_index()?;
         let index = (setter_index + offset_from_setter) % 6;
         self.get(index)
     }
@@ -346,7 +585,7 @@ impl Lineup {
     /// opposite in 4, the outside hitter in 2; not with the P1 inverted.
     /// `None` if the setter is not on court.
     pub fn get_rally_positions(&self, inverted_p1: bool) -> Option<[Uuid; 6]> {
-        let setter_index = self.find_position(&self.current_setter)?;
+        let setter_index = self.setter_index()?;
         let canonical_p1 = self.phase == PhaseEnum::SideOut && setter_index == 0 && !inverted_p1;
         let mut positions = self.players;
         for (index, player) in self.players.iter().enumerate() {
@@ -375,6 +614,16 @@ impl Lineup {
     /// position 1).
     pub fn get_positions(&self) -> [Uuid; 6] {
         self.players
+    }
+
+    /// The players by position as if the libero weren't on court: the
+    /// player the libero replaces in its place. DataVolley writes the six
+    /// on court so.
+    pub fn get_positions_without_libero(&self) -> [Uuid; 6] {
+        self.players.map(|id| match self.idle_player {
+            Some(idle) if id == self.current_libero => idle,
+            _ => id,
+        })
     }
 
     pub fn get(&self, index: usize) -> Option<Uuid> {
@@ -463,12 +712,26 @@ impl Lineup {
         self.substitutions.len() >= self.max_substitutions as usize
     }
 
+    /// The player out of the court while the libero plays in their place:
+    /// still in the game, and can be substituted (e.g. the substitute who
+    /// served and the libero replaced on the side out, back to the bench for
+    /// the middle blocker).
+    pub fn is_out_for_the_libero(&self, player_id: &Uuid) -> bool {
+        self.idle_player == Some(*player_id)
+    }
+
+    /// Whether the player is in the game: on court, or out of it for the
+    /// libero.
+    pub fn is_in_the_game(&self, player_id: &Uuid) -> bool {
+        self.find_position(player_id).is_some() || self.is_out_for_the_libero(player_id)
+    }
+
     pub fn add_substitution(
         &mut self,
         replaced: &Uuid,
         replacement: &Uuid,
     ) -> Result<(), AppError> {
-        if let Some(pos) = self.find_position(replaced) {
+        if self.is_in_the_game(replaced) {
             // check if already replaced previously
             if self.was_player_already_replaced(replaced) {
                 return Err(AppError::Snapshot(SnapshotError::LineupError(format!(
@@ -505,7 +768,12 @@ impl Lineup {
                 ))));
             }
 
-            self.try_set(replacement, pos)?;
+            // on court, or in the place of the player out for the libero:
+            // the libero stays on court
+            match self.find_position(replaced) {
+                Some(pos) => self.try_set(replacement, pos)?,
+                None => self.idle_player = Some(*replacement),
+            }
             // add entry into substitutions
             self.substitutions.push(SubstitutionRecord {
                 replaced: *replaced,
@@ -518,6 +786,10 @@ impl Lineup {
             // the substitute is the one replacing the libero
             if self.rules != LineupRulesEnum::V1 && self.libero_replacement == Some(*replaced) {
                 self.libero_replacement = Some(*replacement);
+            }
+            // ...and the one the libero is for
+            if self.libero_for == Some(*replaced) {
+                self.libero_for = Some(*replacement);
             }
             Ok(())
         } else {

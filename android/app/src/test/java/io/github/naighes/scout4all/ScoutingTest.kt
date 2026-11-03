@@ -74,17 +74,26 @@ class ScoutingTest {
         rule.waitFor { score(saved()) == 0 to 1 }
     }
 
-    /** The inverted P1, up in the bar, goes with the events saved from
-     * then on: the set resumed keeps it. */
+    /** The inverted P1, up in the bar in P1 in side out only, where it
+     * makes a difference, goes with the events saved from then on: the set
+     * resumed keeps it. */
     @Test
     fun theInvertedP1IsSavedWithTheEvents() {
         show()
         val chip = hasContentDescription(string(R.string.inverted_p1_description)) and hasClickAction()
+        val chips = { rule.onAllNodes(chip).fetchSemanticsNodes().size }
+        // we serve in P1: not there
+        assertEquals(0, chips())
+        // our serve error: they serve, P1 in side out
+        touch("=")
+        rule.waitFor { chips() == 1 }
         rule.onNode(chip).assertIsNotSelected().performClick()
         rule.waitFor { rule.onAllNodes(chip and isSelected()).fetchSemanticsNodes().size == 1 }
-        touch("#")
-        rule.waitFor { score(saved()) == 1 to 0 }
+        touch(string(R.string.their_error))
+        rule.waitFor { score(saved()) == 1 to 1 }
         assertTrue(saved().invertedP1)
+        // we rotate and serve: gone again
+        rule.waitFor { chips() == 0 }
     }
 
     /** The reception, up in the bar, only before their serve: 3, 4, 2,
@@ -119,14 +128,37 @@ class ScoutingTest {
         touch("18")
         touch("defense")
         touch("+")
+        // the setter can only attack: straight to the evaluation
         touch("8")
-        touch("attack")
         touch("#")
         rule.waitFor { score(saved()) == 1 to 0 }
         // the last first: the attack of the setter, on the second touch
         val events = saved().events.map { listOf(it.name, it.symbol, it.player?.name) }
         assertEquals(listOf("attack", "#", "Alessia Orro"), events.first())
         assertEquals(3, events.size)
+    }
+
+    /** From the changes of the lineup, the libero for a player touched on
+     * court: saved with the player; in their place after a rally. */
+    @Test
+    fun theLiberoForAPlayerOfTheBackRow() {
+        show()
+        rule.onNode(hasContentDescription(string(R.string.lineup)) and hasClickAction()).performClick()
+        touch(string(R.string.libero_for_short))
+        // Ekaterina Antropova, outside hitter 2, in position 5
+        touch("9")
+        rule.waitFor { saved().events.size == 1 }
+        val first = saved().events.first()
+        assertEquals(EventTypeEnum.LF, first.event)
+        assertEquals("Ekaterina Antropova", first.player?.name)
+        // out of the middle blocker at once, in for her after our ace
+        assertTrue(saved().court.none { it.libero })
+        touch("#")
+        rule.waitFor { score(saved()) == 1 to 0 }
+        val court = saved().court
+        assertTrue(court.any { it.libero })
+        assertTrue(court.none { it.name == "Ekaterina Antropova" })
+        assertTrue(court.any { it.name == "Anna Danesi" })
     }
 
     @Test

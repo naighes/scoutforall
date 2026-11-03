@@ -6,7 +6,7 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use chrono::{DateTime, FixedOffset, Local};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate};
 use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
@@ -16,6 +16,15 @@ use scout4all_core::{
     archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
     detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
+    dvw::{
+        self,
+        import::{
+            MatchPlan, TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
+            match_date, match_exists, match_plan, save_import, season_year, similar_teams,
+            team_plan,
+        },
+        model::{DvwFile, MatchDate as DvwDate, Side},
+    },
     errors::{AppError, IOError},
     event_edit::{EditField, EventEdit},
     example,
@@ -39,8 +48,9 @@ use scout4all_core::{
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::Consent,
+    settings::{Consent, TeamDefaults},
     shapes::{
+        country::CountryCode,
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
@@ -123,6 +133,8 @@ pub enum EventTypeEnum {
     OF,
     R,
     CL,
+    LR,
+    LF,
     CS,
 }
 
@@ -234,6 +246,7 @@ pub struct TeamForm {
     pub name: String,
     pub classification: Option<TeamClassificationEnum>,
     pub gender: Option<GenderEnum>,
+    pub country: Option<CountryCode>,
     pub year: String,
 }
 
@@ -254,6 +267,15 @@ uniffi::custom_type!(Uuid, String, {
     remote,
     lower: |id| id.to_string(),
     try_lift: |id| Ok(Uuid::parse_str(&id)?),
+});
+
+// the ISO 3166-1 code of a country, as text for the app
+uniffi::custom_type!(CountryCode, String, {
+    remote,
+    lower: |code| code.to_string(),
+    try_lift: |code| Ok(CountryCode::parse(&code).ok_or_else(|| {
+        AppError::IO(IOError::Msg(format!("invalid country: {code}")))
+    })?),
 });
 
 /// RFC 3339 text for the app, with the offset of where the match is played.
@@ -300,6 +322,7 @@ pub enum TeamField {
     Name,
     Classification,
     Gender,
+    Country,
     Year,
 }
 
@@ -309,6 +332,7 @@ impl From<TeamFormError> for TeamField {
             TeamFormError::EmptyName => TeamField::Name,
             TeamFormError::MissingClassification => TeamField::Classification,
             TeamFormError::MissingGender => TeamField::Gender,
+            TeamFormError::MissingCountry => TeamField::Country,
             TeamFormError::InvalidYear => TeamField::Year,
         }
     }
@@ -404,6 +428,13 @@ pub struct ClassificationChoice {
     pub description: String,
 }
 
+/// A country as the form and the settings offer it.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct CountryChoice {
+    pub value: CountryCode,
+    pub name: String,
+}
+
 /// A gender as the form offers it.
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct GenderChoice {
@@ -419,6 +450,7 @@ pub struct TeamDetails {
     pub year: u16,
     pub classification: Option<String>,
     pub gender: Option<String>,
+    pub country: Option<String>,
     /// the active players, by number
     pub players: Vec<Player>,
     /// what the form starts from, to edit the team
@@ -457,6 +489,8 @@ pub enum MatchListing {
     },
     Unreadable {
         folder: String,
+        /// why, when it's known: e.g. a set this version doesn't replay
+        reason: Option<String>,
     },
 }
 
@@ -510,6 +544,87 @@ pub const RECENT_MATCHES: usize = 5;
 pub struct ExportedArchive {
     pub file_name: String,
     pub bytes: Vec<u8>,
+}
+
+/// A team of a DataVolley file: the one playing at home or the visiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum DvwSide {
+    Home,
+    Visiting,
+}
+
+impl From<DvwSide> for Side {
+    fn from(side: DvwSide) -> Self {
+        match side {
+            DvwSide::Home => Side::Home,
+            DvwSide::Visiting => Side::Visiting,
+        }
+    }
+}
+
+/// The final score of a set of a DataVolley file.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwSetScore {
+    pub home: u8,
+    pub visiting: u8,
+}
+
+/// What a DataVolley file holds, to choose what to import.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwPreview {
+    pub home: String,
+    pub visiting: String,
+    /// The day of the match, `YYYY-MM-DD`: one when the file tells it, two
+    /// when it reads two ways (day first, then month first), none when it
+    /// has none: the user chooses or writes it.
+    pub days: Vec<String>,
+    /// The first year of the season, when it can be told.
+    pub season: Option<u16>,
+    pub sets: Vec<DvwSetScore>,
+}
+
+/// A team of ours like the one of the file, and why.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwSimilarTeam {
+    pub id: String,
+    pub name: String,
+    pub year: u16,
+    pub same_name: bool,
+    /// the players of the file found in the team, of `players`
+    pub same_players: u32,
+    pub players: u32,
+}
+
+/// How a team of a DataVolley file is imported, as the user chose.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct DvwChoice {
+    pub side: DvwSide,
+    /// `YYYY-MM-DD`
+    pub day: String,
+    pub max_substitutions: u8,
+    /// The team of ours it goes into; a new team when none.
+    pub team_id: Option<String>,
+    /// Of the new team, required as by the form of a team.
+    pub classification: Option<TeamClassificationEnum>,
+    pub gender: Option<GenderEnum>,
+    pub country: Option<CountryCode>,
+}
+
+/// The import checked, ready to save.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwReady {
+    pub team: String,
+    pub sets: u32,
+    pub new_players: u32,
+    /// The team has the match already: saved only when the user confirms.
+    pub saved_already: bool,
+}
+
+/// What an import saved.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct DvwImported {
+    pub team_id: String,
+    pub match_id: String,
 }
 
 /// A team a match may be imported into.
@@ -985,10 +1100,16 @@ pub struct ScoutingState {
     /// in P1 in side out the outside hitter attacks from 4 and the opposite
     /// from 2: kept until changed, also in the next set
     pub inverted_p1: bool,
+    /// whether the inverted P1 makes a difference now, in P1 in side out
+    /// only: shown then
+    pub inverted_p1_applies: bool,
     /// how many receive their next serve, 3 unless told; told only before
     /// their serve
     pub reception: u8,
     pub reception_open: bool,
+    /// whether the team can make the event chosen, no player: our fault
+    /// (e.g. a rotation fault), see `choose_team`
+    pub team_choice: bool,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -1248,8 +1369,9 @@ pub struct Exploited {
     pub total: u32,
 }
 
-/// The freeballs we gave, the ones they gave us (none with a player:
-/// theirs have none) and how many of these we exploited.
+/// The freeballs we gave, the ones they gave us and how many of these we
+/// exploited: team events, with a player none given and the others not
+/// told.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct FreeballStats {
     pub given: u32,
@@ -1382,7 +1504,7 @@ impl Scouting {
                 .saturating_sub(u8::try_from(lineup.get_substitutions().len()).unwrap_or(u8::MAX)),
             step: session.step(),
             halfway: session.is_halfway(),
-            event: session.event().map(|e| self.event_choice(e)),
+            event: session.event().map(|e| self.event_choice(&session, e)),
             player: session
                 .player()
                 .and_then(|id| team.find_player(id))
@@ -1397,38 +1519,42 @@ impl Scouting {
                 .get_last_touch()
                 .map(|(e, _)| self.scouted_event(team, e)),
             inverted_p1: session.inverted_p1(),
+            inverted_p1_applies: session.inverted_p1_applies(),
             reception: session.reception().players(),
             reception_open: session.can_tell_reception(),
+            team_choice: session.team_choice(),
         }
     }
 
     /// The events that can follow.
     pub fn available_events(&self) -> Vec<EventChoice> {
-        self.session()
+        let session = self.session();
+        session
             .available_events()
             .iter()
-            .map(|e| self.event_choice(*e))
+            .map(|e| self.event_choice(&session, *e))
             .collect()
     }
 
     /// The events the player can play now, before an event is chosen.
     pub fn player_events(&self, player: String) -> Result<Vec<EventChoice>, MobileError> {
         let player = parse_id(&player)?;
-        Ok(self
-            .session()
+        let session = self.session();
+        Ok(session
             .player_events(&player)
             .into_iter()
-            .map(|e| self.event_choice(e))
+            .map(|e| self.event_choice(&session, e))
             .collect())
     }
 
     /// The events that come before their player: the opponent's, the
     /// faults, the changes of the lineup.
     pub fn other_events(&self) -> Vec<EventChoice> {
-        self.session()
+        let session = self.session();
+        session
             .other_events()
             .into_iter()
-            .map(|e| self.event_choice(e))
+            .map(|e| self.event_choice(&session, e))
             .collect()
     }
 
@@ -1487,6 +1613,12 @@ impl Scouting {
         let player = parse_id(&player)?;
         let mut session = self.session();
         self.scouted(self.runtime.block_on(session.choose_player(player)))
+    }
+
+    /// The team makes the event, no player: our fault.
+    pub fn choose_team(&self) -> Result<Progress, MobileError> {
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_team()))
     }
 
     pub fn choose_replacement(&self, player: String) -> Result<Progress, MobileError> {
@@ -1999,10 +2131,15 @@ impl Scouting {
             .collect()
     }
 
-    fn event_choice(&self, event: EventTypeEnum) -> EventChoice {
+    /// The event with its name, the libero replacement saying what it does
+    /// now: out, or back in. Of the session already locked by the caller.
+    fn event_choice(&self, session: &ScoutingSession, event: EventTypeEnum) -> EventChoice {
         EventChoice {
             value: event,
-            name: event.friendly_name(self.labels).to_string(),
+            name: session
+                .snapshot()
+                .next_event_name(event, self.labels)
+                .to_string(),
         }
     }
 
@@ -2190,8 +2327,15 @@ impl Scout4All {
                 .classification
                 .map(|c| c.friendly_name(labels).to_string()),
             gender: team.gender.map(|g| g.friendly_name(labels).to_string()),
+            country: team.country.map(|c| c.name(self.language.get())),
             players: players(&team, labels),
-            form: TeamForm::of(&team),
+            // a team saved before v0.12: the country of the settings
+            form: TeamForm {
+                country: team
+                    .country
+                    .or_else(|| self.default_country().map(|c| c.value)),
+                ..TeamForm::of(&team)
+            },
         })
     }
 
@@ -2213,9 +2357,15 @@ impl Scout4All {
                     lost: status.them_wins,
                     finished: status.match_finished,
                 },
-                Ok((Err(_), m)) => MatchListing::Unreadable { folder: m.id },
+                Ok((Err(_), m)) => MatchListing::Unreadable {
+                    reason: m
+                        .replay_issue()
+                        .map(|issue| issue.describe(self.language.labels())),
+                    folder: m.id,
+                },
                 Err(unreadable) => MatchListing::Unreadable {
                     folder: unreadable.id,
+                    reason: unreadable.reason,
                 },
             })
             .collect())
@@ -2359,7 +2509,11 @@ impl Scout4All {
                     score_them,
                     editable: !matches!(
                         e.event_type,
-                        EventTypeEnum::R | EventTypeEnum::CL | EventTypeEnum::CS
+                        EventTypeEnum::R
+                            | EventTypeEnum::CL
+                            | EventTypeEnum::LR
+                            | EventTypeEnum::LF
+                            | EventTypeEnum::CS
                     ),
                 })
                 .collect(),
@@ -2613,14 +2767,34 @@ impl Scout4All {
         Ok(saved?)
     }
 
-    /// An empty form for a new team, with the year given.
+    /// An empty form for a new team, with the year given and the country
+    /// of the settings.
     pub fn new_team_form(&self, year: u16) -> TeamForm {
         TeamForm {
             name: String::new(),
             classification: None,
             gender: None,
+            country: self.default_country().map(|c| c.value),
             year: year.to_string(),
         }
+    }
+
+    /// The countries whose code is `query`, then those whose name has it
+    /// in it, by name in the language of the app; all of them for an empty
+    /// query.
+    pub fn countries(&self, query: String) -> Vec<CountryChoice> {
+        CountryCode::search(&query, self.language.get())
+            .into_iter()
+            .map(|(value, name)| CountryChoice {
+                value,
+                name: name.to_string(),
+            })
+            .collect()
+    }
+
+    /// The name of the country in the language of the app.
+    pub fn country_name(&self, country: CountryCode) -> String {
+        country.name(self.language.get())
     }
 
     pub fn classifications(&self) -> Vec<ClassificationChoice> {
@@ -2805,6 +2979,98 @@ impl Scout4All {
         Ok(team.id.to_string())
     }
 
+    /// What the DataVolley file holds.
+    pub fn preview_dvw(&self, bytes: Vec<u8>) -> Result<DvwPreview, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let day = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+        Ok(DvwPreview {
+            home: file.home.name.trim().to_string(),
+            visiting: file.visiting.name.trim().to_string(),
+            days: match file.match_info.date {
+                DvwDate::Known(d) => vec![day(d)],
+                DvwDate::Ambiguous(a, b) => vec![day(a), day(b)],
+                DvwDate::Missing => vec![],
+            },
+            season: season_year(&file),
+            sets: file
+                .sets
+                .iter()
+                .map(|s| DvwSetScore {
+                    home: s.final_score.0,
+                    visiting: s.final_score.1,
+                })
+                .collect(),
+        })
+    }
+
+    /// The substitutions per set proposed for a match of the day
+    /// (`YYYY-MM-DD`, none when not known): the rules of the time.
+    pub fn dvw_max_substitutions(&self, day: Option<String>) -> u8 {
+        default_max_substitutions(day.as_deref().and_then(|d| parse_day(d).ok()))
+    }
+
+    /// Our teams like the one of the side, the most alike first.
+    pub fn dvw_similar_teams(
+        &self,
+        bytes: Vec<u8>,
+        side: DvwSide,
+    ) -> Result<Vec<DvwSimilarTeam>, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let teams = self.readable_teams()?;
+        Ok(similar_teams(&file, side.into(), &teams)
+            .into_iter()
+            .map(|s| DvwSimilarTeam {
+                id: s.team.id.to_string(),
+                name: s.team.name.clone(),
+                year: s.team.year,
+                same_name: s.same_name,
+                same_players: count_of(s.same_players),
+                players: count_of(s.players),
+            })
+            .collect())
+    }
+
+    /// The import as chosen, checked: what it saves, or why it can't.
+    pub fn plan_dvw(&self, bytes: Vec<u8>, choice: DvwChoice) -> Result<DvwReady, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let saved_already = self
+            .runtime
+            .block_on(match_exists(&plan, &self.match_reader))?;
+        Ok(DvwReady {
+            team: team.team.name.clone(),
+            sets: count_of(plan.entry.sets.len()),
+            new_players: count_of(team.new_players.len()),
+            saved_already,
+        })
+    }
+
+    /// Saves the import as chosen; a match saved already only when
+    /// `overwrite`.
+    pub fn import_dvw(
+        &self,
+        bytes: Vec<u8>,
+        choice: DvwChoice,
+        overwrite: bool,
+    ) -> Result<DvwImported, MobileError> {
+        let file = self.parse_dvw(&bytes)?;
+        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let m = self.runtime.block_on(save_import(
+            &team,
+            &plan,
+            overwrite,
+            &self.team_writer,
+            &self.match_reader,
+            &self.match_writer,
+            &*self.set_writer,
+            &*self.finished_matches(),
+        ))?;
+        Ok(DvwImported {
+            team_id: team.team.id.to_string(),
+            match_id: m.id,
+        })
+    }
+
     /// Adds the match of the archive to the team; its id.
     pub fn import_match(&self, bytes: Vec<u8>, team_id: String) -> Result<String, MobileError> {
         let team = self.read_team(&team_id)?;
@@ -2915,6 +3181,38 @@ impl Scout4All {
         }
     }
 
+    /// The country a new team starts with, from the settings.
+    pub fn default_country(&self) -> Option<CountryChoice> {
+        self.read_config()
+            .ok()
+            .and_then(|config| config.team_defaults.country)
+            .map(|value| CountryChoice {
+                value,
+                name: value.name(self.language.get()),
+            })
+    }
+
+    /// Saves the country a new team starts with, keeping the other
+    /// settings as `accept_terms`.
+    pub fn set_default_country(&self, country: CountryCode) -> Result<(), MobileError> {
+        self.update_team_defaults(|_| TeamDefaults {
+            country: Some(country),
+        })
+    }
+
+    /// When the settings have no country for a new team yet, the first of
+    /// the `hints` of the system telling one (the SIM, the network, the
+    /// locale, in this order), else the one of the language. To call at
+    /// startup after `add_example_team_if_new`, which tells a new
+    /// installation by its missing `config.json`.
+    pub fn guess_default_country(&self, hints: Vec<String>) -> Result<(), MobileError> {
+        let guess = CountryCode::guess(hints.iter().map(String::as_str), self.language.get());
+        match (self.default_country(), guess) {
+            (None, Some(country)) => self.set_default_country(country),
+            _ => Ok(()),
+        }
+    }
+
     /// Whether the user allows sending the statistics of the matches.
     pub fn analytics_enabled(&self) -> bool {
         self.read_config()
@@ -2985,6 +3283,8 @@ struct AppConfig {
     #[serde(flatten)]
     tutorial: Tutorial,
     #[serde(flatten)]
+    team_defaults: TeamDefaults,
+    #[serde(flatten)]
     other: Map<String, Value>,
 }
 
@@ -3048,6 +3348,18 @@ impl Scout4All {
         })
     }
 
+    /// Changes the country of a new team in `config.json`, as
+    /// `update_consent`.
+    fn update_team_defaults(
+        &self,
+        change: impl FnOnce(TeamDefaults) -> TeamDefaults,
+    ) -> Result<(), MobileError> {
+        self.update_config(|config| AppConfig {
+            team_defaults: change(config.team_defaults),
+            ..config
+        })
+    }
+
     /// Changes the tutorial in `config.json`, as `update_consent`.
     fn update_tutorial(
         &self,
@@ -3104,6 +3416,54 @@ impl Scout4All {
     }
 
     /// The teams that can be read.
+    fn parse_dvw(&self, bytes: &[u8]) -> Result<DvwFile, MobileError> {
+        dvw::parse(bytes).map_err(|e| MobileError::Failed {
+            reason: self
+                .language
+                .labels()
+                .dvw_unreadable
+                .replace("{detail}", &e.to_string()),
+        })
+    }
+
+    /// The team and the match of the import as chosen, or why not, in the
+    /// language of the app.
+    fn dvw_plans(
+        &self,
+        file: &DvwFile,
+        choice: &DvwChoice,
+    ) -> Result<(TeamPlan, MatchPlan), MobileError> {
+        let labels = self.language.labels();
+        let failed = |reason| MobileError::Failed { reason };
+        let day = parse_day(&choice.day)?;
+        let existing = choice
+            .team_id
+            .as_deref()
+            .map(|id| self.read_team(id))
+            .transpose()?;
+        let team_choice = match &existing {
+            Some(team) => DvwTeamChoice::Existing(team),
+            None => DvwTeamChoice::New {
+                classification: choice.classification,
+                gender: choice.gender,
+                country: choice.country,
+            },
+        };
+        let side = choice.side.into();
+        let team = team_plan(file, side, team_choice).map_err(|e| match e {
+            // shown next to its field, as by the form of a team
+            TeamIssue::Incomplete(missing) => MobileError::InvalidTeam {
+                field: missing.into(),
+                reason: missing.message(labels),
+            },
+            other => failed(other.describe(labels)),
+        })?;
+        let date = match_date(file, day, *Local::now().offset());
+        let plan = match_plan(file, side, &team, date, choice.max_substitutions)
+            .map_err(|e| failed(e.describe(labels)))?;
+        Ok((team, plan))
+    }
+
     fn readable_teams(&self) -> Result<Vec<TeamEntry>, MobileError> {
         Ok(self
             .runtime
@@ -3160,6 +3520,18 @@ fn find_set(m: &MatchEntry, set_number: u8) -> Result<&SetEntry, MobileError> {
         .ok_or_else(|| MobileError::Failed {
             reason: format!("no set {set_number} in {}", m.id),
         })
+}
+
+/// A day as `YYYY-MM-DD`.
+fn parse_day(day: &str) -> Result<NaiveDate, MobileError> {
+    NaiveDate::parse_from_str(day, "%Y-%m-%d").map_err(|e| MobileError::Failed {
+        reason: e.to_string(),
+    })
+}
+
+/// A count for the app, which has no larger ones.
+fn count_of(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 fn parse_id(id: &str) -> Result<Uuid, MobileError> {
@@ -3398,6 +3770,7 @@ mod tests {
             name: name.into(),
             classification: Some(TeamClassificationEnum::Regional),
             gender: Some(GenderEnum::Women),
+            country: CountryCode::known("IT"),
             year: "2026".into(),
         }
     }
@@ -3446,6 +3819,73 @@ mod tests {
             other => unreachable!("expected an invalid year, got {other:?}"),
         }
         assert_eq!(app.teams().unwrap(), vec![]);
+    }
+
+    #[test]
+    fn the_country_is_guessed_once_and_offered_to_a_new_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().into_owned();
+        let app = Scout4All::new(path.clone(), "it".into()).unwrap();
+        assert_eq!(app.new_team_form(2026).country, None);
+        // no SIM, the network in France
+        app.guess_default_country(vec!["".into(), "fr".into(), "it-IT".into()])
+            .unwrap();
+        assert_eq!(app.default_country().unwrap().name, "Francia");
+        assert_eq!(app.new_team_form(2026).country, CountryCode::known("FR"));
+        // guessed once: what the user chose stays
+        app.set_default_country(CountryCode::known("JP").unwrap())
+            .unwrap();
+        app.guess_default_country(vec!["fr".into()]).unwrap();
+        let config: Value = from_slice(&std::fs::read(dir.path().join(CONFIG)).unwrap()).unwrap();
+        assert_eq!(config["country"], "JP");
+        // the TUI reads the same config.json
+        assert_eq!(config["language"], "it");
+    }
+
+    #[test]
+    fn without_hints_the_country_of_the_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pt".into()).unwrap();
+        app.guess_default_country(vec![]).unwrap();
+        assert_eq!(app.default_country().unwrap().name, "Brasil");
+        let english = tempfile::tempdir().unwrap();
+        let app =
+            Scout4All::new(english.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        app.guess_default_country(vec!["".into()]).unwrap();
+        assert_eq!(app.default_country(), None);
+    }
+
+    #[test]
+    fn countries_by_code_or_name_in_the_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pl".into()).unwrap();
+        assert_eq!(app.countries(String::new()).len(), 249);
+        let found = app.countries("wło".into());
+        assert_eq!(found[0].name, "Włochy");
+        assert_eq!(found[0].value.as_str(), "IT");
+        assert_eq!(app.country_name(found[0].value), "Włochy");
+        let id = app.save_team(None, form("Cortona")).unwrap();
+        assert_eq!(app.team(id).unwrap().country.as_deref(), Some("Włochy"));
+    }
+
+    #[test]
+    fn a_team_without_country_names_the_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let result = app.save_team(
+            None,
+            TeamForm {
+                country: None,
+                ..form("Cortona")
+            },
+        );
+        match result {
+            Err(MobileError::InvalidTeam { field, reason }) => {
+                assert_eq!(field, TeamField::Country);
+                assert_eq!(reason, "country is required");
+            }
+            other => unreachable!("expected a missing country, got {other:?}"),
+        }
     }
 
     #[test]
@@ -3551,7 +3991,8 @@ mod tests {
                     finished: false,
                 },
                 MatchListing::Unreadable {
-                    folder: "not-a-match".into()
+                    folder: "not-a-match".into(),
+                    reason: None,
                 },
             ]
         );
@@ -3887,6 +4328,269 @@ mod tests {
         assert_eq!(app.scouting(team, m).unwrap().state().events, vec![]);
     }
 
+    /// A set this version doesn't replay, e.g. saved by a version whose
+    /// scouting allowed an event no more: the match is unreadable, and
+    /// tells why.
+    #[test]
+    fn a_match_whose_set_does_not_replay_tells_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Over).unwrap();
+        // their freeball after our serve `/`: their reception came back
+        let set = dir.path().join(&team).join(&m).join("set_1.csv");
+        let mut rows = std::fs::read_to_string(&set).unwrap();
+        rows.push_str("2026-10-24T18:00:00Z,OF,,,\n");
+        std::fs::write(&set, rows).unwrap();
+        let listed = app.matches(team).unwrap();
+        assert_eq!(
+            listed,
+            vec![MatchListing::Unreadable {
+                folder: m,
+                reason: Some("set 1, row 2: OF after S/ isn't valid in this version".into()),
+            }]
+        );
+    }
+
+    /// Our serve `/`, their reception straight over: our block among the
+    /// events of the players in the front row, saved with its evaluation.
+    #[test]
+    fn our_block_on_their_reception_straight_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Over).unwrap();
+        let state = scouting.state();
+        let blockers: Vec<_> = state
+            .court
+            .iter()
+            .filter(|p| {
+                scouting
+                    .player_events(p.id.clone())
+                    .unwrap()
+                    .iter()
+                    .any(|e| e.value == EventTypeEnum::B)
+            })
+            .collect();
+        assert_eq!(blockers.len(), 3);
+        scouting
+            .choose_player_first(blockers[0].id.clone())
+            .unwrap();
+        if scouting.state().step == ScoutingStep::Event {
+            scouting.choose_event(EventTypeEnum::B).unwrap();
+        }
+        assert_eq!(
+            scouting.choose_eval(EvalEnum::Perfect).unwrap(),
+            Progress::Saved
+        );
+        match scouting.state().events.as_slice() {
+            [block, ..] => assert_eq!(block.event, EventTypeEnum::B),
+            other => unreachable!("expected the block, got {other:?}"),
+        }
+    }
+
+    /// Our serve `!`, their reception and attack, our dig: our freeball is
+    /// a team event, among the other events and not the player's, saved
+    /// with no player.
+    #[test]
+    fn our_freeball_is_a_team_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(
+            scouting
+                .available_evals()
+                .iter()
+                .any(|e| e.value == EvalEnum::Exclamative && e.symbol == "!")
+        );
+        scouting.choose_eval(EvalEnum::Exclamative).unwrap();
+        let state = scouting.state();
+        let digger = state.court.iter().find(|p| p.selectable).unwrap();
+        scouting.choose_player_first(digger.id.clone()).unwrap();
+        if scouting.state().step == ScoutingStep::Event {
+            scouting.choose_event(EventTypeEnum::D).unwrap();
+        }
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        for player in state.court.iter().filter(|p| p.selectable) {
+            let events = scouting.player_events(player.id.clone()).unwrap();
+            assert!(events.iter().all(|e| e.value != EventTypeEnum::FB));
+        }
+        assert!(
+            scouting
+                .other_events()
+                .iter()
+                .any(|e| e.value == EventTypeEnum::FB)
+        );
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::FB).unwrap(),
+            Progress::Saved
+        );
+        // the latest first
+        match scouting.state().events.as_slice() {
+            [freeball, ..] => {
+                assert_eq!(freeball.event, EventTypeEnum::FB);
+                assert_eq!(freeball.player, None);
+            }
+            other => unreachable!("expected the freeball, got {other:?}"),
+        }
+    }
+
+    /// Our fault, among the other events: the team can make it (e.g. a
+    /// rotation fault), saved with no player; only the fault offers the
+    /// team.
+    #[test]
+    fn our_fault_can_be_the_teams() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        assert!(!scouting.state().team_choice);
+        assert!(scouting.choose_team().is_err());
+        scouting.choose_event(EventTypeEnum::D).unwrap();
+        let state = scouting.state();
+        assert_eq!(state.step, ScoutingStep::Player);
+        assert!(!state.team_choice);
+        assert!(scouting.choose_team().is_err());
+        scouting.undo().unwrap();
+        assert!(
+            scouting
+                .other_events()
+                .iter()
+                .any(|e| e.value == EventTypeEnum::F)
+        );
+        scouting.choose_event(EventTypeEnum::F).unwrap();
+        let state = scouting.state();
+        assert_eq!(state.step, ScoutingStep::Player);
+        assert!(state.team_choice);
+        assert_eq!(scouting.choose_team().unwrap(), Progress::Saved);
+        let state = scouting.state();
+        assert!(!state.team_choice);
+        assert_eq!(state.score_them, 1);
+        // the latest first
+        match state.events.as_slice() {
+            [fault, ..] => {
+                assert_eq!(fault.event, EventTypeEnum::F);
+                assert_eq!(fault.player, None);
+            }
+            other => unreachable!("expected the fault, got {other:?}"),
+        }
+    }
+
+    /// Before the serve the libero goes out, then back in: the event says
+    /// which, saved at once; never within the rally.
+    #[test]
+    fn the_libero_goes_out_and_back_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let name = |scouting: &Scouting| {
+            scouting
+                .other_events()
+                .into_iter()
+                .find(|e| e.value == EventTypeEnum::LR)
+                .map(|e| e.name)
+        };
+        let en = labels(LanguageEnum::En);
+        assert_eq!(name(&scouting).as_deref(), Some(en.libero_out));
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::LR).unwrap(),
+            Progress::Saved
+        );
+        assert_eq!(name(&scouting).as_deref(), Some(en.libero_in));
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::LR).unwrap(),
+            Progress::Saved
+        );
+        assert_eq!(name(&scouting).as_deref(), Some(en.libero_out));
+        match scouting.state().events.as_slice() {
+            [first, second] => {
+                assert_eq!(
+                    (first.event, second.event),
+                    (EventTypeEnum::LR, EventTypeEnum::LR)
+                );
+                assert_eq!((first.player.clone(), second.player.clone()), (None, None));
+            }
+            other => unreachable!("expected the libero out and in, got {other:?}"),
+        }
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        assert_eq!(name(&scouting), None);
+        assert!(scouting.choose_event(EventTypeEnum::LR).is_err());
+    }
+
+    /// Before the serve, the libero for a player touched on court (the
+    /// libero aside): saved with the player; on court for the middle
+    /// blocker, the libero goes out at once and comes in for the player
+    /// after a rally.
+    #[test]
+    fn the_libero_for_a_player_of_the_back_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let ids: Vec<String> = scouting
+            .state()
+            .court
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        let libero = scouting
+            .state()
+            .court
+            .iter()
+            .find(|p| p.libero)
+            .map(|p| p.id.clone())
+            .expect("the libero on court");
+        let outside_hitter = ids[4].clone();
+        let en = labels(LanguageEnum::En);
+        let name = scouting
+            .other_events()
+            .into_iter()
+            .find(|e| e.value == EventTypeEnum::LF)
+            .map(|e| e.name);
+        assert_eq!(name.as_deref(), Some(en.libero_for));
+        assert_eq!(
+            scouting.choose_event(EventTypeEnum::LF).unwrap(),
+            Progress::Choosing
+        );
+        let choices: Vec<String> = scouting
+            .player_choices()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert!(choices.contains(&outside_hitter));
+        assert!(!choices.contains(&libero));
+        assert_eq!(
+            scouting.choose_player(outside_hitter.clone()).unwrap(),
+            Progress::Saved
+        );
+        let on_court = |scouting: &Scouting| -> Vec<String> {
+            scouting.state().court.into_iter().map(|p| p.id).collect()
+        };
+        assert!(!on_court(&scouting).contains(&libero), "out at once");
+        assert!(on_court(&scouting).contains(&outside_hitter));
+        match scouting.state().events.as_slice() {
+            [first] => {
+                assert_eq!(first.event, EventTypeEnum::LF);
+                assert_eq!(
+                    first.player.as_ref().map(|p| p.id.clone()),
+                    Some(outside_hitter.clone())
+                );
+            }
+            other => unreachable!("expected the libero for, got {other:?}"),
+        }
+        // our ace (the serve waits for its evaluation): the libero for the
+        // outside hitter
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        assert!(on_court(&scouting).contains(&libero));
+        assert!(!on_court(&scouting).contains(&outside_hitter));
+    }
+
     #[test]
     fn the_players_spread_to_receive() {
         let dir = tempfile::tempdir().unwrap();
@@ -3914,12 +4618,21 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
-        assert!(!scouting.state().inverted_p1);
+        let state = scouting.state();
+        assert!(!state.inverted_p1);
+        // we serve in P1: no difference, not shown
+        assert!(!state.inverted_p1_applies);
         scouting.set_inverted_p1(true);
         scouting.choose_eval(EvalEnum::Error).unwrap();
-        assert!(scouting.state().inverted_p1);
+        let state = scouting.state();
+        assert!(state.inverted_p1);
+        // they serve, P1 in side out: shown
+        assert!(state.inverted_p1_applies);
         scouting.set_inverted_p1(false);
         assert!(!scouting.state().inverted_p1);
+        // their error: we rotate and serve, not shown again
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+        assert!(!scouting.state().inverted_p1_applies);
     }
 
     /// The reception is told before their serve only, 3, 4, 2.
@@ -4555,7 +5268,7 @@ mod tests {
             vec![EditField::EventType, EditField::Eval, EditField::Technique]
         );
         assert_eq!(state.eval, Some(EvalEnum::Perfect));
-        assert_eq!(state.evals.len(), 5);
+        assert_eq!(state.evals.len(), 6);
         // the serve type the scouting preselected
         let chosen: Vec<String> = state
             .techniques
@@ -4916,5 +5629,225 @@ mod tests {
             Uploads::Retry
         );
         assert_eq!(queued(&dir), vec![(m, 1)]);
+    }
+
+    /// Three sets won by the home team ("Home", players 1 to 7, the libero
+    /// 7) against "Visiting", on 2015-01-25: the fixture of the TUI.
+    const THREE_SETS: &[u8] = include_bytes!("../../src/tests/fixtures/three_sets.dvw");
+
+    fn dvw_choice(side: DvwSide, team_id: Option<String>) -> DvwChoice {
+        DvwChoice {
+            side,
+            day: "2015-01-25".into(),
+            max_substitutions: 6,
+            team_id,
+            classification: Some(TeamClassificationEnum::Regional),
+            gender: Some(GenderEnum::Women),
+            country: CountryCode::known("SI"),
+        }
+    }
+
+    #[test]
+    fn a_datavolley_file_previewed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let preview = app.preview_dvw(THREE_SETS.to_vec()).unwrap();
+        assert_eq!(
+            preview,
+            DvwPreview {
+                home: "Home".into(),
+                visiting: "Visiting".into(),
+                days: vec!["2015-01-25".into()],
+                season: Some(2014),
+                sets: (0..3)
+                    .map(|_| DvwSetScore {
+                        home: 25,
+                        visiting: 0
+                    })
+                    .collect(),
+            }
+        );
+        // day first, then month first
+        let text = String::from_utf8_lossy(THREE_SETS).replacen("01/25/2015", "02/03/2015", 1);
+        let preview = app.preview_dvw(text.into_bytes()).unwrap();
+        assert_eq!(preview.days, vec!["2015-03-02", "2015-02-03"]);
+        assert_eq!(app.dvw_max_substitutions(Some("2025-12-31".into())), 6);
+        assert_eq!(app.dvw_max_substitutions(Some("2026-01-01".into())), 8);
+        assert_eq!(app.dvw_max_substitutions(None), 8);
+    }
+
+    #[test]
+    fn a_file_not_datavolley_is_said_in_the_language_of_the_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let it = labels(LanguageEnum::It);
+        let message = reason(app.preview_dvw(b"nothing here".to_vec()));
+        let frame = it.dvw_unreadable.split(" (").next().unwrap();
+        assert!(message.starts_with(frame), "{message}");
+    }
+
+    /// A new team: checked, then saved with its match, queued for the
+    /// statistics as any finished match; the level, gender and country
+    /// chosen.
+    #[test]
+    fn a_datavolley_team_imported_as_a_new_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = dvw_choice(DvwSide::Home, None);
+        assert!(
+            app.dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Home)
+                .unwrap()
+                .is_empty()
+        );
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), choice.clone()).unwrap();
+        assert_eq!(
+            ready,
+            DvwReady {
+                team: "Home".into(),
+                sets: 3,
+                new_players: 7,
+                saved_already: false,
+            }
+        );
+        assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice, false).unwrap();
+        let team = app.team(imported.team_id.clone()).unwrap();
+        assert_eq!((team.name.as_str(), team.year), ("Home", 2014));
+        assert_eq!(team.gender.as_deref(), Some("women"));
+        assert_eq!(team.classification.as_deref(), Some("regional"));
+        assert_eq!(
+            team.form.classification,
+            Some(TeamClassificationEnum::Regional)
+        );
+        assert_eq!(team.players.len(), 7);
+        let matches = app.matches(imported.team_id).unwrap();
+        assert!(
+            matches!(
+                &matches[..],
+                [MatchListing::Match { id, opponent, home: true, won: 3, lost: 0, finished: true, .. }]
+                    if *id == imported.match_id && opponent == "Visiting"
+            ),
+            "{matches:?}"
+        );
+    }
+
+    /// The visiting team into a team of ours like it; then again: the match
+    /// saved already, overwritten only when confirmed.
+    #[test]
+    fn a_datavolley_team_into_a_similar_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let first = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                dvw_choice(DvwSide::Visiting, None),
+                false,
+            )
+            .unwrap();
+        let similar = app
+            .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting)
+            .unwrap();
+        assert_eq!(
+            similar,
+            vec![DvwSimilarTeam {
+                id: first.team_id.clone(),
+                name: "Visiting".into(),
+                year: 2014,
+                same_name: true,
+                same_players: 7,
+                players: 7,
+            }]
+        );
+        let choice = dvw_choice(DvwSide::Visiting, Some(first.team_id.clone()));
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), choice.clone()).unwrap();
+        assert_eq!((ready.new_players, ready.saved_already), (0, true));
+        // not overwritten unless confirmed
+        reason(app.import_dvw(THREE_SETS.to_vec(), choice.clone(), false));
+        let again = app.import_dvw(THREE_SETS.to_vec(), choice, true).unwrap();
+        assert_eq!(again, first);
+        let matches = app.matches(first.team_id).unwrap();
+        assert!(
+            matches!(
+                &matches[..],
+                [MatchListing::Match {
+                    home: false,
+                    won: 0,
+                    lost: 3,
+                    ..
+                }]
+            ),
+            "{matches:?}"
+        );
+    }
+
+    /// A new team without its level, gender or country: the field said, as
+    /// by the form of a team, in the language of the app; nothing saved.
+    #[test]
+    fn a_new_datavolley_team_needs_level_gender_and_country() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let it = labels(LanguageEnum::It);
+        let full = dvw_choice(DvwSide::Home, None);
+        for (choice, field, message) in [
+            (
+                DvwChoice {
+                    classification: None,
+                    gender: None,
+                    country: None,
+                    ..full.clone()
+                },
+                TeamField::Classification,
+                it.classification_is_required,
+            ),
+            (
+                DvwChoice {
+                    gender: None,
+                    ..full.clone()
+                },
+                TeamField::Gender,
+                it.gender_is_required,
+            ),
+            (
+                DvwChoice {
+                    country: None,
+                    ..full.clone()
+                },
+                TeamField::Country,
+                it.country_is_required,
+            ),
+        ] {
+            for result in [
+                app.plan_dvw(THREE_SETS.to_vec(), choice.clone())
+                    .map(|_| ()),
+                app.import_dvw(THREE_SETS.to_vec(), choice, false)
+                    .map(|_| ()),
+            ] {
+                match result {
+                    Err(MobileError::InvalidTeam { field: f, reason }) => {
+                        assert_eq!((f, reason.as_str()), (field, message));
+                    }
+                    other => panic!("{field:?}: {other:?}"),
+                }
+            }
+        }
+        assert!(app.teams().unwrap().is_empty());
+    }
+
+    /// Why a side can't be imported, in the language of the app: nothing
+    /// saved.
+    #[test]
+    fn a_datavolley_team_not_imported_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let text =
+            String::from_utf8_lossy(THREE_SETS).replacen("True;;;;25-0;;", "True;;;;25-3;;", 1);
+        let choice = dvw_choice(DvwSide::Home, None);
+        let message = reason(app.plan_dvw(text.clone().into_bytes(), choice.clone()));
+        assert!(
+            message.contains("25-3 in the file, 25-0 from its rallies"),
+            "{message}"
+        );
+        assert!(app.import_dvw(text.into_bytes(), choice, false).is_err());
+        assert!(app.teams().unwrap().is_empty());
     }
 }

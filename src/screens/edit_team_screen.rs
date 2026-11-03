@@ -5,8 +5,8 @@ use crate::localization::current_labels;
 use crate::{
     screens::{
         components::{
-            navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel,
-            select::Select, text_box::TextBox,
+            country_picker::CountryPicker, navigation_footer::NavigationFooter,
+            notify_banner::NotifyBanner, panel, select::Select, text_box::TextBox,
         },
         screen::{
             AppAction, FieldKey, Renderable, Sba, ScreenAsync, change_value_entry,
@@ -26,17 +26,22 @@ use ratatui::{
 use scout4all_core::{
     providers::team_writer::TeamWriter,
     shapes::{
+        country::CountryCode,
         enums::{FriendlyName, GenderEnum, TeamClassificationEnum},
         team::TeamEntry,
     },
     team_form::TeamForm,
 };
 
+/// name, classification, gender, country, year
+const FIELDS: usize = 5;
+
 #[derive(Debug)]
 pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
     name: TextBox,
     gender: Select<GenderEnum>,
     classification: Select<TeamClassificationEnum>,
+    country: CountryPicker,
     year: TextBox,
     field: usize,
     notify_message: NotifyBanner,
@@ -54,16 +59,26 @@ impl<TW: TeamWriter + Send + Sync> Renderable for EditTeamScreen<TW> {
     }
 
     fn render(&mut self, f: &mut Frame, body: Rect, footer_left: Rect, footer_right: Rect) {
+        // a line for each field, three for the one being changed (in a
+        // frame) and for the description of the classification chosen: all
+        // of them fit a short terminal
+        let rows = |shown: bool| Constraint::Length(if shown { 3 } else { 1 });
+        let info = Constraint::Length(if self.classification.writing_mode {
+            3
+        } else {
+            0
+        });
         let area = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(3), // 0: name
-                Constraint::Length(3), // 1: classification
-                Constraint::Length(3), // 2: classification info
-                Constraint::Length(3), // 3: gender
-                Constraint::Length(3), // 4: year
-                Constraint::Min(1),
+                Constraint::Length(1),                  // 0: name
+                rows(self.classification.writing_mode), // 1: classification
+                info,                                   // 2: classification info
+                rows(self.gender.writing_mode),         // 3: gender
+                rows(self.country.writing_mode),        // 4: country
+                Constraint::Length(1),                  // 5: year
+                Constraint::Min(0),
             ])
             .split(body);
         self.notify_message.render(f, footer_right);
@@ -72,7 +87,8 @@ impl<TW: TeamWriter + Send + Sync> Renderable for EditTeamScreen<TW> {
         self.classification.render(f, area[1]);
         self.render_classification_description(f, area[2]);
         self.gender.render(f, area[3]);
-        self.year.render(f, area[4]);
+        self.country.render(f, area[4]);
+        self.year.render(f, area[5]);
         self.footer
             .render(f, footer_left, self.footer_entries.clone());
     }
@@ -108,7 +124,8 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditTeamScreen<TW> {
 }
 
 impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
-    pub fn new(team_writer: Arc<TW>) -> Self {
+    /// A new team, of `country` (the one of the settings) unless changed.
+    pub fn new(team_writer: Arc<TW>, country: Option<CountryCode>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -122,6 +139,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             false,
         );
         let name = TextBox::new(current_labels().name.to_owned(), true, None);
+        let country = CountryPicker::new(current_labels().country.to_owned(), country, false);
         let year = TextBox::with_validator(
             current_labels().year.to_owned(),
             false,
@@ -146,6 +164,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             name,
             gender,
             classification,
+            country,
             year,
             field: 0,
             notify_message: NotifyBanner::new(),
@@ -158,7 +177,9 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         }
     }
 
-    pub fn edit(team: &TeamEntry, team_writer: Arc<TW>) -> Self {
+    /// The team, of `country` (the one of the settings) when it has none,
+    /// as the teams saved before v0.12.
+    pub fn edit(team: &TeamEntry, team_writer: Arc<TW>, country: Option<CountryCode>) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -172,6 +193,11 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             false,
         );
         let name = TextBox::new(current_labels().name.to_owned(), true, Some(&team.name));
+        let country = CountryPicker::new(
+            current_labels().country.to_owned(),
+            team.country.or(country),
+            false,
+        );
         let year = TextBox::with_validator(
             current_labels().year.to_owned(),
             false,
@@ -196,6 +222,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             name,
             gender,
             classification,
+            country,
             year,
             field: 0,
             notify_message: NotifyBanner::new(),
@@ -218,13 +245,13 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
     }
 
     fn handle_tab(&mut self) -> AppAction {
-        self.field = (self.field + 1) % 4;
+        self.field = (self.field + 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
 
     fn handle_backtab(&mut self) -> AppAction {
-        self.field = (self.field + 3) % 4;
+        self.field = (self.field + FIELDS - 1) % FIELDS;
         self.update_writing_modes();
         AppAction::None
     }
@@ -233,23 +260,27 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
         self.name.writing_mode = self.field == 0;
         self.classification.writing_mode = self.field == 1;
         self.gender.writing_mode = self.field == 2;
-        self.year.writing_mode = self.field == 3;
+        self.country.writing_mode = self.field == 3;
+        self.year.writing_mode = self.field == 4;
     }
 
     fn handle_up(&mut self) -> AppAction {
         self.gender.handle_up();
         self.classification.handle_up();
+        self.country.handle_up();
         AppAction::None
     }
 
     fn handle_down(&mut self) -> AppAction {
         self.gender.handle_down();
         self.classification.handle_down();
+        self.country.handle_down();
         AppAction::None
     }
 
     fn handle_backspace(&mut self) -> AppAction {
         self.name.handle_backspace();
+        self.country.handle_backspace();
         self.year.handle_backspace();
         AppAction::None
     }
@@ -259,6 +290,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             name: self.name.get_selected_value().unwrap_or_default(),
             classification: self.classification.get_selected_value(),
             gender: self.gender.get_selected_value(),
+            country: self.country.get_selected_value(),
             year: self.year.get_selected_value().unwrap_or_default(),
         };
         match form.validate(self.existing_team.as_ref()) {
@@ -285,6 +317,7 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
 
     fn handle_char(&mut self, c: char) -> AppAction {
         self.name.handle_char(c);
+        self.country.handle_char(c);
         self.year.handle_char(c);
         AppAction::None
     }

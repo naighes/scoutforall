@@ -268,6 +268,12 @@ where
                     {
                         match self.action.is_selectable(selected_path) {
                             true => match self.action.on_selected(selected_path).await {
+                                // the file opens a screen of its own, e.g.
+                                // the import of a DataVolley file
+                                Ok(AppAction::SwitchScreen(screen)) => {
+                                    self.save_selected_directory(&current).await;
+                                    AppAction::SwitchScreen(screen)
+                                }
                                 Ok(_) => {
                                     self.save_selected_directory(&current).await;
                                     let message = if let Some(suffix) =

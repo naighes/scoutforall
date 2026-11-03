@@ -44,6 +44,13 @@
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/x-zip-compressed" />
             </intent-filter>
+            <!-- a DataVolley file (.dvw) has no type of its own: shared
+                 only, not offered by "Open with" for every file -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
         </activity>
         <!-- the archives shared go to the other apps from here -->
         <provider

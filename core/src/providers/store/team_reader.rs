@@ -51,7 +51,10 @@ impl TeamReader for StoreTeamReader {
         Ok(join_all(folders.map(|folder| async move {
             self.map_entry(&folder).await.map_err(|e| {
                 log_error(&format!("team {:?} is unreadable: {}", folder, e));
-                Unreadable { id: folder }
+                Unreadable {
+                    id: folder,
+                    reason: None,
+                }
             })
         }))
         .await)

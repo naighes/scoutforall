@@ -79,11 +79,11 @@ private fun touch(target: String, caption: Int) = TutorialStep.Touch(target, cap
 /** Two rallies: a side-out, then a break (2-0). */
 private val rallies = listOf(
     TutorialStep.Read("score", R.string.tutorial_score),
-    // the first: Nervini receives and scores
+    // the first: Nervini receives and scores; she can only attack then,
+    // straight to the evaluation
     touch("player:16", R.string.tutorial_reception),
     touch("eval:PERFECT", R.string.tutorial_reception_eval),
     touch("player:16", R.string.tutorial_attack),
-    touch("event:A", R.string.tutorial_attack_event),
     touch("eval:PERFECT", R.string.tutorial_attack_point),
     TutorialStep.Read("score", R.string.tutorial_side_out),
     // the second: Fahr serves, a long rally, their error
@@ -94,10 +94,12 @@ private val rallies = listOf(
     touch("player:19", R.string.tutorial_dig),
     touch("event:D", R.string.tutorial_dig_event),
     touch("eval:POSITIVE", R.string.tutorial_dig_eval),
+    // the evaluation tells who plays the ball next: + us (their freeball),
+    // − them (they attack)
     touch("player:18", R.string.tutorial_opposite),
-    touch("event:A", R.string.tutorial_attack_event),
-    touch("eval:NEGATIVE", R.string.tutorial_attack_dug),
+    touch("eval:POSITIVE", R.string.tutorial_attack_kept),
     touch("event:OF", R.string.tutorial_their_freeball),
+    // in the front row after their freeball she may attack or block
     touch("player:18", R.string.tutorial_opposite_again),
     touch("event:A", R.string.tutorial_attack_event),
     touch("eval:NEGATIVE", R.string.tutorial_attack_dug),

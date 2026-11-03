@@ -1,7 +1,11 @@
 use crate::{
     errors::{AppError, MatchError},
     providers::{match_writer::MatchWriter, store::write_json},
-    shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
+    shapes::{
+        r#match::{MatchEntry, MatchSource},
+        set::SetEntry,
+        team::TeamEntry,
+    },
     storage::{Store, layout},
 };
 use async_trait::async_trait;
@@ -31,6 +35,7 @@ impl MatchWriter for StoreMatchWriter {
     ) -> Result<MatchEntry, AppError> {
         let match_id = MatchEntry::id_of(&opponent, &date);
         let m = MatchEntry {
+            source: Default::default(),
             opponent,
             date,
             id: match_id.clone(),
@@ -81,6 +86,8 @@ impl MatchWriter for StoreMatchWriter {
             id: m.id.clone(),
             team: m.team.clone(),
             sets: m.sets.clone(),
+            // an imported match stays one when edited
+            source: m.source,
         };
         write_json(
             &*self.0,
@@ -88,5 +95,23 @@ impl MatchWriter for StoreMatchWriter {
             &updated,
         )
         .await
+    }
+
+    async fn save_source(
+        &self,
+        m: &MatchEntry,
+        source: MatchSource,
+    ) -> Result<MatchEntry, AppError> {
+        let saved = MatchEntry {
+            source,
+            ..m.clone()
+        };
+        write_json(
+            &*self.0,
+            &layout::match_descriptor(&m.team.id, &m.id),
+            &saved,
+        )
+        .await?;
+        Ok(saved)
     }
 }

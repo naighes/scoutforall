@@ -682,8 +682,8 @@ impl MatchStatsScreen {
     }
 
     /// The freeballs we gave (`FB`), the ones they gave us (`OF`) and how
-    /// many of these we exploited. Theirs have no player: with a player
-    /// selected, only the ones given.
+    /// many of these we exploited. Team events: with a player selected,
+    /// none given and the others not shown.
     fn render_freeball_stats(&self, f: &mut Frame, area: Rect) {
         let Some(Breakdown::Freeballs(freeballs)) = self.breakdown(EventTypeEnum::FB) else {
             return;
@@ -697,7 +697,7 @@ impl MatchStatsScreen {
             Cell::from(labels.domain.freeballs_given),
             Cell::from(count(freeballs.given)),
         ]);
-        // theirs have no player
+        // team events
         let received = freeballs.received.map(|received| {
             [
                 Row::new(vec![

@@ -70,4 +70,10 @@ impl Store for MemoryStore {
             .collect();
         Ok(entries.into_iter().collect())
     }
+
+    async fn remove(&self, key: &str) -> Result<(), AppError> {
+        let mut blobs = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        blobs.remove(key);
+        Ok(())
+    }
 }

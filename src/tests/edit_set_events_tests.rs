@@ -88,8 +88,14 @@ mod tests {
         let before = ui.saved_first_set_events();
         edit_events(&mut ui).await;
         // the serve kept by them becomes positive: still kept
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Down, KeyCode::Left, KeyCode::Left])
-            .await;
+        ui.type_keys(&[
+            KeyCode::Enter,
+            KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Left,
+            KeyCode::Left,
+        ])
+        .await;
         assert!(editing(&mut ui), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
         assert!(!editing(&mut ui), "{}", ui.screen());
@@ -124,7 +130,7 @@ mod tests {
             "{}",
             ui.screen()
         );
-        ui.type_keys(&[KeyCode::Left, KeyCode::Left, KeyCode::Left])
+        ui.type_keys(&[KeyCode::Left, KeyCode::Left, KeyCode::Left, KeyCode::Left])
             .await;
         ui.press(KeyCode::Enter).await;
         assert_eq!(saved(&ui, 0), ("S".into(), "+".into()), "{}", ui.screen());
@@ -146,8 +152,14 @@ mod tests {
         let mut ui = scouted().await;
         let before = ui.saved_first_set_events();
         edit_events(&mut ui).await;
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Down, KeyCode::Left, KeyCode::Left])
-            .await;
+        ui.type_keys(&[
+            KeyCode::Enter,
+            KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Left,
+            KeyCode::Left,
+        ])
+        .await;
         ui.press(KeyCode::Esc).await;
         assert!(!editing(&mut ui), "{}", ui.screen());
         assert_eq!(ui.saved_first_set_events(), before);
@@ -180,8 +192,14 @@ mod tests {
         // the matches read again
         ui.type_keys(&[KeyCode::Esc, KeyCode::Char('m')]).await;
         edit_events(&mut ui).await;
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Down, KeyCode::Left, KeyCode::Left])
-            .await;
+        ui.type_keys(&[
+            KeyCode::Enter,
+            KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Left,
+            KeyCode::Left,
+        ])
+        .await;
         ui.press(KeyCode::Enter).await;
         assert_eq!(saved(&ui, 0), ("S".into(), "+".into()), "{}", ui.screen());
         assert!(

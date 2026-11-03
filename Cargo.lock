@@ -3982,6 +3982,7 @@ dependencies = [
  "self_update",
  "serde",
  "serde_json",
+ "sys-locale",
  "tempfile",
  "tokio",
  "unicode-width",
@@ -3998,6 +3999,7 @@ dependencies = [
  "chrono",
  "csv",
  "dirs 7.0.0",
+ "encoding_rs",
  "futures",
  "regex",
  "reqwest",
@@ -4010,6 +4012,7 @@ dependencies = [
  "typst-kit",
  "typst-layout",
  "typst-pdf",
+ "unicode-normalization",
  "uuid",
  "webpki-root-certs",
  "zip",
@@ -4599,6 +4602,15 @@ dependencies = [
  "thiserror 2.0.21",
  "walkdir",
  "yaml-rust",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

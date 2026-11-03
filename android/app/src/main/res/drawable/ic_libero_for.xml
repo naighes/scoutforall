@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The libero for a player: its jersey, an arrow to the player it replaces. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group android:scaleX="0.7" android:scaleY="0.7" android:pivotX="0" android:pivotY="0">
+        <path android:fillColor="#FF000000" android:pathData="M8.5,3L3.5,5.5L1.5,10.5L5.5,12V21H18.5V12L22.5,10.5L20.5,5.5L15.5,3Q12,6 8.5,3z" />
+    </group>
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M13,18H21M18.5,15.5L21,18L18.5,20.5" />
+    <path android:fillColor="#FF000000" android:pathData="M19,8m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+</vector>

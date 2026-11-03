@@ -171,6 +171,39 @@ mod tests {
         assert_only_cortona_unreadable(&mut ui, &cortona);
     }
 
+    /// A set this version doesn't replay, e.g. saved by a version whose
+    /// scouting allowed an event no more: opening the match tells the set,
+    /// the row and the events.
+    #[tokio::test]
+    async fn set_that_does_not_replay_tells_why() {
+        let mut cortona = String::new();
+        let mut rows = 0;
+        let mut ui = match_list(|base| {
+            let folder = match_folder(base, "cortona");
+            let set = folder.join("set_1.csv");
+            rows = std::fs::read_to_string(&set).unwrap().lines().count();
+            append(&set, "2025-09-01T18:00:00Z,OE,,,\n");
+            append(&set, "2025-09-01T18:00:01Z,OS,,,\n");
+            cortona = folder_name(&folder);
+        })
+        .await;
+        assert_only_cortona_unreadable(&mut ui, &cortona);
+        let why = current_labels()
+            .domain
+            .set_event_not_valid
+            .replace("{set}", "1")
+            .replace("{row}", &(rows + 2).to_string())
+            .replace("{event}", "OS")
+            .replace("{previous}", "OE");
+        assert!(!ui.screen().contains(&why), "{}", ui.screen());
+        // unreadable matches are listed last: the footer offers why
+        ui.type_keys(&[KeyCode::Down, KeyCode::Down]).await;
+        let footer = ui.footer();
+        assert!(footer.contains(current_labels().why), "{footer}");
+        ui.press(KeyCode::Enter).await;
+        assert!(ui.screen().contains(&why), "{why}: {}", ui.screen());
+    }
+
     /// A set edited by hand giving an evaluation to their error.
     #[tokio::test]
     async fn set_edited_by_hand_with_an_unexpected_evaluation() {

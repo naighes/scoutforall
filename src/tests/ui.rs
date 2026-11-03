@@ -137,6 +137,7 @@ impl Ui {
                     year: 2025,
                     classification: None,
                     gender: None,
+                    country: None,
                     players: vec![],
                 })
                 .await
@@ -216,6 +217,13 @@ impl Ui {
         };
         ui.render();
         ui
+    }
+
+    /// Puts a file in the folder the file system screens open on.
+    pub fn browse_file(&self, name: &str, content: &[u8]) {
+        let browse = self._dir.path().join("browse");
+        std::fs::create_dir_all(&browse).unwrap();
+        std::fs::write(browse.join(name), content).unwrap();
     }
 
     pub fn render(&mut self) -> Buffer {

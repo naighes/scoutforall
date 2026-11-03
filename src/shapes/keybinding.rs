@@ -40,9 +40,9 @@ pub fn is_reserved_key(ck: &KeyCombination) -> bool {
 }
 
 /// Whether the key is one scouting keeps for itself (settings, undo, back,
-/// statistics and the digits choosing players): it can't be assigned to events nor
-/// evaluations. Sets and serves can have digits: they're chosen along with
-/// the evaluation, once the player is.
+/// statistics and the digits choosing players, 0 the team for our fault): it
+/// can't be assigned to events nor evaluations. Sets and serves can have
+/// digits: they're chosen along with the evaluation, once the player is.
 pub fn is_fixed_key(ck: &KeyCombination) -> bool {
     is_reserved_key(ck) || ck.as_letter().is_some_and(|c| c.is_ascii_digit())
 }
@@ -319,6 +319,8 @@ impl Default for KeyBindings<EventTypeEnum> {
         bindings.set(EventTypeEnum::FB, key!(x));
         bindings.set(EventTypeEnum::OF, key!(shift - x));
         bindings.set(EventTypeEnum::CL, key!(shift - l));
+        bindings.set(EventTypeEnum::LR, key!(l));
+        bindings.set(EventTypeEnum::LF, key!(k));
         bindings.set(EventTypeEnum::CS, key!(shift - c));
         bindings
     }

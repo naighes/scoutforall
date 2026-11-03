@@ -6,6 +6,7 @@ use crate::{
     providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
     screens::{
         components::{navigation_footer::NavigationFooter, notify_dialogue::NotifyDialogue, panel},
+        country_screen::CountryScreen,
         keybindings_change_screen::ChangeKeyBindingScreen,
         report_an_issue_screen::ReportAnIssueScreen,
         screen::{AppAction, Renderable, Sba, ScreenAsync, get_keybinding_actions},
@@ -43,7 +44,7 @@ const SIDE_BY_SIDE_MIN_WIDTH: u16 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsPanel {
-    /// language and analytics
+    /// language, country and analytics
     General,
     /// the scouting key bindings
     Shortcuts,
@@ -52,10 +53,16 @@ pub enum SettingsPanel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GeneralField {
     Language,
+    /// the country of a new team, chosen in a screen of its own
+    Country,
     Analytics,
 }
 
-const GENERAL_FIELDS: [GeneralField; 2] = [GeneralField::Language, GeneralField::Analytics];
+const GENERAL_FIELDS: [GeneralField; 3] = [
+    GeneralField::Language,
+    GeneralField::Country,
+    GeneralField::Analytics,
+];
 
 /// An editable scouting shortcut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -323,9 +330,15 @@ where
     }
 
     /// changes the selected general setting (the next or previous language,
-    /// the analytics toggled) and saves it
+    /// the analytics toggled) and saves it; the country opens its screen
     async fn change_general_field(&mut self, backwards: bool) -> AppAction {
         let settings = match GENERAL_FIELDS[self.general_field] {
+            GeneralField::Country => {
+                return AppAction::SwitchScreen(Box::new(CountryScreen::new(
+                    self.settings.clone(),
+                    self.settings_writer.clone(),
+                )));
+            }
             GeneralField::Language => {
                 let languages = LanguageEnum::ALL;
                 let current = languages
@@ -407,6 +420,15 @@ where
                     "{}: ◀ {} ▶",
                     labels.language,
                     self.settings.language.friendly_name(labels.domain)
+                ),
+                GeneralField::Country => format!(
+                    "{}: {} ▶",
+                    labels.country,
+                    self.settings
+                        .team_defaults
+                        .country
+                        .map(|c| c.name(self.settings.language))
+                        .unwrap_or_default()
                 ),
                 GeneralField::Analytics => format!(
                     "{} {}",
