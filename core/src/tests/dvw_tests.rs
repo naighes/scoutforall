@@ -503,8 +503,9 @@ mod tests {
                     })
                     .collect();
                 let choice = TeamChoice::New {
-                    gender: None,
-                    country: None,
+                    classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
+                    gender: Some(crate::shapes::enums::GenderEnum::Women),
+                    country: crate::shapes::country::CountryCode::parse("AT"),
                 };
                 match team_plan(&file, side, choice) {
                     Ok(plan) => {

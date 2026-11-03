@@ -285,7 +285,7 @@
     <string name="dvw_same_name">ta sama nazwa</string>
     <string name="dvw_same_players">%1$d z %2$d zawodników zgodnych</string>
     <string name="dvw_new_team">Utwórz nową drużynę</string>
-    <string name="dvw_new_team_of">Nowa drużyna %1$s %2$s: płeć i kraj</string>
+    <string name="dvw_new_team_of">Nowa drużyna %1$s %2$s: płeć, kraj i poziom</string>
     <string name="dvw_ready">%1$s: sety %2$d, nowi zawodnicy %3$d. Zapisać?</string>
     <string name="dvw_already_saved">%1$s ma już ten mecz: nadpisać go?</string>
     <string name="dvw_overwrite">Nadpisz</string>

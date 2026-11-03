@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.naighes.scout4all.core.ClassificationChoice
 import io.github.naighes.scout4all.core.CountryChoice
 import io.github.naighes.scout4all.core.DvwChoice
 import io.github.naighes.scout4all.core.DvwPreview
@@ -56,6 +57,8 @@ import io.github.naighes.scout4all.core.DvwSimilarTeam
 import io.github.naighes.scout4all.core.GenderChoice
 import io.github.naighes.scout4all.core.GenderEnum
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.TeamClassificationEnum
+import io.github.naighes.scout4all.core.TeamField
 import java.time.Instant
 import java.time.LocalDate
 import java.time.Year
@@ -103,9 +106,13 @@ data class DvwState(
     /** `YYYY-MM-DD` */
     val day: String? = null,
     val substitutions: String = "",
+    val classifications: List<ClassificationChoice> = emptyList(),
+    val classification: TeamClassificationEnum? = null,
     val genders: List<GenderChoice> = emptyList(),
     val gender: GenderEnum? = null,
     val country: CountryChoice? = null,
+    /** a field of the new team missing, said next to it as in the form */
+    val invalid: Pair<TeamField, String>? = null,
     val results: List<DvwResult> = emptyList(),
     val working: Boolean = false,
 ) {
@@ -126,6 +133,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
                     DvwState(
                         step = DvwStep.Sides,
                         preview = preview,
+                        classifications = core.classifications(),
                         genders = core.genders(),
                         country = form.country?.let { CountryChoice(it, core.countryName(it)) },
                     )
@@ -139,8 +147,10 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     fun select(index: Int) = mutableState.update { it.copy(selected = index) }
     fun day(day: String) = mutableState.update { it.copy(day = day) }
     fun substitutions(text: String) = mutableState.update { it.copy(substitutions = text.filter(Char::isDigit).take(2)) }
-    fun gender(gender: GenderEnum) = mutableState.update { it.copy(gender = gender) }
-    fun country(country: CountryChoice) = mutableState.update { it.copy(country = country) }
+    fun classification(classification: TeamClassificationEnum) =
+        mutableState.update { it.copy(classification = classification, invalid = null) }
+    fun gender(gender: GenderEnum) = mutableState.update { it.copy(gender = gender, invalid = null) }
+    fun country(country: CountryChoice) = mutableState.update { it.copy(country = country, invalid = null) }
 
     private fun to(step: DvwStep) = mutableState.update { it.copy(step = step, selected = 0, working = false) }
 
@@ -229,7 +239,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
      * done after the last side. */
     private suspend fun team(s: DvwState) {
         val side = s.side ?: return to(DvwStep.Done)
-        mutableState.update { it.copy(current = s.current, gender = null) }
+        mutableState.update { it.copy(current = s.current, classification = null, gender = null, invalid = null) }
         try {
             val similar = app.core { it.dvwSimilarTeams(bytes, side) }
             to(if (similar.isEmpty()) DvwStep.NewTeam(similar) else DvwStep.Team(similar))
@@ -243,6 +253,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
         day = s.day.orEmpty(),
         maxSubstitutions = (s.substitutions.toIntOrNull() ?: 0).toUByte(),
         teamId = teamId,
+        classification = s.classification,
         gender = s.gender,
         country = s.country?.value,
     )
@@ -252,6 +263,9 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
         try {
             val ready = app.core { it.planDvw(bytes, choice) }
             to(DvwStep.Ready(ready, choice))
+        } catch (e: MobileException.InvalidTeam) {
+            // the new team still to fill in, as in the form
+            mutableState.update { it.copy(invalid = e.field to e.reason, working = false) }
         } catch (e: MobileException) {
             nextSide(s, DvwResult(side(s), app.getString(R.string.dvw_not_imported, side(s), e.reason)))
         }
@@ -447,8 +461,8 @@ private fun similar(team: DvwSimilarTeam): String {
     return "${team.name} ${team.year} ($why)"
 }
 
-/** The gender and the country of the new team: the country of the
- * settings to start with. */
+/** The gender, the country and the level of the new team, as in the form
+ * of a team: the country of the settings to start with. */
 @Composable
 private fun NewTeamFields(state: DvwState, model: DvwImportViewModel) {
     var choosingCountry by rememberSaveable { mutableStateOf(false) }
@@ -464,7 +478,8 @@ private fun NewTeamFields(state: DvwState, model: DvwImportViewModel) {
             onDismiss = { choosingCountry = false },
         )
     }
-    FieldTitle(stringResource(R.string.gender), null)
+    val error = { field: TeamField -> state.invalid?.takeIf { it.first == field }?.second }
+    FieldTitle(stringResource(R.string.gender), error(TeamField.GENDER))
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         state.genders.forEachIndexed { index, choice ->
             SegmentedButton(
@@ -474,7 +489,13 @@ private fun NewTeamFields(state: DvwState, model: DvwImportViewModel) {
             ) { Text(choice.name) }
         }
     }
-    CountryField(country, state.country, null) { choosingCountry = true }
+    CountryField(country, state.country, error(TeamField.COUNTRY)) { choosingCountry = true }
+    FieldTitle(stringResource(R.string.classification), error(TeamField.CLASSIFICATION))
+    Column(Modifier.selectableGroup()) {
+        state.classifications.forEach { choice ->
+            ClassificationRow(choice, state.classification == choice.value) { model.classification(choice.value) }
+        }
+    }
 }
 
 /** The day of a match the file has no date of. */

@@ -2,14 +2,19 @@ package io.github.naighes.scout4all
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.pressBack
 import io.github.naighes.scout4all.core.GenderEnum
 import io.github.naighes.scout4all.core.MatchListing
+import io.github.naighes.scout4all.core.TeamClassificationEnum
 import io.github.naighes.scout4all.core.TeamListing
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -30,9 +35,11 @@ class DvwImportTest {
     private val threeSets: String =
         javaClass.classLoader!!.getResourceAsStream("three_sets.dvw")!!.use { it.readBytes() }.decodeToString()
 
-    /** The activity, sent the file with this text, past the terms. */
-    private fun share(text: String = threeSets): ActivityScenario<MainActivity> {
+    /** The activity, sent the file with this text, past the terms; the
+     * country of the new teams the one of the settings, when given. */
+    private fun share(text: String = threeSets, country: String? = "AT"): ActivityScenario<MainActivity> {
         core { it.acceptTerms() }
+        country?.let { c -> core { it.setDefaultCountry(c) } }
         val file = File(app.cacheDir, "match.dvw").apply { writeText(text) }
         val intent = Intent(Intent.ACTION_SEND)
             .setType("application/octet-stream")
@@ -43,6 +50,21 @@ class DvwImportTest {
 
     private fun tap(text: String) =
         rule.onNode(hasText(text) and hasClickAction()).performClick()
+
+    /** A field of the new team, in the part of the screen that scrolls. */
+    private fun choose(text: String) =
+        rule.onNode(hasText(text) and hasClickAction()).performScrollTo().performClick()
+
+    private fun gender(gender: GenderEnum) = choose(core { it.genders() }.first { it.value == gender }.name)
+
+    private fun classification(classification: TeamClassificationEnum) =
+        choose(core { it.classifications() }.first { it.value == classification }.name)
+
+    /** The new team filled in, as the form of a team wants it. */
+    private fun fillNewTeam() {
+        gender(GenderEnum.WOMEN)
+        classification(TeamClassificationEnum.REGIONAL)
+    }
 
     private fun next() = tap(string(R.string.dvw_next))
 
@@ -61,7 +83,7 @@ class DvwImportTest {
             rule.waitForText("6")
             next()
             rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
-            tap(core { it.genders() }.first { it.value == GenderEnum.WOMEN }.name)
+            fillNewTeam()
             next()
             rule.waitForText(string(R.string.dvw_ready, "Home", 3, 7))
             tap(string(R.string.save))
@@ -69,6 +91,11 @@ class DvwImportTest {
             val team = teams().single()
             val matches = core { it.matches(team.id) }
             assertTrue(matches.single().let { it is MatchListing.Match && it.won.toInt() == 3 && it.opponent == "Visiting" })
+            val form = core { it.team(team.id) }.form
+            assertEquals(
+                Triple(TeamClassificationEnum.REGIONAL, GenderEnum.WOMEN, "AT"),
+                Triple(form.classification, form.gender, form.country),
+            )
             tap(string(R.string.dvw_imported, "Home"))
             rule.waitForText("Name1 Surname1")
         }
@@ -86,9 +113,12 @@ class DvwImportTest {
             scenario.recreate()
             rule.waitForText(string(R.string.dvw_substitutions))
             next()
+            rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
+            fillNewTeam()
             next()
             tap(string(R.string.save))
             rule.waitForText(string(R.string.dvw_new_team_of, "Visiting", "2014"))
+            fillNewTeam()
             next()
             tap(string(R.string.save))
             rule.waitForText(string(R.string.dvw_imported, "Visiting"))
@@ -106,6 +136,8 @@ class DvwImportTest {
             next()
             rule.waitForText(string(R.string.dvw_substitutions))
             next()
+            rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
+            fillNewTeam()
             next()
             tap(string(R.string.save))
             rule.waitForText(string(R.string.dvw_imported, "Home"))
@@ -125,6 +157,31 @@ class DvwImportTest {
         }
     }
 
+    /** The new team needs its level, gender and country, as the form of a
+     * team: what's missing said next to its field, the import still on
+     * the team; nothing saved until it's all there. */
+    @Test
+    fun aNewTeamNeedsLevelGenderAndCountry() {
+        share(country = null).use {
+            rule.waitForText(string(R.string.dvw_which_team))
+            next()
+            rule.waitForText(string(R.string.dvw_substitutions))
+            next()
+            rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
+            next()
+            rule.waitForText("classification is required")
+            classification(TeamClassificationEnum.REGIONAL)
+            rule.onAllNodesWithText("classification is required").assertCountEquals(0)
+            next()
+            rule.waitForText("gender is required")
+            gender(GenderEnum.WOMEN)
+            next()
+            rule.waitForText("country is required")
+            rule.onNodeWithText(string(R.string.dvw_new_team_of, "Home", "2014")).assertExists()
+            assertTrue(teams().isEmpty())
+        }
+    }
+
     /** Sets that don't add up: not imported, the reason said. */
     @Test
     fun aMatchNotTranslatedSaysWhy() {
@@ -133,6 +190,8 @@ class DvwImportTest {
             next()
             rule.waitForText(string(R.string.dvw_substitutions))
             next()
+            rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
+            fillNewTeam()
             next()
             rule.waitForText("25-3 in the file, 25-0 from its rallies", substring = true)
             assertTrue(teams().isEmpty())

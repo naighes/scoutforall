@@ -33,6 +33,16 @@ mod tests {
         ui
     }
 
+    /// The new team filled in, as the form of a team: the second level
+    /// (high national), the first gender (men), the country typed.
+    async fn fill_new_team(ui: &mut Ui) {
+        ui.type_keys(&[KeyCode::Right, KeyCode::Down, KeyCode::Down])
+            .await;
+        for c in "Austria".chars() {
+            ui.press(KeyCode::Char(c)).await;
+        }
+    }
+
     fn shows(ui: &mut Ui, text: &str) -> bool {
         ui.screen().contains(text)
     }
@@ -86,6 +96,7 @@ mod tests {
             .replace("{team}", "Wien")
             .replace("{year}", "2014");
         assert!(shows(&mut ui, &question), "{}", ui.screen());
+        fill_new_team(&mut ui).await;
         ui.press(KeyCode::Enter).await;
         let ready = labels
             .dvw_ready
@@ -97,6 +108,14 @@ mod tests {
         let done = labels.dvw_imported.replace("{team}", "Wien");
         assert!(shows(&mut ui, &done), "{}", ui.screen());
         assert_eq!(saved_team_names(&ui), vec!["Volley Club", "Wien"]);
+        let wien = ui
+            .saved_teams()
+            .into_iter()
+            .find(|t| t["name"] == "Wien")
+            .expect("Wien saved");
+        assert_eq!(wien["classification"], "HighNational", "{wien}");
+        assert_eq!(wien["gender"], "Men", "{wien}");
+        assert_eq!(wien["country"], "AT", "{wien}");
         let matches = ui.saved_matches();
         assert_eq!(matches.len(), 1, "{matches:?}");
         assert_eq!(matches[0]["opponent"], "Graz");
@@ -109,6 +128,24 @@ mod tests {
         );
     }
 
+    /// The new team without its country: said as by the form of a team,
+    /// the user still on it; nothing saved.
+    #[tokio::test]
+    async fn a_new_team_needs_its_country() {
+        let labels = current_labels();
+        let mut ui = opened(TEAMS, &file("Wien", "Graz")).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter, KeyCode::Enter])
+            .await;
+        assert!(
+            shows(&mut ui, labels.domain.country_is_required),
+            "{}",
+            ui.screen()
+        );
+        assert!(shows(&mut ui, labels.country), "{}", ui.screen());
+        assert_eq!(ui.saved_matches().len(), 0);
+        assert_eq!(saved_team_names(&ui), vec!["Volley Club"]);
+    }
+
     /// Both teams: each imported on its own, the visiting one too.
     #[tokio::test]
     async fn both_teams_imported() {
@@ -117,8 +154,10 @@ mod tests {
         ui.type_keys(&[KeyCode::Down, KeyCode::Down, KeyCode::Enter])
             .await;
         // substitutions, new Wien, saved, new Graz, saved
-        for _ in 0..5 {
-            ui.press(KeyCode::Enter).await;
+        ui.press(KeyCode::Enter).await;
+        for _ in 0..2 {
+            fill_new_team(&mut ui).await;
+            ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         }
         let screen = ui.screen();
         for team in ["Wien", "Graz"] {
@@ -175,6 +214,7 @@ mod tests {
         ])
         .await;
         assert!(shows(&mut ui, labels.gender), "{}", ui.screen());
+        fill_new_team(&mut ui).await;
         ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         let done = labels.dvw_imported.replace("{team}", "Volley Club");
         assert!(shows(&mut ui, &done), "{}", ui.screen());
@@ -194,8 +234,9 @@ mod tests {
         assert!(shows(&mut ui, "2015-03-02"), "{}", ui.screen());
         ui.type_keys(&[KeyCode::Down, KeyCode::Enter]).await;
         // substitutions, new team, saved
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter, KeyCode::Enter])
-            .await;
+        ui.press(KeyCode::Enter).await;
+        fill_new_team(&mut ui).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
         let matches = ui.saved_matches();
         assert!(
             matches[0]["date"]
@@ -211,8 +252,9 @@ mod tests {
         let labels = current_labels();
         let text = file("Wien", "Graz").replacen("True;;;;25-0;;", "True;;;;25-3;;", 1);
         let mut ui = opened(TEAMS, &text).await;
-        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter, KeyCode::Enter])
-            .await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
+        fill_new_team(&mut ui).await;
+        ui.press(KeyCode::Enter).await;
         let screen = ui.screen();
         assert!(
             screen.contains("set 1: 25-3 in the file, 25-0 from its rallies"),
@@ -238,9 +280,10 @@ mod tests {
         let labels = current_labels();
         let mut ui = opened(TEAMS, &file("Wien", "Graz")).await;
         // home, substitutions, new team, saved, back to the teams
-        for _ in 0..5 {
-            ui.press(KeyCode::Enter).await;
-        }
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter]).await;
+        fill_new_team(&mut ui).await;
+        ui.type_keys(&[KeyCode::Enter, KeyCode::Enter, KeyCode::Enter])
+            .await;
         ui.press(KeyCode::Char('i')).await;
         ui.press(KeyCode::Enter).await;
         // home, substitutions, Wien alike, ready

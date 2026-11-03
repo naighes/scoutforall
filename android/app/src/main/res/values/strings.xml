@@ -284,7 +284,7 @@
     <string name="dvw_same_name">same name</string>
     <string name="dvw_same_players">%1$d of %2$d players alike</string>
     <string name="dvw_new_team">Create a new team</string>
-    <string name="dvw_new_team_of">The new team %1$s %2$s: its gender and country</string>
+    <string name="dvw_new_team_of">The new team %1$s %2$s: its gender, country and classification</string>
     <string name="dvw_ready">%1$s: sets %2$d, new players %3$d. Save it?</string>
     <string name="dvw_already_saved">%1$s has this match already: overwrite it?</string>
     <string name="dvw_overwrite">Overwrite it</string>

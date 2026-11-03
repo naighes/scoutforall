@@ -252,7 +252,7 @@ fun FieldTitle(title: String, error: String?) = Column {
 }
 
 @Composable
-private fun ClassificationRow(choice: ClassificationChoice, selected: Boolean, onSelect: () -> Unit) = Row(
+fun ClassificationRow(choice: ClassificationChoice, selected: Boolean, onSelect: () -> Unit) = Row(
     Modifier
         .fillMaxWidth()
         .selectable(selected = selected, onClick = onSelect, role = Role.RadioButton)

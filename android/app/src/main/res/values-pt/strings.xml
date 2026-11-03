@@ -283,7 +283,7 @@
     <string name="dvw_same_name">mesmo nome</string>
     <string name="dvw_same_players">%1$d de %2$d jogadores iguais</string>
     <string name="dvw_new_team">Criar uma equipe nova</string>
-    <string name="dvw_new_team_of">A nova equipe %1$s %2$s: gênero e país</string>
+    <string name="dvw_new_team_of">A nova equipe %1$s %2$s: gênero, país e classificação</string>
     <string name="dvw_ready">%1$s: sets %2$d, jogadores novos %3$d. Salvar?</string>
     <string name="dvw_already_saved">%1$s já tem esta partida: sobrescrevê-la?</string>
     <string name="dvw_overwrite">Sobrescrever</string>

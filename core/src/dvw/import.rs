@@ -19,12 +19,13 @@ use crate::{
     },
     shapes::{
         country::CountryCode,
-        enums::{GenderEnum, RoleEnum},
+        enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
         set::ReplayIssue,
         team::TeamEntry,
     },
+    team_form::TeamFormError,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveTime};
 use std::collections::HashMap;
@@ -38,6 +39,10 @@ pub enum TeamIssue {
     /// Neither a season nor a date telling it.
     #[error("the season of the match can't be told")]
     NoYear,
+    /// A new team needs what the form of a team needs: its level, gender
+    /// and country, in this order.
+    #[error("the new team: {0:?}")]
+    Incomplete(TeamFormError),
     /// A player of the team with the number of a player of the file and
     /// another surname.
     #[error("number {number}: {file} in the file, {team} in the team")]
@@ -66,8 +71,10 @@ pub struct SimilarTeam<'a> {
 pub enum TeamChoice<'a> {
     Existing(&'a TeamEntry),
     /// A new team with the name of the file; the file tells neither its
-    /// gender nor its country.
+    /// level, nor its gender, nor its country: the user does, as in the
+    /// form of a team.
     New {
+        classification: Option<TeamClassificationEnum>,
         gender: Option<GenderEnum>,
         country: Option<CountryCode>,
     },
@@ -169,15 +176,22 @@ pub fn similar_teams<'a>(
 pub fn team_plan(file: &DvwFile, side: Side, choice: TeamChoice) -> Result<TeamPlan, TeamIssue> {
     let (mut team, new_team) = match choice {
         TeamChoice::Existing(team) => (team.clone(), false),
-        TeamChoice::New { gender, country } => (
+        TeamChoice::New {
+            classification,
+            gender,
+            country,
+        } => (
             TeamEntry {
                 name: file.team(side).name.trim().to_string(),
                 year: season_year(file).ok_or(TeamIssue::NoYear)?,
                 players: vec![],
                 id: Uuid::new_v4(),
-                classification: None,
-                gender,
-                country,
+                classification: Some(
+                    classification
+                        .ok_or(TeamIssue::Incomplete(TeamFormError::MissingClassification))?,
+                ),
+                gender: Some(gender.ok_or(TeamIssue::Incomplete(TeamFormError::MissingGender))?),
+                country: Some(country.ok_or(TeamIssue::Incomplete(TeamFormError::MissingCountry))?),
             },
             true,
         ),
@@ -503,6 +517,7 @@ impl TeamIssue {
     pub fn describe(&self, labels: &Labels) -> String {
         match self {
             TeamIssue::NoYear => labels.dvw_no_year.to_string(),
+            TeamIssue::Incomplete(e) => e.message(labels),
             TeamIssue::PlayerConflict { number, file, team } => labels
                 .dvw_player_conflict
                 .replace("{number}", &number.to_string())

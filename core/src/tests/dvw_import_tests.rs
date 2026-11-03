@@ -9,10 +9,11 @@ mod tests {
     };
     use crate::shapes::{
         country::CountryCode,
-        enums::{GenderEnum, RoleEnum},
+        enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
         player::PlayerEntry,
         team::TeamEntry,
     };
+    use crate::team_form::TeamFormError;
     use chrono::NaiveDate;
     use uuid::Uuid;
 
@@ -107,6 +108,7 @@ mod tests {
 
     fn new_team() -> TeamChoice<'static> {
         TeamChoice::New {
+            classification: Some(TeamClassificationEnum::Regional),
             gender: Some(GenderEnum::Women),
             country: CountryCode::parse("AT"),
         }
@@ -250,7 +252,10 @@ mod tests {
         assert_eq!(plan.team.year, 2021);
         assert_eq!(plan.team.gender, Some(GenderEnum::Women));
         assert_eq!(plan.team.country, CountryCode::parse("AT"));
-        assert_eq!(plan.team.classification, None);
+        assert_eq!(
+            plan.team.classification,
+            Some(TeamClassificationEnum::Regional)
+        );
         let players: Vec<(u8, &str, Option<RoleEnum>)> = plan
             .team
             .players
@@ -273,6 +278,51 @@ mod tests {
         assert_eq!(plan.roster, ids);
         assert_eq!(plan.numbers.get(&14), Some(&ids[4]));
         assert_eq!(plan.liberos, vec![11, 16]);
+    }
+
+    /// A new team needs its level, gender and country, as the form of a
+    /// team: the first one missing, in the order of the form, is said.
+    #[test]
+    fn a_new_team_needs_level_gender_and_country() {
+        let level = Some(TeamClassificationEnum::Regional);
+        let gender = Some(GenderEnum::Women);
+        let country = CountryCode::parse("AT");
+        for (classification, gender, country, missing) in [
+            (None, None, None, TeamFormError::MissingClassification),
+            (None, gender, country, TeamFormError::MissingClassification),
+            (level, None, None, TeamFormError::MissingGender),
+            (level, None, country, TeamFormError::MissingGender),
+            (level, gender, None, TeamFormError::MissingCountry),
+        ] {
+            let choice = TeamChoice::New {
+                classification,
+                gender,
+                country,
+            };
+            assert_eq!(
+                team_plan(&wien(), Side::Home, choice).map(|p| p.team.id),
+                Err(TeamIssue::Incomplete(missing)),
+                "{classification:?} {gender:?} {country:?}"
+            );
+        }
+    }
+
+    /// Said in the language of the app, as by the form of a team.
+    #[test]
+    fn a_new_team_incomplete_is_said_as_by_the_form() {
+        use crate::localization::labels;
+        use crate::shapes::enums::LanguageEnum;
+        let it = labels(LanguageEnum::It);
+        for missing in [
+            TeamFormError::MissingClassification,
+            TeamFormError::MissingGender,
+            TeamFormError::MissingCountry,
+        ] {
+            assert_eq!(
+                TeamIssue::Incomplete(missing).describe(it),
+                missing.message(it)
+            );
+        }
     }
 
     /// No season in the file and no date: a new team has no year.

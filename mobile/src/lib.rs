@@ -19,7 +19,7 @@ use scout4all_core::{
     dvw::{
         self,
         import::{
-            MatchPlan, TeamChoice as DvwTeamChoice, TeamPlan, default_max_substitutions,
+            MatchPlan, TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
             match_date, match_exists, match_plan, save_import, season_year, similar_teams,
             team_plan,
         },
@@ -604,7 +604,8 @@ pub struct DvwChoice {
     pub max_substitutions: u8,
     /// The team of ours it goes into; a new team when none.
     pub team_id: Option<String>,
-    /// Of the new team.
+    /// Of the new team, required as by the form of a team.
+    pub classification: Option<TeamClassificationEnum>,
     pub gender: Option<GenderEnum>,
     pub country: Option<CountryCode>,
 }
@@ -3443,12 +3444,20 @@ impl Scout4All {
         let team_choice = match &existing {
             Some(team) => DvwTeamChoice::Existing(team),
             None => DvwTeamChoice::New {
+                classification: choice.classification,
                 gender: choice.gender,
                 country: choice.country,
             },
         };
         let side = choice.side.into();
-        let team = team_plan(file, side, team_choice).map_err(|e| failed(e.describe(labels)))?;
+        let team = team_plan(file, side, team_choice).map_err(|e| match e {
+            // shown next to its field, as by the form of a team
+            TeamIssue::Incomplete(missing) => MobileError::InvalidTeam {
+                field: missing.into(),
+                reason: missing.message(labels),
+            },
+            other => failed(other.describe(labels)),
+        })?;
         let date = match_date(file, day, *Local::now().offset());
         let plan = match_plan(file, side, &team, date, choice.max_substitutions)
             .map_err(|e| failed(e.describe(labels)))?;
@@ -5632,6 +5641,7 @@ mod tests {
             day: "2015-01-25".into(),
             max_substitutions: 6,
             team_id,
+            classification: Some(TeamClassificationEnum::Regional),
             gender: Some(GenderEnum::Women),
             country: CountryCode::known("SI"),
         }
@@ -5677,7 +5687,8 @@ mod tests {
     }
 
     /// A new team: checked, then saved with its match, queued for the
-    /// statistics as any finished match; the gender and country chosen.
+    /// statistics as any finished match; the level, gender and country
+    /// chosen.
     #[test]
     fn a_datavolley_team_imported_as_a_new_team() {
         let dir = tempfile::tempdir().unwrap();
@@ -5703,6 +5714,11 @@ mod tests {
         let team = app.team(imported.team_id.clone()).unwrap();
         assert_eq!((team.name.as_str(), team.year), ("Home", 2014));
         assert_eq!(team.gender.as_deref(), Some("women"));
+        assert_eq!(team.classification.as_deref(), Some("regional"));
+        assert_eq!(
+            team.form.classification,
+            Some(TeamClassificationEnum::Regional)
+        );
         assert_eq!(team.players.len(), 7);
         let matches = app.matches(imported.team_id).unwrap();
         assert!(
@@ -5762,6 +5778,59 @@ mod tests {
             ),
             "{matches:?}"
         );
+    }
+
+    /// A new team without its level, gender or country: the field said, as
+    /// by the form of a team, in the language of the app; nothing saved.
+    #[test]
+    fn a_new_datavolley_team_needs_level_gender_and_country() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let it = labels(LanguageEnum::It);
+        let full = dvw_choice(DvwSide::Home, None);
+        for (choice, field, message) in [
+            (
+                DvwChoice {
+                    classification: None,
+                    gender: None,
+                    country: None,
+                    ..full.clone()
+                },
+                TeamField::Classification,
+                it.classification_is_required,
+            ),
+            (
+                DvwChoice {
+                    gender: None,
+                    ..full.clone()
+                },
+                TeamField::Gender,
+                it.gender_is_required,
+            ),
+            (
+                DvwChoice {
+                    country: None,
+                    ..full.clone()
+                },
+                TeamField::Country,
+                it.country_is_required,
+            ),
+        ] {
+            for result in [
+                app.plan_dvw(THREE_SETS.to_vec(), choice.clone())
+                    .map(|_| ()),
+                app.import_dvw(THREE_SETS.to_vec(), choice, false)
+                    .map(|_| ()),
+            ] {
+                match result {
+                    Err(MobileError::InvalidTeam { field: f, reason }) => {
+                        assert_eq!((f, reason.as_str()), (field, message));
+                    }
+                    other => panic!("{field:?}: {other:?}"),
+                }
+            }
+        }
+        assert!(app.teams().unwrap().is_empty());
     }
 
     /// Why a side can't be imported, in the language of the app: nothing

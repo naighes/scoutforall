@@ -859,8 +859,9 @@ mod tests {
             text,
             side,
             crate::dvw::import::TeamChoice::New {
-                gender: None,
-                country: None,
+                classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
+                gender: Some(crate::shapes::enums::GenderEnum::Women),
+                country: crate::shapes::country::CountryCode::parse("AT"),
             },
         )
         .map(|(_, plan)| plan)
@@ -1077,8 +1078,9 @@ mod tests {
 
         fn new_team() -> TeamChoice<'static> {
             TeamChoice::New {
-                gender: None,
-                country: None,
+                classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
+                gender: Some(crate::shapes::enums::GenderEnum::Women),
+                country: crate::shapes::country::CountryCode::parse("AT"),
             }
         }
 

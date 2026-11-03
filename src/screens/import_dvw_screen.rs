@@ -32,8 +32,8 @@ use scout4all_core::{
     constants::DEFAULT_MAX_SUBSTITUTIONS,
     dvw::{
         import::{
-            MatchPlan, TeamChoice, TeamPlan, default_max_substitutions, match_date, match_exists,
-            match_plan, save_import, season_year, similar_teams, team_plan,
+            MatchPlan, TeamChoice, TeamIssue, TeamPlan, default_max_substitutions, match_date,
+            match_exists, match_plan, save_import, season_year, similar_teams, team_plan,
         },
         model::{DvwFile, MatchDate, Side},
     },
@@ -41,7 +41,11 @@ use scout4all_core::{
         match_reader::MatchReader, match_writer::MatchWriter, set_writer::SetWriter,
         team_reader::TeamReader, team_writer::TeamWriter,
     },
-    shapes::{country::CountryCode, enums::GenderEnum, team::TeamEntry},
+    shapes::{
+        country::CountryCode,
+        enums::{GenderEnum, TeamClassificationEnum},
+        team::TeamEntry,
+    },
 };
 use std::sync::Arc;
 
@@ -85,9 +89,11 @@ pub struct DvwImportScreen {
     substitutions: TextBox,
     /// The similar teams of the side being imported.
     similar: Vec<TeamEntry>,
+    classification: Select<TeamClassificationEnum>,
     gender: Select<GenderEnum>,
     country: CountryPicker,
-    /// The field of the new team: gender or country.
+    /// The field of the new team, in the order of the form of a team:
+    /// level, gender, country.
     field: usize,
     plan: Option<(TeamPlan, MatchPlan)>,
     /// What happened to each side.
@@ -131,11 +137,17 @@ impl DvwImportScreen {
                 |current: &str, c: char| current.len() < 2 && c.is_ascii_digit(),
             ),
             similar: vec![],
+            classification: Select::new(
+                labels.team_classification.to_owned(),
+                TeamClassificationEnum::ALL.to_vec(),
+                None,
+                true,
+            ),
             gender: Select::new(
                 labels.gender.to_owned(),
                 GenderEnum::ALL.to_vec(),
                 None,
-                true,
+                false,
             ),
             country,
             field: 0,
@@ -248,11 +260,17 @@ impl DvwImportScreen {
 
     fn show_new_team(&mut self) {
         let labels = current_labels();
+        self.classification = Select::new(
+            labels.team_classification.to_owned(),
+            TeamClassificationEnum::ALL.to_vec(),
+            None,
+            true,
+        );
         self.gender = Select::new(
             labels.gender.to_owned(),
             GenderEnum::ALL.to_vec(),
             None,
-            true,
+            false,
         );
         self.country = CountryPicker::new(labels.country.to_owned(), self.providers.country, false);
         self.field = 0;
@@ -275,7 +293,16 @@ impl DvwImportScreen {
         };
         let day = self.day.unwrap_or_default();
         let offset = *Local::now().offset();
-        let planned = team_plan(&self.file, side, choice)
+        let planned = match team_plan(&self.file, side, choice) {
+            // the new team not filled in: still to fill in, as in the form
+            Err(TeamIssue::Incomplete(missing)) => {
+                self.notify_message
+                    .set_error(missing.message(labels.domain));
+                return;
+            }
+            planned => planned,
+        };
+        let planned = planned
             .map_err(|e| e.describe(labels.domain))
             .and_then(|team| {
                 match_plan(
@@ -380,6 +407,7 @@ impl DvwImportScreen {
             },
             Step::NewTeam => {
                 let choice = TeamChoice::New {
+                    classification: self.classification.get_selected_value(),
                     gender: self.gender.get_selected_value(),
                     country: self.country.get_selected_value(),
                 };
@@ -444,9 +472,10 @@ impl DvwImportScreen {
     fn move_selection(&mut self, forward: bool) {
         match self.step {
             Step::NewTeam => {
-                self.field = (self.field + 1) % 2;
-                self.gender.writing_mode = self.field == 0;
-                self.country.writing_mode = self.field == 1;
+                self.field = (self.field + 1) % 3;
+                self.classification.writing_mode = self.field == 0;
+                self.gender.writing_mode = self.field == 1;
+                self.country.writing_mode = self.field == 2;
             }
             _ if !self.options.is_empty() => {
                 let count = self.options.len();
@@ -464,10 +493,12 @@ impl DvwImportScreen {
     fn change(&mut self, back: bool) {
         match (self.step, back) {
             (Step::NewTeam, true) => {
+                self.classification.handle_up();
                 self.gender.handle_up();
                 self.country.handle_up();
             }
             (Step::NewTeam, false) => {
+                self.classification.handle_down();
                 self.gender.handle_down();
                 self.country.handle_down();
             }
@@ -623,13 +654,15 @@ impl Renderable for DvwImportScreen {
                 let rows = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
+                        form_rows(self.classification.writing_mode),
                         form_rows(self.gender.writing_mode),
                         form_rows(self.country.writing_mode),
                         Constraint::Min(0),
                     ])
                     .split(area[3]);
-                self.gender.render(f, rows[0]);
-                self.country.render(f, rows[1]);
+                self.classification.render(f, rows[0]);
+                self.gender.render(f, rows[1]);
+                self.country.render(f, rows[2]);
             }
             Step::Ready => {}
             Step::Done => f.render_widget(

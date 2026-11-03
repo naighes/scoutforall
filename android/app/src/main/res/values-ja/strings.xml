@@ -282,7 +282,7 @@
     <string name="dvw_same_name">同じ名前</string>
     <string name="dvw_same_players">%2$d人中%1$d人が一致</string>
     <string name="dvw_new_team">新しいチームを作成</string>
-    <string name="dvw_new_team_of">新しいチーム %1$s %2$s: 性別と国</string>
+    <string name="dvw_new_team_of">新しいチーム %1$s %2$s: 性別、国とレベル</string>
     <string name="dvw_ready">%1$s: %2$dセット、新しい選手%3$d人。保存しますか?</string>
     <string name="dvw_already_saved">%1$sにはこの試合がすでにあります: 上書きしますか?</string>
     <string name="dvw_overwrite">上書きする</string>
