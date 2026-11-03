@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 /// The version of the terms of use (license and data collection): raise it
 /// when they change, to show them again to every user. 3: the country of
-/// the team among the data sent.
-pub const TERMS_VERSION: u8 = 3;
+/// the team among the data sent. 4: the names of team and opponent through
+/// the server, for the keys of teams and matches.
+pub const TERMS_VERSION: u8 = 4;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Consent {

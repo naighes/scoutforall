@@ -127,7 +127,32 @@ mod tests {
         let country = "country";
         assert!(ui.screen().contains(country), "{}", ui.screen());
         ui.press(KeyCode::Enter).await;
-        assert_eq!(ui.saved_settings().await.unwrap().consent.terms_version, 3);
+        assert_eq!(
+            ui.saved_settings().await.unwrap().consent.terms_version,
+            TERMS_VERSION
+        );
+    }
+
+    /// The terms of v0.11 didn't say that the names of team and opponent
+    /// pass through the server, for the keys: seen then, they're shown
+    /// again, and nothing is sent until they are.
+    #[tokio::test]
+    async fn the_terms_seen_before_the_keys_are_shown_again() {
+        let settings = Settings {
+            consent: Consent {
+                terms_version: 3,
+                ..Consent::default()
+            },
+            ..Settings::default()
+        };
+        assert!(!settings.uploads_enabled());
+        let mut ui = Ui::start_as(TEAM, settings).await;
+        assert!(shows_terms(&mut ui), "{}", ui.screen());
+        assert!(ui.screen().contains("opponent"), "{}", ui.screen());
+        ui.press(KeyCode::Enter).await;
+        let consent = ui.saved_settings().await.unwrap().consent;
+        assert_eq!(consent.terms_version, 4);
+        assert!(consent.uploads_enabled());
     }
 
     #[test]
