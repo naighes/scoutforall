@@ -8,7 +8,7 @@
 //!
 //! Every query takes a [`StatsFilter`] narrowing it to a phase, a rotation
 //! (the index of the setter's position, 0 to 5) and a player.
-use crate::shapes::court_zone::CourtZoneEnum;
+use crate::shapes::court_zone::{CourtTarget, CourtZoneEnum};
 use crate::shapes::enums::{
     ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
@@ -154,8 +154,9 @@ pub struct EventKey {
     pub player: Option<Uuid>,
     /// the zone of an attack, when the role of the attacker tells it
     pub zone: Option<ZoneEnum>,
-    /// where our serve went, when the scout told it
-    pub target: Option<CourtZoneEnum>,
+    /// where our serve or attack went, or where we received theirs, when
+    /// the scout told it
+    pub target: Option<CourtTarget>,
     /// `None` for the events with no evaluation (`F`, `OS`, `OE`, `FB`,
     /// `OF`)
     pub eval: Option<EvalEnum>,
@@ -409,28 +410,68 @@ impl Stats {
         (total > 0).then(|| percentage(score, total))
     }
 
-    /// Our serves sent to a zone, or our receptions in a zone (see
-    /// `CourtSide::of`), among the ones whose zone was told: how many, and
-    /// their efficiency (as `Metric::Efficiency`).
+    /// Our serves or attacks sent to one of the nine zones, or our
+    /// receptions in it (see `CourtSide::of`), among the ones whose zone was
+    /// told: how many, two cells of different zones half in each (see
+    /// `CourtTarget::zones`), and their efficiency (as `Metric::Efficiency`).
     pub fn events_to(
         &self,
         event_type: EventTypeEnum,
-        target: CourtZoneEnum,
+        zone: CourtZoneEnum,
+        filter: &StatsFilter,
+    ) -> (f64, f64) {
+        self.weighted(event_type, filter, |target| {
+            target
+                .zones()
+                .iter()
+                .filter(|(z, _)| *z == zone)
+                .map(|(_, weight)| weight)
+                .sum()
+        })
+    }
+
+    /// The events of the type on a conflict zone (any, with `None`): how
+    /// many, and their efficiency (as `Metric::Efficiency`).
+    pub fn events_on_conflict(
+        &self,
+        event_type: EventTypeEnum,
+        conflict: Option<CourtZoneEnum>,
         filter: &StatsFilter,
     ) -> (u32, f64) {
+        let (count, efficiency) = self.weighted(event_type, filter, |target| {
+            match (target.conflict(), conflict) {
+                (Some(on), Some(asked)) if on == asked => 1.0,
+                (Some(_), None) => 1.0,
+                _ => 0.0,
+            }
+        });
+        // whole events: each counts 1 or 0
+        (count.round() as u32, efficiency)
+    }
+
+    /// The events of the type whose zone was told, each counted by the
+    /// weight of its target: how many, and their efficiency.
+    fn weighted(
+        &self,
+        event_type: EventTypeEnum,
+        filter: &StatsFilter,
+        weight: impl Fn(&CourtTarget) -> f64,
+    ) -> (f64, f64) {
         let (score, total) = self
             .events(event_type, filter)
-            .filter(|(k, _)| k.target == Some(target))
             .filter_map(|(k, v)| {
-                k.eval
-                    .map(|eval| (Metric::Efficiency.score(event_type, eval), v))
+                k.target
+                    .map(|t| weight(&t) * f64::from(v))
+                    .filter(|w| *w > 0.0)
+                    .zip(k.eval)
             })
-            .fold((0, 0), |(score, total), (s, v)| {
-                (score + s * v as i32, total + v)
+            .fold((0.0, 0.0), |(score, total), (w, eval)| {
+                let s = f64::from(Metric::Efficiency.score(event_type, eval));
+                (score + s * w, total + w)
             });
-        match total {
-            0 => (0, 0.0),
-            _ => (total, percentage(score, total)),
+        match total > 0.0 {
+            true => (total, score / total * 100.0),
+            false => (0.0, 0.0),
         }
     }
 

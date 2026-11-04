@@ -192,12 +192,6 @@ pub enum CourtZoneEnum {
     Z89,
     Z56,
     Z61,
-    Z47,
-    Z38,
-    Z29,
-    Z57,
-    Z68,
-    Z19,
 }
 
 #[uniffi::remote(Enum)]
@@ -1400,17 +1394,32 @@ pub struct FundamentalDetail {
     pub points: Option<u32>,
     /// for an attack
     pub zones: Vec<DetailZone>,
-    /// for a serve or a reception: how many had their zone told, and the
-    /// court a row each from the top as `CourtZoneEnum::shown` (theirs for
-    /// the serve, ours for the reception); empty with no zone told
+    /// for a serve, an attack or a reception: how many had their zone
+    /// told, and the court a row each from the top (theirs for the serve
+    /// and the attack, the nine zones as `CourtZoneEnum::zones_shown`;
+    /// ours for the reception, with the conflict zones between them as
+    /// `CourtZoneEnum::shown`); empty with no zone told
     pub targets_told: u32,
     pub targets: Vec<Vec<TargetStats>>,
+    /// for a reception, all the conflict zones together
+    pub on_conflicts: Option<ConflictStats>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
     pub players: Vec<PlayerStats>,
 }
 
-/// Our serves to a zone of their court, of the ones whose zone was told.
+/// Our receptions on any conflict zone, of the ones whose zone was told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ConflictStats {
+    pub count: u32,
+    /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
+}
+
+/// Our serves or attacks to a zone of their court, or our receptions in
+/// one of ours or on a conflict zone, of the ones whose zone was told.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct TargetStats {
     pub value: CourtZoneEnum,
@@ -1418,7 +1427,8 @@ pub struct TargetStats {
     pub label: String,
     /// one of the nine zones, not a conflict zone
     pub zone: bool,
-    pub count: u32,
+    /// two cells of different zones count half in each zone
+    pub count: f64,
     /// of the serves whose zone was told, 0 to 100
     pub share: f64,
     /// -100 to 100: none on too few serves to tell
@@ -2004,14 +2014,23 @@ fn detail_stats(
                     })
                     .collect(),
                 targets_told: d.targets_told,
-                targets: match d.targets.is_empty() {
-                    true => vec![],
-                    false => {
-                        CourtZoneEnum::shown(CourtSide::of(event).unwrap_or(CourtSide::Theirs))
-                            .iter()
+                targets: match (d.targets.is_empty(), d.conflicts.is_empty()) {
+                    (true, _) => vec![],
+                    (false, conflicts) => {
+                        let side = CourtSide::of(event).unwrap_or(CourtSide::Theirs);
+                        let rows = match conflicts {
+                            true => CourtZoneEnum::zones_shown(side),
+                            false => CourtZoneEnum::shown(side),
+                        };
+                        rows.iter()
                             .map(|row| {
                                 row.iter()
-                                    .filter_map(|zone| d.targets.iter().find(|t| t.zone == *zone))
+                                    .filter_map(|zone| {
+                                        d.targets
+                                            .iter()
+                                            .chain(d.conflicts.iter())
+                                            .find(|t| t.zone == *zone)
+                                    })
                                     .map(|t| TargetStats {
                                         value: t.zone,
                                         label: t.zone.to_string(),
@@ -2025,6 +2044,11 @@ fn detail_stats(
                             .collect()
                     }
                 },
+                on_conflicts: d.on_conflicts.map(|on| ConflictStats {
+                    count: on.count,
+                    share: on.share,
+                    efficiency: on.efficiency,
+                }),
                 players: by_player(&stats, event, &narrowed)
                     .into_iter()
                     .filter_map(|line| {
@@ -5333,7 +5357,8 @@ mod tests {
     }
 
     /// The serves by zone, of the ones whose zone was told: their court a
-    /// row each, how many to each zone and the efficiency from three on.
+    /// row each, the nine zones, how many to each zone and the efficiency
+    /// from three on; the receptions with the conflict zones too.
     #[test]
     fn the_serves_by_zone() {
         let dir = tempfile::tempdir().unwrap();
@@ -5359,22 +5384,26 @@ mod tests {
                 .iter()
                 .map(|row| row.len())
                 .collect::<Vec<_>>(),
-            vec![5, 3, 5, 3, 5]
+            vec![3, 3, 3]
         );
+        assert_eq!(serve.on_conflicts, None);
         let z1 = serve
             .targets
             .iter()
             .flatten()
             .find(|t| t.label == "1")
             .unwrap();
-        assert_eq!((z1.count, z1.share, z1.efficiency), (3, 100.0, Some(100.0)));
+        assert_eq!(
+            (z1.count, z1.share, z1.efficiency),
+            (3.0, 100.0, Some(100.0))
+        );
         assert!(
             serve
                 .targets
                 .iter()
                 .flatten()
                 .filter(|t| t.label != "1")
-                .all(|t| t.count == 0 && t.efficiency.is_none())
+                .all(|t| t.count == 0.0 && t.efficiency.is_none())
         );
         // none for another fundamental
         let reception = scouting
@@ -5408,7 +5437,16 @@ mod tests {
             .flatten()
             .find(|t| t.label == "6")
             .unwrap();
-        assert_eq!((z6.count, z6.share), (1, 100.0));
+        assert_eq!((z6.count, z6.share), (1.0, 100.0));
+        assert_eq!(reception.targets.len(), 3);
+        assert_eq!(
+            reception.on_conflicts,
+            Some(ConflictStats {
+                count: 0,
+                share: 0.0,
+                efficiency: None
+            })
+        );
     }
 
     #[test]

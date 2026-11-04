@@ -586,13 +586,12 @@ impl Snapshot {
                 rotation,
                 player: event.player.filter(|_| event.event_type.asks_player()),
                 zone,
-                // where our serve went, or where we received theirs, if
-                // told
+                // where our serve or attack went, or where we received
+                // theirs, if told
                 target: event
                     .flags
                     .target()
-                    .filter(|_| CourtSide::of(event.event_type).is_some())
-                    .map(|t| t.court_zone()),
+                    .filter(|_| CourtSide::of(event.event_type).is_some()),
                 eval: event.eval,
             });
         }

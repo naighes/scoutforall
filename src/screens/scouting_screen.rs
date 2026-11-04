@@ -220,9 +220,10 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
             Some(side) => target_court::render(
                 f,
                 right,
-                match side {
-                    CourtSide::Theirs => current_labels().serve_target,
-                    CourtSide::Ours => current_labels().reception_target,
+                match (side, self.session.event()) {
+                    (CourtSide::Ours, _) => current_labels().reception_target,
+                    (CourtSide::Theirs, Some(EventTypeEnum::A)) => current_labels().attack_target,
+                    (CourtSide::Theirs, _) => current_labels().serve_target,
                 },
                 side,
                 self.cursor(),

@@ -102,12 +102,14 @@ pub struct ZoneDetail {
 /// fewer, it would mislead.
 pub const MIN_SERVES_FOR_EFFICIENCY: u32 = 3;
 
-/// Our serves sent to a zone of their court, or our receptions in a zone
-/// of ours (see `CourtZoneEnum`), among the ones whose zone was told.
+/// Our serves or attacks sent to a zone of their court, or our receptions
+/// in a zone of ours (see `CourtZoneEnum`), among the ones whose zone was
+/// told; or our receptions on a conflict zone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TargetDetail {
     pub zone: CourtZoneEnum,
-    pub count: u32,
+    /// in a zone, two cells of different zones count half in each
+    pub count: f64,
     /// of the ones whose zone was told, 0 to 100
     pub share: f64,
     /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
@@ -136,11 +138,27 @@ pub struct Detail {
     pub points: Option<u32>,
     /// for an attack, the zones of `DISTRIBUTION_ZONES` set to
     pub zones: Vec<ZoneDetail>,
-    /// for a serve or a reception, how many had their zone told, and each
-    /// zone of the court (`CourtZoneEnum::ALL`, the ones never served to or
-    /// received in too); none for the other fundamentals
+    /// for a serve, an attack or a reception, how many had their zone
+    /// told, and each of the nine zones (`CourtZoneEnum::ZONES`, the ones
+    /// never served to or received in too); none for the other fundamentals
     pub targets_told: u32,
     pub targets: Vec<TargetDetail>,
+    /// for a reception, each conflict zone (`CourtZoneEnum::CONFLICTS`)
+    /// and all of them together; none for the other fundamentals, or with
+    /// no zone told
+    pub conflicts: Vec<TargetDetail>,
+    pub on_conflicts: Option<OnConflicts>,
+}
+
+/// Our receptions on any conflict zone, among the ones whose zone was told.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OnConflicts {
+    pub count: u32,
+    /// of the ones whose zone was told, 0 to 100
+    pub share: f64,
+    /// as `Metric::Efficiency`: `None` on fewer than
+    /// `MIN_SERVES_FOR_EFFICIENCY`
+    pub efficiency: Option<f64>,
 }
 
 /// The freeballs: the ones we gave (`FB`), the ones they gave us (`OF`)
@@ -205,24 +223,44 @@ impl Detail {
                 .collect(),
             _ => Vec::new(),
         };
-        let targets_told = match CourtSide::of(event_type) {
+        let side = CourtSide::of(event_type);
+        let targets_told = match side {
             Some(_) => stats.events_with_target(event_type, filter),
             None => 0,
         };
+        let detail = |zone: CourtZoneEnum, (count, efficiency): (f64, f64)| TargetDetail {
+            zone,
+            count,
+            share: count / f64::from(targets_told) * 100.0,
+            efficiency: (count >= f64::from(MIN_SERVES_FOR_EFFICIENCY)).then_some(efficiency),
+        };
         let targets = match targets_told {
-            1.. => CourtZoneEnum::ALL
+            1.. => CourtZoneEnum::ZONES
                 .iter()
-                .map(|zone| {
-                    let (count, efficiency) = stats.events_to(event_type, *zone, filter);
-                    TargetDetail {
-                        zone: *zone,
-                        count,
-                        share: f64::from(count) / f64::from(targets_told) * 100.0,
-                        efficiency: (count >= MIN_SERVES_FOR_EFFICIENCY).then_some(efficiency),
-                    }
-                })
+                .map(|zone| detail(*zone, stats.events_to(event_type, *zone, filter)))
                 .collect(),
             _ => Vec::new(),
+        };
+        // where two of ours could take their serve: only in reception
+        let (conflicts, on_conflicts) = match (side, targets_told) {
+            (Some(CourtSide::Ours), 1..) => {
+                let conflicts = CourtZoneEnum::CONFLICTS
+                    .iter()
+                    .map(|zone| {
+                        let (count, efficiency) =
+                            stats.events_on_conflict(event_type, Some(*zone), filter);
+                        detail(*zone, (f64::from(count), efficiency))
+                    })
+                    .collect();
+                let (count, efficiency) = stats.events_on_conflict(event_type, None, filter);
+                let on_conflicts = OnConflicts {
+                    count,
+                    share: f64::from(count) / f64::from(targets_told) * 100.0,
+                    efficiency: (count >= MIN_SERVES_FOR_EFFICIENCY).then_some(efficiency),
+                };
+                (conflicts, Some(on_conflicts))
+            }
+            _ => (Vec::new(), None),
         };
         Detail {
             total,
@@ -239,6 +277,8 @@ impl Detail {
             zones,
             targets_told,
             targets,
+            conflicts,
+            on_conflicts,
         }
     }
 }

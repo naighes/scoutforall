@@ -138,6 +138,10 @@
     <string name="reception_zone">Reception zone</string>
     <string name="receptions_by_zone">Receptions by zone</string>
     <string name="reception_zones_told">zone told for %1$d of %2$d receptions</string>
+    <string name="attack_zone">Attack zone</string>
+    <string name="attacks_by_zone">Attacks by zone</string>
+    <string name="attack_zones_told">zone told for %1$d of %2$d attacks</string>
+    <string name="on_conflicts">On the conflict zones: %1$d (%2$d%%)</string>
     <string name="zone_density">density</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>
     <string name="no_attacks">No attacks yet</string>

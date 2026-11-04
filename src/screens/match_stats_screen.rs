@@ -431,13 +431,31 @@ impl MatchStatsScreen {
             .selected()
             .map(|selection| selection.event_type)
         {
-            self.render_court_canvas(
-                f,
-                chunks[0],
-                current_labels().domain.distribution,
-                |(p, _)| p,
+            // with the zones of their court told, the distribution on the
+            // left and the zones on the right
+            let told = matches!(
+                self.breakdown(EventTypeEnum::A),
+                Some(Breakdown::Fundamental(Detail {
+                    targets_told: 1..,
+                    ..
+                }))
             );
-            self.render_court_canvas(f, chunks[1], current_labels().conversion_rate, |(_, s)| s);
+            let halves = |area: Rect| {
+                Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(area)
+            };
+            let (top, bottom) = match told {
+                true => {
+                    let (top, bottom) = (halves(chunks[0]), halves(chunks[1]));
+                    self.render_targets(EventTypeEnum::A, f, top[1], bottom[1]);
+                    (top[0], bottom[0])
+                }
+                false => (chunks[0], chunks[1]),
+            };
+            self.render_court_canvas(f, top, current_labels().domain.distribution, |(p, _)| p);
+            self.render_court_canvas(f, bottom, current_labels().conversion_rate, |(_, s)| s);
         }
         match (
             self.event_filter.selected().map(|s| s.event_type),
@@ -515,10 +533,12 @@ impl MatchStatsScreen {
         f.render_widget(table, area);
     }
 
-    /// Where our serves went (on their court), or where we received
-    /// theirs (on ours), of the ones whose zone was told: how many in each
-    /// zone, in a shade of one color, the more the brighter; and their
-    /// efficiency there, red to green, only from a few on.
+    /// Where our serves or attacks went (on their court), or where we
+    /// received theirs (on ours), of the ones whose zone was told: how many
+    /// in each zone, in a shade of one color, the more the brighter; and
+    /// their efficiency there, red to green, only from a few on. For the
+    /// reception, the conflict zones between the zones, and all of them in
+    /// the title.
     fn render_targets(
         &self,
         event_type: EventTypeEnum,
@@ -532,29 +552,59 @@ impl MatchStatsScreen {
             return;
         };
         let domain = current_labels().domain;
-        let by_zone = match side {
-            CourtSide::Theirs => domain.serves_by_zone,
-            CourtSide::Ours => domain.receptions_by_zone,
+        let by_zone = match event_type {
+            EventTypeEnum::P => domain.receptions_by_zone,
+            EventTypeEnum::A => domain.attacks_by_zone,
+            _ => domain.serves_by_zone,
         };
         let told = domain
             .zones_told
             .replace("{told}", &detail.targets_told.to_string())
             .replace("{total}", &detail.total.to_string());
-        let target = |zone: CourtZoneEnum| detail.targets.iter().find(|t| t.zone == zone).copied();
-        let most = detail.targets.iter().map(|t| t.count).max().unwrap_or(0);
+        // how many told, and all the conflict zones together, at the
+        // bottom of the panels
+        let (on_density, on_efficiency) = match detail.on_conflicts {
+            Some(on) => {
+                let conflicts = domain
+                    .on_conflicts
+                    .replace("{count}", &on.count.to_string())
+                    .replace("{share}", &format!("{:.0}", on.share));
+                let efficiency = match on.efficiency {
+                    Some(e) => format!("{conflicts} {e:+.0}%"),
+                    None => conflicts.clone(),
+                };
+                (format!("{told} · {conflicts}"), efficiency)
+            }
+            None => (told, String::new()),
+        };
+        let conflicts = !detail.conflicts.is_empty();
+        let target = |zone: CourtZoneEnum| {
+            detail
+                .targets
+                .iter()
+                .chain(detail.conflicts.iter())
+                .find(|t| t.zone == zone)
+                .copied()
+        };
+        let most = detail
+            .targets
+            .iter()
+            .chain(detail.conflicts.iter())
+            .map(|t| t.count)
+            .fold(0.0, f64::max);
         target_court::render_court(
             f,
             density,
-            panel::section(format!("{by_zone} · {told}")),
+            panel::section(by_zone).title_bottom(on_density),
             side,
-            false,
+            (conflicts, false),
             |zone| {
-                let shown = target(zone).filter(|t| t.count > 0);
+                let shown = target(zone).filter(|t| t.count > 0.0);
                 let lines = match shown {
                     Some(t) => vec![
                         Line::from(zone.to_string()),
                         Line::from(format!("{:.0}%", t.share)),
-                        Line::from(format!("({})", t.count)),
+                        Line::from(format!("({})", count(t.count))),
                     ],
                     None => vec![Line::from(zone.to_string())],
                 };
@@ -564,24 +614,24 @@ impl MatchStatsScreen {
         target_court::render_court(
             f,
             efficiency,
-            panel::section(domain.efficiency_by_zone),
+            panel::section(domain.efficiency_by_zone).title_bottom(on_efficiency),
             side,
-            false,
+            (conflicts, false),
             |zone| {
-                let lines = match target(zone).filter(|t| t.count > 0) {
+                let lines = match target(zone).filter(|t| t.count > 0.0) {
                     Some(TargetDetail {
                         efficiency: Some(e),
-                        count,
+                        count: n,
                         ..
                     }) => vec![
                         Line::from(zone.to_string()),
                         Line::from(format!("{e:+.0}%")),
-                        Line::from(format!("n={count}")),
+                        Line::from(format!("n={}", count(n))),
                     ],
                     // too few to tell
                     Some(t) => vec![
                         Line::from(zone.to_string()),
-                        Line::from(format!("({})", t.count)),
+                        Line::from(format!("({})", count(t.count))),
                     ],
                     None => vec![Line::from(zone.to_string())],
                 };
@@ -857,17 +907,26 @@ const DENSITY_SHADES: [u8; 4] = [94, 136, 172, 214];
 
 /// A zone of the serves: none, or a shade by how many went there, the most
 /// the brightest.
-fn density_style(zone: CourtZoneEnum, target: Option<TargetDetail>, most: u32) -> Style {
+fn density_style(zone: CourtZoneEnum, target: Option<TargetDetail>, most: f64) -> Style {
     let shade = target
-        .filter(|_| most > 0)
-        .map(|t| (t.count * DENSITY_SHADES.len() as u32).div_ceil(most))
-        .and_then(|step| DENSITY_SHADES.get((step as usize).saturating_sub(1)));
+        .filter(|_| most > 0.0)
+        .map(|t| (t.count * DENSITY_SHADES.len() as f64 / most).ceil() as usize)
+        .and_then(|step| DENSITY_SHADES.get(step.saturating_sub(1)));
     match shade {
         Some(&color) => Style::default()
             .bg(Color::Indexed(color))
             .fg(Color::Black)
             .add_modifier(Modifier::BOLD),
         None => empty_zone(zone),
+    }
+}
+
+/// How many in a zone: whole, or with the half of two cells of different
+/// zones ("2.5").
+fn count(count: f64) -> String {
+    match count.fract() == 0.0 {
+        true => format!("{count:.0}"),
+        false => format!("{count:.1}"),
     }
 }
 

@@ -1301,6 +1301,8 @@ mod tests {
                 points: Some(2),
                 targets_told: 0,
                 targets: vec![],
+                conflicts: vec![],
+                on_conflicts: None,
                 zones: vec![
                     ZoneDetail {
                         zone: ZoneEnum::Four,
@@ -1340,6 +1342,8 @@ mod tests {
                 points: Some(1),
                 targets_told: 0,
                 targets: vec![],
+                conflicts: vec![],
+                on_conflicts: None,
                 zones: vec![ZoneDetail {
                     zone: ZoneEnum::Two,
                     share: 100.0,
@@ -1382,6 +1386,8 @@ mod tests {
                 points: None,
                 targets_told: 0,
                 targets: vec![],
+                conflicts: vec![],
+                on_conflicts: None,
                 zones: vec![],
             }
         );
@@ -1396,12 +1402,13 @@ mod tests {
         assert_eq!(none.phases_per_point, Some((3.0, 1, 3)));
     }
 
-    /// Our serves where their zone was told: how many to each zone, the
-    /// share of the ones told, the efficiency only from three serves on;
-    /// the serves without a zone left out.
+    /// Our serves where their zone was told: how many to each of the nine
+    /// zones, two cells of different zones half in each; the share of the
+    /// ones told, the efficiency only from three serves on; the serves
+    /// without a zone left out; no conflict zones for a serve.
     #[test]
     fn detail_of_the_serve_targets() {
-        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z43};
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z3, Z4};
         use crate::shapes::court_zone::{CourtCell, CourtTarget, SubzoneEnum};
         let t = Team::new();
         let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
@@ -1427,55 +1434,103 @@ mod tests {
             .stats;
         let serves = detail(&stats, S, &all());
         assert_eq!((serves.total, serves.targets_told), (5, 4));
-        assert_eq!(serves.targets.len(), 21);
+        assert_eq!(serves.targets.len(), 9);
         let of = |zone| serves.targets.iter().find(|t| t.zone == zone).copied();
         let z1 = of(Z1).unwrap();
-        assert_eq!((z1.count, z1.share), (3, 75.0));
+        assert_eq!((z1.count, z1.share), (3.0, 75.0));
         // (2 aces - 1 error) / 3
         assert!((z1.efficiency.unwrap() - 100.0 / 3.0).abs() < 1e-9);
-        let z43 = of(Z43).unwrap();
-        assert_eq!((z43.count, z43.share, z43.efficiency), (1, 25.0, None));
+        for zone in [Z3, Z4] {
+            let z = of(zone).unwrap();
+            assert_eq!((z.count, z.share, z.efficiency), (0.5, 12.5, None));
+        }
         assert!(
             serves
                 .targets
                 .iter()
-                .filter(|t| t.zone != Z1 && t.zone != Z43)
-                .all(|t| t.count == 0 && t.share == 0.0 && t.efficiency.is_none())
+                .filter(|t| ![Z1, Z3, Z4].contains(&t.zone))
+                .all(|t| t.count == 0.0 && t.share == 0.0 && t.efficiency.is_none())
         );
-        // not for another fundamental, nor with no zone told
+        // the conflict zones only for a reception
+        assert!(serves.conflicts.is_empty());
+        assert_eq!(serves.on_conflicts, None);
+        // not with no zone told
         assert!(detail(&stats, A, &all()).targets.is_empty());
         let none = t.serving(vec![serve(Perfect, None)]).stats;
         assert!(detail(&none, S, &all()).targets.is_empty());
     }
 
+    /// Our attacks by the zone of their court they went to: as the serves.
+    #[test]
+    fn detail_of_the_attack_targets() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z5, Z6};
+        use crate::shapes::court_zone::{CourtCell, CourtTarget, SubzoneEnum};
+        let t = Team::new();
+        let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
+        let attack = |eval, zone| {
+            let mut e = act(A, t.oh1, eval);
+            e.flags = e.flags.with_target(zone);
+            e
+        };
+        let stats = t
+            .receiving(vec![
+                act(P, t.libero, Positive),
+                attack(
+                    Error,
+                    CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A)),
+                ),
+                act(P, t.libero, Positive),
+                attack(Perfect, Some(CourtTarget::Cell(cell(5, SubzoneEnum::A)))),
+            ])
+            .stats;
+        let attacks = detail(&stats, A, &all());
+        assert_eq!(attacks.targets_told, 2);
+        let of = |zone| {
+            attacks
+                .targets
+                .iter()
+                .find(|t| t.zone == zone)
+                .map(|t| t.count)
+        };
+        assert_eq!((of(Z5), of(Z6), of(Z1)), (Some(1.0), Some(0.5), Some(0.5)));
+        assert!(attacks.conflicts.is_empty());
+    }
+
     /// Our receptions by the zone of our court where we received: as the
-    /// serves, among the ones whose zone was told.
+    /// serves, among the ones whose zone was told; and on the conflict
+    /// zones, each and all, for the team and for a player.
     #[test]
     fn detail_of_the_receptions_by_zone() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z6, Z61, Z89};
         use crate::shapes::court_zone::{CourtCell, CourtTarget, SubzoneEnum};
         let t = Team::new();
         let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
         let z6a = Some(CourtTarget::Cell(cell(6, SubzoneEnum::A)));
-        let z61 = CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A));
-        let received = |eval, zone| {
-            let mut e = act(P, t.libero, eval);
+        let z1d6a = CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A));
+        let z1c6b = CourtTarget::pair(cell(1, SubzoneEnum::C), cell(6, SubzoneEnum::B));
+        // one behind the other: no conflict zone
+        let z1c9d = CourtTarget::pair(cell(1, SubzoneEnum::C), cell(9, SubzoneEnum::D));
+        let received = |player, eval, zone| {
+            let mut e = act(P, player, eval);
             e.flags = e.flags.with_target(zone);
             e
         };
         // each reception lost, their serve again
         let stats = t
             .receiving(vec![
-                received(Perfect, z6a),
+                received(t.libero, Perfect, z6a),
                 act(A, t.oh1, Error),
-                received(Error, z61),
-                received(Negative, z6a),
+                received(t.libero, Error, z1d6a),
+                received(t.oh1, Negative, z1c6b),
                 act(A, t.oh1, Error),
-                received(Positive, None),
+                received(t.libero, Positive, None),
+                act(A, t.oh1, Error),
+                received(t.libero, Positive, z1c9d),
                 act(A, t.oh1, Error),
             ])
             .stats;
         let receptions = detail(&stats, P, &all());
-        assert_eq!((receptions.total, receptions.targets_told), (4, 3));
+        assert_eq!((receptions.total, receptions.targets_told), (5, 4));
         let of = |zone| {
             receptions
                 .targets
@@ -1483,8 +1538,26 @@ mod tests {
                 .find(|t| t.zone == zone)
                 .map(|t| t.count)
         };
-        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z6, Z61};
-        assert_eq!((of(Z6), of(Z61), of(Z1)), (Some(2), Some(1), Some(0)));
+        // 6A, then half of each pair
+        assert_eq!((of(Z6), of(Z1)), (Some(2.0), Some(1.5)));
+        let conflict = |d: &Detail, zone| d.conflicts.iter().find(|t| t.zone == zone).copied();
+        let on61 = conflict(&receptions, Z61).unwrap();
+        // two, too few for the efficiency
+        assert_eq!((on61.count, on61.share, on61.efficiency), (2.0, 50.0, None));
+        assert_eq!(conflict(&receptions, Z89).map(|t| t.count), Some(0.0));
+        assert_eq!(receptions.conflicts.len(), 6);
+        let all_on = receptions.on_conflicts.unwrap();
+        assert_eq!((all_on.count, all_on.share), (2, 50.0));
+        // the outside hitter: one of one on 6/1
+        let oh1 = detail(&stats, P, &StatsFilter::new(None, None, Some(t.oh1)));
+        assert_eq!(
+            (oh1.targets_told, conflict(&oh1, Z61).map(|t| t.count)),
+            (1, Some(1.0))
+        );
+        assert_eq!(
+            oh1.on_conflicts.map(|c| (c.count, c.share)),
+            Some((1, 100.0))
+        );
         // the serves told none
         assert!(detail(&stats, S, &all()).targets.is_empty());
     }

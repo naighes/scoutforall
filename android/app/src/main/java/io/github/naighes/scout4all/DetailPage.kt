@@ -233,7 +233,7 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
             }
         }
     }
-    if (f.targets.isNotEmpty()) TargetZones(f, reception = query.event == EventTypeEnum.P)
+    if (f.targets.isNotEmpty()) TargetZones(f, query.event)
     if (f.players.isNotEmpty()) {
         Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
         Column {
@@ -389,15 +389,18 @@ private fun FreeballContent(f: FreeballStats) = TileRow {
     }
 }
 
-/** The serves with their zone told, on their court, or the receptions, on
- * ours: where they went, the more the brighter amber; or their efficiency
- * there, red to green, from a few on. */
+/** The serves or attacks with their zone told, on their court, or the
+ * receptions, on ours: where they went, the more the brighter amber; or
+ * their efficiency there, red to green, from a few on. Two cells of two
+ * zones count half in each. The receptions also on the conflict zones,
+ * between the zones, and on all of them under the court. */
 @Composable
-private fun TargetZones(f: FundamentalDetail, reception: Boolean) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     var efficiency by rememberSaveable { mutableStateOf(false) }
-    val (title, told) = when (reception) {
-        true -> R.string.receptions_by_zone to R.string.reception_zones_told
-        false -> R.string.serves_by_zone to R.string.zones_told
+    val (title, told) = when (event) {
+        EventTypeEnum.P -> R.string.receptions_by_zone to R.string.reception_zones_told
+        EventTypeEnum.A -> R.string.attacks_by_zone to R.string.attack_zones_told
+        else -> R.string.serves_by_zone to R.string.zones_told
     }
     Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
     Text(
@@ -414,25 +417,37 @@ private fun TargetZones(f: FundamentalDetail, reception: Boolean) = Column(verti
             ) { Text(stringResource(name).replaceFirstChar { it.uppercase() }, maxLines = 1) }
         }
     }
-    val most = f.targets.flatten().maxOfOrNull { it.count }?.coerceAtLeast(1u) ?: 1u
+    val most = f.targets.flatten().maxOfOrNull { it.count }?.coerceAtLeast(1.0) ?: 1.0
     ZoneGrid(f.targets) { t ->
         val (background, value, detail) = when {
             !efficiency -> Triple(
-                densityColor(t.count.toDouble() / most.toDouble()).takeIf { t.count > 0u },
-                if (t.count > 0u) "${t.share.roundToInt()}%" else "",
-                if (t.count > 0u) "(${t.count})" else "",
+                densityColor(t.count / most).takeIf { t.count > 0.0 },
+                if (t.count > 0.0) "${t.share.roundToInt()}%" else "",
+                if (t.count > 0.0) "(${count(t.count)})" else "",
             )
             t.efficiency != null -> Triple(
                 gradeColor((t.efficiency!! + 100.0) / 200.0),
                 "%+d%%".format(t.efficiency!!.roundToInt()),
-                "n=${t.count}",
+                "n=${count(t.count)}",
             )
             // too few to tell
-            else -> Triple(null, if (t.count > 0u) "(${t.count})" else "", "")
+            else -> Triple(null, if (t.count > 0.0) "(${count(t.count)})" else "", "")
         }
         ZoneCell(t, background, value, detail)
     }
+    f.onConflicts?.let { on ->
+        val all = stringResource(R.string.on_conflicts, on.count.toInt(), on.share.roundToInt())
+        Text(
+            all + (on.efficiency?.takeIf { efficiency }?.let { " · %+d%%".format(it.roundToInt()) } ?: ""),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
 }
+
+/** How many in a zone: whole, or with the half of two cells of two zones
+ * ("2.5"). */
+internal fun count(count: Double): String =
+    if (count % 1.0 == 0.0) count.toLong().toString() else "%.1f".format(count)
 
 /** The amber of the zones served to, from the fewest serves (`share`
  * near 0) to the most (1). */
@@ -486,10 +501,11 @@ private fun ZoneCell(t: TargetStats, background: Color?, value: String, detail: 
     }
 }
 
-/** The court, square: the opponent's as our server sees it (their end line
- * at the top, 1 on the left) or ours from the bench (the net at the top, 4
- * on the left), the zones a row each as `rows` gives them, the conflict zones narrower between them. A
- * row grows with its texts, at a large font. */
+/** The court: the opponent's as our server sees it (their end line at the
+ * top, 1 on the left) or ours from the bench (the net at the top, 4 on the
+ * left), the zones a row each as `rows` gives them: three zones, or with
+ * the conflict zones narrower between them. A row as tall as a zone is
+ * wide, more with its texts at a large font. */
 @Composable
 private fun <T> ZoneGrid(rows: List<List<T>>, cell: @Composable (T) -> Unit) =
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -497,12 +513,11 @@ private fun <T> ZoneGrid(rows: List<List<T>>, cell: @Composable (T) -> Unit) =
         val conflict = maxWidth / 6
         val zone = (maxWidth - conflict * 2) / 3
         val fives = listOf(zone, conflict, zone, conflict, zone)
-        // a row of three: the sides over a zone and a conflict zone each
-        val threes = listOf(zone + conflict, zone, conflict + zone)
-        val heights = fives
+        val threes = List(3) { maxWidth / 3 }
+        val height = if (rows.any { it.size == 5 }) zone else maxWidth / 3
         Column(Modifier.fillMaxWidth()) {
-            rows.forEachIndexed { r, row ->
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = heights.getOrElse(r) { 0.dp })) {
+            rows.forEach { row ->
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = height)) {
                     val widths = if (row.size == 5) fives else threes
                     row.forEachIndexed { c, t ->
                         Box(Modifier.width(widths.getOrElse(c) { 0.dp }).fillMaxHeight()) { cell(t) }

@@ -147,7 +147,7 @@ mod tests {
         assert!(ui.screen().contains(&court_title("3D")), "{}", ui.screen());
         ui.type_keys(&[KeyCode::Up, KeyCode::Char(' ')]).await;
         assert!(
-            ui.screen().contains(&court_title("8C-3D (3/8)")),
+            ui.screen().contains(&court_title("8C-3D")) && !ui.screen().contains("(3/8)"),
             "{}",
             ui.screen()
         );
@@ -163,7 +163,7 @@ mod tests {
         ui.press_with(KeyCode::Char('U'), KeyModifiers::SHIFT).await;
         ui.press_with(KeyCode::Char('U'), KeyModifiers::SHIFT).await;
         assert!(
-            ui.screen().contains(&court_title("8C-3D (3/8)")),
+            ui.screen().contains(&court_title("8C-3D")) && !ui.screen().contains("(3/8)"),
             "{}",
             ui.screen()
         );
@@ -200,14 +200,18 @@ mod tests {
     }
 
     /// The stats of the reception: how many were received in each zone of
-    /// ours, beside the side outs by possession.
+    /// ours, beside the side outs by possession; and on the conflict zones,
+    /// the line between 8 and 9 here (8A and 9D side by side).
     #[tokio::test]
     async fn the_reception_stats_show_the_zones() {
         use KeyCode::*;
         let mut ui = serving().await;
         ui.press(Char('=')).await;
-        ui.type_keys(&[Char('p'), Char('7'), Up, Char(' '), Char('+')])
+        ui.type_keys(&[Char('p'), Char('7'), Char(' '), Right, Char(' ')])
             .await;
+        let title = format!("{}: 9D-8A (8/9)", current_labels().reception_target);
+        assert!(ui.screen().contains(&title), "{}", ui.screen());
+        ui.press(Char('+')).await;
         ui.resize(120, 40);
         ui.type_keys(&[Esc, Char(' '), Tab, Tab, Tab, Down]).await;
         let domain = current_labels().domain;
@@ -215,15 +219,70 @@ mod tests {
             .zones_told
             .replace("{told}", "1")
             .replace("{total}", "1");
+        let conflicts = domain
+            .on_conflicts
+            .replace("{count}", "1")
+            .replace("{share}", "100");
         let density = ui
-            .panel(&format!("{} · {told}", domain.receptions_by_zone))
+            .panel(domain.receptions_by_zone)
             .unwrap_or_else(|| panic!("{}", ui.screen()));
+        // how many told, at the bottom
+        assert!(ui.screen().contains(&told), "{}", ui.screen());
+        assert!(
+            ui.screen().contains(&format!("{told} · {conflicts}")),
+            "{}",
+            ui.screen()
+        );
+        // half in 8, half in 9, all on 8/9
+        assert!(
+            density
+                .iter()
+                .any(|l| l.contains("50%") && l.contains("100%")),
+            "{density:?}"
+        );
+        assert!(density.iter().any(|l| l.contains("8/9")), "{density:?}");
+    }
+
+    /// Our attack: where it went, told along with its evaluation on their
+    /// court; in the stats beside the distribution.
+    #[tokio::test]
+    async fn the_attack_is_told_on_their_court() {
+        use KeyCode::*;
+        let mut ui = serving().await;
+        ui.press(Char('=')).await;
+        ui.type_keys(&[Char('p'), Char('7'), Char('+'), Char('a'), Char('4')])
+            .await;
+        let title = |zone: &str| format!("{}: {zone}", current_labels().attack_target);
+        assert!(
+            ui.screen().contains(&title(current_labels().no_zone)),
+            "{}",
+            ui.screen()
+        );
+        // from 8A up to 6B
+        ui.type_keys(&[Up, Char(' ')]).await;
+        assert!(ui.screen().contains(&title("6B")), "{}", ui.screen());
+        ui.press(Char('#')).await;
+        assert_eq!(last_flags(&ui), ((10 + 5 * 4 + 1) * 8).to_string());
+        ui.resize(160, 50);
+        ui.type_keys(&[Esc, Char(' '), Tab, Tab, Tab, Down, Down, Down, Down])
+            .await;
+        let domain = current_labels().domain;
+        let told = domain
+            .zones_told
+            .replace("{told}", "1")
+            .replace("{total}", "1");
+        let density = ui
+            .panel(domain.attacks_by_zone)
+            .unwrap_or_else(|| panic!("{}", ui.screen()));
+        // how many told, at the bottom
+        assert!(ui.screen().contains(&told), "{}", ui.screen());
         assert!(density.iter().any(|l| l.contains("100%")), "{density:?}");
+        assert!(ui.panel(domain.distribution).is_some(), "{}", ui.screen());
     }
 
     /// The stats of the serve: how many went to each zone and their
-    /// efficiency there, of the serves whose zone was told; the efficiency
-    /// only from three serves on.
+    /// efficiency there, of the serves whose zone was told, two cells of
+    /// two zones half in each; the efficiency only from three serves on.
     #[tokio::test]
     async fn the_serve_stats_show_the_zones() {
         use KeyCode::*;
@@ -231,7 +290,8 @@ mod tests {
         // 4A; 3D and 4A, on the line between 3 and 4
         let to_4 = [Down, Down, Right, Right, Char(' ')];
         let to_43 = [Down, Down, Right, Char(' '), Right, Char(' ')];
-        // aces to 4 (twice) and to 4/3, one without a zone, an error to 4
+        // aces to 4 (twice) and to 4/3 (half to 4, half to 3), one without
+        // a zone, an error to 4
         ui.type_keys(&[&to_4[..], &[Char('#'), Char('s')]].concat())
             .await;
         ui.type_keys(&[&to_4[..], &[Char('#'), Char('s')]].concat())
@@ -249,30 +309,32 @@ mod tests {
             .replace("{told}", "4")
             .replace("{total}", "5");
         let density = ui
-            .panel(&format!("{} · {told}", domain.serves_by_zone))
+            .panel(domain.serves_by_zone)
             .unwrap_or_else(|| panic!("{}", ui.screen()));
+        // how many told, at the bottom
+        assert!(ui.screen().contains(&told), "{}", ui.screen());
         assert!(
             density
                 .iter()
-                .any(|l| l.contains("75%") && l.contains("25%")),
+                .any(|l| l.contains("12%") && l.contains("88%")),
             "{density:?}"
         );
         assert!(
             density
                 .iter()
-                .any(|l| l.contains("(3)") && l.contains("(1)")),
+                .any(|l| l.contains("(0.5)") && l.contains("(3.5)")),
             "{density:?}"
         );
         let efficiency = ui.panel(domain.efficiency_by_zone).unwrap();
-        // (2 aces - 1 error) / 3; 4/3 has too few
+        // (2.5 aces - 1 error) / 3.5; 3 has too few
         assert!(
             efficiency
                 .iter()
-                .any(|l| l.contains("+33%") && l.contains("(1)")),
+                .any(|l| l.contains("(0.5)") && l.contains("n=3.5")),
             "{efficiency:?}"
         );
         assert!(
-            efficiency.iter().any(|l| l.contains("n=3")),
+            efficiency.iter().any(|l| l.contains("+43%")),
             "{efficiency:?}"
         );
         // green, a positive efficiency

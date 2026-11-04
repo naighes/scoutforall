@@ -1,12 +1,14 @@
-//! Where the ball goes: on the court of the opponent (our serve) or on
-//! ours (their serve, where we receive it).
+//! Where the ball goes: on the court of the opponent (our serve, our
+//! attack) or on ours (their serve, where we receive it).
 //!
 //! The scout tells a quarter of a zone (a cell: the subzones of DataVolley,
 //! `1A`), or two cells side by side (`1B-6A`), or, from a file without the
-//! subzone, the whole zone (`1`). The statistics read it as one of the
-//! nine zones or as the line between two of them (a conflict zone, `1/6`):
-//! two cells of different zones are on that line, two of the same zone in
-//! the zone.
+//! subzone, the whole zone (`1`). The statistics put it in the nine zones:
+//! two cells of different zones half in each. Two cells side by side across
+//! the line between two zones of a row (`1D-6A`, `1C-6B`) are on a conflict
+//! zone (`6/1`), where two players could take the ball: only the lines
+//! across the court, from the net to the end line; two cells one behind the
+//! other (`1C-9D`) aren't.
 //!
 //! The court of the opponent as our server sees it, their end line at the
 //! top; each zone in four cells as DataVolley tells them (A behind on the
@@ -45,11 +47,11 @@ pub enum CourtSide {
 }
 
 impl CourtSide {
-    /// The court where the ball of the event goes: our serve to theirs,
-    /// our reception on ours; none for the other events.
+    /// The court where the ball of the event goes: our serve and our
+    /// attack to theirs, our reception on ours; none for the other events.
     pub fn of(event: EventTypeEnum) -> Option<Self> {
         match event {
-            EventTypeEnum::S => Some(CourtSide::Theirs),
+            EventTypeEnum::S | EventTypeEnum::A => Some(CourtSide::Theirs),
             EventTypeEnum::P => Some(CourtSide::Ours),
             _ => None,
         }
@@ -81,8 +83,8 @@ impl CourtSide {
     }
 }
 
-/// One of the nine zones, or the line between two of them: where the
-/// statistics put the ball.
+/// One of the nine zones, or a conflict zone: the line between two zones
+/// of a row, from the net to the end line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CourtZoneEnum {
     Z1,
@@ -100,12 +102,6 @@ pub enum CourtZoneEnum {
     Z89,
     Z56,
     Z61,
-    Z47,
-    Z38,
-    Z29,
-    Z57,
-    Z68,
-    Z19,
 }
 
 /// Where the cursor choosing a cell moves, on the court as it's shown.
@@ -120,13 +116,10 @@ pub enum Direction {
 use CourtZoneEnum::*;
 
 /// The rows of the court as our server sees it, from their end line: the
-/// zones with the conflict zones between them, then the conflict zones
-/// between two rows.
-const GRID: [&[CourtZoneEnum]; 5] = [
+/// zones with the conflict zones between them.
+const GRID: [&[CourtZoneEnum]; 3] = [
     &[Z1, Z61, Z6, Z56, Z5],
-    &[Z19, Z68, Z57],
     &[Z9, Z89, Z8, Z78, Z7],
-    &[Z29, Z38, Z47],
     &[Z2, Z32, Z3, Z43, Z4],
 ];
 
@@ -135,19 +128,33 @@ const ZONES: [[u8; 3]; 3] = [[1, 6, 5], [9, 8, 7], [2, 3, 4]];
 
 impl CourtZoneEnum {
     /// The nine zones, then the conflict zones.
-    pub const ALL: [CourtZoneEnum; 21] = [
-        Z1, Z2, Z3, Z4, Z5, Z6, Z7, Z8, Z9, Z43, Z32, Z78, Z89, Z56, Z61, Z47, Z38, Z29, Z57, Z68,
-        Z19,
+    pub const ALL: [CourtZoneEnum; 15] = [
+        Z1, Z2, Z3, Z4, Z5, Z6, Z7, Z8, Z9, Z43, Z32, Z78, Z89, Z56, Z61,
     ];
 
+    /// The nine zones.
+    pub const ZONES: [CourtZoneEnum; 9] = [Z1, Z2, Z3, Z4, Z5, Z6, Z7, Z8, Z9];
+
+    /// The conflict zones.
+    pub const CONFLICTS: [CourtZoneEnum; 6] = [Z43, Z32, Z78, Z89, Z56, Z61];
+
     /// The rows of the court as our server sees it (see `GRID`).
-    pub fn grid() -> &'static [&'static [CourtZoneEnum]; 5] {
+    pub fn grid() -> &'static [&'static [CourtZoneEnum]; 3] {
         &GRID
     }
 
-    /// The rows of the court as shown on `side`, from the top.
+    /// The rows of the court as shown on `side`, from the top, with the
+    /// conflict zones between the zones.
     pub fn shown(side: CourtSide) -> Vec<Vec<CourtZoneEnum>> {
         side.shown(&GRID)
+    }
+
+    /// The rows of the nine zones as shown on `side`, from the top.
+    pub fn zones_shown(side: CourtSide) -> Vec<Vec<CourtZoneEnum>> {
+        Self::shown(side)
+            .into_iter()
+            .map(|row| row.into_iter().filter(Self::is_zone).collect())
+            .collect()
     }
 
     /// The zone with the number, 1 to 9.
@@ -171,7 +178,8 @@ impl CourtZoneEnum {
         (1..=9).find(|n| Self::numbered(*n) == Some(*self))
     }
 
-    /// The line between two zones side by side, none for two zones apart.
+    /// The conflict zone between two zones side by side in a row, none for
+    /// two zones one behind the other or apart.
     pub fn between(a: u8, b: u8) -> Option<Self> {
         match (a.min(b), a.max(b)) {
             (3, 4) => Some(Z43),
@@ -180,12 +188,6 @@ impl CourtZoneEnum {
             (8, 9) => Some(Z89),
             (5, 6) => Some(Z56),
             (1, 6) => Some(Z61),
-            (4, 7) => Some(Z47),
-            (3, 8) => Some(Z38),
-            (2, 9) => Some(Z29),
-            (5, 7) => Some(Z57),
-            (6, 8) => Some(Z68),
-            (1, 9) => Some(Z19),
             _ => None,
         }
     }
@@ -215,12 +217,6 @@ impl fmt::Display for CourtZoneEnum {
             Z89 => "8/9",
             Z56 => "5/6",
             Z61 => "6/1",
-            Z47 => "4/7",
-            Z38 => "3/8",
-            Z29 => "2/9",
-            Z57 => "5/7",
-            Z68 => "6/8",
-            Z19 => "1/9",
         };
         write!(f, "{label}")
     }
@@ -438,15 +434,28 @@ impl CourtTarget {
         }
     }
 
-    /// Where the statistics put it: the zone, or the line between the
-    /// zones of the two cells.
-    pub fn court_zone(&self) -> CourtZoneEnum {
+    /// The zones the statistics put it in, each with its weight: its
+    /// zone, or half in each zone of the two cells.
+    pub fn zones(&self) -> Vec<(CourtZoneEnum, f64)> {
         match self {
-            CourtTarget::Zone(z) => CourtZoneEnum::numbered(*z).unwrap_or(Z8),
-            CourtTarget::Cell(c) => c.zone(),
-            CourtTarget::Pair(a, b) => {
-                CourtZoneEnum::between(a.zone, b.zone).unwrap_or_else(|| a.zone())
+            CourtTarget::Zone(z) => CourtZoneEnum::numbered(*z)
+                .map(|zone| (zone, 1.0))
+                .into_iter()
+                .collect(),
+            CourtTarget::Cell(c) => vec![(c.zone(), 1.0)],
+            CourtTarget::Pair(a, b) if a.zone == b.zone => vec![(a.zone(), 1.0)],
+            CourtTarget::Pair(a, b) => vec![(a.zone(), 0.5), (b.zone(), 0.5)],
+        }
+    }
+
+    /// The conflict zone it's on: two cells side by side across the line
+    /// between two zones of a row (see `CourtZoneEnum::between`).
+    pub fn conflict(&self) -> Option<CourtZoneEnum> {
+        match self {
+            CourtTarget::Pair(a, b) if a.place().0 == b.place().0 => {
+                CourtZoneEnum::between(a.zone, b.zone)
             }
+            _ => None,
         }
     }
 
@@ -523,10 +532,9 @@ impl CourtTarget {
     /// As the scout reads it, with the conflict zone two cells are on:
     /// "1D-6A (6/1)".
     pub fn described(&self) -> String {
-        let zone = self.court_zone();
-        match (self, zone.is_zone()) {
-            (CourtTarget::Pair(_, _), false) => format!("{self} ({zone})"),
-            _ => self.to_string(),
+        match self.conflict() {
+            Some(zone) => format!("{self} ({zone})"),
+            None => self.to_string(),
         }
     }
 

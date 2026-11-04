@@ -127,6 +127,8 @@ fun Court(
     ball: CourtBall? = null,
     targets: List<List<CourtCellChoice>> = emptyList(),
     targetsOurs: Boolean = false,
+    /** what the cells are, read by TalkBack: the serve, attack or reception zone */
+    targetsName: Int = R.string.serve_zone,
     onTarget: (CourtCellChoice) -> Unit = {},
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
     // the zones where the ball went (our serve on theirs, our reception on
@@ -143,7 +145,7 @@ fun Court(
         constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * aspect)
         else -> maxWidth
     }
-    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, onTarget, Modifier.width(width))
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, Modifier.width(width))
 }
 
 @Composable
@@ -155,6 +157,7 @@ private fun CourtColumn(
     ball: CourtBall?,
     targets: List<List<CourtCellChoice>>,
     targetsOurs: Boolean,
+    targetsName: Int,
     onTarget: (CourtCellChoice) -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
@@ -177,7 +180,7 @@ private fun CourtColumn(
             drawLine(net, Offset(0f, netY), Offset(size.width, netY), strokeWidth = 4.dp.toPx())
         }
         // where the ball went, in place of the players
-        if (targets.isNotEmpty()) TargetZones(targets, targetsOurs, onTarget)
+        if (targets.isNotEmpty()) TargetZones(targets, targetsName, onTarget)
         else BoxWithConstraints(Modifier.fillMaxSize()) {
             // the player on the spot, the name under the jersey in two
             // lines, a third of the court wide; on a court narrower than a
@@ -268,9 +271,9 @@ private val ServeZone = 72.dp
  * between them); the cells chosen filled, touched again to take them
  * back. The lines between the zones bolder than between the cells. */
 @Composable
-private fun TargetZones(rows: List<List<CourtCellChoice>>, ours: Boolean, onTarget: (CourtCellChoice) -> Unit) =
+private fun TargetZones(rows: List<List<CourtCellChoice>>, name: Int, onTarget: (CourtCellChoice) -> Unit) =
     Box(Modifier.fillMaxSize()) {
-        val zoneDescription = stringResource(if (ours) R.string.reception_zone else R.string.serve_zone)
+        val zoneDescription = stringResource(name)
         val chosenState = stringResource(R.string.zone_chosen)
         val colors = MaterialTheme.colorScheme
         val cellLines = colors.onSurface.copy(alpha = 0.25f)

@@ -219,29 +219,39 @@ mod tests {
         assert_eq!(at.moved_on(CourtSide::Theirs, Direction::Down), cell("8C"));
     }
 
-    /// Two cells side by side across or down, not on a corner: of two
-    /// zones they are on the line between them (a conflict zone), of one
-    /// zone in it.
+    /// Two cells side by side across or down, not on a corner: across the
+    /// line between two zones of a row they are on a conflict zone; one
+    /// behind the other, or in one zone, they aren't.
     #[test]
     fn two_cells_side_by_side() {
+        use CourtZoneEnum::*;
         let pair = |a: &str, b: &str| CourtTarget::pair(cell(a), cell(b));
-        let zone = |a: &str, b: &str| pair(a, b).map(|t| t.court_zone());
-        assert_eq!(zone("1D", "6A"), Some(CourtZoneEnum::Z61));
-        assert_eq!(zone("6A", "1D"), Some(CourtZoneEnum::Z61));
-        assert_eq!(zone("1A", "1D"), Some(CourtZoneEnum::Z1));
-        // 1B with 9A under it, 1C on its right, 1A over it
-        assert_eq!(zone("1B", "9A"), Some(CourtZoneEnum::Z19));
-        assert_eq!(zone("1B", "1C"), Some(CourtZoneEnum::Z1));
-        assert_eq!(zone("1B", "1A"), Some(CourtZoneEnum::Z1));
+        let conflict = |a: &str, b: &str| pair(a, b).map(|t| t.conflict());
+        let zones = |a: &str, b: &str| pair(a, b).map(|t| t.zones());
+        assert_eq!(conflict("1D", "6A"), Some(Some(Z61)));
+        assert_eq!(conflict("6A", "1D"), Some(Some(Z61)));
+        assert_eq!(conflict("1C", "6B"), Some(Some(Z61)));
+        assert_eq!(conflict("1A", "1D"), Some(None));
+        assert_eq!(conflict("1B", "1C"), Some(None));
+        // 1C with 9D under it: on the line between two rows, no conflict
+        assert_eq!(conflict("1C", "9D"), Some(None));
+        assert_eq!(conflict("1B", "9A"), Some(None));
+        assert_eq!(conflict("3A", "8B"), Some(None));
+        // half in each zone, one zone whole
+        assert_eq!(zones("1C", "9D"), Some(vec![(Z1, 0.5), (Z9, 0.5)]));
+        assert_eq!(zones("1D", "6A"), Some(vec![(Z1, 0.5), (Z6, 0.5)]));
+        assert_eq!(zones("1B", "1A"), Some(vec![(Z1, 1.0)]));
         // not 1D nor 9D, on its corners
         assert_eq!(pair("1B", "1D"), None);
         assert_eq!(pair("1B", "9D"), None);
         assert_eq!(pair("1A", "6A"), None);
         assert_eq!(pair("1A", "1A"), None);
-        // every line between two zones has its pairs
-        let lines: std::collections::HashSet<CourtZoneEnum> =
-            CourtTarget::all().iter().map(|t| t.court_zone()).collect();
-        assert_eq!(lines.len(), CourtZoneEnum::ALL.len());
+        // every conflict zone has its pairs
+        let lines: std::collections::HashSet<CourtZoneEnum> = CourtTarget::all()
+            .iter()
+            .filter_map(|t| t.conflict())
+            .collect();
+        assert_eq!(lines.len(), CourtZoneEnum::CONFLICTS.len());
         assert_eq!(
             pair("8C", "7B").map(|t| t.to_string()),
             Some("8C-7B".to_string())
@@ -249,10 +259,6 @@ mod tests {
         assert_eq!(
             pair("7B", "8C").map(|t| t.to_string()),
             Some("8C-7B".to_string())
-        );
-        assert_eq!(
-            pair("3A", "8B").map(|t| t.court_zone()),
-            Some(CourtZoneEnum::Z38)
         );
     }
 

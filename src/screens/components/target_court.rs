@@ -1,7 +1,8 @@
 //! The court of the opponent as our server sees it, their end line at the
 //! top: to tell where the ball went, a cell of a zone or two side by side
 //! (see `CourtTarget`), with the cursor and the cells chosen; and, for the
-//! statistics, the nine zones with the conflict zones between them.
+//! statistics, the nine zones, with the conflict zones between them for
+//! the reception.
 use crate::localization::current_labels;
 use crate::screens::components::panel;
 use ratatui::{
@@ -18,21 +19,16 @@ const BORDERED_ROW: u16 = 3;
 
 /// The widths of the five columns of the court (zone, conflict, zone,
 /// conflict, zone): the conflict columns as wide as their label at least.
-fn columns(width: u16) -> [u16; 5] {
-    let conflict = (width / 11).max(3).min(width / 5);
+/// Without the conflict zones, three as wide.
+fn columns(width: u16, conflicts: bool) -> Vec<u16> {
+    let conflict = match conflicts {
+        true => (width / 11).max(4).min(width / 5),
+        false => return split(width, 3),
+    };
     let zones = width.saturating_sub(2 * conflict);
     let zone = zones / 3;
     // what's left goes to the middle zone
-    [zone, conflict, zones - 2 * zone, conflict, zone]
-}
-
-/// The heights of the five rows (zones, conflicts, zones, conflicts,
-/// zones): the conflicts one line, more on a tall court.
-fn rows(height: u16) -> [u16; 5] {
-    let conflict = (height / 11).max(1).min(height / 5);
-    let zones = height.saturating_sub(2 * conflict);
-    let zone = zones / 3;
-    [zone, conflict, zones - 2 * zone, conflict, zone]
+    vec![zone, conflict, zones - 2 * zone, conflict, zone]
 }
 
 /// The style of a cell: the ones chosen highlighted, the cursor reversed;
@@ -181,14 +177,14 @@ pub fn render(
 }
 
 /// The court in the block, as shown on `side`: each zone with its lines
-/// and style, told by `cell`; the nine zones in a box when `boxes` and
-/// there's room.
+/// and style, told by `cell`, with the conflict zones between them when
+/// `conflicts`; the nine zones in a box when `boxes` and there's room.
 pub fn render_court<F>(
     f: &mut Frame,
     area: Rect,
     block: Block,
     side: CourtSide,
-    boxes: bool,
+    (conflicts, boxes): (bool, bool),
     cell: F,
 ) where
     F: Fn(CourtZoneEnum) -> (Vec<Line<'static>>, Style),
@@ -205,26 +201,23 @@ pub fn render_court<F>(
         },
         false => inner,
     };
-    let [w0, w1, w2, w3, w4] = columns(court.width);
-    let heights = rows(court.height);
-    let boxed = boxes && heights.iter().step_by(2).all(|h| *h >= BORDERED_ROW);
-    let x = court.x;
-    let fives = [
-        (x, w0),
-        (x + w0, w1),
-        (x + w0 + w1, w2),
-        (x + w0 + w1 + w2, w3),
-        (x + w0 + w1 + w2 + w3, w4),
-    ];
-    let threes = [(x, w0 + w1), (x + w0 + w1, w2), (x + w0 + w1 + w2, w3 + w4)];
+    let widths = columns(court.width, conflicts);
+    let heights = split(court.height, 3);
+    let boxed = boxes && heights.iter().all(|h| *h >= BORDERED_ROW);
+    let spans: Vec<(u16, u16)> = widths
+        .iter()
+        .scan(court.x, |x, width| {
+            let span = (*x, *width);
+            *x += width;
+            Some(span)
+        })
+        .collect();
+    let rows = match conflicts {
+        true => CourtZoneEnum::shown(side),
+        false => CourtZoneEnum::zones_shown(side),
+    };
     let mut y = court.y;
-    for (row, height) in CourtZoneEnum::shown(side).iter().zip(heights) {
-        // a row of five takes a column each, a row of three the columns of
-        // a zone and a conflict at the sides, the middle zone in between
-        let spans: &[(u16, u16)] = match row.len() {
-            5 => &fives,
-            _ => &threes,
-        };
+    for (row, height) in rows.iter().zip(heights) {
         for (zone, (x, width)) in row.iter().zip(spans.iter().copied()) {
             let area = Rect {
                 x,

@@ -87,20 +87,22 @@ class ScoutingTest {
         rule.waitFor { rule.onAllNodes(zone("1B") and hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().size == 1 }
         rule.onNode(zone("1B")).performClick()
         rule.waitFor { chosen() == 0 }
-        // 1B, then 9A under it: both chosen, told under the score
+        // 1B, then 9A under it: both chosen, told under the score; one
+        // behind the other, no conflict zone
         rule.onNode(zone("1B")).performClick()
         rule.onNode(zone("9A")).performClick()
         rule.waitFor { chosen() == 2 }
-        rule.waitForText("1B-9A (1/9)", substring = true)
+        rule.waitForText("1B-9A", substring = true)
+        assertTrue(rule.onAllNodes(hasText("(1/9)", substring = true)).fetchSemanticsNodes().isEmpty())
         touch("#")
         rule.waitFor { saved().events.size == 1 }
-        assertEquals("1B-9A (1/9)", saved().events[0].target)
+        assertEquals("1B-9A", saved().events[0].target)
         // the next serve, without one
         rule.waitFor { rule.onAllNodes(hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().isEmpty() }
         touch("=")
         rule.waitFor { saved().events.size == 2 }
         // the last first
-        assertEquals(listOf(null, "1B-9A (1/9)"), saved().events.map { it.target })
+        assertEquals(listOf(null, "1B-9A"), saved().events.map { it.target })
         // their serve: the players again, no zones
         rule.waitFor { rule.onAllNodes(zone("8A")).fetchSemanticsNodes().isEmpty() }
     }
@@ -197,6 +199,29 @@ class ScoutingTest {
         val events = saved().events.map { listOf(it.name, it.symbol, it.player?.name) }
         assertEquals(listOf("attack", "#", "Alessia Orro"), events.first())
         assertEquals(3, events.size)
+    }
+
+    /** Our attack: where it went, touched on their court as our server
+     * sees it (the net at the bottom, 1 at the top on the left). */
+    @Test
+    fun theAttackZoneIsTouchedOnTheirCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.attack_zone)} $label") and hasClickAction() }
+        touch("+")
+        touch("18")
+        touch("defense")
+        touch("+")
+        assertTrue(rule.onAllNodes(zone("5A")).fetchSemanticsNodes().isEmpty())
+        // the setter can only attack: the evaluation and the court
+        touch("8")
+        rule.waitFor { rule.onAllNodes(zone("5A")).fetchSemanticsNodes().size == 1 }
+        val at = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(at("1A").y < at("4C").y && at("1A").x < at("4C").x)
+        rule.onNode(zone("5A")).performClick()
+        rule.waitForText("5A", substring = true)
+        touch("#")
+        rule.waitFor { score(saved()) == 1 to 0 }
+        assertEquals("5A", saved().events[0].target)
     }
 
     /** From the changes of the lineup, the libero for a player touched on

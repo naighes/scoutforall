@@ -39,6 +39,17 @@ class StatsLayoutTest(private val screen: Size) {
                 s.chooseEval(EvalEnum.PERFECT)
                 s.touchTarget(1u, "A")
                 s.chooseEval(EvalEnum.PERFECT)
+                // their serve received on 6/1 (1D and 6A), our attack to 5A
+                s.chooseEval(EvalEnum.ERROR)
+                s.chooseEvent(EventTypeEnum.P)
+                s.choosePlayer(s.playerChoices().first().id)
+                s.touchTarget(1u, "D")
+                s.touchTarget(6u, "A")
+                s.chooseEval(EvalEnum.POSITIVE)
+                s.chooseEvent(EventTypeEnum.A)
+                s.choosePlayer(s.playerChoices().first().id)
+                s.touchTarget(5u, "A")
+                s.chooseEval(EvalEnum.PERFECT)
             }
         }
         serve(team, match, EvalEnum.PERFECT, EvalEnum.POSITIVE)
@@ -59,6 +70,16 @@ class StatsLayoutTest(private val screen: Size) {
         rule.onNode(hasText(efficiency) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         rule.shot("stats-zone-efficiency-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        // the reception, with the conflict zones; the attack, by zone
+        rule.onNode(hasText("Reception") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.receptions_by_zone))
+        rule.waitForText(string(R.string.on_conflicts, 1, 100), substring = true)
+        rule.shot("stats-reception-zones-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.onNode(hasText("Attack") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.attacks_by_zone))
+        rule.shot("stats-attack-zones-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 }

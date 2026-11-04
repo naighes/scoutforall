@@ -223,7 +223,7 @@ mod tests {
 
     /// Where we received their serve is told along with the evaluation of
     /// the reception, on our court, with its formation; not before the
-    /// receiver, nor for an attack.
+    /// receiver. The attack after it goes to their court.
     #[tokio::test]
     async fn the_reception_target_is_on_our_court() {
         let mut s = scouting().await;
@@ -240,7 +240,7 @@ mod tests {
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
         s.session.choose_event(A).await.unwrap();
         s.session.choose_player(s.players[3]).await.unwrap();
-        assert!(!s.session.targets_apply());
+        assert_eq!(s.session.target_side(), Some(CourtSide::Theirs));
         let saved = saved_events(&s).await;
         let reception = saved
             .iter()
@@ -260,8 +260,40 @@ mod tests {
             }
         }
         assert_eq!(
-            (s.session.step(), s.session.target().map(|t| t.court_zone())),
+            (
+                s.session.step(),
+                s.session.target().and_then(|t| t.conflict())
+            ),
             (ScoutingStep::Eval, Some(CourtZoneEnum::Z61))
+        );
+    }
+
+    /// Our attack: where it went on their court, saved with its evaluation;
+    /// not before the attacker.
+    #[tokio::test]
+    async fn the_attack_target_is_on_their_court() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        s.session.choose_event(P).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(A).await.unwrap();
+        assert!(!s.session.targets_apply());
+        s.session.choose_player(s.players[3]).await.unwrap();
+        assert_eq!(s.session.target_side(), Some(CourtSide::Theirs));
+        // 5A, then 5D next to it: one zone
+        s.session.touch_target(cell(5, SubzoneEnum::A)).unwrap();
+        s.session.touch_target(cell(5, SubzoneEnum::D)).unwrap();
+        s.session.choose_eval(EvalEnum::Perfect).await.unwrap();
+        let saved = saved_events(&s).await;
+        let attack = saved
+            .iter()
+            .find(|e| e.event_type == A)
+            .expect("the attack");
+        assert_eq!(
+            attack.flags.target(),
+            CourtTarget::pair(cell(5, SubzoneEnum::A), cell(5, SubzoneEnum::D))
         );
     }
 

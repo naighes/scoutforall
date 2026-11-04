@@ -137,8 +137,9 @@ data class ScoutingView(
     val evals: List<EvalChoice>,
     val techniques: List<TechniqueChoice>,
     val replacements: List<ScoutingPlayer>,
-    /** the court where our serve went, six rows of six cells from their
-     * end line: empty when it can't be told now */
+    /** the court where our serve or attack went (theirs) or where we
+     * received (ours), six rows of six cells from the top: empty when it
+     * can't be told now */
     val targets: List<List<CourtCellChoice>> = emptyList(),
     /** what's told of where it went: "1D-6A (6/1)" */
     val targetTold: String? = null,
@@ -508,6 +509,11 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     serveZone = true,
                     targets = view.targets,
                     targetsOurs = view.targetOurs,
+                    targetsName = when {
+                        view.targetOurs -> R.string.reception_zone
+                        view.state.event?.value == EventTypeEnum.A -> R.string.attack_zone
+                        else -> R.string.serve_zone
+                    },
                     onTarget = model::target,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
