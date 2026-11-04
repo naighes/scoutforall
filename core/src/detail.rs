@@ -5,6 +5,7 @@
 use crate::overview::{DISTRIBUTION_ZONES, RalliesWon};
 use crate::shapes::court_zone::{CourtSide, CourtZoneEnum, TargetKind};
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
+use crate::shapes::flags::BlockersEnum;
 use crate::shapes::stats::{Metric, Stats, StatsFilter};
 use std::cmp::Reverse;
 use uuid::Uuid;
@@ -151,6 +152,24 @@ pub struct Detail {
     /// no zone told
     pub conflicts: Vec<TargetDetail>,
     pub on_conflicts: Option<OnConflicts>,
+    /// for an attack or a block, how many had how many blocked told, and
+    /// each of the ones it can tell (`BlockersEnum::of`), the ones never
+    /// told too; none for the other fundamentals, or with none told
+    pub blockers_told: u32,
+    pub blockers: Vec<BlockersDetail>,
+}
+
+/// Our attacks against so many of theirs at the block, or our blocks with
+/// so many of ours, among the ones with how many told.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockersDetail {
+    pub blockers: BlockersEnum,
+    pub count: u32,
+    /// of the ones told, 0 to 100
+    pub share: f64,
+    /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
+    /// `MIN_SERVES_FOR_EFFICIENCY`
+    pub efficiency: Option<f64>,
 }
 
 /// Our receptions (or digs) on any conflict zone, among the ones whose zone
@@ -269,6 +288,23 @@ impl Detail {
             }
             _ => (Vec::new(), None),
         };
+        let (blockers_told, _) = stats.events_with_blockers(event_type, None, filter);
+        let blockers = match blockers_told {
+            0 => Vec::new(),
+            told => BlockersEnum::of(event_type)
+                .iter()
+                .map(|b| {
+                    let (count, efficiency) =
+                        stats.events_with_blockers(event_type, Some(*b), filter);
+                    BlockersDetail {
+                        blockers: *b,
+                        count,
+                        share: f64::from(count) / f64::from(told) * 100.0,
+                        efficiency: (count >= MIN_SERVES_FOR_EFFICIENCY).then_some(efficiency),
+                    }
+                })
+                .collect(),
+        };
         Detail {
             total,
             evals,
@@ -286,6 +322,8 @@ impl Detail {
             targets,
             conflicts,
             on_conflicts,
+            blockers_told,
+            blockers,
         }
     }
 }

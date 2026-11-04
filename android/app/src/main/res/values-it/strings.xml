@@ -146,6 +146,11 @@
     <string name="block_zone">Zona di muro</string>
     <string name="blocks_by_zone">Muri per zona</string>
     <string name="block_zones_told">zona indicata in %1$d muri su %2$d</string>
+    <string name="blockers">Muro</string>
+    <string name="hole_block_short">buco</string>
+    <string name="attacks_by_block">Attacchi per muro</string>
+    <string name="blocks_by_blockers">Muri per muratori</string>
+    <string name="blockers_told">indicato in %1$d su %2$d</string>
     <string name="on_conflicts">Sulle zone di conflitto: %1$d (%2$d%%)</string>
     <string name="zone_density">densità</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>

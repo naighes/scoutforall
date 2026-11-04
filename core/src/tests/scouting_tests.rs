@@ -361,6 +361,69 @@ mod tests {
         assert_eq!(block.flags.target(), Some(CourtTarget::Zone(2)));
     }
 
+    /// How many blocked: told along with the evaluation of our attack and
+    /// of our block, saved with it, resumed by undo; not for the serve.
+    #[tokio::test]
+    async fn how_many_blocked_is_told_with_the_evaluation() {
+        use crate::shapes::flags::BlockersEnum;
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        // not for the serve
+        assert!(s.session.available_blockers().is_empty());
+        assert_eq!(
+            s.session.next_blockers(),
+            Err(ScoutingError::InvalidSelection)
+        );
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(B).await.unwrap();
+        assert!(s.session.available_blockers().is_empty());
+        let blocker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("a blocker");
+        s.session.choose_player(blocker).await.unwrap();
+        assert_eq!(
+            s.session.choose_blockers(Some(BlockersEnum::NoBlock)),
+            Err(ScoutingError::InvalidSelection)
+        );
+        assert_eq!(s.session.next_blockers(), Ok(Some(BlockersEnum::One)));
+        assert_eq!(s.session.next_blockers(), Ok(Some(BlockersEnum::Two)));
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        let block = saved.iter().find(|e| e.event_type == B).expect("the block");
+        assert_eq!(block.flags.blockers(), Some(BlockersEnum::Two));
+        // undo: the block again, with how many
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.event(), s.session.blockers()),
+            (Some(B), Some(BlockersEnum::Two))
+        );
+        s.session.choose_blockers(None).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        // our attack against none of theirs
+        s.session.choose_event(A).await.unwrap();
+        let attacker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("an attacker");
+        s.session.choose_player(attacker).await.unwrap();
+        s.session
+            .choose_blockers(Some(BlockersEnum::NoBlock))
+            .unwrap();
+        s.session.choose_eval(EvalEnum::Perfect).await.unwrap();
+        let saved = saved_events(&s).await;
+        let told: Vec<_> = saved
+            .iter()
+            .filter(|e| matches!(e.event_type, A | B))
+            .map(|e| (e.event_type, e.flags.blockers()))
+            .collect();
+        assert_eq!(told, vec![(B, None), (A, Some(BlockersEnum::NoBlock))]);
+    }
+
     /// The cells are not for the block, nor the zone at the net for the
     /// dig.
     #[tokio::test]

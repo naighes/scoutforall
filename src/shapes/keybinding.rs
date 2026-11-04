@@ -37,12 +37,23 @@ pub const STATS_KEY: KeyCombination = key!(f3);
 pub const ZONE_CURSOR_KEYS: [KeyCombination; 4] = [key!(left), key!(up), key!(down), key!(right)];
 /// Chooses the zone under the cursor, or takes it back.
 pub const ZONE_KEY: KeyCombination = key!(space);
+/// Tells how many blocked, against our attack or on our block: the next
+/// one each time, then none told again.
+pub const BLOCKERS_KEY: KeyCombination = key!(tab);
 
 /// Whether the key is one scouting keeps for itself all along (settings, undo,
 /// back and statistics) or along with the evaluations (the court where the
-/// ball went): it can't be assigned to anything.
+/// ball went, how many blocked): it can't be assigned to anything.
 pub fn is_reserved_key(ck: &KeyCombination) -> bool {
-    [SETTINGS_KEY, UNDO_KEY, BACK_KEY, STATS_KEY, ZONE_KEY].contains(ck)
+    [
+        SETTINGS_KEY,
+        UNDO_KEY,
+        BACK_KEY,
+        STATS_KEY,
+        ZONE_KEY,
+        BLOCKERS_KEY,
+    ]
+    .contains(ck)
         || ZONE_CURSOR_KEYS.contains(ck)
 }
 

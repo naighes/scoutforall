@@ -11,6 +11,7 @@ use crate::{
             EvalEnum, EventTypeEnum, FriendlyName, LineupRulesEnum, PhaseEnum, RoleEnum,
             TeamSideEnum, ZoneEnum,
         },
+        flags::BlockersEnum,
         flags::EventFlags,
         lineup::Lineup,
         refusal::Refusal,
@@ -592,6 +593,11 @@ impl Snapshot {
                     .flags
                     .target()
                     .filter(|t| TargetKind::of(event.event_type).is_some_and(|k| k.fits(t))),
+                // how many blocked against our attack or on our block, if told
+                blockers: event
+                    .flags
+                    .blockers()
+                    .filter(|b| BlockersEnum::of(event.event_type).contains(b)),
                 eval: event.eval,
             });
         }

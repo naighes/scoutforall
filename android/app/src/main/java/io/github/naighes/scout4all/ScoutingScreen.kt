@@ -121,6 +121,8 @@ import io.github.naighes.scout4all.core.ScoutingStep
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.ServeTypeEnum
 import io.github.naighes.scout4all.core.TechniqueChoice
+import io.github.naighes.scout4all.core.BlockersChoice
+import io.github.naighes.scout4all.core.BlockersEnum
 import io.github.naighes.scout4all.core.CourtCellChoice
 import io.github.naighes.scout4all.core.TechniqueEnum
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -137,6 +139,9 @@ data class ScoutingView(
     val evals: List<EvalChoice>,
     val techniques: List<TechniqueChoice>,
     val replacements: List<ScoutingPlayer>,
+    /** how many blocked, to tell with the evaluation of our attack or our
+     * block: empty for the other events */
+    val blockers: List<BlockersChoice> = emptyList(),
     /** the court where our serve or attack went (theirs) or where we
      * received or dug (ours), six rows of six cells from the top; where we
      * blocked, one row of the zones at the net: empty when it can't be told
@@ -209,6 +214,12 @@ class ScoutingViewModel(
     }
 
     fun eval(eval: EvalChoice) = choose("eval ${eval.value}") { it.chooseEval(eval.value) }
+
+    /** How many blocked; touched again, taken back. */
+    fun blockers(blockers: BlockersChoice) = choose("blockers ${blockers.value}") {
+        it.chooseBlockers(if (blockers.chosen) null else blockers.value)
+        Progress.CHOOSING
+    }
 
     /** Where the ball went: a cell, alone or along with the one next to
      * it; touched again, taken back. */
@@ -306,6 +317,7 @@ class ScoutingViewModel(
             evals = s.availableEvals(),
             techniques = s.availableTechniques(),
             replacements = s.replacementChoices(),
+            blockers = s.availableBlockers(),
             targets = s.targetCourt(),
             targetTold = s.targetTold(),
             targetOurs = s.targetOurs(),
@@ -813,11 +825,16 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
             }
         }
         ScoutingStep.EVAL -> {
-            // the serve shows on the court, with the server in the serve zone
-            if (state.event?.value != EventTypeEnum.S) {
-                Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
+            // the title, the sets and how many blocked close together, the
+            // last row lower: the evaluations stay in the room of the serve's
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // the serve shows on the court, with the server in the serve zone
+                if (state.event?.value != EventTypeEnum.S) {
+                    Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
+                }
+                if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
+                if (view.blockers.isNotEmpty()) Blockers(view.blockers, model)
             }
-            if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
             Evals(view.evals, model)
             // the serve waits for its evaluation, or gives way
             RallyEvents(view.otherEvents, model)
@@ -1030,6 +1047,36 @@ private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewMod
                 contentPadding = padding,
                 shape = MaterialTheme.shapes.medium,
             ) { content() }
+        }
+    }
+}
+
+/** How many blocked, in a row after its name: 0 (none, against our attack)
+ * to 3, and the hole block; the chosen one filled, touched again to take it
+ * back. TalkBack reads the whole name ("2 blockers"). */
+@Composable
+private fun Blockers(blockers: List<BlockersChoice>, model: ScoutingViewModel) = Row(
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+) {
+    Text(stringResource(R.string.blockers), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 4.dp))
+    val hole = stringResource(R.string.hole_block_short)
+    blockers.forEach { b ->
+        val label = when (b.value) {
+            BlockersEnum.NO_BLOCK -> "0"
+            BlockersEnum.ONE -> "1"
+            BlockersEnum.TWO -> "2"
+            BlockersEnum.THREE -> "3"
+            BlockersEnum.HOLE -> hole
+        }
+        // lower than the sets: touched on 48dp all the same
+        val modifier = Modifier.weight(1f).heightIn(min = 40.dp).tutorial("blockers:${b.value}")
+            .semantics { contentDescription = b.name }
+        val padding = PaddingValues(0.dp)
+        val content = @Composable { Text(label, style = MaterialTheme.typography.titleMedium, maxLines = 1) }
+        when {
+            b.chosen -> FilledTonalButton(onClick = { model.blockers(b) }, modifier = modifier, contentPadding = padding, shape = MaterialTheme.shapes.medium) { content() }
+            else -> OutlinedButton(onClick = { model.blockers(b) }, modifier = modifier, contentPadding = padding, shape = MaterialTheme.shapes.medium) { content() }
         }
     }
 }

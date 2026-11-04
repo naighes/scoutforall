@@ -56,6 +56,7 @@ use scout4all_core::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
+        flags::BlockersEnum,
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
@@ -112,6 +113,15 @@ pub enum RoleEnum {
     Setter,
     OutsideHitter,
     MiddleBlocker,
+}
+
+#[uniffi::remote(Enum)]
+pub enum BlockersEnum {
+    NoBlock,
+    One,
+    Two,
+    Three,
+    Hole,
 }
 
 #[uniffi::remote(Enum)]
@@ -1027,6 +1037,17 @@ pub struct TechniqueChoice {
     pub chosen: bool,
 }
 
+/// How many blocked, to tell along with the evaluation of our attack or
+/// of our block.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct BlockersChoice {
+    pub value: BlockersEnum,
+    /// e.g. "2 blockers"
+    pub name: String,
+    /// what the evaluation saves now
+    pub chosen: bool,
+}
+
 /// A cell of the court (a subzone of DataVolley), or a whole zone at the
 /// net for our block, to tell where the ball went.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -1054,6 +1075,8 @@ pub struct ScoutedEvent {
     pub technique: Option<String>,
     /// where the ball went, if told: e.g. "4" or "4/3"
     pub target: Option<String>,
+    /// how many blocked, if told: e.g. "2 blockers"
+    pub blockers: Option<String>,
 }
 
 /// An event of a set, in the list to correct it.
@@ -1404,9 +1427,27 @@ pub struct FundamentalDetail {
     pub targets: Vec<Vec<TargetStats>>,
     /// for a reception or a dig, all the conflict zones together
     pub on_conflicts: Option<ConflictStats>,
+    /// for an attack or a block: how many had how many blocked told, and
+    /// each of the ones it can tell; empty with none told
+    pub blockers_told: u32,
+    pub blockers: Vec<BlockersStats>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
     pub players: Vec<PlayerStats>,
+}
+
+/// Our attacks against so many of theirs at the block, or our blocks with
+/// so many of ours, of the ones told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct BlockersStats {
+    pub value: BlockersEnum,
+    /// e.g. "2 blockers"
+    pub name: String,
+    pub count: u32,
+    /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
 }
 
 /// Our receptions on any conflict zone, of the ones whose zone was told.
@@ -1677,6 +1718,28 @@ impl Scouting {
             .into_iter()
             .map(|t| technique_choice(t, session.technique() == Some(t), self.labels))
             .collect()
+    }
+
+    /// How many blocked, to tell along with the evaluation: against our
+    /// attack (none too) and on our block; empty for the other events.
+    pub fn available_blockers(&self) -> Vec<BlockersChoice> {
+        let session = self.session();
+        session
+            .available_blockers()
+            .iter()
+            .map(|b| BlockersChoice {
+                value: *b,
+                name: b.name(self.labels).to_string(),
+                chosen: session.blockers() == Some(*b),
+            })
+            .collect()
+    }
+
+    /// The scout tells how many blocked, or takes it back (`None`). Saved
+    /// with the evaluation, never required.
+    pub fn choose_blockers(&self, blockers: Option<BlockersEnum>) -> Result<(), MobileError> {
+        let chosen = self.session().choose_blockers(blockers);
+        self.scouted(chosen)
     }
 
     pub fn choose_event(&self, event: EventTypeEnum) -> Result<Progress, MobileError> {
@@ -2072,6 +2135,18 @@ fn detail_stats(
                     share: on.share,
                     efficiency: on.efficiency,
                 }),
+                blockers_told: d.blockers_told,
+                blockers: d
+                    .blockers
+                    .iter()
+                    .map(|b| BlockersStats {
+                        value: b.blockers,
+                        name: b.blockers.name(labels).to_string(),
+                        count: b.count,
+                        share: b.share,
+                        efficiency: b.efficiency,
+                    })
+                    .collect(),
                 players: by_player(&stats, event, &narrowed)
                     .into_iter()
                     .filter_map(|line| {
@@ -2195,6 +2270,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         symbol: e.eval.map(|v| v.to_string()),
         technique: e.technique.map(|t| t.to_string()),
         target: e.flags.target().map(|t| t.described()),
+        blockers: e.flags.blockers().map(|b| b.name(labels).to_string()),
     }
 }
 
@@ -4462,6 +4538,47 @@ mod tests {
         start.choose_libero(Some(ids[6].clone())).unwrap();
         app.start_set(start).unwrap();
         app.scouting(team.into(), m.into()).unwrap()
+    }
+
+    /// How many blocked: on our block from one on, the one chosen saved
+    /// with the evaluation and shown on the event; none on the serve.
+    #[test]
+    fn how_many_blocked_is_told() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(scouting.available_blockers().is_empty());
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event(EventTypeEnum::B).unwrap();
+        let blocker = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(blocker).unwrap();
+        let names: Vec<String> = scouting
+            .available_blockers()
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["muro a 1", "muro a 2", "muro a 3", "muro con buco"]
+        );
+        assert!(
+            scouting
+                .choose_blockers(Some(BlockersEnum::NoBlock))
+                .is_err()
+        );
+        scouting.choose_blockers(Some(BlockersEnum::Two)).unwrap();
+        let chosen: Vec<BlockersEnum> = scouting
+            .available_blockers()
+            .into_iter()
+            .filter(|b| b.chosen)
+            .map(|b| b.value)
+            .collect();
+        assert_eq!(chosen, vec![BlockersEnum::Two]);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        assert_eq!(state.events[0].blockers.as_deref(), Some("muro a 2"));
+        assert_eq!(state.events[1].blockers, None);
     }
 
     /// Our block: one row, the zones at the net on our court, 4 3 2;

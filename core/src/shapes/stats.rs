@@ -12,6 +12,7 @@ use crate::shapes::court_zone::{CourtTarget, CourtZoneEnum};
 use crate::shapes::enums::{
     ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
+use crate::shapes::flags::BlockersEnum;
 use std::collections::HashMap;
 use std::hash::Hash;
 use uuid::Uuid;
@@ -157,6 +158,9 @@ pub struct EventKey {
     /// where our serve or attack went, or where we received theirs, when
     /// the scout told it
     pub target: Option<CourtTarget>,
+    /// how many blocked against our attack, or on our block, when the
+    /// scout told it
+    pub blockers: Option<BlockersEnum>,
     /// `None` for the events with no evaluation (`F`, `OS`, `OE`, `FB`,
     /// `OF`)
     pub eval: Option<EvalEnum>,
@@ -472,6 +476,33 @@ impl Stats {
         match total > 0.0 {
             true => (total, score / total * 100.0),
             false => (0.0, 0.0),
+        }
+    }
+
+    /// The events of the type with how many blocked told, or with that
+    /// many: how many, and their efficiency (0 with none).
+    pub fn events_with_blockers(
+        &self,
+        event_type: EventTypeEnum,
+        blockers: Option<BlockersEnum>,
+        filter: &StatsFilter,
+    ) -> (u32, f64) {
+        let (count, score) = self
+            .events(event_type, filter)
+            .filter(|(k, _)| match (k.blockers, blockers) {
+                (Some(b), Some(wanted)) => b == wanted,
+                (Some(_), None) => true,
+                (None, _) => false,
+            })
+            .fold((0u32, 0i64), |(count, score), (k, v)| {
+                let s = k.eval.map_or(0, |eval| {
+                    i64::from(Metric::Efficiency.score(event_type, eval))
+                });
+                (count + v, score + s * i64::from(v))
+            });
+        match count {
+            0 => (0, 0.0),
+            n => (n, score as f64 / f64::from(n) * 100.0),
         }
     }
 

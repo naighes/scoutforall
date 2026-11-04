@@ -145,6 +145,11 @@
     <string name="block_zone">ブロックのゾーン</string>
     <string name="blocks_by_zone">ゾーン別ブロック</string>
     <string name="block_zones_told">ゾーン指定 %1$d/%2$d本</string>
+    <string name="blockers">ブロック</string>
+    <string name="hole_block_short">穴</string>
+    <string name="attacks_by_block">ブロック別アタック</string>
+    <string name="blocks_by_blockers">枚数別ブロック</string>
+    <string name="blockers_told">指定 %1$d/%2$d</string>
     <string name="on_conflicts">境界ゾーン: %1$d本 (%2$d%%)</string>
     <string name="zone_density">密度</string>
     <string name="attacks_detail">%1$d 本 · 効果率 %2$s</string>

@@ -146,6 +146,11 @@
     <string name="block_zone">Zona do bloqueio</string>
     <string name="blocks_by_zone">Bloqueios por zona</string>
     <string name="block_zones_told">zona indicada em %1$d de %2$d bloqueios</string>
+    <string name="blockers">Bloqueio</string>
+    <string name="hole_block_short">buraco</string>
+    <string name="attacks_by_block">Ataques por bloqueio</string>
+    <string name="blocks_by_blockers">Bloqueios por bloqueadores</string>
+    <string name="blockers_told">indicado em %1$d de %2$d</string>
     <string name="on_conflicts">Nas zonas de conflito: %1$d (%2$d%%)</string>
     <string name="zone_density">densidade</string>
     <string name="attacks_detail">%1$d at · efi %2$s</string>

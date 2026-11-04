@@ -148,6 +148,11 @@
     <string name="block_zone">Strefa bloku</string>
     <string name="blocks_by_zone">Bloki według stref</string>
     <string name="block_zones_told">strefa podana w %1$d z %2$d bloków</string>
+    <string name="blockers">Blok</string>
+    <string name="hole_block_short">dziura</string>
+    <string name="attacks_by_block">Ataki według bloku</string>
+    <string name="blocks_by_blockers">Bloki według liczby blokujących</string>
+    <string name="blockers_told">podano w %1$d z %2$d</string>
     <string name="on_conflicts">W strefach konfliktu: %1$d (%2$d%%)</string>
     <string name="zone_density">gęstość</string>
     <string name="attacks_detail">%1$d at · sku %2$s</string>

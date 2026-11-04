@@ -645,6 +645,56 @@ mod tests {
         );
     }
 
+    /// How many blocked: on our block, how many of ours; on our attack,
+    /// how many of theirs (none too, the hole block); not told, none.
+    #[test]
+    fn how_many_blocked() {
+        use crate::shapes::flags::BlockersEnum;
+        let rallies = [
+            [
+                "a07RM+",
+                "a02AH+~~~47~H2",
+                "*05BH+~~~~2~~2",
+                "*02AH#~~~45BH0",
+            ],
+            [
+                "a07RM+",
+                "a02AH+~~~47~H2",
+                "*05BH+~~~~2~~4",
+                "*02AH#~~~45BH3",
+            ],
+            ["a07RM+", "a02AH+", "*05BH+", "*02AH#"],
+        ];
+        let told: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.their_serve_error();
+                let serve = format!("{}SM+", file.server());
+                let touches: Vec<&str> = std::iter::once(serve.as_str())
+                    .chain(touches.iter().copied())
+                    .collect();
+                file.rally(&touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                let of = |event_type| {
+                    events
+                        .iter()
+                        .find(|e| e.event_type == event_type)
+                        .and_then(|e| e.flags.blockers())
+                };
+                (of(B), of(A))
+            })
+            .collect();
+        assert_eq!(
+            told,
+            vec![
+                (Some(BlockersEnum::Two), Some(BlockersEnum::NoBlock)),
+                (Some(BlockersEnum::Hole), Some(BlockersEnum::Three)),
+                (None, None),
+            ]
+        );
+    }
+
     /// Our blocks with where we blocked their attack: the zone at the net,
     /// in front of it (their attack from 4, our block in 2); none for
     /// another zone or when the file doesn't tell it.

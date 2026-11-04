@@ -234,6 +234,7 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
         }
     }
     if (f.targets.isNotEmpty()) TargetZones(f, query.event)
+    if (f.blockers.isNotEmpty()) Blockers(f, query.event)
     if (f.players.isNotEmpty()) {
         Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
         Column {
@@ -443,6 +444,41 @@ private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum) = Column(ver
             all + (on.efficiency?.takeIf { efficiency }?.let { " · %+d%%".format(it.roundToInt()) } ?: ""),
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+/** Our attacks by how many of theirs blocked, or our blocks by how many of
+ * ours, of the ones told: a row each, how many, their share and, from a
+ * few on, their efficiency. */
+@Composable
+private fun Blockers(f: FundamentalDetail, event: EventTypeEnum) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val title = if (event == EventTypeEnum.B) R.string.blocks_by_blockers else R.string.attacks_by_block
+    Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
+    Text(
+        stringResource(R.string.blockers_told, f.blockersTold.toInt(), f.total.toInt()),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    f.blockers.forEach { b ->
+        val shown = b.count > 0u
+        val color = if (shown) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+        Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(b.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = color)
+            Text(
+                if (shown) "${b.share.roundToInt()}% (${b.count})" else "–",
+                style = MaterialTheme.typography.bodyLarge,
+                color = color,
+            )
+            b.efficiency?.let {
+                Text(
+                    "%+d%%".format(it.roundToInt()),
+                    Modifier.padding(start = 12.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = gradeColor((it + 100.0) / 200.0),
+                )
+            }
+        }
     }
 }
 

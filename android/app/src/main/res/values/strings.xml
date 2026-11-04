@@ -147,6 +147,11 @@
     <string name="block_zone">Block zone</string>
     <string name="blocks_by_zone">Blocks by zone</string>
     <string name="block_zones_told">zone told for %1$d of %2$d blocks</string>
+    <string name="blockers">Block</string>
+    <string name="hole_block_short">hole</string>
+    <string name="attacks_by_block">Attacks by block</string>
+    <string name="blocks_by_blockers">Blocks by blockers</string>
+    <string name="blockers_told">told for %1$d of %2$d</string>
     <string name="on_conflicts">On the conflict zones: %1$d (%2$d%%)</string>
     <string name="zone_density">density</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>

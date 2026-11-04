@@ -14,8 +14,8 @@ use crate::{
     shapes::{
         actions::{ScoutingOptionEnum, ScreenActionEnum},
         keybinding::{
-            ActionsKeyBindings, BACK_KEY, KeyBindings, SETTINGS_KEY, STATS_KEY, UNDO_KEY,
-            ZONE_CURSOR_KEYS, ZONE_KEY,
+            ActionsKeyBindings, BACK_KEY, BLOCKERS_KEY, KeyBindings, SETTINGS_KEY, STATS_KEY,
+            UNDO_KEY, ZONE_CURSOR_KEYS, ZONE_KEY,
         },
         settings::{ScoutingShortcut, Settings, set_settings},
         symbol::KeyCombinationFormatExt,
@@ -485,6 +485,7 @@ where
                     fmt.to_string(ZONE_KEY)
                 ),
             ),
+            (labels.blockers, fmt.to_string(BLOCKERS_KEY)),
         ]
     }
 

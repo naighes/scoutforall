@@ -13,7 +13,7 @@ use crate::screens::{
 };
 use crate::shapes::actions::{ScoutingOptionEnum, ScreenActionEnum};
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
-use crate::shapes::keybinding::{ZONE_CURSOR_KEYS, ZONE_KEY, navigation_keybindings};
+use crate::shapes::keybinding::{BLOCKERS_KEY, ZONE_CURSOR_KEYS, ZONE_KEY, navigation_keybindings};
 
 /// The keys moving the cursor on the zones at the net: only across.
 const NET_CURSOR_KEYS: [OneToThree<KeyCode>; 2] = [
@@ -142,7 +142,22 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
             }
             false => vec![],
         };
+        // how many blocked, against our attack or on our block
+        let blockers = match self.session.available_blockers().is_empty() {
+            true => vec![],
+            false => {
+                let told = self
+                    .session
+                    .blockers()
+                    .map_or("-", |b| b.name(labels.domain));
+                vec![(
+                    fmt.to_string(BLOCKERS_KEY),
+                    format!("{}: {told}", labels.blockers),
+                )]
+            }
+        };
         zone.into_iter()
+            .chain(blockers)
             .chain(get_keybinding_actions(
                 navigation_keybindings(),
                 &self.get_screen_actions(),
@@ -564,6 +579,10 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .copied()
             .filter(|eval| self.session.available_evals().contains(eval));
         let net = self.session.target_kind() == Some(TargetKind::Net);
+        if ck == BLOCKERS_KEY && !self.session.available_blockers().is_empty() {
+            let told = self.session.next_blockers();
+            return self.show(told.map(|_| Progress::Choosing));
+        }
         match (direction, toggle, eval, self.technique_for(&ck)) {
             (Some(direction), _, _, _) if net => {
                 let side = self.session.target_side().unwrap_or(CourtSide::Ours);

@@ -219,6 +219,36 @@ mod tests {
         assert_eq!(at.moved_on(CourtSide::Theirs, Direction::Down), cell("8C"));
     }
 
+    /// How many blocked: in bits of their own, the zone and the rest kept;
+    /// all five against our attack, on our block all but none; told one by
+    /// one, then none again.
+    #[test]
+    fn how_many_blocked() {
+        use crate::shapes::flags::BlockersEnum::{self, *};
+        let flags = EventFlags::default()
+            .with_inverted_p1(true)
+            .with_target(Some(CourtTarget::Zone(2)));
+        for b in BlockersEnum::ALL {
+            let told = flags.with_blockers(Some(b));
+            assert_eq!(told.blockers(), Some(b));
+            assert_eq!(told.target(), Some(CourtTarget::Zone(2)));
+            assert!(told.inverted_p1());
+            assert_eq!(told.with_blockers(None), flags);
+            assert_eq!(EventFlags::parse(&told.to_string()).ok(), Some(told));
+        }
+        assert_eq!(flags.blockers(), None);
+        assert_eq!(BlockersEnum::of(EventTypeEnum::A).len(), 5);
+        assert_eq!(BlockersEnum::of(EventTypeEnum::B), &[One, Two, Three, Hole]);
+        assert!(BlockersEnum::of(EventTypeEnum::D).is_empty());
+        let next = |c| BlockersEnum::next(EventTypeEnum::B, c);
+        assert_eq!(next(None), Some(One));
+        assert_eq!(next(Some(Three)), Some(Hole));
+        assert_eq!(next(Some(Hole)), None);
+        assert_eq!(BlockersEnum::next(EventTypeEnum::A, None), Some(NoBlock));
+        assert_eq!(BlockersEnum::of_datavolley('4'), Some(Hole));
+        assert_eq!(BlockersEnum::of_datavolley('~'), None);
+    }
+
     /// The zones at the net on our court, 4 3 2 from the left: the cursor
     /// across them, staying at the ends; only a zone there fits the block.
     #[test]

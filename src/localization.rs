@@ -202,6 +202,8 @@ pub struct Labels {
     pub attack_target: &'static str,
     pub dig_target: &'static str,
     pub block_target: &'static str,
+    /// how many blocked, told with its key: "block: 2 blockers"
+    pub blockers: &'static str,
     /// in the footer of the serve: the arrows moving on its court
     pub target_zone: &'static str,
     /// the space bar choosing the zone under the cursor, or taking it back
@@ -405,6 +407,7 @@ const EN: Labels = Labels {
     attack_target: "attack zone",
     dig_target: "defense zone",
     block_target: "block zone",
+    blockers: "block",
     target_zone: "zone",
     choose_zone: "choose",
     remove_zone: "remove",
@@ -602,6 +605,7 @@ const IT: Labels = Labels {
     attack_target: "zona d'attacco",
     dig_target: "zona di difesa",
     block_target: "zona di muro",
+    blockers: "muro",
     target_zone: "zona",
     choose_zone: "scegli",
     remove_zone: "togli",
@@ -799,6 +803,7 @@ const PT: Labels = Labels {
     attack_target: "zona do ataque",
     dig_target: "zona da defesa",
     block_target: "zona do bloqueio",
+    blockers: "bloqueio",
     target_zone: "zona",
     choose_zone: "escolher",
     remove_zone: "remover",
@@ -996,6 +1001,7 @@ const PL: Labels = Labels {
     attack_target: "strefa ataku",
     dig_target: "strefa obrony",
     block_target: "strefa bloku",
+    blockers: "blok",
     target_zone: "strefa",
     choose_zone: "wybierz",
     remove_zone: "usuń",
@@ -1193,6 +1199,7 @@ const JA: Labels = Labels {
     attack_target: "アタックのゾーン",
     dig_target: "ディグのゾーン",
     block_target: "ブロックのゾーン",
+    blockers: "ブロック",
     target_zone: "ゾーン",
     choose_zone: "選択",
     remove_zone: "解除",

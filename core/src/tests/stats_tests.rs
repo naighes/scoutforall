@@ -157,6 +157,7 @@ mod tests {
                 player: None,
                 zone: None,
                 target: None,
+                blockers: None,
                 eval: *eval,
             });
         }
@@ -1303,6 +1304,8 @@ mod tests {
                 targets: vec![],
                 conflicts: vec![],
                 on_conflicts: None,
+                blockers_told: 0,
+                blockers: vec![],
                 zones: vec![
                     ZoneDetail {
                         zone: ZoneEnum::Four,
@@ -1344,6 +1347,8 @@ mod tests {
                 targets: vec![],
                 conflicts: vec![],
                 on_conflicts: None,
+                blockers_told: 0,
+                blockers: vec![],
                 zones: vec![ZoneDetail {
                     zone: ZoneEnum::Two,
                     share: 100.0,
@@ -1388,6 +1393,8 @@ mod tests {
                 targets: vec![],
                 conflicts: vec![],
                 on_conflicts: None,
+                blockers_told: 0,
+                blockers: vec![],
                 zones: vec![],
             }
         );
@@ -1626,6 +1633,60 @@ mod tests {
         assert_eq!(zones, vec![(Z2, 1.0), (Z3, 0.0), (Z4, 0.0)]);
         assert!(blocks.conflicts.is_empty());
         assert_eq!(blocks.on_conflicts, None);
+    }
+
+    /// Our attacks by how many of theirs blocked: of the ones told, the
+    /// share and, from three on, the efficiency; none told, no rows.
+    #[test]
+    fn detail_of_the_attacks_by_block() {
+        use crate::shapes::flags::BlockersEnum::{self, *};
+        let attacking = |attacks: &[(EvalEnum, Option<BlockersEnum>)]| {
+            let mut stats = Stats::new();
+            for (eval, blockers) in attacks {
+                stats.events.add(EventKey {
+                    event_type: A,
+                    phase: PhaseEnum::SideOut,
+                    rotation: 0,
+                    player: None,
+                    zone: None,
+                    target: None,
+                    blockers: *blockers,
+                    eval: Some(*eval),
+                });
+            }
+            stats
+        };
+        // three against two (two kills, an error), an error against one,
+        // a kill not told
+        let attacks = detail(
+            &attacking(&[
+                (Perfect, Some(Two)),
+                (Perfect, Some(Two)),
+                (Error, Some(Two)),
+                (Error, Some(One)),
+                (Perfect, None),
+            ]),
+            A,
+            &all(),
+        );
+        assert_eq!(attacks.blockers_told, 4);
+        let rows: Vec<_> = attacks
+            .blockers
+            .iter()
+            .map(|b| (b.blockers, b.count, b.efficiency.map(|e| e.round())))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (NoBlock, 0, None),
+                (One, 1, None),
+                (Two, 3, Some(33.0)),
+                (Three, 0, None),
+                (Hole, 0, None),
+            ]
+        );
+        let none_told = detail(&attacking(&[(Perfect, None)]), A, &all());
+        assert!(none_told.blockers.is_empty());
     }
 
     /// Their freeball after ours, exploited with a kill: team events, with

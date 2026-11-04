@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
+import io.github.naighes.scout4all.core.BlockersEnum
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
@@ -65,9 +66,11 @@ class StatsLayoutTest(private val screen: Size) {
                 s.chooseEvent(EventTypeEnum.B)
                 s.choosePlayer(s.playerChoices().first().id)
                 s.touchTarget(3u, "")
+                s.chooseBlockers(BlockersEnum.TWO)
                 s.chooseEval(EvalEnum.POSITIVE)
                 s.chooseEvent(EventTypeEnum.A)
                 s.choosePlayer(s.playerChoices().first().id)
+                s.chooseBlockers(BlockersEnum.ONE)
                 s.chooseEval(EvalEnum.PERFECT)
             }
         }
@@ -104,10 +107,12 @@ class StatsLayoutTest(private val screen: Size) {
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         rule.onNode(hasText("Block") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.blocks_by_zone))
+        rule.waitForText(string(R.string.blocks_by_blockers))
         rule.shot("stats-block-zones-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         rule.onNode(hasText("Attack") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.attacks_by_zone))
+        rule.waitForText(string(R.string.attacks_by_block))
         rule.shot("stats-attack-zones-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }

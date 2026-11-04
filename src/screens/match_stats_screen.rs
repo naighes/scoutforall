@@ -395,6 +395,14 @@ impl MatchStatsScreen {
     }
 
     fn render_event_stats(&self, f: &mut Frame, selection: &EventSelection, area: Rect) {
+        let Some(Breakdown::Fundamental(detail)) = self.breakdown(selection.event_type) else {
+            return;
+        };
+        // how many blocked, under the rest, when told
+        let blockers = match detail.blockers.len() {
+            0 => 0,
+            n => u16::try_from(n).unwrap_or(0) + 3,
+        };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -402,16 +410,64 @@ impl MatchStatsScreen {
                 Constraint::Percentage(20),
                 Constraint::Length(3),
                 Constraint::Length(3),
+                Constraint::Length(blockers),
             ])
             .split(area);
-        let Some(Breakdown::Fundamental(detail)) = self.breakdown(selection.event_type) else {
-            return;
-        };
         let with_player = self.player_filter.selected().is_some();
         Self::render_evals_bars(f, &detail, chunks[0]);
         Self::render_summary_table(f, &detail, with_player, chunks[1]);
         Self::render_efficiency_bars(f, &detail, chunks[2]);
         Self::render_positiveness_bars(f, &detail, chunks[3]);
+        Self::render_blockers(f, &detail, selection.event_type, chunks[4]);
+    }
+
+    /// Our attacks by how many of theirs blocked, or our blocks by how many
+    /// of ours, of the ones told: how many, their share and, from a few on,
+    /// their efficiency.
+    fn render_blockers(f: &mut Frame, detail: &Detail, event_type: EventTypeEnum, area: Rect) {
+        if detail.blockers.is_empty() {
+            return;
+        }
+        let labels = current_labels();
+        let domain = labels.domain;
+        let title = match event_type {
+            EventTypeEnum::B => domain.blocks_by_blockers,
+            _ => domain.attacks_by_block,
+        };
+        let told = domain
+            .blockers_told
+            .replace("{told}", &detail.blockers_told.to_string())
+            .replace("{total}", &detail.total.to_string());
+        let rows = detail.blockers.iter().map(|b| {
+            let shown = b.count > 0;
+            Row::new(vec![
+                Cell::from(b.blockers.name(domain)),
+                Cell::from(match shown {
+                    true => b.count.to_string(),
+                    false => "-".to_string(),
+                }),
+                Cell::from(match shown {
+                    true => format!("{:.0}%", b.share),
+                    false => String::new(),
+                }),
+                Cell::from(b.efficiency.map_or(String::new(), |e| format!("{e:+.0}%"))),
+            ])
+            .style(match shown {
+                true => Style::default(),
+                false => Style::default().add_modifier(Modifier::DIM),
+            })
+        });
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Fill(1),
+                Constraint::Length(4),
+                Constraint::Length(5),
+                Constraint::Length(6),
+            ],
+        )
+        .block(panel::section(title).title_bottom(told));
+        f.render_widget(table, area);
     }
 
     /// The fundamental in the set (or the match) selected, narrowed by the

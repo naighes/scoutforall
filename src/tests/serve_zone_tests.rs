@@ -355,6 +355,48 @@ mod tests {
         assert!(!density.iter().any(|l| l.contains('8')), "{density:?}");
     }
 
+    /// How many blocked: the tab tells the next one, on our block from one
+    /// on, on our attack from none; saved in the flags; in the stats, the
+    /// blocks by blockers.
+    #[tokio::test]
+    async fn how_many_blocked_is_told_with_the_tab() {
+        use KeyCode::*;
+        let mut ui = serving().await;
+        let domain = current_labels().domain;
+        let told = |name: &str| format!("{}: {name}", current_labels().blockers);
+        ui.type_keys(&[Char('+'), Char('b'), Char('2')]).await;
+        assert!(ui.screen().contains(&told("-")), "{}", ui.screen());
+        ui.type_keys(&[Tab, Tab]).await;
+        assert!(
+            ui.screen().contains(&told(domain.blockers[2])),
+            "{}",
+            ui.screen()
+        );
+        ui.press(Char('+')).await;
+        // 2 blockers: code 3 from bit 10
+        assert_eq!(last_flags(&ui), (3 << 10).to_string());
+        ui.type_keys(&[Char('a'), Char('2'), Tab]).await;
+        assert!(
+            ui.screen().contains(&told(domain.blockers[0])),
+            "{}",
+            ui.screen()
+        );
+        ui.press(Char('#')).await;
+        assert_eq!(last_flags(&ui), (1 << 10).to_string());
+        ui.resize(120, 40);
+        ui.type_keys(&[Esc, Char(' '), Tab, Tab, Tab, Down, Down, Down])
+            .await;
+        let table = ui
+            .panel(domain.blocks_by_blockers)
+            .unwrap_or_else(|| panic!("{}", ui.screen()));
+        assert!(
+            table
+                .iter()
+                .any(|l| l.contains(domain.blockers[2]) && l.contains("100%")),
+            "{table:?}"
+        );
+    }
+
     /// The stats of the serve: how many went to each zone and their
     /// efficiency there, of the serves whose zone was told, two cells of
     /// two zones half in each; the efficiency only from three serves on.

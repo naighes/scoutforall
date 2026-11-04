@@ -12,7 +12,7 @@ use crate::{
     shapes::{
         court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
-        flags::{EventFlags, ReceptionSchemeEnum},
+        flags::{BlockersEnum, EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
@@ -128,6 +128,8 @@ pub struct ScoutingSession {
     /// where the ball went, if the scout tells it along with the
     /// evaluation
     target: Option<CourtTarget>,
+    /// how many blocked, if the scout tells it along with the evaluation
+    blockers: Option<BlockersEnum>,
     /// the inverted P1, written on every event saved
     inverted_p1: bool,
     /// how many receive their next serve, written on the reception or on
@@ -148,6 +150,7 @@ impl fmt::Debug for ScoutingSession {
             .field("player", &self.player)
             .field("technique", &self.technique)
             .field("target", &self.target)
+            .field("blockers", &self.blockers)
             .field("order", &self.order)
             .finish_non_exhaustive()
     }
@@ -180,6 +183,7 @@ impl ScoutingSession {
             player: None,
             technique: None,
             target: None,
+            blockers: None,
             inverted_p1,
             reception: ReceptionSchemeEnum::default(),
             order: ChoiceOrder::EventFirst,
@@ -314,6 +318,44 @@ impl ScoutingSession {
         self.target
     }
 
+    /// How many blocked, if told.
+    pub fn blockers(&self) -> Option<BlockersEnum> {
+        self.blockers
+    }
+
+    /// The ones the scout can tell now, along with the evaluation: against
+    /// our attack and on our block (see `BlockersEnum::of`).
+    pub fn available_blockers(&self) -> &'static [BlockersEnum] {
+        match (self.step, self.event) {
+            (ScoutingStep::Eval, Some(event)) => BlockersEnum::of(event),
+            _ => &[],
+        }
+    }
+
+    /// The scout tells how many blocked, or takes it back (`None`): the
+    /// evaluation saves it with the event. Never required.
+    pub fn choose_blockers(&mut self, blockers: Option<BlockersEnum>) -> Result<(), ScoutingError> {
+        match blockers {
+            Some(b) if !self.available_blockers().contains(&b) => {
+                Err(ScoutingError::InvalidSelection)
+            }
+            _ if self.available_blockers().is_empty() => Err(ScoutingError::InvalidSelection),
+            _ => {
+                self.blockers = blockers;
+                Ok(())
+            }
+        }
+    }
+
+    /// The scout tells the next one: from the first, none told again after
+    /// the last (see `BlockersEnum::next`).
+    pub fn next_blockers(&mut self) -> Result<Option<BlockersEnum>, ScoutingError> {
+        let next = self
+            .event
+            .and_then(|event| BlockersEnum::next(event, self.blockers));
+        self.choose_blockers(next).map(|_| next)
+    }
+
     /// Whether the scout can tell where the ball went, along with the
     /// evaluation: for our serve, on their court, and for our reception,
     /// on ours.
@@ -345,6 +387,7 @@ impl ScoutingSession {
         match (self.target_kind(), target) {
             (Some(_), None) => {
                 self.target = None;
+                self.blockers = None;
                 Ok(())
             }
             (Some(kind), Some(t)) if kind.fits(&t) => {
@@ -743,10 +786,15 @@ impl ScoutingSession {
                     player: self.player,
                     target_player: None,
                     technique: self.technique,
-                    flags: EventFlags::default().with_target(
-                        self.target
-                            .filter(|t| self.target_kind().is_some_and(|k| k.fits(t))),
-                    ),
+                    flags: EventFlags::default()
+                        .with_target(
+                            self.target
+                                .filter(|t| self.target_kind().is_some_and(|k| k.fits(t))),
+                        )
+                        .with_blockers(
+                            self.blockers
+                                .filter(|b| self.available_blockers().contains(b)),
+                        ),
                 })
                 .await
             }
@@ -795,6 +843,7 @@ impl ScoutingSession {
                 self.player = None;
                 self.technique = None;
                 self.target = None;
+                self.blockers = None;
                 self.step = Player;
                 Ok(())
             }
@@ -812,6 +861,7 @@ impl ScoutingSession {
         self.player = None;
         self.technique = None;
         self.target = None;
+        self.blockers = None;
         self.step = ScoutingStep::Event;
     }
 
@@ -886,6 +936,11 @@ impl ScoutingSession {
                     .flags
                     .target()
                     .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)));
+                // and how many blocked
+                self.blockers = removed
+                    .flags
+                    .blockers()
+                    .filter(|b| self.available_blockers().contains(b));
             }
             (_, R, Some(player)) => {
                 self.event = Some(R);

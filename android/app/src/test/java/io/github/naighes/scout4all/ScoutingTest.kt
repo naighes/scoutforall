@@ -260,9 +260,12 @@ class ScoutingTest {
         val at = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
         assertTrue(at("4").x < at("3").x && at("3").x < at("2").x)
         rule.onNode(zone("2")).performClick()
+        // and how many blocked: two, read whole
+        rule.onNode(hasContentDescription("2 blockers") and hasClickAction()).performClick()
         touch("+")
         rule.waitFor { saved().events.size == 2 }
         assertEquals("2", saved().events[0].target)
+        assertEquals("2 blockers", saved().events[0].blockers)
     }
 
     /** From the changes of the lineup, the libero for a player touched on

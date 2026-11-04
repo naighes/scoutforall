@@ -10,7 +10,7 @@ use crate::{
     shapes::{
         court_zone::{CourtTarget, SubzoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum},
-        flags::EventFlags,
+        flags::{BlockersEnum, EventFlags},
         lineup::Lineup,
         refusal::Refusal,
         set::SetEntry,
@@ -1215,13 +1215,21 @@ impl SetTranslator<'_> {
                     }
                     _ => None,
                 };
+                // how many of theirs blocked our attack, or of ours blocked
+                // theirs
+                let blockers = skill
+                    .num_players
+                    .and_then(BlockersEnum::of_datavolley)
+                    .filter(|b| BlockersEnum::of(event_type).contains(b));
                 self.apply_flagged(
                     event_type,
                     Some(player),
                     eval,
                     None,
                     technique,
-                    EventFlags::default().with_target(target),
+                    EventFlags::default()
+                        .with_target(target)
+                        .with_blockers(blockers),
                 )
             }
             None => Ok(()),
