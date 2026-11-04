@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod tests {
     use crate::shapes::{
+        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, Direction, SubzoneEnum},
         enums::{EvalEnum, EventTypeEnum},
         flags::{EventFlags, ReceptionSchemeEnum},
         snapshot::EventEntry,
@@ -84,15 +85,284 @@ mod tests {
     fn unknown_bits_are_kept() {
         let later = EventFlags::parse("0").unwrap();
         assert_eq!(later, EventFlags::default());
-        let later = EventFlags::parse("70").unwrap();
-        assert_eq!(later.to_string(), "70");
+        // bit 10 and a reception with both its bits
+        let later = EventFlags::parse("1030").unwrap();
+        assert_eq!(later.to_string(), "1030");
         assert_eq!(later.reception(), ReceptionSchemeEnum::Three);
+        assert_eq!(later.target(), None);
         let changed = later
             .with_inverted_p1(true)
-            .with_reception(ReceptionSchemeEnum::Four);
-        assert_eq!(changed.to_string(), "67");
+            .with_reception(ReceptionSchemeEnum::Four)
+            .with_target(Some(CourtTarget::Zone(1)));
+        assert_eq!(changed.to_string(), "1035");
+        // a target this version doesn't know (code 127) is none, and kept
+        let later = EventFlags::parse("1016").unwrap();
+        assert_eq!(later.target(), None);
+        assert_eq!(later.with_inverted_p1(true).to_string(), "1017");
         assert!(EventFlags::parse("x").is_err());
         assert!(EventFlags::parse("70000").is_err());
+    }
+
+    /// Every target in bits 3 to 9, apart from the other flags: the nine
+    /// zones, the 36 cells, the 60 pairs side by side; none by default, and
+    /// taken away. The zones keep the codes 1 to 9 of before the cells.
+    #[test]
+    fn the_target() {
+        let base = EventFlags::default()
+            .with_inverted_p1(true)
+            .with_reception(ReceptionSchemeEnum::Two);
+        let all = CourtTarget::all();
+        assert_eq!(all.len(), 9 + 36 + 60);
+        for (i, target) in all.into_iter().enumerate() {
+            let flags = base.with_target(Some(target));
+            assert_eq!(flags.target(), Some(target));
+            assert!(flags.inverted_p1());
+            assert_eq!(flags.reception(), ReceptionSchemeEnum::Two);
+            assert_eq!(flags.to_string(), ((i + 1) * 8 + 5).to_string());
+            assert_eq!(flags.with_target(None), base);
+        }
+        assert_eq!(EventFlags::default().target(), None);
+        assert_eq!(
+            EventFlags::parse("8").unwrap().target(),
+            Some(CourtTarget::Zone(1))
+        );
+        assert_eq!(
+            EventFlags::parse("72").unwrap().target(),
+            Some(CourtTarget::Zone(9))
+        );
+    }
+
+    fn cell(text: &str) -> CourtCell {
+        let mut chars = text.chars();
+        let zone = chars.next().and_then(|c| c.to_digit(10)).unwrap();
+        let subzone = chars.next().and_then(SubzoneEnum::of).unwrap();
+        CourtCell::new(u8::try_from(zone).unwrap(), subzone).unwrap()
+    }
+
+    /// The court as our server sees it, their end line at the top: zone 1
+    /// at the top on the left, each zone in the subzones of DataVolley (A
+    /// behind on the right of who plays there, then anticlockwise).
+    #[test]
+    fn the_cells_as_datavolley_tells_them() {
+        let rows: Vec<String> = CourtCell::grid()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                "1A 1D 6A 6D 5A 5D",
+                "1B 1C 6B 6C 5B 5C",
+                "9A 9D 8A 8D 7A 7D",
+                "9B 9C 8B 8C 7B 7C",
+                "2A 2D 3A 3D 4A 4D",
+                "2B 2C 3B 3C 4B 4C",
+            ]
+        );
+        for row in CourtCell::grid() {
+            for c in row {
+                let (r, col) = c.place();
+                assert_eq!(CourtCell::at(r, col), Some(c));
+            }
+        }
+    }
+
+    /// Our court, seen from the bench with the net at the top: theirs
+    /// turned round, the same cells; the cursor moves as shown.
+    #[test]
+    fn our_court_is_theirs_turned_round() {
+        let rows: Vec<String> = CourtCell::shown(CourtSide::Ours)
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                "4C 4B 3C 3B 2C 2B",
+                "4D 4A 3D 3A 2D 2A",
+                "7C 7B 8C 8B 9C 9B",
+                "7D 7A 8D 8A 9D 9A",
+                "5C 5B 6C 6B 1C 1B",
+                "5D 5A 6D 6A 1D 1A",
+            ]
+        );
+        assert_eq!(CourtCell::shown(CourtSide::Theirs), CourtCell::grid());
+        let zones: Vec<Vec<CourtZoneEnum>> = CourtZoneEnum::shown(CourtSide::Ours);
+        assert_eq!(
+            zones.first().map(Vec::as_slice),
+            Some(
+                &[
+                    CourtZoneEnum::Z4,
+                    CourtZoneEnum::Z43,
+                    CourtZoneEnum::Z3,
+                    CourtZoneEnum::Z32,
+                    CourtZoneEnum::Z2
+                ][..]
+            )
+        );
+        // 8D: right to 8A on ours, to 7A on theirs
+        let at = cell("8D");
+        assert_eq!(at.moved_on(CourtSide::Ours, Direction::Right), cell("8A"));
+        assert_eq!(at.moved_on(CourtSide::Theirs, Direction::Right), cell("7A"));
+        // up to 8C, over it on ours (under it on theirs)
+        assert_eq!(at.moved_on(CourtSide::Ours, Direction::Up), cell("8C"));
+        assert_eq!(at.moved_on(CourtSide::Theirs, Direction::Down), cell("8C"));
+    }
+
+    /// How many blocked: in bits of their own, the zone and the rest kept;
+    /// all five against our attack, on our block all but none; told one by
+    /// one, then none again.
+    #[test]
+    fn how_many_blocked() {
+        use crate::shapes::flags::BlockersEnum::{self, *};
+        let flags = EventFlags::default()
+            .with_inverted_p1(true)
+            .with_target(Some(CourtTarget::Zone(2)));
+        for b in BlockersEnum::ALL {
+            let told = flags.with_blockers(Some(b));
+            assert_eq!(told.blockers(), Some(b));
+            assert_eq!(told.target(), Some(CourtTarget::Zone(2)));
+            assert!(told.inverted_p1());
+            assert_eq!(told.with_blockers(None), flags);
+            assert_eq!(EventFlags::parse(&told.to_string()).ok(), Some(told));
+        }
+        assert_eq!(flags.blockers(), None);
+        assert_eq!(BlockersEnum::of(EventTypeEnum::A).len(), 5);
+        assert_eq!(BlockersEnum::of(EventTypeEnum::B), &[One, Two, Three, Hole]);
+        assert!(BlockersEnum::of(EventTypeEnum::D).is_empty());
+        let next = |c| BlockersEnum::next(EventTypeEnum::B, c);
+        assert_eq!(next(None), Some(One));
+        assert_eq!(next(Some(Three)), Some(Hole));
+        assert_eq!(next(Some(Hole)), None);
+        assert_eq!(BlockersEnum::next(EventTypeEnum::A, None), Some(NoBlock));
+        assert_eq!(BlockersEnum::of_datavolley('4'), Some(Hole));
+        assert_eq!(BlockersEnum::of_datavolley('~'), None);
+    }
+
+    /// The zones at the net on our court, 4 3 2 from the left: the cursor
+    /// across them, staying at the ends; only a zone there fits the block.
+    #[test]
+    fn the_zones_at_the_net() {
+        use crate::shapes::court_zone::TargetKind;
+        use CourtZoneEnum::*;
+        assert_eq!(CourtZoneEnum::net_shown(CourtSide::Ours), vec![Z4, Z3, Z2]);
+        assert_eq!(
+            CourtZoneEnum::net_shown(CourtSide::Theirs),
+            vec![Z2, Z3, Z4]
+        );
+        let moved = |z: CourtZoneEnum, d| z.moved_at_net(CourtSide::Ours, d);
+        assert_eq!(moved(Z4, Direction::Right), Z3);
+        assert_eq!(moved(Z3, Direction::Right), Z2);
+        assert_eq!(moved(Z2, Direction::Right), Z2);
+        assert_eq!(moved(Z4, Direction::Left), Z4);
+        assert_eq!(moved(Z3, Direction::Up), Z3);
+        assert_eq!(moved(Z8, Direction::Down), Z4);
+        let net = TargetKind::Net;
+        assert!(net.fits(&CourtTarget::Zone(3)));
+        assert!(!net.fits(&CourtTarget::Zone(8)));
+        assert!(!net.fits(&CourtTarget::Cell(cell("3A"))));
+        assert!(TargetKind::Cells.fits(&CourtTarget::Cell(cell("3A"))));
+        assert_eq!(TargetKind::of(EventTypeEnum::B), Some(TargetKind::Net));
+        assert_eq!(TargetKind::of(EventTypeEnum::D), Some(TargetKind::Cells));
+        assert_eq!(TargetKind::of(EventTypeEnum::F), None);
+        // touched again, taken back
+        let touched = CourtTarget::touched_zone(None, Z3);
+        assert_eq!(touched, Some(CourtTarget::Zone(3)));
+        assert_eq!(CourtTarget::touched_zone(touched, Z3), None);
+        assert_eq!(CourtTarget::touched_zone(touched, Z43), None);
+    }
+
+    /// Two cells side by side across or down, not on a corner: across the
+    /// line between two zones of a row they are on a conflict zone; one
+    /// behind the other, or in one zone, they aren't.
+    #[test]
+    fn two_cells_side_by_side() {
+        use CourtZoneEnum::*;
+        let pair = |a: &str, b: &str| CourtTarget::pair(cell(a), cell(b));
+        let conflict = |a: &str, b: &str| pair(a, b).map(|t| t.conflict());
+        let zones = |a: &str, b: &str| pair(a, b).map(|t| t.zones());
+        assert_eq!(conflict("1D", "6A"), Some(Some(Z61)));
+        assert_eq!(conflict("6A", "1D"), Some(Some(Z61)));
+        assert_eq!(conflict("1C", "6B"), Some(Some(Z61)));
+        assert_eq!(conflict("1A", "1D"), Some(None));
+        assert_eq!(conflict("1B", "1C"), Some(None));
+        // 1C with 9D under it: on the line between two rows, no conflict
+        assert_eq!(conflict("1C", "9D"), Some(None));
+        assert_eq!(conflict("1B", "9A"), Some(None));
+        assert_eq!(conflict("3A", "8B"), Some(None));
+        // half in each zone, one zone whole
+        assert_eq!(zones("1C", "9D"), Some(vec![(Z1, 0.5), (Z9, 0.5)]));
+        assert_eq!(zones("1D", "6A"), Some(vec![(Z1, 0.5), (Z6, 0.5)]));
+        assert_eq!(zones("1B", "1A"), Some(vec![(Z1, 1.0)]));
+        // not 1D nor 9D, on its corners
+        assert_eq!(pair("1B", "1D"), None);
+        assert_eq!(pair("1B", "9D"), None);
+        assert_eq!(pair("1A", "6A"), None);
+        assert_eq!(pair("1A", "1A"), None);
+        // every conflict zone has its pairs
+        let lines: std::collections::HashSet<CourtZoneEnum> = CourtTarget::all()
+            .iter()
+            .filter_map(|t| t.conflict())
+            .collect();
+        assert_eq!(lines.len(), CourtZoneEnum::CONFLICTS.len());
+        assert_eq!(
+            pair("8C", "7B").map(|t| t.to_string()),
+            Some("8C-7B".to_string())
+        );
+        assert_eq!(
+            pair("7B", "8C").map(|t| t.to_string()),
+            Some("8C-7B".to_string())
+        );
+    }
+
+    /// Touching cells: one, then one side by side along with it; touched
+    /// again, taken back; one elsewhere starts over.
+    #[test]
+    fn touching_the_cells() {
+        let touch = |current: Option<CourtTarget>, c: &str| CourtTarget::touched(current, cell(c));
+        let one = touch(None, "1D");
+        assert_eq!(one, Some(CourtTarget::Cell(cell("1D"))));
+        let two = touch(one, "6A");
+        assert_eq!(two.map(|t| t.to_string()), Some("1D-6A".to_string()));
+        assert_eq!(touch(two, "6A"), one);
+        assert_eq!(touch(two, "1D"), Some(CourtTarget::Cell(cell("6A"))));
+        assert_eq!(touch(two, "8A"), Some(CourtTarget::Cell(cell("8A"))));
+        assert_eq!(touch(one, "1D"), None);
+        // a corner isn't side by side: it starts over
+        assert_eq!(touch(one, "6B"), Some(CourtTarget::Cell(cell("6B"))));
+        // the whole zone of a file: a touch tells a cell
+        assert_eq!(
+            touch(Some(CourtTarget::Zone(1)), "1A"),
+            Some(CourtTarget::Cell(cell("1A")))
+        );
+    }
+
+    /// The cursor on the court: a cell at a time, still at the edges.
+    #[test]
+    fn the_cursor_moves_on_the_court() {
+        use Direction::*;
+        let path = |from: &str, moves: &[Direction]| {
+            moves
+                .iter()
+                .fold(cell(from), |c, d| c.moved(*d))
+                .to_string()
+        };
+        assert_eq!(path("8A", &[Up]), "6B");
+        assert_eq!(path("8A", &[Left]), "9D");
+        assert_eq!(path("1A", &[Up, Left]), "1A");
+        assert_eq!(path("4C", &[Down, Right]), "4C");
+        assert_eq!(path("1A", &[Right, Right, Down, Down]), "8A");
+        assert_eq!(path("2B", &[Right; 5]), "4C");
     }
 
     /// Saved last, after the technique, and read back; a row of v0.10.1 or

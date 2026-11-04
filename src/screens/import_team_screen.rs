@@ -46,11 +46,8 @@ impl<TR: TeamReader + Send + Sync, TW: TeamWriter + Send + Sync> FileSystemActio
         match (&self.dvw, has_extension(path, &["dvw"])) {
             (Some(providers), true) => {
                 let labels = current_labels().domain;
-                let file = parse(&bytes).map_err(|e| {
-                    AppError::IO(IOError::Msg(
-                        labels.dvw_unreadable.replace("{detail}", &e.to_string()),
-                    ))
-                })?;
+                let file =
+                    parse(&bytes).map_err(|e| AppError::IO(IOError::Msg(e.describe(labels))))?;
                 let teams = providers
                     .team_reader
                     .read_all()

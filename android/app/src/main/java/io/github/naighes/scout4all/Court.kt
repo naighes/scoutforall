@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +59,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.CourtCellChoice
+import androidx.compose.ui.semantics.contentDescription
 
 /** What a position of the court shows. */
 data class CourtSlot(
@@ -122,13 +126,27 @@ fun Court(
     showPositions: Boolean = false,
     serveZone: Boolean = false,
     ball: CourtBall? = null,
+    targets: List<List<CourtCellChoice>> = emptyList(),
+    targetsOurs: Boolean = false,
+    /** what the cells are, read by TalkBack: the serve, attack or reception zone */
+    targetsName: Int = R.string.serve_zone,
+    onTarget: (CourtCellChoice) -> Unit = {},
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
-    val zone = if (serveZone) ServeZone else 0.dp
+    // the zones where the ball went (our serve on theirs, our reception on
+    // ours) on a square court (its true proportions), to leave them room to
+    // touch; the player is told above
+    val aiming = targets.isNotEmpty()
+    val zone = when {
+        aiming -> 0.dp
+        serveZone -> ServeZone
+        else -> 0.dp
+    }
+    val aspect = if (aiming) 1f else 1.4f
     val width = when {
-        constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * 1.4f)
+        constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * aspect)
         else -> maxWidth
     }
-    CourtColumn(slot, onPosition, showPositions, serveZone, ball, Modifier.width(width))
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, Modifier.width(width))
 }
 
 @Composable
@@ -138,23 +156,33 @@ private fun CourtColumn(
     showPositions: Boolean,
     serveZone: Boolean,
     ball: CourtBall?,
+    targets: List<List<CourtCellChoice>>,
+    targetsOurs: Boolean,
+    targetsName: Int,
+    onTarget: (CourtCellChoice) -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
     val lines = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
     val net = MaterialTheme.colorScheme.onSurface
     val server = slot(1).takeIf { serveZone && it.serving }
-    Box(Modifier.fillMaxWidth().aspectRatio(1.4f)) {
+    val aiming = targets.isNotEmpty()
+    Box(Modifier.fillMaxWidth().aspectRatio(if (aiming) 1f else 1.4f)) {
         Canvas(Modifier.fillMaxSize()) {
             val line = 2.dp.toPx()
             drawRect(floor)
             drawRect(lines, topLeft = Offset(line / 2, line / 2), style = Stroke(line),
                 size = size.copy(width = size.width - line, height = size.height - line))
+            // the zones show the attack line, between their rows
             val attack = size.height / 3
-            drawLine(lines, Offset(0f, attack), Offset(size.width, attack), strokeWidth = line)
-            drawLine(net, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 4.dp.toPx())
+            if (!aiming) drawLine(lines, Offset(0f, attack), Offset(size.width, attack), strokeWidth = line)
+            // their court as our server sees it: the net at the bottom
+            val netY = if (aiming && !targetsOurs) size.height else 0f
+            drawLine(net, Offset(0f, netY), Offset(size.width, netY), strokeWidth = 4.dp.toPx())
         }
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        // where the ball went, in place of the players
+        if (targets.isNotEmpty()) TargetZones(targets, targetsName, onTarget)
+        else BoxWithConstraints(Modifier.fillMaxSize()) {
             // the player on the spot, the name under the jersey in two
             // lines, a third of the court wide; on a court narrower than a
             // phone's (360dp), the jersey smaller, so that the players don't
@@ -222,7 +250,7 @@ private fun CourtColumn(
             }
         }
     }
-    if (serveZone) {
+    if (serveZone && !aiming) {
         // behind the end line, under position 1
         Row(Modifier.fillMaxWidth().height(ServeZone)) {
             Box(Modifier.weight(2f))
@@ -235,6 +263,71 @@ private fun CourtColumn(
 }
 
 private val ServeZone = 72.dp
+
+/** The court of the opponent as our server sees it (their end line at the
+ * top, 1 on the left, the net at the bottom), or ours (`ours`: seen from
+ * the bench, the net at the top, 4 on the left): the nine zones, each in
+ * the four cells of DataVolley, to touch where the ball went; a cell alone, or
+ * along with the one next to it (two cells of two zones are on the line
+ * between them); the cells chosen filled, touched again to take them
+ * back. The lines between the zones bolder than between the cells. For our
+ * block a single row, the zones at the net (4, 3, 2), whole: the rest of
+ * the court empty, only the lines of its zones. */
+@Composable
+private fun TargetZones(rows: List<List<CourtCellChoice>>, name: Int, onTarget: (CourtCellChoice) -> Unit) =
+    Box(Modifier.fillMaxSize()) {
+        val net = rows.size == 1
+        val zoneDescription = stringResource(name)
+        val chosenState = stringResource(R.string.zone_chosen)
+        val colors = MaterialTheme.colorScheme
+        val cellLines = colors.onSurface.copy(alpha = 0.25f)
+        val zoneLines = colors.onSurface.copy(alpha = 0.7f)
+        Canvas(Modifier.fillMaxSize()) {
+            val (thin, bold) = 1.dp.toPx() to 2.dp.toPx()
+            (1 until 6).forEach { i ->
+                val (x, y) = size.width * i / 6 to size.height * i / 6
+                val (color, width) = if (i % 2 == 0) zoneLines to bold else cellLines to thin
+                // at the net only the zones, no cells
+                if (net && i % 2 != 0) return@forEach
+                drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = width)
+                drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = width)
+            }
+        }
+        Column(Modifier.fillMaxSize()) {
+            rows.forEach { row ->
+                Row(Modifier.fillMaxWidth().weight(1f)) {
+                    row.forEach { cell ->
+                        val (background, content) = when {
+                            cell.chosen -> colors.primary to colors.onPrimary
+                            else -> Color.Transparent to colors.onSurface
+                        }
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight().padding(2.dp)
+                                .tutorial("cell:${cell.label}")
+                                .clickable(role = Role.Button) { onTarget(cell) }
+                                .semantics {
+                                    contentDescription = "$zoneDescription ${cell.label}"
+                                    if (cell.chosen) stateDescription = chosenState
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Surface(Modifier.fillMaxSize(), shape = MaterialTheme.shapes.small, color = background) {}
+                            Text(
+                                cell.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (cell.chosen) FontWeight.Bold else FontWeight.Normal,
+                                color = content,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
+                }
+            }
+            // at the net, the rest of the court below
+            if (net) Spacer(Modifier.fillMaxWidth().weight(2f))
+        }
+    }
 
 /** The player of a position, all of it to touch: the jersey at the top,
  * the name under it. TalkBack reads the number, the name, then what the

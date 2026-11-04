@@ -51,6 +51,18 @@ import io.github.naighes.scout4all.core.FreeballStats
 import io.github.naighes.scout4all.core.FundamentalDetail
 import io.github.naighes.scout4all.core.PlayerStats
 import io.github.naighes.scout4all.core.Tone
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import io.github.naighes.scout4all.core.TargetStats
 import kotlin.math.roundToInt
 
 /** The detail asked for: a fundamental, narrowed by the filter. */
@@ -221,6 +233,8 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
             }
         }
     }
+    if (f.targets.isNotEmpty()) TargetZones(f, query.event)
+    if (f.blockers.isNotEmpty()) Blockers(f, query.event)
     if (f.players.isNotEmpty()) {
         Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
         Column {
@@ -375,3 +389,178 @@ private fun FreeballContent(f: FreeballStats) = TileRow {
         )
     }
 }
+
+/** The serves or attacks with their zone told, on their court, or the
+ * receptions or digs, on ours, or the blocks at our net: where they went, the more the brighter
+ * amber; or their efficiency there, red to green, from a few on. Two cells
+ * of two zones count half in each. On our court also the conflict zones,
+ * between the zones, and all of them under the court. */
+@Composable
+private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    var efficiency by rememberSaveable { mutableStateOf(false) }
+    val (title, told) = when (event) {
+        EventTypeEnum.P -> R.string.receptions_by_zone to R.string.reception_zones_told
+        EventTypeEnum.A -> R.string.attacks_by_zone to R.string.attack_zones_told
+        EventTypeEnum.D -> R.string.digs_by_zone to R.string.dig_zones_told
+        EventTypeEnum.B -> R.string.blocks_by_zone to R.string.block_zones_told
+        else -> R.string.serves_by_zone to R.string.zones_told
+    }
+    Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
+    Text(
+        stringResource(told, f.targetsTold.toInt(), f.total.toInt()),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        listOf(R.string.zone_density to false, R.string.efficiency to true).forEachIndexed { i, (name, shows) ->
+            SegmentedButton(
+                selected = efficiency == shows,
+                onClick = { efficiency = shows },
+                shape = SegmentedButtonDefaults.itemShape(i, 2),
+            ) { Text(stringResource(name).replaceFirstChar { it.uppercase() }, maxLines = 1) }
+        }
+    }
+    val most = f.targets.flatten().maxOfOrNull { it.count }?.coerceAtLeast(1.0) ?: 1.0
+    ZoneGrid(f.targets) { t ->
+        val (background, value, detail) = when {
+            !efficiency -> Triple(
+                densityColor(t.count / most).takeIf { t.count > 0.0 },
+                if (t.count > 0.0) "${t.share.roundToInt()}%" else "",
+                if (t.count > 0.0) "(${count(t.count)})" else "",
+            )
+            t.efficiency != null -> Triple(
+                gradeColor((t.efficiency!! + 100.0) / 200.0),
+                "%+d%%".format(t.efficiency!!.roundToInt()),
+                "n=${count(t.count)}",
+            )
+            // too few to tell
+            else -> Triple(null, if (t.count > 0.0) "(${count(t.count)})" else "", "")
+        }
+        ZoneCell(t, background, value, detail)
+    }
+    f.onConflicts?.let { on ->
+        val all = stringResource(R.string.on_conflicts, on.count.toInt(), on.share.roundToInt())
+        Text(
+            all + (on.efficiency?.takeIf { efficiency }?.let { " · %+d%%".format(it.roundToInt()) } ?: ""),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+/** Our attacks by how many of theirs blocked, or our blocks by how many of
+ * ours, of the ones told: a row each, how many, their share and, from a
+ * few on, their efficiency. */
+@Composable
+private fun Blockers(f: FundamentalDetail, event: EventTypeEnum) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val title = if (event == EventTypeEnum.B) R.string.blocks_by_blockers else R.string.attacks_by_block
+    Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
+    Text(
+        stringResource(R.string.blockers_told, f.blockersTold.toInt(), f.total.toInt()),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    f.blockers.forEach { b ->
+        val shown = b.count > 0u
+        val color = if (shown) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+        Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(b.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = color)
+            Text(
+                if (shown) "${b.share.roundToInt()}% (${b.count})" else "–",
+                style = MaterialTheme.typography.bodyLarge,
+                color = color,
+            )
+            b.efficiency?.let {
+                Text(
+                    "%+d%%".format(it.roundToInt()),
+                    Modifier.padding(start = 12.dp),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = gradeColor((it + 100.0) / 200.0),
+                )
+            }
+        }
+    }
+}
+
+/** How many in a zone: whole, or with the half of two cells of two zones
+ * ("2.5"). */
+internal fun count(count: Double): String =
+    if (count % 1.0 == 0.0) count.toLong().toString() else "%.1f".format(count)
+
+/** The amber of the zones served to, from the fewest serves (`share`
+ * near 0) to the most (1). */
+internal fun densityColor(share: Double): Color =
+    lerp(Scout4AllColors.surfaceVariant, Scout4AllColors.primary, (0.25 + 0.75 * share.coerceIn(0.0, 1.0)).toFloat())
+
+/** The text on a background: white or black, whichever reads better (at
+ * 4.5:1 at least on any color). */
+internal fun readableOn(background: Color): Color =
+    listOf(Color.White, Color.Black).maxBy { contrast(it, background) }
+
+internal fun contrast(a: Color, b: Color): Double {
+    val (light, dark) = listOf(a.luminance(), b.luminance()).sortedDescending()
+    return (light + 0.05) / (dark + 0.05)
+}
+
+/** A zone: its name, its value and a detail under it, on its color if it
+ * has one; a conflict zone, narrow, its name and value only. TalkBack reads
+ * them all. */
+@Composable
+private fun ZoneCell(t: TargetStats, background: Color?, value: String, detail: String) {
+    val text = background?.let { readableOn(it) } ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val lines = when {
+        !t.zone -> listOf(t.label to MaterialTheme.typography.labelSmall, value to MaterialTheme.typography.labelMedium)
+            .filter { it.first.isNotEmpty() }
+        else -> listOf(
+            t.label to MaterialTheme.typography.labelSmall,
+            value to MaterialTheme.typography.labelLarge,
+            detail to MaterialTheme.typography.labelSmall,
+        ).filter { it.first.isNotEmpty() }
+    }
+    Surface(
+        Modifier.fillMaxSize().padding(1.dp).clearAndSetSemantics {
+            contentDescription = listOf(t.label, value, detail).filter { it.isNotEmpty() }.joinToString(" ")
+        },
+        shape = MaterialTheme.shapes.small,
+        color = background ?: MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (t.zone) 1f else 0.5f),
+    ) {
+        Column(verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            lines.forEach { (line, style) ->
+                Text(
+                    line,
+                    style = style,
+                    fontWeight = if (style == MaterialTheme.typography.labelLarge) FontWeight.Bold else null,
+                    color = text,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+    }
+}
+
+/** The court: the opponent's as our server sees it (their end line at the
+ * top, 1 on the left) or ours from the bench (the net at the top, 4 on the
+ * left), the zones a row each as `rows` gives them: three zones, or with
+ * the conflict zones narrower between them. A row as tall as a zone is
+ * wide, more with its texts at a large font. */
+@Composable
+private fun <T> ZoneGrid(rows: List<List<T>>, cell: @Composable (T) -> Unit) =
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // the conflict zones a sixth of the court, the zones what's left
+        val conflict = maxWidth / 6
+        val zone = (maxWidth - conflict * 2) / 3
+        val fives = listOf(zone, conflict, zone, conflict, zone)
+        val threes = List(3) { maxWidth / 3 }
+        val height = if (rows.any { it.size == 5 }) zone else maxWidth / 3
+        Column(Modifier.fillMaxWidth()) {
+            rows.forEach { row ->
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = height)) {
+                    val widths = if (row.size == 5) fives else threes
+                    row.forEachIndexed { c, t ->
+                        Box(Modifier.width(widths.getOrElse(c) { 0.dp }).fillMaxHeight()) { cell(t) }
+                    }
+                }
+            }
+        }
+    }

@@ -48,13 +48,15 @@ use scout4all_core::{
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::{Consent, TeamDefaults},
+    settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
+        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, SubzoneEnum, TargetKind},
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
+        flags::BlockersEnum,
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
@@ -111,6 +113,15 @@ pub enum RoleEnum {
     Setter,
     OutsideHitter,
     MiddleBlocker,
+}
+
+#[uniffi::remote(Enum)]
+pub enum BlockersEnum {
+    NoBlock,
+    One,
+    Two,
+    Three,
+    Hole,
 }
 
 #[uniffi::remote(Enum)]
@@ -172,6 +183,25 @@ pub enum SetTypeEnum {
 pub enum ServeTypeEnum {
     Float,
     Spin,
+}
+
+#[uniffi::remote(Enum)]
+pub enum CourtZoneEnum {
+    Z1,
+    Z2,
+    Z3,
+    Z4,
+    Z5,
+    Z6,
+    Z7,
+    Z8,
+    Z9,
+    Z43,
+    Z32,
+    Z78,
+    Z89,
+    Z56,
+    Z61,
 }
 
 #[uniffi::remote(Enum)]
@@ -465,6 +495,8 @@ pub enum TeamListing {
         name: String,
         year: u16,
         players: u32,
+        /// kept at the top of the list (see `set_pinned`)
+        pinned: bool,
     },
     Unreadable {
         folder: String,
@@ -1005,6 +1037,31 @@ pub struct TechniqueChoice {
     pub chosen: bool,
 }
 
+/// How many blocked, to tell along with the evaluation of our attack or
+/// of our block.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct BlockersChoice {
+    pub value: BlockersEnum,
+    /// e.g. "2 blockers"
+    pub name: String,
+    /// what the evaluation saves now
+    pub chosen: bool,
+}
+
+/// A cell of the court (a subzone of DataVolley), or a whole zone at the
+/// net for our block, to tell where the ball went.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CourtCellChoice {
+    /// 1 to 9
+    pub zone: u8,
+    /// "A" to "D"; empty for a whole zone at the net
+    pub subzone: String,
+    /// as the scout reads it: "1A", "4"
+    pub label: String,
+    /// what the evaluation saves now, alone or with the one next to it
+    pub chosen: bool,
+}
+
 /// An event saved in the set.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ScoutedEvent {
@@ -1016,6 +1073,10 @@ pub struct ScoutedEvent {
     pub symbol: Option<String>,
     /// e.g. "A" or "F"
     pub technique: Option<String>,
+    /// where the ball went, if told: e.g. "4" or "4/3"
+    pub target: Option<String>,
+    /// how many blocked, if told: e.g. "2 blockers"
+    pub blockers: Option<String>,
 }
 
 /// An event of a set, in the list to correct it.
@@ -1356,9 +1417,64 @@ pub struct FundamentalDetail {
     pub points: Option<u32>,
     /// for an attack
     pub zones: Vec<DetailZone>,
+    /// for a serve, an attack, a reception, a dig or a block: how many had
+    /// their zone told, and the court a row each from the top (theirs for the
+    /// serve and the attack, the nine zones as `CourtZoneEnum::zones_shown`;
+    /// ours for the reception and the dig, with the conflict zones between
+    /// them as `CourtZoneEnum::shown`; for the block one row, the zones at
+    /// the net as `CourtZoneEnum::net_shown`); empty with no zone told
+    pub targets_told: u32,
+    pub targets: Vec<Vec<TargetStats>>,
+    /// for a reception or a dig, all the conflict zones together
+    pub on_conflicts: Option<ConflictStats>,
+    /// for an attack or a block: how many had how many blocked told, and
+    /// each of the ones it can tell; empty with none told
+    pub blockers_told: u32,
+    pub blockers: Vec<BlockersStats>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
     pub players: Vec<PlayerStats>,
+}
+
+/// Our attacks against so many of theirs at the block, or our blocks with
+/// so many of ours, of the ones told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct BlockersStats {
+    pub value: BlockersEnum,
+    /// e.g. "2 blockers"
+    pub name: String,
+    pub count: u32,
+    /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
+}
+
+/// Our receptions on any conflict zone, of the ones whose zone was told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ConflictStats {
+    pub count: u32,
+    /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
+}
+
+/// Our serves or attacks to a zone of their court, or our receptions in
+/// one of ours or on a conflict zone, of the ones whose zone was told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TargetStats {
+    pub value: CourtZoneEnum,
+    /// as the scout reads it: "4", "4/3"
+    pub label: String,
+    /// one of the nine zones, not a conflict zone
+    pub zone: bool,
+    /// two cells of different zones count half in each zone
+    pub count: f64,
+    /// of the serves whose zone was told, 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few serves to tell
+    pub efficiency: Option<f64>,
 }
 
 /// Their freeballs we exploited.
@@ -1604,6 +1720,28 @@ impl Scouting {
             .collect()
     }
 
+    /// How many blocked, to tell along with the evaluation: against our
+    /// attack (none too) and on our block; empty for the other events.
+    pub fn available_blockers(&self) -> Vec<BlockersChoice> {
+        let session = self.session();
+        session
+            .available_blockers()
+            .iter()
+            .map(|b| BlockersChoice {
+                value: *b,
+                name: b.name(self.labels).to_string(),
+                chosen: session.blockers() == Some(*b),
+            })
+            .collect()
+    }
+
+    /// The scout tells how many blocked, or takes it back (`None`). Saved
+    /// with the evaluation, never required.
+    pub fn choose_blockers(&self, blockers: Option<BlockersEnum>) -> Result<(), MobileError> {
+        let chosen = self.session().choose_blockers(blockers);
+        self.scouted(chosen)
+    }
+
     pub fn choose_event(&self, event: EventTypeEnum) -> Result<Progress, MobileError> {
         let mut session = self.session();
         self.scouted(self.runtime.block_on(session.choose_event(event)))
@@ -1641,6 +1779,80 @@ impl Scouting {
     pub fn choose_technique(&self, technique: TechniqueEnum) -> Result<(), MobileError> {
         let chosen = self.session().choose_technique(technique);
         self.scouted(chosen)
+    }
+
+    /// The court where the ball goes: for our serve or attack theirs as
+    /// our server sees it (their end line at the top), for our reception
+    /// or dig ours as seen from the bench (the net at the top); six rows of
+    /// six cells, two by two in a zone. For our block one row, the zones at
+    /// the net on ours (4, 3, 2: see `target_at_net`). Empty when it can't
+    /// be told now.
+    pub fn target_court(&self) -> Vec<Vec<CourtCellChoice>> {
+        let session = self.session();
+        let chosen = session.target();
+        match (session.target_side(), session.target_kind()) {
+            (Some(side), Some(TargetKind::Net)) => vec![
+                CourtZoneEnum::net_shown(side)
+                    .iter()
+                    .filter_map(|zone| zone.number().map(|n| (zone, n)))
+                    .map(|(zone, n)| CourtCellChoice {
+                        zone: n,
+                        subzone: String::new(),
+                        label: zone.to_string(),
+                        chosen: chosen == Some(CourtTarget::Zone(n)),
+                    })
+                    .collect(),
+            ],
+            (Some(side), _) => CourtCell::shown(side)
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| CourtCellChoice {
+                            zone: cell.zone_number(),
+                            subzone: cell.subzone().to_string(),
+                            label: cell.to_string(),
+                            chosen: chosen.is_some_and(|t| t.has(cell)),
+                        })
+                        .collect()
+                })
+                .collect(),
+            (None, _) => vec![],
+        }
+    }
+
+    /// Whether the court is told at the net, only a whole zone: for our
+    /// block.
+    pub fn target_at_net(&self) -> bool {
+        self.session().target_kind() == Some(TargetKind::Net)
+    }
+
+    /// Whether the court where the ball goes is ours (the net at the top),
+    /// not theirs (the net at the bottom).
+    pub fn target_ours(&self) -> bool {
+        self.session().target_side() == Some(CourtSide::Ours)
+    }
+
+    /// What's told of where the ball went: "1D", "1D-6A (6/1)"; none
+    /// when nothing is.
+    pub fn target_told(&self) -> Option<String> {
+        self.session().target().map(|t| t.described())
+    }
+
+    /// The scout touches a cell: alone, or along with the one told next to
+    /// it; touched again, taken back. With no subzone, a whole zone at the
+    /// net, for our block. Saved with the evaluation, never required.
+    pub fn touch_target(&self, zone: u8, subzone: String) -> Result<(), MobileError> {
+        let cell = subzone
+            .chars()
+            .next()
+            .and_then(SubzoneEnum::of)
+            .and_then(|s| CourtCell::new(zone, s));
+        let touched = match (subzone.is_empty(), cell, CourtZoneEnum::numbered(zone)) {
+            (true, _, Some(zone)) => self.session().touch_zone(zone),
+            (false, Some(cell), _) => self.session().touch_target(cell),
+            _ => Err(ScoutingError::InvalidSelection),
+        };
+        self.scouted(touched)
     }
 
     pub fn choose_eval(&self, eval: EvalEnum) -> Result<Progress, MobileError> {
@@ -1886,6 +2098,55 @@ fn detail_stats(
                         conversion: z.conversion,
                     })
                     .collect(),
+                targets_told: d.targets_told,
+                targets: match (d.targets.is_empty(), d.conflicts.is_empty()) {
+                    (true, _) => vec![],
+                    (false, conflicts) => {
+                        let side = CourtSide::of(event).unwrap_or(CourtSide::Theirs);
+                        let rows = match (TargetKind::of(event), conflicts) {
+                            (Some(TargetKind::Net), _) => vec![CourtZoneEnum::net_shown(side)],
+                            (_, true) => CourtZoneEnum::zones_shown(side),
+                            (_, false) => CourtZoneEnum::shown(side),
+                        };
+                        rows.iter()
+                            .map(|row| {
+                                row.iter()
+                                    .filter_map(|zone| {
+                                        d.targets
+                                            .iter()
+                                            .chain(d.conflicts.iter())
+                                            .find(|t| t.zone == *zone)
+                                    })
+                                    .map(|t| TargetStats {
+                                        value: t.zone,
+                                        label: t.zone.to_string(),
+                                        zone: t.zone.is_zone(),
+                                        count: t.count,
+                                        share: t.share,
+                                        efficiency: t.efficiency,
+                                    })
+                                    .collect()
+                            })
+                            .collect()
+                    }
+                },
+                on_conflicts: d.on_conflicts.map(|on| ConflictStats {
+                    count: on.count,
+                    share: on.share,
+                    efficiency: on.efficiency,
+                }),
+                blockers_told: d.blockers_told,
+                blockers: d
+                    .blockers
+                    .iter()
+                    .map(|b| BlockersStats {
+                        value: b.blockers,
+                        name: b.blockers.name(labels).to_string(),
+                        count: b.count,
+                        share: b.share,
+                        efficiency: b.efficiency,
+                    })
+                    .collect(),
                 players: by_player(&stats, event, &narrowed)
                     .into_iter()
                     .filter_map(|line| {
@@ -2008,6 +2269,8 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         eval: e.eval.map(|v| v.friendly_name(e.event_type, labels)),
         symbol: e.eval.map(|v| v.to_string()),
         technique: e.technique.map(|t| t.to_string()),
+        target: e.flags.target().map(|t| t.described()),
+        blockers: e.flags.blockers().map(|b| b.name(labels).to_string()),
     }
 }
 
@@ -2290,16 +2553,19 @@ impl Scout4All {
         Ok(Arc::new(app))
     }
 
-    /// The teams, sorted by name.
+    /// The teams, the pinned ones at the top, each group by name.
     pub fn teams(&self) -> Result<Vec<TeamListing>, MobileError> {
-        let mut teams: Vec<TeamListing> = self
-            .runtime
-            .block_on(self.team_reader.read_all())?
+        // settings that can't be read: no pins, the teams all the same
+        let pins = self.read_config().map(|c| c.pinned).unwrap_or_default();
+        let teams = self.runtime.block_on(self.team_reader.read_all())?;
+        Ok(pins
+            .sorted(teams)
             .into_iter()
             .map(|listed| match listed {
                 Ok(team) => TeamListing::Team {
                     id: team.id.to_string(),
                     players: count(&team),
+                    pinned: pins.is_pinned(&team.id),
                     name: team.name,
                     year: team.year,
                 },
@@ -2307,12 +2573,16 @@ impl Scout4All {
                     folder: unreadable.id,
                 },
             })
-            .collect();
-        teams.sort_by_key(|t| match t {
-            TeamListing::Team { name, .. } => name.to_lowercase(),
-            TeamListing::Unreadable { folder } => folder.to_lowercase(),
-        });
-        Ok(teams)
+            .collect())
+    }
+
+    /// Pins the team at the top of the list, or unpins it.
+    pub fn set_pinned(&self, team_id: String, pinned: bool) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.update_config(|config| AppConfig {
+            pinned: config.pinned.with(id, pinned),
+            ..config
+        })
     }
 
     /// The team with this id.
@@ -2872,6 +3142,13 @@ impl Scout4All {
                 reason: e.message(self.language.labels()),
             })?;
         let team = self.runtime.block_on(self.team_writer.save(input))?;
+        // created by hand: at the top of the list; the team is there all
+        // the same when the settings can't be written
+        if existing.is_none()
+            && let Err(e) = self.set_pinned(team.id.to_string(), true)
+        {
+            log_error(&format!("could not pin the new team: {e:?}"));
+        }
         Ok(team.id.to_string())
     }
 
@@ -3285,6 +3562,8 @@ struct AppConfig {
     #[serde(flatten)]
     team_defaults: TeamDefaults,
     #[serde(flatten)]
+    pinned: PinnedTeams,
+    #[serde(flatten)]
     other: Map<String, Value>,
 }
 
@@ -3418,11 +3697,7 @@ impl Scout4All {
     /// The teams that can be read.
     fn parse_dvw(&self, bytes: &[u8]) -> Result<DvwFile, MobileError> {
         dvw::parse(bytes).map_err(|e| MobileError::Failed {
-            reason: self
-                .language
-                .labels()
-                .dvw_unreadable
-                .replace("{detail}", &e.to_string()),
+            reason: e.describe(self.language.labels()),
         })
     }
 
@@ -3796,8 +4071,53 @@ mod tests {
                 name: "Cortona Volley".into(),
                 year: 2026,
                 players: 0,
+                // created by hand
+                pinned: true,
             }]
         );
+    }
+
+    /// The pinned teams at the top, each group by name; kept in
+    /// `config.json` with the settings of the TUI.
+    #[test]
+    fn the_pinned_teams_come_first_and_keep_the_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        app.accept_terms().unwrap();
+        let ids: Vec<String> = ["Zeta", "alfa", "Beta"]
+            .into_iter()
+            .map(|name| app.save_team(None, form(name)).unwrap())
+            .collect();
+        let listed = |app: &Scout4All| -> Vec<(String, bool)> {
+            app.teams()
+                .unwrap()
+                .into_iter()
+                .filter_map(|t| match t {
+                    TeamListing::Team { name, pinned, .. } => Some((name, pinned)),
+                    TeamListing::Unreadable { .. } => None,
+                })
+                .collect()
+        };
+        let all = |pinned| {
+            ["alfa", "Beta", "Zeta"]
+                .map(|n| (n.to_string(), pinned))
+                .to_vec()
+        };
+        assert_eq!(listed(&app), all(true));
+        for id in &ids[1..] {
+            app.set_pinned(id.clone(), false).unwrap();
+        }
+        assert_eq!(
+            listed(&app),
+            [("Zeta", true), ("alfa", false), ("Beta", false)]
+                .map(|(n, p)| (n.to_string(), p))
+                .to_vec()
+        );
+        app.set_pinned(ids[0].clone(), false).unwrap();
+        assert_eq!(listed(&app), all(false));
+        let config = config(&dir);
+        assert_eq!(config.get("pinned_teams"), None, "{config}");
+        assert!(config.get("language").is_some(), "{config}");
     }
 
     #[test]
@@ -4218,6 +4538,167 @@ mod tests {
         start.choose_libero(Some(ids[6].clone())).unwrap();
         app.start_set(start).unwrap();
         app.scouting(team.into(), m.into()).unwrap()
+    }
+
+    /// How many blocked: on our block from one on, the one chosen saved
+    /// with the evaluation and shown on the event; none on the serve.
+    #[test]
+    fn how_many_blocked_is_told() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        assert!(scouting.available_blockers().is_empty());
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event(EventTypeEnum::B).unwrap();
+        let blocker = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(blocker).unwrap();
+        let names: Vec<String> = scouting
+            .available_blockers()
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["muro a 1", "muro a 2", "muro a 3", "muro con buco"]
+        );
+        assert!(
+            scouting
+                .choose_blockers(Some(BlockersEnum::NoBlock))
+                .is_err()
+        );
+        scouting.choose_blockers(Some(BlockersEnum::Two)).unwrap();
+        let chosen: Vec<BlockersEnum> = scouting
+            .available_blockers()
+            .into_iter()
+            .filter(|b| b.chosen)
+            .map(|b| b.value)
+            .collect();
+        assert_eq!(chosen, vec![BlockersEnum::Two]);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        assert_eq!(state.events[0].blockers.as_deref(), Some("muro a 2"));
+        assert_eq!(state.events[1].blockers, None);
+    }
+
+    /// Our block: one row, the zones at the net on our court, 4 3 2;
+    /// touched with no subzone, again taken back; in the stats one row.
+    #[test]
+    fn the_block_target_is_at_the_net() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event(EventTypeEnum::B).unwrap();
+        let blocker = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(blocker).unwrap();
+        assert!(scouting.target_at_net() && scouting.target_ours());
+        let labels = |s: &Scouting| -> Vec<Vec<String>> {
+            s.target_court()
+                .iter()
+                .map(|row| row.iter().map(|c| c.label.clone()).collect())
+                .collect()
+        };
+        assert_eq!(labels(&scouting), vec![vec!["4", "3", "2"]]);
+        assert!(matches!(
+            scouting.touch_target(3, "A".into()),
+            Err(MobileError::Scouting { .. })
+        ));
+        scouting.touch_target(3, String::new()).unwrap();
+        scouting.touch_target(3, String::new()).unwrap();
+        assert_eq!(scouting.target_told(), None);
+        scouting.touch_target(4, String::new()).unwrap();
+        let chosen: Vec<String> = scouting
+            .target_court()
+            .into_iter()
+            .flatten()
+            .filter(|c| c.chosen)
+            .map(|c| c.label)
+            .collect();
+        assert_eq!(chosen, vec!["4"]);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        let targets: Vec<Option<&str>> = state.events.iter().map(|e| e.target.as_deref()).collect();
+        // the latest first
+        assert_eq!(targets, vec![Some("4"), None]);
+        assert!(!scouting.target_at_net());
+    }
+
+    /// Where our serve went: their court while it waits for its
+    /// evaluation, the zone chosen or taken back, never required; where we
+    /// received theirs: our court, turned round, once the receiver is told.
+    #[test]
+    fn the_serve_target_is_told_on_the_court() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let court = scouting.target_court();
+        let labels: Vec<Vec<&str>> = court
+            .iter()
+            .map(|row| row.iter().map(|c| c.label.as_str()).collect())
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                vec!["1A", "1D", "6A", "6D", "5A", "5D"],
+                vec!["1B", "1C", "6B", "6C", "5B", "5C"],
+                vec!["9A", "9D", "8A", "8D", "7A", "7D"],
+                vec!["9B", "9C", "8B", "8C", "7B", "7C"],
+                vec!["2A", "2D", "3A", "3D", "4A", "4D"],
+                vec!["2B", "2C", "3B", "3C", "4B", "4C"],
+            ]
+        );
+        assert!(court.iter().flatten().all(|c| !c.chosen));
+        assert!(!scouting.target_ours());
+        assert_eq!(scouting.target_told(), None);
+        // 3D, then 4A next to it: on the line between 3 and 4
+        scouting.touch_target(3, "D".into()).unwrap();
+        assert_eq!(scouting.target_told().as_deref(), Some("3D"));
+        scouting.touch_target(4, "A".into()).unwrap();
+        let chosen: Vec<String> = scouting
+            .target_court()
+            .into_iter()
+            .flatten()
+            .filter(|c| c.chosen)
+            .map(|c| c.label)
+            .collect();
+        assert_eq!(chosen, vec!["3D", "4A"]);
+        assert_eq!(scouting.target_told().as_deref(), Some("3D-4A (4/3)"));
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let state = scouting.state();
+        let targets: Vec<Option<&str>> = state.events.iter().map(|e| e.target.as_deref()).collect();
+        assert_eq!(targets, vec![Some("3D-4A (4/3)")]);
+        // their serve: no court before the receiver
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        assert!(scouting.target_court().is_empty());
+        assert!(matches!(
+            scouting.touch_target(1, "A".into()),
+            Err(MobileError::Scouting { .. })
+        ));
+        let receiver = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(receiver).unwrap();
+        assert!(scouting.target_ours());
+        let rows: Vec<String> = scouting
+            .target_court()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| c.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert_eq!(rows.first().map(String::as_str), Some("4C 4B 3C 3B 2C 2B"));
+        assert_eq!(rows.last().map(String::as_str), Some("5D 5A 6D 6A 1D 1A"));
+        scouting.touch_target(6, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        assert_eq!(
+            state.events.first().and_then(|e| e.target.as_deref()),
+            Some("6A")
+        );
     }
 
     #[test]
@@ -5059,6 +5540,99 @@ mod tests {
         assert_eq!(saved(StatsScope::Set { number: 3 }), none);
     }
 
+    /// The serves by zone, of the ones whose zone was told: their court a
+    /// row each, the nine zones, how many to each zone and the efficiency
+    /// from three on; the receptions with the conflict zones too.
+    #[test]
+    fn the_serves_by_zone() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        // three serves to cells of 1, one without a zone
+        for cell in [Some("A"), Some("C"), None, Some("A")] {
+            if let Some(subzone) = cell {
+                scouting.touch_target(1, subzone.into()).unwrap();
+            }
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        }
+        let serve = scouting
+            .detail(StatsScope::Match, EventTypeEnum::S, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        assert_eq!((serve.total, serve.targets_told), (4, 3));
+        assert_eq!(
+            serve
+                .targets
+                .iter()
+                .map(|row| row.len())
+                .collect::<Vec<_>>(),
+            vec![3, 3, 3]
+        );
+        assert_eq!(serve.on_conflicts, None);
+        let z1 = serve
+            .targets
+            .iter()
+            .flatten()
+            .find(|t| t.label == "1")
+            .unwrap();
+        assert_eq!(
+            (z1.count, z1.share, z1.efficiency),
+            (3.0, 100.0, Some(100.0))
+        );
+        assert!(
+            serve
+                .targets
+                .iter()
+                .flatten()
+                .filter(|t| t.label != "1")
+                .all(|t| t.count == 0.0 && t.efficiency.is_none())
+        );
+        // none for another fundamental
+        let reception = scouting
+            .detail(StatsScope::Match, EventTypeEnum::P, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        assert!(reception.targets.is_empty());
+        // a reception in 6A: our court, 4 at the net on the left
+        scouting.touch_target(1, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        let receiver = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(receiver).unwrap();
+        scouting.touch_target(6, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let reception = scouting
+            .detail(StatsScope::Match, EventTypeEnum::P, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        assert_eq!((reception.total, reception.targets_told), (1, 1));
+        let first: Vec<&str> = reception.targets[0]
+            .iter()
+            .map(|t| t.label.as_str())
+            .collect();
+        assert_eq!(first, vec!["4", "4/3", "3", "3/2", "2"]);
+        let z6 = reception
+            .targets
+            .iter()
+            .flatten()
+            .find(|t| t.label == "6")
+            .unwrap();
+        assert_eq!((z6.count, z6.share), (1.0, 100.0));
+        assert_eq!(reception.targets.len(), 3);
+        assert_eq!(
+            reception.on_conflicts,
+            Some(ConflictStats {
+                count: 0,
+                share: 0.0,
+                efficiency: None
+            })
+        );
+    }
+
     #[test]
     fn the_detail_of_a_fundamental() {
         let dir = tempfile::tempdir().unwrap();
@@ -5682,8 +6256,14 @@ mod tests {
         let app = app(&dir, "it");
         let it = labels(LanguageEnum::It);
         let message = reason(app.preview_dvw(b"nothing here".to_vec()));
-        let frame = it.dvw_unreadable.split(" (").next().unwrap();
-        assert!(message.starts_with(frame), "{message}");
+        assert_eq!(
+            message,
+            "il file non si legge come DataVolley (non è un file DataVolley)"
+        );
+        assert_eq!(
+            message,
+            it.dvw_unreadable.replace("{detail}", it.dvw_not_dvw)
+        );
     }
 
     /// A new team: checked, then saved with its match, queued for the

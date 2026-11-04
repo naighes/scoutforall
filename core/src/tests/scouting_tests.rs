@@ -19,6 +19,7 @@ mod tests {
         },
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
+            court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, SubzoneEnum},
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
             flags::ReceptionSchemeEnum,
             player::PlayerEntry,
@@ -173,6 +174,290 @@ mod tests {
         let saved = saved_events(&s).await;
         assert_eq!(event_types(&saved), vec![S]);
         assert_eq!(saved[0].technique, Some(spin));
+    }
+
+    /// Where our serve went is told along with its evaluation, or not:
+    fn cell(zone: u8, subzone: SubzoneEnum) -> CourtCell {
+        CourtCell::new(zone, subzone).expect("a cell")
+    }
+
+    fn z43() -> CourtTarget {
+        CourtTarget::pair(cell(3, SubzoneEnum::D), cell(4, SubzoneEnum::A)).expect("side by side")
+    }
+
+    /// saved in the flags, none when not told; on their court.
+    #[tokio::test]
+    async fn the_serve_target_is_optional() {
+        let mut s = scouting().await;
+        assert!(!s.session.targets_apply());
+        assert_eq!(
+            s.session.choose_target(Some(CourtTarget::Zone(1))),
+            Err(ScoutingError::InvalidSelection)
+        );
+        s.session.choose_event(S).await.unwrap();
+        assert!(s.session.targets_apply());
+        assert_eq!(s.session.target_side(), Some(CourtSide::Theirs));
+        assert_eq!(s.session.target(), None);
+        // 3D and 4A: on the line between 3 and 4
+        assert_eq!(s.session.touch_target(cell(3, SubzoneEnum::D)), Ok(()));
+        assert_eq!(s.session.touch_target(cell(4, SubzoneEnum::A)), Ok(()));
+        assert_eq!(s.session.target(), Some(z43()));
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        // not told: their dig and their attack, our dig, our serve again
+        s.session.choose_event(OE).await.ok();
+        assert_eq!(s.session.target(), None);
+        s.session.choose_event(S).await.unwrap();
+        s.session.touch_target(cell(6, SubzoneEnum::A)).unwrap();
+        s.session.choose_target(None).unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        // their serve: our reception, not told
+        s.session.choose_event(P).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        assert_eq!(
+            saved.iter().map(|e| e.flags.target()).collect::<Vec<_>>(),
+            vec![Some(z43()), None, None, None]
+        );
+    }
+
+    /// Where we received their serve is told along with the evaluation of
+    /// the reception, on our court, with its formation; not before the
+    /// receiver. The attack after it goes to their court.
+    #[tokio::test]
+    async fn the_reception_target_is_on_our_court() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        s.session.next_reception().unwrap();
+        s.session.choose_event(P).await.unwrap();
+        assert!(!s.session.targets_apply());
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert_eq!(s.session.target_side(), Some(CourtSide::Ours));
+        // 1D and 6A: on the line between 1 and 6
+        s.session.touch_target(cell(1, SubzoneEnum::D)).unwrap();
+        s.session.touch_target(cell(6, SubzoneEnum::A)).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(A).await.unwrap();
+        s.session.choose_player(s.players[3]).await.unwrap();
+        assert_eq!(s.session.target_side(), Some(CourtSide::Theirs));
+        let saved = saved_events(&s).await;
+        let reception = saved
+            .iter()
+            .find(|e| e.event_type == P)
+            .expect("the reception");
+        assert_eq!(
+            (reception.flags.target(), reception.flags.reception()),
+            (
+                CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A)),
+                ReceptionSchemeEnum::Four
+            )
+        );
+        // undo resumes it with where it was received
+        for _ in 0..3 {
+            if s.session.event() != Some(P) {
+                s.session.undo().await.unwrap();
+            }
+        }
+        assert_eq!(
+            (
+                s.session.step(),
+                s.session.target().and_then(|t| t.conflict())
+            ),
+            (ScoutingStep::Eval, Some(CourtZoneEnum::Z61))
+        );
+    }
+
+    /// Our attack: where it went on their court, saved with its evaluation;
+    /// not before the attacker.
+    #[tokio::test]
+    async fn the_attack_target_is_on_their_court() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        s.session.choose_event(P).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(A).await.unwrap();
+        assert!(!s.session.targets_apply());
+        s.session.choose_player(s.players[3]).await.unwrap();
+        assert_eq!(s.session.target_side(), Some(CourtSide::Theirs));
+        // 5A, then 5D next to it: one zone
+        s.session.touch_target(cell(5, SubzoneEnum::A)).unwrap();
+        s.session.touch_target(cell(5, SubzoneEnum::D)).unwrap();
+        s.session.choose_eval(EvalEnum::Perfect).await.unwrap();
+        let saved = saved_events(&s).await;
+        let attack = saved
+            .iter()
+            .find(|e| e.event_type == A)
+            .expect("the attack");
+        assert_eq!(
+            attack.flags.target(),
+            CourtTarget::pair(cell(5, SubzoneEnum::A), cell(5, SubzoneEnum::D))
+        );
+    }
+
+    /// Our dig: where we dug their attack, on our court, saved with its
+    /// evaluation; not before the player.
+    #[tokio::test]
+    async fn the_dig_target_is_on_our_court() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(D).await.unwrap();
+        assert!(!s.session.targets_apply());
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert_eq!(s.session.target_side(), Some(CourtSide::Ours));
+        // 1C and 6B: on the line between 1 and 6
+        s.session.touch_target(cell(1, SubzoneEnum::C)).unwrap();
+        s.session.touch_target(cell(6, SubzoneEnum::B)).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        let dig = saved.iter().find(|e| e.event_type == D).expect("the dig");
+        assert_eq!(
+            dig.flags.target().and_then(|t| t.conflict()),
+            Some(CourtZoneEnum::Z61)
+        );
+    }
+
+    /// Our block: only a zone at the net, 4, 3 or 2, saved with its
+    /// evaluation; touched again, taken back; no cell.
+    #[tokio::test]
+    async fn the_block_target_is_at_the_net() {
+        use crate::shapes::court_zone::TargetKind;
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(B).await.unwrap();
+        assert_eq!(s.session.target_kind(), None);
+        let blocker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("a blocker");
+        s.session.choose_player(blocker).await.unwrap();
+        assert_eq!(
+            (s.session.target_side(), s.session.target_kind()),
+            (Some(CourtSide::Ours), Some(TargetKind::Net))
+        );
+        assert_eq!(
+            s.session.touch_target(cell(4, SubzoneEnum::C)),
+            Err(ScoutingError::InvalidSelection)
+        );
+        assert_eq!(
+            s.session.touch_zone(CourtZoneEnum::Z8),
+            Err(ScoutingError::InvalidSelection)
+        );
+        s.session.touch_zone(CourtZoneEnum::Z3).unwrap();
+        s.session.touch_zone(CourtZoneEnum::Z3).unwrap();
+        assert_eq!(s.session.target(), None);
+        s.session.touch_zone(CourtZoneEnum::Z4).unwrap();
+        s.session.touch_zone(CourtZoneEnum::Z2).unwrap();
+        assert_eq!(s.session.target(), Some(CourtTarget::Zone(2)));
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        let block = saved.iter().find(|e| e.event_type == B).expect("the block");
+        assert_eq!(block.flags.target(), Some(CourtTarget::Zone(2)));
+    }
+
+    /// How many blocked: told along with the evaluation of our attack and
+    /// of our block, saved with it, resumed by undo; not for the serve.
+    #[tokio::test]
+    async fn how_many_blocked_is_told_with_the_evaluation() {
+        use crate::shapes::flags::BlockersEnum;
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        // not for the serve
+        assert!(s.session.available_blockers().is_empty());
+        assert_eq!(
+            s.session.next_blockers(),
+            Err(ScoutingError::InvalidSelection)
+        );
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(B).await.unwrap();
+        assert!(s.session.available_blockers().is_empty());
+        let blocker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("a blocker");
+        s.session.choose_player(blocker).await.unwrap();
+        assert_eq!(
+            s.session.choose_blockers(Some(BlockersEnum::NoBlock)),
+            Err(ScoutingError::InvalidSelection)
+        );
+        assert_eq!(s.session.next_blockers(), Ok(Some(BlockersEnum::One)));
+        assert_eq!(s.session.next_blockers(), Ok(Some(BlockersEnum::Two)));
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        let block = saved.iter().find(|e| e.event_type == B).expect("the block");
+        assert_eq!(block.flags.blockers(), Some(BlockersEnum::Two));
+        // undo: the block again, with how many
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.event(), s.session.blockers()),
+            (Some(B), Some(BlockersEnum::Two))
+        );
+        s.session.choose_blockers(None).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        // our attack against none of theirs
+        s.session.choose_event(A).await.unwrap();
+        let attacker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("an attacker");
+        s.session.choose_player(attacker).await.unwrap();
+        s.session
+            .choose_blockers(Some(BlockersEnum::NoBlock))
+            .unwrap();
+        s.session.choose_eval(EvalEnum::Perfect).await.unwrap();
+        let saved = saved_events(&s).await;
+        let told: Vec<_> = saved
+            .iter()
+            .filter(|e| matches!(e.event_type, A | B))
+            .map(|e| (e.event_type, e.flags.blockers()))
+            .collect();
+        assert_eq!(told, vec![(B, None), (A, Some(BlockersEnum::NoBlock))]);
+    }
+
+    /// The cells are not for the block, nor the zone at the net for the
+    /// dig.
+    #[tokio::test]
+    async fn the_dig_has_no_zone_at_the_net() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(D).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert_eq!(
+            s.session.touch_zone(CourtZoneEnum::Z3),
+            Err(ScoutingError::InvalidSelection)
+        );
+    }
+
+    /// Undo resumes the serve with where it went; going back from the
+    /// evaluation forgets it.
+    #[tokio::test]
+    async fn undo_resumes_the_serve_with_its_target() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.touch_target(cell(1, SubzoneEnum::B)).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        assert_eq!(s.session.target(), None);
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.step(), s.session.target()),
+            (
+                ScoutingStep::Eval,
+                Some(CourtTarget::Cell(cell(1, SubzoneEnum::B)))
+            )
+        );
+        s.session.undo().await.unwrap();
+        assert_eq!(s.session.target(), None);
     }
 
     /// The reception is told before their serve, for that serve only: it

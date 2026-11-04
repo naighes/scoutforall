@@ -2,7 +2,7 @@
 //! players and the tables of the codes.
 
 use crate::dvw::{
-    DvwError,
+    DvwError, Field,
     model::{
         AttackCombination, DvwRole, MatchDate, MatchInfo, Player, SetResult, SetStart, Skill, Team,
         WinningSymbols,
@@ -28,10 +28,11 @@ pub(crate) fn non_empty(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn invalid(line: usize, reason: impl Into<String>) -> DvwError {
+fn invalid(line: usize, field: Field, text: &str) -> DvwError {
     DvwError::Invalid {
         line,
-        reason: reason.into(),
+        field,
+        text: text.to_string(),
     }
 }
 
@@ -63,7 +64,7 @@ pub(crate) fn match_info(lines: &[Line]) -> Result<MatchInfo, DvwError> {
     let time = at(&first, 1).replace('.', ":");
     Ok(MatchInfo {
         date: match_date(at(&first, 0), serial)
-            .ok_or_else(|| invalid(number, format!("unknown date '{}'", at(&first, 0))))?,
+            .ok_or_else(|| invalid(number, Field::Date, at(&first, 0)))?,
         time: NaiveTime::parse_from_str(&time, "%H:%M:%S")
             .or_else(|_| NaiveTime::parse_from_str(&time, "%H:%M"))
             .ok(),
@@ -141,7 +142,7 @@ pub(crate) fn sets(lines: &[Line]) -> Result<Vec<SetResult>, DvwError> {
                 "" => None,
                 last => Some(
                     score(last)
-                        .ok_or_else(|| invalid(*number, format!("unknown score '{last}'")))
+                        .ok_or_else(|| invalid(*number, Field::Score, last))
                         .map(|final_score| SetResult {
                             set_number,
                             partials: (1..=3).filter_map(|i| score(at(&f, i))).collect(),
@@ -168,7 +169,7 @@ pub(crate) fn players(lines: &[Line]) -> Result<Vec<Player>, DvwError> {
             let special = at(&f, 12);
             at(&f, 1)
                 .parse()
-                .map_err(|_| invalid(*number, format!("unknown player number '{}'", at(&f, 1))))
+                .map_err(|_| invalid(*number, Field::PlayerNumber, at(&f, 1)))
                 .map(|player_number| Player {
                     number: player_number,
                     starts: (3..=7).map(|i| set_start(at(&f, i))).collect(),
@@ -237,7 +238,7 @@ pub(crate) fn winning_symbols(lines: &[Line]) -> Result<Option<WinningSymbols>, 
                         })
                         .collect(),
                 })),
-                _ => Err(invalid(*number, "unknown winning symbols")),
+                _ => Err(invalid(*number, Field::WinningSymbols, "")),
             }
         }
     }

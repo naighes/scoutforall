@@ -10,8 +10,9 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
+        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
-        flags::ReceptionSchemeEnum,
+        flags::{BlockersEnum, EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
@@ -124,6 +125,11 @@ pub struct ScoutingSession {
     player: Option<Uuid>,
     /// the set or serve chosen along with the evaluation
     technique: Option<TechniqueEnum>,
+    /// where the ball went, if the scout tells it along with the
+    /// evaluation
+    target: Option<CourtTarget>,
+    /// how many blocked, if the scout tells it along with the evaluation
+    blockers: Option<BlockersEnum>,
     /// the inverted P1, written on every event saved
     inverted_p1: bool,
     /// how many receive their next serve, written on the reception or on
@@ -143,6 +149,8 @@ impl fmt::Debug for ScoutingSession {
             .field("event", &self.event)
             .field("player", &self.player)
             .field("technique", &self.technique)
+            .field("target", &self.target)
+            .field("blockers", &self.blockers)
             .field("order", &self.order)
             .finish_non_exhaustive()
     }
@@ -174,6 +182,8 @@ impl ScoutingSession {
             event: None,
             player: None,
             technique: None,
+            target: None,
+            blockers: None,
             inverted_p1,
             reception: ReceptionSchemeEnum::default(),
             order: ChoiceOrder::EventFirst,
@@ -301,6 +311,109 @@ impl ScoutingSession {
     /// The set or serve that the evaluation saves with the event.
     pub fn technique(&self) -> Option<TechniqueEnum> {
         self.technique
+    }
+
+    /// Where the ball went, if told.
+    pub fn target(&self) -> Option<CourtTarget> {
+        self.target
+    }
+
+    /// How many blocked, if told.
+    pub fn blockers(&self) -> Option<BlockersEnum> {
+        self.blockers
+    }
+
+    /// The ones the scout can tell now, along with the evaluation: against
+    /// our attack and on our block (see `BlockersEnum::of`).
+    pub fn available_blockers(&self) -> &'static [BlockersEnum] {
+        match (self.step, self.event) {
+            (ScoutingStep::Eval, Some(event)) => BlockersEnum::of(event),
+            _ => &[],
+        }
+    }
+
+    /// The scout tells how many blocked, or takes it back (`None`): the
+    /// evaluation saves it with the event. Never required.
+    pub fn choose_blockers(&mut self, blockers: Option<BlockersEnum>) -> Result<(), ScoutingError> {
+        match blockers {
+            Some(b) if !self.available_blockers().contains(&b) => {
+                Err(ScoutingError::InvalidSelection)
+            }
+            _ if self.available_blockers().is_empty() => Err(ScoutingError::InvalidSelection),
+            _ => {
+                self.blockers = blockers;
+                Ok(())
+            }
+        }
+    }
+
+    /// The scout tells the next one: from the first, none told again after
+    /// the last (see `BlockersEnum::next`).
+    pub fn next_blockers(&mut self) -> Result<Option<BlockersEnum>, ScoutingError> {
+        let next = self
+            .event
+            .and_then(|event| BlockersEnum::next(event, self.blockers));
+        self.choose_blockers(next).map(|_| next)
+    }
+
+    /// Whether the scout can tell where the ball went, along with the
+    /// evaluation: for our serve, on their court, and for our reception,
+    /// on ours.
+    pub fn targets_apply(&self) -> bool {
+        self.target_side().is_some()
+    }
+
+    /// The court where the ball goes, when the scout can tell where.
+    pub fn target_side(&self) -> Option<CourtSide> {
+        match (self.step, self.event) {
+            (ScoutingStep::Eval, Some(event)) => CourtSide::of(event),
+            _ => None,
+        }
+    }
+
+    /// How the scout tells where the ball goes, when the scout can: a cell
+    /// or two, or a zone at the net for our block.
+    pub fn target_kind(&self) -> Option<TargetKind> {
+        match (self.step, self.event) {
+            (ScoutingStep::Eval, Some(event)) => TargetKind::of(event),
+            _ => None,
+        }
+    }
+
+    /// The scout tells where the ball went, or takes it back (`None`): the
+    /// evaluation saves it with the event. Never required; only as the
+    /// event tells it (see `TargetKind::fits`).
+    pub fn choose_target(&mut self, target: Option<CourtTarget>) -> Result<(), ScoutingError> {
+        match (self.target_kind(), target) {
+            (Some(_), None) => {
+                self.target = None;
+                self.blockers = None;
+                Ok(())
+            }
+            (Some(kind), Some(t)) if kind.fits(&t) => {
+                self.target = Some(t);
+                Ok(())
+            }
+            _ => Err(ScoutingError::InvalidSelection),
+        }
+    }
+
+    /// The scout touches a cell of the court: alone, or along with the one
+    /// told next to it; touched again, taken back (see
+    /// `CourtTarget::touched`). Not for the block, at the net.
+    pub fn touch_target(&mut self, cell: CourtCell) -> Result<(), ScoutingError> {
+        self.choose_target(CourtTarget::touched(self.target, cell))
+    }
+
+    /// The scout touches a zone at the net, for our block: told, or taken
+    /// back when it was.
+    pub fn touch_zone(&mut self, zone: CourtZoneEnum) -> Result<(), ScoutingError> {
+        match self.target_kind() {
+            Some(TargetKind::Net) => {
+                self.choose_target(CourtTarget::touched_zone(self.target, zone))
+            }
+            _ => Err(ScoutingError::InvalidSelection),
+        }
     }
 
     /// The events that can follow.
@@ -673,7 +786,15 @@ impl ScoutingSession {
                     player: self.player,
                     target_player: None,
                     technique: self.technique,
-                    flags: Default::default(),
+                    flags: EventFlags::default()
+                        .with_target(
+                            self.target
+                                .filter(|t| self.target_kind().is_some_and(|k| k.fits(t))),
+                        )
+                        .with_blockers(
+                            self.blockers
+                                .filter(|b| self.available_blockers().contains(b)),
+                        ),
                 })
                 .await
             }
@@ -721,6 +842,8 @@ impl ScoutingSession {
             (EventFirst, Eval, _, _) => {
                 self.player = None;
                 self.technique = None;
+                self.target = None;
+                self.blockers = None;
                 self.step = Player;
                 Ok(())
             }
@@ -737,6 +860,8 @@ impl ScoutingSession {
         self.event = None;
         self.player = None;
         self.technique = None;
+        self.target = None;
+        self.blockers = None;
         self.step = ScoutingStep::Event;
     }
 
@@ -806,6 +931,16 @@ impl ScoutingSession {
                 self.step = ScoutingStep::Eval;
                 // the set or serve of the removed event, if it was saved
                 self.technique = removed.technique.or_else(|| self.preselected_technique());
+                // and where it went, if told
+                self.target = removed
+                    .flags
+                    .target()
+                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)));
+                // and how many blocked
+                self.blockers = removed
+                    .flags
+                    .blockers()
+                    .filter(|b| self.available_blockers().contains(b));
             }
             (_, R, Some(player)) => {
                 self.event = Some(R);

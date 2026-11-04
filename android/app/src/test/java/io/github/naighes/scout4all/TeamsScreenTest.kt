@@ -5,10 +5,13 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.NextSetKind
+import io.github.naighes.scout4all.core.TeamListing
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -93,5 +96,26 @@ class TeamsScreenTest {
         rule.onAllNodesWithText(string(R.string.home_in_progress)).assertCountEquals(0)
         rule.onNodeWithText("Serbia").performClick()
         assertEquals(listOf(won), matches)
+    }
+
+    /** The teams created by hand start pinned; a touch on the pin moves
+     * the team below the pinned ones, saved for the next start. */
+    @Test
+    fun aTouchOnThePinMovesTheTeam() {
+        saveTeam("Arezzo")
+        saveTeam("Cortona")
+        show()
+        rule.waitForText("Arezzo")
+        val unpin = string(R.string.unpin_team)
+        val pin = string(R.string.pin_team)
+        rule.onAllNodesWithContentDescription(unpin).assertCountEquals(2)
+        // Arezzo, the first one
+        rule.onAllNodesWithContentDescription(unpin)[0].performClick()
+        rule.waitUntil { rule.onAllNodesWithContentDescription(pin).fetchSemanticsNodes().size == 1 }
+        rule.onAllNodesWithContentDescription(unpin).assertCountEquals(1)
+        val top = { name: String -> rule.onNodeWithText(name).fetchSemanticsNode().positionInRoot.y }
+        assertTrue(top("Cortona") < top("Arezzo"))
+        val saved = core { it.teams() }.map { (it as TeamListing.Team).name to it.pinned }
+        assertEquals(listOf("Cortona" to true, "Arezzo" to false), saved)
     }
 }

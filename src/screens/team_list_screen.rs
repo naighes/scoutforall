@@ -3,7 +3,9 @@ use std::{fmt::Debug, sync::Arc};
 
 use crate::localization::current_labels;
 use crate::{
-    providers::{settings_reader::SettingsReader, settings_writer::SettingsWriter},
+    providers::{
+        settings_reader::SettingsReader, settings_writer::SettingsWriter, team_pins::SettingsPins,
+    },
     screens::{
         components::{navigation_footer::NavigationFooter, notify_banner::NotifyBanner, panel},
         edit_team_screen::EditTeamScreen,
@@ -32,6 +34,10 @@ use scout4all_core::{
     shapes::{enums::FriendlyName, listed::Listed, team::TeamEntry},
     storage::Store,
 };
+
+/// Before the name of a pinned team, and of the others.
+pub const PINNED: &str = "* ";
+pub const NOT_PINNED: &str = "  ";
 
 #[derive(Debug)]
 pub struct TeamListScreen<
@@ -76,7 +82,7 @@ impl<
         }
         match self.team_reader.read_all().await {
             Ok(teams) => {
-                self.teams = teams;
+                self.teams = self.settings.pinned.sorted(teams);
                 if self.teams.is_empty() {
                     self.list_state.select(None);
                 } else if let Some(selected) = self.list_state.selected() {
@@ -129,11 +135,20 @@ impl<
                         self.settings_writer.clone(),
                     ))),
                 },
+                (Some(ScreenActionEnum::Pin), _, _) => {
+                    self.toggle_pin().await;
+                    AppAction::None
+                }
                 (Some(ScreenActionEnum::Back), _, _) => AppAction::Back(true, Some(1)),
                 (Some(ScreenActionEnum::New), _, _) => {
                     AppAction::SwitchScreen(Box::new(EditTeamScreen::new(
                         self.team_writer.clone(),
                         self.settings.team_defaults.country,
+                        Arc::new(SettingsPins {
+                            reader: self.settings_reader.clone(),
+                            writer: self.settings_writer.clone(),
+                            current: self.settings.clone(),
+                        }),
                     )))
                 }
                 (Some(ScreenActionEnum::Import), _, _) => {
@@ -214,13 +229,14 @@ impl<
                     .flatten()
                     .collect::<Vec<_>>()
                     .join("/");
+                    let pin = self.pin_mark(t);
                     ListItem::new(match details.as_str() {
-                        "" => format!("{} ({})", t.name, t.year),
-                        _ => format!("{} ({}, {})", t.name, details, t.year),
+                        "" => format!("{pin}{} ({})", t.name, t.year),
+                        _ => format!("{pin}{} ({}, {})", t.name, details, t.year),
                     })
                 }
                 Err(unreadable) => ListItem::new(format!(
-                    "{} ({})",
+                    "{NOT_PINNED}{} ({})",
                     unreadable.id,
                     current_labels().unreadable
                 ))
@@ -262,7 +278,7 @@ impl<
         settings_reader: Arc<SR>,
     ) -> Self {
         TeamListScreen {
-            teams,
+            teams: settings.pinned.sorted(teams),
             list_state: ListState::default(),
             notify_message: NotifyBanner::new(),
             settings: settings.clone(),
@@ -283,6 +299,48 @@ impl<
         match self.list_state.selected().and_then(|x| self.teams.get(x)) {
             Some(Ok(team)) => Some(team),
             _ => None,
+        }
+    }
+
+    /// The mark before the name: a pinned team stands out, the names of
+    /// all the teams stay aligned. ASCII: one column in every terminal and
+    /// language (no ambiguous width, as for CJK).
+    fn pin_mark(&self, team: &TeamEntry) -> &'static str {
+        match self.settings.pinned.is_pinned(&team.id) {
+            true => PINNED,
+            false => NOT_PINNED,
+        }
+    }
+
+    /// Pins the selected team, or unpins it, and keeps it selected where
+    /// the list now shows it.
+    async fn toggle_pin(&mut self) {
+        let Some(id) = self.get_selected_team().map(|t| t.id) else {
+            return;
+        };
+        let settings = self
+            .settings_reader
+            .read()
+            .await
+            .unwrap_or_else(|_| self.settings.clone());
+        let pinned = !settings.pinned.is_pinned(&id);
+        let changed = Settings {
+            pinned: settings.pinned.clone().with(id, pinned),
+            ..settings
+        };
+        match self.settings_writer.save(changed).await {
+            Ok(saved) => {
+                self.settings = saved;
+                self.teams = self.settings.pinned.sorted(std::mem::take(&mut self.teams));
+                let at = self
+                    .teams
+                    .iter()
+                    .position(|t| t.as_ref().is_ok_and(|t| t.id == id));
+                self.list_state.select(at);
+            }
+            Err(_) => self
+                .notify_message
+                .set_error(current_labels().could_not_save_settings.to_string()),
         }
     }
 
@@ -320,6 +378,15 @@ impl<
                         Sba::Simple(ScreenActionEnum::Select)
                     } else {
                         Sba::Hidden(ScreenActionEnum::Select)
+                    },
+                    match self.get_selected_team() {
+                        None => Sba::Hidden(ScreenActionEnum::Pin),
+                        Some(t) if self.settings.pinned.is_pinned(&t.id) => {
+                            Sba::Redacted(ScreenActionEnum::Pin, |_| {
+                                current_labels().unpin.to_string()
+                            })
+                        }
+                        Some(_) => Sba::Simple(ScreenActionEnum::Pin),
                     },
                     Sba::Simple(ScreenActionEnum::Settings),
                     Sba::Redacted(ScreenActionEnum::Import, |lbl| -> String {

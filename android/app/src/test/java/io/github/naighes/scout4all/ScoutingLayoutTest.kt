@@ -59,6 +59,17 @@ class ScoutingLayoutTest(private val screen: Size) {
         assertFits("theServe")
     }
 
+    /** Their serve received: our court with its cells, as large as the
+     * one of the serve. */
+    @Test
+    fun theReceptionZone() {
+        scout()
+        touch("=")
+        touch("18")
+        rule.waitForText("6A")
+        assertFits("theReceptionZone")
+    }
+
     @Test
     fun theirSideAfterTheServe() {
         scout()
@@ -81,5 +92,31 @@ class ScoutingLayoutTest(private val screen: Size) {
         touch("18")
         touch("defense")
         assertFits("theEvaluation")
+    }
+
+    /** Our attack: the sets and how many blocked over the evaluations,
+     * all without a scroll, as the serve. */
+    @Test
+    fun theAttackEvaluation() {
+        scout()
+        touch("+")
+        touch("18")
+        touch("defense")
+        touch("+")
+        // the setter can only attack
+        touch("8")
+        rule.waitForText("hole")
+        assertFits("theAttackEvaluation")
+    }
+
+    /** Our block: the zones at the net, how many blocked. */
+    @Test
+    fun theBlockEvaluation() {
+        scout()
+        touch("+")
+        touch("18")
+        touch("block")
+        rule.waitForText("hole")
+        assertFits("theBlockEvaluation")
     }
 }

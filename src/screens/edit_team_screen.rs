@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::localization::current_labels;
 use crate::{
+    providers::team_pins::TeamPins,
     screens::{
         components::{
             country_picker::CountryPicker, navigation_footer::NavigationFooter,
@@ -24,6 +25,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 use scout4all_core::{
+    logging::logger::log_error,
     providers::team_writer::TeamWriter,
     shapes::{
         country::CountryCode,
@@ -51,6 +53,9 @@ pub struct EditTeamScreen<TW: TeamWriter + Send + Sync> {
     footer_entries: Vec<(String, String)>,
     screen_key_bindings: ActionsKeyBindings<ScreenActionEnum>,
     team_writer: Arc<TW>,
+    /// where a new team is pinned, once saved: the teams created by hand
+    /// start at the top of the list
+    pins: Option<Arc<dyn TeamPins>>,
 }
 
 impl<TW: TeamWriter + Send + Sync> Renderable for EditTeamScreen<TW> {
@@ -124,8 +129,13 @@ impl<TW: TeamWriter + Send + Sync> ScreenAsync for EditTeamScreen<TW> {
 }
 
 impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
-    /// A new team, of `country` (the one of the settings) unless changed.
-    pub fn new(team_writer: Arc<TW>, country: Option<CountryCode>) -> Self {
+    /// A new team, of `country` (the one of the settings) unless changed,
+    /// pinned in `pins` once saved.
+    pub fn new(
+        team_writer: Arc<TW>,
+        country: Option<CountryCode>,
+        pins: Arc<dyn TeamPins>,
+    ) -> Self {
         let classification = Select::new(
             current_labels().team_classification.to_owned(),
             TeamClassificationEnum::ALL.to_vec(),
@@ -174,6 +184,8 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             footer_entries,
             team_writer,
             screen_key_bindings,
+
+            pins: Some(pins),
         }
     }
 
@@ -232,6 +244,8 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
             footer_entries,
             team_writer,
             screen_key_bindings,
+
+            pins: None,
         }
     }
 
@@ -300,7 +314,13 @@ impl<TW: TeamWriter + Send + Sync> EditTeamScreen<TW> {
                 AppAction::None
             }
             Ok(input) => match self.team_writer.save(input).await {
-                Ok(_) => {
+                Ok(team) => {
+                    if let Some(pins) = &self.pins
+                        && let Err(e) = pins.pin(team.id).await
+                    {
+                        // the team is there all the same, just not pinned
+                        log_error(&format!("could not pin the new team: {e}"));
+                    }
                     self.notify_message
                         .set_info(current_labels().operation_successful.to_string());
                     self.back = true;

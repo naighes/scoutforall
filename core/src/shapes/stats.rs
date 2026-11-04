@@ -8,9 +8,11 @@
 //!
 //! Every query takes a [`StatsFilter`] narrowing it to a phase, a rotation
 //! (the index of the setter's position, 0 to 5) and a player.
+use crate::shapes::court_zone::{CourtTarget, CourtZoneEnum};
 use crate::shapes::enums::{
     ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
+use crate::shapes::flags::BlockersEnum;
 use std::collections::HashMap;
 use std::hash::Hash;
 use uuid::Uuid;
@@ -153,6 +155,12 @@ pub struct EventKey {
     pub player: Option<Uuid>,
     /// the zone of an attack, when the role of the attacker tells it
     pub zone: Option<ZoneEnum>,
+    /// where our serve or attack went, or where we received theirs, when
+    /// the scout told it
+    pub target: Option<CourtTarget>,
+    /// how many blocked against our attack, or on our block, when the
+    /// scout told it
+    pub blockers: Option<BlockersEnum>,
     /// `None` for the events with no evaluation (`F`, `OS`, `OE`, `FB`,
     /// `OF`)
     pub eval: Option<EvalEnum>,
@@ -406,6 +414,106 @@ impl Stats {
         (total > 0).then(|| percentage(score, total))
     }
 
+    /// Our serves or attacks sent to one of the nine zones, or our
+    /// receptions in it (see `CourtSide::of`), among the ones whose zone was
+    /// told: how many, two cells of different zones half in each (see
+    /// `CourtTarget::zones`), and their efficiency (as `Metric::Efficiency`).
+    pub fn events_to(
+        &self,
+        event_type: EventTypeEnum,
+        zone: CourtZoneEnum,
+        filter: &StatsFilter,
+    ) -> (f64, f64) {
+        self.weighted(event_type, filter, |target| {
+            target
+                .zones()
+                .iter()
+                .filter(|(z, _)| *z == zone)
+                .map(|(_, weight)| weight)
+                .sum()
+        })
+    }
+
+    /// The events of the type on a conflict zone (any, with `None`): how
+    /// many, and their efficiency (as `Metric::Efficiency`).
+    pub fn events_on_conflict(
+        &self,
+        event_type: EventTypeEnum,
+        conflict: Option<CourtZoneEnum>,
+        filter: &StatsFilter,
+    ) -> (u32, f64) {
+        let (count, efficiency) = self.weighted(event_type, filter, |target| {
+            match (target.conflict(), conflict) {
+                (Some(on), Some(asked)) if on == asked => 1.0,
+                (Some(_), None) => 1.0,
+                _ => 0.0,
+            }
+        });
+        // whole events: each counts 1 or 0
+        (count.round() as u32, efficiency)
+    }
+
+    /// The events of the type whose zone was told, each counted by the
+    /// weight of its target: how many, and their efficiency.
+    fn weighted(
+        &self,
+        event_type: EventTypeEnum,
+        filter: &StatsFilter,
+        weight: impl Fn(&CourtTarget) -> f64,
+    ) -> (f64, f64) {
+        let (score, total) = self
+            .events(event_type, filter)
+            .filter_map(|(k, v)| {
+                k.target
+                    .map(|t| weight(&t) * f64::from(v))
+                    .filter(|w| *w > 0.0)
+                    .zip(k.eval)
+            })
+            .fold((0.0, 0.0), |(score, total), (w, eval)| {
+                let s = f64::from(Metric::Efficiency.score(event_type, eval));
+                (score + s * w, total + w)
+            });
+        match total > 0.0 {
+            true => (total, score / total * 100.0),
+            false => (0.0, 0.0),
+        }
+    }
+
+    /// The events of the type with how many blocked told, or with that
+    /// many: how many, and their efficiency (0 with none).
+    pub fn events_with_blockers(
+        &self,
+        event_type: EventTypeEnum,
+        blockers: Option<BlockersEnum>,
+        filter: &StatsFilter,
+    ) -> (u32, f64) {
+        let (count, score) = self
+            .events(event_type, filter)
+            .filter(|(k, _)| match (k.blockers, blockers) {
+                (Some(b), Some(wanted)) => b == wanted,
+                (Some(_), None) => true,
+                (None, _) => false,
+            })
+            .fold((0u32, 0i64), |(count, score), (k, v)| {
+                let s = k.eval.map_or(0, |eval| {
+                    i64::from(Metric::Efficiency.score(event_type, eval))
+                });
+                (count + v, score + s * i64::from(v))
+            });
+        match count {
+            0 => (0, 0.0),
+            n => (n, score as f64 / f64::from(n) * 100.0),
+        }
+    }
+
+    /// The events of the type whose zone was told.
+    pub fn events_with_target(&self, event_type: EventTypeEnum, filter: &StatsFilter) -> u32 {
+        self.events(event_type, filter)
+            .filter(|(k, _)| k.target.is_some())
+            .map(|(_, v)| v)
+            .sum()
+    }
+
     /// The errors made with this type of event (of this type of error, when
     /// given): see `EventTypeEnum::error_type`. A fault is an unforced error.
     pub fn errors(
@@ -441,12 +549,19 @@ impl Stats {
             .sum()
     }
 
-    /// The points scored minus the errors made, or `None` when there are
-    /// neither.
+    /// The points scored minus the points given away, as DataVolley counts
+    /// them: serve, reception and attack errors and attacks blocked. A
+    /// block or a dig missed is their kill, a fault (a set, a freeball)
+    /// isn't counted either. `None` when there are neither.
     pub fn won_minus_lost(&self, filter: &StatsFilter) -> Option<i32> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
         let points = self.points(filter);
-        let errors = self.total_errors(None, filter);
-        (points + errors > 0).then_some(points as i32 - errors as i32)
+        let lost: u32 = [(S, Error), (P, Error), (A, Error), (A, Over)]
+            .into_iter()
+            .map(|(event_type, eval)| self.event_count(event_type, Some(eval), filter))
+            .sum();
+        (points + lost > 0).then_some(points as i32 - lost as i32)
     }
 
     /// How many rallies it takes us to win a point: in break, the serves

@@ -8,6 +8,8 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -48,6 +50,9 @@ class ScoutingTest {
         rule.onNode(touchable).performClick()
     }
 
+    private fun hasStateDescription(state: String) =
+        SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state)
+
     private fun undo() {
         rule.onNode(hasContentDescription(string(R.string.undo)) and hasClickAction()).performClick()
     }
@@ -65,6 +70,64 @@ class ScoutingTest {
         touch("#")
         rule.waitFor { score(saved()) == 1 to 0 }
         rule.waitForText("serve #", substring = true)
+    }
+
+    /** Where our serve went, touched on the court while it waits for its
+     * evaluation: a cell, then the one next to it along with it (two cells
+     * of 1 and 9: on the line between them), saved with it; touched again,
+     * taken back; never required. */
+    @Test
+    fun theServeZoneIsTouchedOnTheCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.serve_zone)} $label") and hasClickAction() }
+        val chosen = { rule.onAllNodes(hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().size }
+        rule.waitFor { rule.onAllNodes(zone("1B")).fetchSemanticsNodes().size == 1 }
+        // chosen, taken back
+        rule.onNode(zone("1B")).performClick()
+        rule.waitFor { rule.onAllNodes(zone("1B") and hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().size == 1 }
+        rule.onNode(zone("1B")).performClick()
+        rule.waitFor { chosen() == 0 }
+        // 1B, then 9A under it: both chosen, told under the score; one
+        // behind the other, no conflict zone
+        rule.onNode(zone("1B")).performClick()
+        rule.onNode(zone("9A")).performClick()
+        rule.waitFor { chosen() == 2 }
+        rule.waitForText("1B-9A", substring = true)
+        assertTrue(rule.onAllNodes(hasText("(1/9)", substring = true)).fetchSemanticsNodes().isEmpty())
+        touch("#")
+        rule.waitFor { saved().events.size == 1 }
+        assertEquals("1B-9A", saved().events[0].target)
+        // the next serve, without one
+        rule.waitFor { rule.onAllNodes(hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().isEmpty() }
+        touch("=")
+        rule.waitFor { saved().events.size == 2 }
+        // the last first
+        assertEquals(listOf(null, "1B-9A"), saved().events.map { it.target })
+        // their serve: the players again, no zones
+        rule.waitFor { rule.onAllNodes(zone("8A")).fetchSemanticsNodes().isEmpty() }
+    }
+
+    /** Their serve: once the receiver is touched, our court with its
+     * cells while the reception waits for its evaluation, the net at the
+     * top; where we received saved with it. */
+    @Test
+    fun theReceptionZoneIsTouchedOnOurCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.reception_zone)} $label") and hasClickAction() }
+        touch("=")
+        rule.waitFor { saved().events.size == 1 }
+        assertTrue(rule.onAllNodes(zone("6A")).fetchSemanticsNodes().isEmpty())
+        touch("18")
+        rule.waitFor { rule.onAllNodes(zone("6A")).fetchSemanticsNodes().size == 1 }
+        // ours: 4 at the net on the left, 1 at our end line on the right
+        val top = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(top("4C").y < top("1A").y && top("4C").x < top("1A").x)
+        rule.onNode(zone("1D")).performClick()
+        rule.onNode(zone("6A")).performClick()
+        rule.waitForText("1D-6A (6/1)", substring = true)
+        touch("+")
+        rule.waitFor { saved().events.size == 2 }
+        assertEquals("1D-6A (6/1)", saved().events[0].target)
     }
 
     @Test
@@ -136,6 +199,73 @@ class ScoutingTest {
         val events = saved().events.map { listOf(it.name, it.symbol, it.player?.name) }
         assertEquals(listOf("attack", "#", "Alessia Orro"), events.first())
         assertEquals(3, events.size)
+    }
+
+    /** Our attack: where it went, touched on their court as our server
+     * sees it (the net at the bottom, 1 at the top on the left). */
+    @Test
+    fun theAttackZoneIsTouchedOnTheirCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.attack_zone)} $label") and hasClickAction() }
+        touch("+")
+        touch("18")
+        touch("defense")
+        touch("+")
+        assertTrue(rule.onAllNodes(zone("5A")).fetchSemanticsNodes().isEmpty())
+        // the setter can only attack: the evaluation and the court
+        touch("8")
+        rule.waitFor { rule.onAllNodes(zone("5A")).fetchSemanticsNodes().size == 1 }
+        val at = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(at("1A").y < at("4C").y && at("1A").x < at("4C").x)
+        rule.onNode(zone("5A")).performClick()
+        rule.waitForText("5A", substring = true)
+        touch("#")
+        rule.waitFor { score(saved()) == 1 to 0 }
+        assertEquals("5A", saved().events[0].target)
+    }
+
+    /** Our dig: where we dug their attack, touched on our court (the net
+     * at the top, 4 on the left). */
+    @Test
+    fun theDigZoneIsTouchedOnOurCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.dig_zone)} $label") and hasClickAction() }
+        touch("+")
+        touch("18")
+        touch("defense")
+        rule.waitFor { rule.onAllNodes(zone("6B")).fetchSemanticsNodes().size == 1 }
+        val at = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(at("4C").y < at("1A").y && at("4C").x < at("1A").x)
+        rule.onNode(zone("1C")).performClick()
+        rule.onNode(zone("6B")).performClick()
+        rule.waitForText("1C-6B (6/1)", substring = true)
+        touch("+")
+        rule.waitFor { saved().events.size == 2 }
+        assertEquals("1C-6B (6/1)", saved().events[0].target)
+    }
+
+    /** Our block: where we blocked, only the zones at the net on our court
+     * (4, 3, 2 from the left), whole: no cells. */
+    @Test
+    fun theBlockZoneIsTouchedAtTheNet() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.block_zone)} $label") and hasClickAction() }
+        touch("+")
+        // Paola Egonu, opposite, in the front row
+        touch("18")
+        touch("block")
+        rule.waitFor { rule.onAllNodes(zone("3")).fetchSemanticsNodes().size == 1 }
+        assertTrue(rule.onAllNodes(zone("3A")).fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodes(zone("8")).fetchSemanticsNodes().isEmpty())
+        val at = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(at("4").x < at("3").x && at("3").x < at("2").x)
+        rule.onNode(zone("2")).performClick()
+        // and how many blocked: two, read whole
+        rule.onNode(hasContentDescription("2 blockers") and hasClickAction()).performClick()
+        touch("+")
+        rule.waitFor { saved().events.size == 2 }
+        assertEquals("2", saved().events[0].target)
+        assertEquals("2 blockers", saved().events[0].blockers)
     }
 
     /** From the changes of the lineup, the libero for a player touched on

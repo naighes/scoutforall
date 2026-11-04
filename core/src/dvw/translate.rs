@@ -8,9 +8,11 @@
 use crate::{
     dvw::model::{Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols},
     shapes::{
+        court_zone::{CourtTarget, SubzoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum},
-        flags::EventFlags,
+        flags::{BlockersEnum, EventFlags},
         lineup::Lineup,
+        refusal::Refusal,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
         technique::{ServeTypeEnum, TechniqueEnum},
@@ -39,8 +41,14 @@ pub enum Issue {
         evaluation: char,
     },
     /// A rally the file tells in a way we can't: what's missing.
-    Untranslatable(&'static str),
-    /// Our snapshot refuses the event.
+    Untranslatable(Untranslatable),
+    /// Our scouting refuses the event, the players by number.
+    Refused {
+        event: EventTypeEnum,
+        refusal: Refusal<u8>,
+    },
+    /// Our snapshot refuses the event for another reason: the technical
+    /// detail.
     Event(String),
     /// The score after a rally (us, them): the file's and ours.
     Score {
@@ -49,6 +57,31 @@ pub enum Issue {
     },
     /// The file ends the set before one of the teams wins it.
     Unfinished,
+}
+
+/// What the file tells in a way we can't translate exactly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Untranslatable {
+    SubstitutionInRally,
+    SetterChangeInRally,
+    /// A touch of theirs keeping the ball after the point.
+    TheirTouchAfterTheEnd,
+    /// A touch of ours after the point.
+    OurTouchAfterTheEnd,
+    PointWithoutCause,
+    /// The libero should change the player it replaces within a rally.
+    LiberoTooLate,
+    /// Every player of the back row touches the ball with the libero.
+    LiberoForNobody,
+    /// The libero may replace each of these players: the file doesn't tell
+    /// which.
+    LiberoForWhom(Vec<u8>),
+    OurTouchWithoutPlayer,
+    /// Their attack back from our block (`!`) without our block.
+    TheirAttackBackWithoutOurBlock,
+    /// Their attack blocked (`/`) without our block point.
+    TheirAttackBlockedWithoutOurBlock,
+    UnknownEvaluation(char),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +133,7 @@ pub fn translate_set(
         rally_number: 0,
         chosen: HashMap::new(),
         earlier: None,
+        at: None,
     };
     set.translate(lines)
         .map_err(|(line, issue)| fail(line, issue))?;
@@ -226,6 +260,16 @@ fn player(us: &Us, number: u8) -> Result<Uuid, Issue> {
         .get(&number)
         .copied()
         .ok_or(Issue::UnknownPlayer(number))
+}
+
+// the number of one of our players, as the file writes it (0 for an id
+// not of the file, which our events never have)
+fn number(us: &Us, id: Uuid) -> u8 {
+    us.players
+        .iter()
+        .find(|(_, player)| **player == id)
+        .map(|(number, _)| *number)
+        .unwrap_or_default()
 }
 
 /// The symbols of DataVolley when the file has none (Click&Scout).
@@ -360,6 +404,9 @@ struct SetTranslator<'a> {
     chosen: HashMap<usize, Uuid>,
     // the player to choose a rally earlier, the rally failing without
     earlier: Option<Uuid>,
+    // the line the rally being translated is at: its first touch for what
+    // comes before the touches, then each touch; none for the point
+    at: Option<usize>,
 }
 
 /// Where a rally starts (the dead ball before it): to translate again from
@@ -416,7 +463,7 @@ impl SetTranslator<'_> {
                                 rally.clear();
                                 continue;
                             }
-                            _ => return Err((at, issue)),
+                            _ => return Err((self.at.take().or(at), issue)),
                         }
                     }
                     self.rally_number += 1;
@@ -443,7 +490,10 @@ impl SetTranslator<'_> {
                                 .map_err(|issue| (at, issue))?;
                         }
                         false => {
-                            return Err((at, Issue::Untranslatable("substitution in a rally")));
+                            return Err((
+                                at,
+                                Issue::Untranslatable(Untranslatable::SubstitutionInRally),
+                            ));
                         }
                     }
                 }
@@ -460,7 +510,10 @@ impl SetTranslator<'_> {
                             .apply(EventTypeEnum::CS, Some(setter), None, None, None)
                             .map_err(|issue| (at, issue))?,
                         (false, false) => {
-                            return Err((at, Issue::Untranslatable("setter change in a rally")));
+                            return Err((
+                                at,
+                                Issue::Untranslatable(Untranslatable::SetterChangeInRally),
+                            ));
                         }
                     }
                 }
@@ -517,6 +570,25 @@ impl SetTranslator<'_> {
         target_player: Option<Uuid>,
         technique: Option<TechniqueEnum>,
     ) -> Result<(), Issue> {
+        self.apply_flagged(
+            event_type,
+            player,
+            eval,
+            target_player,
+            technique,
+            EventFlags::default(),
+        )
+    }
+
+    fn apply_flagged(
+        &mut self,
+        event_type: EventTypeEnum,
+        player: Option<Uuid>,
+        eval: Option<EvalEnum>,
+        target_player: Option<Uuid>,
+        technique: Option<TechniqueEnum>,
+        flags: EventFlags,
+    ) -> Result<(), Issue> {
         let event = EventEntry {
             timestamp: self.clock,
             event_type,
@@ -524,8 +596,14 @@ impl SetTranslator<'_> {
             eval,
             target_player,
             technique,
-            flags: EventFlags::default(),
+            flags,
         };
+        if let Some(refusal) = self.snapshot.refusal(&event) {
+            return Err(Issue::Refused {
+                event: event_type,
+                refusal: refusal.map(|id| number(self.us, id)),
+            });
+        }
         if let Err(e) = self.snapshot.add_event(&event) {
             return Err(Issue::Event(e.to_string()));
         }
@@ -548,6 +626,17 @@ impl SetTranslator<'_> {
         }
     }
 
+    // the last touch played before is our attack winning the point
+    fn after_our_kill(&self, before: &[(&ScoutLine, Touch)]) -> bool {
+        matches!(
+            before.iter().rev().find_map(|(_, t)| t.played()),
+            Some((side, skill))
+                if side == self.us.side
+                    && skill.skill == Skill::Attack
+                    && self.ending(skill.skill, skill.evaluation) == Ending::Won
+        )
+    }
+
     // the events of the rally being translated
     fn rally_events(&self) -> &[EventEntry] {
         self.events.get(self.rally_start..).unwrap_or_default()
@@ -568,13 +657,15 @@ impl SetTranslator<'_> {
     ) -> Result<(), Issue> {
         self.rally_start = self.events.len();
         let touches = &freeballs_sent(touches);
+        self.at = touches.first().map(|(line, _)| line.line);
         self.change_libero(touches)?;
         self.libero_in_or_out(touches)?;
         let mut last_cause: Option<(Side, Ending)> = None;
         // a point without a touch: the cause when no touch is, otherwise
         // the other side of the same point (`a07AH#`, then `*$$&H=`)
         let mut green: Option<(Side, Ending)> = None;
-        for (index, (_, touch)) in touches.iter().enumerate() {
+        for (index, (line, touch)) in touches.iter().enumerate() {
+            self.at = Some(line.line);
             let next = touches.get(index + 1..).unwrap_or_default();
             match (self.rally_over(), touch) {
                 // what the file adds after the end: the other side of the
@@ -582,11 +673,21 @@ impl SetTranslator<'_> {
                 (true, Touch::Skill(side, skill) | Touch::Sent(side, skill))
                     if *side != self.us.side =>
                 {
-                    match self.ending(skill.skill, skill.evaluation) {
-                        Ending::Goes => {
-                            return Err(Issue::Untranslatable("their touch after the end"));
+                    let block_on_our_kill = skill.skill == Skill::Block
+                        && self.after_our_kill(touches.get(..index).unwrap_or_default());
+                    match (
+                        self.ending(skill.skill, skill.evaluation),
+                        block_on_our_kill,
+                    ) {
+                        // their block touching our kill (`*02AH#`, then
+                        // `a13BH-`): the ball went down all the same
+                        (Ending::Goes, true) => self.mapped("their block on our kill: dropped"),
+                        (Ending::Goes, false) => {
+                            return Err(Issue::Untranslatable(
+                                Untranslatable::TheirTouchAfterTheEnd,
+                            ));
                         }
-                        Ending::Won | Ending::Lost => {}
+                        (Ending::Won | Ending::Lost, _) => {}
                     }
                 }
                 (true, Touch::Green(_, _)) => {}
@@ -604,7 +705,9 @@ impl SetTranslator<'_> {
                 {
                     self.mapped("dig after a ball off a block: dropped");
                 }
-                (true, _) => return Err(Issue::Untranslatable("our touch after the end")),
+                (true, _) => {
+                    return Err(Issue::Untranslatable(Untranslatable::OurTouchAfterTheEnd));
+                }
                 (false, Touch::Skill(side, skill) | Touch::Sent(side, skill))
                     if *side == self.us.side =>
                 {
@@ -629,6 +732,7 @@ impl SetTranslator<'_> {
                 }
             }
         }
+        self.at = None;
         match (self.rally_over(), winner, last_cause.or(green)) {
             (true, _, _) => Ok(()),
             // their point: their ace, kill or block point, or their point
@@ -659,7 +763,7 @@ impl SetTranslator<'_> {
             (false, TeamSideEnum::Them, Some((side, Ending::Lost))) if side == self.us.side => {
                 self.apply(EventTypeEnum::F, None, None, None, None)
             }
-            (false, _, _) => Err(Issue::Untranslatable("a point without its cause")),
+            (false, _, _) => Err(Issue::Untranslatable(Untranslatable::PointWithoutCause)),
         }
     }
 
@@ -701,9 +805,7 @@ impl SetTranslator<'_> {
             self.mapped("libero for a player: LF");
             self.apply(EventTypeEnum::LF, Some(player), None, None, None)?;
             return match libero_touches {
-                true => Err(Issue::Untranslatable(
-                    "the libero can't change player in time",
-                )),
+                true => Err(Issue::Untranslatable(Untranslatable::LiberoTooLate)),
                 false => Ok(()),
             };
         }
@@ -713,9 +815,7 @@ impl SetTranslator<'_> {
             (Some(_), false, _) => self.apply(EventTypeEnum::LR, None, None, None, None),
             (Some(_), true, _) => {
                 self.earlier = Some(self.only_one_out(&ours)?);
-                Err(Issue::Untranslatable(
-                    "the libero can't change player in time",
-                ))
+                Err(Issue::Untranslatable(Untranslatable::LiberoTooLate))
             }
             (None, false, true) => {
                 let mut back_in = lineup.clone();
@@ -742,9 +842,7 @@ impl SetTranslator<'_> {
                             true => Ok(()),
                             false => {
                                 self.earlier = Some(player);
-                                Err(Issue::Untranslatable(
-                                    "the libero can't change player in time",
-                                ))
+                                Err(Issue::Untranslatable(Untranslatable::LiberoTooLate))
                             }
                         }
                     }
@@ -768,10 +866,10 @@ impl SetTranslator<'_> {
             .collect();
         match out.as_slice() {
             [player] => Ok(*player),
-            [] => Err(Issue::Untranslatable("the libero has nobody to replace")),
-            _ => Err(Issue::Untranslatable(
-                "the libero for more than one player: who is out can't be told",
-            )),
+            [] => Err(Issue::Untranslatable(Untranslatable::LiberoForNobody)),
+            candidates => Err(Issue::Untranslatable(Untranslatable::LiberoForWhom(
+                candidates.iter().map(|id| number(self.us, *id)).collect(),
+            ))),
         }
     }
 
@@ -850,7 +948,7 @@ impl SetTranslator<'_> {
         };
         let number = skill
             .player
-            .ok_or(Issue::Untranslatable("our touch without a player"))?;
+            .ok_or(Issue::Untranslatable(Untranslatable::OurTouchWithoutPlayer))?;
         let player = player(self.us, number)?;
         // our set `=` attacked by us next: the rally went on, the `=` is
         // how bad the set was, not a fault
@@ -1104,7 +1202,35 @@ impl SetTranslator<'_> {
                     S => serve_type(skill.skill_type).map(TechniqueEnum::Serve),
                     _ => None,
                 };
-                self.apply(event_type, Some(player), eval, None, technique)
+                // where our serve or attack went, or where we received or
+                // dug theirs: the zone, with its subzone if told (a cell
+                // of ours; DataVolley tells no two cells); where we blocked
+                // it, only the zone at the net
+                let target = match (event_type, skill.end_zone) {
+                    (S | P | A | D, Some(zone)) => {
+                        CourtTarget::of_zone(zone, skill.end_subzone.and_then(SubzoneEnum::of))
+                    }
+                    (B, Some(zone)) => {
+                        CourtTarget::of_zone(zone, None).filter(|t| TargetKind::Net.fits(t))
+                    }
+                    _ => None,
+                };
+                // how many of theirs blocked our attack, or of ours blocked
+                // theirs
+                let blockers = skill
+                    .num_players
+                    .and_then(BlockersEnum::of_datavolley)
+                    .filter(|b| BlockersEnum::of(event_type).contains(b));
+                self.apply_flagged(
+                    event_type,
+                    Some(player),
+                    eval,
+                    None,
+                    technique,
+                    EventFlags::default()
+                        .with_target(target)
+                        .with_blockers(blockers),
+                )
             }
             None => Ok(()),
         }?;
@@ -1146,7 +1272,7 @@ impl SetTranslator<'_> {
         match (skill.skill, ending, after_their_attack, sent) {
             (Skill::Freeball, Ending::Goes, Some('!'), true) => {
                 return Err(Issue::Untranslatable(
-                    "their attack back from our block without our block",
+                    Untranslatable::TheirAttackBackWithoutOurBlock,
                 ));
             }
             (Skill::Freeball, Ending::Goes, Some(_), true) => {
@@ -1159,7 +1285,7 @@ impl SetTranslator<'_> {
         match (skill.skill, ending, skill.evaluation, sent, last) {
             // blocked by us: our block point must follow
             (Skill::Attack, Ending::Lost, '/', _, _) if !block_point_next => Err(
-                Issue::Untranslatable("their attack blocked without our block"),
+                Issue::Untranslatable(Untranslatable::TheirAttackBlockedWithoutOurBlock),
             ),
             (
                 Skill::Freeball,
@@ -1200,7 +1326,9 @@ fn eval(code: char) -> Result<EvalEnum, Issue> {
         '-' => Ok(EvalEnum::Negative),
         '/' => Ok(EvalEnum::Over),
         '=' => Ok(EvalEnum::Error),
-        _ => Err(Issue::Untranslatable("unknown evaluation")),
+        other => Err(Issue::Untranslatable(Untranslatable::UnknownEvaluation(
+            other,
+        ))),
     }
 }
 

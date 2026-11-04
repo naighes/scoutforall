@@ -1,6 +1,10 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import io.github.naighes.scout4all.core.PlayerForm
@@ -33,6 +37,9 @@ class SetterBadgeTest(private val screen: Size) {
         val match = startFirstSet(team)
         rule.setContent { Scout4AllTheme { ScoutingScreen(team, match, onBack = {}) } }
         rule.waitForText("Cortona", substring = true)
+        // she serves: on court once the serve is made (the court shows
+        // where it goes until then)
+        rule.onNode(hasContentDescription("positive") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitFor { rule.onAllNodes(hasTestTag(SETTER_BADGE), useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
         val badge = rule.onNode(hasTestTag(SETTER_BADGE), useUnmergedTree = true).fetchSemanticsNode().bounds()
         val number = rule.onNode(hasText("12"), useUnmergedTree = true).fetchSemanticsNode().bounds()

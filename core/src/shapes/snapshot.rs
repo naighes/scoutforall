@@ -6,12 +6,15 @@ use crate::{
     errors::{AppError, SnapshotError},
     localization::Labels,
     shapes::{
+        court_zone::TargetKind,
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, LineupRulesEnum, PhaseEnum, RoleEnum,
             TeamSideEnum, ZoneEnum,
         },
+        flags::BlockersEnum,
         flags::EventFlags,
         lineup::Lineup,
+        refusal::Refusal,
         set::SetEntry,
         stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, PossessionKey, RallyKey, Stats},
         technique::{SetTypeEnum, TechniqueEnum},
@@ -201,17 +204,32 @@ impl Snapshot {
     /// player out for the libero can be substituted too (the libero never,
     /// as the lineup checks).
     pub fn can_play(&self, event_type: EventTypeEnum, player_id: &Uuid) -> bool {
+        self.play_refusal(event_type, player_id).is_none()
+    }
+
+    /// Why the player can't play the event, if they can't.
+    fn play_refusal(&self, event_type: EventTypeEnum, player_id: &Uuid) -> Option<Refusal> {
         use EventTypeEnum::*;
         let lineup = &self.current_lineup;
         let is_libero = lineup.get_current_libero() == *player_id;
-        match (event_type, lineup.find_position(player_id).is_some()) {
-            (R, _) => lineup.is_in_the_game(player_id),
-            (LF, _) => lineup.is_in_the_game(player_id) && !is_libero,
-            (_, false) => false,
-            (S, true) => lineup.get_serving_player() == Some(*player_id),
-            (A | CS, true) => !is_libero,
-            (B, true) => !is_libero && !lineup.is_back_row_player(player_id),
-            (_, true) => true,
+        let player = *player_id;
+        match (
+            event_type,
+            lineup.find_position(player_id).is_some(),
+            lineup.is_in_the_game(player_id),
+        ) {
+            (R, _, false) | (LF, _, false) => Some(Refusal::NotOnCourt(player)),
+            (LF, _, true) if is_libero => Some(Refusal::Libero(player)),
+            (R | LF, _, true) => None,
+            (_, false, _) => Some(Refusal::NotOnCourt(player)),
+            (S, true, _) if lineup.get_serving_player() != Some(player) => {
+                Some(Refusal::NotServing(player))
+            }
+            (A | CS | B, true, _) if is_libero => Some(Refusal::Libero(player)),
+            (B, true, _) if lineup.is_back_row_player(player_id) => {
+                Some(Refusal::BackRowBlock(player))
+            }
+            (_, true, _) => None,
         }
     }
 
@@ -230,13 +248,7 @@ impl Snapshot {
     /// is among the available ones, and it has the evaluation and the
     /// players it needs (and none it doesn't).
     fn validate(&self, event: &EventEntry) -> Result<(), AppError> {
-        match self
-            .sequence_issue(event)
-            .or_else(|| Self::evaluation_issue(event))
-            .or_else(|| self.player_issue(event))
-            .or_else(|| Self::technique_issue(event))
-            .or_else(|| self.replacement_issue(event))
-        {
+        match self.event_refusal(event) {
             Some(reason) => Err(AppError::Snapshot(SnapshotError::InvalidEvent(format!(
                 "{event}: {reason}"
             )))),
@@ -244,64 +256,82 @@ impl Snapshot {
         }
     }
 
-    fn sequence_issue(&self, event: &EventEntry) -> Option<String> {
+    /// Why the event can't follow the ones before it, the substitutions'
+    /// rules too: what the import of a file tells the user.
+    pub fn refusal(&self, event: &EventEntry) -> Option<Refusal> {
+        self.event_refusal(event).or_else(|| {
+            match (event.event_type, event.player, event.target_player) {
+                (EventTypeEnum::R, Some(replaced), Some(replacement)) => self
+                    .current_lineup
+                    .substitution_refusal(&replaced, &replacement),
+                _ => None,
+            }
+        })
+    }
+
+    fn event_refusal(&self, event: &EventEntry) -> Option<Refusal> {
+        self.sequence_issue(event)
+            .or_else(|| Self::evaluation_issue(event))
+            .or_else(|| self.player_issue(event))
+            .or_else(|| Self::technique_issue(event))
+            .or_else(|| self.replacement_issue(event))
+    }
+
+    fn sequence_issue(&self, event: &EventEntry) -> Option<Refusal> {
         match (
             self.get_set_winner(self.set_number),
             self.available_options.contains(&event.event_type),
         ) {
-            (Some(_), _) => Some("the set is over".to_string()),
-            (None, false) => Some(format!(
-                "not available, the available events are {:?}",
-                self.available_options
-            )),
+            (Some(_), _) => Some(Refusal::SetOver),
+            (None, false) => Some(Refusal::NotNow {
+                available: self.available_options.clone(),
+            }),
             (None, true) => None,
         }
     }
 
-    fn evaluation_issue(event: &EventEntry) -> Option<String> {
+    fn evaluation_issue(event: &EventEntry) -> Option<Refusal> {
         match (event.event_type.requires_evaluation(), event.eval) {
-            (true, None) => Some("missing evaluation".to_string()),
+            (true, None) => Some(Refusal::MissingEvaluation),
             (true, Some(eval)) if !event.event_type.available_evals().contains(&eval) => {
-                Some(format!("evaluation {eval} not allowed"))
+                Some(Refusal::EvaluationNotAllowed(eval))
             }
-            (false, Some(_)) => Some("unexpected evaluation".to_string()),
+            (false, Some(_)) => Some(Refusal::UnexpectedEvaluation),
             _ => None,
         }
     }
 
-    fn technique_issue(event: &EventEntry) -> Option<String> {
+    fn technique_issue(event: &EventEntry) -> Option<Refusal> {
         match event.technique {
             Some(technique) if !technique.fits(event.event_type) => {
-                Some(format!("technique {technique} not allowed"))
+                Some(Refusal::TechniqueNotAllowed(technique))
             }
             _ => None,
         }
     }
 
-    fn player_issue(&self, event: &EventEntry) -> Option<String> {
+    fn player_issue(&self, event: &EventEntry) -> Option<Refusal> {
         let event_type = event.event_type;
         match (
             event_type.requires_player(),
             event_type.accepts_player(),
             event.player,
         ) {
-            (true, _, None) => Some("missing player".to_string()),
-            (_, true, Some(player)) if !self.can_play(event_type, &player) => {
-                Some(format!("player {player} can't play it"))
-            }
-            (_, false, Some(_)) => Some("unexpected player".to_string()),
+            (true, _, None) => Some(Refusal::MissingPlayer),
+            (_, true, Some(player)) => self.play_refusal(event_type, &player),
+            (_, false, Some(_)) => Some(Refusal::UnexpectedPlayer),
             _ => None,
         }
     }
 
-    fn replacement_issue(&self, event: &EventEntry) -> Option<String> {
+    fn replacement_issue(&self, event: &EventEntry) -> Option<Refusal> {
         match (event.event_type, event.target_player) {
-            (EventTypeEnum::R, None) => Some("missing replacement".to_string()),
+            (EventTypeEnum::R, None) => Some(Refusal::MissingReplacement),
             (EventTypeEnum::R, Some(replacement)) if !self.can_come_in(&replacement) => {
-                Some(format!("player {replacement} can't come in"))
+                Some(Refusal::CantComeIn(replacement))
             }
             (EventTypeEnum::R, Some(_)) | (_, None) => None,
-            (_, Some(_)) => Some("unexpected replacement".to_string()),
+            (_, Some(_)) => Some(Refusal::UnexpectedReplacement),
         }
     }
 
@@ -557,6 +587,17 @@ impl Snapshot {
                 rotation,
                 player: event.player.filter(|_| event.event_type.asks_player()),
                 zone,
+                // where our serve or attack went, or where we received,
+                // dug or blocked theirs, if told as the event tells it
+                target: event
+                    .flags
+                    .target()
+                    .filter(|t| TargetKind::of(event.event_type).is_some_and(|k| k.fits(t))),
+                // how many blocked against our attack or on our block, if told
+                blockers: event
+                    .flags
+                    .blockers()
+                    .filter(|b| BlockersEnum::of(event.event_type).contains(b)),
                 eval: event.eval,
             });
         }

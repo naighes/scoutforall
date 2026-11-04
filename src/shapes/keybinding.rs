@@ -33,10 +33,28 @@ pub const BACK_KEY: KeyCombination = key!(esc);
 /// Shows the statistics while scouting, and closes them.
 pub const STATS_KEY: KeyCombination = key!(f3);
 
+/// Move the cursor on the court where the ball went, while evaluating.
+pub const ZONE_CURSOR_KEYS: [KeyCombination; 4] = [key!(left), key!(up), key!(down), key!(right)];
+/// Chooses the zone under the cursor, or takes it back.
+pub const ZONE_KEY: KeyCombination = key!(space);
+/// Tells how many blocked, against our attack or on our block: the next
+/// one each time, then none told again.
+pub const BLOCKERS_KEY: KeyCombination = key!(tab);
+
 /// Whether the key is one scouting keeps for itself all along (settings, undo,
-/// back and statistics): it can't be assigned to anything.
+/// back and statistics) or along with the evaluations (the court where the
+/// ball went, how many blocked): it can't be assigned to anything.
 pub fn is_reserved_key(ck: &KeyCombination) -> bool {
-    [SETTINGS_KEY, UNDO_KEY, BACK_KEY, STATS_KEY].contains(ck)
+    [
+        SETTINGS_KEY,
+        UNDO_KEY,
+        BACK_KEY,
+        STATS_KEY,
+        ZONE_KEY,
+        BLOCKERS_KEY,
+    ]
+    .contains(ck)
+        || ZONE_CURSOR_KEYS.contains(ck)
 }
 
 /// Whether the key is one scouting keeps for itself (settings, undo, back,
@@ -291,6 +309,7 @@ impl Default for KeyBindings<ScreenActionEnum> {
         bindings.set(ScreenActionEnum::Settings, SETTINGS_KEY);
         bindings.set(ScreenActionEnum::OneLevelUp, key!(backspace));
         bindings.set(ScreenActionEnum::EnterDirectory, key!(space));
+        bindings.set(ScreenActionEnum::Pin, key!(space));
         bindings.set(ScreenActionEnum::ScrollDown, key!(down));
         bindings.set(ScreenActionEnum::ScrollUp, key!(up));
         bindings.set(ScreenActionEnum::ReportAnIssue, key!(i));
@@ -499,7 +518,15 @@ fn test_without_keys() {
 
 #[test]
 fn test_reserved_and_fixed_keys() {
-    for ck in [key!(shift - u), key!(esc), key!(f2)] {
+    // the zone keys too: active along with the evaluations and serves
+    for ck in [
+        key!(shift - u),
+        key!(esc),
+        key!(f2),
+        key!(space),
+        key!(up),
+        key!(left),
+    ] {
         assert!(is_reserved_key(&ck), "{ck}");
     }
     for ck in [key!('0'), key!('9'), key!(a), key!(u)] {

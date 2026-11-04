@@ -1,10 +1,15 @@
 //! What the scout tells about an event besides its type, player, evaluation
 //! and technique, saved as one number in the last column of the events:
-//! bit 0 the inverted P1, bits 1 and 2 the reception formation. Empty or
-//! missing (the sets scouted up to v0.10.1) is 0: the canonical P1, the
-//! reception with three players.
+//! bit 0 the inverted P1, bits 1 and 2 the reception formation, bits 3 to 9
+//! where the ball went (the code of a `CourtTarget`, 0 when not told), bits
+//! 10 to 12 how many blocked (the code of a `BlockersEnum`, 0 when not
+//! told).
+//! Empty or missing (the sets scouted up to v0.10.1) is 0: the canonical
+//! P1, the reception with three players, no zone.
 
 use crate::errors::{AppError, IOError};
+use crate::shapes::court_zone::CourtTarget;
+use crate::shapes::enums::EventTypeEnum;
 use std::fmt;
 
 /// How many receive the serve: three by default, four or two when the
@@ -34,6 +39,87 @@ impl ReceptionSchemeEnum {
     }
 }
 
+/// How many blocked: against our attack, how many of theirs (none too);
+/// on our block, how many of ours. As DataVolley tells them, with the hole
+/// block: two with a gap between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BlockersEnum {
+    NoBlock,
+    One,
+    Two,
+    Three,
+    Hole,
+}
+
+impl BlockersEnum {
+    pub const ALL: [BlockersEnum; 5] = [
+        BlockersEnum::NoBlock,
+        BlockersEnum::One,
+        BlockersEnum::Two,
+        BlockersEnum::Three,
+        BlockersEnum::Hole,
+    ];
+
+    /// The ones the scout can tell on the event: all of them against our
+    /// attack, on our block all but none; nothing for the other events.
+    pub fn of(event: EventTypeEnum) -> &'static [BlockersEnum] {
+        match event {
+            EventTypeEnum::A => &Self::ALL,
+            EventTypeEnum::B => &Self::ALL[1..],
+            _ => &[],
+        }
+    }
+
+    /// Its name in the labels (see `Labels::blockers`).
+    pub fn name(&self, labels: &crate::localization::Labels) -> &'static str {
+        let names = labels.blockers;
+        match self {
+            BlockersEnum::NoBlock => names[0],
+            BlockersEnum::One => names[1],
+            BlockersEnum::Two => names[2],
+            BlockersEnum::Three => names[3],
+            BlockersEnum::Hole => names[4],
+        }
+    }
+
+    /// As DataVolley writes it: 0 to 3 blockers, 4 the hole block.
+    pub fn of_datavolley(c: char) -> Option<Self> {
+        match c {
+            '0' => Some(BlockersEnum::NoBlock),
+            '1' => Some(BlockersEnum::One),
+            '2' => Some(BlockersEnum::Two),
+            '3' => Some(BlockersEnum::Three),
+            '4' => Some(BlockersEnum::Hole),
+            _ => None,
+        }
+    }
+
+    /// The next one the scout tells on the event, after `current`: from
+    /// the first, then none told again after the last.
+    pub fn next(event: EventTypeEnum, current: Option<Self>) -> Option<Self> {
+        let all = Self::of(event);
+        match current.and_then(|c| all.iter().position(|b| *b == c)) {
+            Some(i) => all.get(i + 1).copied(),
+            None => all.first().copied(),
+        }
+    }
+
+    /// Its code in the flags (see `BLOCKERS`). Never to be reordered.
+    fn code(&self) -> u16 {
+        match self {
+            BlockersEnum::NoBlock => 1,
+            BlockersEnum::One => 2,
+            BlockersEnum::Two => 3,
+            BlockersEnum::Three => 4,
+            BlockersEnum::Hole => 5,
+        }
+    }
+
+    fn from_code(code: u16) -> Option<Self> {
+        Self::ALL.into_iter().find(|b| b.code() == code)
+    }
+}
+
 /// The flags of an event. The bits this version doesn't know (written by a
 /// later one) are kept as they were.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -43,6 +129,10 @@ const INVERTED_P1: u16 = 1;
 const RECEPTION: u16 = 0b110;
 const RECEPTION_FOUR: u16 = 0b010;
 const RECEPTION_TWO: u16 = 0b100;
+const TARGET_SHIFT: u16 = 3;
+const TARGET: u16 = 0b111_1111 << TARGET_SHIFT;
+const BLOCKERS_SHIFT: u16 = 10;
+const BLOCKERS: u16 = 0b111 << BLOCKERS_SHIFT;
 
 impl EventFlags {
     /// In P1 in side out, the outside hitter attacks from 4 and the
@@ -76,6 +166,28 @@ impl EventFlags {
             ReceptionSchemeEnum::Two => RECEPTION_TWO,
         };
         Self(self.0 & !RECEPTION | bits)
+    }
+
+    /// Where the ball went, if the scout told it (and told it in a way
+    /// this version knows).
+    pub fn target(&self) -> Option<CourtTarget> {
+        CourtTarget::from_code((self.0 & TARGET) >> TARGET_SHIFT)
+    }
+
+    pub fn with_target(self, target: Option<CourtTarget>) -> Self {
+        let bits = target.map_or(0, |t| t.code() << TARGET_SHIFT);
+        Self(self.0 & !TARGET | bits)
+    }
+
+    /// How many blocked, if the scout told it (in a way this version
+    /// knows).
+    pub fn blockers(&self) -> Option<BlockersEnum> {
+        BlockersEnum::from_code((self.0 & BLOCKERS) >> BLOCKERS_SHIFT)
+    }
+
+    pub fn with_blockers(self, blockers: Option<BlockersEnum>) -> Self {
+        let bits = blockers.map_or(0, |b| b.code() << BLOCKERS_SHIFT);
+        Self(self.0 & !BLOCKERS | bits)
     }
 
     /// The flags of the column: empty is none.

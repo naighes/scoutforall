@@ -81,6 +81,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -120,6 +121,9 @@ import io.github.naighes.scout4all.core.ScoutingStep
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.ServeTypeEnum
 import io.github.naighes.scout4all.core.TechniqueChoice
+import io.github.naighes.scout4all.core.BlockersChoice
+import io.github.naighes.scout4all.core.BlockersEnum
+import io.github.naighes.scout4all.core.CourtCellChoice
 import io.github.naighes.scout4all.core.TechniqueEnum
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -135,6 +139,18 @@ data class ScoutingView(
     val evals: List<EvalChoice>,
     val techniques: List<TechniqueChoice>,
     val replacements: List<ScoutingPlayer>,
+    /** how many blocked, to tell with the evaluation of our attack or our
+     * block: empty for the other events */
+    val blockers: List<BlockersChoice> = emptyList(),
+    /** the court where our serve or attack went (theirs) or where we
+     * received or dug (ours), six rows of six cells from the top; where we
+     * blocked, one row of the zones at the net: empty when it can't be told
+     * now */
+    val targets: List<List<CourtCellChoice>> = emptyList(),
+    /** what's told of where it went: "1D-6A (6/1)" */
+    val targetTold: String? = null,
+    /** the court is ours (our reception, the net at the top), not theirs */
+    val targetOurs: Boolean = false,
 )
 
 sealed interface ScoutingUi {
@@ -198,6 +214,19 @@ class ScoutingViewModel(
     }
 
     fun eval(eval: EvalChoice) = choose("eval ${eval.value}") { it.chooseEval(eval.value) }
+
+    /** How many blocked; touched again, taken back. */
+    fun blockers(blockers: BlockersChoice) = choose("blockers ${blockers.value}") {
+        it.chooseBlockers(if (blockers.chosen) null else blockers.value)
+        Progress.CHOOSING
+    }
+
+    /** Where the ball went: a cell, alone or along with the one next to
+     * it; touched again, taken back. */
+    fun target(cell: CourtCellChoice) = choose("target ${cell.label}") {
+        it.touchTarget(cell.zone, cell.subzone)
+        Progress.CHOOSING
+    }
 
     /** The inverted P1, saved with the events from now on. */
     fun invertedP1(inverted: Boolean) = choose("inverted p1 $inverted") {
@@ -288,6 +317,10 @@ class ScoutingViewModel(
             evals = s.availableEvals(),
             techniques = s.availableTechniques(),
             replacements = s.replacementChoices(),
+            blockers = s.availableBlockers(),
+            targets = s.targetCourt(),
+            targetTold = s.targetTold(),
+            targetOurs = s.targetOurs(),
         )
     }
 }
@@ -321,7 +354,17 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "", Modifier.title()) },
+                title = {
+                    // in landscape, while the serve court takes the room of
+                    // the score, the score up here
+                    val configuration = LocalConfiguration.current
+                    val low = view != null && view.targets.isNotEmpty() &&
+                        configuration.screenWidthDp > configuration.screenHeightDp
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "", Modifier.title())
+                        if (low) view?.let { BarScore(it.state) }
+                    }
+                },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     view?.let {
@@ -347,6 +390,26 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
             }
         }
     }
+    }
+}
+
+/** The teams and the points in a line, the home team on the left, and the
+ * rotation. */
+@Composable
+private fun BarScore(state: ScoutingState) {
+    val (left, right) = when (state.home) {
+        true -> (state.team to state.scoreUs) to (state.opponent to state.scoreThem)
+        false -> (state.opponent to state.scoreThem) to (state.team to state.scoreUs)
+    }
+    // read as one, as the score under the bar
+    val serving = if (state.servingTeam == TeamSideEnum.US) state.team else state.opponent
+    val spoken = "${left.first} ${left.second}, ${right.first} ${right.second}, " +
+        stringResource(R.string.serves, serving) + ", ${state.rotation}"
+    Row(Modifier.tutorial("score").readAs(spoken), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(left.first, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("${left.second} – ${right.second}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(right.first, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("· ${state.rotation}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -418,9 +481,16 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
             }
         }
         // the court fits what's left: the same at every step
+        // choosing where the serve went, the court shows its 36 cells, 48dp
+        // each to touch them apart: they take the room of the phase (break,
+        // as we serve) and of the margins; the server is told under the
+        // score; in landscape, low, the court takes the room of the score
+        // too, back as soon as the serve is evaluated
+        val aiming = view.targets.isNotEmpty()
+        val low = aiming && maxWidth > maxHeight
         val court = @Composable { m: Modifier ->
-            Column(m.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Score(view.state)
+            Column(m.padding(vertical = if (aiming) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (aiming) 4.dp else 16.dp)) {
+                if (!low) Score(view.state, server = aiming, phase = !aiming, told = view.targetTold)
                 // where they stand: spread to receive, then where they
                 // play once our serve is made or theirs received
                 val players = view.state.court
@@ -454,6 +524,16 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },
                     modifier = Modifier.weight(1f, fill = false),
                     serveZone = true,
+                    targets = view.targets,
+                    targetsOurs = view.targetOurs,
+                    targetsName = when {
+                        view.state.event?.value == EventTypeEnum.B -> R.string.block_zone
+                        view.state.event?.value == EventTypeEnum.D -> R.string.dig_zone
+                        view.targetOurs -> R.string.reception_zone
+                        view.state.event?.value == EventTypeEnum.A -> R.string.attack_zone
+                        else -> R.string.serve_zone
+                    },
+                    onTarget = model::target,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
                         position = players.indexOfFirst { it.id == touched }.takeIf { it >= 0 }?.plus(1),
@@ -507,7 +587,12 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
             else -> {
                 val height = maxHeight
                 Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    CourtAbove(height, court = { court(Modifier) }, panel = { panel(Modifier.fillMaxWidth(), true) })
+                    CourtAbove(
+                        height,
+                        min = if (aiming) MinAimingCourt else MinCourt,
+                        court = { court(Modifier) },
+                        panel = { panel(Modifier.fillMaxWidth(), true) },
+                    )
                 }
             }
         }
@@ -516,15 +601,20 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
 /** The court, the score with it, never lower than on a phone of 360×800. */
 private val MinCourt = 360.dp
 
+/** The court with the zones where the serve went, the score above them:
+ * the zones a square of about 250dp, to touch them apart. No more: a
+ * screen of 360×800 has just 1dp left before it scrolls. */
+private val MinAimingCourt = 370.dp
+
 /** `court` over `panel`, as high as `height` all together: the court takes
- * what the panel leaves, but not less than `MinCourt`; on a shorter screen,
+ * what the panel leaves, but not less than `min`; on a shorter screen,
  * it all scrolls. */
 @Composable
-private fun CourtAbove(height: Dp, court: @Composable () -> Unit, panel: @Composable () -> Unit) =
+private fun CourtAbove(height: Dp, min: Dp, court: @Composable () -> Unit, panel: @Composable () -> Unit) =
     Layout(contents = listOf(court, panel)) { (courts, panels), constraints ->
         val loose = constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
         val below = panels.map { it.measure(loose) }
-        val left = (height.roundToPx() - below.sumOf { it.height }).coerceAtLeast(MinCourt.roundToPx())
+        val left = (height.roundToPx() - below.sumOf { it.height }).coerceAtLeast(min.roundToPx())
         val above = courts.map { it.measure(constraints.copy(minHeight = left, maxHeight = left)) }
         layout(constraints.maxWidth, left + below.sumOf { it.height }) {
             above.forEach { it.place(0, 0) }
@@ -564,7 +654,7 @@ private fun AsHighAs(reference: @Composable () -> Unit, content: @Composable () 
  * they do) and the rotation. A point stands out: the score turns, in green for ours, in
  * red for theirs, and the phone vibrates. */
 @Composable
-private fun Score(state: ScoutingState) {
+private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean = true, told: String? = null) {
     val weServe = state.servingTeam == TeamSideEnum.US
     val us = Side(state.team, state.scoreUs.toInt(), weServe, Won)
     val them = Side(state.opponent, state.scoreThem.toInt(), !weServe, Lost)
@@ -592,7 +682,7 @@ private fun Score(state: ScoutingState) {
             Points(right)
             TeamName(right, TextAlign.End, Modifier.weight(1f))
         }
-        Crossfade(weServe to state.rotation, label = "phase") { (serving, rotation) ->
+        if (phase) Crossfade(weServe to state.rotation, label = "phase") { (serving, rotation) ->
             Text(
                 stringResource(if (serving) R.string.break_phase else R.string.side_out_phase) + " · " + rotation,
                 style = MaterialTheme.typography.labelLarge,
@@ -602,8 +692,28 @@ private fun Score(state: ScoutingState) {
             )
         }
         LastEvent(state.events.firstOrNull())
+        if (server) Serving(state, told)
     }
 }
+
+/** Our serve or our reception being scouted, where the last event is, its
+ * line given to the court: the phase (break as we serve, side-out as we
+ * receive) and the rotation, the player, and where the ball went if told
+ * (the court shows it too). */
+@Composable
+private fun Serving(state: ScoutingState, told: String?) = Text(
+    listOfNotNull(
+        stringResource(if (state.servingTeam == TeamSideEnum.US) R.string.break_phase else R.string.side_out_phase),
+        state.rotation,
+        state.player?.let { "${it.number} · ${it.name}" },
+        told,
+    ).joinToString(" · "),
+    modifier = Modifier.padding(top = 2.dp),
+    style = MaterialTheme.typography.labelMedium,
+    fontWeight = FontWeight.Bold,
+    maxLines = 1,
+    overflow = TextOverflow.Ellipsis,
+)
 
 /** The last event saved, what undo takes back: the event, its evaluation
  * and its player. One line, kept also before the first. */
@@ -715,11 +825,16 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
             }
         }
         ScoutingStep.EVAL -> {
-            // the serve shows on the court, with the server in the serve zone
-            if (state.event?.value != EventTypeEnum.S) {
-                Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
+            // the title, the sets and how many blocked close together, the
+            // last row lower: the evaluations stay in the room of the serve's
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // the serve shows on the court, with the server in the serve zone
+                if (state.event?.value != EventTypeEnum.S) {
+                    Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
+                }
+                if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
+                if (view.blockers.isNotEmpty()) Blockers(view.blockers, model)
             }
-            if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
             Evals(view.evals, model)
             // the serve waits for its evaluation, or gives way
             RallyEvents(view.otherEvents, model)
@@ -932,6 +1047,36 @@ private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewMod
                 contentPadding = padding,
                 shape = MaterialTheme.shapes.medium,
             ) { content() }
+        }
+    }
+}
+
+/** How many blocked, in a row after its name: 0 (none, against our attack)
+ * to 3, and the hole block; the chosen one filled, touched again to take it
+ * back. TalkBack reads the whole name ("2 blockers"). */
+@Composable
+private fun Blockers(blockers: List<BlockersChoice>, model: ScoutingViewModel) = Row(
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+) {
+    Text(stringResource(R.string.blockers), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 4.dp))
+    val hole = stringResource(R.string.hole_block_short)
+    blockers.forEach { b ->
+        val label = when (b.value) {
+            BlockersEnum.NO_BLOCK -> "0"
+            BlockersEnum.ONE -> "1"
+            BlockersEnum.TWO -> "2"
+            BlockersEnum.THREE -> "3"
+            BlockersEnum.HOLE -> hole
+        }
+        // lower than the sets: touched on 48dp all the same
+        val modifier = Modifier.weight(1f).heightIn(min = 40.dp).tutorial("blockers:${b.value}")
+            .semantics { contentDescription = b.name }
+        val padding = PaddingValues(0.dp)
+        val content = @Composable { Text(label, style = MaterialTheme.typography.titleMedium, maxLines = 1) }
+        when {
+            b.chosen -> FilledTonalButton(onClick = { model.blockers(b) }, modifier = modifier, contentPadding = padding, shape = MaterialTheme.shapes.medium) { content() }
+            else -> OutlinedButton(onClick = { model.blockers(b) }, modifier = modifier, contentPadding = padding, shape = MaterialTheme.shapes.medium) { content() }
         }
     }
 }

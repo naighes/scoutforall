@@ -165,7 +165,7 @@ impl EventEdit {
 
     /// Another type, among `event_types`: it keeps the evaluation and the
     /// technique when it allows them, else the first evaluation and no
-    /// technique.
+    /// technique; where a serve went, if it stays a serve.
     pub fn choose_event_type(&mut self, event_type: EventTypeEnum) {
         if !self.event_types().contains(&event_type) {
             return;
@@ -184,6 +184,13 @@ impl EventEdit {
             .filter(|e| evals.contains(e))
             .or_else(|| evals.first().copied());
         event.technique = event.technique.filter(|t| techniques.contains(&Some(*t)));
+        // where the ball went, for a serve only
+        event.flags = event.flags.with_target(
+            event
+                .flags
+                .target()
+                .filter(|_| event_type == EventTypeEnum::S),
+        );
     }
 
     /// Another evaluation, among `evals`.

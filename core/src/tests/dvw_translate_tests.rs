@@ -7,9 +7,11 @@ mod tests {
     use crate::dvw::{
         model::Side,
         parse,
-        translate::{Issue, Us, translate_set},
+        translate::{Issue, Untranslatable, Us, translate_set},
     };
+    use crate::shapes::court_zone::{CourtTarget, SubzoneEnum};
     use crate::shapes::enums::{EvalEnum, EventTypeEnum};
+    use crate::shapes::refusal::Refusal;
     use crate::shapes::snapshot::EventEntry;
     use EventTypeEnum::*;
     use chrono::NaiveDate;
@@ -168,9 +170,9 @@ mod tests {
                 let libero = if role == 1 { "L" } else { "" };
                 format!("{team};{n};{n};*;;;;;P{n};Surname{n};Name{n};;{libero};{role};False;;;")
             };
-            let roles = [5, 2, 4, 3, 2, 4, 1];
+            let roles = [5, 2, 4, 3, 2, 4, 1, 2];
             let players = |team: u8, first: u8| {
-                (0..7u8)
+                (0..8u8)
                     .map(|i| player(team, first + i, roles[usize::from(i)]))
                     .collect::<Vec<_>>()
                     .join("\n")
@@ -201,7 +203,7 @@ mod tests {
     /// each player.
     fn translated_events(file: &File) -> Result<(Vec<EventEntry>, HashMap<Uuid, u8>), Issue> {
         let dvw = parse(file.text().as_bytes()).expect("expected a DataVolley file");
-        let players: HashMap<u8, Uuid> = (1..=7).map(|n| (n, Uuid::new_v4())).collect();
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
         let numbers: HashMap<Uuid, u8> = players.iter().map(|(n, id)| (*id, *n)).collect();
         let us = Us {
             side: Side::Home,
@@ -317,9 +319,9 @@ mod tests {
         file.rally(&["a11SM+", "*07RM+", "*06AH#"], true);
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                "the libero for more than one player: who is out can't be told"
-            ))
+            Err(Issue::Untranslatable(Untranslatable::LiberoForWhom(vec![
+                1, 5
+            ])))
         );
     }
 
@@ -362,9 +364,7 @@ mod tests {
         file.rally(&["a11SM+", "*07RM+", "*01EM+", "*06AH#"], true);
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                "the libero can't change player in time"
-            ))
+            Err(Issue::Untranslatable(Untranslatable::LiberoTooLate))
         );
     }
 
@@ -380,9 +380,7 @@ mod tests {
         file.rally(&["a12SM+", "*07RM+", "*01EM+", "*06AH#"], true);
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                "the libero can't change player in time"
-            ))
+            Err(Issue::Untranslatable(Untranslatable::LiberoTooLate))
         );
     }
 
@@ -399,8 +397,48 @@ mod tests {
         );
         assert_eq!(
             translated(&file.finished()),
-            Err(Issue::Untranslatable("the libero has nobody to replace"))
+            Err(Issue::Untranslatable(Untranslatable::LiberoForNobody))
         );
+    }
+
+    /// A player substituted, then touching the ball (as in a file of
+    /// Cortona vs Pol Remo, the substitute's touch given to the player out):
+    /// the touch refused, at its own line, the player by number.
+    #[test]
+    fn a_touch_of_a_player_substituted_is_refused_at_its_line() {
+        let mut file = File::new();
+        file.their_serve_error();
+        file.line("*c04:08");
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "a12RM+", "a13AH+", "*04DH+", "*02AH#"], true);
+        let dig = file
+            .lines
+            .iter()
+            .position(|l| l.starts_with("*04DH+"))
+            .expect("the dig");
+        let text = file.finished().text();
+        // the scout's lines after its header, numbered from 1
+        let scout = text
+            .lines()
+            .position(|l| l == "[3SCOUT]")
+            .expect("the scout");
+        let dvw = parse(text.as_bytes()).expect("expected a DataVolley file");
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
+        let us = Us {
+            side: Side::Home,
+            players: &players,
+            liberos: &[HOME_LIBERO],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let error = translate_set(&dvw, &us, 1, date, 6).expect_err("the dig refused");
+        assert_eq!(
+            error.issue,
+            Issue::Refused {
+                event: D,
+                refusal: Refusal::NotOnCourt(4),
+            }
+        );
+        assert_eq!(error.line, Some(scout + 2 + dig));
     }
 
     /// The server of the file not in zone 1 by the rules: refused.
@@ -410,7 +448,10 @@ mod tests {
         file.their_serve_error();
         file.rally(&["*03SM#"], true);
         match translated(&file.finished()) {
-            Err(Issue::Event(text)) => assert!(text.contains("can't play it"), "{text}"),
+            Err(Issue::Refused {
+                event: S,
+                refusal: Refusal::NotServing(3),
+            }) => {}
             other => panic!("expected the serve refused, got {other:?}"),
         }
     }
@@ -425,7 +466,7 @@ mod tests {
         assert_eq!(
             translated(&file.finished()),
             Err(Issue::Untranslatable(
-                "their attack blocked without our block"
+                Untranslatable::TheirAttackBlockedWithoutOurBlock
             ))
         );
     }
@@ -475,6 +516,216 @@ mod tests {
         );
         let evals = evaluated(&file).expect("expected the set");
         assert_eq!(evals.get(1), Some(&(S, Some(EvalEnum::Negative))));
+    }
+
+    /// Our serves with where they went: the cell of the zone and its
+    /// subzone, the whole zone without the subzone; none when the file
+    /// doesn't tell it, nor for the other touches.
+    #[test]
+    fn the_zone_of_our_serves() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let to = |zone: &str| format!("{}SM#~~~1{zone}", file.server());
+        // the same server all along: we keep serving
+        let (to_4, to_6) = (to("4C"), to("6"));
+        file.rally(&[&to_4], true);
+        file.rally(&[&to_6], true);
+        let plain = format!("{}SM#", file.server());
+        file.rally(&[&plain], true);
+        let file = file.finished();
+        let (events, _) = translated_events(&file).expect("expected the set");
+        let targets: Vec<_> = events
+            .iter()
+            .take(4)
+            .map(|e| (e.event_type, e.flags.target()))
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                (OE, None),
+                (S, CourtTarget::of_zone(4, Some(SubzoneEnum::C))),
+                (S, Some(CourtTarget::Zone(6))),
+                (S, None),
+            ]
+        );
+    }
+
+    /// Our receptions with where we received: the cell of the zone and its
+    /// subzone (from 5 to 1D), the whole zone without the subzone; none
+    /// when the file doesn't tell it.
+    #[test]
+    fn the_zone_of_our_receptions() {
+        let rallies = [
+            ["a11SM+~~~51D", "*07RM+~~~51D", "*02AH#"],
+            ["a11SM+~~~56", "*07RM+~~~56", "*02AH#"],
+            ["a11SM+", "*07RM+", "*02AH#"],
+        ];
+        let targets: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.rally(touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                events
+                    .iter()
+                    .find(|e| e.event_type == P)
+                    .and_then(|e| e.flags.target())
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                CourtTarget::of_zone(1, Some(SubzoneEnum::D)),
+                Some(CourtTarget::Zone(6)),
+                None,
+            ]
+        );
+    }
+
+    /// Our attacks with where they went: the cell of the zone and its
+    /// subzone (from 4 to 5B), the whole zone without the subzone; none
+    /// when the file doesn't tell it.
+    #[test]
+    fn the_zone_of_our_attacks() {
+        let rallies = [
+            ["a11SM+", "*07RM+", "*02AH#~~~45B"],
+            ["a11SM+", "*07RM+", "*02AH#~~~46"],
+            ["a11SM+", "*07RM+", "*02AH#"],
+        ];
+        let targets: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.rally(touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                events
+                    .iter()
+                    .find(|e| e.event_type == A)
+                    .and_then(|e| e.flags.target())
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                CourtTarget::of_zone(5, Some(SubzoneEnum::B)),
+                Some(CourtTarget::Zone(6)),
+                None,
+            ]
+        );
+    }
+
+    /// Our digs with where we dug their attack: the cell (from 4 to 1C),
+    /// copied from their attack; none when the file doesn't tell it.
+    #[test]
+    fn the_zone_of_our_digs() {
+        let rallies = [
+            ["a07RM+", "a02AH+~~~41C", "*05DH+~~~41C", "*02AH#"],
+            ["a07RM+", "a02AH+", "*05DH+", "*02AH#"],
+        ];
+        let targets: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.their_serve_error();
+                let serve = format!("{}SM+", file.server());
+                let touches: Vec<&str> = std::iter::once(serve.as_str())
+                    .chain(touches.iter().copied())
+                    .collect();
+                file.rally(&touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                events
+                    .iter()
+                    .find(|e| e.event_type == D)
+                    .and_then(|e| e.flags.target())
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![CourtTarget::of_zone(1, Some(SubzoneEnum::C)), None]
+        );
+    }
+
+    /// How many blocked: on our block, how many of ours; on our attack,
+    /// how many of theirs (none too, the hole block); not told, none.
+    #[test]
+    fn how_many_blocked() {
+        use crate::shapes::flags::BlockersEnum;
+        let rallies = [
+            [
+                "a07RM+",
+                "a02AH+~~~47~H2",
+                "*05BH+~~~~2~~2",
+                "*02AH#~~~45BH0",
+            ],
+            [
+                "a07RM+",
+                "a02AH+~~~47~H2",
+                "*05BH+~~~~2~~4",
+                "*02AH#~~~45BH3",
+            ],
+            ["a07RM+", "a02AH+", "*05BH+", "*02AH#"],
+        ];
+        let told: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.their_serve_error();
+                let serve = format!("{}SM+", file.server());
+                let touches: Vec<&str> = std::iter::once(serve.as_str())
+                    .chain(touches.iter().copied())
+                    .collect();
+                file.rally(&touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                let of = |event_type| {
+                    events
+                        .iter()
+                        .find(|e| e.event_type == event_type)
+                        .and_then(|e| e.flags.blockers())
+                };
+                (of(B), of(A))
+            })
+            .collect();
+        assert_eq!(
+            told,
+            vec![
+                (Some(BlockersEnum::Two), Some(BlockersEnum::NoBlock)),
+                (Some(BlockersEnum::Hole), Some(BlockersEnum::Three)),
+                (None, None),
+            ]
+        );
+    }
+
+    /// Our blocks with where we blocked their attack: the zone at the net,
+    /// in front of it (their attack from 4, our block in 2); none for
+    /// another zone or when the file doesn't tell it.
+    #[test]
+    fn the_zone_of_our_blocks() {
+        let rallies = [
+            ["a07RM+", "a02AH+~~~47", "*05BH+~~~~2", "*02AH#"],
+            ["a07RM+", "a02AH+~~~47", "*05BH+~~~~8", "*02AH#"],
+            ["a07RM+", "a02AH+", "*05BH+", "*02AH#"],
+        ];
+        let targets: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.their_serve_error();
+                let serve = format!("{}SM+", file.server());
+                let touches: Vec<&str> = std::iter::once(serve.as_str())
+                    .chain(touches.iter().copied())
+                    .collect();
+                file.rally(&touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                events
+                    .iter()
+                    .find(|e| e.event_type == B)
+                    .map(|e| e.flags.target())
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![Some(Some(CourtTarget::Zone(2))), Some(None), Some(None)]
+        );
     }
 
     /// Our serve `+`, their reception `-` and our attack, their touches
@@ -695,6 +946,56 @@ mod tests {
         assert!(!events.iter().any(|(e, _)| *e == D), "{events:?}");
     }
 
+    /// Our kill touched by their block (`a13BH-`, then their dig `=`, as
+    /// in a file of Cortona vs Cascina): the point is ours, their block
+    /// dropped.
+    #[test]
+    fn their_block_on_our_kill_is_dropped() {
+        for rally in [
+            vec!["a11SM+", "*07RM+", "*02AH#", "a13BH-"],
+            vec!["a11SM+", "*07RM+", "*02AH#", "a13BH-", "a15DH="],
+            vec!["a11SM+", "*07RM+", "*02AH#", "a13BH!"],
+        ] {
+            let mut file = File::new();
+            file.rally(&rally, true);
+            let events = translated(&file.finished()).expect("expected the set");
+            assert_eq!(
+                first(&events, 2),
+                vec![(P, Some(7)), (A, Some(2))],
+                "{rally:?}"
+            );
+            assert!(!events.iter().any(|(e, _)| *e == B), "{events:?}");
+        }
+    }
+
+    /// Their touch after the end that keeps the ball is still refused when
+    /// it isn't their block on our kill: a dig after our kill, a block
+    /// after our ace.
+    #[test]
+    fn their_touch_after_the_end_otherwise_is_refused() {
+        let mut ace = File::new();
+        ace.their_serve_error();
+        let serve = format!("{}SM#", ace.server());
+        ace.rally(&[&serve, "a13BH-"], true);
+        let mut files = vec![ace];
+        for rally in [
+            vec!["a11SM+", "*07RM+", "*02AH#", "a15DH+"],
+            vec!["a11SM+", "*07RM+", "*02AH#", "a15DH+", "a13BH-"],
+        ] {
+            let mut file = File::new();
+            file.rally(&rally, true);
+            files.push(file);
+        }
+        for file in files {
+            let rally = file.lines.clone();
+            assert_eq!(
+                translated(&file.finished()),
+                Err(Issue::Untranslatable(Untranslatable::TheirTouchAfterTheEnd)),
+                "{rally:?}"
+            );
+        }
+    }
+
     /// After our block `=` or our attack `/` only our dig `=` is dropped:
     /// a dig keeping the ball, or a dig `=` after another end, is still our
     /// touch after the end.
@@ -718,7 +1019,7 @@ mod tests {
             file.rally(&rally, false);
             assert_eq!(
                 translated(&file.finished()),
-                Err(Issue::Untranslatable("our touch after the end")),
+                Err(Issue::Untranslatable(Untranslatable::OurTouchAfterTheEnd)),
                 "{rally:?}"
             );
         }
@@ -791,7 +1092,7 @@ mod tests {
         assert_eq!(
             translated(&file.finished()),
             Err(Issue::Untranslatable(
-                "their attack back from our block without our block"
+                Untranslatable::TheirAttackBackWithoutOurBlock
             ))
         );
     }
@@ -838,7 +1139,7 @@ mod tests {
         let mut file = File::new();
         file.received_by(HOME_LIBERO);
         let dvw = parse(file.finished().text().as_bytes()).expect("a file");
-        let players: HashMap<u8, Uuid> = (1..=7).map(|n| (n, Uuid::new_v4())).collect();
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
         let us = Us {
             side: Side::Home,
             players: &players,
@@ -906,8 +1207,8 @@ mod tests {
         );
         assert_eq!(m.sets.len(), 3);
         assert!(m.sets.iter().all(|s| !s.events.is_empty()));
-        assert_eq!(m.roster.len(), 7);
-        assert_eq!(m.team.players.len(), 7);
+        assert_eq!(m.roster.len(), 8);
+        assert_eq!(m.team.players.len(), 8);
         let status = m.get_status().expect("a status");
         assert!(status.match_finished);
         assert_eq!((status.us_wins, status.them_wins), (3, 0));
@@ -947,7 +1248,10 @@ mod tests {
         match planned(&file.text(), Side::Home) {
             Err(crate::dvw::import::MatchIssue::Set(e)) => {
                 assert_eq!(e.set_number, 2);
-                assert_eq!(e.issue, Issue::Untranslatable("our touch after the end"));
+                assert_eq!(
+                    e.issue,
+                    Issue::Untranslatable(Untranslatable::OurTouchAfterTheEnd)
+                );
             }
             other => panic!("expected the set refused: {other:?}"),
         }
@@ -1112,7 +1416,7 @@ mod tests {
                 .read_single(&team.team.id)
                 .await
                 .expect("the team");
-            assert_eq!(read_team.players.len(), 7);
+            assert_eq!(read_team.players.len(), 8);
             let read = p
                 .match_reader
                 .read_single(&read_team, &saved.id)
@@ -1208,7 +1512,7 @@ mod tests {
                 .read_single(&team.team.id)
                 .await
                 .expect("the team");
-            assert_eq!(kept.players.len(), 7);
+            assert_eq!(kept.players.len(), 8);
             assert_eq!(p.queued().len(), 1);
         }
 

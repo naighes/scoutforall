@@ -50,14 +50,18 @@ class ReceptionLayoutTest(private val screen: Size, private val setterAt: Int) {
         assertEquals(emptyList<String>(), rule.misfits(screen.scrolls) + rule.inaccessible().filterNot { it.startsWith("closer") })
         val pairs = crowded.map { (a, b) -> listOf(a, b).partition { it.number() in receivers } }
         assertEquals(emptyList<String>(), pairs.filter { it.first.size == 2 }.map { (r, _) -> r.joinToString { it.describe() } })
-        val hidden = pairs.filter { it.first.size == 1 }.map { (r, other) -> r.single() to other.single() }
+        // read before any touch: a receiver chosen, the court shows its
+        // cells instead of the players, and gives them new nodes after
+        val hidden = pairs.filter { it.first.size == 1 }.map { (r, other) ->
+            val receiver = r.single()
+            Triple(receiver.number(), receiver.bounds().center, other.single().bounds().center)
+        }
+        val side = with(rule.density) { 23.dp.toPx() }
         // the edge of the square of the receiver, towards the other one
-        hidden.forEach { (receiver, other) ->
-            val (from, to) = receiver.bounds().center to other.bounds().center
-            val side = with(receiver.layoutInfo.density) { 23.dp.toPx() }
+        hidden.forEach { (number, from, to) ->
             val touch = from + Offset(sign(to.x - from.x) * minOf(abs(to.x - from.x), side), sign(to.y - from.y) * minOf(abs(to.y - from.y), side))
             rule.onRoot().performTouchInput { click(touch) }
-            val chosen = " · ${receiver.number()} · "
+            val chosen = " · $number · "
             rule.waitForText(chosen, substring = true)
             // the choice taken back (undo is off before the first event)
             // off the main thread: till then the court ignores touches
