@@ -5,6 +5,9 @@
 
 mod charts;
 mod court;
+mod editors;
+mod form;
+mod game;
 mod home;
 mod keymap;
 mod scouting;
@@ -12,17 +15,20 @@ mod settings;
 mod splash;
 mod start;
 mod strings;
+mod team;
 mod theme;
 mod ui;
 
 use {
+    game::MatchScreen,
+    home::HomeScreen,
     iced::{
         Element, Event, Length, Size, Subscription, Task, Theme, event, keyboard,
-        widget::{column, container, space},
+        widget::{Id, column, container, space},
         window,
     },
     scout4all_core::{scouting::ChoiceOrder, shapes::enums::LanguageEnum},
-    scout4all_keys::{BACK_KEY, KeyCombination, SETTINGS_KEY, ScoutingKeys, key},
+    scout4all_keys::{BACK_KEY, KeyCombination, SETTINGS_KEY, ScoutingKeys},
     scout4all_mobile::{Home, Scout4All},
     scouting::{Outcome, ScoutingScreen},
     settings::SettingsScreen,
@@ -33,6 +39,7 @@ use {
         time::Instant,
     },
     strings::Strings,
+    team::TeamScreen,
 };
 
 const DATA_DIR_VAR: &str = "SCOUT4ALL_DATA_DIR";
@@ -66,9 +73,21 @@ fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys) {
 }
 
 enum Screen {
-    Home { home: Home, selected: usize },
+    Home(Box<HomeScreen>),
+    Team(Box<TeamScreen>),
+    Match(Box<MatchScreen>),
     Start(Box<start::StartScreen>),
     Scouting(Box<ScoutingScreen>),
+}
+
+/// Where a key or a click leads.
+enum Go {
+    Stay,
+    Home,
+    Team(String),
+    Match(String, String),
+    /// a set of the match: to start, or in progress
+    Scout(home::Open),
 }
 
 struct App {
@@ -82,16 +101,20 @@ struct App {
     dark: bool,
     screen: Screen,
     error: Option<String>,
+    /// the text field the keys are on, last focused
+    focused: Option<Id>,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     Key(KeyCombination),
-    Open(home::Open),
     ToggleTheme,
     /// the arrow on the bar: as Esc
     Back,
     OpenSettings,
+    Home(home::Message),
+    Team(team::Message),
+    Match(game::Message),
     Scouting(scouting::Message),
     Start(start::Message),
     /// a frame of the splash
@@ -127,17 +150,15 @@ impl App {
             settings: None,
             strings,
             dark: true,
-            screen: Screen::Home {
-                home: Home {
-                    in_progress: vec![],
-                    recent: vec![],
-                    teams: vec![],
-                },
-                selected: 0,
-            },
+            screen: Screen::Home(Box::new(HomeScreen::new(Home {
+                in_progress: vec![],
+                recent: vec![],
+                teams: vec![],
+            }))),
             error,
+            focused: None,
         };
-        app.go_home();
+        app.go(Go::Home);
         app
     }
 
@@ -145,16 +166,11 @@ impl App {
     fn title(&self) -> String {
         match (&self.settings, &self.screen) {
             (Some(_), _) => self.strings.settings.to_string(),
-            (None, Screen::Home { .. }) => String::new(),
+            (None, Screen::Home(_)) => String::new(),
+            (None, Screen::Team(screen)) => screen.title(),
+            (None, Screen::Match(screen)) => screen.title(),
             (None, Screen::Start(screen)) => screen.title(),
             (None, Screen::Scouting(screen)) => screen.title(),
-        }
-    }
-
-    fn go_home(&mut self) {
-        match self.core.home() {
-            Ok(home) => self.screen = Screen::Home { home, selected: 0 },
-            Err(e) => self.error = Some(e.to_string()),
         }
     }
 
@@ -162,56 +178,68 @@ impl App {
         theme::colors(self.dark)
     }
 
-    fn open(&mut self, open: home::Open) {
-        match open.start {
-            true => match self
-                .core
+    /// Opens the screen `go` leads to; an error stays on the one shown.
+    fn go(&mut self, go: Go) {
+        let core = self.core.clone();
+        let opened = match go {
+            Go::Stay => return,
+            Go::Home => core
+                .home()
+                .map(|home| Screen::Home(Box::new(HomeScreen::new(home)))),
+            Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
+            Go::Match(team, m) => {
+                MatchScreen::new(core, team, m).map(|m| Screen::Match(Box::new(m)))
+            }
+            Go::Scout(open) if open.start => core
                 .set_start(open.team_id.clone(), open.match_id.clone())
-            {
-                Ok(start) => {
-                    self.error = None;
-                    self.screen = Screen::Start(Box::new(start::StartScreen::new(
+                .map(|start| {
+                    Screen::Start(Box::new(start::StartScreen::new(
                         start,
                         open.team_id,
                         open.match_id,
                     )))
-                }
-                Err(e) => self.error = Some(e.to_string()),
-            },
-            false => self.scout(&open.team_id, &open.match_id),
-        }
-    }
-
-    fn scout(&mut self, team_id: &str, match_id: &str) {
-        match self
-            .core
-            .scouting_in_order(team_id, match_id, ChoiceOrder::EventFirst)
-        {
-            Ok(scouting) => {
+                }),
+            Go::Scout(open) => core
+                .scouting_in_order(&open.team_id, &open.match_id, ChoiceOrder::EventFirst)
+                .map(|scouting| {
+                    Screen::Scouting(Box::new(ScoutingScreen::new(
+                        scouting,
+                        self.keys.clone(),
+                        open.team_id,
+                        open.match_id,
+                    )))
+                }),
+        };
+        match opened {
+            Ok(screen) => {
                 self.error = None;
-                self.screen =
-                    Screen::Scouting(Box::new(ScoutingScreen::new(scouting, self.keys.clone())))
+                self.screen = screen;
             }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    /// After a key or a click on the start of a set: back home, or the set
-    /// saved and scouted.
-    fn started(&mut self, outcome: start::Outcome) {
+    /// After a key or a click on the start of a set: back to the match, or
+    /// the set saved and scouted.
+    fn started(&mut self, outcome: start::Outcome) -> Go {
         let Screen::Start(screen) = &mut self.screen else {
-            return;
+            return Go::Stay;
         };
+        let (team_id, match_id) = (screen.team_id.clone(), screen.match_id.clone());
         match outcome {
-            start::Outcome::Stay => {}
-            start::Outcome::Back => self.go_home(),
-            start::Outcome::Start => {
-                let (team_id, match_id) = (screen.team_id.clone(), screen.match_id.clone());
-                match self.core.start_set(screen.set_start()) {
-                    Ok(()) => self.scout(&team_id, &match_id),
-                    Err(e) => screen.failed(e.to_string()),
+            start::Outcome::Stay => Go::Stay,
+            start::Outcome::Back => Go::Match(team_id, match_id),
+            start::Outcome::Start => match self.core.start_set(screen.set_start()) {
+                Ok(()) => Go::Scout(home::Open {
+                    team_id,
+                    match_id,
+                    start: false,
+                }),
+                Err(e) => {
+                    screen.failed(e.to_string());
+                    Go::Stay
                 }
-            }
+            },
         }
     }
 
@@ -232,7 +260,31 @@ impl App {
         }
     }
 
-    fn update(&mut self, message: Message) {
+    /// The text field of the screen the keys are on, if any.
+    fn focus_id(&self) -> Option<Id> {
+        match (&self.settings, &self.screen) {
+            (Some(_), _) => None,
+            (None, Screen::Home(screen)) => screen.focus_id(),
+            (None, Screen::Team(screen)) => screen.focus_id(),
+            (None, Screen::Match(screen)) => screen.focus_id(),
+            (None, Screen::Start(_) | Screen::Scouting(_)) => None,
+        }
+    }
+
+    /// Updates, then moves the focus where the keys went.
+    fn update(&mut self, message: Message) -> Task<Message> {
+        self.handle(message);
+        let focus = self.focus_id();
+        match focus == self.focused {
+            true => Task::none(),
+            false => {
+                self.focused = focus.clone();
+                focus.map_or_else(Task::none, iced::widget::operation::focus)
+            }
+        }
+    }
+
+    fn handle(&mut self, message: Message) {
         let s = self.strings;
         // the settings, while open, take the keys
         let closed = match (&message, &mut self.settings) {
@@ -248,54 +300,54 @@ impl App {
             Some(settings::Outcome::Stay) => return,
             None => {}
         }
-        match (message, &mut self.screen) {
-            (Message::Settings(_) | Message::OpenSettings, _) => {}
-            (Message::Frame(_) | Message::Loaded(_), _) => {}
-            (Message::Back, Screen::Scouting(_)) => self.go_home(),
-            (Message::Back, Screen::Start(screen)) => {
-                let outcome = screen.key(BACK_KEY);
-                self.started(outcome)
+        let core = self.core.clone();
+        let back = |message: Message| match message {
+            Message::Back => Message::Key(BACK_KEY),
+            other => other,
+        };
+        let go = match (back(message), &mut self.screen) {
+            (Message::ToggleTheme, _) => {
+                self.dark = !self.dark;
+                Go::Stay
+            }
+            (Message::Home(m), Screen::Home(screen)) => home_go(screen.update(&core, s, m)),
+            (Message::Key(ck), Screen::Home(screen)) => {
+                self.error = None;
+                home_go(screen.key(&core, s, ck))
+            }
+            (Message::Team(m), Screen::Team(screen)) => {
+                team_go(&screen.team_id.clone(), screen.update(s, m))
+            }
+            (Message::Key(ck), Screen::Team(screen)) => {
+                team_go(&screen.team_id.clone(), screen.key(s, ck))
+            }
+            (Message::Match(m), Screen::Match(screen)) => {
+                let outcome = screen.update(s, m);
+                match_go(screen, outcome)
+            }
+            (Message::Key(ck), Screen::Match(screen)) => {
+                let outcome = screen.key(s, ck);
+                match_go(screen, outcome)
             }
             (Message::Start(m), Screen::Start(screen)) => {
                 let outcome = screen.update(m);
                 self.started(outcome)
             }
-            (Message::Start(_), _) => {}
-            (Message::Scouting(_), Screen::Start(_)) => {}
             (Message::Key(ck), Screen::Start(screen)) => {
                 let outcome = screen.key(ck);
                 self.started(outcome)
             }
-            (Message::Back, Screen::Home { .. }) => {}
-            (Message::ToggleTheme, _) => self.dark = !self.dark,
-            (Message::Open(open), _) => self.open(open),
-            (Message::Scouting(m), Screen::Scouting(screen)) => match screen.update(m) {
-                Outcome::Stay => {}
-                Outcome::Leave => self.go_home(),
-            },
-            (Message::Scouting(_), Screen::Home { .. }) => {}
-            (Message::Key(ck), Screen::Scouting(screen)) => match screen.key(ck) {
-                Outcome::Stay => {}
-                Outcome::Leave => self.go_home(),
-            },
-            (Message::Key(ck), Screen::Home { home, selected }) => {
-                let count = home.in_progress.len();
-                match ck {
-                    k if k == key!(down) => {
-                        *selected = (*selected + 1).min(count.saturating_sub(1))
-                    }
-                    k if k == key!(up) => *selected = selected.saturating_sub(1),
-                    k if k == key!(enter) => {
-                        if let Some(open) = home.in_progress.get(*selected).and_then(home::openable)
-                        {
-                            self.open(open)
-                        }
-                    }
-                    k if k == BACK_KEY => self.error = None,
-                    _ => {}
-                }
+            (Message::Scouting(m), Screen::Scouting(screen)) => {
+                let outcome = screen.update(m);
+                scouting_go(screen, outcome)
             }
-        }
+            (Message::Key(ck), Screen::Scouting(screen)) => {
+                let outcome = screen.key(ck);
+                scouting_go(screen, outcome)
+            }
+            _ => Go::Stay,
+        };
+        self.go(go);
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -308,11 +360,15 @@ impl App {
                     settings.hints(s),
                     true,
                 ),
-                (None, Screen::Home { home, selected }) => (
-                    home::view(home, *selected, s, Message::Open, c),
-                    home::hints(s),
-                    false,
-                ),
+                (None, Screen::Home(screen)) => {
+                    (screen.view(s, c).map(Message::Home), screen.hints(s), false)
+                }
+                (None, Screen::Team(screen)) => {
+                    (screen.view(s, c).map(Message::Team), screen.hints(s), true)
+                }
+                (None, Screen::Match(screen)) => {
+                    (screen.view(s, c).map(Message::Match), screen.hints(s), true)
+                }
                 (None, Screen::Start(screen)) => {
                     (screen.view(s, c).map(Message::Start), screen.hints(s), true)
                 }
@@ -358,10 +414,52 @@ impl App {
                     modifiers,
                     ..
                 }),
-                event::Status::Ignored,
-            ) => keymap::combination(&modified_key, modifiers).map(Message::Key),
+                status,
+            ) if status == event::Status::Ignored
+                // Esc leaves a form also from a text field, which takes it
+                || modified_key == keyboard::Key::Named(keyboard::key::Named::Escape) =>
+            {
+                keymap::combination(&modified_key, modifiers).map(Message::Key)
+            }
             _ => None,
         })
+    }
+}
+
+fn home_go(outcome: home::Outcome) -> Go {
+    match outcome {
+        home::Outcome::Stay => Go::Stay,
+        home::Outcome::Scout(open) => Go::Scout(open),
+        home::Outcome::Match(team, m) => Go::Match(team, m),
+        home::Outcome::Team(team) => Go::Team(team),
+    }
+}
+
+fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
+    match outcome {
+        team::Outcome::Stay => Go::Stay,
+        team::Outcome::Back => Go::Home,
+        team::Outcome::OpenMatch(m) => Go::Match(team_id.to_string(), m),
+    }
+}
+
+fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
+    match outcome {
+        game::Outcome::Stay => Go::Stay,
+        game::Outcome::Back => Go::Team(screen.team_id.clone()),
+        game::Outcome::Scout(start) => Go::Scout(home::Open {
+            team_id: screen.team_id.clone(),
+            match_id: screen.match_id.clone(),
+            start,
+        }),
+    }
+}
+
+/// Leaving the scouting: back to its match.
+fn scouting_go(screen: &ScoutingScreen, outcome: Outcome) -> Go {
+    match outcome {
+        Outcome::Stay => Go::Stay,
+        Outcome::Leave => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
     }
 }
 
@@ -400,9 +498,12 @@ impl Main {
         (main, loaded)
     }
 
-    fn update(&mut self, message: Message) {
-        match (message, &mut self.splash, &mut self.app) {
-            (Message::Frame(now), Some(splash), _) => splash.tick(now),
+    fn update(&mut self, message: Message) -> Task<Message> {
+        let task = match (message, &mut self.splash, &mut self.app) {
+            (Message::Frame(now), Some(splash), _) => {
+                splash.tick(now);
+                Task::none()
+            }
             (Message::Loaded(Loaded(app)), _, _) => {
                 let app = app.lock().ok().and_then(|mut app| app.take());
                 match app {
@@ -413,15 +514,17 @@ impl Main {
                 if let Some(started) = STARTED.get() {
                     eprintln!("data read after {} ms", started.elapsed().as_millis());
                 }
+                Task::none()
             }
             (message, None, Some(app)) => app.update(message),
-            _ => {}
-        }
+            _ => Task::none(),
+        };
         if let (Some(splash), Some(_)) = (&self.splash, &self.app)
             && splash.done()
         {
             self.splash = None;
         }
+        task
     }
 
     fn view(&self) -> Element<'_, Message> {

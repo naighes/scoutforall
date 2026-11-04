@@ -18,6 +18,7 @@ pub fn combination(key: &Key, modifiers: Modifiers) -> Option<KeyCombination> {
         Key::Named(Named::Space) => Some(KeyCode::Char(' ')),
         Key::Named(Named::Enter) => Some(KeyCode::Enter),
         Key::Named(Named::Backspace) => Some(KeyCode::Backspace),
+        Key::Named(Named::Delete) => Some(KeyCode::Delete),
         Key::Named(Named::ArrowLeft) => Some(KeyCode::Left),
         Key::Named(Named::ArrowRight) => Some(KeyCode::Right),
         Key::Named(Named::ArrowUp) => Some(KeyCode::Up),

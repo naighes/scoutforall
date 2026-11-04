@@ -341,3 +341,43 @@ pub fn bottom_bar<'a, M: 'a>(hints: Vec<(String, String)>, c: Colors) -> Element
 pub fn body<'a>(s: impl ToString) -> iced::widget::Text<'a> {
     text(s.to_string()).size(SIZE_BODY)
 }
+
+/// The word with its first letter in capitals, for a title.
+pub fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// A question to confirm, in the middle: Enter does it, Esc doesn't.
+pub fn confirm<'a, M: Clone + 'a>(
+    question: &str,
+    yes: &str,
+    on_yes: M,
+    no: &str,
+    on_no: M,
+    c: Colors,
+) -> Element<'a, M> {
+    let question = panel(
+        None,
+        column![
+            body(question.to_string()),
+            row![
+                pill(&format!("Esc  {no}"), false, Some(on_no), c),
+                pill(&format!("Enter  {yes}"), true, Some(on_yes), c),
+            ]
+            .spacing(10)
+        ]
+        .spacing(18)
+        .align_x(Alignment::Center),
+        c,
+    );
+    container(container(question).max_width(560))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .into()
+}

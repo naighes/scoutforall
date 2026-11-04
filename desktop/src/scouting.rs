@@ -82,6 +82,9 @@ struct Snapshot {
 }
 
 pub struct ScoutingScreen {
+    /// the team and the match, to go back to the match
+    pub team_id: String,
+    pub match_id: String,
     scouting: Arc<Scouting>,
     keys: ScoutingKeys,
     snapshot: Snapshot,
@@ -102,10 +105,17 @@ pub struct ScoutingScreen {
 }
 
 impl ScoutingScreen {
-    pub fn new(scouting: Arc<Scouting>, keys: ScoutingKeys) -> Self {
+    pub fn new(
+        scouting: Arc<Scouting>,
+        keys: ScoutingKeys,
+        team_id: String,
+        match_id: String,
+    ) -> Self {
         let snapshot = read(&scouting, false);
         let trend = Trend::of_stats(snapshot.stats.as_ref(), 0, false);
         Self {
+            team_id,
+            match_id,
             scouting,
             keys,
             snapshot,
