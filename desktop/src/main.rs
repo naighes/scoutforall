@@ -9,6 +9,7 @@ mod home;
 mod keymap;
 mod scouting;
 mod settings;
+mod start;
 mod strings;
 mod theme;
 mod ui;
@@ -60,6 +61,7 @@ fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys) {
 
 enum Screen {
     Home { home: Home, selected: usize },
+    Start(Box<start::StartScreen>),
     Scouting(Box<ScoutingScreen>),
 }
 
@@ -86,6 +88,7 @@ enum Message {
     Back,
     OpenSettings,
     Scouting(scouting::Message),
+    Start(start::Message),
     Settings(settings::Message),
 }
 
@@ -141,9 +144,29 @@ impl App {
     }
 
     fn open(&mut self, open: home::Open) {
+        match open.start {
+            true => match self
+                .core
+                .set_start(open.team_id.clone(), open.match_id.clone())
+            {
+                Ok(start) => {
+                    self.error = None;
+                    self.screen = Screen::Start(Box::new(start::StartScreen::new(
+                        start,
+                        open.team_id,
+                        open.match_id,
+                    )))
+                }
+                Err(e) => self.error = Some(e.to_string()),
+            },
+            false => self.scout(&open.team_id, &open.match_id),
+        }
+    }
+
+    fn scout(&mut self, team_id: &str, match_id: &str) {
         match self
             .core
-            .scouting_in_order(&open.team_id, &open.match_id, ChoiceOrder::EventFirst)
+            .scouting_in_order(team_id, match_id, ChoiceOrder::EventFirst)
         {
             Ok(scouting) => {
                 self.error = None;
@@ -151,6 +174,25 @@ impl App {
                     Screen::Scouting(Box::new(ScoutingScreen::new(scouting, self.keys.clone())))
             }
             Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// After a key or a click on the start of a set: back home, or the set
+    /// saved and scouted.
+    fn started(&mut self, outcome: start::Outcome) {
+        let Screen::Start(screen) = &mut self.screen else {
+            return;
+        };
+        match outcome {
+            start::Outcome::Stay => {}
+            start::Outcome::Back => self.go_home(),
+            start::Outcome::Start => {
+                let (team_id, match_id) = (screen.team_id.clone(), screen.match_id.clone());
+                match self.core.start_set(screen.set_start()) {
+                    Ok(()) => self.scout(&team_id, &match_id),
+                    Err(e) => screen.failed(e.to_string()),
+                }
+            }
         }
     }
 
@@ -190,6 +232,20 @@ impl App {
         match (message, &mut self.screen) {
             (Message::Settings(_) | Message::OpenSettings, _) => {}
             (Message::Back, Screen::Scouting(_)) => self.go_home(),
+            (Message::Back, Screen::Start(screen)) => {
+                let outcome = screen.key(BACK_KEY);
+                self.started(outcome)
+            }
+            (Message::Start(m), Screen::Start(screen)) => {
+                let outcome = screen.update(m);
+                self.started(outcome)
+            }
+            (Message::Start(_), _) => {}
+            (Message::Scouting(_), Screen::Start(_)) => {}
+            (Message::Key(ck), Screen::Start(screen)) => {
+                let outcome = screen.key(ck);
+                self.started(outcome)
+            }
             (Message::Back, Screen::Home { .. }) => {}
             (Message::ToggleTheme, _) => self.dark = !self.dark,
             (Message::Open(open), _) => self.open(open),
@@ -210,8 +266,7 @@ impl App {
                     }
                     k if k == key!(up) => *selected = selected.saturating_sub(1),
                     k if k == key!(enter) => {
-                        if let Some(open) =
-                            home.in_progress.get(*selected).and_then(home::resumable)
+                        if let Some(open) = home.in_progress.get(*selected).and_then(home::openable)
                         {
                             self.open(open)
                         }
@@ -241,6 +296,9 @@ impl App {
                     home::hints(s),
                     false,
                 ),
+                (None, Screen::Start(screen)) => {
+                    (screen.view(s, c).map(Message::Start), screen.hints(s), true)
+                }
                 (None, Screen::Scouting(screen)) => (
                     screen.view(s, c).map(Message::Scouting),
                     screen.hints(s),

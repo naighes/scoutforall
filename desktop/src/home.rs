@@ -18,17 +18,24 @@ use {
 pub struct Open {
     pub team_id: String,
     pub match_id: String,
+    /// a set to start, not one in progress
+    pub start: bool,
 }
 
-/// The match can be scouted here: a set in progress. Starting a set comes
-/// with the other screens (027, step 3).
-pub fn resumable(m: &HomeMatch) -> Option<Open> {
-    match m.next {
-        NextSetKind::Resume { .. } => Some(Open {
+/// What the match goes on with: a set to start or to resume; nothing once
+/// it's over.
+pub fn openable(m: &HomeMatch) -> Option<Open> {
+    let open = |start| {
+        Some(Open {
             team_id: m.team_id.clone(),
             match_id: m.id.clone(),
-        }),
-        NextSetKind::Start { .. } | NextSetKind::Over => None,
+            start,
+        })
+    };
+    match m.next {
+        NextSetKind::Resume { .. } => open(false),
+        NextSetKind::Start { .. } => open(true),
+        NextSetKind::Over => None,
     }
 }
 
@@ -39,7 +46,7 @@ fn date(m: &HomeMatch) -> String {
 pub fn hints(s: &Strings) -> Vec<(String, String)> {
     vec![
         ("↑ ↓".to_string(), String::new()),
-        ("Enter".to_string(), s.resume.to_string()),
+        ("Enter".to_string(), format!("{} / {}", s.resume, s.start)),
         ("F2".to_string(), s.settings.to_string()),
     ]
 }
@@ -76,9 +83,7 @@ fn match_row<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     let next = match m.next {
         NextSetKind::Resume { set_number } => format!("{} · {} {set_number}", s.resume, s.set_n),
-        NextSetKind::Start { set_number } => {
-            format!("{} {set_number}: {}", s.set_n, s.start_elsewhere)
-        }
+        NextSetKind::Start { set_number } => format!("{} · {} {set_number}", s.start, s.set_n),
         NextSetKind::Over => s.match_over.to_string(),
     };
     let bold = theme::fonts().bold;
@@ -105,7 +110,7 @@ fn match_row<'a, M: Clone + 'a>(
     ]
     .align_y(Alignment::Center)
     .spacing(10);
-    ui::list_row(body, selected, resumable(m).map(on_open), c)
+    ui::list_row(body, selected, openable(m).map(on_open), c)
 }
 
 pub fn view<'a, M: Clone + 'a>(

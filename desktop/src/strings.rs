@@ -12,7 +12,6 @@ pub struct Strings {
     pub players: &'static str,
     pub set_n: &'static str,
     pub resume: &'static str,
-    pub start_elsewhere: &'static str,
     pub match_over: &'static str,
     pub rotation: &'static str,
     pub events: &'static str,
@@ -52,6 +51,16 @@ pub struct Strings {
     pub reset_keys: &'static str,
     pub change_hint: &'static str,
     pub not_saved: &'static str,
+    pub start: &'static str,
+    pub serving_first: &'static str,
+    pub lineup: &'static str,
+    pub position: &'static str,
+    pub setter: &'static str,
+    pub libero: &'static str,
+    pub fallback_libero: &'static str,
+    pub no_fallback_libero: &'static str,
+    pub no_available_players: &'static str,
+    pub choose: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -62,7 +71,6 @@ const EN: Strings = Strings {
     players: "players",
     set_n: "Set",
     resume: "Resume",
-    start_elsewhere: "starts in the TUI or the app",
     match_over: "Match over",
     rotation: "Rotation",
     events: "Event",
@@ -102,6 +110,16 @@ const EN: Strings = Strings {
     reset_keys: "Restore the default keys",
     change_hint: "Enter or click to change",
     not_saved: "Could not save the settings: {}",
+    start: "Start",
+    serving_first: "Who serves first?",
+    lineup: "Lineup",
+    position: "Position",
+    setter: "Setter",
+    libero: "Libero",
+    fallback_libero: "Fallback libero",
+    no_fallback_libero: "no fallback libero",
+    no_available_players: "No available players",
+    choose: "Choose",
 };
 
 const IT: Strings = Strings {
@@ -112,7 +130,6 @@ const IT: Strings = Strings {
     players: "giocatori",
     set_n: "Set",
     resume: "Riprendi",
-    start_elsewhere: "si inizia dalla TUI o dall'app",
     match_over: "Partita finita",
     rotation: "Rotazione",
     events: "Evento",
@@ -152,6 +169,16 @@ const IT: Strings = Strings {
     reset_keys: "Ripristina i tasti predefiniti",
     change_hint: "Invio o clic per cambiarlo",
     not_saved: "Impossibile salvare le impostazioni: {}",
+    start: "Inizia",
+    serving_first: "Chi batte per primo?",
+    lineup: "Formazione",
+    position: "Posizione",
+    setter: "Palleggiatore",
+    libero: "Libero",
+    fallback_libero: "Libero di riserva",
+    no_fallback_libero: "nessun libero di riserva",
+    no_available_players: "Nessun giocatore disponibile",
+    choose: "Scegli",
 };
 
 const PT: Strings = Strings {
@@ -162,7 +189,6 @@ const PT: Strings = Strings {
     players: "jogadores",
     set_n: "Set",
     resume: "Retomar",
-    start_elsewhere: "começa na TUI ou no app",
     match_over: "Partida encerrada",
     rotation: "Rodízio",
     events: "Evento",
@@ -202,6 +228,16 @@ const PT: Strings = Strings {
     reset_keys: "Restaurar as teclas padrão",
     change_hint: "Enter ou clique para mudar",
     not_saved: "Não foi possível salvar as configurações: {}",
+    start: "Iniciar",
+    serving_first: "Quem saca primeiro?",
+    lineup: "Escalação",
+    position: "Posição",
+    setter: "Levantador",
+    libero: "Líbero",
+    fallback_libero: "Líbero reserva",
+    no_fallback_libero: "sem líbero reserva",
+    no_available_players: "Nenhum jogador disponível",
+    choose: "Escolher",
 };
 
 const PL: Strings = Strings {
@@ -212,7 +248,6 @@ const PL: Strings = Strings {
     players: "zawodników",
     set_n: "Set",
     resume: "Wznów",
-    start_elsewhere: "zaczyna się w TUI lub w aplikacji",
     match_over: "Mecz zakończony",
     rotation: "Ustawienie",
     events: "Zdarzenie",
@@ -252,6 +287,16 @@ const PL: Strings = Strings {
     reset_keys: "Przywróć domyślne klawisze",
     change_hint: "Enter lub kliknij, aby zmienić",
     not_saved: "Nie udało się zapisać ustawień: {}",
+    start: "Rozpocznij",
+    serving_first: "Kto zagrywa pierwszy?",
+    lineup: "Skład",
+    position: "Pozycja",
+    setter: "Rozgrywający",
+    libero: "Libero",
+    fallback_libero: "Drugi libero",
+    no_fallback_libero: "bez drugiego libero",
+    no_available_players: "Brak dostępnych zawodników",
+    choose: "Wybierz",
 };
 
 const JA: Strings = Strings {
@@ -262,7 +307,6 @@ const JA: Strings = Strings {
     players: "選手",
     set_n: "セット",
     resume: "再開",
-    start_elsewhere: "TUIかアプリで開始",
     match_over: "試合終了",
     rotation: "ローテーション",
     events: "イベント",
@@ -302,6 +346,16 @@ const JA: Strings = Strings {
     reset_keys: "既定のキーに戻す",
     change_hint: "Enterまたはクリックで変更",
     not_saved: "設定を保存できませんでした: {}",
+    start: "開始",
+    serving_first: "最初にサーブするのは?",
+    lineup: "スタメン",
+    position: "ポジション",
+    setter: "セッター",
+    libero: "リベロ",
+    fallback_libero: "控えのリベロ",
+    no_fallback_libero: "控えのリベロなし",
+    no_available_players: "出場できる選手がいません",
+    choose: "選択",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

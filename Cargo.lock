@@ -5762,6 +5762,7 @@ dependencies = [
 name = "scout4all-desktop"
 version = "0.13.0"
 dependencies = [
+ "chrono",
  "crokey",
  "dirs 7.0.0",
  "iced",
