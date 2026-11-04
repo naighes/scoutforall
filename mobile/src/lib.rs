@@ -3213,6 +3213,16 @@ impl Scout4All {
         })
     }
 
+    /// The report of the match as a PDF, in the language of the app: the
+    /// file to save or print, as the TUI opens it.
+    pub fn match_pdf(&self, team_id: String, match_id: String) -> Result<Vec<u8>, MobileError> {
+        let m = self.read_match(&team_id, &match_id)?;
+        Ok(scout4all_core::reporting::pdf::render_match_pdf(
+            &m,
+            self.language.labels(),
+        )?)
+    }
+
     /// What the archive holds, unless it can't be imported: e.g. a team
     /// already there, or a match of none of the teams, or not of `team_id`
     /// when it's imported into that team. `file_name` is the name of the

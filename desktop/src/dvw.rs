@@ -836,6 +836,10 @@ mod tests {
         };
         let team = picked(Export::Team(team_id.clone()));
         let game = picked(Export::Match(team_id.clone(), match_id.clone()));
+        // the report: a PDF named after the match
+        let report = picked(Export::Report(team_id.clone(), match_id.clone()));
+        assert_eq!(report.name, format!("{match_id}.pdf"));
+        assert!(report.bytes.starts_with(b"%PDF"));
 
         // elsewhere: the team, then its match from the home
         let there = tempfile::tempdir().unwrap();

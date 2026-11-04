@@ -25,6 +25,7 @@ pub enum Message {
     Edit,
     Stats,
     Export,
+    Report,
     /// the events of the set, to correct them
     Set(u8),
     Form(form::Message),
@@ -38,6 +39,8 @@ pub enum Outcome {
     Stats,
     /// the archive of the match, to save
     Export,
+    /// the report of the match as a PDF, to save
+    Report,
     /// the events of the set, to correct them
     Events(u8),
 }
@@ -127,6 +130,7 @@ impl MatchScreen {
             (Message::Next, None) => self.next(),
             (Message::Stats, None) => Outcome::Stats,
             (Message::Export, None) => Outcome::Export,
+            (Message::Report, None) => Outcome::Report,
             (Message::Set(n), None) => Outcome::Events(n),
             (Message::Edit, None) => {
                 self.edit(s);
@@ -146,6 +150,7 @@ impl MatchScreen {
             (None, k) if k == key!(enter) => self.next(),
             (None, k) if k == key!(s) => Outcome::Stats,
             (None, k) if k == key!(x) => Outcome::Export,
+            (None, k) if k == key!(p) => Outcome::Report,
             (None, k) if k == key!(e) => {
                 self.edit(s);
                 Outcome::Stay
@@ -184,6 +189,7 @@ impl MatchScreen {
                     ("s".to_string(), s.stats.to_string()),
                     ("e".to_string(), s.edit_match.to_string()),
                     ("x".to_string(), s.export_match.to_string()),
+                    ("p".to_string(), s.match_report.to_string()),
                     (
                         format!("1–{}", self.details.sets.len().max(1)),
                         s.set_events.to_string(),
@@ -251,6 +257,7 @@ impl MatchScreen {
                         Some(Message::Export),
                         c
                     ),
+                    ui::pill(s.match_report, false, Some(Message::Report), c),
                 ]
                 .spacing(10)
                 .wrap()

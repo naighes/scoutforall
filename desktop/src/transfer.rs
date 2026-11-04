@@ -25,6 +25,8 @@ pub enum Export {
     Team(String),
     /// the team, the match
     Match(String, String),
+    /// the report of the match as a PDF, as the TUI prints it
+    Report(String, String),
 }
 
 /// A file chosen to import: its name and what it holds.
@@ -46,21 +48,26 @@ pub fn is_dvw(name: &str) -> bool {
     name.to_lowercase().ends_with(".dvw")
 }
 
-/// The zip of `export` and the name to give its file.
+/// The file of `export` (a zip, or the PDF of the report) and the name to
+/// give it.
 pub fn archive(core: &Scout4All, export: &Export) -> Result<(String, Vec<u8>), MobileError> {
     let archive = match export {
         Export::Team(team) => core.export_team(team.clone())?,
         Export::Match(team, m) => core.export_match(team.clone(), m.clone())?,
+        Export::Report(team, m) => {
+            return Ok((format!("{m}.pdf"), core.match_pdf(team.clone(), m.clone())?));
+        }
     };
     Ok((archive.file_name, archive.bytes))
 }
 
-/// Where to save the file named `name`: none when the user changes their
-/// mind.
+/// Where to save the file named `name`, of its kind (zip, pdf): none when
+/// the user changes their mind.
 pub async fn save_to(name: String) -> Option<PathBuf> {
+    let extension = name.rsplit_once('.').map_or("zip", |(_, e)| e).to_string();
     rfd::AsyncFileDialog::new()
         .set_file_name(name)
-        .add_filter("zip", &["zip"])
+        .add_filter(&extension, &[&extension])
         .save_file()
         .await
         .map(|f| f.path().to_path_buf())

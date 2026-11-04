@@ -227,6 +227,7 @@ pub struct Strings {
     pub general: &'static str,
     pub keys_page: &'static str,
     pub search_country: &'static str,
+    pub match_report: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -457,6 +458,7 @@ What did you expect instead?
     general: "General",
     keys_page: "Keys",
     search_country: "Search the country",
+    match_report: "Report (PDF)",
 };
 
 const IT: Strings = Strings {
@@ -687,6 +689,7 @@ Cosa ti aspettavi invece?
     general: "Generale",
     keys_page: "Tasti",
     search_country: "Cerca il paese",
+    match_report: "Report (PDF)",
 };
 
 const PT: Strings = Strings {
@@ -917,6 +920,7 @@ O que você esperava?
     general: "Geral",
     keys_page: "Teclas",
     search_country: "Pesquisar o país",
+    match_report: "Relatório (PDF)",
 };
 
 const PL: Strings = Strings {
@@ -1147,6 +1151,7 @@ Czego się spodziewałeś(-aś)?
     general: "Ogólne",
     keys_page: "Klawisze",
     search_country: "Szukaj kraju",
+    match_report: "Raport (PDF)",
 };
 
 const JA: Strings = Strings {
@@ -1377,6 +1382,7 @@ const JA: Strings = Strings {
     general: "一般",
     keys_page: "キー",
     search_country: "国を検索",
+    match_report: "レポート (PDF)",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

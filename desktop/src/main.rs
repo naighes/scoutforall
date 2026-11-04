@@ -834,6 +834,10 @@ fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
         game::Outcome::Events(set) => {
             Go::Events(screen.team_id.clone(), screen.match_id.clone(), set)
         }
+        game::Outcome::Report => Go::Export(transfer::Export::Report(
+            screen.team_id.clone(),
+            screen.match_id.clone(),
+        )),
         game::Outcome::Export => Go::Export(transfer::Export::Match(
             screen.team_id.clone(),
             screen.match_id.clone(),
