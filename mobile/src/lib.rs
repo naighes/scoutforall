@@ -51,7 +51,7 @@ use scout4all_core::{
     settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
-        court_zone::{CourtCell, CourtSide, CourtZoneEnum, SubzoneEnum},
+        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, SubzoneEnum, TargetKind},
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
@@ -1027,15 +1027,15 @@ pub struct TechniqueChoice {
     pub chosen: bool,
 }
 
-/// A cell of the court of the opponent (a subzone of DataVolley), to tell
-/// where the ball went.
+/// A cell of the court (a subzone of DataVolley), or a whole zone at the
+/// net for our block, to tell where the ball went.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct CourtCellChoice {
     /// 1 to 9
     pub zone: u8,
-    /// "A" to "D"
+    /// "A" to "D"; empty for a whole zone at the net
     pub subzone: String,
-    /// as the scout reads it: "1A"
+    /// as the scout reads it: "1A", "4"
     pub label: String,
     /// what the evaluation saves now, alone or with the one next to it
     pub chosen: bool,
@@ -1394,11 +1394,12 @@ pub struct FundamentalDetail {
     pub points: Option<u32>,
     /// for an attack
     pub zones: Vec<DetailZone>,
-    /// for a serve, an attack, a reception or a dig: how many had their
-    /// zone told, and the court a row each from the top (theirs for the
+    /// for a serve, an attack, a reception, a dig or a block: how many had
+    /// their zone told, and the court a row each from the top (theirs for the
     /// serve and the attack, the nine zones as `CourtZoneEnum::zones_shown`;
     /// ours for the reception and the dig, with the conflict zones between
-    /// them as `CourtZoneEnum::shown`); empty with no zone told
+    /// them as `CourtZoneEnum::shown`; for the block one row, the zones at
+    /// the net as `CourtZoneEnum::net_shown`); empty with no zone told
     pub targets_told: u32,
     pub targets: Vec<Vec<TargetStats>>,
     /// for a reception or a dig, all the conflict zones together
@@ -1719,13 +1720,27 @@ impl Scouting {
 
     /// The court where the ball goes: for our serve or attack theirs as
     /// our server sees it (their end line at the top), for our reception
-    /// or dig ours as seen from the bench (the net at the top); six rows of six cells, two
-    /// by two in a zone; empty when it can't be told now.
+    /// or dig ours as seen from the bench (the net at the top); six rows of
+    /// six cells, two by two in a zone. For our block one row, the zones at
+    /// the net on ours (4, 3, 2: see `target_at_net`). Empty when it can't
+    /// be told now.
     pub fn target_court(&self) -> Vec<Vec<CourtCellChoice>> {
         let session = self.session();
         let chosen = session.target();
-        match session.target_side() {
-            Some(side) => CourtCell::shown(side)
+        match (session.target_side(), session.target_kind()) {
+            (Some(side), Some(TargetKind::Net)) => vec![
+                CourtZoneEnum::net_shown(side)
+                    .iter()
+                    .filter_map(|zone| zone.number().map(|n| (zone, n)))
+                    .map(|(zone, n)| CourtCellChoice {
+                        zone: n,
+                        subzone: String::new(),
+                        label: zone.to_string(),
+                        chosen: chosen == Some(CourtTarget::Zone(n)),
+                    })
+                    .collect(),
+            ],
+            (Some(side), _) => CourtCell::shown(side)
                 .iter()
                 .map(|row| {
                     row.iter()
@@ -1738,8 +1753,14 @@ impl Scouting {
                         .collect()
                 })
                 .collect(),
-            None => vec![],
+            (None, _) => vec![],
         }
+    }
+
+    /// Whether the court is told at the net, only a whole zone: for our
+    /// block.
+    pub fn target_at_net(&self) -> bool {
+        self.session().target_kind() == Some(TargetKind::Net)
     }
 
     /// Whether the court where the ball goes is ours (the net at the top),
@@ -1755,17 +1776,18 @@ impl Scouting {
     }
 
     /// The scout touches a cell: alone, or along with the one told next to
-    /// it; touched again, taken back. Saved with the evaluation, never
-    /// required.
+    /// it; touched again, taken back. With no subzone, a whole zone at the
+    /// net, for our block. Saved with the evaluation, never required.
     pub fn touch_target(&self, zone: u8, subzone: String) -> Result<(), MobileError> {
         let cell = subzone
             .chars()
             .next()
             .and_then(SubzoneEnum::of)
             .and_then(|s| CourtCell::new(zone, s));
-        let touched = match cell {
-            Some(cell) => self.session().touch_target(cell),
-            None => Err(ScoutingError::InvalidSelection),
+        let touched = match (subzone.is_empty(), cell, CourtZoneEnum::numbered(zone)) {
+            (true, _, Some(zone)) => self.session().touch_zone(zone),
+            (false, Some(cell), _) => self.session().touch_target(cell),
+            _ => Err(ScoutingError::InvalidSelection),
         };
         self.scouted(touched)
     }
@@ -2018,9 +2040,10 @@ fn detail_stats(
                     (true, _) => vec![],
                     (false, conflicts) => {
                         let side = CourtSide::of(event).unwrap_or(CourtSide::Theirs);
-                        let rows = match conflicts {
-                            true => CourtZoneEnum::zones_shown(side),
-                            false => CourtZoneEnum::shown(side),
+                        let rows = match (TargetKind::of(event), conflicts) {
+                            (Some(TargetKind::Net), _) => vec![CourtZoneEnum::net_shown(side)],
+                            (_, true) => CourtZoneEnum::zones_shown(side),
+                            (_, false) => CourtZoneEnum::shown(side),
                         };
                         rows.iter()
                             .map(|row| {
@@ -4439,6 +4462,50 @@ mod tests {
         start.choose_libero(Some(ids[6].clone())).unwrap();
         app.start_set(start).unwrap();
         app.scouting(team.into(), m.into()).unwrap()
+    }
+
+    /// Our block: one row, the zones at the net on our court, 4 3 2;
+    /// touched with no subzone, again taken back; in the stats one row.
+    #[test]
+    fn the_block_target_is_at_the_net() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event(EventTypeEnum::B).unwrap();
+        let blocker = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(blocker).unwrap();
+        assert!(scouting.target_at_net() && scouting.target_ours());
+        let labels = |s: &Scouting| -> Vec<Vec<String>> {
+            s.target_court()
+                .iter()
+                .map(|row| row.iter().map(|c| c.label.clone()).collect())
+                .collect()
+        };
+        assert_eq!(labels(&scouting), vec![vec!["4", "3", "2"]]);
+        assert!(matches!(
+            scouting.touch_target(3, "A".into()),
+            Err(MobileError::Scouting { .. })
+        ));
+        scouting.touch_target(3, String::new()).unwrap();
+        scouting.touch_target(3, String::new()).unwrap();
+        assert_eq!(scouting.target_told(), None);
+        scouting.touch_target(4, String::new()).unwrap();
+        let chosen: Vec<String> = scouting
+            .target_court()
+            .into_iter()
+            .flatten()
+            .filter(|c| c.chosen)
+            .map(|c| c.label)
+            .collect();
+        assert_eq!(chosen, vec!["4"]);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        let targets: Vec<Option<&str>> = state.events.iter().map(|e| e.target.as_deref()).collect();
+        // the latest first
+        assert_eq!(targets, vec![Some("4"), None]);
+        assert!(!scouting.target_at_net());
     }
 
     /// Where our serve went: their court while it waits for its

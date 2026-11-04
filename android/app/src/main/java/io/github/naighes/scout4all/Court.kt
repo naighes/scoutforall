@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -269,10 +270,13 @@ private val ServeZone = 72.dp
  * the four cells of DataVolley, to touch where the ball went; a cell alone, or
  * along with the one next to it (two cells of two zones are on the line
  * between them); the cells chosen filled, touched again to take them
- * back. The lines between the zones bolder than between the cells. */
+ * back. The lines between the zones bolder than between the cells. For our
+ * block a single row, the zones at the net (4, 3, 2), whole: the rest of
+ * the court empty, only the lines of its zones. */
 @Composable
 private fun TargetZones(rows: List<List<CourtCellChoice>>, name: Int, onTarget: (CourtCellChoice) -> Unit) =
     Box(Modifier.fillMaxSize()) {
+        val net = rows.size == 1
         val zoneDescription = stringResource(name)
         val chosenState = stringResource(R.string.zone_chosen)
         val colors = MaterialTheme.colorScheme
@@ -283,6 +287,8 @@ private fun TargetZones(rows: List<List<CourtCellChoice>>, name: Int, onTarget: 
             (1 until 6).forEach { i ->
                 val (x, y) = size.width * i / 6 to size.height * i / 6
                 val (color, width) = if (i % 2 == 0) zoneLines to bold else cellLines to thin
+                // at the net only the zones, no cells
+                if (net && i % 2 != 0) return@forEach
                 drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = width)
                 drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = width)
             }
@@ -318,6 +324,8 @@ private fun TargetZones(rows: List<List<CourtCellChoice>>, name: Int, onTarget: 
                     }
                 }
             }
+            // at the net, the rest of the court below
+            if (net) Spacer(Modifier.fillMaxWidth().weight(2f))
         }
     }
 

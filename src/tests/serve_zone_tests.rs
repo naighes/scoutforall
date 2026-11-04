@@ -315,6 +315,46 @@ mod tests {
         assert!(ui.screen().contains(&conflicts), "{}", ui.screen());
     }
 
+    /// Our block: only the zones at the net, 4 3 2 from the left on our
+    /// court, the cursor in the middle; the space bar tells it, again
+    /// takes it back. In the stats, the blocks by zone at the net.
+    #[tokio::test]
+    async fn the_block_is_told_at_the_net() {
+        use KeyCode::*;
+        let mut ui = serving().await;
+        ui.type_keys(&[Char('+'), Char('b'), Char('2')]).await;
+        let title = |zone: &str| format!("{}: {zone}", current_labels().block_target);
+        assert!(
+            ui.screen().contains(&title(current_labels().no_zone)),
+            "{}",
+            ui.screen()
+        );
+        ui.type_keys(&[Char(' ')]).await;
+        assert!(ui.screen().contains(&title("3")), "{}", ui.screen());
+        ui.type_keys(&[Char(' ')]).await;
+        assert!(
+            ui.screen().contains(&title(current_labels().no_zone)),
+            "{}",
+            ui.screen()
+        );
+        // right of 3 on our court, then on to the end: 2
+        ui.type_keys(&[Right, Right, Down, Char(' ')]).await;
+        assert!(ui.screen().contains(&title("2")), "{}", ui.screen());
+        // only across at the net
+        assert!(ui.screen().contains("⬅⮕ ="), "{}", ui.screen());
+        ui.press(Char('+')).await;
+        // the zone 2 in the flags: (2) << 3
+        assert_eq!(last_flags(&ui), (2 * 8).to_string());
+        ui.resize(120, 40);
+        ui.type_keys(&[Esc, Char(' '), Tab, Tab, Tab, Down, Down, Down])
+            .await;
+        let density = ui
+            .panel(current_labels().domain.blocks_by_zone)
+            .unwrap_or_else(|| panic!("{}", ui.screen()));
+        assert!(density.iter().any(|l| l.contains("100%")), "{density:?}");
+        assert!(!density.iter().any(|l| l.contains('8')), "{density:?}");
+    }
+
     /// The stats of the serve: how many went to each zone and their
     /// efficiency there, of the serves whose zone was told, two cells of
     /// two zones half in each; the efficiency only from three serves on.

@@ -145,6 +145,9 @@
     <string name="dig_zone">Strefa obrony</string>
     <string name="digs_by_zone">Obrony według stref</string>
     <string name="dig_zones_told">strefa podana w %1$d z %2$d obron</string>
+    <string name="block_zone">Strefa bloku</string>
+    <string name="blocks_by_zone">Bloki według stref</string>
+    <string name="block_zones_told">strefa podana w %1$d z %2$d bloków</string>
     <string name="on_conflicts">W strefach konfliktu: %1$d (%2$d%%)</string>
     <string name="zone_density">gęstość</string>
     <string name="attacks_detail">%1$d at · sku %2$s</string>

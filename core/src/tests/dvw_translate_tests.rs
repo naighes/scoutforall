@@ -645,6 +645,39 @@ mod tests {
         );
     }
 
+    /// Our blocks with where we blocked their attack: the zone at the net,
+    /// in front of it (their attack from 4, our block in 2); none for
+    /// another zone or when the file doesn't tell it.
+    #[test]
+    fn the_zone_of_our_blocks() {
+        let rallies = [
+            ["a07RM+", "a02AH+~~~47", "*05BH+~~~~2", "*02AH#"],
+            ["a07RM+", "a02AH+~~~47", "*05BH+~~~~8", "*02AH#"],
+            ["a07RM+", "a02AH+", "*05BH+", "*02AH#"],
+        ];
+        let targets: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.their_serve_error();
+                let serve = format!("{}SM+", file.server());
+                let touches: Vec<&str> = std::iter::once(serve.as_str())
+                    .chain(touches.iter().copied())
+                    .collect();
+                file.rally(&touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                events
+                    .iter()
+                    .find(|e| e.event_type == B)
+                    .map(|e| e.flags.target())
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![Some(Some(CourtTarget::Zone(2))), Some(None), Some(None)]
+        );
+    }
+
     /// Our serve `+`, their reception `-` and our attack, their touches
     /// after the reception not scouted: the ball came back without their
     /// attack, a freeball (`OF`), the serve keeping its evaluation.

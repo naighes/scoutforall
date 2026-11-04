@@ -219,6 +219,39 @@ mod tests {
         assert_eq!(at.moved_on(CourtSide::Theirs, Direction::Down), cell("8C"));
     }
 
+    /// The zones at the net on our court, 4 3 2 from the left: the cursor
+    /// across them, staying at the ends; only a zone there fits the block.
+    #[test]
+    fn the_zones_at_the_net() {
+        use crate::shapes::court_zone::TargetKind;
+        use CourtZoneEnum::*;
+        assert_eq!(CourtZoneEnum::net_shown(CourtSide::Ours), vec![Z4, Z3, Z2]);
+        assert_eq!(
+            CourtZoneEnum::net_shown(CourtSide::Theirs),
+            vec![Z2, Z3, Z4]
+        );
+        let moved = |z: CourtZoneEnum, d| z.moved_at_net(CourtSide::Ours, d);
+        assert_eq!(moved(Z4, Direction::Right), Z3);
+        assert_eq!(moved(Z3, Direction::Right), Z2);
+        assert_eq!(moved(Z2, Direction::Right), Z2);
+        assert_eq!(moved(Z4, Direction::Left), Z4);
+        assert_eq!(moved(Z3, Direction::Up), Z3);
+        assert_eq!(moved(Z8, Direction::Down), Z4);
+        let net = TargetKind::Net;
+        assert!(net.fits(&CourtTarget::Zone(3)));
+        assert!(!net.fits(&CourtTarget::Zone(8)));
+        assert!(!net.fits(&CourtTarget::Cell(cell("3A"))));
+        assert!(TargetKind::Cells.fits(&CourtTarget::Cell(cell("3A"))));
+        assert_eq!(TargetKind::of(EventTypeEnum::B), Some(TargetKind::Net));
+        assert_eq!(TargetKind::of(EventTypeEnum::D), Some(TargetKind::Cells));
+        assert_eq!(TargetKind::of(EventTypeEnum::F), None);
+        // touched again, taken back
+        let touched = CourtTarget::touched_zone(None, Z3);
+        assert_eq!(touched, Some(CourtTarget::Zone(3)));
+        assert_eq!(CourtTarget::touched_zone(touched, Z3), None);
+        assert_eq!(CourtTarget::touched_zone(touched, Z43), None);
+    }
+
     /// Two cells side by side across or down, not on a corner: across the
     /// line between two zones of a row they are on a conflict zone; one
     /// behind the other, or in one zone, they aren't.

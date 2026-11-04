@@ -144,6 +144,9 @@
     <string name="dig_zone">Defense zone</string>
     <string name="digs_by_zone">Digs by zone</string>
     <string name="dig_zones_told">zone told for %1$d of %2$d digs</string>
+    <string name="block_zone">Block zone</string>
+    <string name="blocks_by_zone">Blocks by zone</string>
+    <string name="block_zones_told">zone told for %1$d of %2$d blocks</string>
     <string name="on_conflicts">On the conflict zones: %1$d (%2$d%%)</string>
     <string name="zone_density">density</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>

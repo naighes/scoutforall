@@ -3,7 +3,7 @@
 //! points, where the attacks were set; the freeballs given and received;
 //! the players compared in a fundamental; the phases won in each rotation.
 use crate::overview::{DISTRIBUTION_ZONES, RalliesWon};
-use crate::shapes::court_zone::{CourtSide, CourtZoneEnum};
+use crate::shapes::court_zone::{CourtSide, CourtZoneEnum, TargetKind};
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
 use crate::shapes::stats::{Metric, Stats, StatsFilter};
 use std::cmp::Reverse;
@@ -103,8 +103,9 @@ pub struct ZoneDetail {
 pub const MIN_SERVES_FOR_EFFICIENCY: u32 = 3;
 
 /// Our serves or attacks sent to a zone of their court, or our receptions
-/// or digs in a zone of ours (see `CourtZoneEnum`), among the ones whose
-/// zone was told; or our receptions or digs on a conflict zone.
+/// or digs in a zone of ours, or our blocks in a zone at the net (see
+/// `CourtZoneEnum`), among the ones whose zone was told; or our receptions
+/// or digs on a conflict zone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TargetDetail {
     pub zone: CourtZoneEnum,
@@ -138,9 +139,10 @@ pub struct Detail {
     pub points: Option<u32>,
     /// for an attack, the zones of `DISTRIBUTION_ZONES` set to
     pub zones: Vec<ZoneDetail>,
-    /// for a serve, an attack, a reception or a dig, how many had their zone
-    /// told, and each of the nine zones (`CourtZoneEnum::ZONES`, the ones
-    /// never served to or received in too); none for the other fundamentals
+    /// for a serve, an attack, a reception, a dig or a block, how many had
+    /// their zone told, and each of the zones (`TargetKind::zones`: the nine,
+    /// the three at the net for the block; the ones never told too); none
+    /// for the other fundamentals
     pub targets_told: u32,
     pub targets: Vec<TargetDetail>,
     /// for a reception or a dig (on our court), each conflict zone
@@ -236,17 +238,19 @@ impl Detail {
             share: count / f64::from(targets_told) * 100.0,
             efficiency: (count >= f64::from(MIN_SERVES_FOR_EFFICIENCY)).then_some(efficiency),
         };
-        let targets = match targets_told {
-            1.. => CourtZoneEnum::ZONES
+        let kind = TargetKind::of(event_type);
+        let targets = match (kind, targets_told) {
+            (Some(kind), 1..) => kind
+                .zones()
                 .iter()
                 .map(|zone| detail(*zone, stats.events_to(event_type, *zone, filter)))
                 .collect(),
             _ => Vec::new(),
         };
         // where two of ours could take their serve or their attack: only
-        // on our court, in reception and in defense
-        let (conflicts, on_conflicts) = match (side, targets_told) {
-            (Some(CourtSide::Ours), 1..) => {
+        // on our court, in reception and in defense (not at the net)
+        let (conflicts, on_conflicts) = match (side, kind, targets_told) {
+            (Some(CourtSide::Ours), Some(TargetKind::Cells), 1..) => {
                 let conflicts = CourtZoneEnum::CONFLICTS
                     .iter()
                     .map(|zone| {

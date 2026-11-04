@@ -14,6 +14,12 @@ use crate::screens::{
 use crate::shapes::actions::{ScoutingOptionEnum, ScreenActionEnum};
 use crate::shapes::keybinding::{ActionsKeyBindings, KeyBindings, combination_of};
 use crate::shapes::keybinding::{ZONE_CURSOR_KEYS, ZONE_KEY, navigation_keybindings};
+
+/// The keys moving the cursor on the zones at the net: only across.
+const NET_CURSOR_KEYS: [OneToThree<KeyCode>; 2] = [
+    OneToThree::One(KeyCode::Left),
+    OneToThree::One(KeyCode::Right),
+];
 use crate::shapes::settings::Settings;
 use crate::shapes::symbol::KeyCombinationFormatExt;
 use async_trait::async_trait;
@@ -29,7 +35,10 @@ use ratatui::{
 use scout4all_core::{
     scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     shapes::{
-        court_zone::{CourtCell, CourtSide, CourtTarget, Direction as CourtDirection},
+        court_zone::{
+            CourtCell, CourtSide, CourtTarget, CourtZoneEnum, Direction as CourtDirection,
+            TargetKind,
+        },
         enums::{EventTypeEnum, FriendlyName, RoleEnum},
         snapshot::EventEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
@@ -57,6 +66,9 @@ pub struct ScoutingScreen<
     /// the cursor on the court where the ball went: `None` until moved, on
     /// the zone chosen or in the middle
     target_cursor: Option<CourtCell>,
+    /// the cursor on the zones at the net, for our block: `None` until
+    /// moved, on the zone chosen or in the middle
+    net_cursor: Option<CourtZoneEnum>,
     settings_writer: Arc<SW>,
     settings_reader: Arc<SR>,
 }
@@ -106,15 +118,25 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
         // the court where the ball went, along with the evaluation
         let zone = match self.session.targets_apply() {
             true => {
-                let toggle = match self.session.target().is_some_and(|t| t.has(&self.cursor())) {
+                let on_chosen = match self.session.target_kind() {
+                    Some(TargetKind::Net) => {
+                        self.session.target() == self.net_at().number().map(CourtTarget::Zone)
+                    }
+                    _ => self.session.target().is_some_and(|t| t.has(&self.cursor())),
+                };
+                let toggle = match on_chosen {
                     true => labels.remove_zone,
                     false => labels.choose_zone,
                 };
+                // at the net only across
+                let net = self.session.target_kind() == Some(TargetKind::Net);
+                let keys: String = ZONE_CURSOR_KEYS
+                    .iter()
+                    .filter(|k| !net || NET_CURSOR_KEYS.contains(&k.codes))
+                    .map(|k| fmt.to_string(*k))
+                    .collect();
                 vec![
-                    (
-                        ZONE_CURSOR_KEYS.map(|k| fmt.to_string(k)).join(""),
-                        labels.target_zone.to_string(),
-                    ),
+                    (keys, labels.target_zone.to_string()),
                     (fmt.to_string(ZONE_KEY), toggle.to_string()),
                 ]
             }
@@ -216,8 +238,16 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
         self.footer.render(f, footer_left, self.footer_entries());
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
-        match self.session.target_side() {
-            Some(side) => target_court::render(
+        match (self.session.target_side(), self.session.target_kind()) {
+            (Some(side), Some(TargetKind::Net)) => target_court::render_net(
+                f,
+                right,
+                current_labels().block_target,
+                side,
+                self.net_at(),
+                self.session.target(),
+            ),
+            (Some(side), _) => target_court::render(
                 f,
                 right,
                 match (side, self.session.event()) {
@@ -230,7 +260,7 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
                 self.cursor(),
                 self.session.target(),
             ),
-            None => self.render_court(f, right),
+            (None, _) => self.render_court(f, right),
         }
         self.notify_message.render(f, footer_right);
         self.screen_key_bindings = screen_key_bindings;
@@ -246,6 +276,7 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> ScreenA
         // the cursor starts again from the zone chosen, or the middle
         if !self.session.targets_apply() {
             self.target_cursor = None;
+            self.net_cursor = None;
         }
         action
     }
@@ -281,6 +312,7 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             back: false,
             footer: NavigationFooter::new(),
             target_cursor: None,
+            net_cursor: None,
             screen_key_bindings: ActionsKeyBindings::empty(),
             event_key_bindings: event_key_bindings.to_owned(),
             event_screen_key_bindings: ActionsKeyBindings::from(
@@ -497,6 +529,16 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
         self.target_cursor.or(chosen).unwrap_or(CourtCell::CENTER)
     }
 
+    /// Where the cursor on the zones at the net is: where moved, or on the
+    /// zone chosen, or in the middle.
+    fn net_at(&self) -> CourtZoneEnum {
+        let chosen = match self.session.target() {
+            Some(CourtTarget::Zone(z)) => CourtZoneEnum::numbered(z),
+            Some(CourtTarget::Cell(_) | CourtTarget::Pair(_, _)) | None => None,
+        };
+        self.net_cursor.or(chosen).unwrap_or(CourtZoneEnum::Z3)
+    }
+
     async fn handle_eval_screen(&mut self, key: KeyEvent) -> AppAction {
         let ck = combination_of(key);
         // the court where the ball went: the arrows move on it, the space
@@ -508,7 +550,11 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             OneToThree::One(KeyCode::Right) => Some(CourtDirection::Right),
             _ => None,
         }
-        .filter(|_| self.session.targets_apply() && ZONE_CURSOR_KEYS.contains(&ck));
+        .filter(|_| self.session.targets_apply() && ZONE_CURSOR_KEYS.contains(&ck))
+        .filter(|_| {
+            self.session.target_kind() != Some(TargetKind::Net)
+                || NET_CURSOR_KEYS.contains(&ck.codes)
+        });
         let toggle = self.session.targets_apply() && ck == ZONE_KEY;
         // the evaluation bound to the key, if the event allows it
         let eval = self
@@ -517,7 +563,19 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .action_for(&ck)
             .copied()
             .filter(|eval| self.session.available_evals().contains(eval));
+        let net = self.session.target_kind() == Some(TargetKind::Net);
         match (direction, toggle, eval, self.technique_for(&ck)) {
+            (Some(direction), _, _, _) if net => {
+                let side = self.session.target_side().unwrap_or(CourtSide::Ours);
+                self.net_cursor = Some(self.net_at().moved_at_net(side, direction));
+                AppAction::None
+            }
+            (None, true, _, _) if net => {
+                let cursor = self.net_at();
+                self.net_cursor = Some(cursor);
+                let chosen = self.session.touch_zone(cursor);
+                self.show(chosen.map(|_| Progress::Choosing))
+            }
             (Some(direction), _, _, _) => {
                 let side = self.session.target_side().unwrap_or(CourtSide::Theirs);
                 self.target_cursor = Some(self.cursor().moved_on(side, direction));

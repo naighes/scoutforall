@@ -320,6 +320,62 @@ mod tests {
         );
     }
 
+    /// Our block: only a zone at the net, 4, 3 or 2, saved with its
+    /// evaluation; touched again, taken back; no cell.
+    #[tokio::test]
+    async fn the_block_target_is_at_the_net() {
+        use crate::shapes::court_zone::TargetKind;
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(B).await.unwrap();
+        assert_eq!(s.session.target_kind(), None);
+        let blocker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("a blocker");
+        s.session.choose_player(blocker).await.unwrap();
+        assert_eq!(
+            (s.session.target_side(), s.session.target_kind()),
+            (Some(CourtSide::Ours), Some(TargetKind::Net))
+        );
+        assert_eq!(
+            s.session.touch_target(cell(4, SubzoneEnum::C)),
+            Err(ScoutingError::InvalidSelection)
+        );
+        assert_eq!(
+            s.session.touch_zone(CourtZoneEnum::Z8),
+            Err(ScoutingError::InvalidSelection)
+        );
+        s.session.touch_zone(CourtZoneEnum::Z3).unwrap();
+        s.session.touch_zone(CourtZoneEnum::Z3).unwrap();
+        assert_eq!(s.session.target(), None);
+        s.session.touch_zone(CourtZoneEnum::Z4).unwrap();
+        s.session.touch_zone(CourtZoneEnum::Z2).unwrap();
+        assert_eq!(s.session.target(), Some(CourtTarget::Zone(2)));
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        let block = saved.iter().find(|e| e.event_type == B).expect("the block");
+        assert_eq!(block.flags.target(), Some(CourtTarget::Zone(2)));
+    }
+
+    /// The cells are not for the block, nor the zone at the net for the
+    /// dig.
+    #[tokio::test]
+    async fn the_dig_has_no_zone_at_the_net() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(D).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert_eq!(
+            s.session.touch_zone(CourtZoneEnum::Z3),
+            Err(ScoutingError::InvalidSelection)
+        );
+    }
+
     /// Undo resumes the serve with where it went; going back from the
     /// evaluation forgets it.
     #[tokio::test]

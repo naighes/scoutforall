@@ -14,6 +14,27 @@ use ratatui::{
 };
 use scout4all_core::shapes::court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum};
 
+/// The panel of the court where the ball went, titled with what's told,
+/// and the court inside it, with an empty line on each side if there's
+/// room.
+fn court_panel(f: &mut Frame, area: Rect, title: &str, chosen: Option<CourtTarget>) -> Rect {
+    let labels = current_labels();
+    let told = chosen.map_or_else(|| labels.no_zone.to_string(), |t| t.described());
+    let block = panel::section(format!("{title}: {told}"))
+        .style(Style::default().add_modifier(Modifier::REVERSED));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    match inner.width > 20 && inner.height > 7 {
+        true => Rect {
+            x: inner.x + 1,
+            y: inner.y + 1,
+            width: inner.width - 2,
+            height: inner.height - 2,
+        },
+        false => inner,
+    }
+}
+
 /// The rows a zone takes with its borders.
 const BORDERED_ROW: u16 = 3;
 
@@ -102,21 +123,7 @@ pub fn render(
     cursor: CourtCell,
     chosen: Option<CourtTarget>,
 ) {
-    let labels = current_labels();
-    let told = chosen.map_or_else(|| labels.no_zone.to_string(), |t| t.described());
-    let block = panel::section(format!("{title}: {told}"))
-        .style(Style::default().add_modifier(Modifier::REVERSED));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    let court = match inner.width > 20 && inner.height > 7 {
-        true => Rect {
-            x: inner.x + 1,
-            y: inner.y + 1,
-            width: inner.width - 2,
-            height: inner.height - 2,
-        },
-        false => inner,
-    };
+    let court = court_panel(f, area, title, chosen);
     let (widths, heights) = (split(court.width, 3), split(court.height, 3));
     // a box for each zone when its two rows still have a line each
     let boxed = heights.iter().all(|h| *h >= 4) && widths.iter().all(|w| *w >= 6);
@@ -176,15 +183,57 @@ pub fn render(
     }
 }
 
-/// The court in the block, as shown on `side`: each zone with its lines
-/// and style, told by `cell`, with the conflict zones between them when
-/// `conflicts`; the nine zones in a box when `boxes` and there's room.
+/// Our court where we blocked, to choose it: the zones at the net in the
+/// first row (4, 3, 2 from the left), in a box each when there's room, the
+/// one chosen highlighted, the cursor reversed; the rest of the court
+/// empty.
+pub fn render_net(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    side: CourtSide,
+    cursor: CourtZoneEnum,
+    chosen: Option<CourtTarget>,
+) {
+    let court = court_panel(f, area, title, chosen);
+    let (widths, heights) = (split(court.width, 3), split(court.height, 3));
+    let height = heights.first().copied().unwrap_or(0);
+    let boxed = height >= BORDERED_ROW && widths.iter().all(|w| *w >= 4);
+    let mut x = court.x;
+    for (zone, width) in CourtZoneEnum::net_shown(side).into_iter().zip(widths) {
+        let area = Rect {
+            x,
+            y: court.y,
+            width,
+            height,
+        };
+        let base = match chosen == zone.number().map(CourtTarget::Zone) {
+            true => Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            false => Style::default(),
+        };
+        let style = match zone == cursor {
+            true => base.add_modifier(Modifier::REVERSED),
+            false => base,
+        };
+        render_cell(f, area, vec![Line::from(zone.to_string())], style, boxed);
+        x += width;
+    }
+}
+
+/// The court in the block, its rows from the top as shown (see
+/// `CourtZoneEnum::shown`, `zones_shown`; only the first for the zones at
+/// the net, the rest of the court empty): each zone with its lines and
+/// style, told by `cell`, the conflict zones between them if in the rows;
+/// the zones in a box when `boxes` and there's room.
 pub fn render_court<F>(
     f: &mut Frame,
     area: Rect,
     block: Block,
-    side: CourtSide,
-    (conflicts, boxes): (bool, bool),
+    rows: &[Vec<CourtZoneEnum>],
+    boxes: bool,
     cell: F,
 ) where
     F: Fn(CourtZoneEnum) -> (Vec<Line<'static>>, Style),
@@ -201,6 +250,7 @@ pub fn render_court<F>(
         },
         false => inner,
     };
+    let conflicts = rows.iter().flatten().any(|zone| !zone.is_zone());
     let widths = columns(court.width, conflicts);
     let heights = split(court.height, 3);
     let boxed = boxes && heights.iter().all(|h| *h >= BORDERED_ROW);
@@ -212,10 +262,6 @@ pub fn render_court<F>(
             Some(span)
         })
         .collect();
-    let rows = match conflicts {
-        true => CourtZoneEnum::shown(side),
-        false => CourtZoneEnum::zones_shown(side),
-    };
     let mut y = court.y;
     for (row, height) in rows.iter().zip(heights) {
         for (zone, (x, width)) in row.iter().zip(spans.iter().copied()) {

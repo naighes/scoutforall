@@ -1600,6 +1600,34 @@ mod tests {
         assert_eq!(digs.on_conflicts.map(|c| c.count), Some(1));
     }
 
+    /// Our blocks by the zone at the net: only 4, 3 and 2, no conflict
+    /// zones.
+    #[test]
+    fn detail_of_the_blocks_by_zone() {
+        use crate::shapes::court_zone::CourtTarget;
+        use crate::shapes::court_zone::CourtZoneEnum::{Z2, Z3, Z4};
+        let t = Team::new();
+        let blocked = |eval, zone| {
+            let mut e = act(B, t.mb2, eval);
+            e.flags = e.flags.with_target(Some(CourtTarget::Zone(zone)));
+            e
+        };
+        // our serve, their attack blocked, our attack out: their serve
+        let stats = t
+            .serving(vec![
+                act(S, t.setter, Positive),
+                blocked(Positive, 2),
+                act(A, t.oh1, Error),
+            ])
+            .stats;
+        let blocks = detail(&stats, B, &all());
+        assert_eq!(blocks.targets_told, 1);
+        let zones: Vec<_> = blocks.targets.iter().map(|t| (t.zone, t.count)).collect();
+        assert_eq!(zones, vec![(Z2, 1.0), (Z3, 0.0), (Z4, 0.0)]);
+        assert!(blocks.conflicts.is_empty());
+        assert_eq!(blocks.on_conflicts, None);
+    }
+
     /// Their freeball after ours, exploited with a kill: team events, with
     /// a player none given and the others not told; also for our freeball
     /// naming its player, as scouted before.

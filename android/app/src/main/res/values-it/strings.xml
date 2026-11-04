@@ -143,6 +143,9 @@
     <string name="dig_zone">Zona di difesa</string>
     <string name="digs_by_zone">Difese per zona</string>
     <string name="dig_zones_told">zona indicata in %1$d difese su %2$d</string>
+    <string name="block_zone">Zona di muro</string>
+    <string name="blocks_by_zone">Muri per zona</string>
+    <string name="block_zones_told">zona indicata in %1$d muri su %2$d</string>
     <string name="on_conflicts">Sulle zone di conflitto: %1$d (%2$d%%)</string>
     <string name="zone_density">densità</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>

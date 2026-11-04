@@ -10,7 +10,7 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
-        court_zone::{CourtCell, CourtSide, CourtTarget},
+        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
         flags::{EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
@@ -329,23 +329,48 @@ impl ScoutingSession {
         }
     }
 
+    /// How the scout tells where the ball goes, when the scout can: a cell
+    /// or two, or a zone at the net for our block.
+    pub fn target_kind(&self) -> Option<TargetKind> {
+        match (self.step, self.event) {
+            (ScoutingStep::Eval, Some(event)) => TargetKind::of(event),
+            _ => None,
+        }
+    }
+
     /// The scout tells where the ball went, or takes it back (`None`): the
-    /// evaluation saves it with the event. Never required.
+    /// evaluation saves it with the event. Never required; only as the
+    /// event tells it (see `TargetKind::fits`).
     pub fn choose_target(&mut self, target: Option<CourtTarget>) -> Result<(), ScoutingError> {
-        match self.targets_apply() {
-            true => {
-                self.target = target;
+        match (self.target_kind(), target) {
+            (Some(_), None) => {
+                self.target = None;
                 Ok(())
             }
-            false => Err(ScoutingError::InvalidSelection),
+            (Some(kind), Some(t)) if kind.fits(&t) => {
+                self.target = Some(t);
+                Ok(())
+            }
+            _ => Err(ScoutingError::InvalidSelection),
         }
     }
 
     /// The scout touches a cell of the court: alone, or along with the one
     /// told next to it; touched again, taken back (see
-    /// `CourtTarget::touched`).
+    /// `CourtTarget::touched`). Not for the block, at the net.
     pub fn touch_target(&mut self, cell: CourtCell) -> Result<(), ScoutingError> {
         self.choose_target(CourtTarget::touched(self.target, cell))
+    }
+
+    /// The scout touches a zone at the net, for our block: told, or taken
+    /// back when it was.
+    pub fn touch_zone(&mut self, zone: CourtZoneEnum) -> Result<(), ScoutingError> {
+        match self.target_kind() {
+            Some(TargetKind::Net) => {
+                self.choose_target(CourtTarget::touched_zone(self.target, zone))
+            }
+            _ => Err(ScoutingError::InvalidSelection),
+        }
     }
 
     /// The events that can follow.
@@ -718,8 +743,10 @@ impl ScoutingSession {
                     player: self.player,
                     target_player: None,
                     technique: self.technique,
-                    flags: EventFlags::default()
-                        .with_target(self.target.filter(|_| self.targets_apply())),
+                    flags: EventFlags::default().with_target(
+                        self.target
+                            .filter(|t| self.target_kind().is_some_and(|k| k.fits(t))),
+                    ),
                 })
                 .await
             }
@@ -855,7 +882,10 @@ impl ScoutingSession {
                 // the set or serve of the removed event, if it was saved
                 self.technique = removed.technique.or_else(|| self.preselected_technique());
                 // and where it went, if told
-                self.target = removed.flags.target().filter(|_| self.targets_apply());
+                self.target = removed
+                    .flags
+                    .target()
+                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)));
             }
             (_, R, Some(player)) => {
                 self.event = Some(R);

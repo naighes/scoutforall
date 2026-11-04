@@ -8,7 +8,7 @@
 use crate::{
     dvw::model::{Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols},
     shapes::{
-        court_zone::{CourtTarget, SubzoneEnum},
+        court_zone::{CourtTarget, SubzoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum},
         flags::EventFlags,
         lineup::Lineup,
@@ -1204,10 +1204,14 @@ impl SetTranslator<'_> {
                 };
                 // where our serve or attack went, or where we received or
                 // dug theirs: the zone, with its subzone if told (a cell
-                // of ours; DataVolley tells no two cells)
+                // of ours; DataVolley tells no two cells); where we blocked
+                // it, only the zone at the net
                 let target = match (event_type, skill.end_zone) {
                     (S | P | A | D, Some(zone)) => {
                         CourtTarget::of_zone(zone, skill.end_subzone.and_then(SubzoneEnum::of))
+                    }
+                    (B, Some(zone)) => {
+                        CourtTarget::of_zone(zone, None).filter(|t| TargetKind::Net.fits(t))
                     }
                     _ => None,
                 };

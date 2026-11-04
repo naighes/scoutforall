@@ -1,6 +1,9 @@
 //! Where the ball goes: on the court of the opponent (our serve, our
 //! attack) or on ours (their serve, where we receive it; their attack,
-//! where we dig it).
+//! where we dig it, or block it at the net).
+//!
+//! The block tells only the zone at the net, 4, 3 or 2 (`TargetKind::Net`),
+//! as DataVolley: in front of their attack.
 //!
 //! The scout tells a quarter of a zone (a cell: the subzones of DataVolley,
 //! `1A`), or two cells side by side (`1B-6A`), or, from a file without the
@@ -49,12 +52,12 @@ pub enum CourtSide {
 
 impl CourtSide {
     /// The court where the ball of the event goes: our serve and our
-    /// attack to theirs, our reception and our dig on ours; none for the
-    /// other events.
+    /// attack to theirs, our reception, our dig and our block on ours; none
+    /// for the other events.
     pub fn of(event: EventTypeEnum) -> Option<Self> {
         match event {
             EventTypeEnum::S | EventTypeEnum::A => Some(CourtSide::Theirs),
-            EventTypeEnum::P | EventTypeEnum::D => Some(CourtSide::Ours),
+            EventTypeEnum::P | EventTypeEnum::D | EventTypeEnum::B => Some(CourtSide::Ours),
             _ => None,
         }
     }
@@ -81,6 +84,48 @@ impl CourtSide {
             (CourtSide::Ours, Direction::Down) => Direction::Up,
             (CourtSide::Ours, Direction::Left) => Direction::Right,
             (CourtSide::Ours, Direction::Right) => Direction::Left,
+        }
+    }
+}
+
+/// How the scout tells where the ball went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TargetKind {
+    /// A cell or two side by side anywhere on the court.
+    Cells,
+    /// One of the zones at the net, 4, 3 or 2: where we blocked, in front
+    /// of their attack.
+    Net,
+}
+
+impl TargetKind {
+    /// How the scout tells where the ball of the event went: the block at
+    /// the net, the others on the cells; none where it isn't told.
+    pub fn of(event: EventTypeEnum) -> Option<Self> {
+        match (event, CourtSide::of(event)) {
+            (EventTypeEnum::B, _) => Some(TargetKind::Net),
+            (_, Some(_)) => Some(TargetKind::Cells),
+            (_, None) => None,
+        }
+    }
+
+    /// Whether the target can be told this way: at the net only a whole
+    /// zone there.
+    pub fn fits(&self, target: &CourtTarget) -> bool {
+        match (self, target) {
+            (TargetKind::Cells, _) => true,
+            (TargetKind::Net, CourtTarget::Zone(z)) => {
+                CourtZoneEnum::numbered(*z).is_some_and(|zone| CourtZoneEnum::NET.contains(&zone))
+            }
+            (TargetKind::Net, CourtTarget::Cell(_) | CourtTarget::Pair(_, _)) => false,
+        }
+    }
+
+    /// The zones the statistics show: the nine, or the ones at the net.
+    pub fn zones(&self) -> &'static [CourtZoneEnum] {
+        match self {
+            TargetKind::Cells => &CourtZoneEnum::ZONES,
+            TargetKind::Net => &CourtZoneEnum::NET,
         }
     }
 }
@@ -137,6 +182,9 @@ impl CourtZoneEnum {
     /// The nine zones.
     pub const ZONES: [CourtZoneEnum; 9] = [Z1, Z2, Z3, Z4, Z5, Z6, Z7, Z8, Z9];
 
+    /// The zones at the net, where we block.
+    pub const NET: [CourtZoneEnum; 3] = [Z2, Z3, Z4];
+
     /// The conflict zones.
     pub const CONFLICTS: [CourtZoneEnum; 6] = [Z43, Z32, Z78, Z89, Z56, Z61];
 
@@ -157,6 +205,33 @@ impl CourtZoneEnum {
             .into_iter()
             .map(|row| row.into_iter().filter(Self::is_zone).collect())
             .collect()
+    }
+
+    /// The zones at the net as shown on `side`, from the left: 4, 3, 2 on
+    /// ours.
+    pub fn net_shown(side: CourtSide) -> Vec<CourtZoneEnum> {
+        Self::zones_shown(side)
+            .into_iter()
+            .flatten()
+            .filter(|zone| Self::NET.contains(zone))
+            .collect()
+    }
+
+    /// The zone at the net next to this one on `side`, this one at the
+    /// end; the first one shown from elsewhere.
+    pub fn moved_at_net(&self, side: CourtSide, direction: Direction) -> Self {
+        let net = Self::net_shown(side);
+        let at = net.iter().position(|z| z == self);
+        let to = match (at, direction) {
+            (None, _) => Some(0),
+            (Some(i), Direction::Left) => i.checked_sub(1),
+            (Some(i), Direction::Right) => Some(i + 1),
+            (Some(i), Direction::Up | Direction::Down) => Some(i),
+        };
+        to.and_then(|i| net.get(i))
+            .or_else(|| at.and_then(|i| net.get(i)))
+            .copied()
+            .unwrap_or(*self)
     }
 
     /// The zone with the number, 1 to 9.
@@ -484,6 +559,16 @@ impl CourtTarget {
             Some(CourtTarget::Pair(_, _) | CourtTarget::Zone(_)) | None => {
                 Some(CourtTarget::Cell(cell))
             }
+        }
+    }
+
+    /// The target after the scout touches a whole zone: told, or taken
+    /// back when it was.
+    pub fn touched_zone(current: Option<CourtTarget>, zone: CourtZoneEnum) -> Option<CourtTarget> {
+        let target = zone.number().map(CourtTarget::Zone);
+        match current == target {
+            true => None,
+            false => target,
         }
     }
 

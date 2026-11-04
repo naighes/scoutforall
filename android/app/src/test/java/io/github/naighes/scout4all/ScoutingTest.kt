@@ -244,6 +244,27 @@ class ScoutingTest {
         assertEquals("1C-6B (6/1)", saved().events[0].target)
     }
 
+    /** Our block: where we blocked, only the zones at the net on our court
+     * (4, 3, 2 from the left), whole: no cells. */
+    @Test
+    fun theBlockZoneIsTouchedAtTheNet() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.block_zone)} $label") and hasClickAction() }
+        touch("+")
+        // Paola Egonu, opposite, in the front row
+        touch("18")
+        touch("block")
+        rule.waitFor { rule.onAllNodes(zone("3")).fetchSemanticsNodes().size == 1 }
+        assertTrue(rule.onAllNodes(zone("3A")).fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodes(zone("8")).fetchSemanticsNodes().isEmpty())
+        val at = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(at("4").x < at("3").x && at("3").x < at("2").x)
+        rule.onNode(zone("2")).performClick()
+        touch("+")
+        rule.waitFor { saved().events.size == 2 }
+        assertEquals("2", saved().events[0].target)
+    }
+
     /** From the changes of the lineup, the libero for a player touched on
      * court: saved with the player; in their place after a rally. */
     @Test

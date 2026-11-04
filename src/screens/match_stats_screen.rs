@@ -29,7 +29,7 @@ use scout4all_core::{
     errors::AppError,
     overview::side_out_possessions,
     shapes::{
-        court_zone::{CourtSide, CourtZoneEnum},
+        court_zone::{CourtSide, CourtZoneEnum, TargetKind},
         enums::{EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
@@ -461,7 +461,7 @@ impl MatchStatsScreen {
             self.event_filter.selected().map(|s| s.event_type),
             self.player_filter.selected(),
         ) {
-            (Some(event_type @ (EventTypeEnum::S | EventTypeEnum::D)), _) => {
+            (Some(event_type @ (EventTypeEnum::S | EventTypeEnum::D | EventTypeEnum::B)), _) => {
                 self.render_targets(event_type, f, chunks[0], chunks[1]);
             }
             // the side outs have no player: with one, the zones take the
@@ -534,7 +534,7 @@ impl MatchStatsScreen {
     }
 
     /// Where our serves or attacks went (on their court), or where we
-    /// received theirs (on ours), of the ones whose zone was told: how many
+    /// received, dug or blocked theirs (on ours), of the ones whose zone was told: how many
     /// in each zone, in a shade of one color, the more the brighter; and
     /// their efficiency there, red to green, only from a few on. For the
     /// reception, the conflict zones between the zones, and all of them in
@@ -556,6 +556,7 @@ impl MatchStatsScreen {
             EventTypeEnum::P => domain.receptions_by_zone,
             EventTypeEnum::A => domain.attacks_by_zone,
             EventTypeEnum::D => domain.digs_by_zone,
+            EventTypeEnum::B => domain.blocks_by_zone,
             _ => domain.serves_by_zone,
         };
         let told = domain
@@ -578,7 +579,13 @@ impl MatchStatsScreen {
             }
             None => (told, String::new()),
         };
-        let conflicts = !detail.conflicts.is_empty();
+        // the zones at the net for the block, the conflict zones between
+        // the zones in reception and in defense
+        let rows = match (TargetKind::of(event_type), detail.conflicts.is_empty()) {
+            (Some(TargetKind::Net), _) => vec![CourtZoneEnum::net_shown(side)],
+            (_, false) => CourtZoneEnum::shown(side),
+            (_, true) => CourtZoneEnum::zones_shown(side),
+        };
         let target = |zone: CourtZoneEnum| {
             detail
                 .targets
@@ -597,8 +604,8 @@ impl MatchStatsScreen {
             f,
             density,
             panel::section(by_zone).title_bottom(on_density),
-            side,
-            (conflicts, false),
+            &rows,
+            false,
             |zone| {
                 let shown = target(zone).filter(|t| t.count > 0.0);
                 let lines = match shown {
@@ -616,8 +623,8 @@ impl MatchStatsScreen {
             f,
             efficiency,
             panel::section(domain.efficiency_by_zone).title_bottom(on_efficiency),
-            side,
-            (conflicts, false),
+            &rows,
+            false,
             |zone| {
                 let lines = match target(zone).filter(|t| t.count > 0.0) {
                     Some(TargetDetail {

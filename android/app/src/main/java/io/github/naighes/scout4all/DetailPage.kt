@@ -390,7 +390,7 @@ private fun FreeballContent(f: FreeballStats) = TileRow {
 }
 
 /** The serves or attacks with their zone told, on their court, or the
- * receptions or digs, on ours: where they went, the more the brighter
+ * receptions or digs, on ours, or the blocks at our net: where they went, the more the brighter
  * amber; or their efficiency there, red to green, from a few on. Two cells
  * of two zones count half in each. On our court also the conflict zones,
  * between the zones, and all of them under the court. */
@@ -401,6 +401,7 @@ private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum) = Column(ver
         EventTypeEnum.P -> R.string.receptions_by_zone to R.string.reception_zones_told
         EventTypeEnum.A -> R.string.attacks_by_zone to R.string.attack_zones_told
         EventTypeEnum.D -> R.string.digs_by_zone to R.string.dig_zones_told
+        EventTypeEnum.B -> R.string.blocks_by_zone to R.string.block_zones_told
         else -> R.string.serves_by_zone to R.string.zones_told
     }
     Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
