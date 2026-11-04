@@ -14,6 +14,7 @@ mod scouting;
 mod settings;
 mod splash;
 mod start;
+mod stats;
 mod strings;
 mod team;
 mod theme;
@@ -78,6 +79,7 @@ enum Screen {
     Match(Box<MatchScreen>),
     Start(Box<start::StartScreen>),
     Scouting(Box<ScoutingScreen>),
+    Stats(Box<stats::StatsScreen>),
 }
 
 /// Where a key or a click leads.
@@ -86,6 +88,7 @@ enum Go {
     Home,
     Team(String),
     Match(String, String),
+    Stats(String, String),
     /// a set of the match: to start, or in progress
     Scout(home::Open),
 }
@@ -117,6 +120,7 @@ enum Message {
     Match(game::Message),
     Scouting(scouting::Message),
     Start(start::Message),
+    Stats(stats::Message),
     /// a frame of the splash
     Frame(Instant),
     Loaded(Loaded),
@@ -171,6 +175,7 @@ impl App {
             (None, Screen::Match(screen)) => screen.title(),
             (None, Screen::Start(screen)) => screen.title(),
             (None, Screen::Scouting(screen)) => screen.title(),
+            (None, Screen::Stats(screen)) => screen.title(),
         }
     }
 
@@ -189,6 +194,9 @@ impl App {
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
             Go::Match(team, m) => {
                 MatchScreen::new(core, team, m).map(|m| Screen::Match(Box::new(m)))
+            }
+            Go::Stats(team, m) => {
+                stats::StatsScreen::new(core, team, m).map(|screen| Screen::Stats(Box::new(screen)))
             }
             Go::Scout(open) if open.start => core
                 .set_start(open.team_id.clone(), open.match_id.clone())
@@ -267,7 +275,7 @@ impl App {
             (None, Screen::Home(screen)) => screen.focus_id(),
             (None, Screen::Team(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
-            (None, Screen::Start(_) | Screen::Scouting(_)) => None,
+            (None, Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_)) => None,
         }
     }
 
@@ -329,6 +337,14 @@ impl App {
                 let outcome = screen.key(s, ck);
                 match_go(screen, outcome)
             }
+            (Message::Stats(m), Screen::Stats(screen)) => {
+                let outcome = screen.update(m);
+                stats_go(screen, outcome)
+            }
+            (Message::Key(ck), Screen::Stats(screen)) => {
+                let outcome = screen.key(ck);
+                stats_go(screen, outcome)
+            }
             (Message::Start(m), Screen::Start(screen)) => {
                 let outcome = screen.update(m);
                 self.started(outcome)
@@ -371,6 +387,9 @@ impl App {
                 }
                 (None, Screen::Start(screen)) => {
                     (screen.view(s, c).map(Message::Start), screen.hints(s), true)
+                }
+                (None, Screen::Stats(screen)) => {
+                    (screen.view(s, c).map(Message::Stats), screen.hints(s), true)
                 }
                 (None, Screen::Scouting(screen)) => (
                     screen.view(s, c).map(Message::Scouting),
@@ -443,10 +462,18 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
     }
 }
 
+fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome) -> Go {
+    match outcome {
+        stats::Outcome::Stay => Go::Stay,
+        stats::Outcome::Back => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
+    }
+}
+
 fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
     match outcome {
         game::Outcome::Stay => Go::Stay,
         game::Outcome::Back => Go::Team(screen.team_id.clone()),
+        game::Outcome::Stats => Go::Stats(screen.team_id.clone(), screen.match_id.clone()),
         game::Outcome::Scout(start) => Go::Scout(home::Open {
             team_id: screen.team_id.clone(),
             match_id: screen.match_id.clone(),

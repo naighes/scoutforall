@@ -23,6 +23,7 @@ use {
 pub enum Message {
     Next,
     Edit,
+    Stats,
     Form(form::Message),
 }
 
@@ -31,6 +32,7 @@ pub enum Outcome {
     Back,
     /// a set to start (`true`) or to resume
     Scout(bool),
+    Stats,
 }
 
 pub struct MatchScreen {
@@ -116,6 +118,7 @@ impl MatchScreen {
             }
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
             (Message::Next, None) => self.next(),
+            (Message::Stats, None) => Outcome::Stats,
             (Message::Edit, None) => {
                 self.edit(s);
                 Outcome::Stay
@@ -132,6 +135,7 @@ impl MatchScreen {
             }
             (None, k) if k == BACK_KEY => Outcome::Back,
             (None, k) if k == key!(enter) => self.next(),
+            (None, k) if k == key!(s) => Outcome::Stats,
             (None, k) if k == key!(e) => {
                 self.edit(s);
                 Outcome::Stay
@@ -161,6 +165,7 @@ impl MatchScreen {
                     .into_iter()
                     .collect::<Vec<_>>(),
                 vec![
+                    ("s".to_string(), s.stats.to_string()),
                     ("e".to_string(), s.edit_match.to_string()),
                     ("Esc".to_string(), s.back.to_string()),
                 ],
@@ -215,7 +220,12 @@ impl MatchScreen {
                     .color(c.muted),
                 notes,
                 space::vertical().height(6),
-                row![next, ui::pill(s.edit_match, false, Some(Message::Edit), c)].spacing(10),
+                row![
+                    next,
+                    ui::pill(s.stats, false, Some(Message::Stats), c),
+                    ui::pill(s.edit_match, false, Some(Message::Edit), c)
+                ]
+                .spacing(10),
             ]
             .spacing(12),
             c,

@@ -971,7 +971,7 @@ impl ScoutingScreen {
         .spacing(10);
         let chart: Element<'a, Message> = match self.trend.is_empty() {
             true => small(s.no_rallies, c).into(),
-            false => charts::canvas_view(self.trend.clone(), c),
+            false => charts::canvas_view(self.trend.clone(), c, Length::Fixed(130.0)),
         };
         let content = column![
             scopes,

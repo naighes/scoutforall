@@ -186,9 +186,9 @@ impl<M> canvas::Program<M> for CanvasTrend {
     }
 }
 
-pub fn canvas_view<'a, M: 'a>(trend: Trend, colors: Colors) -> Element<'a, M> {
+pub fn canvas_view<'a, M: 'a>(trend: Trend, colors: Colors, height: Length) -> Element<'a, M> {
     iced::widget::canvas(CanvasTrend { trend, colors })
         .width(Length::Fill)
-        .height(Length::Fixed(130.0))
+        .height(height)
         .into()
 }

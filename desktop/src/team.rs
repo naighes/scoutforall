@@ -580,8 +580,28 @@ mod tests {
         let Outcome::OpenMatch(match_id) = team.update(s, Message::Form(Save)) else {
             unreachable!("the match is saved and opened")
         };
-        let mut m = MatchScreen::new(core, team_id, match_id).unwrap();
+        let mut m = MatchScreen::new(core.clone(), team_id.clone(), match_id.clone()).unwrap();
         assert!(matches!(m.key(s, key!(enter)), game::Outcome::Scout(true)));
         assert!(matches!(m.key(s, BACK_KEY), game::Outcome::Back));
+        // its statistics, with no rally yet: every page and filter goes
+        assert!(matches!(m.key(s, key!(s)), game::Outcome::Stats));
+        let mut stats = crate::stats::StatsScreen::new(core, team_id, match_id).unwrap();
+        for k in [
+            key!(tab),
+            key!(right),
+            key!(down),
+            key!(left),
+            key!(tab),
+            key!(down),
+            key!(right),
+            key!(down),
+            key!(right),
+            key!(up),
+            key!(left),
+            key!(shift - tab),
+        ] {
+            assert!(matches!(stats.key(k), crate::stats::Outcome::Stay));
+        }
+        assert!(matches!(stats.key(BACK_KEY), crate::stats::Outcome::Back));
     }
 }
