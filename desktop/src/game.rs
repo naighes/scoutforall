@@ -25,6 +25,8 @@ pub enum Message {
     Edit,
     Stats,
     Export,
+    /// the events of the set, to correct them
+    Set(u8),
     Form(form::Message),
 }
 
@@ -36,6 +38,8 @@ pub enum Outcome {
     Stats,
     /// the archive of the match, to save
     Export,
+    /// the events of the set, to correct them
+    Events(u8),
 }
 
 pub struct MatchScreen {
@@ -123,6 +127,7 @@ impl MatchScreen {
             (Message::Next, None) => self.next(),
             (Message::Stats, None) => Outcome::Stats,
             (Message::Export, None) => Outcome::Export,
+            (Message::Set(n), None) => Outcome::Events(n),
             (Message::Edit, None) => {
                 self.edit(s);
                 Outcome::Stay
@@ -145,7 +150,13 @@ impl MatchScreen {
                 self.edit(s);
                 Outcome::Stay
             }
-            _ => Outcome::Stay,
+            // a digit: the events of that set, if played
+            (None, k) => match crate::keymap::digit(&k) {
+                Some(n) if self.details.sets.iter().any(|set| set.number == n) => {
+                    Outcome::Events(n)
+                }
+                _ => Outcome::Stay,
+            },
         }
     }
 
@@ -173,6 +184,10 @@ impl MatchScreen {
                     ("s".to_string(), s.stats.to_string()),
                     ("e".to_string(), s.edit_match.to_string()),
                     ("x".to_string(), s.export_match.to_string()),
+                    (
+                        format!("1–{}", self.details.sets.len().max(1)),
+                        s.set_events.to_string(),
+                    ),
                     ("Esc".to_string(), s.back.to_string()),
                 ],
             ]
@@ -245,7 +260,7 @@ impl MatchScreen {
             c,
         );
         let sets = d.sets.iter().map(|set| {
-            row![
+            let line = row![
                 text(format!("{} {}", s.set_n, set.number))
                     .size(SIZE_BODY)
                     .color(c.muted)
@@ -261,8 +276,8 @@ impl MatchScreen {
                 text(format!("{:<2}", set.them)).size(22).font(bold),
             ]
             .spacing(10)
-            .align_y(Alignment::Center)
-            .into()
+            .align_y(Alignment::Center);
+            ui::list_row(line, false, Some(Message::Set(set.number)), c)
         });
         let sets: Element<'a, Message> = match d.sets.is_empty() {
             true => ui::body(s.no_rallies).color(c.muted).into(),

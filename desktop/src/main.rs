@@ -7,6 +7,7 @@ mod charts;
 mod court;
 mod dvw;
 mod editors;
+mod events;
 mod form;
 mod game;
 mod home;
@@ -83,6 +84,7 @@ enum Screen {
     Scouting(Box<ScoutingScreen>),
     Stats(Box<stats::StatsScreen>),
     Dvw(Box<dvw::DvwScreen>),
+    Events(Box<events::EventsScreen>),
 }
 
 /// Where a key or a click leads.
@@ -92,6 +94,8 @@ enum Go {
     Team(String),
     Match(String, String),
     Stats(String, String),
+    /// the events of a set of the match, to correct them
+    Events(String, String, u8),
     /// a set of the match: to start, or in progress
     Scout(home::Open),
     /// the zip of a team or of a match, to save
@@ -137,6 +141,7 @@ enum Message {
     Loaded(Loaded),
     Settings(settings::Message),
     Dvw(dvw::Message),
+    Events(events::Message),
     /// where the archive goes (none: not saved), and the archive
     Exported(Option<PathBuf>, Arc<Vec<u8>>),
     /// the file chosen (none: none) to import into the team, if given
@@ -196,6 +201,7 @@ impl App {
             (None, Screen::Scouting(screen)) => screen.title(),
             (None, Screen::Stats(screen)) => screen.title(),
             (None, Screen::Dvw(_)) => self.strings.import_dvw.to_string(),
+            (None, Screen::Events(screen)) => screen.title(self.strings),
         }
     }
 
@@ -222,6 +228,8 @@ impl App {
             Go::Match(team, m) => {
                 MatchScreen::new(core, team, m).map(|m| Screen::Match(Box::new(m)))
             }
+            Go::Events(team, m, set) => events::EventsScreen::new(core, team, m, set)
+                .map(|screen| Screen::Events(Box::new(screen))),
             Go::Stats(team, m) => {
                 stats::StatsScreen::new(core, team, m).map(|screen| Screen::Stats(Box::new(screen)))
             }
@@ -378,13 +386,33 @@ impl App {
             (None, Screen::Team(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
             (None, Screen::Dvw(screen)) => screen.focus_id(),
-            (None, Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_)) => None,
+            (
+                None,
+                Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_) | Screen::Events(_),
+            ) => None,
         }
     }
 
     /// Updates, then moves the focus where the keys went.
     fn update(&mut self, message: Message) -> Task<Message> {
-        let task = self.handle(message);
+        let handled = self.handle(message);
+        // the event chosen kept in sight
+        let task = match &self.screen {
+            Screen::Events(screen) => {
+                let (id, y) = screen.scroll();
+                Task::batch([
+                    handled,
+                    iced::widget::operation::snap_to(
+                        id,
+                        iced::widget::operation::RelativeOffset {
+                            x: None,
+                            y: Some(y),
+                        },
+                    ),
+                ])
+            }
+            _ => handled,
+        };
         let focus = self.focus_id();
         match focus == self.focused {
             true => task,
@@ -502,6 +530,14 @@ impl App {
                 self.started(outcome)
             }
             (Message::Dvw(m), Screen::Dvw(screen)) => dvw_go(screen.update(s, m)),
+            (Message::Events(m), Screen::Events(screen)) => {
+                let outcome = screen.update(m);
+                events_go(screen, outcome)
+            }
+            (Message::Key(ck), Screen::Events(screen)) => {
+                let outcome = screen.key(ck);
+                events_go(screen, outcome)
+            }
             (Message::Key(ck), Screen::Dvw(screen)) => dvw_go(screen.key(s, ck)),
             (Message::Scouting(m), Screen::Scouting(screen)) => {
                 let outcome = screen.update(m);
@@ -547,6 +583,11 @@ impl App {
                 (None, None, Screen::Stats(screen)) => {
                     (screen.view(s, c).map(Message::Stats), screen.hints(s), true)
                 }
+                (None, None, Screen::Events(screen)) => (
+                    screen.view(s, c).map(Message::Events),
+                    screen.hints(s),
+                    true,
+                ),
                 (None, None, Screen::Dvw(screen)) => {
                     (screen.view(s, c).map(Message::Dvw), screen.hints(s), true)
                 }
@@ -625,6 +666,13 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
     }
 }
 
+fn events_go(screen: &events::EventsScreen, outcome: events::Outcome) -> Go {
+    match outcome {
+        events::Outcome::Stay => Go::Stay,
+        events::Outcome::Back => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
+    }
+}
+
 fn dvw_go(outcome: dvw::Outcome) -> Go {
     match outcome {
         dvw::Outcome::Stay => Go::Stay,
@@ -645,6 +693,9 @@ fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
         game::Outcome::Stay => Go::Stay,
         game::Outcome::Back => Go::Team(screen.team_id.clone()),
         game::Outcome::Stats => Go::Stats(screen.team_id.clone(), screen.match_id.clone()),
+        game::Outcome::Events(set) => {
+            Go::Events(screen.team_id.clone(), screen.match_id.clone(), set)
+        }
         game::Outcome::Export => Go::Export(transfer::Export::Match(
             screen.team_id.clone(),
             screen.match_id.clone(),

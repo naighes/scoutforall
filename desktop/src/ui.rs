@@ -392,3 +392,51 @@ pub fn fill(template: &str, values: &[String]) -> String {
             s.replace(&format!("{{{}}}", i + 1), v)
         })
 }
+
+/// The option after (or before) `current`, round.
+pub fn cycle<T: PartialEq + Clone>(options: &[T], current: &T, forward: bool) -> Option<T> {
+    let count = options.len();
+    let at = options.iter().position(|o| o == current);
+    let next = match (at, forward) {
+        (_, _) if count == 0 => return None,
+        (Some(i), true) => (i + 1) % count,
+        (Some(i), false) => (i + count - 1) % count,
+        (None, _) => 0,
+    };
+    options.get(next).cloned()
+}
+
+/// A line of choices: what it is, then its pills; the one the arrows
+/// are on marked in amber, as the filters of the statistics.
+pub fn choice_line<'a, M: 'a>(
+    name: &str,
+    on: bool,
+    pills: Vec<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
+    let label = text(name.to_string())
+        .size(SIZE_SMALL)
+        .font(theme::fonts().bold)
+        .color(match on {
+            true => c.accent,
+            false => c.muted,
+        })
+        .width(Length::Fixed(130.0));
+    row![
+        text(match on {
+            true => "▸",
+            false => " ",
+        })
+        .size(SIZE_SMALL)
+        .color(c.accent)
+        .width(Length::Fixed(12.0)),
+        label,
+        iced::widget::Row::with_children(pills)
+            .spacing(4)
+            .wrap()
+            .vertical_spacing(4)
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .into()
+}

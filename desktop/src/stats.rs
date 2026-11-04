@@ -87,19 +87,6 @@ pub struct StatsScreen {
     error: Option<String>,
 }
 
-/// The option after (or before) `current`, round.
-fn cycle<T: PartialEq + Clone>(options: &[T], current: &T, forward: bool) -> Option<T> {
-    let count = options.len();
-    let at = options.iter().position(|o| o == current);
-    let next = match (at, forward) {
-        (_, _) if count == 0 => return None,
-        (Some(i), true) => (i + 1) % count,
-        (Some(i), false) => (i + count - 1) % count,
-        (None, _) => 0,
-    };
-    options.get(next).cloned()
-}
-
 fn pct(v: Option<f64>) -> String {
     v.map_or_else(|| "–".to_string(), |v| format!("{v:.0}%"))
 }
@@ -272,11 +259,11 @@ impl StatsScreen {
     fn changed(&self, filter: Filter, forward: bool) -> Option<Message> {
         let detail = self.detail.as_ref();
         match filter {
-            Filter::Scope => cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
+            Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
             Filter::Series => {
                 let count = self.live.as_ref().map_or(0, |l| l.trend.len());
                 let series: Vec<usize> = (0..count).collect();
-                cycle(&series, &self.series, forward).map(Message::Series)
+                ui::cycle(&series, &self.series, forward).map(Message::Series)
             }
             Filter::Mode => Some(Message::Recent(!self.recent)),
             Filter::Zones => Some(Message::Efficiency(!self.efficiency)),
@@ -284,7 +271,7 @@ impl StatsScreen {
                 let events: Vec<EventTypeEnum> = detail
                     .map(|d| d.fundamentals.iter().map(|f| f.value).collect())
                     .unwrap_or_default();
-                cycle(&events, &self.event, forward).map(Message::Event)
+                ui::cycle(&events, &self.event, forward).map(Message::Event)
             }
             Filter::Player => {
                 let players: Vec<Option<String>> = [None]
@@ -295,7 +282,7 @@ impl StatsScreen {
                             .flat_map(|d| d.players.iter().map(|p| Some(p.id.clone()))),
                     )
                     .collect();
-                cycle(&players, &self.filter.player, forward).map(Message::Player)
+                ui::cycle(&players, &self.filter.player, forward).map(Message::Player)
             }
             Filter::Rotation => {
                 let rotations: Vec<Option<u8>> = [None]
@@ -306,7 +293,7 @@ impl StatsScreen {
                             .flat_map(|d| d.rotations.iter().map(|r| Some(r.value))),
                     )
                     .collect();
-                cycle(&rotations, &self.filter.rotation, forward).map(Message::Rotation)
+                ui::cycle(&rotations, &self.filter.rotation, forward).map(Message::Rotation)
             }
             Filter::Phase => {
                 let phases: Vec<Option<PhaseEnum>> = [None]
@@ -317,7 +304,7 @@ impl StatsScreen {
                             .flat_map(|d| d.phases.iter().map(|p| Some(p.value))),
                     )
                     .collect();
-                cycle(&phases, &self.filter.phase, forward).map(Message::Phase)
+                ui::cycle(&phases, &self.filter.phase, forward).map(Message::Phase)
             }
         }
     }
@@ -561,31 +548,7 @@ impl StatsScreen {
                     .collect(),
             ),
         };
-        let label = text(name.to_string())
-            .size(SIZE_SMALL)
-            .font(theme::fonts().bold)
-            .color(match on {
-                true => c.accent,
-                false => c.muted,
-            })
-            .width(Length::Fixed(130.0));
-        row![
-            text(match on {
-                true => "▸",
-                false => " ",
-            })
-            .size(SIZE_SMALL)
-            .color(c.accent)
-            .width(Length::Fixed(12.0)),
-            label,
-            Row::with_children(pills)
-                .spacing(4)
-                .wrap()
-                .vertical_spacing(4)
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .into()
+        ui::choice_line(name, on, pills, c)
     }
 
     fn trend_page<'a>(
@@ -1339,12 +1302,12 @@ mod tests {
     #[test]
     fn the_arrows_go_round_the_choices() {
         let options = [None, Some(1), Some(2)];
-        assert_eq!(cycle(&options, &None, true), Some(Some(1)));
-        assert_eq!(cycle(&options, &None, false), Some(Some(2)));
-        assert_eq!(cycle(&options, &Some(2), true), Some(None));
+        assert_eq!(ui::cycle(&options, &None, true), Some(Some(1)));
+        assert_eq!(ui::cycle(&options, &None, false), Some(Some(2)));
+        assert_eq!(ui::cycle(&options, &Some(2), true), Some(None));
         // a choice no longer there: the first
-        assert_eq!(cycle(&options, &Some(7), true), Some(None));
-        assert_eq!(cycle::<u8>(&[], &1, true), None);
+        assert_eq!(ui::cycle(&options, &Some(7), true), Some(None));
+        assert_eq!(ui::cycle::<u8>(&[], &1, true), None);
     }
 
     #[test]

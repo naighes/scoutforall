@@ -200,6 +200,13 @@ pub struct Strings {
     pub archives: &'static str,
     pub dvw_day_hint: &'static str,
     pub export: &'static str,
+    pub event_n: &'static str,
+    pub serve_type: &'static str,
+    pub set_type: &'static str,
+    pub correct: &'static str,
+    pub set_events: &'static str,
+    pub corrected: &'static str,
+    pub lineup_fixed: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -398,6 +405,13 @@ const EN: Strings = Strings {
     archives: "scout4all archive or DataVolley file",
     dvw_day_hint: "YYYY-MM-DD",
     export: "Export",
+    event_n: "Event {1}",
+    serve_type: "Serve",
+    set_type: "Set",
+    correct: "Correct",
+    set_events: "Events of the set",
+    corrected: "Event corrected",
+    lineup_fixed: "Changes of the lineup can't be corrected",
 };
 
 const IT: Strings = Strings {
@@ -596,6 +610,13 @@ const IT: Strings = Strings {
     archives: "Archivio scout4all o file DataVolley",
     dvw_day_hint: "AAAA-MM-GG",
     export: "Esporta",
+    event_n: "Evento {1}",
+    serve_type: "Battuta",
+    set_type: "Alzata",
+    correct: "Correggi",
+    set_events: "Eventi del set",
+    corrected: "Evento corretto",
+    lineup_fixed: "I cambi della formazione non si correggono",
 };
 
 const PT: Strings = Strings {
@@ -794,6 +815,13 @@ const PT: Strings = Strings {
     archives: "Arquivo scout4all ou arquivo DataVolley",
     dvw_day_hint: "AAAA-MM-DD",
     export: "Exportar",
+    event_n: "Evento {1}",
+    serve_type: "Saque",
+    set_type: "Levantamento",
+    correct: "Corrigir",
+    set_events: "Eventos do set",
+    corrected: "Evento corrigido",
+    lineup_fixed: "As mudanças da formação não podem ser corrigidas",
 };
 
 const PL: Strings = Strings {
@@ -992,6 +1020,13 @@ const PL: Strings = Strings {
     archives: "Archiwum scout4all lub plik DataVolley",
     dvw_day_hint: "RRRR-MM-DD",
     export: "Eksportuj",
+    event_n: "Zdarzenie {1}",
+    serve_type: "Zagrywka",
+    set_type: "Wystawa",
+    correct: "Popraw",
+    set_events: "Zdarzenia seta",
+    corrected: "Zdarzenie poprawione",
+    lineup_fixed: "Zmian składu nie można poprawić",
 };
 
 const JA: Strings = Strings {
@@ -1190,6 +1225,13 @@ const JA: Strings = Strings {
     archives: "scout4allアーカイブまたはDataVolleyファイル",
     dvw_day_hint: "YYYY-MM-DD",
     export: "エクスポート",
+    event_n: "イベント {1}",
+    serve_type: "サーブ",
+    set_type: "トス",
+    correct: "修正",
+    set_events: "セットのイベント",
+    corrected: "イベントを修正しました",
+    lineup_fixed: "ラインナップの変更は修正できません",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {
