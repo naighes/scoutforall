@@ -1,0 +1,5 @@
+- Times fixados: fixe um time e ele fica no topo da lista.
+- Zonas: para onde foram o saque, a recepção, o ataque, a defesa e o bloqueio, nas células do DataVolley; nunca obrigatórias.
+- Bloqueadores: quantos bloquearam nosso ataque e quantos dos nossos bloquearam o deles.
+- Zonas e bloqueadores nas estatísticas, e importados do DataVolley.
+- Relatório: V-P contado como no DataVolley.

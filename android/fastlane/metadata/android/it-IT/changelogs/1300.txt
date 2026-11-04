@@ -1,0 +1,5 @@
+- Squadre fissate: fissa una squadra e resta in cima alla lista.
+- Zone: dove sono andati battuta, ricezione, attacco, difesa e muro, nelle celle di DataVolley; mai obbligatorie.
+- Muratori: quanti hanno murato il nostro attacco e quanti dei nostri il loro.
+- Zone e muratori nelle statistiche, e importati da DataVolley.
+- Report: V-P contato come in DataVolley.

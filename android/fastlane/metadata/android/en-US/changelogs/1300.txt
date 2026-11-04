@@ -1,0 +1,5 @@
+- Pinned teams: pin a team and it stays at the top of the list.
+- Zones: where the serve, the reception, the attack, the dig and the block went, in DataVolley's cells; never required.
+- Blockers: how many blocked our attack and how many of ours blocked theirs.
+- Zones and blockers in the statistics, and imported from DataVolley.
+- Report: W-L counted as DataVolley does.

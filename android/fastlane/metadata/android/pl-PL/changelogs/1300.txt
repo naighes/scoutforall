@@ -1,0 +1,5 @@
+- Przypięte drużyny: przypnij drużynę, a zostanie na górze listy.
+- Strefy: dokąd poszła zagrywka, przyjęcie, atak, obrona i blok, w polach DataVolley; nigdy nie są wymagane.
+- Blokujący: ilu zablokowało nasz atak i ilu naszych zablokowało ich atak.
+- Strefy i blokujący w statystykach oraz w imporcie z DataVolley.
+- Raport: W-P liczone jak w DataVolley.
