@@ -249,6 +249,8 @@
     <string name="tutorial_attack">O levantamento é para ela, que ataca: toque no nome dela de novo.</string>
     <string name="tutorial_attack_point">Agora ela só pode atacar, então a avaliação vem logo. Ponto dela: toque em #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. Rodamos para P5 e Fahr saca.</string>
+    <string name="tutorial_serve_cell">Onde foi o saque? Opcional: toque em 1D.</string>
+    <string name="tutorial_serve_conflict">Depois 6A, ao lado: duas células de zonas diferentes ficam na linha entre elas, a zona de conflito 6/1.</string>
     <string name="tutorial_serve">O saque já está pronto para avaliar: negativo, toque em −.</string>
     <string name="tutorial_block">Elas atacam e Danesi bloqueia: toque no nome dela.</string>
     <string name="tutorial_block_event">Toque em Bloqueio.</string>

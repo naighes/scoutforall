@@ -1,6 +1,7 @@
-//! The court of the opponent, to tell where the ball went: the nine zones
-//! and the conflict zones between them (see `CourtZoneEnum`), the net at
-//! the top, with the cursor and the zone chosen.
+//! The court of the opponent as our server sees it, their end line at the
+//! top: to tell where the ball went, a cell of a zone or two side by side
+//! (see `CourtTarget`), with the cursor and the cells chosen; and, for the
+//! statistics, the nine zones with the conflict zones between them.
 use crate::localization::current_labels;
 use crate::screens::components::panel;
 use ratatui::{
@@ -10,7 +11,7 @@ use ratatui::{
     text::Line,
     widgets::{Block, Paragraph},
 };
-use scout4all_core::shapes::court_zone::CourtZoneEnum;
+use scout4all_core::shapes::court_zone::{CourtCell, CourtTarget, CourtZoneEnum};
 
 /// The rows a zone takes with its borders.
 const BORDERED_ROW: u16 = 3;
@@ -34,20 +35,30 @@ fn rows(height: u16) -> [u16; 5] {
     [zone, conflict, zones - 2 * zone, conflict, zone]
 }
 
-/// The style of a zone: the one chosen highlighted, the cursor reversed.
-fn style(zone: CourtZoneEnum, cursor: CourtZoneEnum, chosen: Option<CourtZoneEnum>) -> Style {
-    let base = match (Some(zone) == chosen, zone.is_zone()) {
-        (true, _) => Style::default()
+/// The style of a cell: the ones chosen highlighted, the cursor reversed;
+/// on `shade` (a zone told apart from the next ones without its box).
+fn style(cell: CourtCell, cursor: CourtCell, chosen: Option<CourtTarget>, shade: Style) -> Style {
+    let base = match chosen.is_some_and(|t| t.has(&cell)) {
+        true => Style::default()
             .fg(Color::Black)
             .bg(Color::Green)
             .add_modifier(Modifier::BOLD),
-        (false, true) => Style::default().add_modifier(Modifier::BOLD),
-        (false, false) => Style::default().fg(Color::DarkGray),
+        false => shade,
     };
-    match zone == cursor {
+    match cell == cursor {
         true => base.add_modifier(Modifier::REVERSED),
         false => base,
     }
+}
+
+/// `total` in `parts` sizes, what's left to the middle ones.
+fn split(total: u16, parts: usize) -> Vec<u16> {
+    let parts16 = u16::try_from(parts).unwrap_or(1).max(1);
+    let size = total / parts16;
+    let left = total - size * parts16;
+    (0..parts16)
+        .map(|i| size + u16::from(i >= (parts16 - left) / 2 && i < (parts16 - left) / 2 + left))
+        .collect()
 }
 
 /// The lines in the middle of the area, in a box if it fits: one each, or
@@ -83,25 +94,88 @@ fn render_cell(f: &mut Frame, area: Rect, lines: Vec<Line<'static>>, style: Styl
     );
 }
 
-/// The court where our serve went, to choose it: in a panel titled with the
-/// zone chosen, if any.
+/// The court where our serve went, to choose it: the nine zones in a box
+/// each when there's room, their four cells inside; in a panel titled with
+/// what's told, if any.
 pub fn render(
     f: &mut Frame,
     area: Rect,
     title: &str,
-    cursor: CourtZoneEnum,
-    chosen: Option<CourtZoneEnum>,
+    cursor: CourtCell,
+    chosen: Option<CourtTarget>,
 ) {
     let labels = current_labels();
-    let told = chosen.map_or_else(|| labels.no_zone.to_string(), |z| z.to_string());
+    let told = chosen.map_or_else(|| labels.no_zone.to_string(), |t| t.described());
     let block = panel::section(format!("{title}: {told}"))
         .style(Style::default().add_modifier(Modifier::REVERSED));
-    render_court(f, area, block, true, |zone| {
-        (
-            vec![Line::from(zone.to_string())],
-            style(zone, cursor, chosen),
-        )
-    });
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let court = match inner.width > 20 && inner.height > 7 {
+        true => Rect {
+            x: inner.x + 1,
+            y: inner.y + 1,
+            width: inner.width - 2,
+            height: inner.height - 2,
+        },
+        false => inner,
+    };
+    let (widths, heights) = (split(court.width, 3), split(court.height, 3));
+    // a box for each zone when its two rows still have a line each
+    let boxed = heights.iter().all(|h| *h >= 4) && widths.iter().all(|w| *w >= 6);
+    let grid = CourtCell::grid();
+    let mut y = court.y;
+    for (zone_row, height) in heights.iter().enumerate() {
+        let mut x = court.x;
+        for (zone_column, width) in widths.iter().enumerate() {
+            let zone = Rect {
+                x,
+                y,
+                width: *width,
+                height: *height,
+            };
+            // without boxes, the zones as on a chessboard
+            let shade = match (boxed, (zone_row + zone_column) % 2) {
+                (false, 1) => Style::default().bg(Color::Indexed(238)),
+                _ => Style::default(),
+            };
+            let block = match boxed {
+                true => Block::bordered(),
+                false => Block::default().style(shade),
+            };
+            let cells = block.inner(zone);
+            f.render_widget(block, zone);
+            let (cell_widths, cell_heights) = (split(cells.width, 2), split(cells.height, 2));
+            let mut cy = cells.y;
+            for (r, ch) in cell_heights.iter().enumerate() {
+                let mut cx = cells.x;
+                for (c, cw) in cell_widths.iter().enumerate() {
+                    let cell = grid
+                        .get(zone_row * 2 + r)
+                        .and_then(|row| row.get(zone_column * 2 + c))
+                        .copied();
+                    if let Some(cell) = cell {
+                        let area = Rect {
+                            x: cx,
+                            y: cy,
+                            width: *cw,
+                            height: *ch,
+                        };
+                        render_cell(
+                            f,
+                            area,
+                            vec![Line::from(cell.to_string())],
+                            style(cell, cursor, chosen, shade),
+                            false,
+                        );
+                    }
+                    cx += cw;
+                }
+                cy += ch;
+            }
+            x += width;
+        }
+        y += height;
+    }
 }
 
 /// The court in the block: each zone with its lines and style, told by

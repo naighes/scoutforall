@@ -250,6 +250,8 @@
     <string name="tutorial_attack">The setter sets her and she attacks: tap her name again.</string>
     <string name="tutorial_attack_point">She can only attack now, so the rating comes at once. Her point: tap #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. We rotate to S5 and Fahr serves.</string>
+    <string name="tutorial_serve_cell">Where did the serve go? Optional: tap 1D.</string>
+    <string name="tutorial_serve_conflict">Then 6A, next to it: two cells of two zones are on the line between them, the conflict zone 6/1.</string>
     <string name="tutorial_serve">The serve is ready to rate: a negative one, tap −.</string>
     <string name="tutorial_block">They attack and Danesi blocks: tap her name.</string>
     <string name="tutorial_block_event">Tap Block.</string>

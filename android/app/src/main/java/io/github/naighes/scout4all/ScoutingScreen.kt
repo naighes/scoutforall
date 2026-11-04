@@ -81,6 +81,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -120,7 +121,7 @@ import io.github.naighes.scout4all.core.ScoutingStep
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.ServeTypeEnum
 import io.github.naighes.scout4all.core.TechniqueChoice
-import io.github.naighes.scout4all.core.CourtZoneChoice
+import io.github.naighes.scout4all.core.CourtCellChoice
 import io.github.naighes.scout4all.core.TechniqueEnum
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -136,9 +137,11 @@ data class ScoutingView(
     val evals: List<EvalChoice>,
     val techniques: List<TechniqueChoice>,
     val replacements: List<ScoutingPlayer>,
-    /** the court where our serve went, a row each from the net: empty
-     * when it can't be told now */
-    val targets: List<List<CourtZoneChoice>> = emptyList(),
+    /** the court where our serve went, six rows of six cells from their
+     * end line: empty when it can't be told now */
+    val targets: List<List<CourtCellChoice>> = emptyList(),
+    /** what's told of where it went: "1D-6A (6/1)" */
+    val targetTold: String? = null,
 )
 
 sealed interface ScoutingUi {
@@ -203,9 +206,10 @@ class ScoutingViewModel(
 
     fun eval(eval: EvalChoice) = choose("eval ${eval.value}") { it.chooseEval(eval.value) }
 
-    /** Where the ball went: touching the zone chosen takes it back. */
-    fun target(zone: CourtZoneChoice) = choose("target ${zone.label}") {
-        it.chooseTarget(zone.value.takeUnless { zone.chosen })
+    /** Where the ball went: a cell, alone or along with the one next to
+     * it; touched again, taken back. */
+    fun target(cell: CourtCellChoice) = choose("target ${cell.label}") {
+        it.touchTarget(cell.zone, cell.subzone)
         Progress.CHOOSING
     }
 
@@ -299,6 +303,7 @@ class ScoutingViewModel(
             techniques = s.availableTechniques(),
             replacements = s.replacementChoices(),
             targets = s.targetCourt(),
+            targetTold = s.targetTold(),
         )
     }
 }
@@ -332,7 +337,17 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "", Modifier.title()) },
+                title = {
+                    // in landscape, while the serve court takes the room of
+                    // the score, the score up here
+                    val configuration = LocalConfiguration.current
+                    val low = view != null && view.targets.isNotEmpty() &&
+                        configuration.screenWidthDp > configuration.screenHeightDp
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text(view?.let { stringResource(R.string.set_n, it.state.setNumber.toInt()) } ?: "", Modifier.title())
+                        if (low) view?.let { BarScore(it.state) }
+                    }
+                },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
                     view?.let {
@@ -358,6 +373,22 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
             }
         }
     }
+    }
+}
+
+/** The teams and the points in a line, the home team on the left, and the
+ * rotation. */
+@Composable
+private fun BarScore(state: ScoutingState) {
+    val (left, right) = when (state.home) {
+        true -> (state.team to state.scoreUs) to (state.opponent to state.scoreThem)
+        false -> (state.opponent to state.scoreThem) to (state.team to state.scoreUs)
+    }
+    Row(Modifier.tutorial("score"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(left.first, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("${left.second} – ${right.second}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(right.first, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("· ${state.rotation}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -429,15 +460,16 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
             }
         }
         // the court fits what's left: the same at every step
-        // choosing where the serve went, the court shows the zones: the
-        // server is told under the score; in landscape, low, the zones take
-        // the room of the server, of the phase (break, as we serve) and of
-        // the margins
+        // choosing where the serve went, the court shows its 36 cells, 48dp
+        // each to touch them apart: they take the room of the phase (break,
+        // as we serve) and of the margins; the server is told under the
+        // score; in landscape, low, the court takes the room of the score
+        // too, back as soon as the serve is evaluated
         val aiming = view.targets.isNotEmpty()
         val low = aiming && maxWidth > maxHeight
         val court = @Composable { m: Modifier ->
-            Column(m.padding(vertical = if (low) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (low) 4.dp else 16.dp)) {
-                Score(view.state, server = aiming && !low, phase = !low)
+            Column(m.padding(vertical = if (aiming) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (aiming) 4.dp else 16.dp)) {
+                if (!low) Score(view.state, server = aiming, phase = !aiming, told = view.targetTold)
                 // where they stand: spread to receive, then where they
                 // play once our serve is made or theirs received
                 val players = view.state.court
@@ -593,7 +625,7 @@ private fun AsHighAs(reference: @Composable () -> Unit, content: @Composable () 
  * they do) and the rotation. A point stands out: the score turns, in green for ours, in
  * red for theirs, and the phone vibrates. */
 @Composable
-private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean = true) {
+private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean = true, told: String? = null) {
     val weServe = state.servingTeam == TeamSideEnum.US
     val us = Side(state.team, state.scoreUs.toInt(), weServe, Won)
     val them = Side(state.opponent, state.scoreThem.toInt(), !weServe, Lost)
@@ -631,15 +663,16 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
             )
         }
         LastEvent(state.events.firstOrNull())
-        if (server) Serving(state)
+        if (server) Serving(state, told)
     }
 }
 
-/** The serve being scouted and its server, where the last event is: the
- * court shows where it went. */
+/** Our serve being scouted, where the last event is, its line given to
+ * the court: the phase (break) and the rotation, the server, and where it
+ * went if told (the court shows it too). */
 @Composable
-private fun Serving(state: ScoutingState) = Text(
-    listOfNotNull(state.event?.name, state.player?.let { "${it.number} · ${it.name}" }).joinToString(" · "),
+private fun Serving(state: ScoutingState, told: String?) = Text(
+    listOfNotNull(stringResource(R.string.break_phase), state.rotation, state.player?.let { "${it.number} · ${it.name}" }, told).joinToString(" · "),
     modifier = Modifier.padding(top = 2.dp),
     style = MaterialTheme.typography.labelMedium,
     fontWeight = FontWeight.Bold,

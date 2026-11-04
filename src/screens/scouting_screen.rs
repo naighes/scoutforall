@@ -29,7 +29,7 @@ use ratatui::{
 use scout4all_core::{
     scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     shapes::{
-        court_zone::{CourtZoneEnum, Direction as CourtDirection},
+        court_zone::{CourtCell, CourtTarget, Direction as CourtDirection},
         enums::{EventTypeEnum, FriendlyName, RoleEnum},
         snapshot::EventEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
@@ -56,7 +56,7 @@ pub struct ScoutingScreen<
     event_key_bindings: KeyBindings<EventTypeEnum>,
     /// the cursor on the court where the ball went: `None` until moved, on
     /// the zone chosen or in the middle
-    target_cursor: Option<CourtZoneEnum>,
+    target_cursor: Option<CourtCell>,
     settings_writer: Arc<SW>,
     settings_reader: Arc<SR>,
 }
@@ -106,7 +106,7 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
         // the court where the ball went, along with the evaluation
         let zone = match self.session.targets_apply() {
             true => {
-                let toggle = match self.session.target() == Some(self.cursor()) {
+                let toggle = match self.session.target().is_some_and(|t| t.has(&self.cursor())) {
                     true => labels.remove_zone,
                     false => labels.choose_zone,
                 };
@@ -481,12 +481,14 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
         self.show(progress)
     }
 
-    /// Where the cursor on the court is: where moved, or on the zone
-    /// chosen, or in the middle.
-    fn cursor(&self) -> CourtZoneEnum {
-        self.target_cursor
-            .or(self.session.target())
-            .unwrap_or(CourtZoneEnum::CENTER)
+    /// Where the cursor on the court is: where moved, or on the cell
+    /// chosen last, or in the middle.
+    fn cursor(&self) -> CourtCell {
+        let chosen = match self.session.target() {
+            Some(CourtTarget::Cell(c) | CourtTarget::Pair(_, c)) => Some(c),
+            Some(CourtTarget::Zone(_)) | None => None,
+        };
+        self.target_cursor.or(chosen).unwrap_or(CourtCell::CENTER)
     }
 
     async fn handle_eval_screen(&mut self, key: KeyEvent) -> AppAction {
@@ -516,12 +518,8 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             }
             (None, true, _, _) => {
                 let cursor = self.cursor();
-                let target = match self.session.target() == Some(cursor) {
-                    true => None,
-                    false => Some(cursor),
-                };
                 self.target_cursor = Some(cursor);
-                let chosen = self.session.choose_target(target);
+                let chosen = self.session.touch_target(cursor);
                 self.show(chosen.map(|_| Progress::Choosing))
             }
             (None, false, Some(eval), _) => {

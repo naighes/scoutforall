@@ -19,7 +19,7 @@ mod tests {
         },
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
-            court_zone::CourtZoneEnum,
+            court_zone::{CourtCell, CourtTarget, SubzoneEnum},
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
             flags::ReceptionSchemeEnum,
             player::PlayerEntry,
@@ -177,26 +177,36 @@ mod tests {
     }
 
     /// Where our serve went is told along with its evaluation, or not:
+    fn cell(zone: u8, subzone: SubzoneEnum) -> CourtCell {
+        CourtCell::new(zone, subzone).expect("a cell")
+    }
+
+    fn z43() -> CourtTarget {
+        CourtTarget::pair(cell(3, SubzoneEnum::D), cell(4, SubzoneEnum::A)).expect("side by side")
+    }
+
     /// saved in the flags, none when not told; not for another event.
     #[tokio::test]
     async fn the_serve_target_is_optional() {
         let mut s = scouting().await;
         assert!(!s.session.targets_apply());
         assert_eq!(
-            s.session.choose_target(Some(CourtZoneEnum::Z1)),
+            s.session.choose_target(Some(CourtTarget::Zone(1))),
             Err(ScoutingError::InvalidSelection)
         );
         s.session.choose_event(S).await.unwrap();
         assert!(s.session.targets_apply());
         assert_eq!(s.session.target(), None);
-        assert_eq!(s.session.choose_target(Some(CourtZoneEnum::Z43)), Ok(()));
-        assert_eq!(s.session.target(), Some(CourtZoneEnum::Z43));
+        // 3D and 4A: on the line between 3 and 4
+        assert_eq!(s.session.touch_target(cell(3, SubzoneEnum::D)), Ok(()));
+        assert_eq!(s.session.touch_target(cell(4, SubzoneEnum::A)), Ok(()));
+        assert_eq!(s.session.target(), Some(z43()));
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
         // not told: their dig and their attack, our dig, our serve again
         s.session.choose_event(OE).await.ok();
         assert_eq!(s.session.target(), None);
         s.session.choose_event(S).await.unwrap();
-        s.session.choose_target(Some(CourtZoneEnum::Z6)).unwrap();
+        s.session.touch_target(cell(6, SubzoneEnum::A)).unwrap();
         s.session.choose_target(None).unwrap();
         s.session.choose_eval(EvalEnum::Error).await.unwrap();
         // their serve: our reception has none
@@ -207,7 +217,7 @@ mod tests {
         let saved = saved_events(&s).await;
         assert_eq!(
             saved.iter().map(|e| e.flags.target()).collect::<Vec<_>>(),
-            vec![Some(CourtZoneEnum::Z43), None, None, None]
+            vec![Some(z43()), None, None, None]
         );
     }
 
@@ -217,13 +227,16 @@ mod tests {
     async fn undo_resumes_the_serve_with_its_target() {
         let mut s = scouting().await;
         s.session.choose_event(S).await.unwrap();
-        s.session.choose_target(Some(CourtZoneEnum::Z19)).unwrap();
+        s.session.touch_target(cell(1, SubzoneEnum::B)).unwrap();
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
         assert_eq!(s.session.target(), None);
         s.session.undo().await.unwrap();
         assert_eq!(
             (s.session.step(), s.session.target()),
-            (ScoutingStep::Eval, Some(CourtZoneEnum::Z19))
+            (
+                ScoutingStep::Eval,
+                Some(CourtTarget::Cell(cell(1, SubzoneEnum::B)))
+            )
         );
         s.session.undo().await.unwrap();
         assert_eq!(s.session.target(), None);

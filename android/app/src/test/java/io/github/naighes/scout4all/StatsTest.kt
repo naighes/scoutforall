@@ -5,7 +5,6 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
-import io.github.naighes.scout4all.core.CourtZoneEnum
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
@@ -31,12 +30,14 @@ class StatsLayoutTest(private val screen: Size) {
     fun theStatisticsOfTheMatch() {
         val team = saveNationalTeam()
         val match = startFirstSet(team)
-        // the serves by zone in the detail: to 4/3, to 1, then without one
+        // the serves by zone in the detail: to 4/3 (3D and 4A), to 1, then
+        // without one
         core { c ->
             c.scouting(team, match).use { s ->
-                s.chooseTarget(CourtZoneEnum.Z43)
+                s.touchTarget(3u, "D")
+                s.touchTarget(4u, "A")
                 s.chooseEval(EvalEnum.PERFECT)
-                s.chooseTarget(CourtZoneEnum.Z1)
+                s.touchTarget(1u, "A")
                 s.chooseEval(EvalEnum.PERFECT)
             }
         }

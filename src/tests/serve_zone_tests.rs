@@ -72,14 +72,21 @@ mod tests {
         assert!(!shows_the_court(&mut ui), "{}", ui.screen());
     }
 
-    /// From the middle: up to 3/8, left to 4/7, chosen and saved.
+    /// From the middle (8A): left to 9D, chosen, then 8A next to it: two
+    /// cells across 9 and 8, on the line between them (8/9), saved.
     #[tokio::test]
-    async fn a_conflict_zone_is_chosen_and_saved() {
+    async fn two_cells_across_two_zones_are_saved() {
         let mut ui = serving().await;
-        ui.type_keys(&[KeyCode::Up, KeyCode::Left]).await;
+        ui.press(KeyCode::Left).await;
         assert!(ui.screen().contains(&court_title(current_labels().no_zone)));
         ui.press(KeyCode::Char(' ')).await;
-        assert!(ui.screen().contains(&court_title("4/7")), "{}", ui.screen());
+        assert!(ui.screen().contains(&court_title("9D")), "{}", ui.screen());
+        ui.type_keys(&[KeyCode::Right, KeyCode::Char(' ')]).await;
+        assert!(
+            ui.screen().contains(&court_title("9D-8A (8/9)")),
+            "{}",
+            ui.screen()
+        );
         let footer = ui.footer_entries();
         assert!(
             footer
@@ -89,47 +96,76 @@ mod tests {
         );
         // moving on doesn't change it
         ui.press(KeyCode::Down).await;
-        assert!(ui.screen().contains(&court_title("4/7")));
+        assert!(ui.screen().contains(&court_title("9D-8A (8/9)")));
         ui.press(KeyCode::Char('+')).await;
-        // 4/7 is the 16th zone, in bits 3 to 7
-        assert_eq!(last_flags(&ui), (16 * 8).to_string());
+        // the pair across in the third row, second column: 46 + 2 * 5 + 1,
+        // in bits 3 to 9
+        assert_eq!(last_flags(&ui), (57 * 8).to_string());
     }
 
-    /// The space bar on the zone chosen takes it back; on another one,
-    /// chooses that one.
+    /// Two cells of a zone are the zone; the space bar on a cell chosen
+    /// takes it back.
     #[tokio::test]
-    async fn the_space_bar_takes_the_zone_back() {
+    async fn the_space_bar_takes_a_cell_back() {
         let mut ui = serving().await;
         ui.press(KeyCode::Char(' ')).await;
-        assert!(ui.screen().contains(&court_title("8")));
-        ui.press(KeyCode::Right).await;
+        assert!(ui.screen().contains(&court_title("8A")));
+        ui.type_keys(&[KeyCode::Right, KeyCode::Char(' ')]).await;
+        assert!(
+            ui.screen().contains(&court_title("8A-8D")),
+            "{}",
+            ui.screen()
+        );
         ui.press(KeyCode::Char(' ')).await;
-        assert!(ui.screen().contains(&court_title("8/9")));
-        ui.press(KeyCode::Char(' ')).await;
+        assert!(ui.screen().contains(&court_title("8A")), "{}", ui.screen());
+        ui.type_keys(&[KeyCode::Left, KeyCode::Char(' ')]).await;
         assert!(ui.screen().contains(&court_title(current_labels().no_zone)));
         ui.press(KeyCode::Char('-')).await;
         assert_eq!(last_flags(&ui), "");
     }
 
-    /// Undo resumes the serve with its zone; the next serve starts without
-    /// one, the cursor in the middle.
+    /// A cell on the corner of the one chosen isn't side by side: it's
+    /// chosen alone.
     #[tokio::test]
-    async fn undo_resumes_the_serve_with_its_zone() {
+    async fn a_cell_on_the_corner_starts_over() {
+        let mut ui = serving().await;
+        ui.press(KeyCode::Char(' ')).await;
+        ui.type_keys(&[KeyCode::Right, KeyCode::Down, KeyCode::Char(' ')])
+            .await;
+        assert!(ui.screen().contains(&court_title("8C")), "{}", ui.screen());
+    }
+
+    /// Undo resumes the serve with its cells; the next serve starts without
+    /// any, the cursor in the middle.
+    #[tokio::test]
+    async fn undo_resumes_the_serve_with_its_cells() {
         let mut ui = serving().await;
         ui.type_keys(&[KeyCode::Down, KeyCode::Down, KeyCode::Right])
             .await;
         ui.press(KeyCode::Char(' ')).await;
-        assert!(ui.screen().contains(&court_title("6/1")), "{}", ui.screen());
+        assert!(ui.screen().contains(&court_title("3D")), "{}", ui.screen());
+        ui.type_keys(&[KeyCode::Up, KeyCode::Char(' ')]).await;
+        assert!(
+            ui.screen().contains(&court_title("8C-3D (3/8)")),
+            "{}",
+            ui.screen()
+        );
         ui.press(KeyCode::Char('#')).await;
-        assert_eq!(last_flags(&ui), (15 * 8).to_string());
+        // the pair down from the fourth row, fourth column: 46 + 30 + 3 *
+        // 6 + 3
+        assert_eq!(last_flags(&ui), (97 * 8).to_string());
         ui.press(KeyCode::Char('s')).await;
         assert!(ui.screen().contains(&court_title(current_labels().no_zone)));
         ui.press(KeyCode::Char(' ')).await;
-        assert!(ui.screen().contains(&court_title("8")));
+        assert!(ui.screen().contains(&court_title("8A")));
         // back to the events, then the ace again
         ui.press_with(KeyCode::Char('U'), KeyModifiers::SHIFT).await;
         ui.press_with(KeyCode::Char('U'), KeyModifiers::SHIFT).await;
-        assert!(ui.screen().contains(&court_title("6/1")), "{}", ui.screen());
+        assert!(
+            ui.screen().contains(&court_title("8C-3D (3/8)")),
+            "{}",
+            ui.screen()
+        );
     }
 
     /// Their serve: no court for our reception, the arrows do nothing.
@@ -157,8 +193,9 @@ mod tests {
     async fn the_serve_stats_show_the_zones() {
         use KeyCode::*;
         let mut ui = serving().await;
-        let to_4 = [Up, Up, Left, Left, Char(' ')];
-        let to_43 = [Up, Up, Left, Char(' ')];
+        // 4A; 3D and 4A, on the line between 3 and 4
+        let to_4 = [Down, Down, Right, Right, Char(' ')];
+        let to_43 = [Down, Down, Right, Char(' '), Right, Char(' ')];
         // aces to 4 (twice) and to 4/3, one without a zone, an error to 4
         ui.type_keys(&[&to_4[..], &[Char('#'), Char('s')]].concat())
             .await;

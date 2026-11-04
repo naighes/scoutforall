@@ -58,7 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import io.github.naighes.scout4all.core.CourtZoneChoice
+import io.github.naighes.scout4all.core.CourtCellChoice
 import androidx.compose.ui.semantics.contentDescription
 
 /** What a position of the court shows. */
@@ -125,8 +125,8 @@ fun Court(
     showPositions: Boolean = false,
     serveZone: Boolean = false,
     ball: CourtBall? = null,
-    targets: List<List<CourtZoneChoice>> = emptyList(),
-    onTarget: (CourtZoneChoice) -> Unit = {},
+    targets: List<List<CourtCellChoice>> = emptyList(),
+    onTarget: (CourtCellChoice) -> Unit = {},
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
     // the zones where our serve went on a square court (its true
     // proportions), to leave them room to touch; the server is told above
@@ -151,8 +151,8 @@ private fun CourtColumn(
     showPositions: Boolean,
     serveZone: Boolean,
     ball: CourtBall?,
-    targets: List<List<CourtZoneChoice>>,
-    onTarget: (CourtZoneChoice) -> Unit,
+    targets: List<List<CourtCellChoice>>,
+    onTarget: (CourtCellChoice) -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
@@ -169,7 +169,9 @@ private fun CourtColumn(
             // the zones show the attack line, between their rows
             val attack = size.height / 3
             if (!aiming) drawLine(lines, Offset(0f, attack), Offset(size.width, attack), strokeWidth = line)
-            drawLine(net, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 4.dp.toPx())
+            // their court as our server sees it: the net at the bottom
+            val netY = if (aiming) size.height else 0f
+            drawLine(net, Offset(0f, netY), Offset(size.width, netY), strokeWidth = 4.dp.toPx())
         }
         // where our serve went, in place of the players
         if (targets.isNotEmpty()) TargetZones(targets, onTarget)
@@ -255,62 +257,52 @@ private fun CourtColumn(
 
 private val ServeZone = 72.dp
 
-/** The sizes of the zones and of the conflict zones between them across
- * `side`, the zones of a row of three after: a conflict zone a meter wide
- * astride the line between two zones (the attack line too, between the
- * rows), wider if the middles of two neighbours would be closer than
- * `TouchApart`. The middles are as far apart as can be when all five are
- * as wide: then a fifth of the side. */
-private fun spans(side: Dp): Pair<List<Dp>, List<Dp>> {
-    // two neighbours' middles are `apart` from each other with a conflict
-    // zone `conflict` wide: 6 apart less a conflict zone make the side
-    val conflict = maxOf(side / 9, TouchApart * 6 - side).coerceAtMost(side / 5)
-    val apart = (side + conflict) / 6
-    val outer = apart * 2 - conflict / 2 - conflict / 2
-    val middle = side - outer * 2 - conflict * 2
-    return listOf(outer, conflict, middle, conflict, outer) to listOf(outer + conflict, middle, conflict + outer)
-}
-
-/** Two neighbours to touch, middle to middle (see `inaccessible` in the
- * tests). */
-private val TouchApart = 48.dp
-
-/** The court of the opponent, as ours (the net at the top, 4 on the left):
- * the nine zones and the conflict zones between them, to touch where the
- * ball went; the zone chosen filled, touched again to take it back. */
+/** The court of the opponent as our server sees it (their end line at the
+ * top, 1 on the left, the net at the bottom): the nine zones, each in the
+ * four cells of DataVolley, to touch where the ball went; a cell alone, or
+ * along with the one next to it (two cells of two zones are on the line
+ * between them); the cells chosen filled, touched again to take them
+ * back. The lines between the zones bolder than between the cells. */
 @Composable
-private fun TargetZones(rows: List<List<CourtZoneChoice>>, onTarget: (CourtZoneChoice) -> Unit) =
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+private fun TargetZones(rows: List<List<CourtCellChoice>>, onTarget: (CourtCellChoice) -> Unit) =
+    Box(Modifier.fillMaxSize()) {
         val zoneDescription = stringResource(R.string.serve_zone)
         val chosenState = stringResource(R.string.zone_chosen)
-        val (fives, threes) = spans(maxWidth)
-        val (heights, _) = spans(maxHeight)
-        Column {
-            rows.forEachIndexed { r, row ->
-                Row(Modifier.fillMaxWidth().height(heights.getOrElse(r) { 0.dp })) {
-                    val widths = if (row.size == 5) fives else threes
-                    row.forEachIndexed { c, zone ->
-                        val colors = MaterialTheme.colorScheme
+        val colors = MaterialTheme.colorScheme
+        val cellLines = colors.onSurface.copy(alpha = 0.25f)
+        val zoneLines = colors.onSurface.copy(alpha = 0.7f)
+        Canvas(Modifier.fillMaxSize()) {
+            val (thin, bold) = 1.dp.toPx() to 2.dp.toPx()
+            (1 until 6).forEach { i ->
+                val (x, y) = size.width * i / 6 to size.height * i / 6
+                val (color, width) = if (i % 2 == 0) zoneLines to bold else cellLines to thin
+                drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = width)
+                drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = width)
+            }
+        }
+        Column(Modifier.fillMaxSize()) {
+            rows.forEach { row ->
+                Row(Modifier.fillMaxWidth().weight(1f)) {
+                    row.forEach { cell ->
                         val (background, content) = when {
-                            zone.chosen -> colors.primary to colors.onPrimary
-                            zone.zone -> Color.Transparent to colors.onSurface
-                            else -> colors.onSurface.copy(alpha = 0.06f) to colors.onSurfaceVariant
+                            cell.chosen -> colors.primary to colors.onPrimary
+                            else -> Color.Transparent to colors.onSurface
                         }
                         Box(
-                            Modifier.width(widths.getOrElse(c) { 0.dp }).fillMaxHeight().padding(1.dp)
-                                .tutorial("zone:${zone.label}")
-                                .clickable(role = Role.Button) { onTarget(zone) }
+                            Modifier.weight(1f).fillMaxHeight().padding(2.dp)
+                                .tutorial("cell:${cell.label}")
+                                .clickable(role = Role.Button) { onTarget(cell) }
                                 .semantics {
-                                    contentDescription = "$zoneDescription ${zone.label}"
-                                    if (zone.chosen) stateDescription = chosenState
+                                    contentDescription = "$zoneDescription ${cell.label}"
+                                    if (cell.chosen) stateDescription = chosenState
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
                             Surface(Modifier.fillMaxSize(), shape = MaterialTheme.shapes.small, color = background) {}
                             Text(
-                                zone.label,
-                                style = if (zone.zone) MaterialTheme.typography.titleLarge else MaterialTheme.typography.labelMedium,
-                                fontWeight = if (zone.zone || zone.chosen) FontWeight.Bold else FontWeight.Normal,
+                                cell.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (cell.chosen) FontWeight.Bold else FontWeight.Normal,
                                 color = content,
                                 maxLines = 1,
                                 softWrap = false,

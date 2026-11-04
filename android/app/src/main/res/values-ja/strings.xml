@@ -248,6 +248,8 @@
     <string name="tutorial_attack">トスが上がり、彼女がアタック:もう一度名前をタップ。</string>
     <string name="tutorial_attack_point">今はアタックだけなので、すぐに評価になる。得点:# をタップ。</string>
     <string name="tutorial_side_out">サイドアウト:1–0。S5にローテーションし、ファールのサーブ。</string>
+    <string name="tutorial_serve_cell">サーブはどこへ? 任意: 1D をタップ。</string>
+    <string name="tutorial_serve_conflict">続けて隣の 6A: 2つのゾーンにまたがる2セルは境界上、コンフリクトゾーン 6/1 です。</string>
     <string name="tutorial_serve">サーブを評価します:ネガティブ、− をタップ。</string>
     <string name="tutorial_block">相手のアタックをダネージがブロック:名前をタップ。</string>
     <string name="tutorial_block_event">「ブロック」をタップ。</string>

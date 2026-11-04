@@ -251,6 +251,8 @@
     <string name="tutorial_attack">Wystawa do niej, atakuje: znowu dotknij jej nazwiska.</string>
     <string name="tutorial_attack_point">Teraz może tylko atakować, więc ocena pojawia się od razu. Jej punkt: dotknij #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. Przechodzimy na R5, zagrywa Fahr.</string>
+    <string name="tutorial_serve_cell">Gdzie poszła zagrywka? Opcjonalnie: dotknij 1D.</string>
+    <string name="tutorial_serve_conflict">Potem 6A obok: dwie komórki dwóch stref leżą na linii między nimi, strefa konfliktu 6/1.</string>
     <string name="tutorial_serve">Zagrywka czeka na ocenę: negatywna, dotknij −.</string>
     <string name="tutorial_block">One atakują, blokuje Danesi: dotknij jej nazwiska.</string>
     <string name="tutorial_block_event">Dotknij Blok.</string>

@@ -1402,7 +1402,15 @@ mod tests {
     #[test]
     fn detail_of_the_serve_targets() {
         use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z43};
+        use crate::shapes::court_zone::{CourtCell, CourtTarget, SubzoneEnum};
         let t = Team::new();
+        let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
+        // a cell of 1, the whole zone 1, two cells across 4 and 3
+        let (z1a, z1) = (
+            CourtTarget::Cell(cell(1, SubzoneEnum::A)),
+            CourtTarget::Zone(1),
+        );
+        let z43 = CourtTarget::pair(cell(3, SubzoneEnum::D), cell(4, SubzoneEnum::A));
         let serve = |eval, zone| {
             let mut e = act(S, t.setter, eval);
             e.flags = e.flags.with_target(zone);
@@ -1410,11 +1418,11 @@ mod tests {
         };
         let stats = t
             .serving(vec![
-                serve(Perfect, Some(Z1)),
-                serve(Perfect, Some(Z43)),
+                serve(Perfect, Some(z1a)),
+                serve(Perfect, z43),
                 serve(Perfect, None),
-                serve(Perfect, Some(Z1)),
-                serve(Error, Some(Z1)),
+                serve(Perfect, Some(z1)),
+                serve(Error, Some(z1a)),
             ])
             .stats;
         let serves = detail(&stats, S, &all());

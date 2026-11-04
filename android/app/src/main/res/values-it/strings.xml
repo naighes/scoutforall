@@ -249,6 +249,8 @@
     <string name="tutorial_attack">L\'alzata è per lei, che attacca: tocca di nuovo il suo nome.</string>
     <string name="tutorial_attack_point">Ora può solo attaccare, quindi la valutazione arriva subito. Punto suo: tocca #.</string>
     <string name="tutorial_side_out">Side-out: 1–0. Si ruota in P5 e batte Fahr.</string>
+    <string name="tutorial_serve_cell">Dove è andata la battuta? Facoltativo: tocca 1D.</string>
+    <string name="tutorial_serve_conflict">Poi 6A, accanto: due celle di zone diverse sono sul bordo tra le due, la zona di conflitto 6/1.</string>
     <string name="tutorial_serve">La battuta è già pronta da valutare: negativa, tocca −.</string>
     <string name="tutorial_block">Attaccano loro e mura Danesi: tocca il suo nome.</string>
     <string name="tutorial_block_event">Tocca Muro.</string>

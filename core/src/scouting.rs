@@ -10,7 +10,7 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
-        court_zone::CourtZoneEnum,
+        court_zone::{CourtCell, CourtTarget},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
         flags::{EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
@@ -127,7 +127,7 @@ pub struct ScoutingSession {
     technique: Option<TechniqueEnum>,
     /// where the ball went, if the scout tells it along with the
     /// evaluation
-    target: Option<CourtZoneEnum>,
+    target: Option<CourtTarget>,
     /// the inverted P1, written on every event saved
     inverted_p1: bool,
     /// how many receive their next serve, written on the reception or on
@@ -310,7 +310,7 @@ impl ScoutingSession {
     }
 
     /// Where the ball went, if told.
-    pub fn target(&self) -> Option<CourtZoneEnum> {
+    pub fn target(&self) -> Option<CourtTarget> {
         self.target
     }
 
@@ -325,7 +325,7 @@ impl ScoutingSession {
 
     /// The scout tells where the ball went, or takes it back (`None`): the
     /// evaluation saves it with the event. Never required.
-    pub fn choose_target(&mut self, target: Option<CourtZoneEnum>) -> Result<(), ScoutingError> {
+    pub fn choose_target(&mut self, target: Option<CourtTarget>) -> Result<(), ScoutingError> {
         match self.targets_apply() {
             true => {
                 self.target = target;
@@ -333,6 +333,13 @@ impl ScoutingSession {
             }
             false => Err(ScoutingError::InvalidSelection),
         }
+    }
+
+    /// The scout touches a cell of the court: alone, or along with the one
+    /// told next to it; touched again, taken back (see
+    /// `CourtTarget::touched`).
+    pub fn touch_target(&mut self, cell: CourtCell) -> Result<(), ScoutingError> {
+        self.choose_target(CourtTarget::touched(self.target, cell))
     }
 
     /// The events that can follow.

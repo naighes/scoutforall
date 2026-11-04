@@ -9,7 +9,7 @@ mod tests {
         parse,
         translate::{Issue, Untranslatable, Us, translate_set},
     };
-    use crate::shapes::court_zone::CourtZoneEnum;
+    use crate::shapes::court_zone::{CourtTarget, SubzoneEnum};
     use crate::shapes::enums::{EvalEnum, EventTypeEnum};
     use crate::shapes::refusal::Refusal;
     use crate::shapes::snapshot::EventEntry;
@@ -518,9 +518,9 @@ mod tests {
         assert_eq!(evals.get(1), Some(&(S, Some(EvalEnum::Negative))));
     }
 
-    /// Our serves with the zone where they went: the zone, its quadrant
-    /// (the subzone) left out; none when the file doesn't tell it, nor for
-    /// the other touches.
+    /// Our serves with where they went: the cell of the zone and its
+    /// subzone, the whole zone without the subzone; none when the file
+    /// doesn't tell it, nor for the other touches.
     #[test]
     fn the_zone_of_our_serves() {
         let mut file = File::new();
@@ -543,8 +543,8 @@ mod tests {
             targets,
             vec![
                 (OE, None),
-                (S, Some(CourtZoneEnum::Z4)),
-                (S, Some(CourtZoneEnum::Z6)),
+                (S, CourtTarget::of_zone(4, Some(SubzoneEnum::C))),
+                (S, Some(CourtTarget::Zone(6))),
                 (S, None),
             ]
         );

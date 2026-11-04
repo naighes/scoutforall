@@ -57,8 +57,8 @@ class TalkBackTest {
         assertSpoken("Italia 0, Cortona 0, " + string(R.string.serves, "Italia"))
         // our serve: the server under the score, where it went on the
         // court
-        assertSpoken("serve · 8 · Alessia Orro")
-        assertSpoken("${string(R.string.serve_zone)} 4/3")
+        assertSpoken("${string(R.string.break_phase)} · S1 · 8 · Alessia Orro")
+        assertSpoken("${string(R.string.serve_zone)} 1A")
         // the rally goes on: the players
         rule.onNode(hasContentDescription("positive") and hasClickAction()).performClick()
         assertSpoken("18, Paola Egonu")

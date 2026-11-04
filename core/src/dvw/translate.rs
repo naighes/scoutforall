@@ -8,7 +8,7 @@
 use crate::{
     dvw::model::{Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols},
     shapes::{
-        court_zone::CourtZoneEnum,
+        court_zone::{CourtTarget, SubzoneEnum},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum},
         flags::EventFlags,
         lineup::Lineup,
@@ -1202,10 +1202,12 @@ impl SetTranslator<'_> {
                     S => serve_type(skill.skill_type).map(TechniqueEnum::Serve),
                     _ => None,
                 };
-                // where the serve went: the zone, not its quadrant (the
-                // subzone, no conflict zone of ours)
-                let target = match event_type {
-                    S => skill.end_zone.and_then(CourtZoneEnum::numbered),
+                // where the serve went: the zone, with its subzone if told
+                // (a cell of ours; DataVolley tells no two cells)
+                let target = match (event_type, skill.end_zone) {
+                    (S, Some(zone)) => {
+                        CourtTarget::of_zone(zone, skill.end_subzone.and_then(SubzoneEnum::of))
+                    }
                     _ => None,
                 };
                 self.apply_flagged(

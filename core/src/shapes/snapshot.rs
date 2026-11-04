@@ -586,7 +586,11 @@ impl Snapshot {
                 player: event.player.filter(|_| event.event_type.asks_player()),
                 zone,
                 // where our serve went, if told
-                target: event.flags.target().filter(|_| event.event_type == S),
+                target: event
+                    .flags
+                    .target()
+                    .filter(|_| event.event_type == S)
+                    .map(|t| t.court_zone()),
                 eval: event.eval,
             });
         }

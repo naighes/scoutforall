@@ -51,7 +51,7 @@ use scout4all_core::{
     settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
-        court_zone::CourtZoneEnum,
+        court_zone::{CourtCell, CourtZoneEnum, SubzoneEnum},
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
@@ -1033,15 +1033,17 @@ pub struct TechniqueChoice {
     pub chosen: bool,
 }
 
-/// A zone of the court of the opponent, to tell where the ball went.
+/// A cell of the court of the opponent (a subzone of DataVolley), to tell
+/// where the ball went.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
-pub struct CourtZoneChoice {
-    pub value: CourtZoneEnum,
-    /// as the scout reads it: "4", "4/3"
+pub struct CourtCellChoice {
+    /// 1 to 9
+    pub zone: u8,
+    /// "A" to "D"
+    pub subzone: String,
+    /// as the scout reads it: "1A"
     pub label: String,
-    /// one of the nine zones, not a conflict zone
-    pub zone: bool,
-    /// what the evaluation saves now
+    /// what the evaluation saves now, alone or with the one next to it
     pub chosen: bool,
 }
 
@@ -1398,9 +1400,9 @@ pub struct FundamentalDetail {
     pub points: Option<u32>,
     /// for an attack
     pub zones: Vec<DetailZone>,
-    /// for a serve: how many had their zone told, and their court, a row
-    /// each from the net (as `Scouting::target_court`); empty with no zone
-    /// told
+    /// for a serve: how many had their zone told, and their court as our
+    /// server sees it, a row each from their end line (see
+    /// `CourtZoneEnum::grid`); empty with no zone told
     pub targets_told: u32,
     pub targets: Vec<Vec<TargetStats>>,
     /// the players who played it, the most involved first; with the
@@ -1705,22 +1707,22 @@ impl Scouting {
         self.scouted(chosen)
     }
 
-    /// The court where our serve went, a row each from the net (the
-    /// zones with the conflict zones between them, then the conflict zones
-    /// between two rows): empty when it can't be told now.
-    pub fn target_court(&self) -> Vec<Vec<CourtZoneChoice>> {
+    /// The court where our serve went as our server sees it, their end
+    /// line at the top: six rows of six cells, two by two in a zone; empty
+    /// when it can't be told now.
+    pub fn target_court(&self) -> Vec<Vec<CourtCellChoice>> {
         let session = self.session();
         let chosen = session.target();
         match session.targets_apply() {
-            true => CourtZoneEnum::grid()
+            true => CourtCell::grid()
                 .iter()
                 .map(|row| {
                     row.iter()
-                        .map(|zone| CourtZoneChoice {
-                            value: *zone,
-                            label: zone.to_string(),
-                            zone: zone.is_zone(),
-                            chosen: chosen == Some(*zone),
+                        .map(|cell| CourtCellChoice {
+                            zone: cell.zone_number(),
+                            subzone: cell.subzone().to_string(),
+                            label: cell.to_string(),
+                            chosen: chosen.is_some_and(|t| t.has(cell)),
                         })
                         .collect()
                 })
@@ -1729,11 +1731,26 @@ impl Scouting {
         }
     }
 
-    /// Where the ball went, or none: saved with the evaluation, never
+    /// What's told of where our serve went: "1D", "1D-6A (6/1)"; none
+    /// when nothing is.
+    pub fn target_told(&self) -> Option<String> {
+        self.session().target().map(|t| t.described())
+    }
+
+    /// The scout touches a cell: alone, or along with the one told next to
+    /// it; touched again, taken back. Saved with the evaluation, never
     /// required.
-    pub fn choose_target(&self, target: Option<CourtZoneEnum>) -> Result<(), MobileError> {
-        let chosen = self.session().choose_target(target);
-        self.scouted(chosen)
+    pub fn touch_target(&self, zone: u8, subzone: String) -> Result<(), MobileError> {
+        let cell = subzone
+            .chars()
+            .next()
+            .and_then(SubzoneEnum::of)
+            .and_then(|s| CourtCell::new(zone, s));
+        let touched = match cell {
+            Some(cell) => self.session().touch_target(cell),
+            None => Err(ScoutingError::InvalidSelection),
+        };
+        self.scouted(touched)
     }
 
     pub fn choose_eval(&self, eval: EvalEnum) -> Result<Progress, MobileError> {
@@ -2121,7 +2138,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         eval: e.eval.map(|v| v.friendly_name(e.event_type, labels)),
         symbol: e.eval.map(|v| v.to_string()),
         technique: e.technique.map(|t| t.to_string()),
-        target: e.flags.target().map(|z| z.to_string()),
+        target: e.flags.target().map(|t| t.described()),
     }
 }
 
@@ -4403,37 +4420,42 @@ mod tests {
         let court = scouting.target_court();
         let labels: Vec<Vec<&str>> = court
             .iter()
-            .map(|row| row.iter().map(|z| z.label.as_str()).collect())
+            .map(|row| row.iter().map(|c| c.label.as_str()).collect())
             .collect();
         assert_eq!(
             labels,
             vec![
-                vec!["4", "4/3", "3", "3/2", "2"],
-                vec!["4/7", "3/8", "2/9"],
-                vec!["7", "7/8", "8", "8/9", "9"],
-                vec!["5/7", "6/8", "1/9"],
-                vec!["5", "5/6", "6", "6/1", "1"],
+                vec!["1A", "1D", "6A", "6D", "5A", "5D"],
+                vec!["1B", "1C", "6B", "6C", "5B", "5C"],
+                vec!["9A", "9D", "8A", "8D", "7A", "7D"],
+                vec!["9B", "9C", "8B", "8C", "7B", "7C"],
+                vec!["2A", "2D", "3A", "3D", "4A", "4D"],
+                vec!["2B", "2C", "3B", "3C", "4B", "4C"],
             ]
         );
-        assert_eq!(court.iter().flatten().filter(|z| z.zone).count(), 9);
-        assert!(court.iter().flatten().all(|z| !z.chosen));
-        scouting.choose_target(Some(CourtZoneEnum::Z43)).unwrap();
-        let chosen: Vec<CourtZoneEnum> = scouting
+        assert!(court.iter().flatten().all(|c| !c.chosen));
+        assert_eq!(scouting.target_told(), None);
+        // 3D, then 4A next to it: on the line between 3 and 4
+        scouting.touch_target(3, "D".into()).unwrap();
+        assert_eq!(scouting.target_told().as_deref(), Some("3D"));
+        scouting.touch_target(4, "A".into()).unwrap();
+        let chosen: Vec<String> = scouting
             .target_court()
             .into_iter()
             .flatten()
-            .filter(|z| z.chosen)
-            .map(|z| z.value)
+            .filter(|c| c.chosen)
+            .map(|c| c.label)
             .collect();
-        assert_eq!(chosen, vec![CourtZoneEnum::Z43]);
+        assert_eq!(chosen, vec!["3D", "4A"]);
+        assert_eq!(scouting.target_told().as_deref(), Some("3D-4A (4/3)"));
         scouting.choose_eval(EvalEnum::Error).unwrap();
         let state = scouting.state();
         let targets: Vec<Option<&str>> = state.events.iter().map(|e| e.target.as_deref()).collect();
-        assert_eq!(targets, vec![Some("4/3")]);
+        assert_eq!(targets, vec![Some("3D-4A (4/3)")]);
         // their serve: our reception has no court
         assert!(scouting.target_court().is_empty());
         assert!(matches!(
-            scouting.choose_target(Some(CourtZoneEnum::Z1)),
+            scouting.touch_target(1, "A".into()),
             Err(MobileError::Scouting { .. })
         ));
     }
@@ -5285,13 +5307,11 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
-        for zone in [
-            Some(CourtZoneEnum::Z1),
-            Some(CourtZoneEnum::Z1),
-            None,
-            Some(CourtZoneEnum::Z1),
-        ] {
-            scouting.choose_target(zone).unwrap();
+        // three serves to cells of 1, one without a zone
+        for cell in [Some("A"), Some("C"), None, Some("A")] {
+            if let Some(subzone) = cell {
+                scouting.touch_target(1, subzone.into()).unwrap();
+            }
             scouting.choose_eval(EvalEnum::Perfect).unwrap();
         }
         let serve = scouting

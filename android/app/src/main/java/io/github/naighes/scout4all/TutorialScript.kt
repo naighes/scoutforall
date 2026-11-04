@@ -86,7 +86,10 @@ private val rallies = listOf(
     touch("player:16", R.string.tutorial_attack),
     touch("eval:PERFECT", R.string.tutorial_attack_point),
     TutorialStep.Read("score", R.string.tutorial_side_out),
-    // the second: Fahr serves, a long rally, their error
+    // the second: Fahr serves, a long rally, their error; where the serve
+    // went, two cells across 1 and 6: the conflict zone 6/1
+    touch("cell:1D", R.string.tutorial_serve_cell),
+    touch("cell:6A", R.string.tutorial_serve_conflict),
     touch("eval:NEGATIVE", R.string.tutorial_serve),
     touch("player:11", R.string.tutorial_block),
     touch("event:B", R.string.tutorial_block_event),

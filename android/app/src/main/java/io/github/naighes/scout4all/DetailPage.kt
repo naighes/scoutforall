@@ -481,8 +481,8 @@ private fun ZoneCell(t: TargetStats, background: Color?, value: String, detail: 
     }
 }
 
-/** The court of the opponent, square, the net at the top: the zones a row
- * each as `rows` gives them, the conflict zones narrower between them. A
+/** The court of the opponent as our server sees it, square, their end line
+ * at the top (1 on the left): the zones a row each as `rows` gives them, the conflict zones narrower between them. A
  * row grows with its texts, at a large font. */
 @Composable
 private fun <T> ZoneGrid(rows: List<List<T>>, cell: @Composable (T) -> Unit) =

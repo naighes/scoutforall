@@ -9,7 +9,7 @@ mod tests {
     use crate::localization::labels;
     use crate::shapes::enums::LanguageEnum;
     use crate::shapes::{
-        court_zone::CourtZoneEnum,
+        court_zone::{CourtTarget, SubzoneEnum},
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         set::SetEntry,
         snapshot::EventEntry,
@@ -278,7 +278,7 @@ mod tests {
     fn the_target_stays_with_the_serve_only() {
         let team = Team::new();
         let mut set = side_out(&team);
-        let zone = Some(CourtZoneEnum::Z56);
+        let zone = CourtTarget::of_zone(5, Some(SubzoneEnum::D));
         set.events[2].flags = set.events[2].flags.with_target(zone);
         let mut serve = edit(&set, 2);
         serve.choose_event_type(S);
