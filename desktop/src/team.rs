@@ -39,6 +39,8 @@ pub enum Message {
     Player(usize),
     NewMatch,
     Match(usize),
+    Import,
+    Export,
     Form(form::Message),
     Confirm,
     Cancel,
@@ -49,6 +51,10 @@ pub enum Outcome {
     Back,
     /// the match to open: saved now, or chosen
     OpenMatch(String),
+    /// an archive of a match to choose, into the team
+    Import,
+    /// the archive of the team, to save
+    Export,
 }
 
 pub struct TeamScreen {
@@ -230,6 +236,8 @@ impl TeamScreen {
                 self.game = i;
                 self.open_match(i)
             }
+            (Message::Import, Mode::Browse) => Outcome::Import,
+            (Message::Export, Mode::Browse) => Outcome::Export,
             (Message::Form(_) | Message::Confirm, Mode::Browse) => Outcome::Stay,
         }
     }
@@ -274,6 +282,8 @@ impl TeamScreen {
                 *selected = selected.checked_sub(1).unwrap_or(count - 1)
             }
             (_, k) if k == key!(e) => self.edit_team(s),
+            (_, k) if k == key!(i) => return Outcome::Import,
+            (_, k) if k == key!(x) => return Outcome::Export,
             (Panel::Players, k) if k == key!(n) => self.edit_player(s, None),
             (Panel::Matches, k) if k == key!(n) => self.new_match(s),
             (Panel::Players, k) if k == key!(enter) && count > 0 => {
@@ -315,6 +325,8 @@ impl TeamScreen {
                         ("Enter".to_string(), enter.to_string()),
                         ("n".to_string(), new.to_string()),
                         ("e".to_string(), s.edit_team.to_string()),
+                        ("i".to_string(), s.import_archive.to_string()),
+                        ("x".to_string(), s.export.to_string()),
                     ],
                     remove,
                     vec![("Esc".to_string(), s.back.to_string())],
@@ -371,8 +383,21 @@ impl TeamScreen {
                 line(s.country, or_dash(&d.country)),
                 space::vertical().height(6),
                 ui::pill(s.edit_team, false, Some(Message::EditTeam), c),
+                ui::pill(
+                    &format!("↑ {}", s.export_team),
+                    false,
+                    Some(Message::Export),
+                    c
+                ),
+                ui::pill(
+                    &format!("↓ {}", s.import_match),
+                    false,
+                    Some(Message::Import),
+                    c
+                ),
             ]
-            .spacing(12),
+            .spacing(12)
+            .width(Length::Fill),
             c,
         )
     }
@@ -493,6 +518,7 @@ impl TeamScreen {
                 list
             ]
             .spacing(10)
+            .width(Length::Fill)
             .height(Length::Fill),
             c,
         )
@@ -524,6 +550,7 @@ mod tests {
         let core = app(&dir);
         // the home: n writes a new team
         let mut home = HomeScreen::new(core.home().unwrap());
+        assert!(matches!(home.key(&core, s, key!(i)), home::Outcome::Import));
         home.key(&core, s, key!(n));
         assert!(home.focus_id().is_some());
         // without a name: the error takes the keys to the name
@@ -563,6 +590,9 @@ mod tests {
         assert!(matches!(team.mode, Mode::Remove(..)));
         team.key(s, key!(enter));
         assert!(team.details.players.is_empty());
+        // its archive to save, a match to import into it
+        assert!(matches!(team.key(s, key!(x)), Outcome::Export));
+        assert!(matches!(team.key(s, key!(i)), Outcome::Import));
 
         // seven players, then a new match: saved, it opens
         for n in 1..=7u8 {
@@ -583,6 +613,7 @@ mod tests {
         let mut m = MatchScreen::new(core.clone(), team_id.clone(), match_id.clone()).unwrap();
         assert!(matches!(m.key(s, key!(enter)), game::Outcome::Scout(true)));
         assert!(matches!(m.key(s, BACK_KEY), game::Outcome::Back));
+        assert!(matches!(m.key(s, key!(x)), game::Outcome::Export));
         // its statistics, with no rally yet: every page and filter goes
         assert!(matches!(m.key(s, key!(s)), game::Outcome::Stats));
         let mut stats = crate::stats::StatsScreen::new(core, team_id, match_id).unwrap();

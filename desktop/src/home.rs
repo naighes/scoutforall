@@ -52,6 +52,7 @@ pub enum Message {
     Match(String, String),
     Team(String),
     NewTeam,
+    Import,
     Form(form::Message),
 }
 
@@ -60,6 +61,8 @@ pub enum Outcome {
     Scout(Open),
     Match(String, String),
     Team(String),
+    /// an archive or a DataVolley file to choose
+    Import,
 }
 
 const IN_PROGRESS: usize = 0;
@@ -158,6 +161,7 @@ impl HomeScreen {
             (Message::Scout(open), None) => Outcome::Scout(open),
             (Message::Match(team, m), None) => Outcome::Match(team, m),
             (Message::Team(team), None) => Outcome::Team(team),
+            (Message::Import, None) => Outcome::Import,
             (Message::NewTeam, None) => {
                 self.new_team(core, s);
                 Outcome::Stay
@@ -193,6 +197,7 @@ impl HomeScreen {
                 self.new_team(core, s);
                 None
             }
+            k if k == key!(i) => return Outcome::Import,
             _ => None,
         };
         if let (Some(index), Some(slot)) = (moved, self.selected.get_mut(self.panel)) {
@@ -209,6 +214,7 @@ impl HomeScreen {
                 ("↑ ↓".to_string(), String::new()),
                 ("Enter".to_string(), s.open.to_string()),
                 ("n".to_string(), s.new_team.to_string()),
+                ("i".to_string(), s.import_archive.to_string()),
                 ("F2".to_string(), s.settings.to_string()),
             ],
         }
@@ -294,12 +300,22 @@ impl HomeScreen {
                 }
             })
             .collect();
-        let new_team = ui::pill(
-            &format!("+ {}", s.new_team),
-            false,
-            Some(Message::NewTeam),
-            c,
-        );
+        let new_team = row![
+            ui::pill(
+                &format!("+ {}", s.new_team),
+                false,
+                Some(Message::NewTeam),
+                c,
+            ),
+            ui::pill(
+                &format!("↓ {}", s.import_archive),
+                false,
+                Some(Message::Import),
+                c,
+            ),
+        ]
+        .spacing(8)
+        .into();
         row![
             list(s.in_progress, None, in_progress, s.no_matches, c),
             list(s.recent, None, recent, s.no_matches, c),

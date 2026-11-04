@@ -98,6 +98,8 @@ pub struct Form {
     pub error: Option<String>,
     /// a title before the field, for a group of them
     pub sections: Vec<(usize, String)>,
+    /// the buttons, when not to cancel and to save: Esc's, then Enter's
+    pub actions: Option<(String, String)>,
 }
 
 /// The focus on nothing: on a choice, no text field takes the keys.
@@ -119,6 +121,7 @@ impl Form {
             focused: 0,
             error: None,
             sections: vec![],
+            actions: None,
         }
     }
 
@@ -250,9 +253,13 @@ impl Form {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => iced::widget::space::vertical().height(0).into(),
         };
+        let (no, yes) = self
+            .actions
+            .clone()
+            .unwrap_or_else(|| (s.cancel.to_string(), s.save.to_string()));
         let buttons = row![
-            ui::pill(s.cancel, false, Some(on(Message::Cancel)), c),
-            ui::pill(s.save, true, Some(on(Message::Save)), c),
+            ui::pill(&no, false, Some(on(Message::Cancel)), c),
+            ui::pill(&yes, true, Some(on(Message::Save)), c),
         ]
         .spacing(10);
         let form = ui::panel(

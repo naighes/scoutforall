@@ -5,6 +5,7 @@
 
 mod charts;
 mod court;
+mod dvw;
 mod editors;
 mod form;
 mod game;
@@ -18,6 +19,7 @@ mod stats;
 mod strings;
 mod team;
 mod theme;
+mod transfer;
 mod ui;
 
 use {
@@ -80,6 +82,7 @@ enum Screen {
     Start(Box<start::StartScreen>),
     Scouting(Box<ScoutingScreen>),
     Stats(Box<stats::StatsScreen>),
+    Dvw(Box<dvw::DvwScreen>),
 }
 
 /// Where a key or a click leads.
@@ -91,6 +94,10 @@ enum Go {
     Stats(String, String),
     /// a set of the match: to start, or in progress
     Scout(home::Open),
+    /// the zip of a team or of a match, to save
+    Export(transfer::Export),
+    /// a file to choose to import: a match into the team, when given
+    Import(Option<String>),
 }
 
 struct App {
@@ -104,6 +111,10 @@ struct App {
     dark: bool,
     screen: Screen,
     error: Option<String>,
+    /// what went well: a file saved, imported
+    notice: Option<String>,
+    /// an archive chosen, to confirm, over the screen
+    importing: Option<transfer::Importing>,
     /// the text field the keys are on, last focused
     focused: Option<Id>,
 }
@@ -125,6 +136,12 @@ enum Message {
     Frame(Instant),
     Loaded(Loaded),
     Settings(settings::Message),
+    Dvw(dvw::Message),
+    /// where the archive goes (none: not saved), and the archive
+    Exported(Option<PathBuf>, Arc<Vec<u8>>),
+    /// the file chosen (none: none) to import into the team, if given
+    Picked(Option<String>, Option<transfer::Picked>),
+    Importing(transfer::Message),
 }
 
 impl App {
@@ -160,9 +177,11 @@ impl App {
                 teams: vec![],
             }))),
             error,
+            notice: None,
+            importing: None,
             focused: None,
         };
-        app.go(Go::Home);
+        let _ = app.go(Go::Home);
         app
     }
 
@@ -176,6 +195,7 @@ impl App {
             (None, Screen::Start(screen)) => screen.title(),
             (None, Screen::Scouting(screen)) => screen.title(),
             (None, Screen::Stats(screen)) => screen.title(),
+            (None, Screen::Dvw(_)) => self.strings.import_dvw.to_string(),
         }
     }
 
@@ -184,10 +204,17 @@ impl App {
     }
 
     /// Opens the screen `go` leads to; an error stays on the one shown.
-    fn go(&mut self, go: Go) {
+    fn go(&mut self, go: Go) -> Task<Message> {
         let core = self.core.clone();
         let opened = match go {
-            Go::Stay => return,
+            Go::Stay => return Task::none(),
+            Go::Export(export) => return self.export(export),
+            Go::Import(team) => {
+                let s = self.strings;
+                return Task::perform(transfer::pick(s.archives, team.is_none()), move |f| {
+                    Message::Picked(team.clone(), f)
+                });
+            }
             Go::Home => core
                 .home()
                 .map(|home| Screen::Home(Box::new(HomeScreen::new(home)))),
@@ -224,6 +251,80 @@ impl App {
                 self.screen = screen;
             }
             Err(e) => self.error = Some(e.to_string()),
+        }
+        Task::none()
+    }
+
+    /// The archive made, then where to save it chosen.
+    fn export(&mut self, export: transfer::Export) -> Task<Message> {
+        match transfer::archive(&self.core, &export) {
+            Ok((name, bytes)) => {
+                let bytes = Arc::new(bytes);
+                Task::perform(transfer::save_to(name), move |path| {
+                    Message::Exported(path, bytes.clone())
+                })
+            }
+            Err(e) => {
+                self.error = Some(e.to_string());
+                Task::none()
+            }
+        }
+    }
+
+    /// The archive written where chosen.
+    fn exported(&mut self, path: Option<PathBuf>, bytes: &[u8]) {
+        let s = self.strings;
+        match path.map(|path| std::fs::write(&path, bytes).map(|()| path)) {
+            None => {}
+            Some(Ok(path)) => {
+                self.notice = Some(format!("{}: {}", s.archive_saved, path.display()));
+            }
+            Some(Err(e)) => self.error = Some(format!("{}: {e}", s.archive_not_saved)),
+        }
+    }
+
+    /// The file chosen: an archive shown before importing it, a
+    /// DataVolley file to its screen.
+    fn picked(&mut self, team: Option<String>, picked: transfer::Picked) {
+        let core = self.core.clone();
+        match transfer::is_dvw(&picked.name) {
+            true => match dvw::DvwScreen::new(core, self.strings, picked.name, picked.bytes) {
+                Ok(screen) => {
+                    self.error = None;
+                    self.screen = Screen::Dvw(Box::new(screen));
+                }
+                Err(e) => self.error = Some(e.to_string()),
+            },
+            false => match transfer::Importing::new(&core, picked, team) {
+                Ok(importing) => self.importing = Some(importing),
+                Err(e) => self.error = Some(e.to_string()),
+            },
+        }
+    }
+
+    /// After a key or a click on the archive to import.
+    fn importing(&mut self, outcome: transfer::Outcome) -> Go {
+        let s = self.strings;
+        let imported = match (outcome, &self.importing) {
+            (transfer::Outcome::Stay, _) | (_, None) => return Go::Stay,
+            (transfer::Outcome::Cancel, Some(_)) => None,
+            (transfer::Outcome::Import, Some(importing)) => Some(importing.import(&self.core)),
+        };
+        self.importing = None;
+        match imported {
+            None => Go::Stay,
+            Some(Ok(transfer::Imported::Team(team))) => {
+                self.notice = Some(s.team_imported.to_string());
+                Go::Team(team)
+            }
+            Some(Ok(transfer::Imported::Match(team, m))) => {
+                self.notice = Some(s.match_imported.to_string());
+                Go::Match(team, m)
+            }
+            Some(Err(e)) => {
+                self.error = Some(e.to_string());
+                Go::Stay
+            }
         }
     }
 
@@ -272,40 +373,87 @@ impl App {
     fn focus_id(&self) -> Option<Id> {
         match (&self.settings, &self.screen) {
             (Some(_), _) => None,
+            (_, _) if self.importing.is_some() => None,
             (None, Screen::Home(screen)) => screen.focus_id(),
             (None, Screen::Team(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
+            (None, Screen::Dvw(screen)) => screen.focus_id(),
             (None, Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_)) => None,
         }
     }
 
     /// Updates, then moves the focus where the keys went.
     fn update(&mut self, message: Message) -> Task<Message> {
-        self.handle(message);
+        let task = self.handle(message);
         let focus = self.focus_id();
         match focus == self.focused {
-            true => Task::none(),
+            true => task,
             false => {
                 self.focused = focus.clone();
-                focus.map_or_else(Task::none, iced::widget::operation::focus)
+                Task::batch([
+                    task,
+                    focus.map_or_else(Task::none, iced::widget::operation::focus),
+                ])
             }
         }
     }
 
-    fn handle(&mut self, message: Message) {
+    fn handle(&mut self, message: Message) -> Task<Message> {
         let s = self.strings;
+        // what went well is said until the next key or click
+        if !matches!(
+            message,
+            Message::Frame(_) | Message::Loaded(_) | Message::Exported(..) | Message::Picked(..)
+        ) {
+            self.notice = None;
+        }
+        // the files: chosen or saved, whatever the screen
+        let message = match message {
+            Message::Exported(path, bytes) => {
+                self.exported(path, &bytes);
+                return Task::none();
+            }
+            Message::Picked(team, Some(picked)) => {
+                self.picked(team, picked);
+                return Task::none();
+            }
+            Message::Picked(_, None) => return Task::none(),
+            other => other,
+        };
+        // the archive to import, while shown, takes the keys
+        let imported = match (&message, &mut self.importing) {
+            (Message::Key(ck), Some(importing)) => Some(importing.key(*ck)),
+            (Message::Importing(m), Some(importing)) => Some(importing.update(m.clone())),
+            (Message::Back, Some(_)) => Some(transfer::Outcome::Cancel),
+            (Message::ToggleTheme, _) => None,
+            (_, Some(_)) => return Task::none(),
+            _ => None,
+        };
+        if let Some(outcome) = imported {
+            let go = self.importing(outcome);
+            return self.go(go);
+        }
         // the settings, while open, take the keys
         let closed = match (&message, &mut self.settings) {
             (Message::Key(ck), Some(settings)) => Some(settings.key(*ck, s)),
             (Message::Settings(m), Some(settings)) => Some(settings.update(m.clone(), s)),
             (Message::Back, Some(_)) => Some(settings::Outcome::Close),
-            (Message::Key(ck), None) if *ck == SETTINGS_KEY => return self.open_settings(),
-            (Message::OpenSettings, None) => return self.open_settings(),
+            (Message::Key(ck), None) if *ck == SETTINGS_KEY => {
+                self.open_settings();
+                return Task::none();
+            }
+            (Message::OpenSettings, None) => {
+                self.open_settings();
+                return Task::none();
+            }
             _ => None,
         };
         match closed {
-            Some(settings::Outcome::Close) => return self.close_settings(),
-            Some(settings::Outcome::Stay) => return,
+            Some(settings::Outcome::Close) => {
+                self.close_settings();
+                return Task::none();
+            }
+            Some(settings::Outcome::Stay) => return Task::none(),
             None => {}
         }
         let core = self.core.clone();
@@ -353,6 +501,8 @@ impl App {
                 let outcome = screen.key(ck);
                 self.started(outcome)
             }
+            (Message::Dvw(m), Screen::Dvw(screen)) => dvw_go(screen.update(s, m)),
+            (Message::Key(ck), Screen::Dvw(screen)) => dvw_go(screen.key(s, ck)),
             (Message::Scouting(m), Screen::Scouting(screen)) => {
                 let outcome = screen.update(m);
                 scouting_go(screen, outcome)
@@ -363,35 +513,44 @@ impl App {
             }
             _ => Go::Stay,
         };
-        self.go(go);
+        self.go(go)
     }
 
     fn view(&self) -> Element<'_, Message> {
         let c = self.colors();
         let s = self.strings;
         let (screen, hints, back): (Element<'_, Message>, _, _) =
-            match (&self.settings, &self.screen) {
-                (Some(settings), _) => (
+            match (&self.settings, &self.importing, &self.screen) {
+                // the archive to import, over the screen
+                (None, Some(importing), _) => (
+                    importing.view(s, c).map(Message::Importing),
+                    importing.hints(s),
+                    true,
+                ),
+                (Some(settings), _, _) => (
                     settings.view(s, c).map(Message::Settings),
                     settings.hints(s),
                     true,
                 ),
-                (None, Screen::Home(screen)) => {
+                (None, None, Screen::Home(screen)) => {
                     (screen.view(s, c).map(Message::Home), screen.hints(s), false)
                 }
-                (None, Screen::Team(screen)) => {
+                (None, None, Screen::Team(screen)) => {
                     (screen.view(s, c).map(Message::Team), screen.hints(s), true)
                 }
-                (None, Screen::Match(screen)) => {
+                (None, None, Screen::Match(screen)) => {
                     (screen.view(s, c).map(Message::Match), screen.hints(s), true)
                 }
-                (None, Screen::Start(screen)) => {
+                (None, None, Screen::Start(screen)) => {
                     (screen.view(s, c).map(Message::Start), screen.hints(s), true)
                 }
-                (None, Screen::Stats(screen)) => {
+                (None, None, Screen::Stats(screen)) => {
                     (screen.view(s, c).map(Message::Stats), screen.hints(s), true)
                 }
-                (None, Screen::Scouting(screen)) => (
+                (None, None, Screen::Dvw(screen)) => {
+                    (screen.view(s, c).map(Message::Dvw), screen.hints(s), true)
+                }
+                (None, None, Screen::Scouting(screen)) => (
                     screen.view(s, c).map(Message::Scouting),
                     screen.hints(s),
                     true,
@@ -406,9 +565,10 @@ impl App {
             ],
             c,
         );
-        let error: Element<'_, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
+        let error: Element<'_, Message> = match (&self.error, &self.notice) {
+            (Some(e), _) => ui::body(e.clone()).color(c.danger).into(),
+            (None, Some(notice)) => ui::body(notice.clone()).color(c.accent).into(),
+            (None, None) => space::vertical().height(0).into(),
         };
         let content = container(column![error, screen].spacing(10))
             .padding(16)
@@ -448,6 +608,7 @@ impl App {
 fn home_go(outcome: home::Outcome) -> Go {
     match outcome {
         home::Outcome::Stay => Go::Stay,
+        home::Outcome::Import => Go::Import(None),
         home::Outcome::Scout(open) => Go::Scout(open),
         home::Outcome::Match(team, m) => Go::Match(team, m),
         home::Outcome::Team(team) => Go::Team(team),
@@ -459,6 +620,16 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Stay => Go::Stay,
         team::Outcome::Back => Go::Home,
         team::Outcome::OpenMatch(m) => Go::Match(team_id.to_string(), m),
+        team::Outcome::Import => Go::Import(Some(team_id.to_string())),
+        team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
+    }
+}
+
+fn dvw_go(outcome: dvw::Outcome) -> Go {
+    match outcome {
+        dvw::Outcome::Stay => Go::Stay,
+        dvw::Outcome::Back => Go::Home,
+        dvw::Outcome::Team(team) => Go::Team(team),
     }
 }
 
@@ -474,6 +645,10 @@ fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
         game::Outcome::Stay => Go::Stay,
         game::Outcome::Back => Go::Team(screen.team_id.clone()),
         game::Outcome::Stats => Go::Stats(screen.team_id.clone(), screen.match_id.clone()),
+        game::Outcome::Export => Go::Export(transfer::Export::Match(
+            screen.team_id.clone(),
+            screen.match_id.clone(),
+        )),
         game::Outcome::Scout(start) => Go::Scout(home::Open {
             team_id: screen.team_id.clone(),
             match_id: screen.match_id.clone(),

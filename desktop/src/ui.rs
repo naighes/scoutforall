@@ -381,3 +381,14 @@ pub fn confirm<'a, M: Clone + 'a>(
         .align_y(Alignment::Center)
         .into()
 }
+
+/// The template with `{1}`, `{2}`… replaced by the values, in the order
+/// the language puts them.
+pub fn fill(template: &str, values: &[String]) -> String {
+    values
+        .iter()
+        .enumerate()
+        .fold(template.to_string(), |s, (i, v)| {
+            s.replace(&format!("{{{}}}", i + 1), v)
+        })
+}

@@ -24,6 +24,7 @@ pub enum Message {
     Next,
     Edit,
     Stats,
+    Export,
     Form(form::Message),
 }
 
@@ -33,6 +34,8 @@ pub enum Outcome {
     /// a set to start (`true`) or to resume
     Scout(bool),
     Stats,
+    /// the archive of the match, to save
+    Export,
 }
 
 pub struct MatchScreen {
@@ -119,6 +122,7 @@ impl MatchScreen {
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
             (Message::Next, None) => self.next(),
             (Message::Stats, None) => Outcome::Stats,
+            (Message::Export, None) => Outcome::Export,
             (Message::Edit, None) => {
                 self.edit(s);
                 Outcome::Stay
@@ -136,6 +140,7 @@ impl MatchScreen {
             (None, k) if k == BACK_KEY => Outcome::Back,
             (None, k) if k == key!(enter) => self.next(),
             (None, k) if k == key!(s) => Outcome::Stats,
+            (None, k) if k == key!(x) => Outcome::Export,
             (None, k) if k == key!(e) => {
                 self.edit(s);
                 Outcome::Stay
@@ -167,6 +172,7 @@ impl MatchScreen {
                 vec![
                     ("s".to_string(), s.stats.to_string()),
                     ("e".to_string(), s.edit_match.to_string()),
+                    ("x".to_string(), s.export_match.to_string()),
                     ("Esc".to_string(), s.back.to_string()),
                 ],
             ]
@@ -223,9 +229,17 @@ impl MatchScreen {
                 row![
                     next,
                     ui::pill(s.stats, false, Some(Message::Stats), c),
-                    ui::pill(s.edit_match, false, Some(Message::Edit), c)
+                    ui::pill(s.edit_match, false, Some(Message::Edit), c),
+                    ui::pill(
+                        &format!("↑ {}", s.export_match),
+                        false,
+                        Some(Message::Export),
+                        c
+                    ),
                 ]
-                .spacing(10),
+                .spacing(10)
+                .wrap()
+                .vertical_spacing(8),
             ]
             .spacing(12),
             c,

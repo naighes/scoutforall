@@ -115,16 +115,6 @@ fn big<'a>(s: impl ToString, color: Color) -> iced::widget::Text<'a> {
         .color(color)
 }
 
-/// "{1} of {2}" and the like, in the order of the language.
-fn fill(template: &str, values: &[String]) -> String {
-    values
-        .iter()
-        .enumerate()
-        .fold(template.to_string(), |s, (i, v)| {
-            s.replace(&format!("{{{}}}", i + 1), v)
-        })
-}
-
 fn tone_grade(tone: &Tone) -> f64 {
     match tone {
         Tone::Excellent => 1.0,
@@ -652,7 +642,7 @@ impl StatsScreen {
                         pct(exploited.map(|e| e.percentage)),
                         c.text,
                         exploited.map(|e| {
-                            fill(s.of_total, &[e.exploited.to_string(), e.total.to_string()])
+                            ui::fill(s.of_total, &[e.exploited.to_string(), e.total.to_string()])
                         }),
                         c
                     ),
@@ -715,7 +705,10 @@ impl StatsScreen {
                         true => c.danger,
                         false => c.text,
                     },
-                    Some(fill(s.unforced_detail, &[f.unforced_errors.to_string()])),
+                    Some(ui::fill(
+                        s.unforced_detail,
+                        &[f.unforced_errors.to_string()]
+                    )),
                     c
                 ),
                 tile(
@@ -734,7 +727,7 @@ impl StatsScreen {
                     c.text,
                     f.phases_per_point
                         .as_ref()
-                        .map(|r| fill(s.of_total, &[r.won.to_string(), r.rallies.to_string()])),
+                        .map(|r| ui::fill(s.of_total, &[r.won.to_string(), r.rallies.to_string()])),
                     c
                 ),
             ]
@@ -793,7 +786,7 @@ impl StatsScreen {
         .spacing(4);
         let conflicts: Element<'a, Message> = match &f.on_conflicts {
             Some(on) => {
-                let all = fill(
+                let all = ui::fill(
                     s.on_conflicts,
                     &[on.count.to_string(), format!("{:.0}", on.share)],
                 );
@@ -809,7 +802,7 @@ impl StatsScreen {
             Some(title),
             column![
                 small(
-                    fill(told, &[f.targets_told.to_string(), f.total.to_string()]),
+                    ui::fill(told, &[f.targets_told.to_string(), f.total.to_string()]),
                     c
                 ),
                 grid,
@@ -924,7 +917,7 @@ impl StatsScreen {
             Some(title),
             column![
                 small(
-                    fill(
+                    ui::fill(
                         s.blockers_told,
                         &[f.blockers_told.to_string(), f.total.to_string()]
                     ),
@@ -1020,7 +1013,7 @@ fn attack_zones<'a>(
                     }
                 ),
                 small(
-                    z.map_or(String::new(), |z| fill(
+                    z.map_or(String::new(), |z| ui::fill(
                         s.kill_rate,
                         &[pct(Some(z.conversion))]
                     )),
@@ -1096,7 +1089,7 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
             ui::body(name.to_string()).width(Length::Fill),
             small(
                 p.as_ref()
-                    .map(|p| fill(s.of_total, &[p.won.to_string(), p.rallies.to_string()]))
+                    .map(|p| ui::fill(s.of_total, &[p.won.to_string(), p.rallies.to_string()]))
                     .unwrap_or_default(),
                 c
             ),
@@ -1132,7 +1125,7 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
         row![
             ui::body(p.name.clone()).width(Length::Fill),
             small(
-                fill(s.of_total, &[p.won.to_string(), p.total.to_string()]),
+                ui::fill(s.of_total, &[p.won.to_string(), p.total.to_string()]),
                 c
             ),
             graded(p.percentage, None),
@@ -1168,7 +1161,7 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
                 ),
                 small(
                     p.as_ref()
-                        .map(|p| fill(s.of_total, &[p.won.to_string(), p.rallies.to_string()]))
+                        .map(|p| ui::fill(s.of_total, &[p.won.to_string(), p.rallies.to_string()]))
                         .unwrap_or_default(),
                     c
                 ),
@@ -1218,7 +1211,7 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
             text(z.map_or(String::new(), |z| {
                 format!(
                     "{} · {}",
-                    fill(s.zone_attacks, &[z.attacks.total.to_string()]),
+                    ui::fill(s.zone_attacks, &[z.attacks.total.to_string()]),
                     pct(Some(z.attacks.efficiency))
                 )
             }))
@@ -1357,7 +1350,7 @@ mod tests {
     #[test]
     fn the_numbers_go_where_the_language_puts_them() {
         let numbers = ["3".to_string(), "8".to_string()];
-        assert_eq!(fill("{1} su {2}", &numbers), "3 su 8");
-        assert_eq!(fill("{2} 中 {1}", &numbers), "8 中 3");
+        assert_eq!(ui::fill("{1} su {2}", &numbers), "3 su 8");
+        assert_eq!(ui::fill("{2} 中 {1}", &numbers), "8 中 3");
     }
 }
