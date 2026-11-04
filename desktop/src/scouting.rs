@@ -121,6 +121,11 @@ impl ScoutingScreen {
         }
     }
 
+    /// The keys as changed in the settings.
+    pub fn set_keys(&mut self, keys: ScoutingKeys) {
+        self.keys = keys;
+    }
+
     fn refresh(&mut self) {
         let started = std::time::Instant::now();
         self.snapshot = read(&self.scouting, self.match_scope);

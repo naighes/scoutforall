@@ -44,6 +44,17 @@ pub struct Strings {
     pub efficiency: &'static str,
     pub total: &'static str,
     pub serving: &'static str,
+    pub settings: &'static str,
+    pub shortcuts: &'static str,
+    pub evals_title: &'static str,
+    pub sets_title: &'static str,
+    pub serves_title: &'static str,
+    pub press_key: &'static str,
+    pub reserved_key: &'static str,
+    pub taken_key: &'static str,
+    pub reset_keys: &'static str,
+    pub change_hint: &'static str,
+    pub not_saved: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -86,6 +97,17 @@ const EN: Strings = Strings {
     efficiency: "Eff.",
     total: "Tot.",
     serving: "serves",
+    settings: "Settings",
+    shortcuts: "Scouting keys",
+    evals_title: "Evaluations",
+    sets_title: "Sets",
+    serves_title: "Serves",
+    press_key: "Press the new key (Esc cancels)",
+    reserved_key: "{} is kept by the scouting",
+    taken_key: "{} is already bound to {}",
+    reset_keys: "Restore the default keys",
+    change_hint: "Enter or click to change",
+    not_saved: "Could not save the settings: {}",
 };
 
 const IT: Strings = Strings {
@@ -128,6 +150,17 @@ const IT: Strings = Strings {
     efficiency: "Eff.",
     total: "Tot.",
     serving: "batte",
+    settings: "Impostazioni",
+    shortcuts: "Tasti dello scouting",
+    evals_title: "Valutazioni",
+    sets_title: "Alzate",
+    serves_title: "Battute",
+    press_key: "Premi il nuovo tasto (Esc annulla)",
+    reserved_key: "{} è riservato allo scouting",
+    taken_key: "{} è già assegnato a {}",
+    reset_keys: "Ripristina i tasti predefiniti",
+    change_hint: "Invio o clic per cambiarlo",
+    not_saved: "Impossibile salvare le impostazioni: {}",
 };
 
 const PT: Strings = Strings {
@@ -170,6 +203,17 @@ const PT: Strings = Strings {
     efficiency: "Ef.",
     total: "Tot.",
     serving: "saca",
+    settings: "Configurações",
+    shortcuts: "Teclas do scout",
+    evals_title: "Avaliações",
+    sets_title: "Levantamentos",
+    serves_title: "Saques",
+    press_key: "Pressione a nova tecla (Esc cancela)",
+    reserved_key: "{} é reservada ao scout",
+    taken_key: "{} já está atribuída a {}",
+    reset_keys: "Restaurar as teclas padrão",
+    change_hint: "Enter ou clique para mudar",
+    not_saved: "Não foi possível salvar as configurações: {}",
 };
 
 const PL: Strings = Strings {
@@ -212,6 +256,17 @@ const PL: Strings = Strings {
     efficiency: "Skut.",
     total: "Razem",
     serving: "zagrywa",
+    settings: "Ustawienia",
+    shortcuts: "Klawisze scoutingu",
+    evals_title: "Oceny",
+    sets_title: "Wystawy",
+    serves_title: "Zagrywki",
+    press_key: "Naciśnij nowy klawisz (Esc anuluje)",
+    reserved_key: "{} jest zarezerwowany dla scoutingu",
+    taken_key: "{} jest już przypisany do {}",
+    reset_keys: "Przywróć domyślne klawisze",
+    change_hint: "Enter lub kliknij, aby zmienić",
+    not_saved: "Nie udało się zapisać ustawień: {}",
 };
 
 const JA: Strings = Strings {
@@ -254,6 +309,17 @@ const JA: Strings = Strings {
     efficiency: "効率",
     total: "計",
     serving: "サーブ",
+    settings: "設定",
+    shortcuts: "スカウティングのキー",
+    evals_title: "評価",
+    sets_title: "トス",
+    serves_title: "サーブ",
+    press_key: "新しいキーを押してください（Escで取消）",
+    reserved_key: "{} はスカウティング用に予約されています",
+    taken_key: "{} はすでに {} に割り当てられています",
+    reset_keys: "既定のキーに戻す",
+    change_hint: "Enterまたはクリックで変更",
+    not_saved: "設定を保存できませんでした: {}",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

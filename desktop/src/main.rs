@@ -1,12 +1,14 @@
-//! The desktop app of scout4all (027): a prototype to judge iced, with the
-//! home and the scouting of a set in progress. It reads the data of the
-//! TUI (`~/.scout4all`, or `SCOUT4ALL_DATA_DIR`) and its keys.
+//! The desktop app of scout4all (027), replacing the TUI: the home, the
+//! scouting of a set in progress, the keys of the scouting (F2). It reads
+//! the data of the TUI (`~/.scout4all`, or `SCOUT4ALL_DATA_DIR`) and its
+//! keys.
 
 mod charts;
 mod court;
 mod home;
 mod keymap;
 mod scouting;
+mod settings;
 mod strings;
 mod theme;
 
@@ -17,9 +19,10 @@ use {
         window,
     },
     scout4all_core::{scouting::ChoiceOrder, shapes::enums::LanguageEnum},
-    scout4all_keys::{BACK_KEY, KeyCombination, ScoutingKeys, key},
+    scout4all_keys::{BACK_KEY, KeyCombination, SETTINGS_KEY, ScoutingKeys, key},
     scout4all_mobile::{Home, Scout4All},
     scouting::{Outcome, ScoutingScreen},
+    settings::SettingsScreen,
     std::{path::PathBuf, str::FromStr, sync::Arc, sync::OnceLock, time::Instant},
     strings::Strings,
 };
@@ -61,7 +64,11 @@ enum Screen {
 
 struct App {
     core: Arc<Scout4All>,
+    dir: PathBuf,
+    language: LanguageEnum,
     keys: ScoutingKeys,
+    /// the settings, over the screen they were opened from (F2)
+    settings: Option<SettingsScreen>,
     strings: &'static Strings,
     dark: bool,
     screen: Screen,
@@ -75,6 +82,7 @@ enum Message {
     Open(home::Open),
     ToggleTheme,
     Scouting(scouting::Message),
+    Settings(settings::Message),
 }
 
 impl App {
@@ -96,7 +104,10 @@ impl App {
         };
         let mut app = App {
             core,
+            dir,
+            language,
             keys,
+            settings: None,
             strings,
             dark: true,
             screen: Screen::Home {
@@ -139,8 +150,38 @@ impl App {
         }
     }
 
+    fn close_settings(&mut self) {
+        if let Some(settings) = self.settings.take() {
+            self.keys = settings.keys;
+            if let Screen::Scouting(screen) = &mut self.screen {
+                screen.set_keys(self.keys.clone());
+            }
+        }
+    }
+
     fn update(&mut self, message: Message) {
+        let s = self.strings;
+        // the settings, while open, take the keys
+        let closed = match (&message, &mut self.settings) {
+            (Message::Key(ck), Some(settings)) => Some(settings.key(*ck, s)),
+            (Message::Settings(m), Some(settings)) => Some(settings.update(m.clone(), s)),
+            (Message::Key(ck), None) if *ck == SETTINGS_KEY => {
+                self.settings = Some(SettingsScreen::new(
+                    self.dir.clone(),
+                    self.keys.clone(),
+                    self.language,
+                ));
+                return;
+            }
+            _ => None,
+        };
+        match closed {
+            Some(settings::Outcome::Close) => return self.close_settings(),
+            Some(settings::Outcome::Stay) => return,
+            None => {}
+        }
         match (message, &mut self.screen) {
+            (Message::Settings(_), _) => {}
             (Message::ToggleTheme, _) => self.dark = !self.dark,
             (Message::Open(open), _) => self.open(open),
             (Message::Scouting(m), Screen::Scouting(screen)) => match screen.update(m) {
@@ -179,9 +220,12 @@ impl App {
         }
         let c = self.colors();
         let s = self.strings;
-        let screen: Element<'_, Message> = match &self.screen {
-            Screen::Home { home, selected } => home::view(home, *selected, s, Message::Open, c),
-            Screen::Scouting(screen) => screen.view(s, c).map(Message::Scouting),
+        let screen: Element<'_, Message> = match (&self.settings, &self.screen) {
+            (Some(settings), _) => settings.view(s, c).map(Message::Settings),
+            (None, Screen::Home { home, selected }) => {
+                home::view(home, *selected, s, Message::Open, c)
+            }
+            (None, Screen::Scouting(screen)) => screen.view(s, c).map(Message::Scouting),
         };
         let bar = row![
             text(self.error.clone().unwrap_or_default()).color(theme::LOST),

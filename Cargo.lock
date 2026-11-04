@@ -5770,6 +5770,7 @@ dependencies = [
  "scout4all-mobile",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
