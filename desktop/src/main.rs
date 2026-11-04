@@ -1,0 +1,245 @@
+//! The desktop app of scout4all (027): a prototype to judge iced, with the
+//! home and the scouting of a set in progress. It reads the data of the
+//! TUI (`~/.scout4all`, or `SCOUT4ALL_DATA_DIR`) and its keys.
+
+mod charts;
+mod court;
+mod home;
+mod keymap;
+mod scouting;
+mod strings;
+mod theme;
+
+use {
+    iced::{
+        Element, Event, Length, Size, Subscription, Task, Theme, event, keyboard,
+        widget::{button, column, container, row, space, text},
+        window,
+    },
+    scout4all_core::{scouting::ChoiceOrder, shapes::enums::LanguageEnum},
+    scout4all_keys::{BACK_KEY, KeyCombination, ScoutingKeys, key},
+    scout4all_mobile::{Home, Scout4All},
+    scouting::{Outcome, ScoutingScreen},
+    std::{path::PathBuf, str::FromStr, sync::Arc, sync::OnceLock, time::Instant},
+    strings::Strings,
+};
+
+const DATA_DIR_VAR: &str = "SCOUT4ALL_DATA_DIR";
+
+/// When the process started, to measure the time to the first frame.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+fn data_dir() -> Option<PathBuf> {
+    std::env::var_os(DATA_DIR_VAR)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".scout4all")))
+}
+
+/// What the TUI keeps in `config.json` that the prototype reads: the
+/// language and the keys.
+fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys) {
+    let json: serde_json::Value = std::fs::read_to_string(dir.join("config.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let language = json
+        .get("language")
+        .and_then(|l| l.as_str())
+        .and_then(|l| LanguageEnum::from_str(l).ok())
+        .unwrap_or(LanguageEnum::En);
+    let keys = serde_json::from_value::<ScoutingKeys>(json)
+        .unwrap_or_default()
+        .normalized();
+    (language, keys)
+}
+
+enum Screen {
+    Home { home: Home, selected: usize },
+    Scouting(Box<ScoutingScreen>),
+}
+
+struct App {
+    core: Arc<Scout4All>,
+    keys: ScoutingKeys,
+    strings: &'static Strings,
+    dark: bool,
+    screen: Screen,
+    error: Option<String>,
+    first_frame: OnceLock<()>,
+}
+
+#[derive(Debug, Clone)]
+enum Message {
+    Key(KeyCombination),
+    Open(home::Open),
+    ToggleTheme,
+    Scouting(scouting::Message),
+}
+
+impl App {
+    fn boot() -> (App, Task<Message>) {
+        let dir = data_dir().unwrap_or_else(|| PathBuf::from(".scout4all"));
+        let (language, keys) = config(&dir);
+        let strings = strings::strings(language);
+        let core = Scout4All::new(dir.to_string_lossy().into_owned(), language.to_string());
+        let (core, error) = match core {
+            Ok(core) => (core, None),
+            // an empty folder in place of the data: the error tells why
+            Err(e) => match Scout4All::new(
+                std::env::temp_dir().to_string_lossy().into_owned(),
+                language.to_string(),
+            ) {
+                Ok(core) => (core, Some(e.to_string())),
+                Err(_) => std::process::exit(1),
+            },
+        };
+        let mut app = App {
+            core,
+            keys,
+            strings,
+            dark: true,
+            screen: Screen::Home {
+                home: Home {
+                    in_progress: vec![],
+                    recent: vec![],
+                    teams: vec![],
+                },
+                selected: 0,
+            },
+            error,
+            first_frame: OnceLock::new(),
+        };
+        app.go_home();
+        (app, Task::none())
+    }
+
+    fn go_home(&mut self) {
+        match self.core.home() {
+            Ok(home) => self.screen = Screen::Home { home, selected: 0 },
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn colors(&self) -> theme::Colors {
+        theme::colors(self.dark)
+    }
+
+    fn open(&mut self, open: home::Open) {
+        match self
+            .core
+            .scouting_in_order(&open.team_id, &open.match_id, ChoiceOrder::EventFirst)
+        {
+            Ok(scouting) => {
+                self.error = None;
+                self.screen = Screen::Scouting(Box::new(ScoutingScreen::new(
+                    scouting,
+                    self.keys.clone(),
+                    self.colors(),
+                )))
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn update(&mut self, message: Message) {
+        let colors = self.colors();
+        match (message, &mut self.screen) {
+            (Message::ToggleTheme, _) => self.dark = !self.dark,
+            (Message::Open(open), _) => self.open(open),
+            (Message::Scouting(m), Screen::Scouting(screen)) => match screen.update(m, colors) {
+                Outcome::Stay => {}
+                Outcome::Leave => self.go_home(),
+            },
+            (Message::Scouting(_), Screen::Home { .. }) => {}
+            (Message::Key(ck), Screen::Scouting(screen)) => match screen.key(ck, colors) {
+                Outcome::Stay => {}
+                Outcome::Leave => self.go_home(),
+            },
+            (Message::Key(ck), Screen::Home { home, selected }) => {
+                let count = home.in_progress.len();
+                match ck {
+                    k if k == key!(down) => {
+                        *selected = (*selected + 1).min(count.saturating_sub(1))
+                    }
+                    k if k == key!(up) => *selected = selected.saturating_sub(1),
+                    k if k == key!(enter) => {
+                        if let Some(open) =
+                            home.in_progress.get(*selected).and_then(home::resumable)
+                        {
+                            self.open(open)
+                        }
+                    }
+                    k if k == BACK_KEY => self.error = None,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        if let (Ok(()), Some(started)) = (self.first_frame.set(()), STARTED.get()) {
+            eprintln!("first frame after {} ms", started.elapsed().as_millis());
+        }
+        let c = self.colors();
+        let s = self.strings;
+        let screen: Element<'_, Message> = match &self.screen {
+            Screen::Home { home, selected } => home::view(home, *selected, s, Message::Open, c),
+            Screen::Scouting(screen) => screen.view(s, c).map(Message::Scouting),
+        };
+        let bar = row![
+            text(self.error.clone().unwrap_or_default()).color(theme::LOST),
+            space::horizontal(),
+            button(text(s.theme).size(12))
+                .on_press(Message::ToggleTheme)
+                .style(button::text),
+        ]
+        .padding([2, 12]);
+        container(column![bar, screen])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(c.background.into()),
+                text_color: Some(c.text),
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn theme(&self) -> Theme {
+        theme::theme(self.dark)
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        event::listen_with(|event, status, _| match (event, status) {
+            (
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    modified_key,
+                    modifiers,
+                    ..
+                }),
+                event::Status::Ignored,
+            ) => keymap::combination(&modified_key, modifiers).map(Message::Key),
+            _ => None,
+        })
+    }
+}
+
+fn main() -> iced::Result {
+    let _ = STARTED.set(Instant::now());
+    // as the CLI: the self-update of the old clients checks it
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("scout4all {}", scout4all_mobile::version());
+        return Ok(());
+    }
+    iced::application(App::boot, App::update, App::view)
+        .title("scout4all")
+        .theme(App::theme)
+        .subscription(App::subscription)
+        .window(window::Settings {
+            size: Size::new(1400.0, 860.0),
+            min_size: Some(Size::new(1000.0, 640.0)),
+            ..window::Settings::default()
+        })
+        .run()
+}

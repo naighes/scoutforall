@@ -2415,6 +2415,59 @@ impl Scouting {
     }
 }
 
+/// For the apps written in Rust (the desktop app), not exported to the
+/// bindings: they drive the scouting from the keyboard as the TUI does.
+impl Scout4All {
+    /// Scouts the set in progress of the match, choosing in `order`: the
+    /// keyboard chooses the event first, the touch the player.
+    pub fn scouting_in_order(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        order: ChoiceOrder,
+    ) -> Result<Arc<Scouting>, MobileError> {
+        let m = self.read_match(team_id, match_id)?;
+        match next_set(&m.get_status()?, &m.team) {
+            NextSet::Resume(set) => set_start::resume(m, set, self.set_writer.clone())
+                .map(|session| {
+                    Arc::new(Scouting {
+                        runtime: self.runtime.clone(),
+                        session: Mutex::new(
+                            session
+                                .with_order(order)
+                                .with_finished(self.finished_matches()),
+                        ),
+                        labels: self.language.labels(),
+                    })
+                })
+                .map_err(|e| MobileError::Failed {
+                    reason: e.message(self.language.labels()),
+                }),
+            NextSet::Start(_) | NextSet::Over => Err(MobileError::Failed {
+                reason: format!("no set in progress in {match_id}"),
+            }),
+        }
+    }
+}
+
+/// For the apps written in Rust, not exported to the bindings: the session
+/// of the core, for what the keyboard does as in the TUI (the players by
+/// their index, the cursor on the court, how many blocked).
+impl Scouting {
+    /// Runs `f` on the session, with the runtime for its async choices.
+    /// `f` must not call the other methods of `Scouting`: they lock the
+    /// session again.
+    pub fn with_session<R>(&self, f: impl FnOnce(&mut ScoutingSession, &Runtime) -> R) -> R {
+        let mut session = self.session();
+        f(&mut session, &self.runtime)
+    }
+
+    /// The error in the language of the app.
+    pub fn message(&self, e: &ScoutingError) -> String {
+        e.message(self.labels)
+    }
+}
+
 /// Correcting an event of a set (see `event_edit` in the core): saved
 /// with `Scout4All::save_correction`.
 #[derive(uniffi::Object)]
@@ -2862,27 +2915,7 @@ impl Scout4All {
         team_id: String,
         match_id: String,
     ) -> Result<Arc<Scouting>, MobileError> {
-        let m = self.read_match(&team_id, &match_id)?;
-        match next_set(&m.get_status()?, &m.team) {
-            NextSet::Resume(set) => set_start::resume(m, set, self.set_writer.clone())
-                .map(|session| {
-                    Arc::new(Scouting {
-                        runtime: self.runtime.clone(),
-                        session: Mutex::new(
-                            session
-                                .with_order(ChoiceOrder::PlayerFirst)
-                                .with_finished(self.finished_matches()),
-                        ),
-                        labels: self.language.labels(),
-                    })
-                })
-                .map_err(|e| MobileError::Failed {
-                    reason: e.message(self.language.labels()),
-                }),
-            NextSet::Start(_) | NextSet::Over => Err(MobileError::Failed {
-                reason: format!("no set in progress in {match_id}"),
-            }),
-        }
+        self.scouting_in_order(&team_id, &match_id, ChoiceOrder::PlayerFirst)
     }
 
     /// Saves the set that `set_start` starts.
