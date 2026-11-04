@@ -431,7 +431,7 @@ fn stats_groups(labels: &Labels) -> Vec<Group> {
 /// The statistics shown for a player, a rotation, a set or the match, in
 /// the columns of `stats_groups`:
 /// - points: total (aces, kills, block points), break points, points minus
-///   errors (faults included);
+///   the points given away as DataVolley counts them (`Stats::won_minus_lost`);
 /// - serve: total, errors, aces, efficiency;
 /// - reception: total, errors, positiveness, perfect, efficiency;
 /// - attack: total, errors (out or net), blocked, kills, kills %,

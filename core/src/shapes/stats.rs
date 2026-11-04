@@ -549,12 +549,19 @@ impl Stats {
             .sum()
     }
 
-    /// The points scored minus the errors made, or `None` when there are
-    /// neither.
+    /// The points scored minus the points given away, as DataVolley counts
+    /// them: serve, reception and attack errors and attacks blocked. A
+    /// block or a dig missed is their kill, a fault (a set, a freeball)
+    /// isn't counted either. `None` when there are neither.
     pub fn won_minus_lost(&self, filter: &StatsFilter) -> Option<i32> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
         let points = self.points(filter);
-        let errors = self.total_errors(None, filter);
-        (points + errors > 0).then_some(points as i32 - errors as i32)
+        let lost: u32 = [(S, Error), (P, Error), (A, Error), (A, Over)]
+            .into_iter()
+            .map(|(event_type, eval)| self.event_count(event_type, Some(eval), filter))
+            .sum();
+        (points + lost > 0).then_some(points as i32 - lost as i32)
     }
 
     /// How many rallies it takes us to win a point: in break, the serves

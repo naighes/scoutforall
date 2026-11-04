@@ -608,8 +608,10 @@ mod tests {
         assert_eq!(stats.points(&all()), 3);
     }
 
-    /// The points minus the errors: shown when either is there (it used to
-    /// be shown only when both were).
+    /// The points minus the points given away, as DataVolley counts them
+    /// (its tabellino): serve, reception and attack errors and attacks
+    /// blocked. A block or a dig missed is their kill, a fault isn't one
+    /// of those: not counted. Shown when either is there.
     #[test]
     fn won_minus_lost() {
         assert_eq!(stats_of(&[]).won_minus_lost(&all()), None);
@@ -621,15 +623,41 @@ mod tests {
             stats_of(&[(A, Some(Perfect))]).won_minus_lost(&all()),
             Some(1)
         );
-        assert_eq!(stats_of(&[(F, None)]).won_minus_lost(&all()), Some(-1));
-        let stats = stats_of(&[
-            (A, Some(Perfect)),
-            (S, Some(Perfect)),
+        for lost in [
+            (S, Some(Error)),
+            (P, Some(Error)),
+            (A, Some(Error)),
             (A, Some(Over)),
+        ] {
+            assert_eq!(
+                stats_of(&[lost]).won_minus_lost(&all()),
+                Some(-1),
+                "{lost:?}"
+            );
+        }
+        for not_lost in [
+            (B, Some(Error)),
+            (B, Some(Over)),
+            (D, Some(Error)),
             (F, None),
-            (F, None),
-        ]);
-        assert_eq!(stats.won_minus_lost(&all()), Some(-1));
+        ] {
+            assert_eq!(
+                stats_of(&[not_lost]).won_minus_lost(&all()),
+                None,
+                "{not_lost:?}"
+            );
+        }
+        // Brilli in Cortona - Savinese (2026-11-01): 15 points, 4 serves
+        // missed, 2 attacks blocked, 5 blocks and 4 digs missed: +9
+        let brilli: Vec<_> = std::iter::repeat_n((A, Some(Perfect)), 11)
+            .chain(std::iter::repeat_n((B, Some(Perfect)), 3))
+            .chain([(S, Some(Perfect))])
+            .chain(std::iter::repeat_n((S, Some(Error)), 4))
+            .chain(std::iter::repeat_n((A, Some(Over)), 2))
+            .chain(std::iter::repeat_n((B, Some(Error)), 5))
+            .chain(std::iter::repeat_n((D, Some(Error)), 4))
+            .collect();
+        assert_eq!(stats_of(&brilli).won_minus_lost(&all()), Some(9));
     }
 
     // --- the filters ------------------------------------------------------
