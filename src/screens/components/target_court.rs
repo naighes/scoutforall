@@ -11,7 +11,7 @@ use ratatui::{
     text::Line,
     widgets::{Block, Paragraph},
 };
-use scout4all_core::shapes::court_zone::{CourtCell, CourtTarget, CourtZoneEnum};
+use scout4all_core::shapes::court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum};
 
 /// The rows a zone takes with its borders.
 const BORDERED_ROW: u16 = 3;
@@ -94,13 +94,15 @@ fn render_cell(f: &mut Frame, area: Rect, lines: Vec<Line<'static>>, style: Styl
     );
 }
 
-/// The court where our serve went, to choose it: the nine zones in a box
+/// The court where the ball went, as shown on `side` (theirs for our
+/// serve, ours for our reception), to choose it: the nine zones in a box
 /// each when there's room, their four cells inside; in a panel titled with
 /// what's told, if any.
 pub fn render(
     f: &mut Frame,
     area: Rect,
     title: &str,
+    side: CourtSide,
     cursor: CourtCell,
     chosen: Option<CourtTarget>,
 ) {
@@ -122,7 +124,7 @@ pub fn render(
     let (widths, heights) = (split(court.width, 3), split(court.height, 3));
     // a box for each zone when its two rows still have a line each
     let boxed = heights.iter().all(|h| *h >= 4) && widths.iter().all(|w| *w >= 6);
-    let grid = CourtCell::grid();
+    let grid = CourtCell::shown(side);
     let mut y = court.y;
     for (zone_row, height) in heights.iter().enumerate() {
         let mut x = court.x;
@@ -178,10 +180,17 @@ pub fn render(
     }
 }
 
-/// The court in the block: each zone with its lines and style, told by
-/// `cell`; the nine zones in a box when `boxes` and there's room.
-pub fn render_court<F>(f: &mut Frame, area: Rect, block: Block, boxes: bool, cell: F)
-where
+/// The court in the block, as shown on `side`: each zone with its lines
+/// and style, told by `cell`; the nine zones in a box when `boxes` and
+/// there's room.
+pub fn render_court<F>(
+    f: &mut Frame,
+    area: Rect,
+    block: Block,
+    side: CourtSide,
+    boxes: bool,
+    cell: F,
+) where
     F: Fn(CourtZoneEnum) -> (Vec<Line<'static>>, Style),
 {
     let inner = block.inner(area);
@@ -209,7 +218,7 @@ where
     ];
     let threes = [(x, w0 + w1), (x + w0 + w1, w2), (x + w0 + w1 + w2, w3 + w4)];
     let mut y = court.y;
-    for (row, height) in CourtZoneEnum::grid().iter().zip(heights) {
+    for (row, height) in CourtZoneEnum::shown(side).iter().zip(heights) {
         // a row of five takes a column each, a row of three the columns of
         // a zone and a conflict at the sides, the middle zone in between
         let spans: &[(u16, u16)] = match row.len() {

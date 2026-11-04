@@ -19,7 +19,7 @@ mod tests {
         },
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
-            court_zone::{CourtCell, CourtTarget, SubzoneEnum},
+            court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, SubzoneEnum},
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
             flags::ReceptionSchemeEnum,
             player::PlayerEntry,
@@ -185,7 +185,7 @@ mod tests {
         CourtTarget::pair(cell(3, SubzoneEnum::D), cell(4, SubzoneEnum::A)).expect("side by side")
     }
 
-    /// saved in the flags, none when not told; not for another event.
+    /// saved in the flags, none when not told; on their court.
     #[tokio::test]
     async fn the_serve_target_is_optional() {
         let mut s = scouting().await;
@@ -196,6 +196,7 @@ mod tests {
         );
         s.session.choose_event(S).await.unwrap();
         assert!(s.session.targets_apply());
+        assert_eq!(s.session.target_side(), Some(CourtSide::Theirs));
         assert_eq!(s.session.target(), None);
         // 3D and 4A: on the line between 3 and 4
         assert_eq!(s.session.touch_target(cell(3, SubzoneEnum::D)), Ok(()));
@@ -209,15 +210,58 @@ mod tests {
         s.session.touch_target(cell(6, SubzoneEnum::A)).unwrap();
         s.session.choose_target(None).unwrap();
         s.session.choose_eval(EvalEnum::Error).await.unwrap();
-        // their serve: our reception has none
+        // their serve: our reception, not told
         s.session.choose_event(P).await.unwrap();
         s.session.choose_player(s.players[6]).await.unwrap();
-        assert!(!s.session.targets_apply());
         s.session.choose_eval(EvalEnum::Positive).await.unwrap();
         let saved = saved_events(&s).await;
         assert_eq!(
             saved.iter().map(|e| e.flags.target()).collect::<Vec<_>>(),
             vec![Some(z43()), None, None, None]
+        );
+    }
+
+    /// Where we received their serve is told along with the evaluation of
+    /// the reception, on our court, with its formation; not before the
+    /// receiver, nor for an attack.
+    #[tokio::test]
+    async fn the_reception_target_is_on_our_court() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        s.session.next_reception().unwrap();
+        s.session.choose_event(P).await.unwrap();
+        assert!(!s.session.targets_apply());
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert_eq!(s.session.target_side(), Some(CourtSide::Ours));
+        // 1D and 6A: on the line between 1 and 6
+        s.session.touch_target(cell(1, SubzoneEnum::D)).unwrap();
+        s.session.touch_target(cell(6, SubzoneEnum::A)).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(A).await.unwrap();
+        s.session.choose_player(s.players[3]).await.unwrap();
+        assert!(!s.session.targets_apply());
+        let saved = saved_events(&s).await;
+        let reception = saved
+            .iter()
+            .find(|e| e.event_type == P)
+            .expect("the reception");
+        assert_eq!(
+            (reception.flags.target(), reception.flags.reception()),
+            (
+                CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A)),
+                ReceptionSchemeEnum::Four
+            )
+        );
+        // undo resumes it with where it was received
+        for _ in 0..3 {
+            if s.session.event() != Some(P) {
+                s.session.undo().await.unwrap();
+            }
+        }
+        assert_eq!(
+            (s.session.step(), s.session.target().map(|t| t.court_zone())),
+            (ScoutingStep::Eval, Some(CourtZoneEnum::Z61))
         );
     }
 

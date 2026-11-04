@@ -142,6 +142,8 @@ data class ScoutingView(
     val targets: List<List<CourtCellChoice>> = emptyList(),
     /** what's told of where it went: "1D-6A (6/1)" */
     val targetTold: String? = null,
+    /** the court is ours (our reception, the net at the top), not theirs */
+    val targetOurs: Boolean = false,
 )
 
 sealed interface ScoutingUi {
@@ -304,6 +306,7 @@ class ScoutingViewModel(
             replacements = s.replacementChoices(),
             targets = s.targetCourt(),
             targetTold = s.targetTold(),
+            targetOurs = s.targetOurs(),
         )
     }
 }
@@ -504,6 +507,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     modifier = Modifier.weight(1f, fill = false),
                     serveZone = true,
                     targets = view.targets,
+                    targetsOurs = view.targetOurs,
                     onTarget = model::target,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
@@ -667,12 +671,18 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
     }
 }
 
-/** Our serve being scouted, where the last event is, its line given to
- * the court: the phase (break) and the rotation, the server, and where it
- * went if told (the court shows it too). */
+/** Our serve or our reception being scouted, where the last event is, its
+ * line given to the court: the phase (break as we serve, side-out as we
+ * receive) and the rotation, the player, and where the ball went if told
+ * (the court shows it too). */
 @Composable
 private fun Serving(state: ScoutingState, told: String?) = Text(
-    listOfNotNull(stringResource(R.string.break_phase), state.rotation, state.player?.let { "${it.number} · ${it.name}" }, told).joinToString(" · "),
+    listOfNotNull(
+        stringResource(if (state.servingTeam == TeamSideEnum.US) R.string.break_phase else R.string.side_out_phase),
+        state.rotation,
+        state.player?.let { "${it.number} · ${it.name}" },
+        told,
+    ).joinToString(" · "),
     modifier = Modifier.padding(top = 2.dp),
     style = MaterialTheme.typography.labelMedium,
     fontWeight = FontWeight.Bold,

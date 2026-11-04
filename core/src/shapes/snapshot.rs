@@ -6,6 +6,7 @@ use crate::{
     errors::{AppError, SnapshotError},
     localization::Labels,
     shapes::{
+        court_zone::CourtSide,
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, LineupRulesEnum, PhaseEnum, RoleEnum,
             TeamSideEnum, ZoneEnum,
@@ -585,11 +586,12 @@ impl Snapshot {
                 rotation,
                 player: event.player.filter(|_| event.event_type.asks_player()),
                 zone,
-                // where our serve went, if told
+                // where our serve went, or where we received theirs, if
+                // told
                 target: event
                     .flags
                     .target()
-                    .filter(|_| event.event_type == S)
+                    .filter(|_| CourtSide::of(event.event_type).is_some())
                     .map(|t| t.court_zone()),
                 eval: event.eval,
             });

@@ -105,6 +105,29 @@ class ScoutingTest {
         rule.waitFor { rule.onAllNodes(zone("8A")).fetchSemanticsNodes().isEmpty() }
     }
 
+    /** Their serve: once the receiver is touched, our court with its
+     * cells while the reception waits for its evaluation, the net at the
+     * top; where we received saved with it. */
+    @Test
+    fun theReceptionZoneIsTouchedOnOurCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.reception_zone)} $label") and hasClickAction() }
+        touch("=")
+        rule.waitFor { saved().events.size == 1 }
+        assertTrue(rule.onAllNodes(zone("6A")).fetchSemanticsNodes().isEmpty())
+        touch("18")
+        rule.waitFor { rule.onAllNodes(zone("6A")).fetchSemanticsNodes().size == 1 }
+        // ours: 4 at the net on the left, 1 at our end line on the right
+        val top = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(top("4C").y < top("1A").y && top("4C").x < top("1A").x)
+        rule.onNode(zone("1D")).performClick()
+        rule.onNode(zone("6A")).performClick()
+        rule.waitForText("1D-6A (6/1)", substring = true)
+        touch("+")
+        rule.waitFor { saved().events.size == 2 }
+        assertEquals("1D-6A (6/1)", saved().events[0].target)
+    }
+
     @Test
     fun aServeErrorIsTheirPoint() {
         show()

@@ -3,7 +3,7 @@
 //! points, where the attacks were set; the freeballs given and received;
 //! the players compared in a fundamental; the phases won in each rotation.
 use crate::overview::{DISTRIBUTION_ZONES, RalliesWon};
-use crate::shapes::court_zone::CourtZoneEnum;
+use crate::shapes::court_zone::{CourtSide, CourtZoneEnum};
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
 use crate::shapes::stats::{Metric, Stats, StatsFilter};
 use std::cmp::Reverse;
@@ -98,20 +98,20 @@ pub struct ZoneDetail {
     pub conversion: f64,
 }
 
-/// The serves needed for the efficiency of a zone: on fewer, it would
-/// mislead.
+/// The serves (or receptions) needed for the efficiency of a zone: on
+/// fewer, it would mislead.
 pub const MIN_SERVES_FOR_EFFICIENCY: u32 = 3;
 
-/// Our serves sent to a zone of their court (see `CourtZoneEnum`), among
-/// the ones whose zone was told.
+/// Our serves sent to a zone of their court, or our receptions in a zone
+/// of ours (see `CourtZoneEnum`), among the ones whose zone was told.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TargetDetail {
     pub zone: CourtZoneEnum,
     pub count: u32,
-    /// of the serves whose zone was told, 0 to 100
+    /// of the ones whose zone was told, 0 to 100
     pub share: f64,
     /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
-    /// `MIN_SERVES_FOR_EFFICIENCY` serves
+    /// `MIN_SERVES_FOR_EFFICIENCY`
     pub efficiency: Option<f64>,
 }
 
@@ -136,9 +136,9 @@ pub struct Detail {
     pub points: Option<u32>,
     /// for an attack, the zones of `DISTRIBUTION_ZONES` set to
     pub zones: Vec<ZoneDetail>,
-    /// for a serve, how many had their zone told, and each zone of their
-    /// court (`CourtZoneEnum::ALL`, the ones never served to too); none
-    /// for the other fundamentals
+    /// for a serve or a reception, how many had their zone told, and each
+    /// zone of the court (`CourtZoneEnum::ALL`, the ones never served to or
+    /// received in too); none for the other fundamentals
     pub targets_told: u32,
     pub targets: Vec<TargetDetail>,
 }
@@ -205,15 +205,15 @@ impl Detail {
                 .collect(),
             _ => Vec::new(),
         };
-        let targets_told = match event_type {
-            EventTypeEnum::S => stats.serves_with_target(filter),
-            _ => 0,
+        let targets_told = match CourtSide::of(event_type) {
+            Some(_) => stats.events_with_target(event_type, filter),
+            None => 0,
         };
-        let targets = match (event_type, targets_told) {
-            (EventTypeEnum::S, 1..) => CourtZoneEnum::ALL
+        let targets = match targets_told {
+            1.. => CourtZoneEnum::ALL
                 .iter()
                 .map(|zone| {
-                    let (count, efficiency) = stats.serves_to(*zone, filter);
+                    let (count, efficiency) = stats.events_to(event_type, *zone, filter);
                     TargetDetail {
                         zone: *zone,
                         count,

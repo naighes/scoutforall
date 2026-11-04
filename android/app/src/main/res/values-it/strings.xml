@@ -134,6 +134,9 @@
     <string name="zone_chosen">scelta</string>
     <string name="serves_by_zone">Battute per zona</string>
     <string name="zones_told">zona indicata in %1$d battute su %2$d</string>
+    <string name="reception_zone">Zona di ricezione</string>
+    <string name="receptions_by_zone">Ricezioni per zona</string>
+    <string name="reception_zones_told">zona indicata in %1$d ricezioni su %2$d</string>
     <string name="zone_density">densità</string>
     <string name="attacks_detail">%1$d att · eff %2$s</string>
     <string name="no_attacks">Ancora nessun attacco</string>

@@ -198,6 +198,7 @@ pub struct Labels {
     pub unpin: &'static str,
     /// the court where our serve went, while evaluating it
     pub serve_target: &'static str,
+    pub reception_target: &'static str,
     /// in the footer of the serve: the arrows moving on its court
     pub target_zone: &'static str,
     /// the space bar choosing the zone under the cursor, or taking it back
@@ -397,6 +398,7 @@ const EN: Labels = Labels {
     pin: "pin",
     unpin: "unpin",
     serve_target: "serve zone",
+    reception_target: "reception zone",
     target_zone: "zone",
     choose_zone: "choose",
     remove_zone: "remove",
@@ -590,6 +592,7 @@ const IT: Labels = Labels {
     pin: "fissa",
     unpin: "togli",
     serve_target: "zona di battuta",
+    reception_target: "zona di ricezione",
     target_zone: "zona",
     choose_zone: "scegli",
     remove_zone: "togli",
@@ -783,6 +786,7 @@ const PT: Labels = Labels {
     pin: "fixar",
     unpin: "desafixar",
     serve_target: "zona do saque",
+    reception_target: "zona da recepção",
     target_zone: "zona",
     choose_zone: "escolher",
     remove_zone: "remover",
@@ -976,6 +980,7 @@ const PL: Labels = Labels {
     pin: "przypnij",
     unpin: "odepnij",
     serve_target: "strefa zagrywki",
+    reception_target: "strefa przyjęcia",
     target_zone: "strefa",
     choose_zone: "wybierz",
     remove_zone: "usuń",
@@ -1169,6 +1174,7 @@ const JA: Labels = Labels {
     pin: "ピン留め",
     unpin: "ピン解除",
     serve_target: "サーブのゾーン",
+    reception_target: "レセプションのゾーン",
     target_zone: "ゾーン",
     choose_zone: "選択",
     remove_zone: "解除",

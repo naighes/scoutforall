@@ -1,6 +1,7 @@
 //! Where our serve went, told along with its evaluation on the court of
-//! the opponent: the arrows move the cursor, the space bar chooses the zone
-//! or takes it back; never required. Saved in the flags of the serve.
+//! the opponent, and where we received theirs, on ours: the arrows move
+//! the cursor, the space bar chooses the zone or takes it back; never
+//! required. Saved in the flags of the event.
 
 #[cfg(test)]
 mod tests {
@@ -168,22 +169,56 @@ mod tests {
         );
     }
 
-    /// Their serve: no court for our reception, the arrows do nothing.
+    /// Their serve: where we received it, told along with the evaluation
+    /// of the reception on our court, seen from the bench (the net at the
+    /// top): the arrows move as shown, from the middle (8A) up to 8B, left
+    /// to 8C; two cells of 8, saved.
     #[tokio::test]
-    async fn no_court_for_the_reception() {
+    async fn the_reception_is_told_on_our_court() {
         let mut ui = serving().await;
         ui.press(KeyCode::Char('=')).await;
         ui.type_keys(&[KeyCode::Char('p'), KeyCode::Char('7')])
             .await;
+        let title = |zone: &str| format!("{}: {zone}", current_labels().reception_target);
         assert!(
-            ui.screen().contains(current_labels().choose_the_evaluation),
+            ui.screen().contains(&title(current_labels().no_zone)),
             "{}",
             ui.screen()
         );
-        assert!(!shows_the_court(&mut ui));
-        ui.type_keys(&[KeyCode::Up, KeyCode::Char(' '), KeyCode::Char('+')])
+        ui.type_keys(&[KeyCode::Up, KeyCode::Char(' ')]).await;
+        assert!(ui.screen().contains(&title("8B")), "{}", ui.screen());
+        ui.type_keys(&[KeyCode::Left, KeyCode::Char(' ')]).await;
+        assert!(ui.screen().contains(&title("8B-8C")), "{}", ui.screen());
+        // our court: 4 at the net on the left, 5 at our end line
+        let screen = ui.screen();
+        let (at_4, at_5) = (screen.find("4C"), screen.find("5D"));
+        assert!(at_4 < at_5, "{screen}");
+        ui.press(KeyCode::Char('+')).await;
+        // the pair across in the fourth row, third column: 46 + 3 * 5 + 2,
+        // in bits 3 to 9
+        assert_eq!(last_flags(&ui), (63 * 8).to_string());
+    }
+
+    /// The stats of the reception: how many were received in each zone of
+    /// ours, beside the side outs by possession.
+    #[tokio::test]
+    async fn the_reception_stats_show_the_zones() {
+        use KeyCode::*;
+        let mut ui = serving().await;
+        ui.press(Char('=')).await;
+        ui.type_keys(&[Char('p'), Char('7'), Up, Char(' '), Char('+')])
             .await;
-        assert_eq!(last_flags(&ui), "");
+        ui.resize(120, 40);
+        ui.type_keys(&[Esc, Char(' '), Tab, Tab, Tab, Down]).await;
+        let domain = current_labels().domain;
+        let told = domain
+            .zones_told
+            .replace("{told}", "1")
+            .replace("{total}", "1");
+        let density = ui
+            .panel(&format!("{} · {told}", domain.receptions_by_zone))
+            .unwrap_or_else(|| panic!("{}", ui.screen()));
+        assert!(density.iter().any(|l| l.contains("100%")), "{density:?}");
     }
 
     /// The stats of the serve: how many went to each zone and their

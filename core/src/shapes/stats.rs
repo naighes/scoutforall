@@ -409,15 +409,21 @@ impl Stats {
         (total > 0).then(|| percentage(score, total))
     }
 
-    /// Our serves sent to a zone, among the ones whose zone was told: how
-    /// many, and their efficiency (as `Metric::Efficiency`).
-    pub fn serves_to(&self, target: CourtZoneEnum, filter: &StatsFilter) -> (u32, f64) {
+    /// Our serves sent to a zone, or our receptions in a zone (see
+    /// `CourtSide::of`), among the ones whose zone was told: how many, and
+    /// their efficiency (as `Metric::Efficiency`).
+    pub fn events_to(
+        &self,
+        event_type: EventTypeEnum,
+        target: CourtZoneEnum,
+        filter: &StatsFilter,
+    ) -> (u32, f64) {
         let (score, total) = self
-            .events(EventTypeEnum::S, filter)
+            .events(event_type, filter)
             .filter(|(k, _)| k.target == Some(target))
             .filter_map(|(k, v)| {
                 k.eval
-                    .map(|eval| (Metric::Efficiency.score(EventTypeEnum::S, eval), v))
+                    .map(|eval| (Metric::Efficiency.score(event_type, eval), v))
             })
             .fold((0, 0), |(score, total), (s, v)| {
                 (score + s * v as i32, total + v)
@@ -428,9 +434,9 @@ impl Stats {
         }
     }
 
-    /// Our serves whose zone was told.
-    pub fn serves_with_target(&self, filter: &StatsFilter) -> u32 {
-        self.events(EventTypeEnum::S, filter)
+    /// The events of the type whose zone was told.
+    pub fn events_with_target(&self, event_type: EventTypeEnum, filter: &StatsFilter) -> u32 {
+        self.events(event_type, filter)
             .filter(|(k, _)| k.target.is_some())
             .map(|(_, v)| v)
             .sum()

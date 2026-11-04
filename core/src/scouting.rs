@@ -10,7 +10,7 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
-        court_zone::{CourtCell, CourtTarget},
+        court_zone::{CourtCell, CourtSide, CourtTarget},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
         flags::{EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
@@ -315,12 +315,18 @@ impl ScoutingSession {
     }
 
     /// Whether the scout can tell where the ball went, along with the
-    /// evaluation: for our serve.
+    /// evaluation: for our serve, on their court, and for our reception,
+    /// on ours.
     pub fn targets_apply(&self) -> bool {
-        matches!(
-            (self.step, self.event),
-            (ScoutingStep::Eval, Some(EventTypeEnum::S))
-        )
+        self.target_side().is_some()
+    }
+
+    /// The court where the ball goes, when the scout can tell where.
+    pub fn target_side(&self) -> Option<CourtSide> {
+        match (self.step, self.event) {
+            (ScoutingStep::Eval, Some(event)) => CourtSide::of(event),
+            _ => None,
+        }
     }
 
     /// The scout tells where the ball went, or takes it back (`None`): the

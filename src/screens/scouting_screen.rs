@@ -29,7 +29,7 @@ use ratatui::{
 use scout4all_core::{
     scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     shapes::{
-        court_zone::{CourtCell, CourtTarget, Direction as CourtDirection},
+        court_zone::{CourtCell, CourtSide, CourtTarget, Direction as CourtDirection},
         enums::{EventTypeEnum, FriendlyName, RoleEnum},
         snapshot::EventEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
@@ -216,15 +216,19 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
         self.footer.render(f, footer_left, self.footer_entries());
         self.render_recent_events(f, left_bottom);
         self.render_set_status(f, center);
-        match self.session.targets_apply() {
-            true => target_court::render(
+        match self.session.target_side() {
+            Some(side) => target_court::render(
                 f,
                 right,
-                current_labels().serve_target,
+                match side {
+                    CourtSide::Theirs => current_labels().serve_target,
+                    CourtSide::Ours => current_labels().reception_target,
+                },
+                side,
                 self.cursor(),
                 self.session.target(),
             ),
-            false => self.render_court(f, right),
+            None => self.render_court(f, right),
         }
         self.notify_message.render(f, footer_right);
         self.screen_key_bindings = screen_key_bindings;
@@ -513,7 +517,8 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Scoutin
             .filter(|eval| self.session.available_evals().contains(eval));
         match (direction, toggle, eval, self.technique_for(&ck)) {
             (Some(direction), _, _, _) => {
-                self.target_cursor = Some(self.cursor().moved(direction));
+                let side = self.session.target_side().unwrap_or(CourtSide::Theirs);
+                self.target_cursor = Some(self.cursor().moved_on(side, direction));
                 AppAction::None
             }
             (None, true, _, _) => {

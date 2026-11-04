@@ -550,6 +550,38 @@ mod tests {
         );
     }
 
+    /// Our receptions with where we received: the cell of the zone and its
+    /// subzone (from 5 to 1D), the whole zone without the subzone; none
+    /// when the file doesn't tell it.
+    #[test]
+    fn the_zone_of_our_receptions() {
+        let rallies = [
+            ["a11SM+~~~51D", "*07RM+~~~51D", "*02AH#"],
+            ["a11SM+~~~56", "*07RM+~~~56", "*02AH#"],
+            ["a11SM+", "*07RM+", "*02AH#"],
+        ];
+        let targets: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.rally(touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                events
+                    .iter()
+                    .find(|e| e.event_type == P)
+                    .and_then(|e| e.flags.target())
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                CourtTarget::of_zone(1, Some(SubzoneEnum::D)),
+                Some(CourtTarget::Zone(6)),
+                None,
+            ]
+        );
+    }
+
     /// Our serve `+`, their reception `-` and our attack, their touches
     /// after the reception not scouted: the ball came back without their
     /// attack, a freeball (`OF`), the serve keeping its evaluation.

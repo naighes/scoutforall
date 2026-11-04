@@ -136,6 +136,9 @@
     <string name="zone_chosen">wybrana</string>
     <string name="serves_by_zone">Zagrywki według stref</string>
     <string name="zones_told">strefa podana w %1$d z %2$d zagrywek</string>
+    <string name="reception_zone">Strefa przyjęcia</string>
+    <string name="receptions_by_zone">Przyjęcia według stref</string>
+    <string name="reception_zones_told">strefa podana w %1$d z %2$d przyjęć</string>
     <string name="zone_density">gęstość</string>
     <string name="attacks_detail">%1$d at · sku %2$s</string>
     <string name="no_attacks">Brak ataków</string>

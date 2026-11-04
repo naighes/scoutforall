@@ -59,6 +59,17 @@ class ScoutingLayoutTest(private val screen: Size) {
         assertFits("theServe")
     }
 
+    /** Their serve received: our court with its cells, as large as the
+     * one of the serve. */
+    @Test
+    fun theReceptionZone() {
+        scout()
+        touch("=")
+        touch("18")
+        rule.waitForText("6A")
+        assertFits("theReceptionZone")
+    }
+
     @Test
     fun theirSideAfterTheServe() {
         scout()

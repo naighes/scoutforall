@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod tests {
     use crate::shapes::{
-        court_zone::{CourtCell, CourtTarget, CourtZoneEnum, Direction, SubzoneEnum},
+        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, Direction, SubzoneEnum},
         enums::{EvalEnum, EventTypeEnum},
         flags::{EventFlags, ReceptionSchemeEnum},
         snapshot::EventEntry,
@@ -170,6 +170,53 @@ mod tests {
                 assert_eq!(CourtCell::at(r, col), Some(c));
             }
         }
+    }
+
+    /// Our court, seen from the bench with the net at the top: theirs
+    /// turned round, the same cells; the cursor moves as shown.
+    #[test]
+    fn our_court_is_theirs_turned_round() {
+        let rows: Vec<String> = CourtCell::shown(CourtSide::Ours)
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                "4C 4B 3C 3B 2C 2B",
+                "4D 4A 3D 3A 2D 2A",
+                "7C 7B 8C 8B 9C 9B",
+                "7D 7A 8D 8A 9D 9A",
+                "5C 5B 6C 6B 1C 1B",
+                "5D 5A 6D 6A 1D 1A",
+            ]
+        );
+        assert_eq!(CourtCell::shown(CourtSide::Theirs), CourtCell::grid());
+        let zones: Vec<Vec<CourtZoneEnum>> = CourtZoneEnum::shown(CourtSide::Ours);
+        assert_eq!(
+            zones.first().map(Vec::as_slice),
+            Some(
+                &[
+                    CourtZoneEnum::Z4,
+                    CourtZoneEnum::Z43,
+                    CourtZoneEnum::Z3,
+                    CourtZoneEnum::Z32,
+                    CourtZoneEnum::Z2
+                ][..]
+            )
+        );
+        // 8D: right to 8A on ours, to 7A on theirs
+        let at = cell("8D");
+        assert_eq!(at.moved_on(CourtSide::Ours, Direction::Right), cell("8A"));
+        assert_eq!(at.moved_on(CourtSide::Theirs, Direction::Right), cell("7A"));
+        // up to 8C, over it on ours (under it on theirs)
+        assert_eq!(at.moved_on(CourtSide::Ours, Direction::Up), cell("8C"));
+        assert_eq!(at.moved_on(CourtSide::Theirs, Direction::Down), cell("8C"));
     }
 
     /// Two cells side by side across or down, not on a corner: of two

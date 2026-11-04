@@ -1448,6 +1448,47 @@ mod tests {
         assert!(detail(&none, S, &all()).targets.is_empty());
     }
 
+    /// Our receptions by the zone of our court where we received: as the
+    /// serves, among the ones whose zone was told.
+    #[test]
+    fn detail_of_the_receptions_by_zone() {
+        use crate::shapes::court_zone::{CourtCell, CourtTarget, SubzoneEnum};
+        let t = Team::new();
+        let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
+        let z6a = Some(CourtTarget::Cell(cell(6, SubzoneEnum::A)));
+        let z61 = CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A));
+        let received = |eval, zone| {
+            let mut e = act(P, t.libero, eval);
+            e.flags = e.flags.with_target(zone);
+            e
+        };
+        // each reception lost, their serve again
+        let stats = t
+            .receiving(vec![
+                received(Perfect, z6a),
+                act(A, t.oh1, Error),
+                received(Error, z61),
+                received(Negative, z6a),
+                act(A, t.oh1, Error),
+                received(Positive, None),
+                act(A, t.oh1, Error),
+            ])
+            .stats;
+        let receptions = detail(&stats, P, &all());
+        assert_eq!((receptions.total, receptions.targets_told), (4, 3));
+        let of = |zone| {
+            receptions
+                .targets
+                .iter()
+                .find(|t| t.zone == zone)
+                .map(|t| t.count)
+        };
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z6, Z61};
+        assert_eq!((of(Z6), of(Z61), of(Z1)), (Some(2), Some(1), Some(0)));
+        // the serves told none
+        assert!(detail(&stats, S, &all()).targets.is_empty());
+    }
+
     /// Their freeball after ours, exploited with a kill: team events, with
     /// a player none given and the others not told; also for our freeball
     /// naming its player, as scouted before.

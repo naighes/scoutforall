@@ -1,4 +1,5 @@
-//! Where the ball goes on the court of the opponent.
+//! Where the ball goes: on the court of the opponent (our serve) or on
+//! ours (their serve, where we receive it).
 //!
 //! The scout tells a quarter of a zone (a cell: the subzones of DataVolley,
 //! `1A`), or two cells side by side (`1B-6A`), or, from a file without the
@@ -25,8 +26,60 @@
 //! +----+----+----+----+----+----+
 //!                 net
 //! ```
+//!
+//! Our court, seen from the bench with the net at the top, is the same
+//! court turned round (`CourtSide::Ours`): 4C 4B on the left at the net,
+//! 1D 1A on the right at our end line. The cells, their codes and the pairs
+//! are the same on both: only how they're shown changes.
 
+use crate::shapes::enums::EventTypeEnum;
 use std::fmt;
+
+/// Which court the ball went to, as it's shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CourtSide {
+    /// The opponent's, as our server sees it: their end line at the top.
+    Theirs,
+    /// Ours, as seen from the bench: the net at the top.
+    Ours,
+}
+
+impl CourtSide {
+    /// The court where the ball of the event goes: our serve to theirs,
+    /// our reception on ours; none for the other events.
+    pub fn of(event: EventTypeEnum) -> Option<Self> {
+        match event {
+            EventTypeEnum::S => Some(CourtSide::Theirs),
+            EventTypeEnum::P => Some(CourtSide::Ours),
+            _ => None,
+        }
+    }
+
+    /// The rows as shown on this side, from the top: ours is theirs turned
+    /// round.
+    fn shown<T: Copy>(&self, rows: &[&[T]]) -> Vec<Vec<T>> {
+        match self {
+            CourtSide::Theirs => rows.iter().map(|row| row.to_vec()).collect(),
+            CourtSide::Ours => rows
+                .iter()
+                .rev()
+                .map(|row| row.iter().rev().copied().collect())
+                .collect(),
+        }
+    }
+
+    /// The direction on the court as our server sees it of a move on the
+    /// court shown.
+    fn turned(&self, direction: Direction) -> Direction {
+        match (self, direction) {
+            (CourtSide::Theirs, d) => d,
+            (CourtSide::Ours, Direction::Up) => Direction::Down,
+            (CourtSide::Ours, Direction::Down) => Direction::Up,
+            (CourtSide::Ours, Direction::Left) => Direction::Right,
+            (CourtSide::Ours, Direction::Right) => Direction::Left,
+        }
+    }
+}
 
 /// One of the nine zones, or the line between two of them: where the
 /// statistics put the ball.
@@ -90,6 +143,11 @@ impl CourtZoneEnum {
     /// The rows of the court as our server sees it (see `GRID`).
     pub fn grid() -> &'static [&'static [CourtZoneEnum]; 5] {
         &GRID
+    }
+
+    /// The rows of the court as shown on `side`, from the top.
+    pub fn shown(side: CourtSide) -> Vec<Vec<CourtZoneEnum>> {
+        side.shown(&GRID)
     }
 
     /// The zone with the number, 1 to 9.
@@ -293,6 +351,18 @@ impl CourtCell {
         (0..CELLS)
             .map(|r| (0..CELLS).filter_map(|c| Self::at(r, c)).collect())
             .collect()
+    }
+
+    /// The rows of the court as shown on `side`, from the top.
+    pub fn shown(side: CourtSide) -> Vec<Vec<CourtCell>> {
+        let grid = Self::grid();
+        let rows: Vec<&[CourtCell]> = grid.iter().map(Vec::as_slice).collect();
+        side.shown(&rows)
+    }
+
+    /// The cell next to this one on the court as shown on `side`.
+    pub fn moved_on(&self, side: CourtSide, direction: Direction) -> Self {
+        self.moved(side.turned(direction))
     }
 
     /// The cell next to this one, this one at the edge of the court.

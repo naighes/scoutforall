@@ -29,7 +29,7 @@ use scout4all_core::{
     errors::AppError,
     overview::side_out_possessions,
     shapes::{
-        court_zone::CourtZoneEnum,
+        court_zone::{CourtSide, CourtZoneEnum},
         enums::{EventTypeEnum, FriendlyName, PhaseEnum, RotationEnum, ZoneEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
@@ -439,18 +439,32 @@ impl MatchStatsScreen {
             );
             self.render_court_canvas(f, chunks[1], current_labels().conversion_rate, |(_, s)| s);
         }
-        if let Some(EventTypeEnum::S) = self
-            .event_filter
-            .selected()
-            .map(|selection| selection.event_type)
-        {
-            self.render_serve_targets(f, chunks[0], chunks[1]);
-        }
-        if let (Some(EventTypeEnum::P), None) = (
+        match (
             self.event_filter.selected().map(|s| s.event_type),
             self.player_filter.selected(),
         ) {
-            self.render_side_out_possessions(f, chunks[0]);
+            (Some(EventTypeEnum::S), _) => {
+                self.render_targets(EventTypeEnum::S, f, chunks[0], chunks[1]);
+            }
+            // the side outs have no player: with one, the zones take the
+            // room
+            (Some(EventTypeEnum::P), None) => {
+                // the side outs a few lines, the zones under them
+                let parts = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(6),
+                        Constraint::Fill(1),
+                        Constraint::Fill(1),
+                    ])
+                    .split(area);
+                self.render_side_out_possessions(f, parts[0]);
+                self.render_targets(EventTypeEnum::P, f, parts[1], parts[2]);
+            }
+            (Some(EventTypeEnum::P), Some(_)) => {
+                self.render_targets(EventTypeEnum::P, f, chunks[0], chunks[1]);
+            }
+            _ => {}
         }
     }
 
@@ -501,14 +515,27 @@ impl MatchStatsScreen {
         f.render_widget(table, area);
     }
 
-    /// Where our serves went, of the ones whose zone was told: how many to
-    /// each zone, in a shade of one color, the more the brighter; and their
-    /// efficiency there, red to green, only from a few serves on.
-    fn render_serve_targets(&self, f: &mut Frame, density: Rect, efficiency: Rect) {
-        let Some(Breakdown::Fundamental(detail)) = self.breakdown(EventTypeEnum::S) else {
+    /// Where our serves went (on their court), or where we received
+    /// theirs (on ours), of the ones whose zone was told: how many in each
+    /// zone, in a shade of one color, the more the brighter; and their
+    /// efficiency there, red to green, only from a few on.
+    fn render_targets(
+        &self,
+        event_type: EventTypeEnum,
+        f: &mut Frame,
+        density: Rect,
+        efficiency: Rect,
+    ) {
+        let (Some(Breakdown::Fundamental(detail)), Some(side)) =
+            (self.breakdown(event_type), CourtSide::of(event_type))
+        else {
             return;
         };
         let domain = current_labels().domain;
+        let by_zone = match side {
+            CourtSide::Theirs => domain.serves_by_zone,
+            CourtSide::Ours => domain.receptions_by_zone,
+        };
         let told = domain
             .zones_told
             .replace("{told}", &detail.targets_told.to_string())
@@ -518,7 +545,8 @@ impl MatchStatsScreen {
         target_court::render_court(
             f,
             density,
-            panel::section(format!("{} · {told}", domain.serves_by_zone)),
+            panel::section(format!("{by_zone} · {told}")),
+            side,
             false,
             |zone| {
                 let shown = target(zone).filter(|t| t.count > 0);
@@ -537,6 +565,7 @@ impl MatchStatsScreen {
             f,
             efficiency,
             panel::section(domain.efficiency_by_zone),
+            side,
             false,
             |zone| {
                 let lines = match target(zone).filter(|t| t.count > 0) {

@@ -51,7 +51,7 @@ use scout4all_core::{
     settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
-        court_zone::{CourtCell, CourtZoneEnum, SubzoneEnum},
+        court_zone::{CourtCell, CourtSide, CourtZoneEnum, SubzoneEnum},
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
@@ -1400,9 +1400,9 @@ pub struct FundamentalDetail {
     pub points: Option<u32>,
     /// for an attack
     pub zones: Vec<DetailZone>,
-    /// for a serve: how many had their zone told, and their court as our
-    /// server sees it, a row each from their end line (see
-    /// `CourtZoneEnum::grid`); empty with no zone told
+    /// for a serve or a reception: how many had their zone told, and the
+    /// court a row each from the top as `CourtZoneEnum::shown` (theirs for
+    /// the serve, ours for the reception); empty with no zone told
     pub targets_told: u32,
     pub targets: Vec<Vec<TargetStats>>,
     /// the players who played it, the most involved first; with the
@@ -1707,14 +1707,15 @@ impl Scouting {
         self.scouted(chosen)
     }
 
-    /// The court where our serve went as our server sees it, their end
-    /// line at the top: six rows of six cells, two by two in a zone; empty
-    /// when it can't be told now.
+    /// The court where the ball goes: for our serve theirs as our server
+    /// sees it (their end line at the top), for our reception ours as
+    /// seen from the bench (the net at the top); six rows of six cells, two
+    /// by two in a zone; empty when it can't be told now.
     pub fn target_court(&self) -> Vec<Vec<CourtCellChoice>> {
         let session = self.session();
         let chosen = session.target();
-        match session.targets_apply() {
-            true => CourtCell::grid()
+        match session.target_side() {
+            Some(side) => CourtCell::shown(side)
                 .iter()
                 .map(|row| {
                     row.iter()
@@ -1727,11 +1728,17 @@ impl Scouting {
                         .collect()
                 })
                 .collect(),
-            false => vec![],
+            None => vec![],
         }
     }
 
-    /// What's told of where our serve went: "1D", "1D-6A (6/1)"; none
+    /// Whether the court where the ball goes is ours (the net at the top),
+    /// not theirs (the net at the bottom).
+    pub fn target_ours(&self) -> bool {
+        self.session().target_side() == Some(CourtSide::Ours)
+    }
+
+    /// What's told of where the ball went: "1D", "1D-6A (6/1)"; none
     /// when nothing is.
     pub fn target_told(&self) -> Option<String> {
         self.session().target().map(|t| t.described())
@@ -1999,22 +2006,24 @@ fn detail_stats(
                 targets_told: d.targets_told,
                 targets: match d.targets.is_empty() {
                     true => vec![],
-                    false => CourtZoneEnum::grid()
-                        .iter()
-                        .map(|row| {
-                            row.iter()
-                                .filter_map(|zone| d.targets.iter().find(|t| t.zone == *zone))
-                                .map(|t| TargetStats {
-                                    value: t.zone,
-                                    label: t.zone.to_string(),
-                                    zone: t.zone.is_zone(),
-                                    count: t.count,
-                                    share: t.share,
-                                    efficiency: t.efficiency,
-                                })
-                                .collect()
-                        })
-                        .collect(),
+                    false => {
+                        CourtZoneEnum::shown(CourtSide::of(event).unwrap_or(CourtSide::Theirs))
+                            .iter()
+                            .map(|row| {
+                                row.iter()
+                                    .filter_map(|zone| d.targets.iter().find(|t| t.zone == *zone))
+                                    .map(|t| TargetStats {
+                                        value: t.zone,
+                                        label: t.zone.to_string(),
+                                        zone: t.zone.is_zone(),
+                                        count: t.count,
+                                        share: t.share,
+                                        efficiency: t.efficiency,
+                                    })
+                                    .collect()
+                            })
+                            .collect()
+                    }
                 },
                 players: by_player(&stats, event, &narrowed)
                     .into_iter()
@@ -4408,9 +4417,9 @@ mod tests {
         app.scouting(team.into(), m.into()).unwrap()
     }
 
-    /// Where our serve went: the court while it waits for its evaluation,
-    /// the zone chosen or taken back, never required; none for the
-    /// reception.
+    /// Where our serve went: their court while it waits for its
+    /// evaluation, the zone chosen or taken back, never required; where we
+    /// received theirs: our court, turned round, once the receiver is told.
     #[test]
     fn the_serve_target_is_told_on_the_court() {
         let dir = tempfile::tempdir().unwrap();
@@ -4434,6 +4443,7 @@ mod tests {
             ]
         );
         assert!(court.iter().flatten().all(|c| !c.chosen));
+        assert!(!scouting.target_ours());
         assert_eq!(scouting.target_told(), None);
         // 3D, then 4A next to it: on the line between 3 and 4
         scouting.touch_target(3, "D".into()).unwrap();
@@ -4452,12 +4462,35 @@ mod tests {
         let state = scouting.state();
         let targets: Vec<Option<&str>> = state.events.iter().map(|e| e.target.as_deref()).collect();
         assert_eq!(targets, vec![Some("3D-4A (4/3)")]);
-        // their serve: our reception has no court
+        // their serve: no court before the receiver
+        scouting.choose_event(EventTypeEnum::P).unwrap();
         assert!(scouting.target_court().is_empty());
         assert!(matches!(
             scouting.touch_target(1, "A".into()),
             Err(MobileError::Scouting { .. })
         ));
+        let receiver = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(receiver).unwrap();
+        assert!(scouting.target_ours());
+        let rows: Vec<String> = scouting
+            .target_court()
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| c.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        assert_eq!(rows.first().map(String::as_str), Some("4C 4B 3C 3B 2C 2B"));
+        assert_eq!(rows.last().map(String::as_str), Some("5D 5A 6D 6A 1D 1A"));
+        scouting.touch_target(6, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let state = scouting.state();
+        assert_eq!(
+            state.events.first().and_then(|e| e.target.as_deref()),
+            Some("6A")
+        );
     }
 
     #[test]
@@ -5350,6 +5383,32 @@ mod tests {
             .fundamental
             .unwrap();
         assert!(reception.targets.is_empty());
+        // a reception in 6A: our court, 4 at the net on the left
+        scouting.touch_target(1, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        let receiver = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(receiver).unwrap();
+        scouting.touch_target(6, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let reception = scouting
+            .detail(StatsScope::Match, EventTypeEnum::P, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        assert_eq!((reception.total, reception.targets_told), (1, 1));
+        let first: Vec<&str> = reception.targets[0]
+            .iter()
+            .map(|t| t.label.as_str())
+            .collect();
+        assert_eq!(first, vec!["4", "4/3", "3", "3/2", "2"]);
+        let z6 = reception
+            .targets
+            .iter()
+            .flatten()
+            .find(|t| t.label == "6")
+            .unwrap();
+        assert_eq!((z6.count, z6.share), (1, 100.0));
     }
 
     #[test]

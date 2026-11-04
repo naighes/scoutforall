@@ -126,10 +126,12 @@ fun Court(
     serveZone: Boolean = false,
     ball: CourtBall? = null,
     targets: List<List<CourtCellChoice>> = emptyList(),
+    targetsOurs: Boolean = false,
     onTarget: (CourtCellChoice) -> Unit = {},
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
-    // the zones where our serve went on a square court (its true
-    // proportions), to leave them room to touch; the server is told above
+    // the zones where the ball went (our serve on theirs, our reception on
+    // ours) on a square court (its true proportions), to leave them room to
+    // touch; the player is told above
     val aiming = targets.isNotEmpty()
     val zone = when {
         aiming -> 0.dp
@@ -141,7 +143,7 @@ fun Court(
         constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * aspect)
         else -> maxWidth
     }
-    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, onTarget, Modifier.width(width))
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, onTarget, Modifier.width(width))
 }
 
 @Composable
@@ -152,6 +154,7 @@ private fun CourtColumn(
     serveZone: Boolean,
     ball: CourtBall?,
     targets: List<List<CourtCellChoice>>,
+    targetsOurs: Boolean,
     onTarget: (CourtCellChoice) -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
@@ -170,11 +173,11 @@ private fun CourtColumn(
             val attack = size.height / 3
             if (!aiming) drawLine(lines, Offset(0f, attack), Offset(size.width, attack), strokeWidth = line)
             // their court as our server sees it: the net at the bottom
-            val netY = if (aiming) size.height else 0f
+            val netY = if (aiming && !targetsOurs) size.height else 0f
             drawLine(net, Offset(0f, netY), Offset(size.width, netY), strokeWidth = 4.dp.toPx())
         }
-        // where our serve went, in place of the players
-        if (targets.isNotEmpty()) TargetZones(targets, onTarget)
+        // where the ball went, in place of the players
+        if (targets.isNotEmpty()) TargetZones(targets, targetsOurs, onTarget)
         else BoxWithConstraints(Modifier.fillMaxSize()) {
             // the player on the spot, the name under the jersey in two
             // lines, a third of the court wide; on a court narrower than a
@@ -258,15 +261,16 @@ private fun CourtColumn(
 private val ServeZone = 72.dp
 
 /** The court of the opponent as our server sees it (their end line at the
- * top, 1 on the left, the net at the bottom): the nine zones, each in the
- * four cells of DataVolley, to touch where the ball went; a cell alone, or
+ * top, 1 on the left, the net at the bottom), or ours (`ours`: seen from
+ * the bench, the net at the top, 4 on the left): the nine zones, each in
+ * the four cells of DataVolley, to touch where the ball went; a cell alone, or
  * along with the one next to it (two cells of two zones are on the line
  * between them); the cells chosen filled, touched again to take them
  * back. The lines between the zones bolder than between the cells. */
 @Composable
-private fun TargetZones(rows: List<List<CourtCellChoice>>, onTarget: (CourtCellChoice) -> Unit) =
+private fun TargetZones(rows: List<List<CourtCellChoice>>, ours: Boolean, onTarget: (CourtCellChoice) -> Unit) =
     Box(Modifier.fillMaxSize()) {
-        val zoneDescription = stringResource(R.string.serve_zone)
+        val zoneDescription = stringResource(if (ours) R.string.reception_zone else R.string.serve_zone)
         val chosenState = stringResource(R.string.zone_chosen)
         val colors = MaterialTheme.colorScheme
         val cellLines = colors.onSurface.copy(alpha = 0.25f)

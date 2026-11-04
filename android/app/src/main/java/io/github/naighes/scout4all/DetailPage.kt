@@ -233,7 +233,7 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
             }
         }
     }
-    if (f.targets.isNotEmpty()) ServeZones(f)
+    if (f.targets.isNotEmpty()) TargetZones(f, reception = query.event == EventTypeEnum.P)
     if (f.players.isNotEmpty()) {
         Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
         Column {
@@ -389,14 +389,19 @@ private fun FreeballContent(f: FreeballStats) = TileRow {
     }
 }
 
-/** The serves with their zone told: where they went, the more the brighter
- * amber; or their efficiency there, red to green, from a few serves on. */
+/** The serves with their zone told, on their court, or the receptions, on
+ * ours: where they went, the more the brighter amber; or their efficiency
+ * there, red to green, from a few on. */
 @Composable
-private fun ServeZones(f: FundamentalDetail) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun TargetZones(f: FundamentalDetail, reception: Boolean) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     var efficiency by rememberSaveable { mutableStateOf(false) }
-    Text(stringResource(R.string.serves_by_zone), Modifier.title(), style = MaterialTheme.typography.titleMedium)
+    val (title, told) = when (reception) {
+        true -> R.string.receptions_by_zone to R.string.reception_zones_told
+        false -> R.string.serves_by_zone to R.string.zones_told
+    }
+    Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
     Text(
-        stringResource(R.string.zones_told, f.targetsTold.toInt(), f.total.toInt()),
+        stringResource(told, f.targetsTold.toInt(), f.total.toInt()),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -481,8 +486,9 @@ private fun ZoneCell(t: TargetStats, background: Color?, value: String, detail: 
     }
 }
 
-/** The court of the opponent as our server sees it, square, their end line
- * at the top (1 on the left): the zones a row each as `rows` gives them, the conflict zones narrower between them. A
+/** The court, square: the opponent's as our server sees it (their end line
+ * at the top, 1 on the left) or ours from the bench (the net at the top, 4
+ * on the left), the zones a row each as `rows` gives them, the conflict zones narrower between them. A
  * row grows with its texts, at a large font. */
 @Composable
 private fun <T> ZoneGrid(rows: List<List<T>>, cell: @Composable (T) -> Unit) =
