@@ -86,6 +86,11 @@ impl StartScreen {
         screen
     }
 
+    /// The match, for the bar on top.
+    pub fn title(&self) -> String {
+        format!("{} – {}", self.lineup.team, self.lineup.opponent)
+    }
+
     pub fn set_start(&self) -> Arc<SetStart> {
         self.start.clone()
     }
@@ -286,7 +291,7 @@ impl StartScreen {
         .concat()
     }
 
-    fn title(&self, s: &Strings) -> String {
+    fn step_title(&self, s: &Strings) -> String {
         match self.step {
             Step::Serving => s.serving_first.to_string(),
             Step::Position(p) => format!("{} {p}", s.position),
@@ -301,9 +306,13 @@ impl StartScreen {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => space::vertical().height(0).into(),
         };
-        let left = container(ui::panel(Some(&self.title(s)), self.choices_view(s, c), c))
-            .width(Length::Fixed(400.0))
-            .height(Length::Fill);
+        let left = container(ui::panel(
+            Some(&self.step_title(s)),
+            self.choices_view(s, c),
+            c,
+        ))
+        .width(Length::Fixed(400.0))
+        .height(Length::Fill);
         column![
             error,
             row![left, self.lineup_view(s, c)]

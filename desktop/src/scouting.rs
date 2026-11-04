@@ -512,6 +512,12 @@ fn small<'a>(s: impl ToString, c: Colors) -> iced::widget::Text<'a> {
 }
 
 impl ScoutingScreen {
+    /// The match, for the bar on top.
+    pub fn title(&self) -> String {
+        let st = &self.snapshot.state;
+        format!("{} – {}", st.team, st.opponent)
+    }
+
     /// The keys of the screen, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         vec![

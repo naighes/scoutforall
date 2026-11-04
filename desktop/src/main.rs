@@ -9,6 +9,7 @@ mod home;
 mod keymap;
 mod scouting;
 mod settings;
+mod splash;
 mod start;
 mod strings;
 mod theme;
@@ -25,7 +26,12 @@ use {
     scout4all_mobile::{Home, Scout4All},
     scouting::{Outcome, ScoutingScreen},
     settings::SettingsScreen,
-    std::{path::PathBuf, str::FromStr, sync::Arc, sync::OnceLock, time::Instant},
+    std::{
+        path::PathBuf,
+        str::FromStr,
+        sync::{Arc, Mutex, OnceLock},
+        time::Instant,
+    },
     strings::Strings,
 };
 
@@ -76,7 +82,6 @@ struct App {
     dark: bool,
     screen: Screen,
     error: Option<String>,
-    first_frame: OnceLock<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,11 +94,16 @@ enum Message {
     OpenSettings,
     Scouting(scouting::Message),
     Start(start::Message),
+    /// a frame of the splash
+    Frame(Instant),
+    Loaded(Loaded),
     Settings(settings::Message),
 }
 
 impl App {
-    fn boot() -> (App, Task<Message>) {
+    /// Reads the configuration and the data: on a thread, the splash on
+    /// screen meanwhile.
+    fn load() -> App {
         let dir = data_dir().unwrap_or_else(|| PathBuf::from(".scout4all"));
         let (language, keys) = config(&dir);
         let strings = strings::strings(language);
@@ -126,10 +136,19 @@ impl App {
                 selected: 0,
             },
             error,
-            first_frame: OnceLock::new(),
         };
         app.go_home();
-        (app, Task::none())
+        app
+    }
+
+    /// The title of the screen, in the middle of the bar.
+    fn title(&self) -> String {
+        match (&self.settings, &self.screen) {
+            (Some(_), _) => self.strings.settings.to_string(),
+            (None, Screen::Home { .. }) => String::new(),
+            (None, Screen::Start(screen)) => screen.title(),
+            (None, Screen::Scouting(screen)) => screen.title(),
+        }
     }
 
     fn go_home(&mut self) {
@@ -231,6 +250,7 @@ impl App {
         }
         match (message, &mut self.screen) {
             (Message::Settings(_) | Message::OpenSettings, _) => {}
+            (Message::Frame(_) | Message::Loaded(_), _) => {}
             (Message::Back, Screen::Scouting(_)) => self.go_home(),
             (Message::Back, Screen::Start(screen)) => {
                 let outcome = screen.key(BACK_KEY);
@@ -279,9 +299,6 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        if let (Ok(()), Some(started)) = (self.first_frame.set(()), STARTED.get()) {
-            eprintln!("first frame after {} ms", started.elapsed().as_millis());
-        }
         let c = self.colors();
         let s = self.strings;
         let (screen, hints, back): (Element<'_, Message>, _, _) =
@@ -307,6 +324,7 @@ impl App {
             };
         let top = ui::top_bar(
             back.then_some(Message::Back),
+            self.title(),
             vec![
                 ui::bar_button("◐", Message::ToggleTheme, c),
                 ui::bar_button("⚙", Message::OpenSettings, c),
@@ -332,10 +350,6 @@ impl App {
             .into()
     }
 
-    fn theme(&self) -> Theme {
-        theme::theme(self.dark)
-    }
-
     fn subscription(&self) -> Subscription<Message> {
         event::listen_with(|event, status, _| match (event, status) {
             (
@@ -351,6 +365,90 @@ impl App {
     }
 }
 
+/// The app once read, from the thread that read it.
+#[derive(Clone)]
+struct Loaded(Arc<Mutex<Option<App>>>);
+
+impl std::fmt::Debug for Loaded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Loaded")
+    }
+}
+
+/// The splash until the app is read and the ball has come in, then the
+/// app.
+struct Main {
+    splash: Option<splash::Splash>,
+    app: Option<App>,
+    first_frame: OnceLock<()>,
+}
+
+impl Main {
+    fn boot() -> (Main, Task<Message>) {
+        let (tx, rx) = iced::futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(App::load());
+        });
+        let main = Main {
+            splash: Some(splash::Splash::new()),
+            app: None,
+            first_frame: OnceLock::new(),
+        };
+        let loaded = Task::perform(async move { rx.await.ok() }, |app| {
+            Message::Loaded(Loaded(Arc::new(Mutex::new(app))))
+        });
+        (main, loaded)
+    }
+
+    fn update(&mut self, message: Message) {
+        match (message, &mut self.splash, &mut self.app) {
+            (Message::Frame(now), Some(splash), _) => splash.tick(now),
+            (Message::Loaded(Loaded(app)), _, _) => {
+                let app = app.lock().ok().and_then(|mut app| app.take());
+                match app {
+                    Some(app) => self.app = Some(app),
+                    // the thread ended without the app: nothing to show
+                    None => std::process::exit(1),
+                }
+                if let Some(started) = STARTED.get() {
+                    eprintln!("data read after {} ms", started.elapsed().as_millis());
+                }
+            }
+            (message, None, Some(app)) => app.update(message),
+            _ => {}
+        }
+        if let (Some(splash), Some(_)) = (&self.splash, &self.app)
+            && splash.done()
+        {
+            self.splash = None;
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        if let (Ok(()), Some(started)) = (self.first_frame.set(()), STARTED.get()) {
+            eprintln!("first frame after {} ms", started.elapsed().as_millis());
+        }
+        match (&self.splash, &self.app) {
+            (None, Some(app)) => app.view(),
+            _ => self
+                .splash
+                .as_ref()
+                .map_or_else(|| splash::Splash::new().view(), |splash| splash.view()),
+        }
+    }
+
+    fn theme(&self) -> Theme {
+        theme::theme(self.app.as_ref().is_none_or(|app| app.dark))
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        match (&self.splash, &self.app) {
+            (None, Some(app)) => app.subscription(),
+            _ => window::frames().map(Message::Frame),
+        }
+    }
+}
+
 fn main() -> iced::Result {
     let _ = STARTED.set(Instant::now());
     // as the CLI: the self-update of the old clients checks it
@@ -359,13 +457,13 @@ fn main() -> iced::Result {
         return Ok(());
     }
     let fonts = theme::fonts();
-    iced::application(App::boot, App::update, App::view)
+    iced::application(Main::boot, Main::update, Main::view)
         .title("scout4all")
         .font(fonts.bytes[0])
         .font(fonts.bytes[1])
         .default_font(fonts.regular)
-        .theme(App::theme)
-        .subscription(App::subscription)
+        .theme(Main::theme)
+        .subscription(Main::subscription)
         .window(window::Settings {
             size: Size::new(1400.0, 860.0),
             min_size: Some(Size::new(1000.0, 640.0)),

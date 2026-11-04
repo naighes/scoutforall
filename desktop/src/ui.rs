@@ -1,13 +1,14 @@
 //! The pieces every screen is made of: the bars, the panels, the pill
-//! buttons, the rows of a list, the keys shown next to what they do.
+//! buttons, the rows of a list, the keys shown next to what they do. The
+//! amber marks what acts and what's chosen, as a line marks the court.
 
 use {
     crate::theme::{
-        self, BAR, BORDER, Colors, RADIUS_PANEL, RADIUS_PILL, SIZE_BODY, SIZE_SMALL, SIZE_TITLE,
+        self, BORDER, Colors, RADIUS_PANEL, RADIUS_PILL, SIZE_BODY, SIZE_SMALL, SIZE_TITLE,
     },
     iced::{
-        Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Vector,
-        widget::{button, column, container, row, space, text},
+        Alignment, Background, Border, Color, Element, Length, Padding,
+        widget::{button, column, container, row, space, svg, text},
     },
 };
 
@@ -19,8 +20,20 @@ fn border(color: Color, width: f32, radius: f32) -> Border {
     }
 }
 
-/// A round panel with its title centered on top, in the color of the
-/// actions.
+/// The amber mark before a title, a line of the court.
+fn mark<'a, M: 'a>(c: Colors, height: f32) -> Element<'a, M> {
+    container(space::horizontal().width(0))
+        .width(Length::Fixed(4.0))
+        .height(Length::Fixed(height))
+        .style(move |_| container::Style {
+            background: Some(c.accent.into()),
+            border: border(Color::TRANSPARENT, 0.0, 2.0),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// A panel with its title on top, after the amber mark.
 pub fn panel<'a, M: 'a>(
     title: Option<&str>,
     content: impl Into<Element<'a, M>>,
@@ -28,22 +41,23 @@ pub fn panel<'a, M: 'a>(
 ) -> Element<'a, M> {
     let body: Element<'a, M> = match title {
         Some(title) => column![
-            container(
+            row![
+                mark(c, 18.0),
                 text(title.to_string())
                     .size(SIZE_TITLE)
                     .font(theme::fonts().bold)
-                    .color(c.accent)
-            )
-            .width(Length::Fill)
-            .align_x(Alignment::Center),
+                    .color(c.text)
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
             content.into()
         ]
-        .spacing(10)
+        .spacing(12)
         .into(),
         None => content.into(),
     };
     container(body)
-        .padding(14)
+        .padding(16)
         .style(move |_| container::Style {
             background: Some(c.panel.into()),
             border: border(c.border, BORDER, RADIUS_PANEL),
@@ -61,7 +75,8 @@ pub fn section<'a, M: 'a>(title: &str, c: Colors) -> Element<'a, M> {
         .into()
 }
 
-/// A pill button: chosen, it has the border of the actions.
+/// A pill button: chosen, it's filled with amber, as the site marks what's
+/// selected.
 pub fn pill<'a, M: Clone + 'a>(
     label: &str,
     chosen: bool,
@@ -78,31 +93,23 @@ pub fn pill<'a, M: Clone + 'a>(
     .style(move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: Some(Background::Color(match (chosen, hovered) {
-                (true, _) => theme::mix(c.button, c.accent, 0.25),
-                (false, true) => theme::mix(c.button, c.accent, 0.12),
-                (false, false) => c.button,
-            })),
-            text_color: c.text,
+            background: match chosen {
+                true => Some(Background::Color(c.accent)),
+                false => None,
+            },
+            text_color: match chosen {
+                true => c.on_accent,
+                false => c.text,
+            },
             border: border(
-                match chosen {
-                    true => c.accent,
-                    false => Color::TRANSPARENT,
+                match (chosen, hovered) {
+                    (true, _) => c.accent,
+                    (false, true) => Color { a: 0.7, ..c.accent },
+                    (false, false) => c.border,
                 },
                 BORDER,
                 RADIUS_PILL,
             ),
-            shadow: match hovered {
-                true => Shadow {
-                    color: Color {
-                        a: 0.35,
-                        ..Color::BLACK
-                    },
-                    offset: Vector::new(0.0, 2.0),
-                    blur_radius: 2.0,
-                },
-                false => Shadow::default(),
-            },
             ..button::Style::default()
         }
     })
@@ -166,22 +173,22 @@ pub fn list_row<'a, M: Clone + 'a>(
                 background: match (chosen, hovered) {
                     (true, _) => Some(
                         Color {
-                            a: 0.22,
+                            a: 0.14,
                             ..c.accent
                         }
                         .into(),
                     ),
-                    (false, true) => Some(Color { a: 0.6, ..c.button }.into()),
+                    (false, true) => Some(Color { a: 0.7, ..c.button }.into()),
                     (false, false) => None,
                 },
                 text_color: c.text,
                 border: border(
                     match chosen {
-                        true => Color { a: 0.7, ..c.accent },
+                        true => c.accent,
                         false => Color::TRANSPARENT,
                     },
                     1.0,
-                    10.0,
+                    8.0,
                 ),
                 ..button::Style::default()
             }
@@ -189,100 +196,145 @@ pub fn list_row<'a, M: Clone + 'a>(
         .into()
 }
 
-/// A round button on a bar, dark on the amber.
+/// A round button on a bar: an outline, amber under the mouse.
 pub fn bar_button<'a, M: Clone + 'a>(label: &str, message: M, c: Colors) -> Element<'a, M> {
     button(
         text(label.to_string())
             .size(SIZE_TITLE)
-            .color(theme::DARK.text)
             .align_x(Alignment::Center),
     )
-    .padding(Padding::from([4, 18]))
+    .padding(Padding::from([3, 14]))
     .on_press(message)
-    .style(move |_, status| button::Style {
-        background: Some(
-            match status {
-                button::Status::Hovered | button::Status::Pressed => {
-                    theme::mix(c.on_accent, theme::DARK.button, 0.5)
-                }
-                _ => c.on_accent,
-            }
-            .into(),
-        ),
-        text_color: theme::DARK.text,
-        border: border(Color::TRANSPARENT, 0.0, RADIUS_PILL),
-        ..button::Style::default()
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: None,
+            text_color: match hovered {
+                true => c.accent,
+                false => c.text,
+            },
+            border: border(
+                match hovered {
+                    true => c.accent,
+                    false => c.border,
+                },
+                BORDER,
+                RADIUS_PILL,
+            ),
+            ..button::Style::default()
+        }
     })
     .into()
 }
 
-fn bar<'a, M: 'a>(content: impl Into<Element<'a, M>>, height: f32) -> Element<'a, M> {
-    container(content)
+/// The ball of the logo, in the color of the text.
+pub fn ball<'a>(size: f32, c: Colors) -> svg::Svg<'a> {
+    svg(svg::Handle::from_memory(theme::BALL))
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(move |_, _| svg::Style {
+            color: Some(c.text),
+        })
+}
+
+/// The name of the app as the site writes it, `height` tall.
+pub fn wordmark<'a>(height: f32, c: Colors) -> svg::Svg<'a> {
+    svg(svg::Handle::from_memory(theme::WORDMARK))
+        .width(Length::Fixed(height * 9112.0 / 1512.0))
+        .height(Length::Fixed(height))
+        .style(move |_, _| svg::Style {
+            color: Some(c.text),
+        })
+}
+
+/// A line across, in amber or in the color of the borders.
+fn line<'a, M: 'a>(color: Color, height: f32) -> Element<'a, M> {
+    container(space::horizontal().width(0))
         .width(Length::Fill)
         .height(Length::Fixed(height))
-        .padding(Padding::from([0, 18]))
-        .align_y(Alignment::Center)
-        .style(|_| container::Style {
-            background: Some(BAR.into()),
+        .style(move |_| container::Style {
+            background: Some(color.into()),
             ..container::Style::default()
         })
         .into()
 }
 
-/// The bar on top: back on the left, the name in the middle, the buttons
-/// on the right.
+fn bar<'a, M: 'a>(content: impl Into<Element<'a, M>>, height: f32, c: Colors) -> Element<'a, M> {
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .padding(Padding::from([0, 18]))
+        .align_y(Alignment::Center)
+        .style(move |_| container::Style {
+            background: Some(c.bar.into()),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// The bar on top: back and the logo on the left, the screen in the
+/// middle, the buttons on the right; an amber line below.
 pub fn top_bar<'a, M: Clone + 'a>(
     back: Option<M>,
+    title: String,
     right: Vec<Element<'a, M>>,
     c: Colors,
 ) -> Element<'a, M> {
-    let left: Element<'a, M> = match back {
+    let back: Element<'a, M> = match back {
         Some(back) => bar_button("←", back, c),
         None => space::horizontal().width(0).into(),
     };
-    let name = text("scout4all")
-        .size(26)
+    let logo = row![back, ball(26.0, c), wordmark(17.0, c)]
+        .spacing(12)
+        .align_y(Alignment::Center);
+    let title = text(title)
+        .size(SIZE_BODY)
         .font(theme::fonts().bold)
-        .color(c.on_accent);
-    bar(
-        row![
-            container(left).width(Length::Fill),
-            name,
-            container(row(right).spacing(10))
-                .width(Length::Fill)
-                .align_x(Alignment::End),
-        ]
-        .align_y(Alignment::Center),
-        60.0,
-    )
+        .color(c.muted);
+    column![
+        bar(
+            row![
+                container(logo).width(Length::Fill),
+                title,
+                container(row(right).spacing(10))
+                    .width(Length::Fill)
+                    .align_x(Alignment::End),
+            ]
+            .align_y(Alignment::Center),
+            58.0,
+            c,
+        ),
+        line(c.accent, 2.0),
+    ]
+    .into()
 }
 
 /// The bar at the bottom: the version on the left, the keys of the screen
 /// on the right.
 pub fn bottom_bar<'a, M: 'a>(hints: Vec<(String, String)>, c: Colors) -> Element<'a, M> {
     let hints = row(hints.into_iter().map(|(key, what)| {
-        row![
-            text(key)
-                .size(SIZE_SMALL)
-                .font(theme::fonts().bold)
-                .color(c.on_accent),
-            text(what).size(SIZE_SMALL).color(c.on_accent),
-        ]
-        .spacing(6)
-        .into()
+        row![keycap(&key, c), text(what).size(SIZE_SMALL).color(c.muted)]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into()
     }))
-    .spacing(20);
-    bar(
-        row![
-            text(format!("scout4all {}", scout4all_mobile::version()))
-                .size(SIZE_SMALL)
-                .color(c.on_accent),
-            space::horizontal(),
-            hints,
-        ]
-        .align_y(Alignment::Center),
-        34.0,
-    )
+    .spacing(18);
+    column![
+        line(c.border, 1.0),
+        bar(
+            row![
+                text(format!("v{}", scout4all_mobile::version()))
+                    .size(SIZE_SMALL)
+                    .color(c.muted),
+                space::horizontal(),
+                hints,
+            ]
+            .align_y(Alignment::Center),
+            36.0,
+            c,
+        ),
+    ]
+    .into()
 }
 
 /// Plain text of the body.

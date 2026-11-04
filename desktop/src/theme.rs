@@ -1,7 +1,6 @@
-//! The look of the desktop app: the amber of the Android app on a deep
-//! blue, bars of amber at the top and at the bottom, round panels with
-//! light borders, pill buttons, one monospaced font. Dark, and a light
-//! version of it.
+//! The look of the desktop app, the one of the site and of the Android
+//! app: zinc surfaces, the amber of the actions, the white ball of the logo.
+//! Dark, and a light version of it.
 
 use iced::{
     Color, Font, Theme,
@@ -47,7 +46,8 @@ const PLEX: Fonts = Fonts {
     ],
 };
 
-/// The font of the app: IBM Plex Mono.
+/// The font of the app: IBM Plex Mono; the name in the bar is the one of
+/// the site, drawn (`assets/wordmark.svg`).
 pub fn fonts() -> &'static Fonts {
     &PLEX
 }
@@ -59,9 +59,9 @@ pub const SIZE_TITLE: f32 = 18.0;
 pub const SIZE_SCORE: f32 = 34.0;
 
 // borders
-pub const RADIUS_PANEL: f32 = 15.0;
+pub const RADIUS_PANEL: f32 = 12.0;
 pub const RADIUS_PILL: f32 = 180.0;
-pub const BORDER: f32 = 2.0;
+pub const BORDER: f32 = 1.0;
 
 // --- colors ---------------------------------------------------------------
 
@@ -71,7 +71,8 @@ pub struct Colors {
     pub dark: bool,
     /// behind everything
     pub background: Color,
-    /// the panels, a veil on the background
+    /// the bars at the top and at the bottom
+    pub bar: Color,
     pub panel: Color,
     /// the borders of the panels and of the buttons
     pub border: Color,
@@ -79,31 +80,27 @@ pub struct Colors {
     pub button: Color,
     pub text: Color,
     pub muted: Color,
-    /// the actions, the titles, the bars
+    /// the actions and what's chosen
     pub accent: Color,
-    /// the text on the bars
+    /// the text on the accent
     pub on_accent: Color,
     pub court: Color,
     pub court_lines: Color,
     pub danger: Color,
 }
 
+/// The surfaces of the site (`web/src/assets/css/global.css`).
 pub const DARK: Colors = Colors {
     dark: true,
-    background: rgb(0x0F172A),
-    panel: Color {
-        a: 0.55,
-        ..rgb(0x1E293B)
-    },
-    border: Color {
-        a: 0.55,
-        ..rgb(0x475569)
-    },
-    button: rgb(0x334155),
-    text: rgb(0xEEF2F7),
-    muted: rgb(0x94A3B8),
+    background: rgb(0x121212),
+    bar: rgb(0x18181B),
+    panel: rgb(0x18181B),
+    border: rgb(0x2F2F31),
+    button: rgb(0x2F2F31),
+    text: rgb(0xEEEEEE),
+    muted: rgb(0xA8A8A8),
     accent: AMBER,
-    on_accent: rgb(0x0F172A),
+    on_accent: rgb(0x121212),
     court: rgb(0x1B2A44),
     court_lines: rgb(0xCBD5E1),
     danger: LOST,
@@ -111,21 +108,16 @@ pub const DARK: Colors = Colors {
 
 pub const LIGHT: Colors = Colors {
     dark: false,
-    background: rgb(0xEEF2F7),
-    panel: Color {
-        a: 0.85,
-        ..rgb(0xFFFFFF)
-    },
-    border: Color {
-        a: 0.8,
-        ..rgb(0xCBD5E1)
-    },
-    button: rgb(0xE2E8F0),
-    text: rgb(0x0F172A),
-    muted: rgb(0x475569),
-    // darker, to read on white; the bars keep the amber of the app
+    background: rgb(0xF4F4F5),
+    bar: rgb(0xFFFFFF),
+    panel: rgb(0xFFFFFF),
+    border: rgb(0xE4E4E7),
+    button: rgb(0xE4E4E7),
+    text: rgb(0x18181B),
+    muted: rgb(0x52525B),
+    // darker, to read on white
     accent: rgb(0xB45309),
-    on_accent: rgb(0x0F172A),
+    on_accent: rgb(0xFFFFFF),
     court: rgb(0xE6EEF8),
     court_lines: rgb(0x334155),
     danger: rgb(0xB91C1C),
@@ -137,9 +129,6 @@ pub fn colors(dark: bool) -> Colors {
         false => LIGHT,
     }
 }
-
-/// The amber of the bars, the same on both themes.
-pub const BAR: Color = AMBER;
 
 pub fn theme(dark: bool) -> Theme {
     let c = colors(dark);
@@ -196,3 +185,7 @@ pub fn grade_color(grade: f64, c: Colors) -> Color {
         false => mix(color, Color::BLACK, 0.35),
     }
 }
+
+/// The ball of the logo, white, and the name of the app, as on the site.
+pub const BALL: &[u8] = include_bytes!("../assets/ball.svg");
+pub const WORDMARK: &[u8] = include_bytes!("../assets/wordmark.svg");
