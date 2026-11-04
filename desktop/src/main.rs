@@ -132,27 +132,23 @@ impl App {
         {
             Ok(scouting) => {
                 self.error = None;
-                self.screen = Screen::Scouting(Box::new(ScoutingScreen::new(
-                    scouting,
-                    self.keys.clone(),
-                    self.colors(),
-                )))
+                self.screen =
+                    Screen::Scouting(Box::new(ScoutingScreen::new(scouting, self.keys.clone())))
             }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
     fn update(&mut self, message: Message) {
-        let colors = self.colors();
         match (message, &mut self.screen) {
             (Message::ToggleTheme, _) => self.dark = !self.dark,
             (Message::Open(open), _) => self.open(open),
-            (Message::Scouting(m), Screen::Scouting(screen)) => match screen.update(m, colors) {
+            (Message::Scouting(m), Screen::Scouting(screen)) => match screen.update(m) {
                 Outcome::Stay => {}
                 Outcome::Leave => self.go_home(),
             },
             (Message::Scouting(_), Screen::Home { .. }) => {}
-            (Message::Key(ck), Screen::Scouting(screen)) => match screen.key(ck, colors) {
+            (Message::Key(ck), Screen::Scouting(screen)) => match screen.key(ck) {
                 Outcome::Stay => {}
                 Outcome::Leave => self.go_home(),
             },

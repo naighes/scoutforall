@@ -1,7 +1,7 @@
 //! The trend of a figure set by set, as the stats sheet of the app draws
 //! it: a line per set from its first rally, the match so far dashed
-//! across, the band of the level shaded. Drawn twice for the prototype, to
-//! choose the library (027): with the canvas of iced, and with iced_aksel.
+//! across, the band of the level shaded. Drawn with the canvas of iced
+//! (chosen over iced_aksel and plotters-iced, 027).
 
 use {
     crate::theme::{Colors, FAIR, set_color},
@@ -9,15 +9,10 @@ use {
         Color, Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse,
         widget::canvas::{self, Frame, Geometry, LineDash, Path, Stroke, Text},
     },
-    iced_aksel::{
-        Axis, Chart, Measure, Plot, PlotData, PlotPoint, State, axis,
-        scale::Linear,
-        shape::{Polyline, Rectangle as PlotRect},
-    },
     scout4all_mobile::TrendLine,
 };
 
-/// The points of a trend, ready to draw with either library.
+/// The points of a trend, ready to draw.
 #[derive(Debug, Clone)]
 pub struct Trend {
     /// each set: its number, its rallies (where the set had got to, the
@@ -90,8 +85,6 @@ impl Trend {
     }
 }
 
-// --- canvas -------------------------------------------------------------
-
 pub struct CanvasTrend {
     pub trend: Trend,
     pub colors: Colors,
@@ -145,9 +138,11 @@ impl<M> canvas::Program<M> for CanvasTrend {
                 position: Point::new(px, plot.height + 1.0),
                 color: c.muted,
                 size: 11.0.into(),
-                align_x: match p {
-                    0 => iced::widget::text::Alignment::Left,
-                    _ => iced::widget::text::Alignment::Center,
+                // the first and the last inside the chart
+                align_x: match (p, f64::from(p + 5) > t.points) {
+                    (0, _) => iced::widget::text::Alignment::Left,
+                    (_, true) => iced::widget::text::Alignment::Right,
+                    (_, false) => iced::widget::text::Alignment::Center,
                 },
                 ..Text::default()
             });
@@ -194,74 +189,5 @@ pub fn canvas_view<'a, M: 'a>(trend: Trend, colors: Colors) -> Element<'a, M> {
     iced::widget::canvas(CanvasTrend { trend, colors })
         .width(Length::Fill)
         .height(Length::Fixed(130.0))
-        .into()
-}
-
-// --- iced_aksel -----------------------------------------------------------
-
-const X: &str = "points";
-const Y: &str = "value";
-
-/// The axes of the chart: kept by the screen, iced_aksel draws from them.
-pub fn aksel_state(trend: &Trend) -> State<&'static str, f64> {
-    let mut state = State::new();
-    state.set_axis(
-        X,
-        Axis::new(Linear::new(0.0, trend.points), axis::Position::Bottom).with_thickness(22.0),
-    );
-    state.set_axis(
-        Y,
-        Axis::new(Linear::new(trend.low, trend.high), axis::Position::Left).with_thickness(36.0),
-    );
-    state
-}
-
-pub struct AkselTrend {
-    pub trend: Trend,
-    pub colors: Colors,
-}
-
-impl<M: Clone> PlotData<f64, M> for AkselTrend {
-    fn draw(&self, plot: &mut Plot<f64, M>, _theme: &Theme) {
-        let t = &self.trend;
-        if let Some((low, high)) = t.band {
-            plot.render(
-                PlotRect::corners(PlotPoint::new(0.0, low), PlotPoint::new(t.points, high))
-                    .fill(Color { a: 0.12, ..FAIR }),
-            );
-        }
-        if let Some(overall) = t.overall {
-            plot.render(Polyline::new(
-                vec![
-                    PlotPoint::new(0.0, overall),
-                    PlotPoint::new(t.points, overall),
-                ],
-                iced_aksel::Stroke::new(
-                    Color {
-                        a: 0.6,
-                        ..self.colors.text
-                    },
-                    Measure::Screen(1.5),
-                ),
-            ));
-        }
-        for (set, runs) in &t.sets {
-            for run in runs {
-                plot.render(Polyline::new(
-                    run.iter().map(|(x, v)| PlotPoint::new(*x, *v)).collect(),
-                    iced_aksel::Stroke::new(set_color(*set), Measure::Screen(2.0)),
-                ));
-            }
-        }
-    }
-}
-
-pub fn aksel_view<'a, M: Clone + 'static>(
-    state: &'a State<&'static str, f64>,
-    data: &'a AkselTrend,
-) -> Element<'a, M> {
-    iced::widget::container(Chart::new(state).plot_data(data, X, Y))
-        .width(Length::Fill)
-        .height(Length::Fixed(150.0))
         .into()
 }

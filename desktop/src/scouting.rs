@@ -5,7 +5,7 @@
 
 use {
     crate::{
-        charts::{self, AkselTrend, Trend},
+        charts::{self, Trend},
         court::{Content, Court, Touch},
         keymap,
         strings::Strings,
@@ -53,16 +53,8 @@ pub enum Message {
     Undo,
     Scope(bool),
     Recent(bool),
-    Chart(ChartLib),
     Series(usize),
     Dismiss,
-}
-
-/// The library the trend is drawn with, to compare them in the prototype.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChartLib {
-    Canvas,
-    Aksel,
 }
 
 /// What the screen does after a message or a key.
@@ -101,16 +93,15 @@ pub struct ScoutingScreen {
     show_stats: bool,
     match_scope: bool,
     recent: bool,
-    chart: ChartLib,
     series: usize,
-    aksel_state: iced_aksel::State<&'static str, f64>,
-    aksel_data: AkselTrend,
+    /// the trend of the series chosen, as the snapshot has it
+    trend: Trend,
     /// how long reading the snapshot took last, in milliseconds
     pub refresh_ms: u128,
 }
 
 impl ScoutingScreen {
-    pub fn new(scouting: Arc<Scouting>, keys: ScoutingKeys, colors: Colors) -> Self {
+    pub fn new(scouting: Arc<Scouting>, keys: ScoutingKeys) -> Self {
         let snapshot = read(&scouting, false);
         let trend = Trend::of_stats(snapshot.stats.as_ref(), 0, false);
         Self {
@@ -124,20 +115,16 @@ impl ScoutingScreen {
             show_stats: true,
             match_scope: false,
             recent: false,
-            chart: ChartLib::Canvas,
             series: 0,
-            aksel_state: charts::aksel_state(&trend),
-            aksel_data: AkselTrend { trend, colors },
+            trend,
             refresh_ms: 0,
         }
     }
 
-    fn refresh(&mut self, colors: Colors) {
+    fn refresh(&mut self) {
         let started = std::time::Instant::now();
         self.snapshot = read(&self.scouting, self.match_scope);
-        let trend = Trend::of_stats(self.snapshot.stats.as_ref(), self.series, self.recent);
-        self.aksel_state = charts::aksel_state(&trend);
-        self.aksel_data = AkselTrend { trend, colors };
+        self.trend = Trend::of_stats(self.snapshot.stats.as_ref(), self.series, self.recent);
         self.refresh_ms = started.elapsed().as_millis();
     }
 
@@ -162,10 +149,10 @@ impl ScoutingScreen {
         r.map_err(|e| self.scouting.message(&e))
     }
 
-    pub fn update(&mut self, message: Message, colors: Colors) -> Outcome {
+    pub fn update(&mut self, message: Message) -> Outcome {
         let mobile = |r: Result<Progress, MobileError>| r.map_err(|e| e.to_string());
         let outcome = match message {
-            Message::Dismiss => return self.dismiss(colors),
+            Message::Dismiss => return self.dismiss(),
             Message::Event(e) => {
                 let r = mobile(self.scouting.choose_event(e));
                 self.show(r);
@@ -238,25 +225,21 @@ impl ScoutingScreen {
                 self.recent = r;
                 Outcome::Stay
             }
-            Message::Chart(c) => {
-                self.chart = c;
-                Outcome::Stay
-            }
             Message::Series(s) => {
                 self.series = s;
                 Outcome::Stay
             }
         };
-        self.refresh(colors);
+        self.refresh();
         outcome
     }
 
-    fn dismiss(&mut self, colors: Colors) -> Outcome {
+    fn dismiss(&mut self) -> Outcome {
         self.notice = None;
         match self.set_over {
             true => Outcome::Leave,
             false => {
-                self.refresh(colors);
+                self.refresh();
                 Outcome::Stay
             }
         }
@@ -277,21 +260,21 @@ impl ScoutingScreen {
     }
 
     /// A key pressed in the window.
-    pub fn key(&mut self, ck: KeyCombination, colors: Colors) -> Outcome {
+    pub fn key(&mut self, ck: KeyCombination) -> Outcome {
         if self.notice.is_some() {
-            return self.dismiss(colors);
+            return self.dismiss();
         }
         let step = self.with(|s, _| s.step());
         match (ck, step) {
             (k, _) if k == BACK_KEY => return Outcome::Leave,
-            (k, _) if k == UNDO_KEY => return self.update(Message::Undo, colors),
+            (k, _) if k == UNDO_KEY => return self.update(Message::Undo),
             (k, _) if k == STATS_KEY => self.show_stats = !self.show_stats,
             (_, ScoutingStep::Event) => self.event_key(ck),
             (_, ScoutingStep::Player) => self.player_key(ck),
             (_, ScoutingStep::Eval) => self.eval_key(ck),
             (_, ScoutingStep::Replacement) => self.replacement_key(ck),
         }
-        self.refresh(colors);
+        self.refresh();
         Outcome::Stay
     }
 
@@ -993,20 +976,6 @@ impl ScoutingScreen {
         let modes = row![
             chip(s.so_far, !self.recent, Message::Recent(false), c),
             chip(s.last_touches, self.recent, Message::Recent(true), c),
-            space::horizontal(),
-            text(s.chart_with).size(12).color(c.muted),
-            chip(
-                "canvas",
-                self.chart == ChartLib::Canvas,
-                Message::Chart(ChartLib::Canvas),
-                c
-            ),
-            chip(
-                "aksel",
-                self.chart == ChartLib::Aksel,
-                Message::Chart(ChartLib::Aksel),
-                c
-            ),
         ]
         .spacing(4)
         .align_y(Alignment::Center);
@@ -1023,10 +992,9 @@ impl ScoutingScreen {
                     .into()
             }))
         .spacing(10);
-        let chart: Element<'a, Message> = match (self.aksel_data.trend.is_empty(), self.chart) {
-            (true, _) => text(s.no_rallies).size(13).color(c.muted).into(),
-            (false, ChartLib::Canvas) => charts::canvas_view(self.aksel_data.trend.clone(), c),
-            (false, ChartLib::Aksel) => charts::aksel_view(&self.aksel_state, &self.aksel_data),
+        let chart: Element<'a, Message> = match self.trend.is_empty() {
+            true => text(s.no_rallies).size(13).color(c.muted).into(),
+            false => charts::canvas_view(self.trend.clone(), c),
         };
         let content = column![
             title(s.stats, c),
