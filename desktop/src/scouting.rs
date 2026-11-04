@@ -9,11 +9,12 @@ use {
         court::{Content, Court, Touch},
         keymap,
         strings::Strings,
-        theme::{self, Colors, grade_color},
+        theme::{self, Colors, SIZE_BODY, SIZE_SCORE, SIZE_SMALL, grade_color},
+        ui,
     },
     iced::{
-        Alignment, Color, Element, Length, Padding,
-        widget::{Column, button, canvas, column, container, row, scrollable, space, text},
+        Alignment, Element, Length, Padding,
+        widget::{Column, canvas, column, container, row, scrollable, space, text},
     },
     scout4all_core::{
         scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
@@ -506,97 +507,27 @@ fn pct(v: Option<f64>) -> String {
     v.map_or_else(|| "–".to_string(), |v| format!("{v:.0}%"))
 }
 
-fn panel<'a>(content: impl Into<Element<'a, Message>>, c: Colors) -> Element<'a, Message> {
-    container(content)
-        .padding(12)
-        .style(move |_| container::Style {
-            background: Some(c.surface.into()),
-            border: iced::Border {
-                radius: 8.0.into(),
-                width: 1.0,
-                color: c.raised,
-            },
-            ..container::Style::default()
-        })
-        .into()
-}
-
-fn title<'a>(s: &str, c: Colors) -> Element<'a, Message> {
-    text(s.to_uppercase()).size(12).color(c.muted).into()
-}
-
-/// A choice with its key: a button the mouse presses too.
-fn choice<'a>(
-    key: Option<String>,
-    label: String,
-    chosen: bool,
-    message: Option<Message>,
-    c: Colors,
-) -> Element<'a, Message> {
-    let key = container(text(key.unwrap_or_default()).size(13).color(c.accent))
-        .width(Length::Fixed(44.0))
-        .align_x(Alignment::Center);
-    let body = row![key, text(label).size(15)]
-        .spacing(8)
-        .align_y(Alignment::Center);
-    button(body)
-        .width(Length::Fill)
-        .padding(Padding::from([5, 6]))
-        .on_press_maybe(message)
-        .style(move |_, status| {
-            let hover = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            button::Style {
-                background: match (chosen, hover) {
-                    (true, _) => Some(
-                        Color {
-                            a: 0.25,
-                            ..c.accent
-                        }
-                        .into(),
-                    ),
-                    (false, true) => Some(c.raised.into()),
-                    (false, false) => None,
-                },
-                text_color: c.text,
-                border: iced::Border {
-                    radius: 6.0.into(),
-                    ..iced::Border::default()
-                },
-                ..button::Style::default()
-            }
-        })
-        .into()
-}
-
-fn chip<'a>(label: &str, on: bool, message: Message, c: Colors) -> Element<'a, Message> {
-    button(text(label.to_string()).size(12))
-        .padding(Padding::from([3, 8]))
-        .on_press(message)
-        .style(move |_, _| button::Style {
-            background: Some(
-                match on {
-                    true => Color { a: 0.3, ..c.accent },
-                    false => c.raised,
-                }
-                .into(),
-            ),
-            text_color: c.text,
-            border: iced::Border {
-                radius: 12.0.into(),
-                ..iced::Border::default()
-            },
-            ..button::Style::default()
-        })
-        .into()
+fn small<'a>(s: impl ToString, c: Colors) -> iced::widget::Text<'a> {
+    text(s.to_string()).size(SIZE_SMALL).color(c.muted)
 }
 
 impl ScoutingScreen {
+    /// The keys of the screen, for the bar at the bottom.
+    pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        vec![
+            ("Esc".to_string(), s.back.to_string()),
+            ("⇧U".to_string(), s.undo.to_string()),
+            ("F2".to_string(), s.settings.to_string()),
+            ("F3".to_string(), s.stats.to_string()),
+        ]
+    }
+
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let left = column![self.header(s, c), self.choices(s, c)]
-            .spacing(12)
-            .width(Length::Fixed(320.0));
+            .spacing(14)
+            .width(Length::Fixed(340.0));
         let middle = column![self.court(c), self.last_events(s, c)]
-            .spacing(12)
+            .spacing(14)
             .width(Length::Fill);
         let body = match self.show_stats {
             true => row![
@@ -606,73 +537,94 @@ impl ScoutingScreen {
             ],
             false => row![left, middle],
         }
-        .spacing(12)
-        .padding(12)
+        .spacing(14)
         .height(Length::Fill);
-        let footer = text(format!("Esc {}   ⇧U {}   F3 {}", s.back, s.undo, s.stats))
-            .size(12)
-            .color(c.muted);
-        let page = column![body, container(footer).padding(Padding::from([0, 14]))];
         match &self.notice {
-            None => page.into(),
+            None => body.into(),
             Some((message, error)) => {
                 let message = match self.set_over {
                     true => s.set_over.to_string(),
                     false => message.clone(),
                 };
                 let color = match error {
-                    true => theme::LOST,
+                    true => c.danger,
                     false => c.accent,
                 };
-                let banner = button(text(message).size(15).color(color))
-                    .padding(10)
-                    .width(Length::Fill)
-                    .on_press(Message::Dismiss)
-                    .style(move |_, _| button::Style {
-                        background: Some(c.raised.into()),
-                        text_color: c.text,
-                        ..button::Style::default()
-                    });
-                column![banner, page].into()
+                let banner = ui::list_row(
+                    container(ui::body(message).color(color))
+                        .width(Length::Fill)
+                        .align_x(Alignment::Center),
+                    true,
+                    Some(Message::Dismiss),
+                    c,
+                );
+                column![banner, body].spacing(10).into()
             }
         }
     }
 
     fn header<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let st = &self.snapshot.state;
-        let serving = |side: TeamSideEnum| match st.serving_team == side {
-            true => format!(" ● {}", s.serving),
-            false => String::new(),
+        let bold = theme::fonts().bold;
+        let side = |name: String, score: u8, serving: bool, ours: bool| {
+            let dot: Element<'a, Message> = match serving {
+                true => text("●").size(SIZE_SMALL).color(c.accent).into(),
+                false => space::horizontal().width(Length::Fixed(10.0)).into(),
+            };
+            row![
+                dot,
+                text(name)
+                    .size(SIZE_BODY)
+                    .font(bold)
+                    .color(match ours {
+                        true => c.text,
+                        false => c.muted,
+                    })
+                    .width(Length::Fill),
+                text(score.to_string())
+                    .size(SIZE_SCORE)
+                    .font(bold)
+                    .color(match ours {
+                        true => c.accent,
+                        false => c.text,
+                    }),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
         };
-        let us = row![
-            text(st.team.clone()).size(16),
-            text(serving(TeamSideEnum::Us)).size(12).color(c.accent),
-            space::horizontal(),
-            text(st.score_us.to_string()).size(28),
+        let info = row![
+            ui::pill(
+                &format!("{} {}", s.set_n, st.set_number),
+                false,
+                None::<Message>,
+                c
+            ),
+            ui::pill(&format!("{}–{}", st.won, st.lost), false, None, c),
+            ui::pill(&format!("{} {}", s.rotation, st.rotation), false, None, c),
+            ui::pill(&format!("⇄ {}", st.substitutions_left), false, None, c),
         ]
-        .align_y(Alignment::Center);
-        let them = row![
-            text(st.opponent.clone()).size(16).color(c.muted),
-            text(serving(TeamSideEnum::Them)).size(12).color(c.accent),
-            space::horizontal(),
-            text(st.score_them.to_string()).size(28).color(c.muted),
-        ]
-        .align_y(Alignment::Center);
-        let info = text(format!(
-            "{} {} · {} {}–{} · {} {} · {} {}",
-            s.set_n,
-            st.set_number,
-            s.whole_match,
-            st.won,
-            st.lost,
-            s.rotation,
-            st.rotation,
-            s.substitutions,
-            st.substitutions_left
-        ))
-        .size(12)
-        .color(c.muted);
-        panel(column![us, them, info].spacing(4), c)
+        .spacing(6)
+        .wrap();
+        ui::panel(
+            None,
+            column![
+                side(
+                    st.team.clone(),
+                    st.score_us,
+                    st.serving_team == TeamSideEnum::Us,
+                    true
+                ),
+                side(
+                    st.opponent.clone(),
+                    st.score_them,
+                    st.serving_team == TeamSideEnum::Them,
+                    false
+                ),
+                info
+            ]
+            .spacing(6),
+            c,
+        )
     }
 
     fn choices<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -695,10 +647,21 @@ impl ScoutingScreen {
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        list = list.push(title(step_title, c));
         if !chosen.is_empty() {
-            list = list.push(text(chosen).size(14).color(c.accent));
+            list = list.push(
+                container(ui::body(chosen).color(c.accent))
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .padding(Padding::from([0, 0]).bottom(6)),
+            );
         }
+        let choice = |key: Option<String>, label: String, chosen: bool, message: Message| {
+            ui::choice(key, ui::body(label), chosen, Some(message), c)
+        };
+        let group = |list: Column<'a, Message>, title: &str| {
+            list.push(space::vertical().height(8))
+                .push(ui::section(title, c))
+        };
         match st.step {
             ScoutingStep::Event => {
                 for e in &snap.events {
@@ -707,13 +670,10 @@ impl ScoutingScreen {
                         key.as_ref().map(keymap::label),
                         e.name.clone(),
                         false,
-                        Some(Message::Event(e.value)),
-                        c,
+                        Message::Event(e.value),
                     ));
                 }
-                list = list
-                    .push(space::vertical().height(8))
-                    .push(title(s.options, c));
+                list = group(list, s.options);
                 let option_key = |o| {
                     self.keys
                         .option_keybindings
@@ -726,8 +686,7 @@ impl ScoutingScreen {
                         option_key(ScoutingOptionEnum::InvertedP1),
                         s.inverted_p1.to_string(),
                         st.inverted_p1,
-                        Some(Message::Option(ScoutingOptionEnum::InvertedP1)),
-                        c,
+                        Message::Option(ScoutingOptionEnum::InvertedP1),
                     ));
                 }
                 if st.reception_open {
@@ -735,8 +694,7 @@ impl ScoutingScreen {
                         option_key(ScoutingOptionEnum::Reception),
                         format!("{}: {}", s.reception, st.reception),
                         false,
-                        Some(Message::Option(ScoutingOptionEnum::Reception)),
-                        c,
+                        Message::Option(ScoutingOptionEnum::Reception),
                     ));
                 }
             }
@@ -746,14 +704,13 @@ impl ScoutingScreen {
                         Some(TEAM_KEY.to_string()),
                         s.team_fault.to_string(),
                         false,
-                        Some(Message::Team),
-                        c,
+                        Message::Team,
                     ));
                 }
                 for p in &snap.players {
-                    list = list.push(choice(
+                    list = list.push(ui::choice(
                         Some(p.index.to_string()),
-                        format!("{} {} · {}", p.number, p.name, p.role),
+                        player_label(p, c),
                         false,
                         Some(Message::Player(p.id.to_string())),
                         c,
@@ -762,9 +719,9 @@ impl ScoutingScreen {
             }
             ScoutingStep::Replacement => {
                 for p in &snap.replacements {
-                    list = list.push(choice(
+                    list = list.push(ui::choice(
                         Some(replacement_key(p.index)),
-                        format!("{} {} · {}", p.number, p.name, p.role),
+                        player_label(p, c),
                         false,
                         Some(Message::Replacement(p.id.to_string())),
                         c,
@@ -780,26 +737,21 @@ impl ScoutingScreen {
                         true => e.name.clone(),
                         false => format!("{}  {}", e.symbol, e.name),
                     };
-                    list = list.push(choice(key, name, false, Some(Message::Eval(e.value)), c));
+                    list = list.push(choice(key, name, false, Message::Eval(e.value)));
                 }
                 if !snap.techniques.is_empty() {
-                    list = list
-                        .push(space::vertical().height(8))
-                        .push(title(s.techniques, c));
+                    list = group(list, s.techniques);
                     for t in &snap.techniques {
                         list = list.push(choice(
                             self.technique_key(&t.value).as_ref().map(keymap::label),
                             t.name.clone(),
                             t.chosen,
-                            Some(Message::Technique(t.value)),
-                            c,
+                            Message::Technique(t.value),
                         ));
                     }
                 }
                 if !snap.blockers.is_empty() {
-                    list = list
-                        .push(space::vertical().height(8))
-                        .push(title(s.blockers, c));
+                    list = group(list, s.blockers);
                     for b in &snap.blockers {
                         let message = match b.chosen {
                             true => Message::Blockers(None),
@@ -809,28 +761,25 @@ impl ScoutingScreen {
                             Some(keymap::label(&BLOCKERS_KEY)),
                             b.name.clone(),
                             b.chosen,
-                            Some(message),
-                            c,
+                            message,
                         ));
                     }
                 }
                 if !snap.target.is_empty() {
-                    list = list
-                        .push(space::vertical().height(8))
-                        .push(title(s.target, c));
+                    list = group(list, s.target);
                     list = list.push(
-                        text(format!(
-                            "← ↑ ↓ →  {}   {}",
-                            keymap::label(&ZONE_KEY),
-                            snap.target_told.clone().unwrap_or_default()
-                        ))
-                        .size(13)
-                        .color(c.muted),
+                        row![
+                            ui::keycap("← ↑ ↓ →", c),
+                            ui::keycap(&keymap::label(&ZONE_KEY), c),
+                            ui::body(snap.target_told.clone().unwrap_or_default()).color(c.accent),
+                        ]
+                        .spacing(6)
+                        .align_y(Alignment::Center),
                     );
                 }
             }
         }
-        panel(scrollable(list).height(Length::Fill), c)
+        ui::panel(Some(step_title), scrollable(list).height(Length::Fill), c)
     }
 
     fn court<'a>(&'a self, c: Colors) -> Element<'a, Message> {
@@ -857,11 +806,11 @@ impl ScoutingScreen {
         let court = canvas(Court { content, colors: c })
             .width(Length::Fill)
             .height(Length::Fill);
-        panel(iced::Element::from(court).map(Message::Court), c)
+        ui::panel(None, iced::Element::from(court).map(Message::Court), c)
     }
 
     fn last_events<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let rows = self.snapshot.state.events.iter().take(8).map(|e| {
+        let rows = self.snapshot.state.events.iter().take(7).map(|e| {
             let who = e
                 .player
                 .as_ref()
@@ -874,116 +823,123 @@ impl ScoutingScreen {
                 .join(" ");
             row![
                 text(e.symbol.clone().unwrap_or_default())
-                    .size(14)
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold)
                     .color(c.accent)
-                    .width(Length::Fixed(18.0)),
-                text(e.name.clone()).size(14).width(Length::FillPortion(2)),
-                text(who)
-                    .size(14)
-                    .color(c.muted)
-                    .width(Length::FillPortion(3)),
-                text(extra)
-                    .size(13)
-                    .color(c.muted)
-                    .width(Length::FillPortion(2)),
+                    .width(Length::Fixed(20.0)),
+                ui::body(e.name.clone()).width(Length::FillPortion(2)),
+                ui::body(who).color(c.muted).width(Length::FillPortion(3)),
+                small(extra, c).width(Length::FillPortion(2)),
             ]
             .spacing(8)
             .into()
         });
-        panel(
-            column![
-                title(s.last_events, c),
-                Column::with_children(rows).spacing(3)
-            ]
-            .spacing(6)
-            .height(Length::Fixed(220.0)),
+        ui::panel(
+            Some(s.last_events),
+            Column::with_children(rows)
+                .spacing(4)
+                .height(Length::Fixed(190.0)),
             c,
         )
     }
 
     fn stats<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let scopes = row![
-            chip(s.this_set, !self.match_scope, Message::Scope(false), c),
-            chip(s.whole_match, self.match_scope, Message::Scope(true), c),
-        ]
-        .spacing(6);
+        let scopes = container(
+            row![
+                ui::pill(
+                    s.this_set,
+                    !self.match_scope,
+                    Some(Message::Scope(false)),
+                    c
+                ),
+                ui::pill(
+                    s.whole_match,
+                    self.match_scope,
+                    Some(Message::Scope(true)),
+                    c
+                ),
+            ]
+            .spacing(6),
+        )
+        .width(Length::Fill)
+        .align_x(Alignment::Center);
         let Some(stats) = &self.snapshot.stats else {
-            return panel(column![title(s.stats, c), scopes].spacing(8), c);
+            return ui::panel(Some(s.stats), scopes, c);
         };
         let graded = |v: Option<f64>, g: Option<f64>| {
             text(pct(v))
-                .size(14)
-                .color(g.map_or(c.text, grade_color))
-                .width(Length::Fixed(52.0))
+                .size(SIZE_BODY)
+                .font(theme::fonts().bold)
+                .color(g.map_or(c.text, |g| grade_color(g, c)))
+                .width(Length::Fixed(56.0))
+                .align_x(Alignment::End)
         };
+        let num = |n: u32, w: f32| ui::body(n).width(Length::Fixed(w)).align_x(Alignment::End);
         let head = row![
-            text("").width(Length::Fill),
-            text(s.total)
-                .size(12)
-                .color(c.muted)
-                .width(Length::Fixed(40.0)),
-            text("#").size(12).color(c.muted).width(Length::Fixed(32.0)),
-            text("=").size(12).color(c.muted).width(Length::Fixed(32.0)),
-            text(s.efficiency)
-                .size(12)
-                .color(c.muted)
-                .width(Length::Fixed(52.0)),
+            space::horizontal(),
+            small(s.total, c)
+                .width(Length::Fixed(40.0))
+                .align_x(Alignment::End),
+            small("#", c)
+                .width(Length::Fixed(32.0))
+                .align_x(Alignment::End),
+            small("=", c)
+                .width(Length::Fixed(32.0))
+                .align_x(Alignment::End),
+            small(s.efficiency, c)
+                .width(Length::Fixed(56.0))
+                .align_x(Alignment::End),
         ];
         let fundamentals = stats.fundamentals.iter().map(|f| {
             row![
-                text(f.name.clone()).size(14).width(Length::Fill),
-                text(f.total.to_string())
-                    .size(14)
-                    .width(Length::Fixed(40.0)),
-                text(f.perfect.to_string())
-                    .size(14)
-                    .width(Length::Fixed(32.0)),
-                text(f.errors.to_string())
-                    .size(14)
-                    .width(Length::Fixed(32.0)),
+                ui::body(f.name.clone()).width(Length::Fill),
+                num(f.total, 40.0),
+                num(f.perfect, 32.0),
+                num(f.errors, 32.0),
                 graded(f.efficiency, f.grade),
             ]
             .into()
         });
         let phase = |name: &str, p: &Option<scout4all_mobile::PhaseStats>| {
             row![
-                text(name.to_string()).size(14).width(Length::Fill),
-                text(
+                ui::body(name).width(Length::Fill),
+                small(
                     p.as_ref()
                         .map(|p| format!("{}/{}", p.won, p.rallies))
-                        .unwrap_or_default()
-                )
-                .size(13)
-                .color(c.muted)
-                .width(Length::Fixed(60.0)),
+                        .unwrap_or_default(),
+                    c
+                ),
                 graded(
                     p.as_ref().map(|p| p.percentage),
                     p.as_ref().and_then(|p| p.grade)
                 ),
             ]
+            .spacing(8)
+            .align_y(Alignment::Center)
         };
         let distribution = row(stats.distribution.iter().map(|z| {
             column![
-                text(z.zone.to_string()).size(12).color(c.muted),
-                text(format!("{:.0}%", z.share)).size(14),
+                small(z.zone, c),
+                text(format!("{:.0}%", z.share))
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold),
             ]
             .align_x(Alignment::Center)
             .width(Length::Fill)
             .into()
         }));
-        let series = row(stats
-            .trend
-            .iter()
-            .enumerate()
-            .map(|(i, line)| chip(&line.name, i == self.series, Message::Series(i), c)))
-        .spacing(4)
-        .wrap();
+        let series =
+            row(stats.trend.iter().enumerate().map(|(i, line)| {
+                ui::pill(&line.name, i == self.series, Some(Message::Series(i)), c)
+            }))
+            .spacing(4)
+            .wrap()
+            .vertical_spacing(4);
         let modes = row![
-            chip(s.so_far, !self.recent, Message::Recent(false), c),
-            chip(s.last_touches, self.recent, Message::Recent(true), c),
+            ui::pill(s.so_far, !self.recent, Some(Message::Recent(false)), c),
+            ui::pill(s.last_touches, self.recent, Some(Message::Recent(true)), c),
         ]
-        .spacing(4)
-        .align_y(Alignment::Center);
+        .spacing(4);
         let legend = row(stats
             .trend
             .first()
@@ -992,37 +948,51 @@ impl ScoutingScreen {
             .into_iter()
             .map(|n| {
                 text(format!("━ {} {n}", s.set_n))
-                    .size(12)
+                    .size(SIZE_SMALL)
                     .color(theme::set_color(n))
                     .into()
             }))
         .spacing(10);
         let chart: Element<'a, Message> = match self.trend.is_empty() {
-            true => text(s.no_rallies).size(13).color(c.muted).into(),
+            true => small(s.no_rallies, c).into(),
             false => charts::canvas_view(self.trend.clone(), c),
         };
         let content = column![
-            title(s.stats, c),
             scopes,
             head,
-            Column::with_children(fundamentals).spacing(2),
-            space::vertical().height(6),
+            Column::with_children(fundamentals).spacing(3),
+            space::vertical().height(4),
             phase(s.side_out, &stats.side_out),
             phase(s.break_point, &stats.break_points),
-            space::vertical().height(6),
+            space::vertical().height(4),
             distribution,
-            space::vertical().height(6),
-            title(s.trend, c),
+            space::vertical().height(4),
+            ui::section(s.trend, c),
             series,
             modes,
             legend,
             chart,
         ]
         .spacing(6);
-        panel(scrollable(content).height(Length::Fill), c)
+        ui::panel(Some(s.stats), scrollable(content).height(Length::Fill), c)
     }
+}
+
+/// A player to choose: the number in bold, the name, the role muted.
+fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
+    row![
+        text(p.number.to_string())
+            .size(SIZE_BODY)
+            .font(theme::fonts().bold)
+            .width(Length::Fixed(28.0)),
+        ui::body(p.name.clone()).width(Length::Fill),
+        small(p.role.clone(), c),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 /// Keeps the width of the statistics: wide enough for the table and the
 /// chart, the court takes the rest.
-pub const STATS_WIDTH: f32 = 380.0;
+pub const STATS_WIDTH: f32 = 400.0;

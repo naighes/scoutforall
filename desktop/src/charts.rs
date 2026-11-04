@@ -134,6 +134,7 @@ impl<M> canvas::Program<M> for CanvasTrend {
                 );
             }
             frame.fill_text(Text {
+                font: crate::theme::fonts().regular,
                 content: p.to_string(),
                 position: Point::new(px, plot.height + 1.0),
                 color: c.muted,

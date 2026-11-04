@@ -4,7 +4,7 @@
 //! the arrows.
 
 use {
-    crate::theme::{Colors, grade_color},
+    crate::theme::{self, Colors, grade_color},
     iced::{
         Color, Point, Rectangle, Renderer, Size, Theme, mouse,
         widget::canvas::{self, Action, Event, Frame, Geometry, Path, Stroke, Text},
@@ -198,13 +198,13 @@ impl Court {
         );
         for (center, radius, p) in self.spots(court, meter) {
             let fill = match (p.libero, p.spotlight) {
-                (true, _) => Color { a: 0.9, ..c.muted },
-                (false, _) => c.raised,
+                (true, _) => theme::mix(c.button, c.accent, 0.35),
+                (false, _) => c.button,
             };
             frame.fill(&Path::circle(center, radius), fill);
             let ring = match (p.selectable, p.grade) {
                 (true, _) => Some((c.accent, 3.0)),
-                (false, Some(g)) => Some((grade_color(g), 2.0)),
+                (false, Some(g)) => Some((grade_color(g, c), 2.0)),
                 (false, None) => None,
             };
             if let Some((color, width)) = ring {
@@ -214,6 +214,7 @@ impl Court {
                 );
             }
             frame.fill_text(Text {
+                font: crate::theme::fonts().bold,
                 content: p.number.to_string(),
                 position: center,
                 color: c.text,
@@ -222,20 +223,34 @@ impl Court {
                 align_y: iced::alignment::Vertical::Center,
                 ..Text::default()
             });
-            let below = Point::new(center.x, center.y + radius + 2.0);
-            let name = match (p.setter, p.efficiency) {
-                (true, _) => format!("▲ {}", p.name),
-                (false, Some(e)) => format!("{} {:.0}%", p.name, e),
-                (false, None) => p.name.clone(),
+            // the surname, and the efficiency below it: three players
+            // side by side on 9 meters
+            let surname = p.name.split_whitespace().last().unwrap_or(&p.name);
+            let name = match p.setter {
+                true => format!("▲ {surname}"),
+                false => surname.to_string(),
             };
+            let size = (meter * 0.3).clamp(11.0, 15.0);
             frame.fill_text(Text {
+                font: crate::theme::fonts().regular,
                 content: name,
-                position: below,
-                color: p.grade.map_or(c.muted, grade_color),
-                size: (meter * 0.32).max(11.0).into(),
+                position: Point::new(center.x, center.y + radius + 3.0),
+                color: c.text,
+                size: size.into(),
                 align_x: iced::widget::text::Alignment::Center,
                 ..Text::default()
             });
+            if let Some(e) = p.efficiency {
+                frame.fill_text(Text {
+                    font: crate::theme::fonts().bold,
+                    content: format!("{e:.0}%"),
+                    position: Point::new(center.x, center.y + radius + 5.0 + size),
+                    color: p.grade.map_or(c.muted, |g| grade_color(g, c)),
+                    size: size.into(),
+                    align_x: iced::widget::text::Alignment::Center,
+                    ..Text::default()
+                });
+            }
         }
     }
 
@@ -290,6 +305,7 @@ impl Court {
                 );
             }
             frame.fill_text(Text {
+                font: crate::theme::fonts().regular,
                 content: cell.label.clone(),
                 position: r.center(),
                 color: match cell.chosen {

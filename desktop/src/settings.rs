@@ -5,10 +5,10 @@
 //! the TUI saves them.
 
 use {
-    crate::{keymap, strings::Strings, theme::Colors},
+    crate::{keymap, strings::Strings, theme::Colors, ui},
     iced::{
-        Alignment, Color, Element, Length, Padding,
-        widget::{Column, button, column, container, row, scrollable, space, text},
+        Alignment, Element, Length,
+        widget::{Column, column, container, row, scrollable, space},
     },
     scout4all_core::{
         localization::{Labels, labels},
@@ -230,6 +230,15 @@ impl SettingsScreen {
         Outcome::Stay
     }
 
+    /// The keys of the screen, for the bar at the bottom.
+    pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        vec![
+            ("↑ ↓ ← →".to_string(), String::new()),
+            (String::new(), s.change_hint.to_string()),
+            ("Esc".to_string(), s.back.to_string()),
+        ]
+    }
+
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let titles = [
             [s.events, s.options],
@@ -242,7 +251,6 @@ impl SettingsScreen {
             .zip(titles)
             .map(|(shortcuts, [first, second])| {
                 let mut list = Column::new().spacing(2);
-                list = list.push(text(first.to_uppercase()).size(12).color(c.muted));
                 for shortcut in shortcuts {
                     // the second group of the column starts with its kind
                     let second_group = |s: Option<Shortcut>| {
@@ -251,46 +259,34 @@ impl SettingsScreen {
                     if second_group(Some(shortcut)) && !second_group(shortcuts_before(index)) {
                         list = list
                             .push(space::vertical().height(10))
-                            .push(text(second.to_uppercase()).size(12).color(c.muted));
+                            .push(ui::section(second, c));
                     }
                     list = list.push(self.row(index, shortcut, s, c));
                     index += 1;
                 }
-                container(scrollable(list).height(Length::Fill))
-                    .padding(12)
-                    .width(Length::FillPortion(1))
-                    .height(Length::Fill)
-                    .style(move |_| panel_style(c))
-                    .into()
+                container(ui::panel(
+                    Some(first),
+                    scrollable(list).height(Length::Fill),
+                    c,
+                ))
+                .width(Length::FillPortion(1))
+                .height(Length::Fill)
+                .into()
             });
         let hint = match (self.waiting, &self.error) {
-            (true, _) => text(s.press_key).color(c.accent),
-            (false, Some(e)) => text(e.clone()).color(crate::theme::LOST),
-            (false, None) => text(s.change_hint).color(c.muted),
+            (true, _) => ui::body(s.press_key).color(c.accent),
+            (false, Some(e)) => ui::body(e.clone()).color(c.danger),
+            (false, None) => ui::body(s.shortcuts).color(c.muted),
         };
         let header = row![
-            column![
-                text(s.settings).size(24).color(c.accent),
-                text(s.shortcuts).size(14).color(c.muted)
-            ],
+            hint,
             space::horizontal(),
-            button(text(s.reset_keys).size(13))
-                .on_press(Message::Reset)
-                .style(button::secondary),
+            ui::pill(s.reset_keys, false, Some(Message::Reset), c),
         ]
         .align_y(Alignment::Center);
-        let footer = text(format!("↑ ↓ ← →  Enter  ·  Esc {}", s.back))
-            .size(12)
-            .color(c.muted);
-        column![
-            header,
-            hint.size(15),
-            row(panels).spacing(12).height(Length::Fill),
-            footer
-        ]
-        .spacing(12)
-        .padding(16)
-        .into()
+        column![header, row(panels).spacing(14).height(Length::Fill)]
+            .spacing(14)
+            .into()
     }
 
     fn row<'a>(
@@ -301,44 +297,18 @@ impl SettingsScreen {
         c: Colors,
     ) -> Element<'a, Message> {
         let selected = index == self.selected;
-        let key = match (selected && self.waiting, key_of(&self.keys, shortcut)) {
-            (true, _) => "…".to_string(),
-            (false, Some(ck)) => keymap::label(&ck),
-            (false, None) => "–".to_string(),
-        };
+        let key: Element<'a, Message> =
+            match (selected && self.waiting, key_of(&self.keys, shortcut)) {
+                (true, _) => ui::keycap("…", c),
+                (false, Some(ck)) => ui::keycap(&keymap::label(&ck), c),
+                (false, None) => ui::body("–").color(c.muted).into(),
+            };
         let body = row![
-            text(name(shortcut, self.labels, s))
-                .size(15)
-                .width(Length::Fill),
-            container(text(key).size(14).color(c.accent))
-                .width(Length::Fixed(70.0))
-                .align_x(Alignment::End),
+            ui::body(name(shortcut, self.labels, s)).width(Length::Fill),
+            key,
         ]
         .align_y(Alignment::Center);
-        button(body)
-            .width(Length::Fill)
-            .padding(Padding::from([5, 8]))
-            .on_press(Message::Change(index))
-            .style(move |_, status| button::Style {
-                background: match (selected, status) {
-                    (true, _) => Some(
-                        Color {
-                            a: 0.25,
-                            ..c.accent
-                        }
-                        .into(),
-                    ),
-                    (false, button::Status::Hovered) => Some(c.raised.into()),
-                    _ => None,
-                },
-                text_color: c.text,
-                border: iced::Border {
-                    radius: 6.0.into(),
-                    ..iced::Border::default()
-                },
-                ..button::Style::default()
-            })
-            .into()
+        ui::list_row(body, selected, Some(Message::Change(index)), c)
     }
 }
 
@@ -346,18 +316,6 @@ impl SettingsScreen {
 /// the kind changes.
 fn shortcuts_before(index: usize) -> Option<Shortcut> {
     index.checked_sub(1).and_then(|i| rows().get(i).copied())
-}
-
-fn panel_style(c: Colors) -> container::Style {
-    container::Style {
-        background: Some(c.surface.into()),
-        border: iced::Border {
-            radius: 8.0.into(),
-            width: 1.0,
-            color: c.raised,
-        },
-        ..container::Style::default()
-    }
 }
 
 #[cfg(test)]

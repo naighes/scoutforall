@@ -48,10 +48,31 @@ pub fn label(ck: &KeyCombination) -> String {
     let label = scout4all_keys::KeyCombinationFormat::default()
         .format(*ck)
         .to_string();
-    // crokey names the minus: the scout reads the symbol, as in the TUI
+    // crokey names the minus: the scout reads the symbol, as in the TUI;
+    // the modifiers as symbols, to fit a keycap: "⇧E" for shift-e
     match label.as_str() {
         "Hyphen" => "-".to_string(),
-        _ => label,
+        _ => {
+            let short = label
+                .replace("Shift-", "⇧")
+                .replace("Ctrl-", "⌃")
+                .replace("Alt-", "⌥");
+            // the letter after a modifier in capitals, as on the keyboard
+            match short.rfind(['⇧', '⌃', '⌥']) {
+                Some(at) => {
+                    let end = at
+                        + short
+                            .get(at..)
+                            .and_then(|s| s.chars().next())
+                            .map_or(0, char::len_utf8);
+                    match (short.get(..end), short.get(end..)) {
+                        (Some(mods), Some(key)) => format!("{mods}{}", key.to_uppercase()),
+                        _ => short,
+                    }
+                }
+                None => short,
+            }
+        }
     }
 }
 
@@ -88,6 +109,8 @@ mod tests {
         );
         assert_eq!(digit(&key!('3')), Some(3));
         assert_eq!(label(&key!('-')), "-");
+        assert_eq!(label(&key!(shift - e)), "⇧E");
+        assert_eq!(label(&key!(a)), "a");
         assert_eq!(digit(&key!(a)), None);
     }
 }

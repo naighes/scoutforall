@@ -2,10 +2,14 @@
 //! side. The arrows move among the matches in progress, Enter resumes one.
 
 use {
-    crate::{strings::Strings, theme::Colors},
+    crate::{
+        strings::Strings,
+        theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
+        ui,
+    },
     iced::{
-        Alignment, Element, Length, Padding,
-        widget::{Column, button, column, container, row, scrollable, space, text},
+        Alignment, Element, Length,
+        widget::{Column, column, row, scrollable, text},
     },
     scout4all_mobile::{Home, HomeMatch, NextSetKind, TeamListing},
 };
@@ -16,8 +20,8 @@ pub struct Open {
     pub match_id: String,
 }
 
-/// The match can be scouted here: a set in progress. Starting a set is not
-/// in the prototype.
+/// The match can be scouted here: a set in progress. Starting a set comes
+/// with the other screens (027, step 3).
 pub fn resumable(m: &HomeMatch) -> Option<Open> {
     match m.next {
         NextSetKind::Resume { .. } => Some(Open {
@@ -32,35 +36,34 @@ fn date(m: &HomeMatch) -> String {
     m.date.get(..10).unwrap_or(&m.date).to_string()
 }
 
-fn column_of<'a, M: 'a>(
-    heading: &str,
+pub fn hints(s: &Strings) -> Vec<(String, String)> {
+    vec![
+        ("↑ ↓".to_string(), String::new()),
+        ("Enter".to_string(), s.resume.to_string()),
+        ("F2".to_string(), s.settings.to_string()),
+    ]
+}
+
+fn list<'a, M: 'a>(
+    title: &str,
     items: Vec<Element<'a, M>>,
     empty: &str,
     c: Colors,
 ) -> Element<'a, M> {
     let body: Element<'a, M> = match items.is_empty() {
-        true => text(empty.to_string()).color(c.muted).into(),
+        true => text(empty.to_string())
+            .size(SIZE_BODY)
+            .color(c.muted)
+            .into(),
         false => Column::with_children(items).spacing(4).into(),
     };
-    container(
-        column![
-            text(heading.to_uppercase()).size(13).color(c.muted),
-            scrollable(body).height(Length::Fill)
-        ]
-        .spacing(10),
-    )
-    .padding(14)
+    iced::widget::container(ui::panel(
+        Some(title),
+        scrollable(body).height(Length::Fill),
+        c,
+    ))
     .width(Length::FillPortion(1))
     .height(Length::Fill)
-    .style(move |_| container::Style {
-        background: Some(c.surface.into()),
-        border: iced::Border {
-            radius: 8.0.into(),
-            width: 1.0,
-            color: c.raised,
-        },
-        ..container::Style::default()
-    })
     .into()
 }
 
@@ -78,42 +81,31 @@ fn match_row<'a, M: Clone + 'a>(
         }
         NextSetKind::Over => s.match_over.to_string(),
     };
+    let bold = theme::fonts().bold;
     let body = row![
         column![
-            text(format!("{} – {}", m.team_name, m.opponent)).size(15),
+            row![
+                text(m.team_name.clone()).size(SIZE_BODY).font(bold),
+                text(format!("– {}", m.opponent))
+                    .size(SIZE_BODY)
+                    .color(c.muted),
+            ]
+            .spacing(6)
+            .wrap(),
             text(format!("{} · {next}", date(m)))
-                .size(12)
+                .size(SIZE_SMALL)
                 .color(c.muted),
         ]
+        .spacing(2)
         .width(Length::Fill),
-        text(format!("{}–{}", m.won, m.lost)).size(20),
+        text(format!("{}–{}", m.won, m.lost))
+            .size(22)
+            .font(bold)
+            .color(c.accent),
     ]
     .align_y(Alignment::Center)
-    .spacing(8);
-    button(body)
-        .width(Length::Fill)
-        .padding(Padding::from([6, 10]))
-        .on_press_maybe(resumable(m).map(on_open))
-        .style(move |_, status| button::Style {
-            background: match (selected, status) {
-                (true, _) => Some(
-                    iced::Color {
-                        a: 0.25,
-                        ..c.accent
-                    }
-                    .into(),
-                ),
-                (false, button::Status::Hovered) => Some(c.raised.into()),
-                _ => None,
-            },
-            text_color: c.text,
-            border: iced::Border {
-                radius: 6.0.into(),
-                ..iced::Border::default()
-            },
-            ..button::Style::default()
-        })
-        .into()
+    .spacing(10);
+    ui::list_row(body, selected, resumable(m).map(on_open), c)
 }
 
 pub fn view<'a, M: Clone + 'a>(
@@ -144,41 +136,42 @@ pub fn view<'a, M: Clone + 'a>(
                 players,
                 pinned,
                 ..
-            } => row![
-                text(match pinned {
-                    true => "★",
-                    false => " ",
-                })
-                .color(c.accent)
-                .width(Length::Fixed(18.0)),
-                text(name.clone()).size(15).width(Length::Fill),
-                text(format!("{year} · {players} {}", s.players))
-                    .size(12)
-                    .color(c.muted),
-            ]
-            .align_y(Alignment::Center)
-            .padding(Padding::from([6, 4]))
-            .into(),
-            TeamListing::Unreadable { folder } => text(folder.clone()).color(c.muted).into(),
+            } => ui::list_row(
+                row![
+                    text(match pinned {
+                        true => "★",
+                        false => "☆",
+                    })
+                    .size(SIZE_BODY)
+                    .color(match pinned {
+                        true => c.accent,
+                        false => c.muted,
+                    })
+                    .width(Length::Fixed(22.0)),
+                    text(name.clone())
+                        .size(SIZE_BODY)
+                        .font(theme::fonts().bold)
+                        .width(Length::Fill),
+                    text(format!("{year} · {players} {}", s.players))
+                        .size(SIZE_SMALL)
+                        .color(c.muted),
+                ]
+                .align_y(Alignment::Center),
+                false,
+                None,
+                c,
+            ),
+            TeamListing::Unreadable { folder } => {
+                text(folder.clone()).size(SIZE_SMALL).color(c.muted).into()
+            }
         })
         .collect();
-    let header = row![
-        text("scout4all").size(24).color(c.accent),
-        space::horizontal(),
-        text("↑ ↓  Enter").size(12).color(c.muted),
+    row![
+        list(s.in_progress, in_progress, s.no_matches, c),
+        list(s.recent, recent, s.no_matches, c),
+        list(s.teams, teams, "", c),
     ]
-    .align_y(Alignment::Center);
-    column![
-        header,
-        row![
-            column_of(s.in_progress, in_progress, s.no_matches, c),
-            column_of(s.recent, recent, s.no_matches, c),
-            column_of(s.teams, teams, "", c),
-        ]
-        .spacing(12)
-        .height(Length::Fill)
-    ]
-    .spacing(12)
-    .padding(16)
+    .spacing(14)
+    .height(Length::Fill)
     .into()
 }

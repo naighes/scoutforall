@@ -11,11 +11,12 @@ mod scouting;
 mod settings;
 mod strings;
 mod theme;
+mod ui;
 
 use {
     iced::{
         Element, Event, Length, Size, Subscription, Task, Theme, event, keyboard,
-        widget::{button, column, container, row, space, text},
+        widget::{column, container, space},
         window,
     },
     scout4all_core::{scouting::ChoiceOrder, shapes::enums::LanguageEnum},
@@ -81,6 +82,9 @@ enum Message {
     Key(KeyCombination),
     Open(home::Open),
     ToggleTheme,
+    /// the arrow on the bar: as Esc
+    Back,
+    OpenSettings,
     Scouting(scouting::Message),
     Settings(settings::Message),
 }
@@ -150,6 +154,14 @@ impl App {
         }
     }
 
+    fn open_settings(&mut self) {
+        self.settings = Some(SettingsScreen::new(
+            self.dir.clone(),
+            self.keys.clone(),
+            self.language,
+        ));
+    }
+
     fn close_settings(&mut self) {
         if let Some(settings) = self.settings.take() {
             self.keys = settings.keys;
@@ -165,14 +177,9 @@ impl App {
         let closed = match (&message, &mut self.settings) {
             (Message::Key(ck), Some(settings)) => Some(settings.key(*ck, s)),
             (Message::Settings(m), Some(settings)) => Some(settings.update(m.clone(), s)),
-            (Message::Key(ck), None) if *ck == SETTINGS_KEY => {
-                self.settings = Some(SettingsScreen::new(
-                    self.dir.clone(),
-                    self.keys.clone(),
-                    self.language,
-                ));
-                return;
-            }
+            (Message::Back, Some(_)) => Some(settings::Outcome::Close),
+            (Message::Key(ck), None) if *ck == SETTINGS_KEY => return self.open_settings(),
+            (Message::OpenSettings, None) => return self.open_settings(),
             _ => None,
         };
         match closed {
@@ -181,7 +188,9 @@ impl App {
             None => {}
         }
         match (message, &mut self.screen) {
-            (Message::Settings(_), _) => {}
+            (Message::Settings(_) | Message::OpenSettings, _) => {}
+            (Message::Back, Screen::Scouting(_)) => self.go_home(),
+            (Message::Back, Screen::Home { .. }) => {}
             (Message::ToggleTheme, _) => self.dark = !self.dark,
             (Message::Open(open), _) => self.open(open),
             (Message::Scouting(m), Screen::Scouting(screen)) => match screen.update(m) {
@@ -220,22 +229,41 @@ impl App {
         }
         let c = self.colors();
         let s = self.strings;
-        let screen: Element<'_, Message> = match (&self.settings, &self.screen) {
-            (Some(settings), _) => settings.view(s, c).map(Message::Settings),
-            (None, Screen::Home { home, selected }) => {
-                home::view(home, *selected, s, Message::Open, c)
-            }
-            (None, Screen::Scouting(screen)) => screen.view(s, c).map(Message::Scouting),
+        let (screen, hints, back): (Element<'_, Message>, _, _) =
+            match (&self.settings, &self.screen) {
+                (Some(settings), _) => (
+                    settings.view(s, c).map(Message::Settings),
+                    settings.hints(s),
+                    true,
+                ),
+                (None, Screen::Home { home, selected }) => (
+                    home::view(home, *selected, s, Message::Open, c),
+                    home::hints(s),
+                    false,
+                ),
+                (None, Screen::Scouting(screen)) => (
+                    screen.view(s, c).map(Message::Scouting),
+                    screen.hints(s),
+                    true,
+                ),
+            };
+        let top = ui::top_bar(
+            back.then_some(Message::Back),
+            vec![
+                ui::bar_button("◐", Message::ToggleTheme, c),
+                ui::bar_button("⚙", Message::OpenSettings, c),
+            ],
+            c,
+        );
+        let error: Element<'_, Message> = match &self.error {
+            Some(e) => ui::body(e.clone()).color(c.danger).into(),
+            None => space::vertical().height(0).into(),
         };
-        let bar = row![
-            text(self.error.clone().unwrap_or_default()).color(theme::LOST),
-            space::horizontal(),
-            button(text(s.theme).size(12))
-                .on_press(Message::ToggleTheme)
-                .style(button::text),
-        ]
-        .padding([2, 12]);
-        container(column![bar, screen])
+        let content = container(column![error, screen].spacing(10))
+            .padding(16)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        container(column![top, content, ui::bottom_bar(hints, c)])
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_| container::Style {
@@ -272,8 +300,12 @@ fn main() -> iced::Result {
         println!("scout4all {}", scout4all_mobile::version());
         return Ok(());
     }
+    let fonts = theme::fonts();
     iced::application(App::boot, App::update, App::view)
         .title("scout4all")
+        .font(fonts.bytes[0])
+        .font(fonts.bytes[1])
+        .default_font(fonts.regular)
         .theme(App::theme)
         .subscription(App::subscription)
         .window(window::Settings {
