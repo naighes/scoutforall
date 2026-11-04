@@ -97,7 +97,8 @@ jobs:
       - uses: houseabsolute/actions-rust-cross@v1
         with:
           target: ${{ matrix.platforms.target }}
-          args: "--locked"
+          # the TUI and the desktop app, which the releases publish
+          args: "--locked --package scout4all --package scout4all-desktop"
           strip: true
 
   lockfile:
