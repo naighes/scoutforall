@@ -10,6 +10,7 @@ mod editors;
 mod events;
 mod form;
 mod game;
+mod general;
 mod home;
 mod keymap;
 mod scouting;
@@ -119,6 +120,9 @@ struct App {
     notice: Option<String>,
     /// an archive chosen, to confirm, over the screen
     importing: Option<transfer::Importing>,
+    /// the terms of use, at the first start and when they change: over
+    /// everything until accepted
+    terms: Option<scout4all_mobile::Terms>,
     /// the text field the keys are on, last focused
     focused: Option<Id>,
 }
@@ -147,6 +151,9 @@ enum Message {
     /// the file chosen (none: none) to import into the team, if given
     Picked(Option<String>, Option<transfer::Picked>),
     Importing(transfer::Message),
+    AcceptTerms,
+    /// the statistics sent or not, from the terms
+    ToggleStatistics,
 }
 
 impl App {
@@ -184,8 +191,12 @@ impl App {
             error,
             notice: None,
             importing: None,
+            terms: None,
             focused: None,
         };
+        app.terms = (!app.core.terms_seen()).then(|| app.core.terms());
+        // the matches queued while offline, sent now
+        general::send_statistics(app.core.clone());
         let _ = app.go(Go::Home);
         app
     }
@@ -362,10 +373,82 @@ impl App {
 
     fn open_settings(&mut self) {
         self.settings = Some(SettingsScreen::new(
+            self.core.clone(),
             self.dir.clone(),
             self.keys.clone(),
             self.language,
+            self.strings,
         ));
+    }
+
+    /// The screen shown, to open again: in another language.
+    fn here(&self) -> Go {
+        match &self.screen {
+            Screen::Home(_) => Go::Home,
+            Screen::Team(t) => Go::Team(t.team_id.clone()),
+            Screen::Match(m) => Go::Match(m.team_id.clone(), m.match_id.clone()),
+            Screen::Stats(st) => Go::Stats(st.team_id.clone(), st.match_id.clone()),
+            Screen::Events(e) => Go::Events(e.team_id.clone(), e.match_id.clone(), e.set_number()),
+            Screen::Start(st) => Go::Scout(home::Open {
+                team_id: st.team_id.clone(),
+                match_id: st.match_id.clone(),
+                start: true,
+            }),
+            Screen::Scouting(sc) => Go::Scout(home::Open {
+                team_id: sc.team_id.clone(),
+                match_id: sc.match_id.clone(),
+                start: false,
+            }),
+            // the import goes on as it was
+            Screen::Dvw(_) => Go::Stay,
+        }
+    }
+
+    /// The language chosen in the settings: the words of the app, and the
+    /// screen behind read again in it.
+    fn follow_language(&mut self) -> Task<Message> {
+        let chosen = self.settings.as_ref().map(SettingsScreen::language);
+        match chosen {
+            Some(language) if language != self.language => {
+                self.language = language;
+                self.strings = strings::strings(language);
+                if let Some(settings) = &mut self.settings {
+                    settings.relabel(self.strings);
+                }
+                let here = self.here();
+                self.go(here)
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// While the terms are shown: Enter accepts them, space turns the
+    /// statistics on or off.
+    fn on_terms(&mut self, message: &Message) -> bool {
+        if self.terms.is_none() {
+            return false;
+        }
+        let accept = matches!(message, Message::AcceptTerms)
+            || matches!(message, Message::Key(ck) if *ck == scout4all_keys::key!(enter));
+        let toggle = matches!(message, Message::ToggleStatistics)
+            || matches!(message, Message::Key(ck) if *ck == scout4all_keys::key!(space));
+        match (accept, toggle, message) {
+            (true, _, _) => {
+                // not saved: shown again at the next start, as the TUI
+                let _ = self.core.accept_terms();
+                self.terms = None;
+                general::send_statistics(self.core.clone());
+            }
+            (_, true, _) => {
+                let on = self.core.analytics_enabled();
+                if let Err(e) = self.core.set_analytics_enabled(!on) {
+                    self.error = Some(e.to_string());
+                }
+            }
+            (_, _, Message::ToggleTheme) => self.dark = !self.dark,
+            _ => {}
+        }
+        true
     }
 
     fn close_settings(&mut self) {
@@ -380,8 +463,8 @@ impl App {
     /// The text field of the screen the keys are on, if any.
     fn focus_id(&self) -> Option<Id> {
         match (&self.settings, &self.screen) {
-            (Some(_), _) => None,
-            (_, _) if self.importing.is_some() => None,
+            (_, _) if self.importing.is_some() || self.terms.is_some() => None,
+            (Some(settings), _) => settings.focus_id(),
             (None, Screen::Home(screen)) => screen.focus_id(),
             (None, Screen::Team(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
@@ -448,6 +531,9 @@ impl App {
             Message::Picked(_, None) => return Task::none(),
             other => other,
         };
+        if self.on_terms(&message) {
+            return Task::none();
+        }
         // the archive to import, while shown, takes the keys
         let imported = match (&message, &mut self.importing) {
             (Message::Key(ck), Some(importing)) => Some(importing.key(*ck)),
@@ -465,7 +551,7 @@ impl App {
         let closed = match (&message, &mut self.settings) {
             (Message::Key(ck), Some(settings)) => Some(settings.key(*ck, s)),
             (Message::Settings(m), Some(settings)) => Some(settings.update(m.clone(), s)),
-            (Message::Back, Some(_)) => Some(settings::Outcome::Close),
+            (Message::Back, Some(settings)) => Some(settings.key(BACK_KEY, s)),
             (Message::Key(ck), None) if *ck == SETTINGS_KEY => {
                 self.open_settings();
                 return Task::none();
@@ -481,7 +567,7 @@ impl App {
                 self.close_settings();
                 return Task::none();
             }
-            Some(settings::Outcome::Stay) => return Task::none(),
+            Some(settings::Outcome::Stay) => return self.follow_language(),
             None => {}
         }
         let core = self.core.clone();
@@ -557,6 +643,11 @@ impl App {
         let s = self.strings;
         let (screen, hints, back): (Element<'_, Message>, _, _) =
             match (&self.settings, &self.importing, &self.screen) {
+                // the terms, over everything until accepted
+                _ if self.terms.is_some() => match &self.terms {
+                    Some(terms) => (self.terms_view(terms), self.terms_hints(), false),
+                    None => (space::vertical().into(), vec![], false),
+                },
                 // the archive to import, over the screen
                 (None, Some(importing), _) => (
                     importing.view(s, c).map(Message::Importing),
@@ -624,6 +715,53 @@ impl App {
                 ..container::Style::default()
             })
             .into()
+    }
+
+    fn terms_view<'a>(&'a self, terms: &'a scout4all_mobile::Terms) -> Element<'a, Message> {
+        let s = self.strings;
+        let c = self.colors();
+        let on = self.core.analytics_enabled();
+        let below = column![
+            ui::list_row(
+                iced::widget::row![
+                    ui::body(match on {
+                        true => "■",
+                        false => "□",
+                    })
+                    .color(c.accent),
+                    column![
+                        ui::body(s.send_statistics),
+                        iced::widget::text(s.send_statistics_detail)
+                            .size(theme::SIZE_SMALL)
+                            .color(c.muted),
+                    ]
+                    .spacing(2),
+                ]
+                .spacing(10)
+                .align_y(iced::Alignment::Center),
+                false,
+                Some(Message::ToggleStatistics),
+                c,
+            ),
+            container(ui::pill(
+                &format!("Enter  {}", s.accept_terms),
+                true,
+                Some(Message::AcceptTerms),
+                c,
+            ))
+            .width(Length::Fill)
+            .align_x(iced::Alignment::End),
+        ]
+        .spacing(14);
+        general::terms_view(terms, Some(below.into()), c)
+    }
+
+    fn terms_hints(&self) -> Vec<(String, String)> {
+        let s = self.strings;
+        vec![
+            (s.space.to_string(), s.send_statistics.to_string()),
+            ("Enter".to_string(), s.accept_terms.to_string()),
+        ]
     }
 
     fn subscription(&self) -> Subscription<Message> {

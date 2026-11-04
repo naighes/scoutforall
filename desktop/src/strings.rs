@@ -207,6 +207,26 @@ pub struct Strings {
     pub set_events: &'static str,
     pub corrected: &'static str,
     pub lineup_fixed: &'static str,
+    pub language: &'static str,
+    pub default_country: &'static str,
+    pub terms_of_use: &'static str,
+    pub accept_terms: &'static str,
+    pub send_statistics: &'static str,
+    pub send_statistics_detail: &'static str,
+    pub about: &'static str,
+    pub version: &'static str,
+    pub license: &'static str,
+    pub license_name: &'static str,
+    pub data_privacy: &'static str,
+    pub source_code: &'static str,
+    pub report_problem: &'static str,
+    pub report_problem_detail: &'static str,
+    pub report_body: &'static str,
+    pub no_app_to_open: &'static str,
+    pub report_title: &'static str,
+    pub general: &'static str,
+    pub keys_page: &'static str,
+    pub search_country: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -412,6 +432,31 @@ const EN: Strings = Strings {
     set_events: "Events of the set",
     corrected: "Event corrected",
     lineup_fixed: "Changes of the lineup can't be corrected",
+    language: "Language",
+    default_country: "Country of new teams",
+    terms_of_use: "Terms of use",
+    accept_terms: "Continue",
+    send_statistics: "Send match statistics",
+    send_statistics_detail: "No names: teams and players are random identifiers",
+    about: "About",
+    version: "Version",
+    license: "License",
+    license_name: "GNU Affero General Public License v3.0",
+    data_privacy: "Data and privacy",
+    source_code: "Source code",
+    report_problem: "Report a problem",
+    report_problem_detail: "Opens an e-mail ready to send",
+    report_body: "What happened?
+
+What did you expect instead?
+
+---
+{1}",
+    no_app_to_open: "No app can open it",
+    report_title: "Problem in the desktop app",
+    general: "General",
+    keys_page: "Keys",
+    search_country: "Search the country",
 };
 
 const IT: Strings = Strings {
@@ -617,6 +662,31 @@ const IT: Strings = Strings {
     set_events: "Eventi del set",
     corrected: "Evento corretto",
     lineup_fixed: "I cambi della formazione non si correggono",
+    language: "Lingua",
+    default_country: "Paese delle nuove squadre",
+    terms_of_use: "Termini di utilizzo",
+    accept_terms: "Continua",
+    send_statistics: "Invia le statistiche delle partite",
+    send_statistics_detail: "Senza nomi: squadre e atleti sono identificativi casuali",
+    about: "Informazioni",
+    version: "Versione",
+    license: "Licenza",
+    license_name: "GNU Affero General Public License v3.0",
+    data_privacy: "Dati e privacy",
+    source_code: "Codice sorgente",
+    report_problem: "Segnala un problema",
+    report_problem_detail: "Apre un'e-mail pronta da inviare",
+    report_body: "Cosa è successo?
+
+Cosa ti aspettavi invece?
+
+---
+{1}",
+    no_app_to_open: "Nessuna app può aprirlo",
+    report_title: "Problema nell'app desktop",
+    general: "Generale",
+    keys_page: "Tasti",
+    search_country: "Cerca il paese",
 };
 
 const PT: Strings = Strings {
@@ -822,6 +892,31 @@ const PT: Strings = Strings {
     set_events: "Eventos do set",
     corrected: "Evento corrigido",
     lineup_fixed: "As mudanças da formação não podem ser corrigidas",
+    language: "Idioma",
+    default_country: "País das novas equipes",
+    terms_of_use: "Termos de uso",
+    accept_terms: "Continuar",
+    send_statistics: "Enviar as estatísticas das partidas",
+    send_statistics_detail: "Sem nomes: equipes e atletas são identificadores aleatórios",
+    about: "Sobre",
+    version: "Versão",
+    license: "Licença",
+    license_name: "GNU Affero General Public License v3.0",
+    data_privacy: "Dados e privacidade",
+    source_code: "Código-fonte",
+    report_problem: "Relatar um problema",
+    report_problem_detail: "Abre um e-mail pronto para enviar",
+    report_body: "O que aconteceu?
+
+O que você esperava?
+
+---
+{1}",
+    no_app_to_open: "Nenhum app pode abrir isto",
+    report_title: "Problema no app para computador",
+    general: "Geral",
+    keys_page: "Teclas",
+    search_country: "Pesquisar o país",
 };
 
 const PL: Strings = Strings {
@@ -1027,6 +1122,31 @@ const PL: Strings = Strings {
     set_events: "Zdarzenia seta",
     corrected: "Zdarzenie poprawione",
     lineup_fixed: "Zmian składu nie można poprawić",
+    language: "Język",
+    default_country: "Kraj nowych drużyn",
+    terms_of_use: "Warunki korzystania",
+    accept_terms: "Dalej",
+    send_statistics: "Wysyłaj statystyki meczów",
+    send_statistics_detail: "Bez nazwisk: drużyny i zawodnicy to losowe identyfikatory",
+    about: "O aplikacji",
+    version: "Wersja",
+    license: "Licencja",
+    license_name: "GNU Affero General Public License v3.0",
+    data_privacy: "Dane i prywatność",
+    source_code: "Kod źródłowy",
+    report_problem: "Zgłoś problem",
+    report_problem_detail: "Otwiera gotową do wysłania wiadomość e-mail",
+    report_body: "Co się stało?
+
+Czego się spodziewałeś(-aś)?
+
+---
+{1}",
+    no_app_to_open: "Żadna aplikacja nie może tego otworzyć",
+    report_title: "Problem w aplikacji na komputer",
+    general: "Ogólne",
+    keys_page: "Klawisze",
+    search_country: "Szukaj kraju",
 };
 
 const JA: Strings = Strings {
@@ -1232,6 +1352,31 @@ const JA: Strings = Strings {
     set_events: "セットのイベント",
     corrected: "イベントを修正しました",
     lineup_fixed: "ラインナップの変更は修正できません",
+    language: "言語",
+    default_country: "新しいチームの国",
+    terms_of_use: "利用規約",
+    accept_terms: "続ける",
+    send_statistics: "試合の統計を送信",
+    send_statistics_detail: "名前は含まれません。チームと選手はランダムな識別子です",
+    about: "アプリについて",
+    version: "バージョン",
+    license: "ライセンス",
+    license_name: "GNU Affero General Public License v3.0",
+    data_privacy: "データとプライバシー",
+    source_code: "ソースコード",
+    report_problem: "問題を報告",
+    report_problem_detail: "送信できる状態のメールを開きます",
+    report_body: "何が起きましたか？
+
+本来はどうなるはずでしたか？
+
+---
+{1}",
+    no_app_to_open: "開けるアプリがありません",
+    report_title: "デスクトップアプリの問題",
+    general: "一般",
+    keys_page: "キー",
+    search_country: "国を検索",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

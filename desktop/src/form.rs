@@ -100,6 +100,8 @@ pub struct Form {
     pub sections: Vec<(usize, String)>,
     /// the buttons, when not to cancel and to save: Esc's, then Enter's
     pub actions: Option<(String, String)>,
+    /// no buttons: each change is saved as it's made
+    pub plain: bool,
 }
 
 /// The focus on nothing: on a choice, no text field takes the keys.
@@ -122,6 +124,7 @@ impl Form {
             error: None,
             sections: vec![],
             actions: None,
+            plain: false,
         }
     }
 
@@ -267,9 +270,13 @@ impl Form {
             column![
                 Column::with_children(fields).spacing(14),
                 error,
-                container(buttons)
-                    .width(Length::Fill)
-                    .align_x(Alignment::End),
+                match self.plain {
+                    true => Element::from(iced::widget::space::vertical().height(0)),
+                    false => container(buttons)
+                        .width(Length::Fill)
+                        .align_x(Alignment::End)
+                        .into(),
+                },
             ]
             .spacing(16),
             c,
@@ -277,9 +284,8 @@ impl Form {
         let body: Element<'a, M> = match aside {
             Some(aside) => row![
                 container(form).width(Length::FillPortion(3)),
-                container(aside)
-                    .width(Length::FillPortion(2))
-                    .height(Length::Fill)
+                // as tall as it is: in the scrollable, not cut to the form
+                container(aside).width(Length::FillPortion(2))
             ]
             .spacing(14)
             .into(),

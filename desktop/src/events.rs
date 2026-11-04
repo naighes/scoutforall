@@ -158,6 +158,10 @@ impl EventsScreen {
         )
     }
 
+    pub fn set_number(&self) -> u8 {
+        self.set.set_number
+    }
+
     /// Where the list is, to keep the event chosen in sight.
     pub fn scroll(&self) -> (Id, f32) {
         let last = self.set.events.len().saturating_sub(1).max(1);

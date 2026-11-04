@@ -1,11 +1,12 @@
-//! The keys of the scouting, to change one by one: events and options,
-//! evaluations and serves, sets, in three columns. The rules are the
+//! The settings (F2), in two pages (⇧Tab Tab): the general ones
+//! (`general`) and the keys of the scouting, to change one by one: events
+//! and options, evaluations and serves, sets, in three columns. The rules are the
 //! TUI's (the `keys` crate): one key each, the fixed keys refused, no key
 //! shared by shortcuts active at the same time. Saved in `config.json`, as
 //! the TUI saves them.
 
 use {
-    crate::{keymap, strings::Strings, theme::Colors, ui},
+    crate::{general::General, keymap, strings::Strings, theme::Colors, ui},
     iced::{
         Alignment, Element, Length,
         widget::{Column, column, container, row, scrollable, space},
@@ -20,14 +21,26 @@ use {
     scout4all_keys::{
         BACK_KEY, Conflict, KeyCombination, ScoutingKeys, ScoutingOptionEnum, Shortcut, key,
     },
-    std::path::{Path, PathBuf},
+    scout4all_mobile::Scout4All,
+    std::{
+        path::{Path, PathBuf},
+        sync::Arc,
+    },
 };
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Page(Page),
+    General(crate::general::Message),
     /// a row clicked: chosen, and waiting for its key
     Change(usize),
     Reset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Page {
+    General,
+    Keys,
 }
 
 /// What the screen does after a key or a message.
@@ -99,13 +112,19 @@ pub fn assigned(
 /// Writes the keys in `config.json`, leaving the rest as it is (the other
 /// apps keep their settings there too): written aside, then renamed.
 pub fn save(dir: &Path, keys: &ScoutingKeys) -> Result<(), String> {
+    merge(dir, serde_json::to_value(keys).map_err(|e| e.to_string())?)
+}
+
+/// Writes `values` (an object) in `config.json`, leaving the rest as it
+/// is: written aside, then renamed.
+pub fn merge(dir: &Path, values: serde_json::Value) -> Result<(), String> {
     let path = dir.join("config.json");
     let mut json: serde_json::Value = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .filter(serde_json::Value::is_object)
         .unwrap_or_else(|| serde_json::json!({}));
-    let groups = serde_json::to_value(keys).map_err(|e| e.to_string())?;
+    let groups = values;
     if let (Some(config), Some(groups)) = (json.as_object_mut(), groups.as_object()) {
         config.extend(groups.clone());
     }
@@ -116,6 +135,8 @@ pub fn save(dir: &Path, keys: &ScoutingKeys) -> Result<(), String> {
 }
 
 pub struct SettingsScreen {
+    page: Page,
+    pub general: General,
     dir: PathBuf,
     pub keys: ScoutingKeys,
     labels: &'static Labels,
@@ -126,8 +147,16 @@ pub struct SettingsScreen {
 }
 
 impl SettingsScreen {
-    pub fn new(dir: PathBuf, keys: ScoutingKeys, language: LanguageEnum) -> Self {
+    pub fn new(
+        core: Arc<Scout4All>,
+        dir: PathBuf,
+        keys: ScoutingKeys,
+        language: LanguageEnum,
+        s: &Strings,
+    ) -> Self {
         Self {
+            page: Page::General,
+            general: General::new(core, language, s),
             dir,
             keys,
             labels: labels(language),
@@ -137,8 +166,44 @@ impl SettingsScreen {
         }
     }
 
+    /// The language chosen now.
+    pub fn language(&self) -> LanguageEnum {
+        self.general.language
+    }
+
+    /// The language changed: the names in its words.
+    pub fn relabel(&mut self, s: &Strings) {
+        self.labels = labels(self.general.language);
+        self.general.relabel(s);
+    }
+
+    pub fn focus_id(&self) -> Option<iced::widget::Id> {
+        match self.page {
+            Page::General => self.general.focus_id(),
+            Page::Keys => None,
+        }
+    }
+
+    fn turn(&mut self) {
+        self.page = match self.page {
+            Page::General => Page::Keys,
+            Page::Keys => Page::General,
+        };
+        self.waiting = false;
+    }
+
     pub fn update(&mut self, message: Message, s: &Strings) -> Outcome {
         match message {
+            Message::Page(page) => {
+                self.page = page;
+                self.waiting = false;
+            }
+            Message::General(m) => {
+                return match self.general.update(&self.dir, s, m) {
+                    true => Outcome::Stay,
+                    false => Outcome::Close,
+                };
+            }
             Message::Change(i) => {
                 self.selected = i;
                 self.waiting = true;
@@ -160,6 +225,24 @@ impl SettingsScreen {
     }
 
     pub fn key(&mut self, ck: KeyCombination, s: &Strings) -> Outcome {
+        let turn = ck == key!(tab)
+            || ck == key!(shift - tab)
+            || ck == key!(shift - backtab)
+            || ck == key!(backtab);
+        let reading = self.general.terms.is_some();
+        match (self.page, turn && !self.waiting && !reading) {
+            (_, true) => {
+                self.turn();
+                return Outcome::Stay;
+            }
+            (Page::General, false) => {
+                return match self.general.key(&self.dir, s, ck) {
+                    true => Outcome::Stay,
+                    false => Outcome::Close,
+                };
+            }
+            (Page::Keys, false) => {}
+        }
         let rows = rows();
         let shortcut = rows.get(self.selected).copied();
         match (self.waiting, shortcut) {
@@ -232,7 +315,11 @@ impl SettingsScreen {
 
     /// The keys of the screen, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        if self.page == Page::General {
+            return self.general.hints(s);
+        }
         vec![
+            ("⇧⇥ ⇥".to_string(), s.page.to_string()),
             ("↑ ↓ ← →".to_string(), String::new()),
             (String::new(), s.change_hint.to_string()),
             ("Esc".to_string(), s.back.to_string()),
@@ -240,6 +327,31 @@ impl SettingsScreen {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let pages = row![
+            ui::pill(
+                s.general,
+                self.page == Page::General,
+                Some(Message::Page(Page::General)),
+                c
+            ),
+            ui::pill(
+                s.keys_page,
+                self.page == Page::Keys,
+                Some(Message::Page(Page::Keys)),
+                c
+            ),
+        ]
+        .spacing(8);
+        let page = match (self.page, &self.general.terms) {
+            // the terms on their own, as they're read
+            (Page::General, Some(_)) => return self.general.view(s, c).map(Message::General),
+            (Page::General, None) => self.general.view(s, c).map(Message::General),
+            (Page::Keys, _) => self.keys_view(s, c),
+        };
+        column![pages, page].spacing(14).into()
+    }
+
+    fn keys_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let titles = [
             [s.events, s.options],
             [s.evals_title, s.serves_title],
