@@ -5894,6 +5894,7 @@ dependencies = [
  "scout4all-core",
  "scout4all-keys",
  "scout4all-mobile",
+ "self_update",
  "serde",
  "serde_json",
  "tempfile",

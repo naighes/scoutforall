@@ -28,6 +28,11 @@ chrono.workspace = true
 crokey = "1.3.0"
 open = "5.4.5"
 rfd = "0.17.2"
+self_update = { version = "1", optional = true, features = ["checksums"] }
+
+[features]
+# the builds of the releases only: they update themselves (`update`)
+self-update = ["self_update"]
 
 [dev-dependencies]
 tempfile.workspace = true

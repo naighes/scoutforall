@@ -228,6 +228,9 @@ pub struct Strings {
     pub keys_page: &'static str,
     pub search_country: &'static str,
     pub match_report: &'static str,
+    pub update_to: &'static str,
+    pub updating: &'static str,
+    pub update_failed: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -459,6 +462,9 @@ What did you expect instead?
     keys_page: "Keys",
     search_country: "Search the country",
     match_report: "Report (PDF)",
+    update_to: "Update to {1}",
+    updating: "Updating to {1}…",
+    update_failed: "Update failed: {1}",
 };
 
 const IT: Strings = Strings {
@@ -690,6 +696,9 @@ Cosa ti aspettavi invece?
     keys_page: "Tasti",
     search_country: "Cerca il paese",
     match_report: "Report (PDF)",
+    update_to: "Aggiorna a {1}",
+    updating: "Aggiornamento a {1}…",
+    update_failed: "Aggiornamento non riuscito: {1}",
 };
 
 const PT: Strings = Strings {
@@ -921,6 +930,9 @@ O que você esperava?
     keys_page: "Teclas",
     search_country: "Pesquisar o país",
     match_report: "Relatório (PDF)",
+    update_to: "Atualizar para {1}",
+    updating: "Atualizando para {1}…",
+    update_failed: "Falha na atualização: {1}",
 };
 
 const PL: Strings = Strings {
@@ -1152,6 +1164,9 @@ Czego się spodziewałeś(-aś)?
     keys_page: "Klawisze",
     search_country: "Szukaj kraju",
     match_report: "Raport (PDF)",
+    update_to: "Aktualizuj do {1}",
+    updating: "Aktualizacja do {1}…",
+    update_failed: "Aktualizacja nie powiodła się: {1}",
 };
 
 const JA: Strings = Strings {
@@ -1383,6 +1398,9 @@ const JA: Strings = Strings {
     keys_page: "キー",
     search_country: "国を検索",
     match_report: "レポート (PDF)",
+    update_to: "{1} に更新",
+    updating: "{1} に更新中…",
+    update_failed: "更新に失敗しました: {1}",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

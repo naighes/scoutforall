@@ -3,6 +3,10 @@
 //! the data of the TUI (`~/.scout4all`, or `SCOUT4ALL_DATA_DIR`) and its
 //! keys.
 
+// no console window on windows for the builds of the releases: `--version`
+// still answers whoever reads its output (the self update, the workflow)
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod charts;
 mod court;
 mod dvw;
@@ -23,6 +27,7 @@ mod team;
 mod theme;
 mod transfer;
 mod ui;
+mod update;
 
 use {
     game::MatchScreen,
@@ -125,6 +130,17 @@ struct App {
     terms: Option<scout4all_mobile::Terms>,
     /// the text field the keys are on, last focused
     focused: Option<Id>,
+    /// a newer release, offered in the bar
+    update: Update,
+}
+
+/// The self update (`update`), as the bar shows it.
+#[derive(Debug, Clone, PartialEq)]
+enum Update {
+    None,
+    /// a newer version: asked before it's installed
+    Available(String),
+    Installing(String),
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +170,11 @@ enum Message {
     AcceptTerms,
     /// the statistics sent or not, from the terms
     ToggleStatistics,
+    /// the version of a newer release, if any
+    UpdateFound(Option<String>),
+    InstallUpdate,
+    /// the new version in place of the app, or why not
+    Installed(Result<String, String>),
 }
 
 impl App {
@@ -193,6 +214,7 @@ impl App {
             importing: None,
             terms: None,
             focused: None,
+            update: Update::None,
         };
         app.terms = (!app.core.terms_seen()).then(|| app.core.terms());
         // the matches queued while offline, sent now
@@ -509,8 +531,45 @@ impl App {
         }
     }
 
+    /// The self update: offered, installed, then the app started again.
+    fn on_update(&mut self, message: &Message) -> Option<Task<Message>> {
+        let s = self.strings;
+        let install = matches!(message, Message::InstallUpdate)
+            || matches!(
+                (message, &self.screen, &self.settings, &self.importing, &self.terms),
+                (Message::Key(ck), Screen::Home(_), None, None, None)
+                    if *ck == scout4all_keys::key!(u)
+            );
+        match (message, &self.update) {
+            (Message::UpdateFound(found), _) => {
+                self.update = found.clone().map_or(Update::None, Update::Available);
+                Some(Task::none())
+            }
+            (_, Update::Available(version)) if install => {
+                self.update = Update::Installing(version.clone());
+                Some(Task::perform(update::install(), Message::Installed))
+            }
+            (Message::Installed(Ok(_)), _) => {
+                // returns only when the new version can't start
+                let why = update::restart();
+                self.update = Update::None;
+                self.error = Some(ui::fill(s.update_failed, &[why]));
+                Some(Task::none())
+            }
+            (Message::Installed(Err(why)), _) => {
+                self.update = Update::None;
+                self.error = Some(ui::fill(s.update_failed, std::slice::from_ref(why)));
+                Some(Task::none())
+            }
+            _ => None,
+        }
+    }
+
     fn handle(&mut self, message: Message) -> Task<Message> {
         let s = self.strings;
+        if let Some(task) = self.on_update(&message) {
+            return task;
+        }
         // what went well is said until the next key or click
         if !matches!(
             message,
@@ -688,15 +747,45 @@ impl App {
                     true,
                 ),
             };
+        let update: Vec<Element<'_, Message>> = match &self.update {
+            Update::None => vec![],
+            Update::Available(version) => vec![ui::pill(
+                &format!("↑ {}", ui::fill(s.update_to, std::slice::from_ref(version))),
+                true,
+                Some(Message::InstallUpdate),
+                c,
+            )],
+            Update::Installing(version) => vec![ui::pill(
+                &ui::fill(s.updating, std::slice::from_ref(version)),
+                false,
+                None,
+                c,
+            )],
+        };
         let top = ui::top_bar(
             back.then_some(Message::Back),
             self.title(),
-            vec![
-                ui::bar_button("◐", Message::ToggleTheme, c),
-                ui::bar_button("⚙", Message::OpenSettings, c),
-            ],
+            update
+                .into_iter()
+                .chain([
+                    ui::bar_button("◐", Message::ToggleTheme, c),
+                    ui::bar_button("⚙", Message::OpenSettings, c),
+                ])
+                .collect(),
             c,
         );
+        // `u` updates from the home
+        let hints = match (&self.update, &self.screen, &self.settings, &self.importing) {
+            (Update::Available(version), Screen::Home(_), None, None) if self.terms.is_none() => [
+                hints,
+                vec![(
+                    "u".to_string(),
+                    ui::fill(s.update_to, std::slice::from_ref(version)),
+                )],
+            ]
+            .concat(),
+            _ => hints,
+        };
         let error: Element<'_, Message> = match (&self.error, &self.notice) {
             (Some(e), _) => ui::body(e.clone()).color(c.danger).into(),
             (None, Some(notice)) => ui::body(notice.clone()).color(c.accent).into(),
@@ -909,8 +998,11 @@ impl Main {
                 if let Some(started) = STARTED.get() {
                     eprintln!("data read after {} ms", started.elapsed().as_millis());
                 }
-                Task::none()
+                // a newer release, looked for once the app is there
+                Task::perform(update::newer(), Message::UpdateFound)
             }
+            // the answer can come while the splash is still on
+            (message @ Message::UpdateFound(_), _, Some(app)) => app.update(message),
             (message, None, Some(app)) => app.update(message),
             _ => Task::none(),
         };
@@ -951,7 +1043,7 @@ fn main() -> iced::Result {
     let _ = STARTED.set(Instant::now());
     // as the CLI: the self-update of the old clients checks it
     if std::env::args().nth(1).as_deref() == Some("--version") {
-        println!("scout4all {}", scout4all_mobile::version());
+        println!("{}", update::version_line());
         return Ok(());
     }
     let fonts = theme::fonts();
