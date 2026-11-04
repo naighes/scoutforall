@@ -388,7 +388,11 @@ private fun BarScore(state: ScoutingState) {
         true -> (state.team to state.scoreUs) to (state.opponent to state.scoreThem)
         false -> (state.opponent to state.scoreThem) to (state.team to state.scoreUs)
     }
-    Row(Modifier.tutorial("score"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // read as one, as the score under the bar
+    val serving = if (state.servingTeam == TeamSideEnum.US) state.team else state.opponent
+    val spoken = "${left.first} ${left.second}, ${right.first} ${right.second}, " +
+        stringResource(R.string.serves, serving) + ", ${state.rotation}"
+    Row(Modifier.tutorial("score").readAs(spoken), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(left.first, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text("${left.second} – ${right.second}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text(right.first, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -510,6 +514,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     targets = view.targets,
                     targetsOurs = view.targetOurs,
                     targetsName = when {
+                        view.state.event?.value == EventTypeEnum.D -> R.string.dig_zone
                         view.targetOurs -> R.string.reception_zone
                         view.state.event?.value == EventTypeEnum.A -> R.string.attack_zone
                         else -> R.string.serve_zone

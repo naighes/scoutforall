@@ -50,6 +50,16 @@ class StatsLayoutTest(private val screen: Size) {
                 s.choosePlayer(s.playerChoices().first().id)
                 s.touchTarget(5u, "A")
                 s.chooseEval(EvalEnum.PERFECT)
+                // our serve, their attack dug on 6/1 (1C and 6B), our kill
+                s.chooseEval(EvalEnum.POSITIVE)
+                s.chooseEvent(EventTypeEnum.D)
+                s.choosePlayer(s.playerChoices().first().id)
+                s.touchTarget(1u, "C")
+                s.touchTarget(6u, "B")
+                s.chooseEval(EvalEnum.POSITIVE)
+                s.chooseEvent(EventTypeEnum.A)
+                s.choosePlayer(s.playerChoices().first().id)
+                s.chooseEval(EvalEnum.PERFECT)
             }
         }
         serve(team, match, EvalEnum.PERFECT, EvalEnum.POSITIVE)
@@ -71,11 +81,17 @@ class StatsLayoutTest(private val screen: Size) {
         rule.waitForIdle()
         rule.shot("stats-zone-efficiency-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
-        // the reception, with the conflict zones; the attack, by zone
+        // the reception and the defense, with the conflict zones; the
+        // attack, by zone
         rule.onNode(hasText("Reception") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.receptions_by_zone))
         rule.waitForText(string(R.string.on_conflicts, 1, 100), substring = true)
         rule.shot("stats-reception-zones-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.onNode(hasText("Defense") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.digs_by_zone))
+        rule.waitForText(string(R.string.on_conflicts, 1, 100), substring = true)
+        rule.shot("stats-dig-zones-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         rule.onNode(hasText("Attack") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.attacks_by_zone))

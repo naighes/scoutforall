@@ -1562,6 +1562,44 @@ mod tests {
         assert!(detail(&stats, S, &all()).targets.is_empty());
     }
 
+    /// Our digs by the zone of our court: as the receptions, with the
+    /// conflict zones.
+    #[test]
+    fn detail_of_the_digs_by_zone() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z5, Z6, Z56};
+        use crate::shapes::court_zone::{CourtCell, CourtTarget, SubzoneEnum};
+        let t = Team::new();
+        let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
+        let dug = |eval, zone| {
+            let mut e = act(D, t.libero, eval);
+            e.flags = e.flags.with_target(zone);
+            e
+        };
+        // our serve, their attack dug, our attack out: their serve
+        let stats = t
+            .serving(vec![
+                act(S, t.setter, Positive),
+                dug(
+                    Positive,
+                    CourtTarget::pair(cell(6, SubzoneEnum::D), cell(5, SubzoneEnum::A)),
+                ),
+                act(A, t.oh1, Error),
+            ])
+            .stats;
+        let digs = detail(&stats, D, &all());
+        assert_eq!(digs.targets_told, 1);
+        let of = |zone| {
+            digs.targets
+                .iter()
+                .find(|t| t.zone == zone)
+                .map(|t| t.count)
+        };
+        assert_eq!((of(Z5), of(Z6)), (Some(0.5), Some(0.5)));
+        let on56 = digs.conflicts.iter().find(|t| t.zone == Z56).copied();
+        assert_eq!(on56.map(|t| (t.count, t.share)), Some((1.0, 100.0)));
+        assert_eq!(digs.on_conflicts.map(|c| c.count), Some(1));
+    }
+
     /// Their freeball after ours, exploited with a kill: team events, with
     /// a player none given and the others not told; also for our freeball
     /// naming its player, as scouted before.

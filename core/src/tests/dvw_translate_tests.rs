@@ -614,6 +614,37 @@ mod tests {
         );
     }
 
+    /// Our digs with where we dug their attack: the cell (from 4 to 1C),
+    /// copied from their attack; none when the file doesn't tell it.
+    #[test]
+    fn the_zone_of_our_digs() {
+        let rallies = [
+            ["a07RM+", "a02AH+~~~41C", "*05DH+~~~41C", "*02AH#"],
+            ["a07RM+", "a02AH+", "*05DH+", "*02AH#"],
+        ];
+        let targets: Vec<_> = rallies
+            .iter()
+            .map(|touches| {
+                let mut file = File::new();
+                file.their_serve_error();
+                let serve = format!("{}SM+", file.server());
+                let touches: Vec<&str> = std::iter::once(serve.as_str())
+                    .chain(touches.iter().copied())
+                    .collect();
+                file.rally(&touches, true);
+                let (events, _) = translated_events(&file.finished()).expect("expected the set");
+                events
+                    .iter()
+                    .find(|e| e.event_type == D)
+                    .and_then(|e| e.flags.target())
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![CourtTarget::of_zone(1, Some(SubzoneEnum::C)), None]
+        );
+    }
+
     /// Our serve `+`, their reception `-` and our attack, their touches
     /// after the reception not scouted: the ball came back without their
     /// attack, a freeball (`OF`), the serve keeping its evaluation.

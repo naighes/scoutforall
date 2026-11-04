@@ -103,8 +103,8 @@ pub struct ZoneDetail {
 pub const MIN_SERVES_FOR_EFFICIENCY: u32 = 3;
 
 /// Our serves or attacks sent to a zone of their court, or our receptions
-/// in a zone of ours (see `CourtZoneEnum`), among the ones whose zone was
-/// told; or our receptions on a conflict zone.
+/// or digs in a zone of ours (see `CourtZoneEnum`), among the ones whose
+/// zone was told; or our receptions or digs on a conflict zone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TargetDetail {
     pub zone: CourtZoneEnum,
@@ -138,19 +138,21 @@ pub struct Detail {
     pub points: Option<u32>,
     /// for an attack, the zones of `DISTRIBUTION_ZONES` set to
     pub zones: Vec<ZoneDetail>,
-    /// for a serve, an attack or a reception, how many had their zone
+    /// for a serve, an attack, a reception or a dig, how many had their zone
     /// told, and each of the nine zones (`CourtZoneEnum::ZONES`, the ones
     /// never served to or received in too); none for the other fundamentals
     pub targets_told: u32,
     pub targets: Vec<TargetDetail>,
-    /// for a reception, each conflict zone (`CourtZoneEnum::CONFLICTS`)
+    /// for a reception or a dig (on our court), each conflict zone
+    /// (`CourtZoneEnum::CONFLICTS`)
     /// and all of them together; none for the other fundamentals, or with
     /// no zone told
     pub conflicts: Vec<TargetDetail>,
     pub on_conflicts: Option<OnConflicts>,
 }
 
-/// Our receptions on any conflict zone, among the ones whose zone was told.
+/// Our receptions (or digs) on any conflict zone, among the ones whose zone
+/// was told.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OnConflicts {
     pub count: u32,
@@ -241,7 +243,8 @@ impl Detail {
                 .collect(),
             _ => Vec::new(),
         };
-        // where two of ours could take their serve: only in reception
+        // where two of ours could take their serve or their attack: only
+        // on our court, in reception and in defense
         let (conflicts, on_conflicts) = match (side, targets_told) {
             (Some(CourtSide::Ours), 1..) => {
                 let conflicts = CourtZoneEnum::CONFLICTS

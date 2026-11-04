@@ -142,6 +142,9 @@
     <string name="attack_zone">Strefa ataku</string>
     <string name="attacks_by_zone">Ataki według stref</string>
     <string name="attack_zones_told">strefa podana w %1$d z %2$d ataków</string>
+    <string name="dig_zone">Strefa obrony</string>
+    <string name="digs_by_zone">Obrony według stref</string>
+    <string name="dig_zones_told">strefa podana w %1$d z %2$d obron</string>
     <string name="on_conflicts">W strefach konfliktu: %1$d (%2$d%%)</string>
     <string name="zone_density">gęstość</string>
     <string name="attacks_detail">%1$d at · sku %2$s</string>

@@ -390,16 +390,17 @@ private fun FreeballContent(f: FreeballStats) = TileRow {
 }
 
 /** The serves or attacks with their zone told, on their court, or the
- * receptions, on ours: where they went, the more the brighter amber; or
- * their efficiency there, red to green, from a few on. Two cells of two
- * zones count half in each. The receptions also on the conflict zones,
- * between the zones, and on all of them under the court. */
+ * receptions or digs, on ours: where they went, the more the brighter
+ * amber; or their efficiency there, red to green, from a few on. Two cells
+ * of two zones count half in each. On our court also the conflict zones,
+ * between the zones, and all of them under the court. */
 @Composable
 private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     var efficiency by rememberSaveable { mutableStateOf(false) }
     val (title, told) = when (event) {
         EventTypeEnum.P -> R.string.receptions_by_zone to R.string.reception_zones_told
         EventTypeEnum.A -> R.string.attacks_by_zone to R.string.attack_zones_told
+        EventTypeEnum.D -> R.string.digs_by_zone to R.string.dig_zones_told
         else -> R.string.serves_by_zone to R.string.zones_told
     }
     Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)

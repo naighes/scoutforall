@@ -1202,11 +1202,11 @@ impl SetTranslator<'_> {
                     S => serve_type(skill.skill_type).map(TechniqueEnum::Serve),
                     _ => None,
                 };
-                // where our serve or attack went, or where we received
-                // theirs: the zone, with its subzone if told (a cell of
-                // ours; DataVolley tells no two cells)
+                // where our serve or attack went, or where we received or
+                // dug theirs: the zone, with its subzone if told (a cell
+                // of ours; DataVolley tells no two cells)
                 let target = match (event_type, skill.end_zone) {
-                    (S | P | A, Some(zone)) => {
+                    (S | P | A | D, Some(zone)) => {
                         CourtTarget::of_zone(zone, skill.end_subzone.and_then(SubzoneEnum::of))
                     }
                     _ => None,

@@ -1394,14 +1394,14 @@ pub struct FundamentalDetail {
     pub points: Option<u32>,
     /// for an attack
     pub zones: Vec<DetailZone>,
-    /// for a serve, an attack or a reception: how many had their zone
-    /// told, and the court a row each from the top (theirs for the serve
-    /// and the attack, the nine zones as `CourtZoneEnum::zones_shown`;
-    /// ours for the reception, with the conflict zones between them as
-    /// `CourtZoneEnum::shown`); empty with no zone told
+    /// for a serve, an attack, a reception or a dig: how many had their
+    /// zone told, and the court a row each from the top (theirs for the
+    /// serve and the attack, the nine zones as `CourtZoneEnum::zones_shown`;
+    /// ours for the reception and the dig, with the conflict zones between
+    /// them as `CourtZoneEnum::shown`); empty with no zone told
     pub targets_told: u32,
     pub targets: Vec<Vec<TargetStats>>,
-    /// for a reception, all the conflict zones together
+    /// for a reception or a dig, all the conflict zones together
     pub on_conflicts: Option<ConflictStats>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
@@ -1717,9 +1717,9 @@ impl Scouting {
         self.scouted(chosen)
     }
 
-    /// The court where the ball goes: for our serve theirs as our server
-    /// sees it (their end line at the top), for our reception ours as
-    /// seen from the bench (the net at the top); six rows of six cells, two
+    /// The court where the ball goes: for our serve or attack theirs as
+    /// our server sees it (their end line at the top), for our reception
+    /// or dig ours as seen from the bench (the net at the top); six rows of six cells, two
     /// by two in a zone; empty when it can't be told now.
     pub fn target_court(&self) -> Vec<Vec<CourtCellChoice>> {
         let session = self.session();

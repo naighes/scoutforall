@@ -1,5 +1,6 @@
 //! Where the ball goes: on the court of the opponent (our serve, our
-//! attack) or on ours (their serve, where we receive it).
+//! attack) or on ours (their serve, where we receive it; their attack,
+//! where we dig it).
 //!
 //! The scout tells a quarter of a zone (a cell: the subzones of DataVolley,
 //! `1A`), or two cells side by side (`1B-6A`), or, from a file without the
@@ -48,11 +49,12 @@ pub enum CourtSide {
 
 impl CourtSide {
     /// The court where the ball of the event goes: our serve and our
-    /// attack to theirs, our reception on ours; none for the other events.
+    /// attack to theirs, our reception and our dig on ours; none for the
+    /// other events.
     pub fn of(event: EventTypeEnum) -> Option<Self> {
         match event {
             EventTypeEnum::S | EventTypeEnum::A => Some(CourtSide::Theirs),
-            EventTypeEnum::P => Some(CourtSide::Ours),
+            EventTypeEnum::P | EventTypeEnum::D => Some(CourtSide::Ours),
             _ => None,
         }
     }

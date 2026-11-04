@@ -280,6 +280,41 @@ mod tests {
         assert!(ui.panel(domain.distribution).is_some(), "{}", ui.screen());
     }
 
+    /// Our dig: where we dug their attack, on our court; in the stats with
+    /// the conflict zones, as the reception.
+    #[tokio::test]
+    async fn the_dig_is_told_on_our_court() {
+        use KeyCode::*;
+        let mut ui = serving().await;
+        ui.type_keys(&[Char('+'), Char('d'), Char('7')]).await;
+        let title = |zone: &str| format!("{}: {zone}", current_labels().dig_target);
+        assert!(
+            ui.screen().contains(&title(current_labels().no_zone)),
+            "{}",
+            ui.screen()
+        );
+        ui.type_keys(&[Char(' '), Right, Char(' ')]).await;
+        assert!(
+            ui.screen().contains(&title("9D-8A (8/9)")),
+            "{}",
+            ui.screen()
+        );
+        ui.press(Char('+')).await;
+        ui.resize(120, 40);
+        ui.type_keys(&[Esc, Char(' '), Tab, Tab, Tab, Down, Down])
+            .await;
+        let domain = current_labels().domain;
+        let density = ui
+            .panel(domain.digs_by_zone)
+            .unwrap_or_else(|| panic!("{}", ui.screen()));
+        assert!(density.iter().any(|l| l.contains("8/9")), "{density:?}");
+        let conflicts = domain
+            .on_conflicts
+            .replace("{count}", "1")
+            .replace("{share}", "100");
+        assert!(ui.screen().contains(&conflicts), "{}", ui.screen());
+    }
+
     /// The stats of the serve: how many went to each zone and their
     /// efficiency there, of the serves whose zone was told, two cells of
     /// two zones half in each; the efficiency only from three serves on.

@@ -461,8 +461,8 @@ impl MatchStatsScreen {
             self.event_filter.selected().map(|s| s.event_type),
             self.player_filter.selected(),
         ) {
-            (Some(EventTypeEnum::S), _) => {
-                self.render_targets(EventTypeEnum::S, f, chunks[0], chunks[1]);
+            (Some(event_type @ (EventTypeEnum::S | EventTypeEnum::D)), _) => {
+                self.render_targets(event_type, f, chunks[0], chunks[1]);
             }
             // the side outs have no player: with one, the zones take the
             // room
@@ -555,6 +555,7 @@ impl MatchStatsScreen {
         let by_zone = match event_type {
             EventTypeEnum::P => domain.receptions_by_zone,
             EventTypeEnum::A => domain.attacks_by_zone,
+            EventTypeEnum::D => domain.digs_by_zone,
             _ => domain.serves_by_zone,
         };
         let told = domain

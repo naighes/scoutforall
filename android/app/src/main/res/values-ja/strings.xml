@@ -139,6 +139,9 @@
     <string name="attack_zone">アタックのゾーン</string>
     <string name="attacks_by_zone">ゾーン別アタック</string>
     <string name="attack_zones_told">ゾーン指定 %1$d/%2$d本</string>
+    <string name="dig_zone">ディグのゾーン</string>
+    <string name="digs_by_zone">ゾーン別ディグ</string>
+    <string name="dig_zones_told">ゾーン指定 %1$d/%2$d本</string>
     <string name="on_conflicts">境界ゾーン: %1$d本 (%2$d%%)</string>
     <string name="zone_density">密度</string>
     <string name="attacks_detail">%1$d 本 · 効果率 %2$s</string>

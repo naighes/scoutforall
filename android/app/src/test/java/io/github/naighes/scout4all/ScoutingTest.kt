@@ -224,6 +224,26 @@ class ScoutingTest {
         assertEquals("5A", saved().events[0].target)
     }
 
+    /** Our dig: where we dug their attack, touched on our court (the net
+     * at the top, 4 on the left). */
+    @Test
+    fun theDigZoneIsTouchedOnOurCourt() {
+        show()
+        val zone = { label: String -> hasContentDescription("${string(R.string.dig_zone)} $label") and hasClickAction() }
+        touch("+")
+        touch("18")
+        touch("defense")
+        rule.waitFor { rule.onAllNodes(zone("6B")).fetchSemanticsNodes().size == 1 }
+        val at = { label: String -> rule.onNode(zone(label)).fetchSemanticsNode().positionInRoot }
+        assertTrue(at("4C").y < at("1A").y && at("4C").x < at("1A").x)
+        rule.onNode(zone("1C")).performClick()
+        rule.onNode(zone("6B")).performClick()
+        rule.waitForText("1C-6B (6/1)", substring = true)
+        touch("+")
+        rule.waitFor { saved().events.size == 2 }
+        assertEquals("1C-6B (6/1)", saved().events[0].target)
+    }
+
     /** From the changes of the lineup, the libero for a player touched on
      * court: saved with the player; in their place after a rally. */
     @Test

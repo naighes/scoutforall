@@ -221,6 +221,7 @@ impl<SW: SettingsWriter + Send + Sync, SR: SettingsReader + Send + Sync> Rendera
                 f,
                 right,
                 match (side, self.session.event()) {
+                    (CourtSide::Ours, Some(EventTypeEnum::D)) => current_labels().dig_target,
                     (CourtSide::Ours, _) => current_labels().reception_target,
                     (CourtSide::Theirs, Some(EventTypeEnum::A)) => current_labels().attack_target,
                     (CourtSide::Theirs, _) => current_labels().serve_target,

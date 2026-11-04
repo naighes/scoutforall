@@ -297,6 +297,29 @@ mod tests {
         );
     }
 
+    /// Our dig: where we dug their attack, on our court, saved with its
+    /// evaluation; not before the player.
+    #[tokio::test]
+    async fn the_dig_target_is_on_our_court() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(D).await.unwrap();
+        assert!(!s.session.targets_apply());
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert_eq!(s.session.target_side(), Some(CourtSide::Ours));
+        // 1C and 6B: on the line between 1 and 6
+        s.session.touch_target(cell(1, SubzoneEnum::C)).unwrap();
+        s.session.touch_target(cell(6, SubzoneEnum::B)).unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        let dig = saved.iter().find(|e| e.event_type == D).expect("the dig");
+        assert_eq!(
+            dig.flags.target().and_then(|t| t.conflict()),
+            Some(CourtZoneEnum::Z61)
+        );
+    }
+
     /// Undo resumes the serve with where it went; going back from the
     /// evaluation forgets it.
     #[tokio::test]

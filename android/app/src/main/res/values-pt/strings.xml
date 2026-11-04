@@ -140,6 +140,9 @@
     <string name="attack_zone">Zona do ataque</string>
     <string name="attacks_by_zone">Ataques por zona</string>
     <string name="attack_zones_told">zona indicada em %1$d de %2$d ataques</string>
+    <string name="dig_zone">Zona da defesa</string>
+    <string name="digs_by_zone">Defesas por zona</string>
+    <string name="dig_zones_told">zona indicada em %1$d de %2$d defesas</string>
     <string name="on_conflicts">Nas zonas de conflito: %1$d (%2$d%%)</string>
     <string name="zone_density">densidade</string>
     <string name="attacks_detail">%1$d at · efi %2$s</string>
