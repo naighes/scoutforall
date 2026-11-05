@@ -36,7 +36,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - id: release
-        run: echo "version=$(cargo pkgid --manifest-path Cargo.toml | cut -d '@' -f2)" >> "$GITHUB_OUTPUT"
+        # the root Cargo.toml is a virtual workspace: the version of the
+        # workspace is read from the package that is released
+        run: |
+          version="$(cargo pkgid --package scout4all-desktop | cut -d '@' -f2)"
+          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "cannot read the version: '${version}'"; exit 1; }
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   create-release:
     runs-on: ubuntu-latest
