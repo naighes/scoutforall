@@ -1,0 +1,6 @@
+- Team analysis: the matches of a period together, each figure match by match with its trend.
+- Statistics by game situation: role, reception, touch before, set, reception formation, P1.
+- Report laid out like DataVolley's scoresheet.
+- DataVolley import from a team too.
+- Opponents suggested as you type.
+- Phase and rotation shown during scouting; names abbreviated, never cut.

@@ -1,0 +1,6 @@
+- Analiza drużyny: mecze z danego okresu razem, każdy wskaźnik mecz po meczu z trendem.
+- Statystyki według sytuacji w grze: rola, przyjęcie, poprzednie dotknięcie, wystawa, ustawienie w przyjęciu, P1.
+- Raport w układzie protokołu DataVolley.
+- Import z DataVolley także z poziomu drużyny.
+- Podpowiedzi przeciwników podczas pisania.
+- Faza i rotacja widoczne podczas scoutingu; nazwiska skracane, nigdy ucinane.

@@ -1,0 +1,6 @@
+- Análise do time: as partidas de um período juntas, cada dado partida a partida com sua tendência.
+- Estatísticas por situação de jogo: função, recepção, toque anterior, levantamento, formação de recepção, P1.
+- Relatório no formato da súmula do DataVolley.
+- Importação do DataVolley também a partir de um time.
+- Adversários sugeridos enquanto você digita.
+- Fase e rodízio mostrados durante o scout; nomes abreviados, nunca cortados.

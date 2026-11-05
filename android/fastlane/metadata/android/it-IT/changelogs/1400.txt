@@ -1,0 +1,6 @@
+- Analisi della squadra: le partite di un periodo insieme, ogni dato partita per partita con il suo andamento.
+- Statistiche per situazione di gioco: ruolo, ricezione, tocco precedente, alzata, schieramento in ricezione, P1.
+- Report impaginato come il tabellino di DataVolley.
+- Importazione DataVolley anche da una squadra.
+- Avversari suggeriti mentre scrivi.
+- Fase e rotazione mostrate durante lo scouting; nomi abbreviati, mai tagliati.
