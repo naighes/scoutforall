@@ -131,14 +131,14 @@
     <string name="first_attack">On reception</string>
     <string name="counter_attack">Counter-attack</string>
     <string name="zone_attacks">%d att</string>
-    <string name="serve_zone">Serve zone</string>
+    <string name="serve_zone">Serve destination</string>
     <string name="zone_chosen">chosen</string>
     <string name="serves_by_zone">Serves by zone</string>
     <string name="zones_told">zone told for %1$d of %2$d serves</string>
     <string name="reception_zone">Reception zone</string>
     <string name="receptions_by_zone">Receptions by zone</string>
     <string name="reception_zones_told">zone told for %1$d of %2$d receptions</string>
-    <string name="attack_zone">Attack zone</string>
+    <string name="attack_zone">Attack destination</string>
     <string name="attacks_by_zone">Attacks by zone</string>
     <string name="attack_zones_told">zone told for %1$d of %2$d attacks</string>
     <string name="dig_zone">Defense zone</string>

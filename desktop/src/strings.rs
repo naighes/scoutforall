@@ -2,7 +2,7 @@
 //! labels of the core and of `mobile` say the rest (events, evaluations,
 //! roles); whether to share the TUI's ones is decided after it (027).
 
-use scout4all_core::shapes::enums::LanguageEnum;
+use scout4all_core::shapes::enums::{EventTypeEnum, LanguageEnum};
 
 pub struct Strings {
     pub in_progress: &'static str,
@@ -24,7 +24,13 @@ pub struct Strings {
     pub reception: &'static str,
     pub techniques: &'static str,
     pub blockers: &'static str,
-    pub target: &'static str,
+    /// what the court asks while evaluating, by the event: where its
+    /// ball went, named as the fundamental does
+    pub target_serve: &'static str,
+    pub target_reception: &'static str,
+    pub target_attack: &'static str,
+    pub target_dig: &'static str,
+    pub target_block: &'static str,
     pub last_events: &'static str,
     pub stats: &'static str,
     pub this_set: &'static str,
@@ -294,7 +300,11 @@ const EN: Strings = Strings {
     reception: "Receiving",
     techniques: "Set or serve",
     blockers: "Blockers",
-    target: "Where the ball went",
+    target_serve: "Serve destination",
+    target_reception: "Reception zone",
+    target_attack: "Attack destination",
+    target_dig: "Defense zone",
+    target_block: "Block zone",
     last_events: "Last events",
     stats: "Statistics",
     this_set: "This set",
@@ -579,7 +589,11 @@ const IT: Strings = Strings {
     reception: "In ricezione",
     techniques: "Alzata o battuta",
     blockers: "Muri",
-    target: "Dove è andata la palla",
+    target_serve: "Destinazione della battuta",
+    target_reception: "Zona di ricezione",
+    target_attack: "Destinazione dell'attacco",
+    target_dig: "Zona di difesa",
+    target_block: "Zona di muro",
     last_events: "Ultimi eventi",
     stats: "Statistiche",
     this_set: "Questo set",
@@ -864,7 +878,11 @@ const PT: Strings = Strings {
     reception: "Na recepção",
     techniques: "Levantamento ou saque",
     blockers: "Bloqueadores",
-    target: "Para onde foi a bola",
+    target_serve: "Destino do saque",
+    target_reception: "Zona da recepção",
+    target_attack: "Destino do ataque",
+    target_dig: "Zona da defesa",
+    target_block: "Zona do bloqueio",
     last_events: "Últimos eventos",
     stats: "Estatísticas",
     this_set: "Este set",
@@ -1149,7 +1167,11 @@ const PL: Strings = Strings {
     reception: "W przyjęciu",
     techniques: "Wystawa lub zagrywka",
     blockers: "Blokujący",
-    target: "Gdzie poleciała piłka",
+    target_serve: "Kierunek zagrywki",
+    target_reception: "Strefa przyjęcia",
+    target_attack: "Kierunek ataku",
+    target_dig: "Strefa obrony",
+    target_block: "Strefa bloku",
     last_events: "Ostatnie zdarzenia",
     stats: "Statystyki",
     this_set: "Ten set",
@@ -1434,7 +1456,11 @@ const JA: Strings = Strings {
     reception: "レシーブ人数",
     techniques: "トスまたはサーブ",
     blockers: "ブロッカー",
-    target: "ボールの行き先",
+    target_serve: "サーブのコース",
+    target_reception: "レセプションのゾーン",
+    target_attack: "アタックのコース",
+    target_dig: "ディグのゾーン",
+    target_block: "ブロックのゾーン",
     last_events: "最近のイベント",
     stats: "統計",
     this_set: "このセット",
@@ -1695,5 +1721,20 @@ pub const fn strings(language: LanguageEnum) -> &'static Strings {
         LanguageEnum::Pt => &PT,
         LanguageEnum::Pl => &PL,
         LanguageEnum::Ja => &JA,
+    }
+}
+
+impl Strings {
+    /// What the court asks while evaluating `event`, if it asks anything:
+    /// the destination of a serve or an attack, the zone of the others.
+    pub const fn target(&self, event: EventTypeEnum) -> Option<&'static str> {
+        match event {
+            EventTypeEnum::S => Some(self.target_serve),
+            EventTypeEnum::P => Some(self.target_reception),
+            EventTypeEnum::A => Some(self.target_attack),
+            EventTypeEnum::D => Some(self.target_dig),
+            EventTypeEnum::B => Some(self.target_block),
+            _ => None,
+        }
     }
 }

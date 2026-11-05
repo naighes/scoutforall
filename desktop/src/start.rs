@@ -412,7 +412,7 @@ impl StartScreen {
                                 .size(SIZE_BODY)
                                 .font(bold)
                                 .width(Length::Fixed(32.0)),
-                            ui::body(p.name.clone()).width(Length::Fill),
+                            ui::name(p.name.clone()),
                             text(p.role_name.clone().unwrap_or_default())
                                 .size(SIZE_SMALL)
                                 .color(c.muted),

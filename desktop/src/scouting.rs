@@ -845,8 +845,9 @@ impl ScoutingScreen {
                     false => group(list, s.eval),
                 };
                 list = list.push(self.evals(c));
-                if !snap.target.is_empty() {
-                    list = group(list, s.target);
+                let asked = snap.state.event.as_ref().and_then(|e| s.target(e.value));
+                if let (false, Some(asked)) = (snap.target.is_empty(), asked) {
+                    list = group(list, asked);
                     list = list.push(
                         row![
                             ui::keycap("← ↑ ↓ →", c),
@@ -979,7 +980,7 @@ impl ScoutingScreen {
             None => big("?".to_string(), c.muted).into(),
         };
         let asked = match (st.step, self.snapshot.target.is_empty()) {
-            (ScoutingStep::Eval, false) => Some(s.target),
+            (ScoutingStep::Eval, false) => s.target(event.value),
             _ => None,
         };
         let line = row![]
@@ -1264,7 +1265,7 @@ fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
             .font(theme::fonts().bold)
             .color(c.accent)
             .width(Length::Fixed(28.0)),
-        ui::body(p.name.clone()).width(Length::Fill),
+        ui::name(p.name.clone()),
     ]
     .spacing(6)
     .align_y(Alignment::Center)

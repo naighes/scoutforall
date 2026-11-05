@@ -8,7 +8,7 @@ use {
     },
     iced::{
         Alignment, Background, Border, Color, Element, Length, Padding,
-        widget::{button, column, container, row, space, svg, text, tooltip},
+        widget::{button, column, container, responsive, row, space, svg, text, tooltip},
     },
 };
 
@@ -482,6 +482,26 @@ pub fn bottom_bar<'a, M: 'a>(hints: Vec<(String, String)>, c: Colors) -> Element
 /// Plain text of the body.
 pub fn body<'a>(s: impl ToString) -> iced::widget::Text<'a> {
     text(s.to_string()).size(SIZE_BODY)
+}
+
+/// How wide a letter of the body is: the font is monospaced, its letters
+/// six tenths of the size.
+const BODY_LETTER: f32 = SIZE_BODY * 0.6;
+
+/// A name in the room its row leaves it, on one line: whole if it fits,
+/// else abbreviated as on the court ("Chr. Di Bal."), and cut if not even
+/// that fits. Never under the numbers next to it, whatever the window.
+pub fn name<'a, M: 'a>(name: String) -> Element<'a, M> {
+    responsive(move |size| {
+        let room = (size.width / BODY_LETTER).floor() as usize;
+        container(body(scout4all_core::names::fitted(&name, room)).wrapping(text::Wrapping::None))
+            .width(Length::Fill)
+            .clip(true)
+            .into()
+    })
+    .width(Length::Fill)
+    .height(Length::Shrink)
+    .into()
 }
 
 /// The word with its first letter in capitals, for a title.

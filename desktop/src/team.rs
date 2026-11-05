@@ -424,7 +424,7 @@ impl TeamScreen {
                         .font(theme::fonts().bold)
                         .color(c.accent)
                         .width(Length::Fixed(34.0)),
-                    ui::body(p.name.clone()).width(Length::Fill),
+                    ui::name(p.name.clone()),
                     text(p.role.clone().unwrap_or_default())
                         .size(SIZE_SMALL)
                         .color(c.muted),

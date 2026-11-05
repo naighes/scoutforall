@@ -132,14 +132,14 @@
     <string name="first_attack">Po przyjęciu</string>
     <string name="counter_attack">Kontratak</string>
     <string name="zone_attacks">%d at.</string>
-    <string name="serve_zone">Strefa zagrywki</string>
+    <string name="serve_zone">Kierunek zagrywki</string>
     <string name="zone_chosen">wybrana</string>
     <string name="serves_by_zone">Zagrywki według stref</string>
     <string name="zones_told">strefa podana w %1$d z %2$d zagrywek</string>
     <string name="reception_zone">Strefa przyjęcia</string>
     <string name="receptions_by_zone">Przyjęcia według stref</string>
     <string name="reception_zones_told">strefa podana w %1$d z %2$d przyjęć</string>
-    <string name="attack_zone">Strefa ataku</string>
+    <string name="attack_zone">Kierunek ataku</string>
     <string name="attacks_by_zone">Ataki według stref</string>
     <string name="attack_zones_told">strefa podana w %1$d z %2$d ataków</string>
     <string name="dig_zone">Strefa obrony</string>

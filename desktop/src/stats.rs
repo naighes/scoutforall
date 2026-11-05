@@ -1445,8 +1445,8 @@ impl StatsScreen {
         let right = self.players(f, s, c);
         scrollable(
             row![
-                container(column![left, middle].spacing(12)).width(Length::FillPortion(3)),
-                container(right).width(Length::FillPortion(2)),
+                container(column![left, middle].spacing(12)).width(Length::FillPortion(1)),
+                container(right).width(Length::FillPortion(1)),
             ]
             .spacing(14),
         )
@@ -1635,13 +1635,13 @@ impl StatsScreen {
         let head = row![
             space::horizontal(),
             small(s.total, c)
-                .width(Length::Fixed(52.0))
+                .width(Length::Fixed(44.0))
                 .align_x(Alignment::End),
             small(ui::capitalized(s.efficiency), c)
                 .width(Length::Fixed(56.0))
                 .align_x(Alignment::End),
             small("+", c)
-                .width(Length::Fixed(52.0))
+                .width(Length::Fixed(44.0))
                 .align_x(Alignment::End),
             small(s.points, c)
                 .width(Length::Fixed(52.0))
@@ -1660,15 +1660,15 @@ impl StatsScreen {
                     .font(theme::fonts().bold)
                     .color(c.accent)
                     .width(Length::Fixed(30.0)),
-                ui::body(p.player.name.clone()).width(Length::Fill),
-                num(p.total.to_string(), 52.0),
+                ui::name(p.player.name.clone()),
+                num(p.total.to_string(), 44.0),
                 text(pct(p.efficiency))
                     .size(SIZE_BODY)
                     .font(theme::fonts().bold)
                     .color(p.grade.map_or(c.text, |g| grade_color(g, c)))
                     .width(Length::Fixed(56.0))
                     .align_x(Alignment::End),
-                num(pct(p.positiveness), 52.0),
+                num(pct(p.positiveness), 44.0),
                 num(p.points.map_or("–".to_string(), |p| p.to_string()), 52.0),
                 num(p.errors.to_string(), 36.0),
             ]
