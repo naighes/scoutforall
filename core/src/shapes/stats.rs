@@ -7,12 +7,16 @@
 //! loaded, so changing how they're counted needs no data migration.
 //!
 //! Every query takes a [`StatsFilter`] narrowing it to a phase, a rotation
-//! (the index of the setter's position, 0 to 5) and a player.
+//! (the index of the setter's position, 0 to 5), a player, and a situation
+//! (see [`SituationFilter`]): the role of the player, our reception in the
+//! rally, the touch before, the set of the attack, the reception formation
+//! and the inverted P1.
 use crate::shapes::court_zone::{CourtTarget, CourtZoneEnum};
 use crate::shapes::enums::{
-    ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum, ZoneEnum,
+    ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
 };
-use crate::shapes::flags::BlockersEnum;
+use crate::shapes::flags::{BlockersEnum, ReceptionSchemeEnum};
+use crate::shapes::technique::SetTypeEnum;
 use std::collections::HashMap;
 use std::hash::Hash;
 use uuid::Uuid;
@@ -62,13 +66,14 @@ impl Metric {
     }
 }
 
-/// Narrows the statistics to a phase, a rotation and a player: `None` keeps
-/// them all.
+/// Narrows the statistics to a phase, a rotation, a player and a
+/// situation: `None` keeps them all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StatsFilter {
     pub phase: Option<PhaseEnum>,
     pub rotation: Option<u8>,
     pub player: Option<Uuid>,
+    pub situation: SituationFilter,
 }
 
 impl StatsFilter {
@@ -77,16 +82,195 @@ impl StatsFilter {
             phase,
             rotation,
             player,
+            situation: SituationFilter::default(),
         }
     }
 
+    pub fn with_situation(self, situation: SituationFilter) -> Self {
+        StatsFilter { situation, ..self }
+    }
+
     /// Whether an event with this context passes the filter: an event with
-    /// no player (e.g. an opponent error) doesn't pass a player filter.
-    fn matches(&self, phase: PhaseEnum, rotation: u8, player: Option<Uuid>) -> bool {
+    /// no player (e.g. an opponent error) doesn't pass a player filter, one
+    /// with no touch (a rally, a freeball of theirs) doesn't pass a filter on
+    /// the touch (role, touch before, set).
+    fn matches(
+        &self,
+        phase: PhaseEnum,
+        rotation: u8,
+        player: Option<Uuid>,
+        situation: &Situation,
+        touch: Option<&Touch>,
+    ) -> bool {
         self.phase.is_none_or(|p| p == phase)
             && self.rotation.is_none_or(|r| r == rotation)
             && self.player.is_none_or(|p| player == Some(p))
+            && self.situation.matches(situation, touch)
     }
+}
+
+/// Narrows the statistics to a situation of the game: `None` keeps them
+/// all. A filter on our reception keeps only the side outs where we
+/// received; a filter on the touch only the touches having it (the set
+/// only the attacks told with it).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SituationFilter {
+    /// the role of the player in the rotation
+    pub role: Option<RoleEnum>,
+    /// our reception in the rally
+    pub reception: Option<EvalSet>,
+    /// the touch of ours before, in the rally (for an attack, the one it
+    /// was built on)
+    pub previous: Option<EvalSet>,
+    /// the set of the attack
+    pub set_types: Option<SetTypeSet>,
+    /// how many received their serve
+    pub scheme: Option<ReceptionSchemeEnum>,
+    /// in P1 in side out, the P1 inverted or not
+    pub inverted_p1: Option<bool>,
+}
+
+impl SituationFilter {
+    /// Whether it narrows anything.
+    pub fn is_empty(&self) -> bool {
+        *self == SituationFilter::default()
+    }
+
+    fn matches(&self, situation: &Situation, touch: Option<&Touch>) -> bool {
+        let role = touch.and_then(|t| t.role);
+        let previous = touch.and_then(|t| t.previous);
+        let set_type = touch.and_then(|t| t.set_type);
+        self.role.is_none_or(|r| role == Some(r))
+            && self
+                .reception
+                .is_none_or(|set| situation.reception.is_some_and(|e| set.contains(e)))
+            && self
+                .previous
+                .is_none_or(|set| previous.is_some_and(|e| set.contains(e)))
+            && self
+                .set_types
+                .is_none_or(|set| set_type.is_some_and(|t| set.contains(t)))
+            && self.scheme.is_none_or(|s| situation.scheme == Some(s))
+            && self
+                .inverted_p1
+                .is_none_or(|i| situation.inverted_p1 == Some(i))
+    }
+}
+
+/// Some evaluations, to filter by.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct EvalSet(u8);
+
+impl EvalSet {
+    /// The good ones: `#` and `+`.
+    pub const POSITIVE: EvalSet = EvalSet(0b11);
+    /// `!`
+    pub const EXCLAMATIVE: EvalSet = EvalSet(0b100);
+    /// The bad ones keeping the ball or giving it to them: `-` and `/`.
+    pub const NEGATIVE: EvalSet = EvalSet(0b11000);
+
+    pub fn of(evals: &[EvalEnum]) -> Self {
+        evals.iter().fold(EvalSet(0), |set, e| set.with(*e, true))
+    }
+
+    fn bit(eval: EvalEnum) -> u8 {
+        match eval {
+            EvalEnum::Perfect => 1,
+            EvalEnum::Positive => 1 << 1,
+            EvalEnum::Exclamative => 1 << 2,
+            EvalEnum::Negative => 1 << 3,
+            EvalEnum::Over => 1 << 4,
+            EvalEnum::Error => 1 << 5,
+        }
+    }
+
+    pub fn contains(&self, eval: EvalEnum) -> bool {
+        self.0 & Self::bit(eval) != 0
+    }
+
+    pub fn with(self, eval: EvalEnum, on: bool) -> Self {
+        match on {
+            true => EvalSet(self.0 | Self::bit(eval)),
+            false => EvalSet(self.0 & !Self::bit(eval)),
+        }
+    }
+
+    /// All the evaluations of the other set in this one.
+    pub fn includes(&self, other: EvalSet) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// The evaluations in either.
+    pub fn union(self, other: EvalSet) -> Self {
+        EvalSet(self.0 | other.0)
+    }
+
+    /// The evaluations of this one not in the other.
+    pub fn minus(self, other: EvalSet) -> Self {
+        EvalSet(self.0 & !other.0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Some sets of the attack, to filter by.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct SetTypeSet(u32);
+
+impl SetTypeSet {
+    pub fn of(types: &[SetTypeEnum]) -> Self {
+        types
+            .iter()
+            .fold(SetTypeSet(0), |set, t| set.with(*t, true))
+    }
+
+    fn bit(set_type: SetTypeEnum) -> u32 {
+        SetTypeEnum::ALL
+            .iter()
+            .position(|t| *t == set_type)
+            .map_or(0, |i| 1 << i)
+    }
+
+    pub fn contains(&self, set_type: SetTypeEnum) -> bool {
+        self.0 & Self::bit(set_type) != 0
+    }
+
+    pub fn with(self, set_type: SetTypeEnum, on: bool) -> Self {
+        match on {
+            true => SetTypeSet(self.0 | Self::bit(set_type)),
+            false => SetTypeSet(self.0 & !Self::bit(set_type)),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// The situation of the rally an event was played in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Situation {
+    /// our reception, from it to the end of the rally: `None` in break, or
+    /// with no reception of ours (their ace, their serve error)
+    pub reception: Option<EvalEnum>,
+    /// how many received their serve: `None` in break
+    pub scheme: Option<ReceptionSchemeEnum>,
+    /// in P1 in side out, whether the P1 was inverted; `None` elsewhere
+    pub inverted_p1: Option<bool>,
+}
+
+/// A touch of ours: who touched the ball and how it came.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Touch {
+    /// the role of the player in the rotation
+    pub role: Option<RoleEnum>,
+    /// our touch before in the rally (the reception or dig an attack was
+    /// built on), `None` with the ball coming from them
+    pub previous: Option<EvalEnum>,
+    /// the set of the attack, when told
+    pub set_type: Option<SetTypeEnum>,
 }
 
 /// How many times each key occurred.
@@ -164,6 +348,9 @@ pub struct EventKey {
     /// `None` for the events with no evaluation (`F`, `OS`, `OE`, `FB`,
     /// `OF`)
     pub eval: Option<EvalEnum>,
+    pub situation: Situation,
+    /// `None` for the opponent events
+    pub touch: Option<Touch>,
 }
 
 /// An attack of ours, with the zone told by the role of the attacker.
@@ -179,6 +366,11 @@ pub struct AttackKey {
     pub prev_type: EventTypeEnum,
     /// `None` after their freeball (`OF`)
     pub prev_eval: Option<EvalEnum>,
+    pub situation: Situation,
+    /// the role of the attacker in the rotation
+    pub role: Option<RoleEnum>,
+    /// the set, when told
+    pub set_type: Option<SetTypeEnum>,
 }
 
 impl AttackKey {
@@ -197,6 +389,14 @@ impl AttackKey {
     pub fn is_freeball_attack(&self) -> bool {
         self.prev_type == EventTypeEnum::OF
     }
+
+    fn touch(&self) -> Touch {
+        Touch {
+            role: self.role,
+            previous: self.prev_eval,
+            set_type: self.set_type,
+        }
+    }
 }
 
 /// A rally, with the phase and rotation it was played in and its winner.
@@ -205,6 +405,7 @@ pub struct RallyKey {
     pub phase: PhaseEnum,
     pub rotation: u8,
     pub winner: TeamSideEnum,
+    pub situation: Situation,
 }
 
 /// Their freeball (`OF`), with the phase and rotation it was played in and
@@ -214,6 +415,7 @@ pub struct FreeballKey {
     pub phase: PhaseEnum,
     pub rotation: u8,
     pub exploited: bool,
+    pub situation: Situation,
 }
 
 /// The first rally of a side out, from their serve to the end of our first
@@ -227,6 +429,7 @@ pub struct FirstRallyKey {
     /// the event ending the first rally
     pub ending: EventTypeEnum,
     pub ending_eval: Option<EvalEnum>,
+    pub situation: Situation,
 }
 
 impl FirstRallyKey {
@@ -245,6 +448,7 @@ pub struct PossessionKey {
     /// 1 for the first possession, after their serve
     pub possession: u8,
     pub won: bool,
+    pub situation: Situation,
 }
 
 /// The possessions of the side outs, and the ones finalized.
@@ -363,7 +567,14 @@ impl Stats {
         filter: &'a StatsFilter,
     ) -> impl Iterator<Item = (&'a EventKey, u32)> {
         self.events.iter(move |k| {
-            k.event_type == event_type && filter.matches(k.phase, k.rotation, k.player)
+            k.event_type == event_type
+                && filter.matches(
+                    k.phase,
+                    k.rotation,
+                    k.player,
+                    &k.situation,
+                    k.touch.as_ref(),
+                )
         })
     }
 
@@ -568,7 +779,7 @@ impl Stats {
     /// per break point; in side out, the receptions per side out. Returns
     /// `(rallies per point, points, rallies)`, or `None` with no points won.
     pub fn phases_per_point(&self, filter: &StatsFilter) -> Option<(f64, u32, u32)> {
-        let matches = |k: &RallyKey| filter.matches(k.phase, k.rotation, None);
+        let matches = |k: &RallyKey| filter.matches(k.phase, k.rotation, None, &k.situation, None);
         let rallies = self.rallies.count(matches);
         let won = self
             .rallies
@@ -580,7 +791,7 @@ impl Stats {
     /// side out, the side outs over their serves. Returns `(percentage, won,
     /// rallies)`, or `None` with no rallies.
     pub fn rallies_won(&self, filter: &StatsFilter) -> Option<(f64, u32, u32)> {
-        let matches = |k: &RallyKey| filter.matches(k.phase, k.rotation, None);
+        let matches = |k: &RallyKey| filter.matches(k.phase, k.rotation, None, &k.situation, None);
         let rallies = self.rallies.count(matches);
         let won = self
             .rallies
@@ -592,8 +803,15 @@ impl Stats {
         &'a self,
         filter: &'a StatsFilter,
     ) -> impl Iterator<Item = (&'a AttackKey, u32)> {
-        self.attacks
-            .iter(move |k| filter.matches(k.phase, k.rotation, Some(k.player)))
+        self.attacks.iter(move |k| {
+            filter.matches(
+                k.phase,
+                k.rotation,
+                Some(k.player),
+                &k.situation,
+                Some(&k.touch()),
+            )
+        })
     }
 
     /// The attacks built by us on our reception (`counter_attack` false) or
@@ -718,10 +936,9 @@ impl Stats {
         matches: impl Fn(&FirstRallyKey) -> bool,
     ) -> Option<FirstRallySummary> {
         let mut summary = FirstRallySummary::default();
-        for (k, v) in self
-            .first_rallies
-            .iter(|k| filter.matches(PhaseEnum::SideOut, k.rotation, None) && matches(k))
-        {
+        for (k, v) in self.first_rallies.iter(|k| {
+            filter.matches(PhaseEnum::SideOut, k.rotation, None, &k.situation, None) && matches(k)
+        }) {
             summary.total += v;
             match k.winner() {
                 Some(TeamSideEnum::Us) => summary.won += v,
@@ -753,7 +970,7 @@ impl Stats {
         filter: &StatsFilter,
     ) -> Option<PossessionSummary> {
         let matches = |k: &PossessionKey| {
-            filter.matches(PhaseEnum::SideOut, k.rotation, None)
+            filter.matches(PhaseEnum::SideOut, k.rotation, None, &k.situation, None)
                 && match possession {
                     None => true,
                     Some(LAST_POSSESSION) => k.possession >= LAST_POSSESSION,
@@ -773,7 +990,7 @@ impl Stats {
     /// player: a player filter leaves none.
     pub fn untouched_aces(&self, filter: &StatsFilter) -> u32 {
         self.first_rallies.count(|k| {
-            filter.matches(PhaseEnum::SideOut, k.rotation, None)
+            filter.matches(PhaseEnum::SideOut, k.rotation, None, &k.situation, None)
                 && k.reception_eval.is_none()
                 && k.ending == EventTypeEnum::OS
         })
@@ -783,7 +1000,8 @@ impl Stats {
     /// or `None` with no freeballs. They have no player: a player filter
     /// leaves none.
     pub fn freeball_exploitation(&self, filter: &StatsFilter) -> Option<(f64, u32, u32)> {
-        let matches = |k: &FreeballKey| filter.matches(k.phase, k.rotation, None);
+        let matches =
+            |k: &FreeballKey| filter.matches(k.phase, k.rotation, None, &k.situation, None);
         let total = self.freeballs.count(matches);
         let exploited = self.freeballs.count(|k| matches(k) && k.exploited);
         (total > 0).then(|| (percentage(exploited as i32, total), total, exploited))
