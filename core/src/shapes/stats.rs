@@ -690,11 +690,38 @@ impl Stats {
         reception_eval: Option<EvalEnum>,
         filter: &StatsFilter,
     ) -> Option<FirstRallySummary> {
+        self.first_rallies_where(filter, |k| {
+            reception_eval.is_none_or(|e| k.reception_eval == Some(e))
+        })
+    }
+
+    /// The first rallies after a reception with one of these evaluations:
+    /// all of them, or only the ones ending with our attack (`attacks_only`,
+    /// as DataVolley counts the first attack after the reception: their
+    /// errors, our faults and our freeballs left out). `None` when there are
+    /// none.
+    pub fn first_rallies_after(
+        &self,
+        receptions: &[EvalEnum],
+        attacks_only: bool,
+        filter: &StatsFilter,
+    ) -> Option<FirstRallySummary> {
+        self.first_rallies_where(filter, |k| {
+            k.reception_eval.is_some_and(|e| receptions.contains(&e))
+                && (!attacks_only || k.ending == EventTypeEnum::A)
+        })
+    }
+
+    fn first_rallies_where(
+        &self,
+        filter: &StatsFilter,
+        matches: impl Fn(&FirstRallyKey) -> bool,
+    ) -> Option<FirstRallySummary> {
         let mut summary = FirstRallySummary::default();
-        for (k, v) in self.first_rallies.iter(|k| {
-            filter.matches(PhaseEnum::SideOut, k.rotation, None)
-                && reception_eval.is_none_or(|e| k.reception_eval == Some(e))
-        }) {
+        for (k, v) in self
+            .first_rallies
+            .iter(|k| filter.matches(PhaseEnum::SideOut, k.rotation, None) && matches(k))
+        {
             summary.total += v;
             match k.winner() {
                 Some(TeamSideEnum::Us) => summary.won += v,

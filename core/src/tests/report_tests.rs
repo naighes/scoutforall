@@ -224,10 +224,11 @@ mod tests {
         assert_eq!((first.name.as_str(), first.us), ("them", false));
         assert_eq!((second.name.as_str(), second.us), ("us", true));
         assert_eq!(report.point_sequence.teams, ["them", "us"]);
-        // the score, the longest runs and the largest leads: theirs first
+        // the score, the longest runs and the largest leads: theirs first;
+        // the side outs and the break points won are ours
         assert_eq!(
             report.sets.rows,
-            [["1", "3-2", "", "4<8", "3 · 1", "2 · 1"]]
+            [["1", "", "3-2", "50", "0", "4<8", "3 · 1", "2 · 1"]]
         );
     }
 
@@ -275,10 +276,12 @@ mod tests {
         let labels = EN;
         let report = away_report();
         let won = &report.points_won.rows;
-        assert_eq!(row_of(won, labels.attack)[1..], ["1", "50"]);
+        // in the match, its share, then in each set
+        assert_eq!(row_of(won, labels.attack)[1..], ["1", "50", "1"]);
         assert_eq!(row_of(won, labels.opponent_errors)[1], "1");
-        assert_eq!(row_of(won, labels.ace)[1..], ["-", "-"]);
-        assert_eq!(row_of(won, labels.total)[1..], ["2", "100"]);
+        assert_eq!(row_of(won, labels.ace)[1..], ["-", "-", "-"]);
+        assert_eq!(row_of(won, labels.total)[1..], ["2", "100", "2"]);
+        assert_eq!(report.points_won.columns[3], "set 1");
         let lost = &report.points_lost.rows;
         assert_eq!(row_of(lost, labels.opponent_score)[1], "1");
         assert_eq!(row_of(lost, labels.serve)[1], "1");
@@ -300,7 +303,8 @@ mod tests {
     }
 
     /// The setter, the starters, the player from the bench, the libero
-    /// (never from the bench), by number, then the total of the team.
+    /// (never from the bench), by number, then the total of the team and
+    /// the team in each set, as DataVolley's scoresheet.
     #[test]
     fn the_players_with_their_lineup_in_each_set() {
         let labels = EN;
@@ -338,7 +342,9 @@ mod tests {
             Cell::Text { text } => text.parse::<u8>().ok(),
             _ => Some(u8::MAX),
         }));
-        let total = rows.last().expect("expected the total");
+        let [.., total, set] = rows.as_slice() else {
+            panic!("expected the total and the set");
+        };
         assert!(total.total);
         assert_eq!(
             total.lead[1],
@@ -346,11 +352,19 @@ mod tests {
                 text: labels.total.to_string()
             }
         );
-        assert!(rows[..rows.len() - 1].iter().all(|r| !r.total));
+        assert_eq!(
+            set.lead[1],
+            Cell::Text {
+                text: "set 1".to_string()
+            }
+        );
+        // a single set: the same as the match
+        assert_eq!(set.values, total.values);
+        assert_eq!(rows.iter().filter(|r| r.total).count(), 1);
         // the opponent errors: none for a player, one for the team
         assert_eq!(total.values.last().map(String::as_str), Some("1"));
         assert!(
-            rows[..rows.len() - 1]
+            rows[..rows.len() - 2]
                 .iter()
                 .all(|r| r.values.last().map(String::as_str) == Some("-"))
         );
@@ -361,7 +375,7 @@ mod tests {
     fn the_statistics_tables_fill_their_columns() {
         let report = away_report();
         let stats_columns: usize = report.stats_groups.iter().map(|g| g.columns.len()).sum();
-        for table in [&report.players, &report.rotations, &report.set_stats] {
+        for table in [&report.players, &report.rotations] {
             let lead_columns: usize = table.lead.iter().map(|g| g.columns.len()).sum();
             assert!(
                 table
@@ -372,7 +386,78 @@ mod tests {
         }
         // 6 rotations, then the total
         assert_eq!(report.rotations.rows.len(), 7);
-        assert_eq!(report.set_stats.rows.len(), 2);
+    }
+
+    /// The closing box of DataVolley's scoresheet: the points by rotation
+    /// add up to the difference of the score; the side-out and break
+    /// points are the players' ones, the rallies won count their errors.
+    #[test]
+    fn the_closing_box_of_the_scoresheet() {
+        let labels = EN;
+        let report = away_report();
+        let summary = &report.summary;
+        assert_eq!(summary.title, "us");
+        let rotations = &summary.rotations.rows;
+        assert_eq!(rotations.len(), 6);
+        assert_eq!(rotations[0][0], "S6");
+        assert_eq!(rotations[5][0], "S1");
+        let diff: i64 = rotations
+            .iter()
+            .map(|r| r[1].parse::<i64>().unwrap_or(0))
+            .sum();
+        assert_eq!(diff, 2 - 3);
+        let [side_out, break_phase] = summary.phases.as_slice() else {
+            panic!("expected the two phases");
+        };
+        assert_eq!(
+            (side_out.rallies.as_str(), side_out.points.as_str()),
+            ("2", "1")
+        );
+        assert_eq!(side_out.every, "every 2.00 receptions 1 point");
+        assert_eq!(side_out.won, "2/4 · 50%");
+        assert_eq!(
+            (break_phase.rallies.as_str(), break_phase.points.as_str()),
+            ("1", "0")
+        );
+        assert_eq!(break_phase.every, "");
+        assert_eq!(break_phase.won, "0/1 · 0%");
+        let rows = &summary.direct_side_out.rows;
+        assert_eq!(rows[0].label, labels.positive_reception);
+        // the kill and the attack blocked: the same in both readings
+        assert_eq!(rows[0].values[0], ["2", "-", "1", "1", "50"]);
+        assert_eq!(rows[0].values[1], ["2", "-", "1", "1", "50"]);
+        assert_eq!(rows[1].values, [vec!["-"; 5], vec!["-"; 5]]);
+        assert_eq!(rows[2].label, labels.counter_attack);
+        assert_eq!(rows[2].values[0], ["-"; 5]);
+    }
+
+    /// DataVolley's first attack after the reception leaves out the
+    /// rallies ending otherwise: their error, our freeball. Ours counts
+    /// them: their error a point, our freeball a side out missed.
+    #[test]
+    fn the_first_attack_and_the_first_rally() {
+        let t = Team::new();
+        let set = t.set(
+            1,
+            TeamSideEnum::Them,
+            vec![
+                act(P, t.libero, Positive),
+                opp(OE),
+                act(S, t.oh1, Error),
+                act(P, t.libero, Negative),
+                ev(FB, None, None),
+                opp(OS),
+                act(P, t.libero, Perfect),
+                act(A, t.oh1, Perfect),
+            ],
+        );
+        let m = match_entry(t.team("us"), "them", true, vec![set]);
+        let report = build_report(&m, EN).expect("expected the report");
+        let rows = &report.summary.direct_side_out.rows;
+        assert_eq!(rows[0].values[0], ["1", "-", "-", "1", "100"]);
+        assert_eq!(rows[0].values[1], ["2", "-", "-", "2", "100"]);
+        assert_eq!(rows[1].values[0], ["-"; 5]);
+        assert_eq!(rows[1].values[1], ["1", "-", "-", "-", "0"]);
     }
 
     /// The rallies won by phase, in the whole match and by rotation.
@@ -447,7 +532,7 @@ mod tests {
             [3, 2]
         );
         assert_eq!(report.sets.rows.len(), 5);
-        assert_eq!(report.sets.rows[4][1], "16-14");
+        assert_eq!(report.sets.rows[4][2], "16-14");
         assert_eq!(report.point_sequence.sets[0].points.len(), 50);
         render_report_pdf(&report).expect("expected the report");
     }
