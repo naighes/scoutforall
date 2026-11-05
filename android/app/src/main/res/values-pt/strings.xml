@@ -322,4 +322,32 @@
     <string name="dvw_season">temporada</string>
     <string name="dvw_sets">sets</string>
     <string name="dvw_next">Avançar</string>
+    <!-- the analysis of a team over several matches -->
+    <string name="analysis">Análise</string>
+    <string name="period">Período</string>
+    <string name="last_month">Último mês</string>
+    <string name="last_matches">Últimas %1$d</string>
+    <string name="between">De – até</string>
+    <string name="from_day">De</string>
+    <string name="to_day">Até</string>
+    <string name="matches_count">%1$d partidas</string>
+    <string name="no_matches_period">Nenhuma partida jogada no período</string>
+    <string name="skipped">Excluídas, um set não pode ser lido: %1$s</string>
+    <string name="rally_reception">Recepção do rali</string>
+    <string name="touch_before">Toque anterior</string>
+    <string name="reception_scheme">Recepção</string>
+    <string name="reception_by">Recepção com…</string>
+    <string name="receivers">com %1$d</string>
+    <string name="canonical">Canônica</string>
+    <string name="inverted">Invertida</string>
+    <string name="positive_group">Positiva</string>
+    <string name="negative_group">Negativa</string>
+    <string name="moving_average">Últimas %1$d juntas</string>
+    <string name="per_match">Partida a partida</string>
+    <string name="touches">%1$d toques</string>
+    <string name="date_placeholder">AAAA-MM-DD</string>
+    <string name="pick_days">Escolha os dias no calendário</string>
+    <string name="fewer_matches">Uma partida a menos</string>
+    <string name="more_matches">Uma partida a mais</string>
+    <string name="not_a_day">Não é um dia</string>
 </resources>

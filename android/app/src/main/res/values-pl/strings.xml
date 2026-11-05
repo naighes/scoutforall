@@ -324,4 +324,32 @@
     <string name="dvw_season">sezon</string>
     <string name="dvw_sets">sety</string>
     <string name="dvw_next">Dalej</string>
+    <!-- the analysis of a team over several matches -->
+    <string name="analysis">Analiza</string>
+    <string name="period">Okres</string>
+    <string name="last_month">Ostatni miesiąc</string>
+    <string name="last_matches">Ostatnie %1$d</string>
+    <string name="between">Od – do</string>
+    <string name="from_day">Od</string>
+    <string name="to_day">Do</string>
+    <string name="matches_count">Mecze: %1$d</string>
+    <string name="no_matches_period">Brak meczów rozegranych w tym okresie</string>
+    <string name="skipped">Pominięte, nie można odczytać seta: %1$s</string>
+    <string name="rally_reception">Przyjęcie w akcji</string>
+    <string name="touch_before">Poprzednie dotknięcie</string>
+    <string name="reception_scheme">Przyjęcie</string>
+    <string name="reception_by">Przyjęcie w…</string>
+    <string name="receivers">w %1$d</string>
+    <string name="canonical">Kanoniczna</string>
+    <string name="inverted">Odwrócona</string>
+    <string name="positive_group">Pozytywne</string>
+    <string name="negative_group">Negatywne</string>
+    <string name="moving_average">Ostatnie %1$d razem</string>
+    <string name="per_match">Mecz po meczu</string>
+    <string name="touches">Dotknięcia: %1$d</string>
+    <string name="date_placeholder">RRRR-MM-DD</string>
+    <string name="pick_days">Wybierz dni w kalendarzu</string>
+    <string name="fewer_matches">O jeden mecz mniej</string>
+    <string name="more_matches">O jeden mecz więcej</string>
+    <string name="not_a_day">To nie jest dzień</string>
 </resources>

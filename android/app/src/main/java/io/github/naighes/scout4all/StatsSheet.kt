@@ -84,6 +84,8 @@ import io.github.naighes.scout4all.core.PhaseStats
 import io.github.naighes.scout4all.core.PossessionStats
 import io.github.naighes.scout4all.core.RotationStats
 import io.github.naighes.scout4all.core.StatsScope
+import io.github.naighes.scout4all.core.SituationChoices
+import androidx.compose.ui.platform.LocalContext
 import io.github.naighes.scout4all.core.TrendLine
 import io.github.naighes.scout4all.core.ZoneStats
 import kotlin.math.roundToInt
@@ -111,7 +113,7 @@ internal val setColors = listOf(
 
 private fun setColor(setNumber: Int) = setColors[(setNumber - 1).coerceIn(0, setColors.size - 1)]
 
-private fun pct(value: Double?) = value?.let { "${it.roundToInt()}%" } ?: "–"
+internal fun pct(value: Double?) = value?.let { "${it.roundToInt()}%" } ?: "–"
 
 /** Under the choices, where the thumb is: touch it or swipe it up for the
  * statistics. */
@@ -221,6 +223,9 @@ fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit, loadDetail: Load
     val detail by produceState<DetailStats?>(null, stats.scope, query) {
         value = loadDetail(stats.scope, query.event, query.filter) ?: value
     }
+    // the choices of the filters on the situation of the game
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val situation by produceState<SituationChoices?>(null) { value = app.core { it.situationChoices() } }
     if (pages[pager.currentPage] != StatsPage.Trend) Scopes(stats, onScope)
     PrimaryScrollableTabRow(selectedTabIndex = pager.currentPage, edgePadding = 0.dp) {
         pages.forEachIndexed { i, page ->
@@ -241,7 +246,7 @@ fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit, loadDetail: Load
                 StatsPage.Distribution -> Distribution(stats)
                 StatsPage.Errors -> Errors(stats)
                 StatsPage.Trend -> Trend(stats)
-                StatsPage.Detail -> Detail(detail, query) { query = it }
+                StatsPage.Detail -> Detail(detail, query, situation) { query = it }
             }
         }
     }
@@ -252,7 +257,7 @@ fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit, loadDetail: Load
 /** What the coach looks at first: the phases, the efficiency of each
  * fundamental, the unforced errors. */
 @Composable
-private fun Summary(stats: LiveStats) {
+internal fun Summary(stats: LiveStats) {
     if (!stats.graded) {
         Text(
             stringResource(R.string.set_team_level),
@@ -439,7 +444,7 @@ private enum class AttackKind(val title: Int) {
 /** The distribution of the setter on half a court: the share of each
  * target, and how well we attack there. */
 @Composable
-private fun Distribution(stats: LiveStats) {
+internal fun Distribution(stats: LiveStats) {
     var kind by remember { mutableIntStateOf(0) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         AttackKind.entries.forEachIndexed { i, k ->
@@ -562,7 +567,7 @@ private val forcedNames = mapOf(
 /** Our errors, the unforced ones first and in red, by fundamental; then
  * theirs and the aces. */
 @Composable
-private fun Errors(stats: LiveStats) {
+internal fun Errors(stats: LiveStats) {
     val most = (stats.unforcedByEvent + stats.forcedByEvent).maxOfOrNull { it.count.toInt() }?.coerceAtLeast(1) ?: 1
     ErrorGroup(stringResource(R.string.unforced_errors), stats.unforcedErrors.toInt(), stats.unforcedByEvent, unforcedNames, Lost, most)
     ErrorGroup(

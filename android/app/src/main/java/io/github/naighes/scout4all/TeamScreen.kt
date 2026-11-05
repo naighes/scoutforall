@@ -22,6 +22,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
@@ -82,6 +84,7 @@ fun TeamScreen(
     onNewMatch: () -> Unit,
     onMatch: (String) -> Unit,
     onDvw: () -> Unit = {},
+    onAnalysis: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<TeamState>(TeamState.Loading, id) {
@@ -174,7 +177,7 @@ fun TeamScreen(
                 val content = Modifier.fillMaxSize()
                 when (tab) {
                     PLAYERS_TAB -> Players(s.team, onPlayer, content)
-                    else -> Matches(matches, onMatch, content)
+                    else -> Matches(matches, onMatch, onAnalysis, content)
                 }
             }
         }
@@ -191,13 +194,20 @@ private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, modifier: Mod
 }
 
 @Composable
-private fun Matches(state: MatchesState, onMatch: (String) -> Unit, modifier: Modifier) = when (state) {
+private fun Matches(state: MatchesState, onMatch: (String) -> Unit, onAnalysis: () -> Unit, modifier: Modifier) = when (state) {
     MatchesState.Loading -> Centered(modifier) { CircularProgressIndicator() }
     is MatchesState.Failed -> Centered(modifier) { Text(state.message) }
     is MatchesState.Loaded -> when {
         state.matches.isEmpty() -> Centered(modifier) { Text(stringResource(R.string.no_matches)) }
         // room at the bottom: the button doesn't cover the last match
         else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
+            // the statistics of the matches together, first
+            item {
+                FilledTonalButton(
+                    onClick = onAnalysis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                ) { Text(stringResource(R.string.analysis)) }
+            }
             items(state.matches) { MatchRow(it, onMatch) }
         }
     }
