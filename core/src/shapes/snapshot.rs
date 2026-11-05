@@ -16,7 +16,10 @@ use crate::{
         lineup::Lineup,
         refusal::Refusal,
         set::SetEntry,
-        stats::{AttackKey, EventKey, FirstRallyKey, FreeballKey, PossessionKey, RallyKey, Stats},
+        stats::{
+            AttackKey, EventKey, FirstRallyKey, FreeballKey, PossessionKey, RallyKey, Situation,
+            Stats, Touch,
+        },
         technique::{SetTypeEnum, TechniqueEnum},
     },
 };
@@ -133,6 +136,8 @@ pub struct Snapshot {
     possession: u8,
     // the ball on our side to play, in that possession
     ball_ours: bool,
+    // the situation of the rally being played
+    rally: Situation,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -175,6 +180,7 @@ impl Snapshot {
             pending_freeball: false,
             possession: 0,
             ball_ours: false,
+            rally: Situation::default(),
         };
         // the events available before the first serve: also the ones after a
         // substitution, setter or libero change opening the set
@@ -580,6 +586,17 @@ impl Snapshot {
         // one (our freeball named it once)
         let skip = matches!(event.event_type, R | CL | LR | LF | CS)
             || (event.event_type.requires_evaluation() && event.eval.is_none());
+        let situation = match skip {
+            true => self.rally,
+            false => self.rally_situation(event, phase, rotation),
+        };
+        self.rally = situation;
+        let role =
+            |player: &Option<Uuid>| player.and_then(|p| self.current_lineup.get_role(&p).ok());
+        let set_type = match event.technique {
+            Some(TechniqueEnum::Set(t)) => Some(t),
+            _ => None,
+        };
         if !skip {
             self.stats.events.add(EventKey {
                 event_type: event.event_type,
@@ -599,6 +616,17 @@ impl Snapshot {
                     .blockers()
                     .filter(|b| BlockersEnum::of(event.event_type).contains(b)),
                 eval: event.eval,
+                situation,
+                touch: event.event_type.asks_player().then(|| Touch {
+                    role: role(&event.player),
+                    // our touch before in the same rally
+                    previous: self
+                        .last_event
+                        .as_ref()
+                        .filter(|e| e.event_type.rally_winner(e.eval).is_none())
+                        .and_then(|e| e.eval),
+                    set_type,
+                }),
             });
         }
         if let Some(winner) = event.event_type.rally_winner(event.eval) {
@@ -606,6 +634,7 @@ impl Snapshot {
                 phase,
                 rotation,
                 winner,
+                situation,
             });
         }
         // the attacks, for the distribution and the counter-attacks: they
@@ -627,12 +656,39 @@ impl Snapshot {
                 eval,
                 prev_type: prev.event_type,
                 prev_eval: prev.eval,
+                situation,
+                role: role(&Some(player)),
+                set_type,
             });
         }
         self.record_first_rally(event, rotation);
         self.record_freeball(event, phase, rotation);
         self.record_possession(event, phase, rotation);
+        // a new rally: a new situation
+        if event.event_type.rally_winner(event.eval).is_some() {
+            self.rally = Situation::default();
+        }
         Ok(())
+    }
+
+    /// The situation of the rally once the event is played: our reception
+    /// and the formation receiving it (told on the reception, or on their
+    /// ace with no reception), and the P1 inverted or not, in P1 in side out.
+    fn rally_situation(&self, event: &EventEntry, phase: PhaseEnum, rotation: u8) -> Situation {
+        use EventTypeEnum::*;
+        let side_out = phase == PhaseEnum::SideOut;
+        Situation {
+            reception: match (side_out, event.event_type) {
+                (true, P) => event.eval.or(self.rally.reception),
+                _ => self.rally.reception,
+            },
+            scheme: match (side_out, event.event_type) {
+                (false, _) => None,
+                (true, P | OS) => self.rally.scheme.or(Some(event.flags.reception())),
+                (true, _) => self.rally.scheme,
+            },
+            inverted_p1: (side_out && rotation == 0).then(|| event.flags.inverted_p1()),
+        }
     }
 
     /// Their freeball (`OF`) is exploited when we win the rally before they
@@ -664,6 +720,7 @@ impl Snapshot {
                 phase,
                 rotation,
                 exploited,
+                situation: self.rally,
             });
         }
         self.pending_freeball = match (event.event_type, exploited) {
@@ -709,6 +766,7 @@ impl Snapshot {
                 rotation,
                 possession: before,
                 won: false,
+                situation: self.rally,
             });
         }
         match (possession, event.event_type.rally_winner(event.eval)) {
@@ -717,6 +775,7 @@ impl Snapshot {
                     rotation,
                     possession,
                     won: winner == TeamSideEnum::Us,
+                    situation: self.rally,
                 });
                 self.possession = 0;
                 self.ball_ours = false;
@@ -761,6 +820,7 @@ impl Snapshot {
             reception_eval,
             ending: event.event_type,
             ending_eval: event.eval,
+            situation: self.rally,
         });
     }
 

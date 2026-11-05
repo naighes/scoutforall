@@ -129,14 +129,14 @@
     <string name="first_attack">レセプションから</string>
     <string name="counter_attack">切り返し</string>
     <string name="zone_attacks">%d本</string>
-    <string name="serve_zone">サーブのゾーン</string>
+    <string name="serve_zone">サーブのコース</string>
     <string name="zone_chosen">選択済み</string>
     <string name="serves_by_zone">ゾーン別サーブ</string>
     <string name="zones_told">ゾーン指定 %1$d/%2$d本</string>
     <string name="reception_zone">レセプションのゾーン</string>
     <string name="receptions_by_zone">ゾーン別レセプション</string>
     <string name="reception_zones_told">ゾーン指定 %1$d/%2$d本</string>
-    <string name="attack_zone">アタックのゾーン</string>
+    <string name="attack_zone">アタックのコース</string>
     <string name="attacks_by_zone">ゾーン別アタック</string>
     <string name="attack_zones_told">ゾーン指定 %1$d/%2$d本</string>
     <string name="dig_zone">ディグのゾーン</string>
@@ -263,7 +263,7 @@
     <string name="tutorial_score">スコア、フェーズ、ローテーション:サイドアウト、S6(セッターは6番)。相手のサーブです。</string>
     <string name="tutorial_reception">ネルヴィーニがレシーブ:名前をタップしてください。</string>
     <string name="tutorial_reception_eval">完璧なレシーブ:# をタップ。</string>
-    <string name="tutorial_attack">トスが上がり、彼女がアタック:もう一度名前をタップ。</string>
+    <string name="tutorial_attack">トスが上がり、ネルヴィーニがアタック:もう一度名前をタップ。</string>
     <string name="tutorial_attack_point">今はアタックだけなので、すぐに評価になる。得点:# をタップ。</string>
     <string name="tutorial_side_out">サイドアウト:1–0。S5にローテーションし、ファールのサーブ。</string>
     <string name="tutorial_serve_cell">サーブはどこへ? 任意: 1D をタップ。</string>
@@ -291,7 +291,7 @@
     <string name="tutorial_in_antropova">第2オポジットのアントロポワが入る:名前をタップ。</string>
     <string name="tutorial_setter_menu">これからカンビがセッター:再び半月のボタン。</string>
     <string name="tutorial_setter">「セッター」をタップ。</string>
-    <string name="tutorial_setter_cambi">カンビをタップ:ローテーションは彼女が基準になります。</string>
+    <string name="tutorial_setter_cambi">カンビをタップ:ローテーションは新しいセッターが基準になります。</string>
     <string name="tutorial_libero_menu">最後にもう一人のリベロ:半月のボタン。</string>
     <string name="tutorial_libero">「リベロ」をタップ:フェルジーノがスピリトと交代。</string>
     <string name="tutorial_stats">セットと試合のスタッツ:ここをタップ、またはここから上にスワイプ。</string>
@@ -321,4 +321,32 @@
     <string name="dvw_season">シーズン</string>
     <string name="dvw_sets">セット</string>
     <string name="dvw_next">次へ</string>
+    <!-- the analysis of a team over several matches -->
+    <string name="analysis">分析</string>
+    <string name="period">期間</string>
+    <string name="last_month">直近1か月</string>
+    <string name="last_matches">直近%1$d試合</string>
+    <string name="between">期間指定</string>
+    <string name="from_day">開始</string>
+    <string name="to_day">終了</string>
+    <string name="matches_count">%1$d試合</string>
+    <string name="no_matches_period">期間内の試合はありません</string>
+    <string name="skipped">除外（セットを読めません）: %1$s</string>
+    <string name="rally_reception">そのラリーのレセプション</string>
+    <string name="touch_before">直前のタッチ</string>
+    <string name="reception_scheme">レセプション</string>
+    <string name="reception_by">レセプション人数</string>
+    <string name="receivers">%1$d人</string>
+    <string name="canonical">通常</string>
+    <string name="inverted">反転</string>
+    <string name="positive_group">良い</string>
+    <string name="negative_group">悪い</string>
+    <string name="moving_average">直近%1$d試合の合計</string>
+    <string name="per_match">試合ごと</string>
+    <string name="touches">%1$d回</string>
+    <string name="date_placeholder">YYYY-MM-DD</string>
+    <string name="pick_days">カレンダーで日付を選択</string>
+    <string name="fewer_matches">1試合減らす</string>
+    <string name="more_matches">1試合増やす</string>
+    <string name="not_a_day">日付ではありません</string>
 </resources>

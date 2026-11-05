@@ -14,7 +14,7 @@ use crate::shapes::r#match::MatchEntry;
 use crate::shapes::player::PlayerEntry;
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::Snapshot;
-use crate::shapes::stats::{Metric, PossessionSummary, Stats, StatsFilter};
+use crate::shapes::stats::{FirstRallySummary, Metric, PossessionSummary, Stats, StatsFilter};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::iter::once;
@@ -30,9 +30,11 @@ pub struct Report {
     /// the groups of columns of the statistics, shared by `players`,
     /// `rotations` and `set_stats` (see `stats_values`)
     pub stats_groups: Vec<Group>,
+    /// the players, the team, then the team in each set
     pub players: StatsTable,
+    /// the closing box of DataVolley's scoresheet
+    pub summary: Summary,
     pub rotations: StatsTable,
-    pub set_stats: StatsTable,
     pub courts: Vec<Court>,
     pub first_rallies: Table,
     pub side_out_possessions: Table,
@@ -41,6 +43,49 @@ pub struct Report {
     pub points_won: Table,
     pub points_lost: Table,
     pub point_sequence: PointSequence,
+}
+
+/// The closing box of the scoresheet, where DataVolley has it: the points
+/// by rotation, the points of each phase, the direct side out and the
+/// counter-attack, in DataVolley's reading and in ours side by side.
+#[derive(Debug, Serialize)]
+pub struct Summary {
+    pub title: String,
+    /// the points won minus the ones lost in each rotation, the last one
+    /// first, as DataVolley lays them out
+    pub rotations: Table,
+    pub phases: Vec<PhaseFigures>,
+    pub direct_side_out: Comparison,
+    pub legend: String,
+}
+
+/// The points of a phase: the players' ones, as DataVolley counts them,
+/// over the receptions or the serves, then the rallies won.
+#[derive(Debug, Serialize)]
+pub struct PhaseFigures {
+    pub rallies_label: String,
+    pub rallies: String,
+    pub points_label: String,
+    pub points: String,
+    pub every: String,
+    pub won_label: String,
+    pub won: String,
+}
+
+/// The same rows in two readings, side by side: each group of values has
+/// the `columns`, a row with no values in a group leaves it blank.
+#[derive(Debug, Serialize)]
+pub struct Comparison {
+    pub title: String,
+    pub groups: [String; 2],
+    pub columns: Vec<String>,
+    pub rows: Vec<ComparisonRow>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ComparisonRow {
+    pub label: String,
+    pub values: [Vec<String>; 2],
 }
 
 /// The texts of the template that don't come with the data.
@@ -218,15 +263,15 @@ pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError>
         sets: sets_table(labels, m, &replay),
         stats_groups: stats_groups(labels),
         players: players_table(labels, m, &replay),
+        summary: summary(labels, m, &replay.stats),
         rotations: rotations_table(labels, &replay.stats),
-        set_stats: set_stats_table(labels, &replay),
         courts: courts(labels, &replay.stats),
         first_rallies: first_rallies_table(labels, &replay.stats),
         side_out_possessions: side_out_possessions_table(labels, &replay.stats),
         attack_by_phase: attack_by_phase_table(labels, &replay.stats),
         freeballs: freeballs_table(labels, &replay.stats),
-        points_won: points_won_table(labels, &replay.stats),
-        points_lost: points_lost_table(labels, &replay.stats),
+        points_won: points_won_table(labels, &replay),
+        points_lost: points_lost_table(labels, &replay),
         point_sequence: point_sequence(labels, m, &replay),
     })
 }
@@ -306,15 +351,25 @@ fn sets_table(labels: &Labels, m: &MatchEntry, replay: &Replay) -> Table {
                 let [left, right] = sides(m, us, them);
                 format!("{left} · {right}")
             };
+            let won = |phase| {
+                fmt_num(
+                    snapshot
+                        .stats
+                        .rallies_won(&StatsFilter::new(Some(phase), None, None))
+                        .map(|(v, _, _)| v),
+                )
+            };
             vec![
                 set.set_number.to_string(),
-                score((snapshot.score_us, snapshot.score_them)),
                 snapshot
                     .partials
                     .iter()
                     .map(|p| score(*p))
                     .collect::<Vec<_>>()
                     .join("  "),
+                score((snapshot.score_us, snapshot.score_them)),
+                won(PhaseEnum::SideOut),
+                won(PhaseEnum::Break),
                 substitutions(m, snapshot),
                 pair(runs.longest),
                 pair(runs.max_lead),
@@ -325,8 +380,10 @@ fn sets_table(labels: &Labels, m: &MatchEntry, replay: &Replay) -> Table {
         title: String::new(),
         columns: vec![
             "set".to_string(),
-            labels.set_score.to_string(),
             labels.partials.to_string(),
+            labels.set_score.to_string(),
+            labels.so_perc.to_string(),
+            labels.bp_perc.to_string(),
             labels.substitutions.to_string(),
             labels.longest_run.to_string(),
             labels.max_lead.to_string(),
@@ -397,19 +454,10 @@ fn stats_groups(labels: &Labels) -> Vec<Group> {
     };
     vec![
         group(labels.points, &[labels.tot, "bp", labels.won_lost]),
-        group(
-            labels.serve,
-            &[labels.tot, labels.err, labels.pt, labels.eff_perc],
-        ),
+        group(labels.serve, &[labels.tot, labels.err, labels.pt]),
         group(
             labels.reception,
-            &[
-                labels.tot,
-                labels.err,
-                labels.pos_perc,
-                labels.prf_perc,
-                labels.eff_perc,
-            ],
+            &[labels.tot, labels.err, labels.pos_perc, labels.prf_perc],
         ),
         group(
             labels.attack,
@@ -419,24 +467,32 @@ fn stats_groups(labels: &Labels) -> Vec<Group> {
                 labels.blk,
                 labels.pt,
                 labels.pt_perc,
-                labels.eff_perc,
             ],
         ),
         group(labels.block, &[labels.pt, labels.tch]),
+        group(
+            labels.eff_perc,
+            &[
+                labels.serve_short,
+                labels.reception_short,
+                labels.attack_short,
+            ],
+        ),
         group(labels.defense, &[labels.tot, labels.pos_perc]),
         group("", &[labels.flt, labels.fb, labels.opp]),
     ]
 }
 
 /// The statistics shown for a player, a rotation, a set or the match, in
-/// the columns of `stats_groups`:
+/// the columns of `stats_groups`: DataVolley's ones first, in its order,
+/// then ours.
 /// - points: total (aces, kills, block points), break points, points minus
 ///   the points given away as DataVolley counts them (`Stats::won_minus_lost`);
-/// - serve: total, errors, aces, efficiency;
-/// - reception: total, errors, positiveness, perfect, efficiency;
-/// - attack: total, errors (out or net), blocked, kills, kills %,
-///   efficiency;
+/// - serve: total, errors, aces;
+/// - reception: total, errors, positiveness, perfect;
+/// - attack: total, errors (out or net), blocked, kills, kills %;
 /// - block: points, touches;
+/// - efficiency of serve, reception and attack;
 /// - defense: total, positiveness;
 /// - faults, freeballs given (the ones received are in `freeballs_table`),
 ///   opponent errors: the freeballs and the opponent errors are team
@@ -464,20 +520,20 @@ fn stats_values(stats: &Stats, filter: &StatsFilter) -> Vec<String> {
         count(S, None),
         count(S, Some(Error)),
         count(S, Some(Perfect)),
-        metric(S, Metric::Efficiency),
         count(P, None),
         count(P, Some(Error)),
         metric(P, Metric::Positive),
         pct(P, Perfect),
-        metric(P, Metric::Efficiency),
         count(A, None),
         count(A, Some(Error)),
         count(A, Some(Over)),
         count(A, Some(Perfect)),
         pct(A, Perfect),
-        metric(A, Metric::Efficiency),
         count(B, Some(Perfect)),
         count(B, Some(Positive)),
+        metric(S, Metric::Efficiency),
+        metric(P, Metric::Efficiency),
+        metric(A, Metric::Efficiency),
         count(D, None),
         metric(D, Metric::Positive),
         count(F, None),
@@ -518,14 +574,20 @@ fn players_table(labels: &Labels, m: &MatchEntry, replay: &Replay) -> StatsTable
             total: false,
         }
     });
-    let total = StatsRow {
-        lead: [Cell::Empty, Cell::text(labels.total)]
+    let team_row = |label: String, stats: &Stats, total: bool| StatsRow {
+        lead: [Cell::Empty, Cell::text(label)]
             .into_iter()
             .chain(replay.sets.iter().map(|_| Cell::Empty))
             .collect(),
-        values: stats_values(&replay.stats, &StatsFilter::default()),
-        total: true,
+        values: stats_values(stats, &StatsFilter::default()),
+        total,
     };
+    let total = team_row(labels.total.to_string(), &replay.stats, true);
+    // under the total, as DataVolley does
+    let sets = replay
+        .sets
+        .iter()
+        .map(|(set, snapshot)| team_row(format!("set {}", set.set_number), &snapshot.stats, false));
     StatsTable {
         title: labels.players.to_string(),
         lead: vec![
@@ -549,7 +611,7 @@ fn players_table(labels: &Labels, m: &MatchEntry, replay: &Replay) -> StatsTable
                 fill: false,
             },
         ],
-        rows: rows.chain(std::iter::once(total)).collect(),
+        rows: rows.chain(once(total)).chain(sets).collect(),
     }
 }
 
@@ -637,32 +699,6 @@ fn rotations_table(labels: &Labels, stats: &Stats) -> StatsTable {
     }
 }
 
-fn set_stats_table(labels: &Labels, replay: &Replay) -> StatsTable {
-    let rows = replay
-        .sets
-        .iter()
-        .map(|(set, snapshot)| {
-            phase_row(
-                format!("set {}", set.set_number),
-                &snapshot.stats,
-                StatsFilter::default(),
-                false,
-            )
-        })
-        .chain(std::iter::once(phase_row(
-            labels.total.to_string(),
-            &replay.stats,
-            StatsFilter::default(),
-            true,
-        )))
-        .collect();
-    StatsTable {
-        title: "set".to_string(),
-        lead: phases_lead(labels, "set"),
-        rows,
-    }
-}
-
 /// The zones of the courts, in the order the template lays them out.
 const COURT_ZONES: [(ZoneEnum, u8); 5] = [
     (ZoneEnum::Four, 4),
@@ -728,8 +764,8 @@ fn first_rallies_table(labels: &Labels, stats: &Stats) -> Table {
                 Some(s) => vec![
                     s.total.to_string(),
                     match s.unforced_errors {
-                        0 => fmt_count(s.errors),
-                        unforced => format!("{}({})", s.errors, unforced),
+                        0 => fmt_count(errors_not_blocked(&s)),
+                        unforced => format!("{}({})", errors_not_blocked(&s), unforced),
                     },
                     fmt_count(s.blocked),
                     s.won.to_string(),
@@ -754,6 +790,138 @@ fn first_rallies_table(labels: &Labels, stats: &Stats) -> Table {
         ],
         rows,
         total: false,
+    }
+}
+
+/// The errors of the first rallies but the attacks blocked, counted
+/// apart as DataVolley does.
+fn errors_not_blocked(s: &FirstRallySummary) -> u32 {
+    s.errors.saturating_sub(s.blocked)
+}
+
+/// The closing box of the scoresheet (see `Summary`).
+fn summary(labels: &Labels, m: &MatchEntry, stats: &Stats) -> Summary {
+    use EventTypeEnum::*;
+    let all = StatsFilter::default();
+    let rotations = (0..6u8)
+        .rev()
+        .map(|rotation| {
+            let diff = stats
+                .rallies_won(&StatsFilter::new(None, Some(rotation), None))
+                .map(|(_, won, total)| 2 * won as i64 - total as i64);
+            vec![
+                format!("{}{}", labels.setter_prefix, rotation + 1),
+                diff.map_or("-".to_string(), |d| match d {
+                    1.. => format!("+{d}"),
+                    _ => d.to_string(),
+                }),
+            ]
+        })
+        .collect();
+    let phase =
+        |phase: PhaseEnum, rallies_label: &str, event_type, points_label: &str, every: &str| {
+            let filter = StatsFilter::new(Some(phase), None, None);
+            let rallies = stats.event_count(event_type, None, &all);
+            let points = stats.points(&filter);
+            PhaseFigures {
+                rallies_label: rallies_label.to_string(),
+                rallies: rallies.to_string(),
+                points_label: points_label.to_string(),
+                points: points.to_string(),
+                every: match points {
+                    0 => String::new(),
+                    _ => every.replace("{n}", &format!("{:.2}", rallies as f64 / points as f64)),
+                },
+                won_label: phase.friendly_name(labels).to_string(),
+                won: stats
+                    .rallies_won(&filter)
+                    .map_or("-".to_string(), |(v, won, total)| {
+                        format!("{won}/{total} · {}", fmt_pct(Some(v)))
+                    }),
+            }
+        };
+    let values = |s: Option<FirstRallySummary>| match s {
+        Some(s) => vec![
+            s.total.to_string(),
+            fmt_count(errors_not_blocked(&s)),
+            fmt_count(s.blocked),
+            fmt_count(s.won),
+            fmt_num(Some(s.won_percentage())),
+        ],
+        None => vec!["-".to_string(); 5],
+    };
+    let side_out = |receptions: &[EvalEnum], label: &str| ComparisonRow {
+        label: label.to_string(),
+        values: [
+            values(stats.first_rallies_after(receptions, true, &all)),
+            values(stats.first_rallies_after(receptions, false, &all)),
+        ],
+    };
+    let counter_attack = stats.attack_summary(true, &all).map(|a| {
+        vec![
+            a.total.to_string(),
+            fmt_count(a.errors),
+            fmt_count(a.blocked),
+            fmt_count(a.kills),
+            fmt_num(Some(a.kill_percentage())),
+        ]
+    });
+    Summary {
+        title: m.team.name.clone(),
+        rotations: Table {
+            title: labels.points_by_rotation.to_string(),
+            columns: vec![labels.rotation.to_string(), "+/-".to_string()],
+            rows: rotations,
+            total: false,
+        },
+        phases: vec![
+            phase(
+                PhaseEnum::SideOut,
+                labels.receptions,
+                P,
+                labels.sideout_points,
+                labels.every_receptions,
+            ),
+            phase(
+                PhaseEnum::Break,
+                labels.serves,
+                S,
+                labels.break_points,
+                labels.every_serves,
+            ),
+        ],
+        direct_side_out: Comparison {
+            title: labels.direct_sideout.to_string(),
+            groups: [
+                labels.first_attack.to_string(),
+                labels.first_rally.to_string(),
+            ],
+            columns: vec![
+                labels.tot.to_string(),
+                labels.err.to_string(),
+                labels.blk.to_string(),
+                labels.pt.to_string(),
+                labels.pt_perc.to_string(),
+            ],
+            rows: vec![
+                side_out(
+                    &[EvalEnum::Perfect, EvalEnum::Positive],
+                    labels.positive_reception,
+                ),
+                side_out(
+                    &[EvalEnum::Exclamative, EvalEnum::Negative],
+                    labels.negative_reception,
+                ),
+                ComparisonRow {
+                    label: labels.counter_attack.to_string(),
+                    values: [
+                        counter_attack.unwrap_or_else(|| vec!["-".to_string(); 5]),
+                        vec![String::new(); 5],
+                    ],
+                },
+            ],
+        },
+        legend: labels.direct_sideout_legend.to_string(),
     }
 }
 
@@ -872,63 +1040,94 @@ fn freeballs_table(labels: &Labels, stats: &Stats) -> Table {
 }
 
 /// A table of where the points come from: a row per source, with its
-/// share, then the total.
-fn origin_table(labels: &Labels, title: &str, sources: Vec<(&str, u32)>) -> Table {
-    let total: u32 = sources.iter().map(|(_, n)| n).sum();
-    let share = |n: u32| fmt_num((n > 0).then(|| n as f64 / total as f64 * 100.0));
-    let rows = sources
+/// count and share in the match, then its count in each set, as
+/// DataVolley's points won by set; then the total.
+fn origin_table(
+    labels: &Labels,
+    title: &str,
+    replay: &Replay,
+    sources: Vec<(&str, &dyn Fn(&Stats) -> u32)>,
+) -> Table {
+    let stats = once(&replay.stats)
+        .chain(replay.sets.iter().map(|(_, snapshot)| &snapshot.stats))
+        .collect::<Vec<_>>();
+    let counts: Vec<(&str, Vec<u32>)> = sources
         .iter()
-        .map(|(label, n)| vec![label.to_string(), fmt_count(*n), share(*n)])
-        .chain(std::iter::once(vec![
-            labels.total.to_string(),
-            fmt_count(total),
-            share(total),
-        ]))
+        .map(|(label, count)| (*label, stats.iter().map(|s| count(s)).collect()))
+        .collect();
+    let totals: Vec<u32> = (0..stats.len())
+        .map(|i| counts.iter().map(|(_, c)| c[i]).sum())
+        .collect();
+    let match_total = totals.first().copied().unwrap_or(0);
+    let share = |n: u32| fmt_num((n > 0).then(|| n as f64 / match_total as f64 * 100.0));
+    let row = |label: &str, counts: &[u32]| {
+        let in_match = counts.first().copied().unwrap_or(0);
+        once(label.to_string())
+            .chain([fmt_count(in_match), share(in_match)])
+            .chain(counts.iter().skip(1).map(|n| fmt_count(*n)))
+            .collect::<Vec<_>>()
+    };
+    let rows = counts
+        .iter()
+        .map(|(label, c)| row(label, c))
+        .chain(once(row(labels.total, &totals)))
         .collect();
     Table {
         title: title.to_string(),
-        columns: vec![String::new(), labels.tot.to_string(), "%".to_string()],
+        columns: [String::new(), labels.tot.to_string(), "%".to_string()]
+            .into_iter()
+            .chain(
+                replay
+                    .sets
+                    .iter()
+                    .map(|(set, _)| format!("set {}", set.set_number)),
+            )
+            .collect(),
         rows,
         total: true,
     }
 }
 
 /// Our points: aces, kills, block points, their errors.
-fn points_won_table(labels: &Labels, stats: &Stats) -> Table {
+fn points_won_table(labels: &Labels, replay: &Replay) -> Table {
+    use EvalEnum::*;
     use EventTypeEnum::*;
     let all = StatsFilter::default();
-    let count = |event_type, eval| stats.event_count(event_type, eval, &all);
+    let count = |event_type, eval| move |s: &Stats| s.event_count(event_type, eval, &all);
     origin_table(
         labels,
         labels.points_won,
+        replay,
         vec![
-            (labels.ace, count(S, Some(EvalEnum::Perfect))),
-            (labels.attack, count(A, Some(EvalEnum::Perfect))),
-            (labels.block, count(B, Some(EvalEnum::Perfect))),
-            (labels.opponent_errors, count(OE, None)),
+            (labels.ace, &count(S, Some(Perfect))),
+            (labels.attack, &count(A, Some(Perfect))),
+            (labels.block, &count(B, Some(Perfect))),
+            (labels.opponent_errors, &count(OE, None)),
         ],
     )
 }
 
 /// Their points: their own ones, then our errors by fundamental and our
 /// faults (see `EventTypeEnum::rally_winner`).
-fn points_lost_table(labels: &Labels, stats: &Stats) -> Table {
+fn points_lost_table(labels: &Labels, replay: &Replay) -> Table {
     use EvalEnum::*;
     use EventTypeEnum::*;
     let all = StatsFilter::default();
-    let count = |event_type, eval| stats.event_count(event_type, eval, &all);
+    let count = |event_type, eval| move |s: &Stats| s.event_count(event_type, eval, &all);
+    let block = |s: &Stats| count(B, Some(Error))(s) + count(B, Some(Over))(s);
     origin_table(
         labels,
         labels.points_lost,
+        replay,
         vec![
-            (labels.opponent_score, count(OS, None)),
-            (labels.serve, count(S, Some(Error))),
-            (labels.reception, count(P, Some(Error))),
-            (labels.attack, count(A, Some(Error))),
-            (labels.attack_blocked, count(A, Some(Over))),
-            (labels.block, count(B, Some(Error)) + count(B, Some(Over))),
-            (labels.defense, count(D, Some(Error))),
-            (labels.faults, count(F, None)),
+            (labels.opponent_score, &count(OS, None)),
+            (labels.serve, &count(S, Some(Error))),
+            (labels.reception, &count(P, Some(Error))),
+            (labels.attack, &count(A, Some(Error))),
+            (labels.attack_blocked, &count(A, Some(Over))),
+            (labels.block, &block),
+            (labels.defense, &count(D, Some(Error))),
+            (labels.faults, &count(F, None)),
         ],
     )
 }

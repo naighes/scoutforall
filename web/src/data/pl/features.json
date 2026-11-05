@@ -1,0 +1,55 @@
+[
+  {
+    "id": "scouting",
+    "eyebrow": "Scouting",
+    "title": "Minimalizacja błędów",
+    "content": "Wybierz zdarzenie, zawodnika i jego ocenę. Ustawienie, faza gry i zawodnicy na boisku wyznaczają dostępne opcje; wynik i statystyki aktualizują się automatycznie.",
+    "points": [
+      "Fazy side-out i break, ustawienia i libero obsługiwane automatycznie",
+      "Zmiany zawodników, libero i rozgrywającego bezpośrednio w trakcie scoutingu",
+      "Tempo i trajektoria wystawy, skład bloku oraz kierunek ataków i zagrywek, gdy są potrzebne",
+      "Możliwość cofnięcia i poprawienia dowolnego zdarzenia w secie"
+    ],
+    "image": "scouting-attack",
+    "image_alt": "Ekran scoutingu: boisko z zawodnikami, oceniany atak i siatka stref"
+  },
+  {
+    "id": "statistics",
+    "eyebrow": "Statystyki",
+    "title": "Dane i analiza meczu",
+    "content": "Statystyki aktualizują się w trakcie scoutingu i można je przeglądać oraz analizować także później. Skuteczność i pozytywność elementów, side-out i break point według ustawień, rozegranie, błędy własne i wymuszone.",
+    "points": [
+      "Filtry według seta, zawodnika, ustawienia, fazy, pozycji i jakości przyjęcia",
+      "Przebieg akcji i setów",
+      "Rozkład zagrywek, przyjęć i ataków według stref"
+    ],
+    "image": "stats-detail",
+    "image_alt": "Szczegóły statystyk meczu: oceny zagrywki, zawodnicy i zagrywki według stref"
+  },
+  {
+    "id": "analysis",
+    "eyebrow": "Analiza drużyny",
+    "title": "Porównanie wielu meczów",
+    "content": "Wybierz zestaw meczów lub przedział czasu, aby przeanalizować formę drużyny i poszczególnych zawodników oraz porównać ich grę na przestrzeni sezonu.",
+    "points": [
+      "Te same filtry co dla pojedynczego meczu",
+      "Przebieg statystyk mecz po meczu, ze średnią kroczącą",
+      "Mecze zapisane w scout4all i zaimportowane z DataVolley, pokazane razem"
+    ],
+    "image": "team-analysis",
+    "image_alt": "Analiza drużyny z ostatnich meczów: podsumowanie, ustawienia, rozegranie i błędy"
+  },
+  {
+    "id": "teams",
+    "eyebrow": "Drużyny i mecze",
+    "title": "Twoje dane na twoim urządzeniu",
+    "content": "Drużyny, zawodnicy i mecze są przechowywane lokalnie, na twoim urządzeniu. Możesz eksportować drużyny i mecze, aby udostępnić je innym, importować dane otrzymane od kolegów i korzystać z programu bez połączenia z internetem.",
+    "points": [
+      "Mecze w toku, ostatnie mecze i drużyny dostępne z ekranu startowego",
+      "Eksport i import drużyn oraz meczów",
+      "Praca offline"
+    ],
+    "image": "home",
+    "image_alt": "Ekran startowy: mecze w toku, ostatnie mecze i drużyny"
+  }
+]

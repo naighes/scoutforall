@@ -1,0 +1,55 @@
+[
+  {
+    "id": "scouting",
+    "eyebrow": "Scouting",
+    "title": "Minimizing errors",
+    "content": "Select the event, the player and their evaluation. The rotation, the phase of play and the players on the court determine the options available; score and statistics are updated automatically.",
+    "points": [
+      "Side-out and break phases, rotations and the libero handled automatically",
+      "Substitutions, libero changes and setter changes right while scouting",
+      "Set tempo and trajectory, block composition and destination of attacks and serves, when needed",
+      "Undo and correct any event of the set"
+    ],
+    "image": "scouting-attack",
+    "image_alt": "The scouting screen: the court with the players, the attack being evaluated and the zone grid"
+  },
+  {
+    "id": "statistics",
+    "eyebrow": "Statistics",
+    "title": "Match data and analysis",
+    "content": "Statistics are updated while you scout and can be checked and analyzed afterwards too. Efficiency and positivity of the fundamentals, side-out and break point by rotation, setter distribution, unforced and forced errors.",
+    "points": [
+      "Filters by set, player, rotation, phase, role and quality of the reception",
+      "Trends of rallies and sets",
+      "Distribution of serves, receptions and attacks by zone"
+    ],
+    "image": "stats-detail",
+    "image_alt": "The detail of the statistics of a match: the evaluations of the serve, the players and the serves by zone"
+  },
+  {
+    "id": "analysis",
+    "eyebrow": "Team analysis",
+    "title": "Comparing several matches",
+    "content": "Select a group of matches or a time range to analyze how the team and each player are doing, comparing their performance over the season.",
+    "points": [
+      "The same filters available for a single match",
+      "Match-by-match trends of the statistics, with a moving average",
+      "Matches scouted with scout4all and imported from DataVolley, shown together"
+    ],
+    "image": "team-analysis",
+    "image_alt": "The analysis of a team over its last matches: summary, rotations, distribution and errors"
+  },
+  {
+    "id": "teams",
+    "eyebrow": "Teams and matches",
+    "title": "Your data, on your device",
+    "content": "Teams, players and matches are stored locally, on your device. You can export teams and matches to share them with others, import data received from colleagues and use the program without any internet connection.",
+    "points": [
+      "Matches in progress, recent matches and teams available from the home screen",
+      "Export and import of teams and matches",
+      "Offline use"
+    ],
+    "image": "home",
+    "image_alt": "The home screen: matches in progress, recent matches and teams"
+  }
+]

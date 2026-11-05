@@ -30,10 +30,11 @@ jobs:
     strategy:
       matrix:
         package:
-          - name: scout4all
-            command: cargo check --locked --package scout4all
-          - name: scout4all-cli
-            command: cargo run --locked -- --version
+          - name: scout4all-desktop
+            command: cargo check --locked --package scout4all-desktop
+          # the line the self update of the released clients checks
+          - name: scout4all-version
+            command: cargo run --locked --package scout4all-desktop -- --version
     steps:
       - uses: actions/checkout@v5
         with:
@@ -80,7 +81,7 @@ jobs:
     strategy:
       matrix:
         platforms:
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -97,7 +98,8 @@ jobs:
       - uses: houseabsolute/actions-rust-cross@v1
         with:
           target: ${{ matrix.platforms.target }}
-          args: "--locked"
+          # the desktop app, which the releases publish
+          args: "--locked --package scout4all-desktop"
           strip: true
 
   lockfile:

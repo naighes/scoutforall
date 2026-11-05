@@ -54,6 +54,23 @@ export default defineConfig({
           src: ["./src/assets/fonts/InterDisplay-SemiBold.woff2"]
         }
       ]
+    },
+    {
+      provider: "local",
+      name: "PlexMonoLocal",
+      cssVariable: "--font-plex-mono",
+      variants: [
+        {
+          weight: 400,
+          style: "normal",
+          src: ["./src/assets/fonts/IBMPlexMono-Regular.ttf"]
+        },
+        {
+          weight: 600,
+          style: "normal",
+          src: ["./src/assets/fonts/IBMPlexMono-SemiBold.ttf"]
+        }
+      ]
     }]
   }
 })

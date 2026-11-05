@@ -9,7 +9,7 @@ mod tests {
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, RoleEnum, TeamSideEnum},
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        stats::Counter,
+        stats::{AttackKey, Counter, EventKey, Touch},
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     };
     use crate::tests::EN;
@@ -760,8 +760,8 @@ mod tests {
         }
     }
 
-    /// For now the techniques are only recorded: score and statistics are
-    /// the same with or without them.
+    /// The techniques don't change score and statistics: only the set of
+    /// the attacks is kept in them, to filter by.
     #[test]
     fn techniques_dont_change_the_replay() {
         let t = Team::new();
@@ -784,11 +784,44 @@ mod tests {
         fn counted<K: Clone + Eq + std::hash::Hash>(c: &Counter<K>) -> HashMap<K, u32> {
             c.iter(|_| true).map(|(k, v)| (k.clone(), v)).collect()
         }
-        assert_eq!(counted(&with.stats.events), counted(&without.stats.events));
-        assert_eq!(
-            counted(&with.stats.attacks),
-            counted(&without.stats.attacks)
-        );
+        let no_set = |c: &Counter<EventKey>| -> HashMap<EventKey, u32> {
+            c.iter(|_| true)
+                .map(|(k, v)| {
+                    let touch = k.touch.map(|t| Touch {
+                        set_type: None,
+                        ..t
+                    });
+                    (EventKey { touch, ..k.clone() }, v)
+                })
+                .collect()
+        };
+        assert_eq!(no_set(&with.stats.events), no_set(&without.stats.events));
+        let no_set = |c: &Counter<AttackKey>| -> HashMap<AttackKey, u32> {
+            c.iter(|_| true)
+                .map(|(k, v)| {
+                    (
+                        AttackKey {
+                            set_type: None,
+                            ..k.clone()
+                        },
+                        v,
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(no_set(&with.stats.attacks), no_set(&without.stats.attacks));
+        let sets = |s: &Snapshot| -> Vec<Option<SetTypeEnum>> {
+            let mut sets: Vec<_> = s
+                .stats
+                .attacks
+                .iter(|_| true)
+                .map(|(k, _)| k.set_type)
+                .collect();
+            sets.sort_by_key(|t| format!("{t:?}"));
+            sets
+        };
+        assert_eq!(sets(&with), vec![Some(Five), Some(Super)]);
+        assert_eq!(sets(&without), vec![None, None]);
         assert_eq!(
             counted(&with.stats.rallies),
             counted(&without.stats.rallies)

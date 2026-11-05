@@ -27,10 +27,10 @@ const meta = asset => [
     { download.map( platform => {
       const text = labels.platforms[platform.id]
       return (
-        <li class="p-6 xl:p-10 flex flex-col gap-5 rounded-xl bg-bs-surface-3 text-center" data-platform={ platform.id }>
+        <li class="p-6 xl:p-10 flex flex-col gap-5 rounded-2xl border border-white/10 bg-bs-surface-1 text-center" data-platform={ platform.id }>
 
           <h3 class="bs-h3 flex flex-col gap-3 items-center">
-            <img height="56" width="56" src={ platform.image } alt="" class="h-14 w-14 object-contain invert opacity-90" />
+            <img height="48" width="48" src={ platform.image } alt="" class="h-12 w-12 object-contain invert opacity-90" />
             <span>{ text.title }</span>
           </h3>
 
@@ -44,13 +44,10 @@ const meta = asset => [
                 <div class="flex flex-col gap-1">
                   <a
                     href={ downloadUrl(asset) }
-                    class="block px-5 py-4 rounded-md font-semibold no-underline
-                          bg-bs-foreground-light text-bs-surface-0
-                          transition-colors duration-200 hover:bg-white
-                          focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/60">
+                    class="bs-btn bs-btn-primary w-full py-4 no-underline">
                     { text.files[file.id] }
                   </a>
-                  { details && <span class="text-sm text-bs-foreground-dark">{ details }</span> }
+                  { details && <span class="font-mono text-xs text-bs-foreground-dark">{ details }</span> }
                 </div>
               )
             })}

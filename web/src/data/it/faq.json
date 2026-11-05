@@ -1,26 +1,34 @@
 [
   {
-    "question": "Posso registrare direzioni di attacco o di battuta, o specificare zone di ricezione con il programma?",
-    "answer": "Al momento no. Il programma segue un approccio basato sull'esito: puoi definire il tipo di azione (attacco, ricezione, battuta, ecc.) e fornire una valutazione (positiva, negativa, errore, ecc.), ma attualmente non è possibile indicare i punti di caduta della palla, le direzioni di battuta o le zone di ricezione. In caso di richiesta significativa per questa funzionalità, potrebbe essere considerata per aggiornamenti futuri."
-  },
-  {
     "question": "Il software è gratuito?",
-    "answer": "Sì! Il programma è completamente gratuito e open source. Accogliamo con piacere i contributi della community, quindi chiunque può aiutare a migliorare il software, suggerire funzionalità o segnalare problemi."
+    "answer": "Sì. scout4all è completamente gratuito e open source (AGPL-3.0). Chiunque può aiutare a migliorarlo, suggerire funzionalità o segnalare problemi su <a href=\"https://github.com/naighes/scoutforall\">GitHub</a>."
   },
   {
-    "question": "Perché è un'applicazione da terminale invece che grafica?",
-    "answer": "Il focus del software è su produttività ed efficienza. Inserire i dati tramite tastiera permette di registrare le azioni più velocemente rispetto all'uso di tablet o smartphone. Questo design aiuta gli utenti a registrare le azioni in modo rapido e sistematico, particolarmente utile in scenari di scouting o analisi dove la velocità è importante."
+    "question": "Usavo la versione da terminale. Cosa succede adesso?",
+    "answer": "Non devi fare niente: al prossimo avvio la versione da terminale propone l'aggiornamento, e l'aggiornamento installa al suo posto l'app desktop. Squadre e partite sono nella stessa cartella e le ritrovi tutte. Da quel momento, avviando scout4all si apre una finestra invece dell'interfaccia da terminale."
   },
   {
-    "question": "Tutte le posizioni dei giocatori e le zone di attacco sono completamente personalizzabili?",
-    "answer": "No, l'applicazione compie alcune scelte arbitrarie ma coerenti per semplificare l'inserimento dei dati e mantenere la consistenza analitica. Ad esempio, il centrale è sempre sostituito dal libero nella seconda linea (tranne quando il centrale è in battuta). Questo significa che non è possibile simulare una fase di side-out senza il libero in seconda linea. Inoltre, le zone di attacco sono determinate automaticamente in base ai ruoli dei giocatori e alla posizione del palleggiatore. Ad esempio, se la rotazione corrente mette il palleggiatore in zona 1, l'opposto attaccherà dalla zona 4. Schemi quali una rotazione P1 invertita non sono supportati."
+    "question": "Perché lo scouting si fa dalla tastiera?",
+    "answer": "Per la velocità. Uno scambio dura pochi secondi: con un tasto per ogni evento, giocatore e valutazione, gli occhi restano sul campo e si sta dietro al gioco. Ogni tasto si può cambiare nelle impostazioni. Anche lo scouting si può fare con il mouse o il touchpad."
   },
   {
-    "question": "Quanto spesso viene aggiornato il software? Devo installare gli aggiornamenti manualmente?",
-    "answer": "Il software è in sviluppo attivo e in costante evoluzione. Nuove funzionalità, miglioramenti e correzioni di bug vengono rilasciati regolarmente. Non è necessario scaricare gli aggiornamenti manualmente: a ogni avvio l'applicazione controlla se è disponibile una nuova versione e, dopo averti chiesto conferma, la installa e si riavvia con la nuova versione. Questo assicura che tu possa beneficiare immediatamente dei contributi della community e del continuo miglioramento del progetto."
+    "question": "È possibile registrare le zone di gioco?",
+    "answer": "Sì. Per battute, ricezioni, attacchi, difese e muri puoi indicare la zona del campo interessata. Per gli attacchi puoi inoltre registrare il numero di giocatori interessati a muro. Queste informazioni sono facoltative: puoi ometterle e limitarti alla valutazione del tocco."
+  },
+  {
+    "question": "Le posizioni dei giocatori e le zone di attacco sono tutte personalizzabili?",
+    "answer": "Non tutte: l'app fa alcune scelte coerenti per tenere veloce l'inserimento dei dati. Il libero sostituisce sempre il centrale in seconda linea (tranne quando il centrale è in battuta), e le zone di attacco derivano dai ruoli e dalla posizione del palleggiatore. Puoi dichiarare la P1 invertita e la ricezione a due, tre o quattro giocatori."
+  },
+  {
+    "question": "Posso aprire le partite registrate con DataVolley?",
+    "answer": "Sì: importa un file <code>.dvw</code> in una delle tue squadre, con le sue zone. La partita importata si analizza come le altre, da sola o insieme a più partite."
+  },
+  {
+    "question": "Quanto spesso viene aggiornato? Devo installare gli aggiornamenti a mano?",
+    "answer": "È in sviluppo attivo e le nuove versioni escono con regolarità. Non devi scaricarle tu: a ogni avvio l'app controlla se c'è una nuova versione e, dopo avertelo chiesto, la installa e si riavvia."
   },
   {
     "question": "Dopo un aggiornamento automatico l'applicazione non si avvia più. Cosa è successo?",
-    "answer": "Fino alla versione 0.4.2, l'aggiornamento automatico poteva sostituire l'applicazione con un file di dati pubblicato insieme a ogni release (la distinta dei componenti software, o SBOM) invece che con la nuova versione: dopo l'aggiornamento, l'applicazione non si avvia più. Il problema è risolto a partire dalla versione 0.4.3. Per ripristinarla, scarica di nuovo l'ultima versione dalla sezione <a href=\"#download\">download</a> e sostituisci il vecchio file. Le tue squadre e le tue partite sono salvate separatamente e non vengono toccate."
+    "answer": "Fino alla versione 0.4.2, l'aggiornamento automatico poteva sostituire l'applicazione con un file di dati pubblicato insieme a ogni release (la distinta dei componenti software, o SBOM) invece che con la nuova versione. Il problema è risolto dalla versione 0.4.3. Per ripristinarla, scarica di nuovo l'ultima versione dalla sezione <a href=\"#download\">download</a> e sostituisci il vecchio file. Squadre e partite sono salvate a parte e non vengono toccate."
   }
 ]

@@ -4,9 +4,17 @@
 :root {
   color-scheme: dark;
   scroll-behavior: smooth;
-  scroll-padding-top: 2em;
+  scroll-padding-top: 6rem;
 }
 
 body {
-  @apply bg-bs-surface-1 text-bs-foreground-light font-body selection:text-black selection:bg-amber-300;
+  @apply bg-bs-surface-0 text-bs-foreground-light font-body antialiased selection:text-black selection:bg-bs-accent;
+}
+
+code {
+  @apply font-mono text-[0.9em] px-1.5 py-0.5 rounded bg-white/5 border border-white/10;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { scroll-behavior: auto; }
 }

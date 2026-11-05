@@ -1,0 +1,19 @@
+[package]
+name = "scout4all-keys"
+description = "The keys of the scouting, shared by the apps with a keyboard: defaults, fixed keys, conflicts."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+crokey = { version = "1.3.0", features = ["serde"] }
+scout4all-core.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

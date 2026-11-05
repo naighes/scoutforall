@@ -206,6 +206,65 @@
   )
 })
 
+// the same rows in two readings side by side, a thin line between them
+#let comparison(c) = {
+  let n = c.columns.len()
+  block(breakable: false, {
+    caption(c.title)
+    table(
+      columns: (auto,) + (1fr,) * (2 * n),
+      inset: (x: 3pt, y: 2.6pt),
+      align: (x, y) => (if x == 0 { left } else { center }) + horizon,
+      stroke: (x, y) => (right: if x == n { thin }),
+      fill: (x, y) => if y > 1 and calc.even(y) { zebra },
+      table.header(
+        [],
+        ..c.groups.map(g => table.cell(colspan: n, text(weight: "semibold", g))),
+        [],
+        ..(c.columns + c.columns).map(col => text(6.5pt, fill: muted, col)),
+        table.hline(stroke: strong-rule),
+      ),
+      ..c.rows.map(r => (r.label, ..r.values.at(0), ..r.values.at(1))).flatten(),
+      table.hline(stroke: thin),
+    )
+  })
+}
+
+// the points of a phase: the players' ones over the receptions or the
+// serves, as DataVolley counts them, then the rallies won
+#let phase-figures(p) = block(
+  width: 100%,
+  fill: zebra,
+  radius: 3pt,
+  inset: (x: 7pt, y: 5pt),
+  breakable: false,
+  {
+    grid(
+      columns: (1fr, auto),
+      row-gutter: 4pt,
+      column-gutter: 6pt,
+      p.rallies_label, strong(p.rallies),
+      p.points_label, strong(p.points),
+      grid.cell(colspan: 2, text(6.5pt, fill: muted, p.every)),
+      grid.cell(colspan: 2, line(length: 100%, stroke: thin)),
+      p.won_label, strong(p.won),
+    )
+  },
+)
+
+// the closing box of DataVolley's scoresheet
+#let summary(s) = block(breakable: false, {
+  section(s.title)
+  grid(
+    columns: (auto, 15em, 1fr),
+    column-gutter: 12pt,
+    simple-table(s.rotations, columns: (auto, auto)),
+    stack(spacing: 6pt, ..s.phases.map(phase-figures)),
+    comparison(s.direct_side_out),
+  )
+  block(above: 6pt, text(6.5pt, fill: muted, s.legend))
+})
+
 #let legend = {
   set text(6.5pt, fill: muted)
   block(above: 8pt, {
@@ -226,19 +285,20 @@
   })
 }
 
-// the summary of the match
+// the first page as DataVolley's scoresheet: the sets, the players with
+// the team and its sets under them, the closing box
 #header(report.header)
-#v(4pt)
-#kpis(report.kpis)
 #section("set")
-#simple-table(report.sets, columns: (auto, auto, 1fr, 1fr, auto, auto))
+#simple-table(report.sets, columns: (auto, 1fr, auto, auto, auto, 1fr, auto, auto))
 #stats-table(report.players)
 #legend
+#summary(report.summary)
 
 // then the analysis of the team: every block stays in one piece, on the
 // next page when it doesn't fit
+#pagebreak(weak: true)
+#kpis(report.kpis)
 #stats-table(report.rotations)
-#stats-table(report.set_stats)
 #v(8pt)
 #grid(columns: (1fr, 1fr, 1fr), column-gutter: 12pt, ..report.courts.map(court))
 #v(8pt)
@@ -247,11 +307,7 @@
   column-gutter: 12pt,
   row-gutter: 10pt,
   simple-table(report.first_rallies), simple-table(report.freeballs),
-  stack(spacing: 10pt, simple-table(report.attack_by_phase), simple-table(report.side_out_possessions)),
-  grid(
-    columns: (1fr, 1fr),
-    column-gutter: 8pt,
-    simple-table(report.points_won), simple-table(report.points_lost),
-  ),
+  simple-table(report.attack_by_phase), simple-table(report.side_out_possessions),
+  simple-table(report.points_won), simple-table(report.points_lost),
 )
 #point-sequence(report.point_sequence)

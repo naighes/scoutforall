@@ -1,14 +1,14 @@
 {
-  "title": "scout4all | volleyball match analysis tool",
-  "description": "A CLI tool for collecting, managing and reporting volleyball match data. It helps coaches and analysts track match events and generate useful reports for post-game analysis.",
+  "title": "scout4all | volleyball scouting and statistics",
+  "description": "A free, open source desktop app for volleyball scouting: fast event recording, designed for the keyboard, with statistics and analysis during and after the match. For Windows, macOS and Linux.",
   "base_url": "https://naighes.github.io/scoutforall/",
   "github_url": "https://github.com/naighes/scoutforall",
   "github_image": "/scoutforall/content-images/github-mark-white.svg",
   "theme_color": "#18181b",
   "nav": [
     {
-      "title": "overview",
-      "link": "./#overview"
+      "title": "features",
+      "link": "./#features"
     },
     {
       "title": "downloads",
@@ -31,9 +31,7 @@
     "license": "License",
     "privacy": "Privacy",
     "made_with": "Made with ❤️ by",
-    "previous_slide": "Previous slide",
-    "next_slide": "Next slide",
-    "hero_image_alt": "The scout4all statistics screen on a laptop",
+    "hero_image_alt": "scout4all while scouting a match",
     "language": "Language"
   }
 }

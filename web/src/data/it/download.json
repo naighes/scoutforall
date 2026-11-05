@@ -27,7 +27,7 @@
         "aarch64": "ARM (es. Raspberry Pi)"
       },
       "help_title": "Come si avvia?",
-      "help": "Estrai l'archivio ed esegui <code>./scout4all</code> da un terminale."
+      "help": "Estrai l'archivio ed esegui <code>./scout4all</code>: l'app si apre in una finestra."
     }
   }
 }

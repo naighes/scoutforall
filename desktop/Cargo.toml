@@ -1,0 +1,46 @@
+[package]
+name = "scout4all-desktop"
+description = "The desktop app of scout4all (Windows, macOS, Linux), written with iced: it took the place of the TUI."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "scout4all-desktop"
+path = "src/main.rs"
+
+[dependencies]
+dirs.workspace = true
+iced = { version = "=0.14.0", features = ["canvas", "advanced", "svg"] }
+scout4all-core.workspace = true
+scout4all-keys = { path = "../keys" }
+scout4all-mobile = { path = "../mobile" }
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+crokey = "1.3.0"
+open = "5.4.5"
+rfd = "0.17.2"
+self_update = { version = "1", optional = true, features = ["checksums"] }
+
+[features]
+# the builds of the releases only: they update themselves (`update`)
+self-update = ["self_update"]
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+winres = "0.1.12"
+
+[lints]
+workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["winres"]

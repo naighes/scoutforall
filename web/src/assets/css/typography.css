@@ -2,17 +2,22 @@
 @reference "./global.css";
 
 .bs-h1 {
-  @apply font-display font-medium text-balance text-5xl md:text-6xl;
+  @apply font-display font-semibold tracking-tight text-balance text-4xl sm:text-5xl lg:text-6xl text-white;
 }
 
 .bs-h2 {
-  @apply font-display font-medium text-balance text-3xl md:text-4xl;
+  @apply font-display font-semibold tracking-tight text-balance text-3xl md:text-4xl text-white;
 }
 
 .bs-h3 {
-  @apply font-display font-medium text-balance text-lg md:text-2xl;
+  @apply font-display font-medium text-balance text-lg md:text-xl text-white;
 }
 
 .bs-body-text {
   @apply leading-relaxed;
+}
+
+/* the small label above a title, as the panels of the app */
+.bs-eyebrow {
+  @apply font-mono text-xs sm:text-sm uppercase tracking-widest text-bs-accent;
 }

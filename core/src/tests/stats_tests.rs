@@ -159,6 +159,8 @@ mod tests {
                 target: None,
                 blockers: None,
                 eval: *eval,
+                situation: Default::default(),
+                touch: None,
             });
         }
         stats
@@ -862,6 +864,9 @@ mod tests {
                 eval,
                 prev_type: P,
                 prev_eval: Some(Perfect),
+                situation: Default::default(),
+                role: None,
+                set_type: None,
             })
         };
         attack(ZoneEnum::Four, Perfect);
@@ -894,6 +899,9 @@ mod tests {
                 eval,
                 prev_type,
                 prev_eval: Some(Positive),
+                situation: Default::default(),
+                role: None,
+                set_type: None,
             })
         };
         attack(ZoneEnum::Four, Perfect, P);
@@ -1680,6 +1688,8 @@ mod tests {
                     target: None,
                     blockers: *blockers,
                     eval: Some(*eval),
+                    situation: Default::default(),
+                    touch: None,
                 });
             }
             stats

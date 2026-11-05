@@ -1,18 +1,6 @@
-[package]
-name = "scout4all"
-description = "scout4all is a CLI tool for collecting, managing and reporting volleyball match data. It helps coaches and analysts track match events and generate useful reports for post-game analysis."
-keywords = ["volley", "volleyball", "tui", "ratatui"]
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-readme = "README.md"
-homepage.workspace = true
-repository.workspace = true
-license.workspace = true
-rust-version.workspace = true
-
 [workspace]
-members = ["core", "mobile"]
+members = ["core", "desktop", "keys", "mobile"]
+resolver = "3"
 
 # the version of the release: shared by all the crates
 [workspace.package]
@@ -77,40 +65,3 @@ incremental = false
 inherits = "release"
 panic = "unwind"
 strip = false
-
-[dependencies]
-scout4all-core.workspace = true
-async-trait.workspace = true
-chrono.workspace = true
-crokey = "1.3.0"
-dirs.workspace = true
-hf = "0.6"
-ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
-reqwest.workspace = true
-self_update = { version = "1", optional = true, features = ["checksums"] }
-serde.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
-unicode-width = "0.2"
-uuid.workspace = true
-zip.workspace = true
-sys-locale = "0.3"
-
-[dev-dependencies]
-tempfile.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-winres = "0.1.12"
-
-[lints]
-workspace = true
-
-[features]
-default = []
-self-update = ["self_update"]
-
-[build-dependencies]
-winres = { version = "0.1.12" }
-
-[package.metadata.cargo-machete]
-ignored = ["winres"]

@@ -62,10 +62,10 @@ jobs:
     strategy:
       matrix:
         platforms:
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             features: "--features self-update"
-          - os: macos-14
+          - os: macos-15
             target: x86_64-apple-darwin
             features: "--features self-update"
           - os: ubuntu-latest
@@ -87,29 +87,32 @@ jobs:
       - uses: houseabsolute/actions-rust-cross@v1
         with:
           target: ${{ matrix.platforms.target }}
-          args: "--verbose --locked --release ${{ matrix.platforms.features }}"
+          # the desktop app: it takes the place of the TUI, also through the
+          # self update of the TUIs already installed (desktop/src/update.rs)
+          args: "--verbose --locked --release --package scout4all-desktop ${{ matrix.platforms.features }}"
           strip: true
         env:
-          LINEAR_TOKEN: ${{ secrets.LINEAR_TOKEN }}
-          LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
           ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
-      # the self update of every released client (src/updater.rs) picks the
+      # the self update of every released client (the TUIs up to v0.13.0, in
+      # their src/updater.rs, and desktop/src/update.rs) picks the
       # first asset whose name contains its target, then installs it as is or
       # extracts `scout4all` (`scout4all.exe`) from it: only the bare binary
       # and the archives may carry the target in their name, and the bare
-      # binary is uploaded first and sorts first
+      # binary is uploaded first and sorts first. The desktop app is built as
+      # `scout4all-desktop` and published as `scout4all`, the name the TUIs
+      # check (`--version`) and extract from the archives
       - name: setup variables
         id: variables
         shell: bash
         run: |
-          name="$(cargo metadata --manifest-path Cargo.toml --no-deps --format-version=1 | jq -r '.packages[] | select(.name=="scout4all").targets[0].name')"
+          name="scout4all"
           exe=""
           if [ "${{ matrix.platforms.os }}" = "windows-latest" ]; then
              exe=".exe"
           fi
           {
             echo "name=${name}"
-            echo "source=target/${{ matrix.platforms.target }}/release/${name}${exe}"
+            echo "source=target/${{ matrix.platforms.target }}/release/scout4all-desktop${exe}"
             echo "archive=scout4all-${{ matrix.platforms.target }}"
             echo "binaryName=${name}${exe}"
             echo "binaryAsset=scout4all-${{ matrix.platforms.target }}${exe}"
@@ -123,13 +126,13 @@ jobs:
         run: cargo install --locked cargo-cyclonedx
       - name: generate SBOM
         run: |
-          cargo cyclonedx --describe binaries --format json ${{ matrix.platforms.features }} --target ${{ matrix.platforms.target }}
+          cargo cyclonedx --manifest-path desktop/Cargo.toml --describe binaries --format json ${{ matrix.platforms.features }} --target ${{ matrix.platforms.target }}
       - name: stage archive content
         shell: bash
         run: |
           mkdir -p package dist
           cp "${SOURCE}" "package/${BINARY}"
-          mv "${NAME}_bin.cdx.json" "package/${NAME}.cdx.json"
+          mv "desktop/scout4all-desktop_bin.cdx.json" "package/${NAME}.cdx.json"
           cp "${SOURCE}" "dist/${BINARY_ASSET}"
         env:
           NAME: ${{ steps.variables.outputs.name }}
@@ -195,7 +198,7 @@ jobs:
   macos-universal:
     needs: [version, build-and-publish]
     name: build and publish the universal macOS binary
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}

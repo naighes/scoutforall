@@ -5,6 +5,7 @@ use crate::{
 };
 use std::{path::Path, sync::Arc};
 
+mod analysis_tests;
 mod archive_tests;
 mod ball_tests;
 mod benchmark_tests;
@@ -33,6 +34,7 @@ mod point_sequence_tests;
 mod report_tests;
 mod scouting_tests;
 mod set_start_tests;
+mod situation_tests;
 mod snapshot_tests;
 mod stats_tests;
 mod storage_tests;

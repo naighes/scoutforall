@@ -410,9 +410,20 @@ pub struct RotationLine {
 
 /// Every rotation, in order, played or not.
 pub fn by_rotation(stats: &Stats) -> Vec<RotationLine> {
+    by_rotation_in(stats, &StatsFilter::default())
+}
+
+/// Every rotation narrowed by the filter (its rotation aside): a phase
+/// asked leaves the other one empty.
+pub fn by_rotation_in(stats: &Stats, filter: &StatsFilter) -> Vec<RotationLine> {
     (0..6)
         .map(|rotation| {
-            let phase = |p| stats.rallies_won(&StatsFilter::new(Some(p), Some(rotation), None));
+            let in_rotation = StatsFilter {
+                rotation: Some(rotation),
+                ..*filter
+            };
+            let phase =
+                |p| crate::overview::in_phase(&in_rotation, p).and_then(|f| stats.rallies_won(&f));
             RotationLine {
                 rotation,
                 side_out: phase(PhaseEnum::SideOut),

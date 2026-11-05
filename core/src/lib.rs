@@ -1,6 +1,7 @@
 //! The domain of scout4all, independent of the user interface: teams,
 //! matches and sets, the lineup and the replay of the events, the
 //! statistics, the PDF report, the persistence and the analytics.
+pub mod analysis;
 pub mod analytics;
 pub mod archive;
 pub mod benchmark;
@@ -13,6 +14,7 @@ pub mod example;
 pub mod localization;
 pub mod logging;
 pub mod match_form;
+pub mod names;
 pub mod overview;
 pub mod player_form;
 pub mod providers;

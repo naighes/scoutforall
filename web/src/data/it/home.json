@@ -1,7 +1,20 @@
 {
-  "hero_title": "scout4all",
-  "hero_content": "<p><strong>Uno strumento CLI gratuito per raccogliere, gestire e analizzare i dati delle partite di pallavolo</strong>, per aiutare allenatori e analisti a monitorare gli eventi della partita e generare report utili per l'analisi post-partita.</p><p>Disponibile per macOS, Windows e Linux.</p>",
-  "overview_title": "Panoramica",
+  "hero_eyebrow": "Libero e open source · Windows · macOS · Linux",
+  "hero_title": "Lo scouting della pallavolo alla velocità del gioco",
+  "hero_content": "scout4all nasce per ridurre i tempi di registrazione degli eventi durante lo scouting, attraverso un'interazione pensata principalmente per la tastiera, ma utilizzabile anche con il mouse o altri dispositivi. I dati raccolti permettono di consultare statistiche e analizzare le prestazioni, durante e dopo la partita.",
+  "cta_download": "Scarica",
+  "cta_github": "Sorgenti su GitHub",
+  "video_label": "Qualche scambio registrato dalla tastiera: ricezione, attacco, battuta con la sua zona, difesa e contrattacco.",
+  "features_title": "Cosa fa",
+  "highlights_title": "E poi",
+  "highlights": [
+    { "title": "Zone di gioco", "content": "Zone di battuta, ricezione, attacco, difesa e muro. Rilevazione della composizione del muro." },
+    { "title": "File DataVolley", "content": "Importa le partite <code>.dvw</code>, con le loro zone, e analizzale insieme alle tue." },
+    { "title": "Report in PDF", "content": "Il report della partita, impaginato come un tabellino, pronto da stampare o condividere con la squadra." },
+    { "title": "I tuoi tasti", "content": "Ogni evento, valutazione e tipo di alzata si può associare al tasto che preferisci." },
+    { "title": "Cinque lingue", "content": "Italiano, inglese, portoghese, polacco e giapponese." },
+    { "title": "Sempre aggiornato", "content": "All'avvio controlla se c'è una nuova versione e, se sei d'accordo, la installa e si riavvia." }
+  ],
   "download_title": "Download",
-  "faq_title": "Domande Frequenti"
+  "faq_title": "Domande frequenti"
 }

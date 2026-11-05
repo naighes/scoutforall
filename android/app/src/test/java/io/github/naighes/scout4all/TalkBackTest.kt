@@ -55,9 +55,13 @@ class TalkBackTest {
         val match = startFirstSet(team)
         show("Cortona") { ScoutingScreen(team, match, onBack = {}) }
         assertSpoken("Italia 0, Cortona 0, " + string(R.string.serves, "Italia"))
-        // our serve: the server under the score, where it went on the
-        // court
-        assertSpoken("${string(R.string.break_phase)} · S1 · 8 · Alessia Orro")
+        // our serve: the server under the score, the phase its color
+        // shows said too; where it went on the court
+        assertSpoken("SERVE · 8 Alessia Orro · S1")
+        assertTrue(
+            rule.onAllNodes(hasText("8 Alessia Orro", substring = true)).fetchSemanticsNodes()
+                .any { it.config.getOrNull(SemanticsProperties.StateDescription) == string(R.string.break_phase) },
+        )
         assertSpoken("${string(R.string.serve_zone)} 1A")
         // the rally goes on: the players
         rule.onNode(hasContentDescription("positive") and hasClickAction()).performClick()

@@ -187,7 +187,7 @@ fun rememberImport(
                 val (bytes, fileName) = context.read(uri)
                 when {
                     onDvw != null && isDvw(fileName) -> {
-                        app.dvw = DvwOpened(bytes, fileName)
+                        app.dvw = DvwOpened(bytes, fileName, teamId)
                         // the navigation, on the main thread only
                         withContext(Dispatchers.Main) { onDvw() }
                     }

@@ -226,7 +226,13 @@ private fun Navigation(
                 onPlayer = { player -> nav.navigate("team/$id/player/$player") },
                 onNewMatch = { nav.navigate("team/$id/new-match") },
                 onMatch = { m -> nav.navigate("team/$id/match/${Uri.encode(m)}") },
+                onDvw = { nav.navigate("dvw") },
+                onAnalysis = { nav.navigate("team/$id/analysis") },
             )
+        }
+        composable("team/{id}/analysis") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            AnalysisScreen(id, onBack = { nav.back(entry) })
         }
         composable("team/{id}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()

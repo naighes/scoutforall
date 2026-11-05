@@ -1,26 +1,34 @@
 [
   {
-    "question": "Czy w programie mogę zapisywać kierunek ataku lub zagrywki albo strefy przyjęcia?",
-    "answer": "Na razie nie. Program opiera się na wyniku akcji: określasz rodzaj akcji (atak, przyjęcie, zagrywka itd.) i jej ocenę (pozytywna, negatywna, błąd itd.), ale obecnie nie można wskazać miejsca upadku piłki, kierunku zagrywki ani strefy przyjęcia. Jeśli zainteresowanie tą funkcją będzie duże, może ona zostać rozważona w przyszłych aktualizacjach."
-  },
-  {
     "question": "Czy program jest darmowy?",
-    "answer": "Tak! Program jest całkowicie darmowy i open source. Zachęcamy społeczność do współpracy: każdy może pomóc ulepszyć program, zaproponować funkcje lub zgłosić problemy."
+    "answer": "Tak. scout4all jest całkowicie darmowy i otwartoźródłowy (AGPL-3.0). Każdy może pomóc go ulepszać, proponować funkcje lub zgłaszać problemy na <a href=\"https://github.com/naighes/scoutforall\">GitHubie</a>."
   },
   {
-    "question": "Dlaczego to aplikacja terminalowa, a nie graficzna?",
-    "answer": "Program stawia na produktywność i wydajność. Wprowadzanie danych z klawiatury jest szybsze niż stukanie w ekran tabletu czy smartfona. Pozwala to zapisywać akcje szybko i systematycznie, co jest szczególnie ważne przy scoutingu i analizie, gdy liczy się czas."
+    "question": "Mam wersję terminalową. Co teraz?",
+    "answer": "Nie musisz nic robić: przy następnym uruchomieniu wersja terminalowa zaproponuje aktualizację, która zainstaluje w jej miejsce aplikację desktopową. Drużyny i mecze są w tym samym folderze, więc znajdziesz je wszystkie. Od tej pory uruchomienie scout4all otwiera okno zamiast interfejsu w terminalu."
   },
   {
-    "question": "Czy wszystkie pozycje zawodników i strefy ataku można dowolnie ustawić?",
-    "answer": "Nie. Aplikacja przyjmuje pewne arbitralne, ale spójne założenia, aby uprościć wprowadzanie danych i zachować spójność analiz. Na przykład środkowego w drugiej linii zawsze zastępuje libero (chyba że środkowy zagrywa). Oznacza to, że nie można odwzorować fazy side-outu bez libero w drugiej linii. Ponadto strefy ataku są wyznaczane automatycznie na podstawie pozycji zawodników i miejsca rozgrywającego. Na przykład jeśli w bieżącym ustawieniu rozgrywający jest w strefie 1, atakujący atakuje ze strefy 4. Systemy takie jak odwrócone ustawienie z rozgrywającym w strefie 1 nie są obsługiwane."
+    "question": "Dlaczego scouting odbywa się z klawiatury?",
+    "answer": "Dla szybkości. Akcja trwa kilka sekund: z klawiszem dla każdego zdarzenia, zawodnika i oceny wzrok zostaje na boisku i nadążasz za grą. Każdy klawisz można zmienić w ustawieniach. Scouting można prowadzić także myszą lub touchpadem."
   },
   {
-    "question": "Jak często program jest aktualizowany i czy muszę instalować aktualizacje ręcznie?",
-    "answer": "Program jest aktywnie rozwijany i stale się zmienia. Nowe funkcje, ulepszenia i poprawki błędów pojawiają się regularnie. Nie musisz ręcznie pobierać aktualizacji: przy każdym uruchomieniu aplikacja sprawdza, czy jest nowa wersja, i po Twoim potwierdzeniu instaluje ją i uruchamia się ponownie. Dzięki temu od razu korzystasz z wkładu społeczności i ciągłego rozwoju projektu."
+    "question": "Czy można zapisywać strefy gry?",
+    "answer": "Tak. Dla zagrywki, przyjęcia, ataku, obrony i bloku możesz wskazać strefę boiska, której dotyczy zagranie. Przy ataku możesz też zapisać liczbę zawodników w bloku. Te informacje są opcjonalne: możesz je pominąć i ocenić tylko samo dotknięcie."
   },
   {
-    "question": "Aplikacja nie uruchamia się po automatycznej aktualizacji. Co się stało?",
-    "answer": "Do wersji 0.4.2 automatyczna aktualizacja mogła zastąpić aplikację plikiem danych publikowanym razem z każdym wydaniem (wykazem składników oprogramowania) zamiast nowej wersji: po aktualizacji aplikacja się nie uruchamia. Zostało to naprawione od wersji 0.4.3. Aby to naprawić, pobierz ponownie najnowszą wersję z sekcji <a href=\"#download\">pobieranie</a> i zastąp stary plik. Twoje drużyny i mecze są przechowywane osobno i nic się z nimi nie dzieje."
+    "question": "Czy wszystkie pozycje zawodników i strefy ataku można dostosować?",
+    "answer": "Nie wszystkie: aplikacja przyjmuje kilka spójnych założeń, żeby wprowadzanie danych było szybkie. Libero zawsze zastępuje środkowego w drugiej linii (z wyjątkiem sytuacji, gdy środkowy zagrywa), a strefy ataku wynikają z pozycji zawodników i miejsca rozgrywającego. Możesz zadeklarować odwrócone ustawienie 1 oraz przyjęcie w dwójkę, trójkę lub czwórkę."
+  },
+  {
+    "question": "Czy mogę otworzyć mecze zapisane w DataVolley?",
+    "answer": "Tak: zaimportuj plik <code>.dvw</code> do jednej ze swoich drużyn, razem ze strefami. Zaimportowany mecz analizuje się tak jak pozostałe, osobno lub razem z innymi meczami."
+  },
+  {
+    "question": "Jak często jest aktualizowany? Czy muszę instalować aktualizacje ręcznie?",
+    "answer": "Jest aktywnie rozwijany, a nowe wersje wychodzą regularnie. Nie musisz ich pobierać samodzielnie: przy każdym uruchomieniu aplikacja sprawdza, czy jest nowa wersja, i po zapytaniu cię instaluje ją i uruchamia się ponownie."
+  },
+  {
+    "question": "Po automatycznej aktualizacji aplikacja się nie uruchamia. Co się stało?",
+    "answer": "Do wersji 0.4.2 automatyczna aktualizacja mogła zastąpić aplikację plikiem danych publikowanym razem z każdym wydaniem (wykazem składników oprogramowania, SBOM) zamiast nową wersją. Zostało to naprawione od wersji 0.4.3. Aby to naprawić, pobierz ponownie najnowszą wersję z sekcji <a href=\"#download\">pobierania</a> i zastąp stary plik. Twoje drużyny i mecze są przechowywane osobno i nie zostaną naruszone."
   }
 ]

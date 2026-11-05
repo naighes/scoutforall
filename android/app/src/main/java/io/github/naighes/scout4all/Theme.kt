@@ -20,6 +20,10 @@ private val Amber = Color(0xFFFCD34D)
 val Won = Color(0xFF4ADE80)
 val Lost = Color(0xFFF87171)
 val Fair = Color(0xFFFACC15)
+/** The phase of the rally, as on the desktop: receiving (side out),
+ * serving (break). */
+val SideOut = Color(0xFF38BDF8)
+val BreakPoint = Color(0xFFFB923C)
 
 internal val Scout4AllColors = darkColorScheme(
     primary = Amber,

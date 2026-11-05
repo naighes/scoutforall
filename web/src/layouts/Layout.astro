@@ -10,9 +10,6 @@ import "../assets/css/buttons.css"
 
 import { Font } from 'astro:assets';
 
-import Image from "astro/components/Image.astro"
-import bg_image from "../assets/theme-images/hero-image.jpg"
-
 const global_settings = content(lang, 'global_settings');
 
 import { latestRelease } from '../lib/release.js';
@@ -59,6 +56,7 @@ const { title, description, url } = Astro.props
 
     <Font cssVariable="--font-inter" preload />
     <Font cssVariable="--font-inter-display" preload />
+    <Font cssVariable="--font-plex-mono" />
 
     {!url && languages.map(l =>
       <link
@@ -88,7 +86,7 @@ const { title, description, url } = Astro.props
           "@type": "SoftwareApplication",
           "name": "scout4all",
           "applicationCategory": "SportsApplication",
-          "operatingSystem": "macOS, Windows, Linux",
+          "operatingSystem": "Windows, macOS, Linux",
           "softwareVersion": release?.version,
           "url": "https://naighes.github.io/scoutforall/",
           "inLanguage": language(lang).hreflang,
@@ -131,10 +129,7 @@ const { title, description, url } = Astro.props
   <body id="top">
 
     <!-- Skip link -->
-    <a class="fixed -top-20 focus-visible:top-0 p-3 bg-black/90 transition-all duration-300" href="#main">{ global_settings.labels.skip_to_content }</a>
-
-    <!-- bg image -->
-    <Image src={ bg_image } alt="" format="avif" height={1080} width={1920} class="absolute min-h-svh object-cover inset-0 bottom-auto -z-1 w-full h-auto opacity-20 mask-b-from-50%" loading="eager" />
+    <a class="fixed z-[60] -top-20 focus-visible:top-0 p-3 bg-black/90 transition-all duration-300" href="#main">{ global_settings.labels.skip_to_content }</a>
 
     <!-- Header -->
     <HeaderMain settings={ global_settings } />

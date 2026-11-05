@@ -29,12 +29,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -69,6 +76,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.MatchField
+import io.github.naighes.scout4all.core.offeredNames
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.RosterPlayer
@@ -104,6 +112,9 @@ sealed interface MatchFormState {
         val loaded: MatchForm = form,
         /** the second step, after the fields: who is on the score sheet */
         val onRoster: Boolean = false,
+        /** the teams and the opponents met, offered as the opponent is
+         * written */
+        val opponents: List<String> = emptyList(),
     ) : MatchFormState {
         val changed: Boolean get() = form != loaded
     }
@@ -134,7 +145,11 @@ class MatchFormViewModel(
                         }
                         else -> core.matchForm(teamId, matchId)
                     }
-                    MatchFormState.Editing(form, core.matchRoster(teamId, matchId, form, null).players)
+                    MatchFormState.Editing(
+                        form,
+                        core.matchRoster(teamId, matchId, form, null).players,
+                        opponents = core.opponents(teamId),
+                    )
                 }
             } catch (e: MobileException) {
                 MatchFormState.Failed(e.reason)
@@ -278,19 +293,9 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
             Modifier.weight(1f).verticalScroll(rememberScrollState()).tutorial("match-fields").padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            OutlinedTextField(
-                value = form.opponent,
-                onValueChange = { opponent -> model.change(MatchField.OPPONENT) { it.copy(opponent = opponent) } },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.opponent)) },
-                singleLine = true,
-                isError = error(MatchField.OPPONENT) != null,
-                supportingText = error(MatchField.OPPONENT)?.let { { Text(it) } },
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Words,
-                    imeAction = ImeAction.Done,
-                ),
-            )
+            OpponentField(form.opponent, state.opponents, error(MatchField.OPPONENT)) { opponent ->
+                model.change(MatchField.OPPONENT) { it.copy(opponent = opponent) }
+            }
             DateField(form.date, error(MatchField.DATE)) { date ->
                 model.change(MatchField.DATE) { it.copy(date = date) }
             }
@@ -300,6 +305,13 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                         selected = form.home == home,
                         onClick = { model.change(null) { it.copy(home = home) } },
                         shape = SegmentedButtonDefaults.itemShape(index, 2),
+                        // the icon of the team's list, not the check
+                        icon = {
+                            when (home) {
+                                true -> Icon(Icons.Outlined.Home, contentDescription = null)
+                                false -> Icon(painterResource(R.drawable.ic_away), contentDescription = null)
+                            }
+                        },
                     ) { Text(stringResource(name)) }
                 }
             }
@@ -327,6 +339,53 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("match-next"),
         ) { Text(stringResource(R.string.go_on)) }
     }
+
+/** The opponent, with the teams and the opponents met offered below as
+ * it's written, as on the desktop: a touch takes one, Done on the keyboard
+ * the first. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OpponentField(value: String, offered: List<String>, error: String?, onChange: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    // the ones that begin as written first, as the core orders them
+    val shown = remember(value, offered) { offeredNames(offered, value).take(6) }
+    val expanded = open && shown.isNotEmpty()
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it }) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onChange(it)
+                open = true
+            },
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
+            label = { Text(stringResource(R.string.opponent)) },
+            singleLine = true,
+            isError = error != null,
+            supportingText = error?.let { { Text(it) } },
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Words,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(onDone = {
+                if (expanded) shown.firstOrNull()?.let(onChange)
+                open = false
+                defaultKeyboardAction(ImeAction.Done)
+            }),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { open = false }) {
+            shown.forEach { name ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        onChange(name)
+                        open = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+        }
+    }
+}
 
 /** The second step: the players of the team as tiles, by number, the ones
  * on the score sheet lit; a tap puts one on or takes it off, who played in

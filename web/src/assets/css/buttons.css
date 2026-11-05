@@ -2,36 +2,18 @@
 @reference "./global.css";
 
 .bs-btn {
+  @apply inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-semibold text-center
+    bg-bs-surface-3 text-bs-foreground-light border border-white/10
+    transition-colors duration-200 hover:bg-[#3a3a3d]
+    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bs-accent/70
+    active:translate-y-[1px];
+}
 
-  @apply
-    active:translate-y-[1px]
-    active:bg-bs-surface-2
-    bg-bs-surface-3
-    duration-200
-    focus-visible:outline-none
-    focus-visible:ring-2
-    focus-visible:ring-white/75
-    font-semibold
-    px-5
-    py-4
-    rounded-md
-    text-bs-foreground-light
-    text-center
-    transition-all
-    relative
-    overflow-clip
-    before:flex
-    before:inset-0
-    before:bg-white
-    before:rounded-sm
-    before:absolute
-    before:opacity-0
-    before:-translate-x-full
-    before:transition-all
-    before:duration-300
-    before:ease-out
-    hover:before:translate-x-0
-    hover:before:opacity-10
-    active:before:opacity-0
-    ;
+/* with bs-btn */
+.bs-btn-primary {
+  @apply bg-bs-accent text-bs-surface-0 border-transparent hover:bg-[#fde68a];
+}
+
+.bs-btn-ghost {
+  @apply bg-transparent border-transparent hover:bg-white/5;
 }

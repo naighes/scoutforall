@@ -1,6 +1,6 @@
 # scout4all for Android
 
-The app scouts matches on the phone, as the CLI does in the terminal. The domain is the Rust core of the
+The app scouts matches on the phone, as the desktop app does on the computer. The domain is the Rust core of the
 workspace (`core/`), exposed to Kotlin by the `mobile/` crate with
 [UniFFI](https://mozilla.github.io/uniffi-rs/); the UI is Jetpack Compose.
 
@@ -95,7 +95,7 @@ python3 -I fastlane/check.py [--release]
 ## Data
 
 The app keeps its data in `files/scout4all` in its sandbox, with the same
-layout as `~/.scout4all`. To try it with the data of the TUI (debug builds
+layout as `~/.scout4all`. To try it with the data of the desktop app (debug builds
 only):
 
 ```sh

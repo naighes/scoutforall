@@ -37,30 +37,41 @@ impl Series {
 
     /// The figure, `None` with no touches.
     pub fn value(&self, stats: &Stats) -> Option<f64> {
-        let all = StatsFilter::default();
-        let efficiency = |e| stats.metric_percentage(e, Metric::Efficiency, &all);
-        match self {
-            Series::Reception => efficiency(EventTypeEnum::P),
-            Series::Attack => efficiency(EventTypeEnum::A),
-            Series::CounterAttack => stats.attack_summary(true, &all).map(|a| a.efficiency()),
-            Series::Serve => efficiency(EventTypeEnum::S),
-            Series::SideOut | Series::BreakPoint => {
-                stats.rallies_won(&self.phase_filter()).map(|(v, _, _)| v)
-            }
-        }
+        self.value_in(stats, &StatsFilter::default())
     }
 
     /// The touches of the figure: the receptions, the attacks, the
     /// counter-attacks, the serves, the rallies of the phase.
     pub fn touches(&self, stats: &Stats) -> u32 {
-        let all = StatsFilter::default();
+        self.touches_in(stats, &StatsFilter::default())
+    }
+
+    /// The figure narrowed by the filter, `None` with no touches (also
+    /// with the filter on the other phase, for side out and break point).
+    pub fn value_in(&self, stats: &Stats, filter: &StatsFilter) -> Option<f64> {
+        let efficiency = |e| stats.metric_percentage(e, Metric::Efficiency, filter);
         match self {
-            Series::Reception => stats.event_count(EventTypeEnum::P, None, &all),
-            Series::Attack => stats.event_count(EventTypeEnum::A, None, &all),
-            Series::CounterAttack => stats.attack_summary(true, &all).map_or(0, |a| a.total),
-            Series::Serve => stats.event_count(EventTypeEnum::S, None, &all),
-            Series::SideOut | Series::BreakPoint => stats
-                .rallies_won(&self.phase_filter())
+            Series::Reception => efficiency(EventTypeEnum::P),
+            Series::Attack => efficiency(EventTypeEnum::A),
+            Series::CounterAttack => stats.attack_summary(true, filter).map(|a| a.efficiency()),
+            Series::Serve => efficiency(EventTypeEnum::S),
+            Series::SideOut | Series::BreakPoint => self
+                .phase_filter(filter)
+                .and_then(|f| stats.rallies_won(&f))
+                .map(|(v, _, _)| v),
+        }
+    }
+
+    /// The touches of the figure narrowed by the filter.
+    pub fn touches_in(&self, stats: &Stats, filter: &StatsFilter) -> u32 {
+        match self {
+            Series::Reception => stats.event_count(EventTypeEnum::P, None, filter),
+            Series::Attack => stats.event_count(EventTypeEnum::A, None, filter),
+            Series::CounterAttack => stats.attack_summary(true, filter).map_or(0, |a| a.total),
+            Series::Serve => stats.event_count(EventTypeEnum::S, None, filter),
+            Series::SideOut | Series::BreakPoint => self
+                .phase_filter(filter)
+                .and_then(|f| stats.rallies_won(&f))
                 .map_or(0, |(_, _, rallies)| rallies),
         }
     }
@@ -76,12 +87,14 @@ impl Series {
         }
     }
 
-    fn phase_filter(&self) -> StatsFilter {
+    /// The filter on the phase of the figure, `None` when it asks the
+    /// other phase.
+    fn phase_filter(&self, filter: &StatsFilter) -> Option<StatsFilter> {
         let phase = match self {
             Series::BreakPoint => PhaseEnum::Break,
             _ => PhaseEnum::SideOut,
         };
-        StatsFilter::new(Some(phase), None, None)
+        crate::overview::in_phase(filter, phase)
     }
 }
 

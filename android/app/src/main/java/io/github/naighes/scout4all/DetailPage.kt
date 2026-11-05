@@ -44,6 +44,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.DetailFilter
+import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.SituationChoices
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.HorizontalDivider
 import io.github.naighes.scout4all.core.DetailStats
 import io.github.naighes.scout4all.core.EvalStats
 import io.github.naighes.scout4all.core.EventTypeEnum
@@ -79,13 +84,19 @@ private fun toneColor(tone: Tone) = gradeColor(
     },
 )
 
-private fun pct(value: Double?) = value?.let { "${it.roundToInt()}%" } ?: "–"
 
 /** A fundamental in detail: chosen on a chip, narrowed to a player, a
  * rotation, a phase; how its evaluations went, its figures, the zones of the
  * attack, and the players compared (touch one to narrow to it). */
 @Composable
-fun Detail(detail: DetailStats?, query: DetailQuery, onQuery: (DetailQuery) -> Unit) {
+fun Detail(
+    detail: DetailStats?,
+    query: DetailQuery,
+    situation: SituationChoices? = null,
+    // the analysis has them over every page
+    filters: Boolean = true,
+    onQuery: (DetailQuery) -> Unit,
+) {
     if (detail == null) return
     val filter = query.filter
     Row(
@@ -100,28 +111,145 @@ fun Detail(detail: DetailStats?, query: DetailQuery, onQuery: (DetailQuery) -> U
             )
         }
     }
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+    if (filters) DetailFilters(detail, situation, filter) { onQuery(query.copy(filter = it)) }
+    detail.fundamental?.let { FundamentalContent(it, query, onQuery) }
+    detail.freeballs?.let { FreeballContent(it) }
+}
+
+/** The filters of the statistics: the player, the rotation, the phase and,
+ * with its choices, the situation of the game (the role, the reception of
+ * the rally, the touch before, the set, the reception formation, the P1),
+ * on as many lines as they take. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun DetailFilters(detail: DetailStats, situation: SituationChoices?, filter: DetailFilter, onFilter: (DetailFilter) -> Unit) =
+    FlowRow(
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FilterMenu(
             stringResource(R.string.filter_player),
             detail.players.find { it.id == filter.player }?.let { "${it.number} ${it.name}" },
             detail.players.map { "${it.number} ${it.name}" to it.id },
-        ) { onQuery(query.copy(filter = filter.copy(player = it))) }
+        ) { onFilter(filter.copy(player = it)) }
         FilterMenu(
             stringResource(R.string.filter_rotation),
             detail.rotations.find { it.value == filter.rotation }?.name,
             detail.rotations.map { it.name to it.value },
-        ) { onQuery(query.copy(filter = filter.copy(rotation = it))) }
+        ) { onFilter(filter.copy(rotation = it)) }
         FilterMenu(
             stringResource(R.string.filter_phase),
             detail.phases.find { it.value == filter.phase }?.name,
             detail.phases.map { it.name to it.value },
-        ) { onQuery(query.copy(filter = filter.copy(phase = it))) }
+        ) { onFilter(filter.copy(phase = it)) }
+        if (situation == null) return@FlowRow
+        FilterMenu(
+            stringResource(R.string.role),
+            situation.roles.find { it.value == filter.role }?.name,
+            situation.roles.map { it.name to it.value },
+        ) { onFilter(filter.copy(role = it)) }
+        val groups = evalGroups(situation)
+        val symbols = situation.symbols.map { it.symbol to it.value }
+        ManyFilterMenu(stringResource(R.string.rally_reception), filter.reception, groups, symbols, { e -> symbolsOf(situation, e) }) {
+            onFilter(filter.copy(reception = it))
+        }
+        ManyFilterMenu(stringResource(R.string.touch_before), filter.previous, groups, symbols, { e -> symbolsOf(situation, e) }) {
+            onFilter(filter.copy(previous = it))
+        }
+        ManyFilterMenu(
+            stringResource(R.string.set_type),
+            filter.setTypes,
+            emptyList(),
+            situation.setTypes.map { "${it.code}  ${it.name}" to it.value },
+            { chosen -> situation.setTypes.filter { it.value in chosen }.joinToString(" ") { it.code } },
+        ) { onFilter(filter.copy(setTypes = it)) }
+        FilterMenu(
+            stringResource(R.string.reception_by),
+            situation.schemes.find { it.value == filter.scheme }?.let {
+                stringResource(R.string.reception_scheme) + " " + stringResource(R.string.receivers, it.receivers.toInt())
+            },
+            situation.schemes.map { stringResource(R.string.receivers, it.receivers.toInt()) to it.value },
+        ) { onFilter(filter.copy(scheme = it)) }
+        val p1 = listOf(stringResource(R.string.canonical) to false, stringResource(R.string.inverted) to true)
+        FilterMenu(
+            "P1",
+            p1.find { it.second == filter.invertedP1 }?.let { "P1 ${it.first}" },
+            p1,
+        ) { onFilter(filter.copy(invertedP1 = it)) }
     }
-    detail.fundamental?.let { FundamentalContent(it, query, onQuery) }
-    detail.freeballs?.let { FreeballContent(it) }
+
+/** The evaluations chosen together: the good ones, `!`, the bad ones. */
+@Composable
+private fun evalGroups(situation: SituationChoices): List<Pair<String, List<EvalEnum>>> =
+    situation.groups.map { g ->
+        val name = when {
+            g.evals.contains(EvalEnum.PERFECT) -> stringResource(R.string.positive_group) + " "
+            g.evals.contains(EvalEnum.OVER) -> stringResource(R.string.negative_group) + " "
+            else -> ""
+        }
+        name + g.symbols to g.evals
+    }
+
+/** The symbols of the evaluations chosen, in their order. */
+private fun symbolsOf(situation: SituationChoices, chosen: List<EvalEnum>): String =
+    situation.symbols.filter { it.value in chosen }.joinToString("") { it.symbol }
+
+/** A chip naming the filter, or what's chosen; a menu to choose more of
+ * them: "all", the groups (just them), each one on or off. */
+@Composable
+private fun <T> ManyFilterMenu(
+    label: String,
+    chosen: List<T>,
+    groups: List<Pair<String, List<T>>>,
+    options: List<Pair<String, T>>,
+    shown: (List<T>) -> String,
+    onChoose: (List<T>) -> Unit,
+) = Box {
+    var open by remember { mutableStateOf(false) }
+    FilterChip(
+        selected = chosen.isNotEmpty(),
+        onClick = { open = true },
+        label = {
+            Text(
+                if (chosen.isEmpty()) label else "$label ${shown(chosen)}",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+    )
+    val tick = @Composable { on: Boolean ->
+        if (on) Icon(Icons.Filled.Check, contentDescription = null) else Spacer(Modifier.size(24.dp))
+    }
+    Menu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.filter_all)) },
+            leadingIcon = { tick(chosen.isEmpty()) },
+            onClick = {
+                open = false
+                onChoose(emptyList())
+            },
+        )
+        groups.forEach { (name, values) ->
+            DropdownMenuItem(
+                text = { Text(name) },
+                leadingIcon = { tick(chosen.toSet() == values.toSet()) },
+                onClick = {
+                    open = false
+                    onChoose(values)
+                },
+            )
+        }
+        if (groups.isNotEmpty()) HorizontalDivider()
+        // one at a time, the menu stays open
+        options.forEach { (name, value) ->
+            DropdownMenuItem(
+                text = { Text(name) },
+                leadingIcon = { tick(value in chosen) },
+                onClick = { onChoose(if (value in chosen) chosen - value else chosen + value) },
+            )
+        }
+    }
 }
 
 /** A chip naming the filter, or what it's set to; a menu to choose, "all"

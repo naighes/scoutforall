@@ -1,0 +1,55 @@
+[
+  {
+    "id": "scouting",
+    "eyebrow": "Scouting",
+    "title": "Minimizzazione dell'errore",
+    "content": "Seleziona l'evento, il giocatore e la sua valutazione. La rotazione, la fase di gioco e i giocatori in campo determinano le opzioni disponibili; punteggio e statistiche vengono aggiornati automaticamente.",
+    "points": [
+      "Fasi di side-out e break, rotazioni e libero gestiti automaticamente",
+      "Sostituzioni, cambi del libero e del palleggiatore direttamente durante lo scouting",
+      "Tempi e traiettorie dell'alzata, composizione del muro e destinazione di attacchi e battute, quando richiesti",
+      "Possibilità di annullare e correggere qualsiasi evento del set"
+    ],
+    "image": "scouting-attack",
+    "image_alt": "La schermata dello scouting: il campo con i giocatori, l'attacco da valutare e la griglia delle zone"
+  },
+  {
+    "id": "statistics",
+    "eyebrow": "Statistiche",
+    "title": "Dati e analisi della partita",
+    "content": "Le statistiche vengono aggiornate durante lo scouting e possono essere consultate e analizzate anche successivamente. Efficienza e positività dei fondamentali, side-out e break point per rotazione, distribuzione dell'alzatore, errori punto ed errori forzati.",
+    "points": [
+      "Filtri per set, giocatore, rotazione, fase, ruolo e qualità della ricezione",
+      "Andamento degli scambi e dei set",
+      "Distribuzione di battute, ricezioni e attacchi per zona"
+    ],
+    "image": "stats-detail",
+    "image_alt": "Il dettaglio delle statistiche di una partita: le valutazioni della battuta, i giocatori e le battute per zona"
+  },
+  {
+    "id": "analysis",
+    "eyebrow": "Analisi della squadra",
+    "title": "Confronto tra più partite",
+    "content": "Seleziona un insieme di partite o un intervallo temporale per analizzare l'andamento della squadra e dei singoli giocatori, confrontando le prestazioni nel corso della stagione.",
+    "points": [
+      "Gli stessi filtri disponibili per la singola partita",
+      "Andamento delle statistiche partita per partita, con media mobile",
+      "Partite registrate con scout4all e importate da DataVolley, visualizzate assieme"
+    ],
+    "image": "team-analysis",
+    "image_alt": "L'analisi di una squadra sulle ultime partite: riepilogo, rotazioni, distribuzione ed errori"
+  },
+  {
+    "id": "teams",
+    "eyebrow": "Squadre e partite",
+    "title": "I tuoi dati, sul tuo dispositivo",
+    "content": "Squadre, giocatori e partite sono archiviati localmente, sul tuo dispositivo. Puoi esportare squadre e partite per condividerle con altri, importare dati ricevuti da colleghi e utilizzare il programma senza alcuna connessione internet.",
+    "points": [
+      "Partite in corso, partite recenti e squadre disponibili dalla schermata iniziale",
+      "Esportazione e importazione di squadre e partite",
+      "Utilizzo offline"
+    ],
+    "image": "home",
+    "image_alt": "La schermata iniziale: partite in corso, partite recenti e squadre"
+  }
+]
