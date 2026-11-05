@@ -1,0 +1,22 @@
+---
+// the smaller features, in a grid of cards
+const { highlights, title } = Astro.props
+---
+
+<section class="bs-container bs-mt-lg">
+
+  { title && <h2 class="bs-h2 text-center">{ title }</h2> }
+
+  <ul class="bs-mt-md grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    { highlights.map(item => (
+      <li class="p-6 rounded-xl border border-white/10 bg-bs-surface-1 flex flex-col gap-2">
+        <h3 class="font-semibold text-white flex items-center gap-3">
+          <span aria-hidden="true" class="h-4 w-1 rounded-full bg-bs-accent"></span>
+          { item.title }
+        </h3>
+        <p class="text-bs-foreground-dark bs-body-text text-pretty" set:html={ item.content } />
+      </li>
+    )) }
+  </ul>
+
+</section>

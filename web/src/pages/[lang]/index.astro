@@ -1,50 +1,10 @@
 ---
-import { languages, content } from '../../lib/languages.js';
+import { languages } from '../../lib/languages.js'
+import Home from '../../components/Home.astro'
 
 export async function getStaticPaths() {
-  return languages.map(({ code }) => ({ params: { lang: code } }));
+  return languages.map(({ code }) => ({ params: { lang: code } }))
 }
-
-const lang = Astro.params.lang || 'en';
-import Layout from "../../layouts/Layout.astro"
-
-import FaqSection from "../../components/FaqSection.astro"
-import OverviewCarousel from "../../components/OverviewCarousel.astro"
-import HeroSection from "../../components/HeroSection.astro"
-import DownloadSection from "../../components/DownloadSection.astro"
-
-import download from "../../data/download.json"
-const faq = content(lang, 'faq');
-const overview = content(lang, 'overview');
-const home = content(lang, 'home');
-const download_labels = content(lang, 'download');
-const global_settings = content(lang, 'global_settings');
-
 ---
 
-<Layout title={ global_settings.title }>
-
-  <HeroSection
-    content={ home.hero_content }
-    settings={ global_settings }
-    title={ home.hero_title }
-  />
-
-  <OverviewCarousel
-    overview={ overview }
-    labels={ global_settings.labels }
-    title={ home.overview_title }
-  />
-
-  <DownloadSection
-    download={ download }
-    labels={ download_labels }
-    title={ home.download_title }
-  />
-
-  <FaqSection
-    faq={ faq }
-    title={ home.faq_title }
-  />
-
-</Layout>
+<Home lang={ Astro.params.lang } />

@@ -1,9 +1,11 @@
 @import "tailwindcss";
 
+/* the palette of the desktop app (desktop/src/theme.rs): zinc and amber */
 @theme {
 
   --font-display: var(--font-inter-display), "ui-sans-serif", "system-ui", "sans-serif";
   --font-body: var(--font-inter), "ui-sans-serif", "system-ui", "sans-serif";
+  --font-mono: var(--font-plex-mono), "ui-monospace", "SFMono-Regular", "Menlo", monospace;
 
   --color-bs-surface-0: #121212;
   --color-bs-surface-1: #18181B;
@@ -11,7 +13,11 @@
   --color-bs-surface-3: #2F2F31;
 
   --color-bs-foreground-light: #eee;
-  --color-bs-foreground-dark: #9f9f9f;
+  --color-bs-foreground-dark: #a8a8a8;
+
+  --color-bs-accent: #FCD34D;
+  --color-bs-side-out: #38BDF8;
+  --color-bs-break: #FB923C;
 
   --color-current: currentColor;
 

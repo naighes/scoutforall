@@ -1,7 +1,20 @@
 {
-  "hero_title": "scout4all",
-  "hero_content": "<p><strong>Uma ferramenta CLI gratuita para coletar, gerenciar e gerar relatórios dos dados das partidas de vôlei</strong>, que ajuda técnicos e analistas a acompanhar os eventos da partida e a gerar relatórios úteis para a análise pós-jogo.</p><p>Disponível para macOS, Windows e Linux.</p>",
-  "overview_title": "Visão geral",
+  "hero_eyebrow": "Livre e de código aberto · Windows · macOS · Linux",
+  "hero_title": "Scout de vôlei na velocidade do jogo",
+  "hero_content": "O scout4all nasceu para reduzir o tempo de registro dos eventos durante o scout, com uma interação pensada principalmente para o teclado, mas que também pode ser usada com o mouse ou outros dispositivos. Os dados coletados permitem consultar estatísticas e analisar o desempenho, durante e depois da partida.",
+  "cta_download": "Baixar",
+  "cta_github": "Código no GitHub",
+  "video_label": "Alguns ralis registrados pelo teclado: recepção, ataque, saque com a sua zona, defesa e contra-ataque.",
+  "features_title": "O que ele faz",
+  "highlights_title": "E também",
+  "highlights": [
+    { "title": "Zonas de jogo", "content": "Zonas de saque, recepção, ataque, defesa e bloqueio. Registro da composição do bloqueio." },
+    { "title": "Arquivos do DataVolley", "content": "Importe partidas <code>.dvw</code>, com as suas zonas, e analise-as junto com as suas." },
+    { "title": "Relatório em PDF", "content": "O relatório da partida, no formato de súmula, pronto para imprimir ou compartilhar com a equipe." },
+    { "title": "Suas teclas", "content": "Cada evento, avaliação e tipo de levantamento pode usar a tecla que você preferir." },
+    { "title": "Cinco idiomas", "content": "Português, inglês, italiano, polonês e japonês." },
+    { "title": "Sempre atualizado", "content": "Ao abrir, verifica se há uma nova versão e, se você concordar, instala e reinicia." }
+  ],
   "download_title": "Downloads",
   "faq_title": "Perguntas frequentes"
 }

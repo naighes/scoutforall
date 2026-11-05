@@ -1,0 +1,56 @@
+---
+// what the app does: one row for each feature, the text beside a capture of
+// the app, on alternating sides
+import { Image } from 'astro:assets'
+import AppWindow from './AppWindow.astro'
+import Check from '../assets/theme-images/icon-check.svg'
+
+const { features, title, lang } = Astro.props
+
+// the captures, taken in each language (src/assets/screens/<lang>/<name>.webp)
+const screens = import.meta.glob('../assets/screens/*/*.webp', { eager: true, import: 'default' })
+const screen = name => screens[`../assets/screens/${lang}/${name}.webp`] ?? screens[`../assets/screens/en/${name}.webp`]
+---
+
+<section id="features" class="bs-container bs-mt-lg">
+
+  { title && <h2 class="sr-only">{ title }</h2> }
+
+  <div class="flex flex-col gap-24 lg:gap-36">
+    { features.map((item, i) => (
+      <article id={ item.id } class="grid lg:grid-cols-12 gap-10 lg:gap-16 items-center">
+
+        <div class:list={[ 'lg:col-span-4 flex flex-col gap-5', i % 2 === 1 && 'lg:order-2' ]}>
+          <p class="bs-eyebrow">{ item.eyebrow }</p>
+          <h3 class="bs-h2" set:html={ item.title } />
+          <p class="bs-body-text text-bs-foreground-dark text-lg text-pretty" set:html={ item.content } />
+          <ul class="flex flex-col gap-3 mt-1">
+            { item.points.map(point => (
+              <li class="flex gap-3 items-start">
+                <Check class="mt-1 h-4 w-4 shrink-0 text-bs-accent" height="16" width="16" />
+                <span set:html={ point } />
+              </li>
+            )) }
+          </ul>
+        </div>
+
+        <div class:list={[ 'lg:col-span-8', i % 2 === 1 && 'lg:order-1' ]}>
+          <AppWindow>
+            <Image
+              src={ screen(item.image) }
+              alt={ item.image_alt }
+              widths={[ 800, 1200, 1600, 2000 ]}
+              sizes="(min-width: 1024px) 60vw, 92vw"
+              format="webp"
+              quality={ 85 }
+              class="block w-full h-auto"
+              loading="lazy"
+            />
+          </AppWindow>
+        </div>
+
+      </article>
+    )) }
+  </div>
+
+</section>

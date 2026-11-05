@@ -1,26 +1,34 @@
 [
   {
-    "question": "Can I scout attack or serve directions or specify reception zones with the program?",
-    "answer": "Not at the moment. The program follows an outcome-based approach: you can define the type of action (attack, reception, serve, etc.) and provide an evaluation (positive, negative, error, etc.), but you cannot currently indicate ball landing points, serve directions or reception zones. In case of significant demand for this feature, it may be considered for future updates."
-  },
-  {
     "question": "Is the software free to use?",
-    "answer": "Yes! The program is completely free and open source. We welcome contributions from the community, so anyone can help improve the software, suggest features or report issues."
+    "answer": "Yes. scout4all is completely free and open source (AGPL-3.0). Anyone can help improve it, suggest features or report problems on <a href=\"https://github.com/naighes/scoutforall\">GitHub</a>."
   },
   {
-    "question": "Why is this a terminal-based application instead of a graphical one?",
-    "answer": "The focus of the software is on productivity and efficiency. Entering input via the keyboard allows faster data entry compared to tapping on a tablet or smartphone screen. This design helps users log actions quickly and systematically, which is especially useful in scouting or analytics scenarios where speed matters."
+    "question": "I was using the terminal version. What happens now?",
+    "answer": "Nothing to do: at its next start, the terminal version offers to update, and the update installs the desktop app in its place. Your teams and matches are in the same folder and you will find them all. From then on, starting scout4all opens a window instead of the terminal interface."
   },
   {
-    "question": "Are all player positions and attack zones fully customizable?",
-    "answer": "No, the application makes certain arbitrary but consistent choices to simplify data entry and maintain analytical consistency. For example, the middle blocker is always replaced by the libero in the back row (except when the middle-blocker is serving). This means you cannot simulate a side-out phase without the libero in the back row. Moreover, attack zones are automatically determined based on player roles and the setter's position. For instance, if the current rotation places the setter in zone 1, the opposite will attack from zone 4. Schemes such as an inverted setter-1 rotation are not supported."
+    "question": "Why is scouting done from the keyboard?",
+    "answer": "Speed. A rally lasts a few seconds: with a key for each event, player and evaluation, your eyes stay on the court and you can keep up with the game. Every key can be changed in the settings. Scouting can be done with a mouse or touchpad too."
   },
   {
-    "question": "How often is the software updated and do I need to install updates manually?",
-    "answer": "The software is under active development and constantly evolving. New features, improvements and bug fixes are released on a regular basis. You don't need to download updates manually: every time it starts, the application checks for a new version and, after asking for your confirmation, installs it and restarts into it. This ensures you benefit right away from community contributions and the continuous improvement of the project."
+    "question": "Can I record the zones of play?",
+    "answer": "Yes. For serves, receptions, attacks, digs and blocks you can mark the zone of the court involved. For attacks you can also record the number of players at the block. This information is optional: you can leave it out and just evaluate the touch."
+  },
+  {
+    "question": "Are all player positions and attack zones customizable?",
+    "answer": "Not all of them: the app makes some consistent choices to keep data entry quick. The libero always replaces the middle blocker in the back row (except when the middle blocker serves), and the attack zones follow from the roles and the position of the setter. You can declare an inverted P1 and a reception with two, three or four players."
+  },
+  {
+    "question": "Can I open matches scouted with DataVolley?",
+    "answer": "Yes: import a <code>.dvw</code> file into one of your teams, with its zones. The imported match is analysed like the others, alone or across several matches."
+  },
+  {
+    "question": "How often is it updated? Do I need to install updates manually?",
+    "answer": "It is under active development and new versions come out regularly. You don't need to download them yourself: at every start the app checks for a new version and, after asking you, installs it and restarts."
   },
   {
     "question": "The application no longer starts after an automatic update. What happened?",
-    "answer": "Up to version 0.4.2, the automatic update could replace the application with a data file published alongside each release (the software bill of materials) instead of the new version: after the update, the application fails to start. This is fixed starting with version 0.4.3. To recover, download the latest version again from the <a href=\"#download\">downloads</a> section and replace the old file. Your teams and matches are stored separately and are not affected."
+    "answer": "Up to version 0.4.2, the automatic update could replace the application with a data file published alongside each release (the software bill of materials) instead of the new version. This is fixed since version 0.4.3. To recover, download the latest version again from the <a href=\"#download\">downloads</a> and replace the old file. Your teams and matches are stored separately and are not affected."
   }
 ]

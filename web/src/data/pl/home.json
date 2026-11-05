@@ -1,7 +1,20 @@
 {
-  "hero_title": "scout4all",
-  "hero_content": "<p><strong>Darmowe narzędzie CLI do zbierania, zarządzania i raportowania danych z meczów siatkówki</strong>, które pomaga trenerom i analitykom śledzić zdarzenia meczu i tworzyć przydatne raporty do analizy pomeczowej.</p><p>Dostępne na macOS, Windows i Linux.</p>",
-  "overview_title": "Przegląd",
+  "hero_eyebrow": "Wolne i otwarte oprogramowanie · Windows · macOS · Linux",
+  "hero_title": "Scouting siatkówki w tempie gry",
+  "hero_content": "scout4all powstał, aby skrócić czas zapisywania zdarzeń podczas scoutingu, dzięki obsłudze pomyślanej przede wszystkim pod klawiaturę, ale dostępnej także myszą i innymi urządzeniami. Zebrane dane pozwalają przeglądać statystyki i analizować grę, w trakcie meczu i po nim.",
+  "cta_download": "Pobierz",
+  "cta_github": "Kod na GitHubie",
+  "video_label": "Kilka akcji zapisanych z klawiatury: przyjęcie, atak, zagrywka ze strefą, obrona i kontratak.",
+  "features_title": "Co potrafi",
+  "highlights_title": "A także",
+  "highlights": [
+    { "title": "Strefy gry", "content": "Strefy zagrywki, przyjęcia, ataku, obrony i bloku. Zapis składu bloku." },
+    { "title": "Pliki DataVolley", "content": "Importuj mecze <code>.dvw</code>, razem ze strefami, i analizuj je obok własnych." },
+    { "title": "Raport PDF", "content": "Raport z meczu w formie protokołu, gotowy do wydruku lub udostępnienia drużynie." },
+    { "title": "Twoje klawisze", "content": "Każde zdarzenie, ocenę i rodzaj wystawy można przypisać do wybranego klawisza." },
+    { "title": "Pięć języków", "content": "Polski, angielski, włoski, portugalski i japoński." },
+    { "title": "Zawsze aktualny", "content": "Przy uruchomieniu sprawdza, czy jest nowa wersja, i jeśli się zgodzisz, instaluje ją i uruchamia się ponownie." }
+  ],
   "download_title": "Pobieranie",
   "faq_title": "Najczęściej zadawane pytania"
 }

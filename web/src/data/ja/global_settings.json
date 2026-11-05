@@ -1,14 +1,14 @@
 {
-  "title": "scout4all | バレーボールの試合分析ツール",
-  "description": "バレーボールの試合データを記録・管理し、レポートを作成する CLI ツール。コーチやアナリストが試合のイベントを記録し、試合後の分析に役立つレポートを作成できます。",
+  "title": "scout4all | バレーボールのスカウティングと統計",
+  "description": "無料・オープンソースのバレーボール用スカウティング デスクトップアプリ。キーボード向けに設計された素早いイベント記録と、試合中・試合後の統計と分析。Windows、macOS、Linux 対応。",
   "base_url": "https://naighes.github.io/scoutforall/",
   "github_url": "https://github.com/naighes/scoutforall",
   "github_image": "/scoutforall/content-images/github-mark-white.svg",
   "theme_color": "#18181b",
   "nav": [
     {
-      "title": "概要",
-      "link": "./#overview"
+      "title": "機能",
+      "link": "./#features"
     },
     {
       "title": "ダウンロード",
@@ -31,9 +31,7 @@
     "license": "ライセンス",
     "privacy": "プライバシー",
     "made_with": "❤️ を込めて制作：",
-    "previous_slide": "前のスライド",
-    "next_slide": "次のスライド",
-    "hero_image_alt": "ノートパソコンに表示された scout4all の統計画面",
+    "hero_image_alt": "試合をスカウティング中の scout4all",
     "language": "言語"
   }
 }

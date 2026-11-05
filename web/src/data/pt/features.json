@@ -1,0 +1,55 @@
+[
+  {
+    "id": "scouting",
+    "eyebrow": "Scout",
+    "title": "Minimização de erros",
+    "content": "Selecione o evento, o jogador e a avaliação. O rodízio, a fase de jogo e os jogadores em quadra determinam as opções disponíveis; placar e estatísticas são atualizados automaticamente.",
+    "points": [
+      "Fases de side-out e break, rodízios e líbero gerenciados automaticamente",
+      "Substituições, trocas do líbero e do levantador diretamente durante o scout",
+      "Tempo e trajetória do levantamento, composição do bloqueio e destino de ataques e saques, quando necessário",
+      "Possibilidade de desfazer e corrigir qualquer evento do set"
+    ],
+    "image": "scouting-attack",
+    "image_alt": "A tela de scout: a quadra com os jogadores, o ataque sendo avaliado e a grade das zonas"
+  },
+  {
+    "id": "statistics",
+    "eyebrow": "Estatísticas",
+    "title": "Dados e análise da partida",
+    "content": "As estatísticas são atualizadas durante o scout e também podem ser consultadas e analisadas depois. Eficiência e positividade dos fundamentos, side-out e break point por rodízio, distribuição do levantador, erros não forçados e forçados.",
+    "points": [
+      "Filtros por set, jogador, rodízio, fase, posição e qualidade da recepção",
+      "Evolução dos ralis e dos sets",
+      "Distribuição de saques, recepções e ataques por zona"
+    ],
+    "image": "stats-detail",
+    "image_alt": "O detalhe das estatísticas de uma partida: as avaliações do saque, os jogadores e os saques por zona"
+  },
+  {
+    "id": "analysis",
+    "eyebrow": "Análise da equipe",
+    "title": "Comparação entre várias partidas",
+    "content": "Selecione um conjunto de partidas ou um intervalo de tempo para analisar a evolução da equipe e de cada jogador, comparando o desempenho ao longo da temporada.",
+    "points": [
+      "Os mesmos filtros disponíveis para uma única partida",
+      "Evolução das estatísticas partida a partida, com média móvel",
+      "Partidas registradas com o scout4all e importadas do DataVolley, exibidas juntas"
+    ],
+    "image": "team-analysis",
+    "image_alt": "A análise de uma equipe nas últimas partidas: resumo, rodízios, distribuição e erros"
+  },
+  {
+    "id": "teams",
+    "eyebrow": "Equipes e partidas",
+    "title": "Seus dados, no seu dispositivo",
+    "content": "Equipes, jogadores e partidas ficam armazenados localmente, no seu dispositivo. Você pode exportar equipes e partidas para compartilhá-las com outras pessoas, importar dados recebidos de colegas e usar o programa sem nenhuma conexão com a internet.",
+    "points": [
+      "Partidas em andamento, partidas recentes e equipes disponíveis na tela inicial",
+      "Exportação e importação de equipes e partidas",
+      "Uso offline"
+    ],
+    "image": "home",
+    "image_alt": "A tela inicial: partidas em andamento, partidas recentes e equipes"
+  }
+]

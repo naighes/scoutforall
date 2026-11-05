@@ -1,0 +1,9 @@
+---
+// a frame around a picture of the app, as a window of the desktop: the
+// captures have their own title bar, so it's only an edge and a shadow
+const { class: className = '' } = Astro.props
+---
+
+<figure class:list={[ 'rounded-xl overflow-hidden border border-white/10 bg-bs-surface-1 ring-1 ring-black/40', className ]}>
+  <slot />
+</figure>

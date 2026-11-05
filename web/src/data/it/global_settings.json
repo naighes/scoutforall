@@ -1,14 +1,14 @@
 {
-  "title": "scout4all | strumento di scouting e analisi per la pallavolo",
-  "description": "Un'applicazione CLI per raccogliere, gestire e riportare i dati delle partite di pallavolo. Aiuta allenatori e analisti a monitorare gli eventi della partita e generare report utili per l'analisi post-partita.",
+  "title": "scout4all | scouting e statistiche per la pallavolo",
+  "description": "Un'app desktop libera e open source per lo scouting della pallavolo: registrazione rapida degli eventi, pensata per la tastiera, con statistiche e analisi durante e dopo la partita. Per Windows, macOS e Linux.",
   "base_url": "https://naighes.github.io/scoutforall/",
   "github_url": "https://github.com/naighes/scoutforall",
   "github_image": "/scoutforall/content-images/github-mark-white.svg",
   "theme_color": "#18181b",
   "nav": [
     {
-      "title": "panoramica",
-      "link": "./#overview"
+      "title": "funzionalità",
+      "link": "./#features"
     },
     {
       "title": "download",
@@ -31,9 +31,7 @@
     "license": "Licenza",
     "privacy": "Privacy",
     "made_with": "Fatto con ❤️ da",
-    "previous_slide": "Slide precedente",
-    "next_slide": "Slide successiva",
-    "hero_image_alt": "La schermata delle statistiche di scout4all su un portatile",
+    "hero_image_alt": "scout4all durante lo scouting di una partita",
     "language": "Lingua"
   }
 }

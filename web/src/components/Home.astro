@@ -1,0 +1,35 @@
+---
+// the home page in a language: the english one at the root, the others
+// under their code
+import { content } from '../lib/languages.js'
+import Layout from '../layouts/Layout.astro'
+import HeroSection from './HeroSection.astro'
+import FeatureSection from './FeatureSection.astro'
+import HighlightsSection from './HighlightsSection.astro'
+import DownloadSection from './DownloadSection.astro'
+import FaqSection from './FaqSection.astro'
+import download from '../data/download.json'
+
+const { lang } = Astro.props
+const home = content(lang, 'home')
+const features = content(lang, 'features')
+const global_settings = content(lang, 'global_settings')
+---
+
+<Layout title={ global_settings.title }>
+
+  <HeroSection home={ home } lang={ lang } />
+
+  <FeatureSection features={ features } title={ home.features_title } lang={ lang } />
+
+  <HighlightsSection highlights={ home.highlights } title={ home.highlights_title } />
+
+  <DownloadSection
+    download={ download }
+    labels={ content(lang, 'download') }
+    title={ home.download_title }
+  />
+
+  <FaqSection faq={ content(lang, 'faq') } title={ home.faq_title } />
+
+</Layout>

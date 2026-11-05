@@ -1,26 +1,74 @@
 # scout4all
 
-**scout4all** is a CLI tool for collecting, managing and reporting volleyball match data.  
-It helps coaches and analysts track match events and generate useful reports for post-game analysis.
+**scout4all** is a free, open source app for volleyball scouting. It's built to cut the time it
+takes to record events while scouting, with an interaction designed mainly for the keyboard, but
+usable with a mouse or other devices too. The data you collect let you check statistics and
+analyze performance, during and after the match: side-out and break point, rotations,
+distribution, zones and trends over the season.
 
-![Demo](assets/demo.gif)
+It runs on **Windows, macOS and Linux**; an **Android** app is in testing.
 
-## reporting features
+🌐 [Website and downloads](https://naighes.github.io/scoutforall/)
 
-- **match summary**: automatically generates a summary of each match, including scores, rotations and key events; statistics can be broken down by phase and by individual rotation
-- **player statistics**: provides per-player stats such as points, errors, substitutions and general efficiency
-- **custom filters**: filter reports by player, event type, set, phase or rotation
+![Scouting a rally: the attack being evaluated, with the zone grid](web/src/assets/screens/en/scouting-attack.webp)
 
-## requirements
+## features
 
-- rust (stable)
-- terminal compatible with [crossterm](https://github.com/crossterm-rs/crossterm)
-- Linux, macOS, or Windows
+- **scouting from the keyboard**: pick the event, the player and the evaluation; the app follows
+  the rotation, the phase and the libero, offers only what makes sense and keeps the score
+- **zones of play**: serve and attack destination, reception, dig and block zones on the DataVolley
+  grid, plus set tempo and number of blockers, all optional
+- **substitutions, libero and setter changes**, undo and correction of any event of the set
+- **match statistics**, while scouting and afterwards: efficiency and positivity of each
+  fundamental, side-out and break point by rotation, setter distribution, errors, trends rally by
+  rally; filters by set, player, rotation, phase, role and quality of the reception
+- **team analysis** over several matches (the last month, the last N, any period), with
+  match-by-match trends
+- **DataVolley import** (`.dvw`), with zones
+- **PDF report** laid out as a scoresheet
+- **export and import** of teams and matches, to share them with colleagues
+- **customizable keys**, five languages (English, Italian, Portuguese, Polish, Japanese), light
+  and dark theme
+- **automatic updates**: at startup the app checks for a new version and, if you agree, installs
+  it and restarts
+
+| Match statistics | Team analysis |
+| --- | --- |
+| ![The summary of the statistics of a match](web/src/assets/screens/en/stats-summary.webp) | ![The analysis of a team over its last matches](web/src/assets/screens/en/team-analysis.webp) |
+| ![The detail of the statistics: serve evaluations, players, serves by zone](web/src/assets/screens/en/stats-detail.webp) | ![The home screen: matches in progress, recent matches and teams](web/src/assets/screens/en/home.webp) |
+
+## download
+
+Get the latest version for your system from the [website](https://naighes.github.io/scoutforall/#download)
+or from the [releases](https://github.com/naighes/scoutforall/releases/latest).
+
+Coming from the old terminal version? Nothing to do: at its next start it offers to update and
+installs the desktop app in its place, with all your teams and matches.
 
 ## data folder
 
 Teams, matches and settings are saved in the `.scout4all` folder of your home directory. To keep
 them somewhere else, set the `SCOUT4ALL_DATA_DIR` environment variable to another folder.
+
+## building from source
+
+Requirements: [Rust](https://rustup.rs/) stable (1.92 or later).
+
+```sh
+cargo run --release --package scout4all-desktop
+cargo test --workspace
+```
+
+The repository:
+
+| folder | what it is |
+| --- | --- |
+| `core/` | the domain, independent of the user interface: lineup, replay of the events, statistics, PDF report, persistence |
+| `desktop/` | the desktop app (Windows, macOS, Linux), written with [iced](https://iced.rs/) |
+| `keys/` | the keys of the scouting, shared by the apps with a keyboard |
+| `mobile/` | the bindings of the core for the native apps, generated with [UniFFI](https://mozilla.github.io/uniffi-rs/) |
+| `android/` | the Android app, in Jetpack Compose: see [android/README.md](android/README.md) |
+| `web/` | the [website](https://naighes.github.io/scoutforall/), built with [Astro](https://astro.build/) |
 
 ## contributing
 

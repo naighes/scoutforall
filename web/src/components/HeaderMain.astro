@@ -8,41 +8,39 @@ const { settings } = Astro.props
 
 ---
 
-<header class="wrapper bg-loop font-semibold">
+<header class="sticky top-0 z-50 border-b border-white/5 bg-bs-surface-0/75 backdrop-blur-md supports-[backdrop-filter]:bg-bs-surface-0/60">
 
-  <div class="bs-container py-6 flex justify-between items-center">
+  <div class="bs-container h-16 flex justify-between items-center gap-4">
 
     <!-- Logo -->
-    <a class="flex items-center gap-4 xl:min-w-32 group" href={`/scoutforall/${currentLang}/`} aria-label={ settings.title + ' - Home' }>
-      <Logo class="group-hover:-rotate-180 group-hover:scale-80 transition-transform ease-bs-spring duration-1000" height="48" width="48" />
-      <span class="text-2xl font-bold text-white leading-none">
-        scout4all
-      </span>
+    <a class="flex items-center gap-3 group" href={`/scoutforall/${currentLang}/`} aria-label={ settings.title + ' - Home' }>
+      <Logo class="h-8 w-8 group-hover:-rotate-180 transition-transform ease-bs-spring duration-1000" height="32" width="32" />
+      <span class="text-xl font-bold text-white leading-none">scout4all</span>
     </a>
 
     <!-- Nav -->
-    <nav class="hidden col-span-6 md:flex mx-auto self-stretch lg:gap-2">
+    <nav class="hidden md:flex items-center gap-1 text-sm font-medium">
       { settings.nav.map( item =>
-        <a class="bs-btn !bg-transparent before:translate-y-full hover:before:translate-y-0" href={`/scoutforall/${currentLang}/${item.link}`}>
+        <a class="px-4 py-2 rounded-md text-bs-foreground-dark hover:text-white hover:bg-white/5 transition-colors" href={`/scoutforall/${currentLang}/${item.link}`}>
           { item.title }
         </a>
       )}
     </nav>
 
     <!-- GitHub link + Language selector -->
-    <div class="inline-flex items-center gap-4">
+    <div class="flex items-center gap-2">
       <a
         href={settings.github_url}
         target="_blank"
         rel="noopener noreferrer"
-        class="inline-flex items-center justify-center min-w-32"
+        class="p-2 rounded-md hover:bg-white/5 transition-colors"
+        aria-label="GitHub"
       >
-        <img src="/scoutforall/content-images/github-mark-white.svg" class="h-6 w-6" alt="GitHub" />
+        <img src="/scoutforall/content-images/github-mark-white.svg" class="h-5 w-5 opacity-80" alt="" height="20" width="20" />
       </a>
 
-      <!-- Language selector -->
       <select
-        class="bg-black text-white px-2 py-1 rounded"
+        class="bg-bs-surface-1 border border-white/10 text-sm text-bs-foreground-light pl-2 pr-1 py-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bs-accent/70"
         aria-label={ settings.labels.language }
         onchange="try { localStorage.setItem('scout4all-language', this.selectedOptions[0].dataset.lang) } catch (e) {} window.location.href = this.value"
       >
