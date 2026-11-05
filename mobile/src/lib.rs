@@ -2694,6 +2694,27 @@ impl Scout4All {
             .collect())
     }
 
+    /// What the opponent of a new match of the team may be, offered as it's
+    /// written: the other teams and the opponents it met, each once, by
+    /// name.
+    pub fn opponents(&self, team_id: String) -> Result<Vec<String>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let teams = self.runtime.block_on(self.team_reader.read_all())?;
+        let met = self.runtime.block_on(self.match_reader.read_all(&team))?;
+        let ours = team.name.to_lowercase();
+        let mut names: Vec<String> = teams
+            .into_iter()
+            .flatten()
+            .map(|t| t.name)
+            .chain(met.into_iter().flatten().map(|m| m.opponent))
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty() && name.to_lowercase() != ours)
+            .collect();
+        names.sort_by_key(|name| name.to_lowercase());
+        names.dedup_by_key(|name| name.to_lowercase());
+        Ok(names)
+    }
+
     /// The home: the matches of every team not over and the last ones
     /// over, the most recent first, then the teams. What can't be read is
     /// left out of the matches; the teams list it.
@@ -4377,6 +4398,25 @@ mod tests {
             notes: String::new(),
             roster: None,
         }
+    }
+
+    #[test]
+    fn the_opponents_offered_are_the_other_teams_and_the_ones_met() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        app.save_team(None, form("Livorno")).unwrap();
+        for n in 1..=7 {
+            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
+                .unwrap();
+        }
+        let date = "2026-10-24T18:00:00+02:00";
+        for opponent in ["Arezzo", "livorno"] {
+            app.save_match(team.clone(), None, match_form(opponent, date, "8"))
+                .unwrap();
+        }
+        // the team itself left out, each name once
+        assert_eq!(app.opponents(team).unwrap(), vec!["Arezzo", "Livorno"]);
     }
 
     #[test]

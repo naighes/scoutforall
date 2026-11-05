@@ -683,16 +683,39 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
             TeamName(right, TextAlign.End, Modifier.weight(1f))
         }
         if (phase) Crossfade(weServe to state.rotation, label = "phase") { (serving, rotation) ->
-            Text(
-                stringResource(if (serving) R.string.break_phase else R.string.side_out_phase) + " · " + rotation,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
-                color = if (serving) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Phase(serving, rotation)
         }
         LastEvent(state.events.firstOrNull())
         if (server) Serving(state, told)
+    }
+}
+
+/** The phase at a glance, as on the desktop: its own color and icon, the
+ * bolt of break as we serve, the shield of side-out as we receive; then the
+ * rotation. */
+@Composable
+private fun Phase(serving: Boolean, rotation: String) = Surface(
+    color = if (serving) BreakPoint else SideOut,
+    contentColor = Color(0xFF121212),
+    shape = RoundedCornerShape(50),
+) {
+    // no higher than the line it replaced: the court keeps its room
+    Row(
+        Modifier.padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            painterResource(if (serving) R.drawable.ic_break else R.drawable.ic_side_out),
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            stringResource(if (serving) R.string.break_phase else R.string.side_out_phase) + " · " + rotation,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 2.sp,
+        )
     }
 }
 

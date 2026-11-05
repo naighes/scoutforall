@@ -71,7 +71,7 @@ const COURT: [[u8; 3]; 2] = [[4, 3, 2], [5, 6, 1]];
 
 /// The letters of a name on a cell of the court: longer, it's
 /// abbreviated ("Ale. Mag.").
-const NAME_ROOM: usize = 14;
+const NAME_ROOM: usize = 22;
 
 impl StartScreen {
     pub fn new(start: Arc<SetStart>, team_id: String, match_id: String) -> Self {
@@ -377,15 +377,24 @@ impl StartScreen {
         match self.step {
             Step::Serving => {
                 let side = |name: &str, side: TeamSideEnum| {
-                    ui::list_row(
+                    let chosen = self.lineup.serving_team == Some(side);
+                    container(ui::list_row(
                         container(text(name.to_string()).size(theme::SIZE_TITLE).font(bold))
                             .width(Length::Fill)
                             .align_x(Alignment::Center)
                             .padding(18),
-                        self.lineup.serving_team == Some(side),
+                        chosen,
                         Some(Message::Serving(side)),
                         c,
-                    )
+                    ))
+                    .style(move |_| container::Style {
+                        border: iced::Border {
+                            color: c.border,
+                            width: 1.0,
+                            radius: 8.0.into(),
+                        },
+                        ..container::Style::default()
+                    })
                 };
                 column![
                     side(&self.lineup.team, TeamSideEnum::Us),

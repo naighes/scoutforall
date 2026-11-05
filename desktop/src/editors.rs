@@ -18,8 +18,8 @@ use {
     scout4all_core::{match_form::MatchForm, player_form::PlayerForm, team_form::TeamForm},
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{
-        ClassificationChoice, GenderChoice, MatchField, MatchListing, MobileError, PlayerField,
-        RoleChoice, RosterPlayer, Scout4All, TeamField, TeamListing,
+        ClassificationChoice, GenderChoice, MatchField, MobileError, PlayerField, RoleChoice,
+        RosterPlayer, Scout4All, TeamField,
     },
 };
 
@@ -253,7 +253,7 @@ impl Editor {
         let mut form = Form::new(title, fields);
         form.shown = Some(0..MATCH_ROSTER);
         form.actions = Some((s.cancel.to_string(), s.go_on.to_string()));
-        let opponents = opponents(core, &team_id);
+        let opponents = core.opponents(team_id.clone()).unwrap_or_default();
         let mut editor = Editor {
             form,
             kind: Kind::Match(MatchEditor {
@@ -678,38 +678,6 @@ impl Editor {
         ]
         .into()
     }
-}
-
-/// What the opponent of a match may be: the other teams, the opponents
-/// already met, each once.
-fn opponents(core: &Scout4All, team_id: &str) -> Vec<String> {
-    let teams: Vec<(String, String)> = core
-        .home()
-        .map(|h| h.teams)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|t| match t {
-            TeamListing::Team { id, name, .. } => Some((id, name)),
-            TeamListing::Unreadable { .. } => None,
-        })
-        .collect();
-    let ours = teams
-        .iter()
-        .find(|(id, _)| id == team_id)
-        .map(|(_, name)| name.to_lowercase());
-    let met = core.matches(team_id.to_string()).unwrap_or_default();
-    let mut names: Vec<String> = teams
-        .into_iter()
-        .map(|(_, name)| name)
-        .chain(met.into_iter().filter_map(|m| match m {
-            MatchListing::Match { opponent, .. } => Some(opponent),
-            MatchListing::Unreadable { .. } => None,
-        }))
-        .filter(|n| Some(n.to_lowercase()) != ours && !n.trim().is_empty())
-        .collect();
-    names.sort_by_key(|n| n.to_lowercase());
-    names.dedup_by_key(|n| n.to_lowercase());
-    names
 }
 
 #[cfg(test)]

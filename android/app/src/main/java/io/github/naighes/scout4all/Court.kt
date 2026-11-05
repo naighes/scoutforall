@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.abbreviatedName
 import io.github.naighes.scout4all.core.CourtCellChoice
 import androidx.compose.ui.semantics.contentDescription
 
@@ -368,26 +369,26 @@ private fun badges(slot: CourtSlot): String = listOfNotNull(
     },
 ).joinToString(", ")
 
-/** The name under the jersey in two lines, or the surname alone (all but
- * the first word) if it doesn't fit, never a word broken: the jersey tells
- * the rest. A surname too long even so is hyphenated. */
+/** The name under the jersey in two lines, or abbreviated if it doesn't
+ * fit ("Ale. Mag.", by the core: no guess about which word is the surname),
+ * never a word broken: the jersey tells the rest. */
 @Composable
 private fun CourtName(name: String, modifier: Modifier = Modifier) {
-    var surname by remember(name) { mutableStateOf(false) }
-    val text = if (surname) name.substringAfter(' ') else name
+    var abbreviated by remember(name) { mutableStateOf(false) }
+    val text = if (abbreviated) abbreviatedName(name) else name
     Text(
         text,
         modifier = modifier.padding(horizontal = 4.dp).let { if (text.isEmpty()) it.notRead() else it },
         style = nameStyle().copy(
-            hyphens = if (surname) Hyphens.Auto else Hyphens.None,
+            hyphens = if (abbreviated) Hyphens.Auto else Hyphens.None,
             lineBreak = LineBreak.Paragraph,
         ),
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center,
         onTextLayout = { layout ->
-            if (!surname && (layout.didOverflowHeight || layout.isLineEllipsized(layout.lineCount - 1) || layout.breaksAWord(text))) {
-                surname = true
+            if (!abbreviated && (layout.didOverflowHeight || layout.isLineEllipsized(layout.lineCount - 1) || layout.breaksAWord(text))) {
+                abbreviated = true
             }
         },
     )
