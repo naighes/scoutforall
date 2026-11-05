@@ -13,6 +13,7 @@ pub mod example;
 pub mod localization;
 pub mod logging;
 pub mod match_form;
+pub mod names;
 pub mod overview;
 pub mod player_form;
 pub mod providers;

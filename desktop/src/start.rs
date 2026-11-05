@@ -11,9 +11,12 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, column, container, row, scrollable, space, text},
+        widget::{Column, button, column, container, row, scrollable, space, text},
     },
-    scout4all_core::shapes::enums::{RoleEnum, TeamSideEnum},
+    scout4all_core::{
+        names,
+        shapes::enums::{RoleEnum, TeamSideEnum},
+    },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{Lineup, LineupPlayer, SetStart},
     std::sync::Arc,
@@ -36,6 +39,8 @@ pub enum Message {
     Choose(String),
     /// no fallback libero
     Skip,
+    /// a position on the court clicked: its player to choose (again)
+    Position(u8),
 }
 
 pub enum Outcome {
@@ -56,14 +61,17 @@ pub struct StartScreen {
     choices: Vec<LineupPlayer>,
     selected: usize,
     error: Option<String>,
+    /// where the choices were when a position was clicked: back there once
+    /// it's chosen
+    resume: Option<Step>,
 }
 
 /// The positions as they stand on court, the net on top.
 const COURT: [[u8; 3]; 2] = [[4, 3, 2], [5, 6, 1]];
 
-fn surname(name: &str) -> &str {
-    name.split_whitespace().last().unwrap_or(name)
-}
+/// The letters of a name on a cell of the court: longer, it's
+/// abbreviated ("Ale. Mag.").
+const NAME_ROOM: usize = 14;
 
 impl StartScreen {
     pub fn new(start: Arc<SetStart>, team_id: String, match_id: String) -> Self {
@@ -81,6 +89,7 @@ impl StartScreen {
             choices: vec![],
             selected: 0,
             error: None,
+            resume: None,
         };
         screen.go_to(step);
         screen
@@ -153,17 +162,31 @@ impl StartScreen {
     }
 
     fn choose(&mut self, id: String) -> Outcome {
-        let (chosen, next) = match self.step {
-            Step::Serving => return Outcome::Stay,
-            Step::Position(p) => (
+        let (chosen, next) = match (self.step, self.resume) {
+            (Step::Serving, _) => return Outcome::Stay,
+            // a position clicked: the first one empty, else back where
+            // the choices were
+            (Step::Position(p), Some(resume)) => {
+                let placed = self.start.place(p, Some(id));
+                let empty = self
+                    .start
+                    .lineup()
+                    .positions
+                    .iter()
+                    .position(Option::is_none)
+                    .and_then(|i| u8::try_from(i + 1).ok());
+                self.resume = None;
+                (placed, Some(empty.map_or(resume, Step::Position)))
+            }
+            (Step::Position(p), None) => (
                 self.start.place(p, Some(id)),
                 match p {
                     6 => Some(Step::Setter),
                     _ => Some(Step::Position(p + 1)),
                 },
             ),
-            Step::Setter => (self.start.choose_setter(Some(id)), Some(Step::Libero)),
-            Step::Libero => {
+            (Step::Setter, _) => (self.start.choose_setter(Some(id)), Some(Step::Libero)),
+            (Step::Libero, _) => {
                 let chosen = self.start.choose_libero(Some(id));
                 // no fallback libero to choose: the set starts
                 let next = match self.start.fallback_libero_choices().is_empty() {
@@ -172,7 +195,7 @@ impl StartScreen {
                 };
                 (chosen, next)
             }
-            Step::FallbackLibero => (self.start.choose_fallback_libero(Some(id)), None),
+            (Step::FallbackLibero, _) => (self.start.choose_fallback_libero(Some(id)), None),
         };
         match (self.done(chosen), next) {
             (false, _) => Outcome::Stay,
@@ -192,8 +215,23 @@ impl StartScreen {
         self.lineup = self.start.lineup();
     }
 
-    /// Back to the choice before, undoing it.
+    /// The player of `position` to choose, clicked on the court; then
+    /// back to the step of now.
+    fn reposition(&mut self, position: u8) {
+        if self.step == Step::Serving || self.step == Step::Position(position) {
+            return;
+        }
+        self.resume = Some(self.resume.unwrap_or(self.step));
+        self.go_to(Step::Position(position));
+    }
+
+    /// Back to the choice before, undoing it; from a position clicked,
+    /// back where the choices were.
     fn back(&mut self) -> Outcome {
+        if let Some(step) = self.resume.take() {
+            self.go_to(step);
+            return Outcome::Stay;
+        }
         let undone = match (self.step, self.lineup.chooses_serving_team) {
             (Step::Serving, _) | (Step::Position(1), false) => return Outcome::Back,
             (Step::Position(1), true) => (Ok(()), Step::Serving),
@@ -231,6 +269,10 @@ impl StartScreen {
             }
             Message::Choose(id) => self.choose(id),
             Message::Skip => self.skip(),
+            Message::Position(position) => {
+                self.reposition(position);
+                Outcome::Stay
+            }
         }
     }
 
@@ -310,17 +352,24 @@ impl StartScreen {
             Some(&self.step_title(s)),
             self.choices_view(s, c),
             c,
-        ))
-        .width(Length::Fixed(400.0))
-        .height(Length::Fill);
-        column![
-            error,
-            row![left, self.lineup_view(s, c)]
-                .spacing(14)
+        ));
+        // who serves first alone: the lineup comes after
+        let body: Element<'a, Message> = match self.step {
+            Step::Serving => container(container(left).max_width(520))
+                .width(Length::Fill)
                 .height(Length::Fill)
-        ]
-        .spacing(10)
-        .into()
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .into(),
+            _ => row![
+                left.width(Length::Fixed(400.0)).height(Length::Fill),
+                self.lineup_view(s, c)
+            ]
+            .spacing(14)
+            .height(Length::Fill)
+            .into(),
+        };
+        column![error, body].spacing(10).into()
     }
 
     fn choices_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -329,10 +378,10 @@ impl StartScreen {
             Step::Serving => {
                 let side = |name: &str, side: TeamSideEnum| {
                     ui::list_row(
-                        container(text(name.to_string()).size(SIZE_BODY).font(bold))
+                        container(text(name.to_string()).size(theme::SIZE_TITLE).font(bold))
                             .width(Length::Fill)
                             .align_x(Alignment::Center)
-                            .padding(10),
+                            .padding(18),
                         self.lineup.serving_team == Some(side),
                         Some(Message::Serving(side)),
                         c,
@@ -408,28 +457,44 @@ impl StartScreen {
                         .font(bold)
                         .color(c.accent),
                     ui::body(match setter.as_deref() == Some(p.id.as_str()) {
-                        true => format!("▲ {}", surname(&p.name)),
-                        false => surname(&p.name).to_string(),
+                        true => format!("▲ {}", names::fitted(&p.name, NAME_ROOM)),
+                        false => names::fitted(&p.name, NAME_ROOM),
                     }),
                 ]
                 .align_x(Alignment::Center)
                 .into(),
                 None => text("–").size(30).color(c.muted).into(),
             };
-            container(
-                column![
-                    text(format!("P{position}")).size(SIZE_SMALL).color(c.muted),
-                    content
-                ]
-                .spacing(4)
-                .align_x(Alignment::Center),
+            // a click chooses its player (again)
+            button(
+                container(
+                    column![
+                        text(format!("P{position}")).size(SIZE_SMALL).color(c.muted),
+                        content
+                    ]
+                    .spacing(4)
+                    .align_x(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
             )
+            .padding(0)
             .width(Length::Fill)
             .height(Length::Fill)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .style(move |_| container::Style {
-                background: Some(c.court.into()),
+            .on_press(Message::Position(position))
+            .style(move |_, status| button::Style {
+                background: Some(
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            iced::Color { a: 0.8, ..c.court }
+                        }
+                        _ => c.court,
+                    }
+                    .into(),
+                ),
+                text_color: c.text,
                 border: iced::Border {
                     color: match current {
                         true => c.accent,
@@ -441,7 +506,7 @@ impl StartScreen {
                     },
                     radius: 6.0.into(),
                 },
-                ..container::Style::default()
+                ..button::Style::default()
             })
             .into()
         };
@@ -614,6 +679,55 @@ mod tests {
         app.start_set(screen.set_start()).unwrap();
         let details = app.match_details(team, m).unwrap();
         assert_eq!(details.next, NextSetKind::Resume { set_number: 1 });
+    }
+
+    #[test]
+    fn a_position_clicked_is_chosen_again_then_the_choices_go_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = new_match(&app);
+        let start = app.set_start(team.clone(), m.clone()).unwrap();
+        let mut screen = StartScreen::new(start, team, m);
+        press(&mut screen, key!(right));
+        press(&mut screen, key!(enter));
+        for _ in 1..=6 {
+            press(&mut screen, key!(enter));
+        }
+        assert_eq!(screen.step, Step::Setter);
+        // P3 clicked: its player chosen again, then the setter again
+        screen.update(Message::Position(3));
+        assert_eq!(screen.step, Step::Position(3));
+        let other = screen
+            .choices
+            .iter()
+            .find(|p| p.number == 7)
+            .map(|p| p.id.clone())
+            .unwrap();
+        screen.update(Message::Choose(other));
+        assert_eq!(screen.step, Step::Setter);
+        assert_eq!(
+            screen
+                .lineup
+                .positions
+                .get(2)
+                .cloned()
+                .flatten()
+                .map(|p| p.number),
+            Some(7)
+        );
+        // clicked, then Esc: back to the setter, nothing changed
+        screen.update(Message::Position(1));
+        press(&mut screen, BACK_KEY);
+        assert_eq!(screen.step, Step::Setter);
+        // no position clicked while who serves is chosen
+        let mut screen = StartScreen::new(
+            app.set_start(screen.team_id.clone(), screen.match_id.clone())
+                .unwrap(),
+            screen.team_id.clone(),
+            screen.match_id.clone(),
+        );
+        screen.update(Message::Position(2));
+        assert_eq!(screen.step, Step::Serving);
     }
 
     #[test]

@@ -542,9 +542,12 @@ impl ScoutingScreen {
         let left = column![self.header(s, c), self.choices(s, c)]
             .spacing(14)
             .width(Length::Fixed(340.0));
-        let middle = column![self.court(c), self.last_events(s, c)]
-            .spacing(14)
-            .width(Length::Fill);
+        let middle = column![
+            container(self.court(c)).height(Length::FillPortion(3)),
+            container(self.last_events(s, c)).height(Length::FillPortion(2)),
+        ]
+        .spacing(14)
+        .width(Length::Fill);
         let body = match self.show_stats {
             true => row![
                 left,
@@ -621,9 +624,42 @@ impl ScoutingScreen {
         ]
         .spacing(6)
         .wrap();
+        // the phase at a glance: its color, its icon, its name
+        let serving = st.serving_team == TeamSideEnum::Us;
+        let (color, icon, name, detail) = match serving {
+            true => (c.break_point, theme::icons::BREAK, s.break_point, s.serving),
+            false => (c.side_out, theme::icons::SIDE_OUT, s.side_out, s.receiving),
+        };
+        let phase = container(
+            row![
+                ui::icon(icon, 30.0, c.background),
+                column![
+                    text(name.to_uppercase())
+                        .size(theme::SIZE_TITLE + 2.0)
+                        .font(bold)
+                        .color(c.background),
+                    text(detail.to_string())
+                        .size(SIZE_SMALL)
+                        .color(c.background),
+                ],
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+        )
+        .padding(Padding::from([10, 14]))
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(color.into()),
+            border: iced::Border {
+                radius: 10.0.into(),
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        });
         ui::panel(
             None,
             column![
+                phase,
                 side(
                     st.team.clone(),
                     st.score_us,
@@ -795,7 +831,12 @@ impl ScoutingScreen {
                 }
             }
         }
-        ui::panel(Some(step_title), scrollable(list).height(Length::Fill), c)
+        ui::lit_panel(
+            Some(step_title),
+            scrollable(list).height(Length::Fill),
+            true,
+            c,
+        )
     }
 
     fn court<'a>(&'a self, c: Colors) -> Element<'a, Message> {
@@ -804,9 +845,12 @@ impl ScoutingScreen {
             (ScoutingStep::Eval, false) => {
                 let chosen = self.scouting.with_session(|s, _| s.target());
                 let at_net = snap.target.len() == 1;
-                let cursor = match at_net {
-                    true => self.net_at(chosen).number().map(|z| (z, String::new())),
-                    false => {
+                // no zone shown until the arrows move or one is chosen: the
+                // choice is never made for the scout
+                let cursor = match (at_net, self.net_cursor, self.target_cursor, chosen) {
+                    (_, None, None, None) => None,
+                    (true, ..) => self.net_at(chosen).number().map(|z| (z, String::new())),
+                    (false, ..) => {
                         let cell = self.cursor(chosen);
                         Some((cell.zone_number(), cell.subzone().to_string()))
                     }
@@ -817,16 +861,24 @@ impl ScoutingScreen {
                     cursor,
                 }
             }
-            _ => Content::Players(snap.state.court.clone()),
+            _ => Content::Players {
+                players: snap.state.court.clone(),
+                pickable: snap.state.step == ScoutingStep::Player,
+            },
+        };
+        // lit when a click on it chooses: a player, where the ball went
+        let lit = match content {
+            Content::Players { pickable, .. } => pickable,
+            Content::Target { .. } => true,
         };
         let court = canvas(Court { content, colors: c })
             .width(Length::Fill)
             .height(Length::Fill);
-        ui::panel(None, iced::Element::from(court).map(Message::Court), c)
+        ui::lit_panel(None, iced::Element::from(court).map(Message::Court), lit, c)
     }
 
     fn last_events<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let rows = self.snapshot.state.events.iter().take(7).map(|e| {
+        let rows = self.snapshot.state.events.iter().map(|e| {
             let who = e
                 .player
                 .as_ref()
@@ -852,9 +904,9 @@ impl ScoutingScreen {
         });
         ui::panel(
             Some(s.last_events),
-            Column::with_children(rows)
-                .spacing(4)
-                .height(Length::Fixed(190.0)),
+            scrollable(Column::with_children(rows).spacing(4))
+                .height(Length::Fill)
+                .width(Length::Fill),
             c,
         )
     }
@@ -995,14 +1047,16 @@ impl ScoutingScreen {
 }
 
 /// A player to choose: the number in bold, the name, the role muted.
+/// A player to choose: the number and the name (the role of the slot of
+/// the lineup the core gives is no word for the scout).
 fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
     row![
         text(p.number.to_string())
             .size(SIZE_BODY)
             .font(theme::fonts().bold)
+            .color(c.accent)
             .width(Length::Fixed(28.0)),
         ui::body(p.name.clone()).width(Length::Fill),
-        small(p.role.clone(), c),
     ]
     .spacing(6)
     .align_y(Alignment::Center)

@@ -3578,6 +3578,13 @@ pub fn start_log(data_dir: String) {
     init_logger(PathBuf::from(data_dir).join("scout4all.log"));
 }
 
+/// A name of a player in little room: each long word cut to its first
+/// letters ("Ale. Mag."), no guess about which is the surname.
+#[uniffi::export]
+pub fn abbreviated_name(name: String) -> String {
+    scout4all_core::names::abbreviated(&name)
+}
+
 /// The version of the app (the same as the core, the TUI, the CLI).
 #[uniffi::export]
 pub fn version() -> String {

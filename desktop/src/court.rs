@@ -14,7 +14,12 @@ use {
 
 /// What the court shows.
 pub enum Content {
-    Players(Vec<CourtPlayer>),
+    /// the players; `pickable`, a click chooses one (only when a player
+    /// is what's chosen now)
+    Players {
+        players: Vec<CourtPlayer>,
+        pickable: bool,
+    },
     /// rows of cells (one row at the net for our block), the net at the
     /// top when the court is ours; the cell of the cursor
     Target {
@@ -58,7 +63,7 @@ impl Court {
     /// Each cell with where it's drawn.
     fn cells(&self, court: Rectangle) -> Vec<(Rectangle, &CourtCellChoice)> {
         match &self.content {
-            Content::Players(_) => vec![],
+            Content::Players { .. } => vec![],
             Content::Target { rows, .. } => {
                 let height = match rows.len() {
                     // the zones at the net: a third of the court deep
@@ -90,7 +95,7 @@ impl Court {
     /// Where each player is drawn, and the radius.
     fn spots(&self, court: Rectangle, meter: f32) -> Vec<(Point, f32, &CourtPlayer)> {
         match &self.content {
-            Content::Players(players) => players
+            Content::Players { players, .. } => players
                 .iter()
                 .map(|p| {
                     (
@@ -106,10 +111,11 @@ impl Court {
 
     fn touched(&self, bounds: Size, at: Point) -> Option<Touch> {
         let (court, meter) = Self::square(bounds);
+        let pickable = matches!(self.content, Content::Players { pickable: true, .. });
         let player = self
             .spots(court, meter)
             .into_iter()
-            .filter(|(_, _, p)| p.selectable)
+            .filter(|(_, _, p)| pickable && p.selectable)
             .find(|(center, radius, _)| center.distance(at) <= *radius * 1.2)
             .map(|(_, _, p)| Touch::Player(p.id.clone()));
         let cell = || {
@@ -170,7 +176,7 @@ impl canvas::Program<Touch> for Court {
         let lines = Stroke::default().with_color(c.court_lines).with_width(2.0);
         frame.stroke(&Path::rectangle(court.position(), court.size()), lines);
         match &self.content {
-            Content::Players(_) => self.draw_players(&mut frame, court, meter),
+            Content::Players { .. } => self.draw_players(&mut frame, court, meter),
             Content::Target { ours, cursor, .. } => {
                 self.draw_target(&mut frame, court, meter, *ours, cursor.as_ref())
             }
@@ -202,7 +208,8 @@ impl Court {
                 (false, _) => c.button,
             };
             frame.fill(&Path::circle(center, radius), fill);
-            let ring = match (p.selectable, p.grade) {
+            let pickable = matches!(self.content, Content::Players { pickable: true, .. });
+            let ring = match (pickable && p.selectable, p.grade) {
                 (true, _) => Some((c.accent, 3.0)),
                 (false, Some(g)) => Some((grade_color(g, c), 2.0)),
                 (false, None) => None,
@@ -223,14 +230,16 @@ impl Court {
                 align_y: iced::alignment::Vertical::Center,
                 ..Text::default()
             });
-            // the surname, and the efficiency below it: three players
-            // side by side on 9 meters
-            let surname = p.name.split_whitespace().last().unwrap_or(&p.name);
-            let name = match p.setter {
-                true => format!("▲ {surname}"),
-                false => surname.to_string(),
-            };
+            // the name, abbreviated if long, and the efficiency below it:
+            // three players side by side on 9 meters
             let size = (meter * 0.3).clamp(11.0, 15.0);
+            // the letters that fit in 3 meters, a monospaced font
+            let room = (3.0 * meter / (size * 0.62)) as usize;
+            let short = scout4all_core::names::fitted(&p.name, room);
+            let name = match p.setter {
+                true => format!("▲ {short}"),
+                false => short,
+            };
             frame.fill_text(Text {
                 font: crate::theme::fonts().regular,
                 content: name,

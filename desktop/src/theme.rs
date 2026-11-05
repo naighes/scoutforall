@@ -90,6 +90,9 @@ pub struct Colors {
     /// the score of a match won, of one lost
     pub won: Color,
     pub lost: Color,
+    /// the phase of the rally: receiving (side out), serving (break point)
+    pub side_out: Color,
+    pub break_point: Color,
 }
 
 /// The surfaces of the site (`web/src/assets/css/global.css`).
@@ -109,6 +112,8 @@ pub const DARK: Colors = Colors {
     danger: LOST,
     won: WON,
     lost: LOST,
+    side_out: rgb(0x38BDF8),
+    break_point: rgb(0xFB923C),
 };
 
 pub const LIGHT: Colors = Colors {
@@ -129,6 +134,8 @@ pub const LIGHT: Colors = Colors {
     // darker, to read on white
     won: rgb(0x15803D),
     lost: rgb(0xB91C1C),
+    side_out: rgb(0x0369A1),
+    break_point: rgb(0xC2410C),
 };
 
 pub fn colors(dark: bool) -> Colors {
@@ -206,4 +213,6 @@ pub mod icons {
     pub const ADD: &[u8] = include_bytes!("../assets/icons/add.svg");
     pub const SETTINGS: &[u8] = include_bytes!("../assets/icons/settings.svg");
     pub const THEME: &[u8] = include_bytes!("../assets/icons/theme.svg");
+    pub const SIDE_OUT: &[u8] = include_bytes!("../assets/icons/side_out.svg");
+    pub const BREAK: &[u8] = include_bytes!("../assets/icons/break.svg");
 }

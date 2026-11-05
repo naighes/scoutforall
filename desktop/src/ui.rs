@@ -66,6 +66,47 @@ pub fn panel<'a, M: 'a>(
         .into()
 }
 
+/// A panel that waits for a choice: lit in amber, its title too; the
+/// others stay quiet.
+pub fn lit_panel<'a, M: 'a>(
+    title: Option<&str>,
+    content: impl Into<Element<'a, M>>,
+    lit: bool,
+    c: Colors,
+) -> Element<'a, M> {
+    let body: Element<'a, M> = match title {
+        Some(title) => column![
+            row![
+                mark(c, 18.0),
+                text(title.to_string())
+                    .size(SIZE_TITLE)
+                    .font(theme::fonts().bold)
+                    .color(match lit {
+                        true => c.accent,
+                        false => c.muted,
+                    })
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+            content.into()
+        ]
+        .spacing(12)
+        .into(),
+        None => content.into(),
+    };
+    container(body)
+        .padding(16)
+        .style(move |_| container::Style {
+            background: Some(c.panel.into()),
+            border: match lit {
+                true => border(c.accent, 2.0, RADIUS_PANEL),
+                false => border(c.border, BORDER, RADIUS_PANEL),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
 /// A small title inside a panel, for a group of rows.
 pub fn section<'a, M: 'a>(title: &str, c: Colors) -> Element<'a, M> {
     text(title.to_string())

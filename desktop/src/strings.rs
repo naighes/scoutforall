@@ -238,6 +238,8 @@ pub struct Strings {
     pub roster_toggle: &'static str,
     pub home_page: &'static str,
     pub switch_theme: &'static str,
+    pub receiving: &'static str,
+    pub serving: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -479,6 +481,8 @@ What did you expect instead?
     roster_toggle: "put on / take off",
     home_page: "Home",
     switch_theme: "Light or dark theme",
+    receiving: "we receive",
+    serving: "we serve",
 };
 
 const IT: Strings = Strings {
@@ -720,6 +724,8 @@ Cosa ti aspettavi invece?
     roster_toggle: "metti / togli",
     home_page: "Home",
     switch_theme: "Tema chiaro o scuro",
+    receiving: "in ricezione",
+    serving: "al servizio",
 };
 
 const PT: Strings = Strings {
@@ -961,6 +967,8 @@ O que você esperava?
     roster_toggle: "incluir / tirar",
     home_page: "Início",
     switch_theme: "Tema claro ou escuro",
+    receiving: "recebendo",
+    serving: "sacando",
 };
 
 const PL: Strings = Strings {
@@ -1202,6 +1210,8 @@ Czego się spodziewałeś(-aś)?
     roster_toggle: "dodaj / usuń",
     home_page: "Strona główna",
     switch_theme: "Jasny lub ciemny motyw",
+    receiving: "przyjmujemy",
+    serving: "zagrywamy",
 };
 
 const JA: Strings = Strings {
@@ -1443,6 +1453,8 @@ const JA: Strings = Strings {
     roster_toggle: "追加 / 削除",
     home_page: "ホーム",
     switch_theme: "ライト / ダークテーマ",
+    receiving: "レシーブ",
+    serving: "サーブ",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {
