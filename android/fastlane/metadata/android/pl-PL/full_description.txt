@@ -1,14 +1,14 @@
 scout4all to scouting siatkówki dla trenerów i statystyków: zapisuj każde dotknięcie piłki w meczu z ławki, kilkoma dotknięciami ekranu, i czytaj statystyki, gdy set jeszcze trwa.
 
 SCOUTING, KTÓRY NADĄŻA ZA AKCJĄ
-• Najpierw dotykasz zawodniczki: aplikacja proponuje tylko elementy, które może zagrać w tej chwili, a potem ocenę (#, +, !, -, /, =).
-• Boisko podąża za akcją: rotacje, rozgrywająca, libero, kto zagrywa, po której stronie jest piłka.
-• Zmiany, wejścia libero i zmiana rozgrywającej bez opuszczania ekranu.
+• Najpierw dotykasz zawodnika: aplikacja proponuje tylko elementy, które może zagrać w tej chwili, a potem ocenę (#, +, !, -, /, =).
+• Boisko podąża za akcją: rotacje, rozgrywający, libero, kto zagrywa, po której stronie jest piłka.
+• Zmiany, wejścia libero i zmiana rozgrywającego bez opuszczania ekranu.
 • Pomyłka? Cofnij ostatnie dotknięcie albo popraw później dowolne zdarzenie seta.
 
 STATYSTYKI NA ŻYWO I PO MECZU
 • Podsumowanie, rozkład ataków, błędy i przebieg każdego seta.
-• Szczegóły według elementu, zawodniczki i rotacji, w przejściu i w side-oucie.
+• Szczegóły według elementu, zawodnika i rotacji, w przejściu i w side-oucie.
 • Skuteczność w kolorach według wartości odniesienia dla poziomu i płci drużyny.
 • Przyjmujące i atakujące na boisku pokazują swoją skuteczność na koszulce.
 

@@ -153,6 +153,8 @@ enum Message {
     Back,
     /// the house on the bar: the home, from wherever
     GoHome,
+    /// the door on the bar: the app closed (all is saved as it's made)
+    Quit,
     OpenSettings,
     Home(home::Message),
     Team(team::Message),
@@ -594,6 +596,9 @@ impl App {
             Message::Picked(_, None) => return Task::none(),
             other => other,
         };
+        if let Message::Quit = message {
+            return iced::exit();
+        }
         if self.on_terms(&message) {
             return Task::none();
         }
@@ -785,6 +790,7 @@ impl App {
                 .chain([
                     ui::bar_button(theme::icons::THEME, s.switch_theme, Message::ToggleTheme, c),
                     ui::bar_button(theme::icons::SETTINGS, s.settings, Message::OpenSettings, c),
+                    ui::bar_button(theme::icons::QUIT, s.quit, Message::Quit, c),
                 ])
                 .collect(),
             s,

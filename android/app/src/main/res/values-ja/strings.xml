@@ -263,7 +263,7 @@
     <string name="tutorial_score">スコア、フェーズ、ローテーション:サイドアウト、S6(セッターは6番)。相手のサーブです。</string>
     <string name="tutorial_reception">ネルヴィーニがレシーブ:名前をタップしてください。</string>
     <string name="tutorial_reception_eval">完璧なレシーブ:# をタップ。</string>
-    <string name="tutorial_attack">トスが上がり、彼女がアタック:もう一度名前をタップ。</string>
+    <string name="tutorial_attack">トスが上がり、ネルヴィーニがアタック:もう一度名前をタップ。</string>
     <string name="tutorial_attack_point">今はアタックだけなので、すぐに評価になる。得点:# をタップ。</string>
     <string name="tutorial_side_out">サイドアウト:1–0。S5にローテーションし、ファールのサーブ。</string>
     <string name="tutorial_serve_cell">サーブはどこへ? 任意: 1D をタップ。</string>
@@ -291,7 +291,7 @@
     <string name="tutorial_in_antropova">第2オポジットのアントロポワが入る:名前をタップ。</string>
     <string name="tutorial_setter_menu">これからカンビがセッター:再び半月のボタン。</string>
     <string name="tutorial_setter">「セッター」をタップ。</string>
-    <string name="tutorial_setter_cambi">カンビをタップ:ローテーションは彼女が基準になります。</string>
+    <string name="tutorial_setter_cambi">カンビをタップ:ローテーションは新しいセッターが基準になります。</string>
     <string name="tutorial_libero_menu">最後にもう一人のリベロ:半月のボタン。</string>
     <string name="tutorial_libero">「リベロ」をタップ:フェルジーノがスピリトと交代。</string>
     <string name="tutorial_stats">セットと試合のスタッツ:ここをタップ、またはここから上にスワイプ。</string>

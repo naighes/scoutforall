@@ -3606,6 +3606,13 @@ pub fn abbreviated_name(name: String) -> String {
     scout4all_core::names::abbreviated(&name)
 }
 
+/// The names offered as `written` is written: the ones that begin with it
+/// first, then the ones with a word that does, then the ones with it inside.
+#[uniffi::export]
+pub fn offered_names(names: Vec<String>, written: String) -> Vec<String> {
+    scout4all_core::names::offered(&names, &written)
+}
+
 /// The version of the app (the same as the core, the TUI, the CLI).
 #[uniffi::export]
 pub fn version() -> String {

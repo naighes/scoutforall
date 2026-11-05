@@ -28,12 +28,17 @@ pub enum Value {
         text: String,
         mask: Mask,
     },
-    /// a text with what it may be offered below: ↑ ↓ choose, Tab or Enter
-    /// take it
+    /// a text with what it may be offered below, as a search engine does:
+    /// the rest of the first one written in grey, for Tab or Enter to take;
+    /// ↑ ↓ go through the others, each written in the field as it's lit
     Search {
+        /// what the field shows
         text: String,
+        /// what was written, before ↑ ↓ wrote a suggestion
+        typed: String,
         suggestions: Vec<Suggestion>,
-        highlighted: usize,
+        /// the suggestion ↑ ↓ lit: none, what was written
+        highlighted: Option<usize>,
         /// written since the last one taken: the suggestions are shown
         open: bool,
     },
@@ -165,6 +170,8 @@ pub struct Field {
     pub hint: Option<String>,
     /// what to write, in the empty field
     pub placeholder: String,
+    /// the icons of the segments, before their names
+    pub icons: Vec<&'static [u8]>,
 }
 
 impl Field {
@@ -174,6 +181,7 @@ impl Field {
             value,
             hint: None,
             placeholder: String::new(),
+            icons: vec![],
         }
     }
 
@@ -199,11 +207,15 @@ impl Field {
     pub fn search(label: &str, value: impl Into<String>) -> Field {
         Field::of(
             label,
-            Value::Search {
-                text: value.into(),
-                suggestions: vec![],
-                highlighted: 0,
-                open: false,
+            {
+                let text: String = value.into();
+                Value::Search {
+                    typed: text.clone(),
+                    text,
+                    suggestions: vec![],
+                    highlighted: None,
+                    open: false,
+                }
             },
         )
     }
@@ -218,6 +230,11 @@ impl Field {
 
     pub fn check(label: &str, on: bool, fixed: bool) -> Field {
         Field::of(label, Value::Check { on, fixed })
+    }
+
+    /// The segments with their icons, in their order.
+    pub fn icons(self, icons: Vec<&'static [u8]>) -> Field {
+        Field { icons, ..self }
     }
 
     pub fn hint(self, hint: &str) -> Field {
@@ -301,14 +318,15 @@ fn written(value: &Value) -> Option<&String> {
 }
 
 /// The suggestions shown: written since the last taken, and not just the
-/// text there is.
-fn offered(value: &Value) -> Option<(&[Suggestion], usize)> {
+/// text there is; the one lit, if any.
+fn offered(value: &Value) -> Option<(&[Suggestion], Option<usize>)> {
     match value {
         Value::Search {
             text,
             suggestions,
             highlighted,
             open: true,
+            ..
         } if !suggestions.is_empty()
             && !(suggestions.len() == 1
                 && suggestions.first().is_some_and(|s| &s.value == text)) =>
@@ -317,6 +335,28 @@ fn offered(value: &Value) -> Option<(&[Suggestion], usize)> {
                 &suggestions[..suggestions.len().min(SUGGESTIONS)],
                 *highlighted,
             ))
+        }
+        _ => None,
+    }
+}
+
+/// What the first suggestion adds to what was written, when it begins
+/// with it and none is lit: written in grey after the text.
+fn completion(value: &Value) -> Option<(usize, String)> {
+    match offered(value) {
+        Some((suggestions, None)) => {
+            let text = written(value)?;
+            let first = suggestions.first()?;
+            let rest = first.value.get(text.len()..)?;
+            match first
+                .value
+                .get(..text.len())
+                .is_some_and(|start| start.to_lowercase() == text.to_lowercase())
+                && !rest.is_empty()
+            {
+                true => Some((0, rest.to_string())),
+                false => None,
+            }
         }
         _ => None,
     }
@@ -353,8 +393,7 @@ impl Form {
         }
     }
 
-    /// What the search `field` offers, for the text it has: the first one
-    /// lit.
+    /// What the search `field` offers, for the text it has: none lit.
     pub fn suggest(&mut self, field: usize, offered: Vec<Suggestion>) {
         if let Some(Value::Search {
             suggestions,
@@ -363,7 +402,7 @@ impl Form {
         }) = self.fields.get_mut(field).map(|f| &mut f.value)
         {
             *suggestions = offered;
-            *highlighted = 0;
+            *highlighted = None;
         }
     }
 
@@ -392,14 +431,11 @@ impl Form {
                 text: mask.apply(&text),
                 mask,
             },
-            Value::Search {
-                suggestions,
-                highlighted,
-                ..
-            } => Value::Search {
+            Value::Search { suggestions, .. } => Value::Search {
+                typed: text.clone(),
                 text,
                 suggestions,
-                highlighted,
+                highlighted: None,
                 open: true,
             },
             _ => Value::Text(text),
@@ -452,7 +488,16 @@ impl Form {
             return Outcome::Stay;
         };
         let now = std::mem::replace(&mut f.value, value);
-        if let Value::Search { open, .. } = &mut f.value {
+        if let Value::Search {
+            text,
+            typed,
+            highlighted,
+            open,
+            ..
+        } = &mut f.value
+        {
+            *typed = text.clone();
+            *highlighted = None;
             *open = false;
         }
         match back {
@@ -463,33 +508,72 @@ impl Form {
         Outcome::Changed(field)
     }
 
-    /// The suggestion lit moved by `step`, if the field offers some.
-    fn highlight(&mut self, step: isize) -> bool {
+    /// The suggestion lit moved by `step`, and written in the field: past
+    /// the first or the last one, none, and what was written comes back.
+    fn highlight(&mut self, step: isize) {
         let shown = self
             .fields
             .get(self.focused)
             .and_then(|f| offered(&f.value))
             .map(|(shown, _)| shown.len());
-        match (
+        if let (
+            Some(n),
+            Some(Value::Search {
+                text,
+                typed,
+                suggestions,
+                highlighted,
+                ..
+            }),
+        ) = (
             shown,
             self.fields.get_mut(self.focused).map(|f| &mut f.value),
         ) {
-            (Some(n), Some(Value::Search { highlighted, .. })) => {
-                *highlighted =
-                    usize::try_from((*highlighted as isize + step).rem_euclid(n as isize))
-                        .unwrap_or(0);
-                true
-            }
-            _ => false,
+            // none is n: the ring is the suggestions and what was written
+            let at = highlighted.unwrap_or(n) as isize;
+            let next = usize::try_from((at + step).rem_euclid(n as isize + 1)).unwrap_or(n);
+            *highlighted = (next < n).then_some(next);
+            *text = highlighted
+                .and_then(|h| suggestions.get(h))
+                .map_or_else(|| typed.clone(), |s| s.value.clone());
         }
     }
 
-    /// The suggestion lit of the field the keys are on, if it offers some.
-    pub fn lit(&self) -> Option<usize> {
+    /// Whether the field the keys are on shows its suggestions.
+    pub fn offering(&self) -> bool {
         self.fields
             .get(self.focused)
             .and_then(|f| offered(&f.value))
-            .map(|(_, lit)| lit)
+            .is_some()
+    }
+
+    /// The suggestion Enter or Tab would take: the one lit, or the first
+    /// when it completes what was written.
+    pub fn lit(&self) -> Option<usize> {
+        self.fields
+            .get(self.focused)
+            .and_then(|f| match offered(&f.value) {
+                Some((_, Some(lit))) => Some(lit),
+                _ => completion(&f.value).map(|(first, _)| first),
+            })
+    }
+
+    /// The suggestions of the field the keys are on closed: what was
+    /// written back, if ↑ ↓ wrote one.
+    fn close(&mut self) {
+        if let Some(Value::Search {
+            text,
+            typed,
+            highlighted,
+            open,
+            ..
+        }) = self.fields.get_mut(self.focused).map(|f| &mut f.value)
+        {
+            if highlighted.take().is_some() {
+                *text = typed.clone();
+            }
+            *open = false;
+        }
     }
 
     fn change(&mut self, field: usize, step: isize) -> Outcome {
@@ -556,34 +640,35 @@ impl Form {
     }
 
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
-        let lit = self.lit();
-        match (ck, lit) {
-            (k, _) if is_undo(k) => self.undo(true),
-            (k, _) if is_redo(k) => self.undo(false),
+        let (offering, lit) = (self.offering(), self.lit());
+        match (ck, offering, lit) {
+            (k, _, _) if is_undo(k) => self.undo(true),
+            (k, _, _) if is_redo(k) => self.undo(false),
             // the suggestions shown: they take the keys
-            (k, Some(_)) if k == BACK_KEY => {
-                if let Some(Value::Search { open, .. }) =
-                    self.fields.get_mut(self.focused).map(|f| &mut f.value)
-                {
-                    *open = false;
-                }
+            (k, true, _) if k == BACK_KEY => {
+                self.close();
                 Outcome::Stay
             }
-            (k, Some(lit)) if k == key!(enter) => self.take(self.focused, lit),
-            (k, Some(lit)) if k == key!(tab) => {
+            (k, true, Some(lit)) if k == key!(enter) => self.take(self.focused, lit),
+            (k, true, Some(lit)) if k == key!(tab) => {
                 let outcome = self.take(self.focused, lit);
                 self.focused = self.step(false);
                 outcome
             }
-            (k, Some(_)) if k == key!(down) => {
+            (k, true, _) if k == key!(down) => {
                 self.highlight(1);
                 Outcome::Stay
             }
-            (k, Some(_)) if k == key!(up) => {
+            (k, true, _) if k == key!(up) => {
                 self.highlight(-1);
                 Outcome::Stay
             }
-            (k, _) => self.move_key(k),
+            // Tab on: what was written stays, the suggestions close
+            (k, true, None) if k == key!(tab) => {
+                self.close();
+                self.move_key(k)
+            }
+            (k, _, _) => self.move_key(k),
         }
     }
 
@@ -716,7 +801,7 @@ impl Form {
             width: 1.0,
             radius: 8.0.into(),
         };
-        let input = |value: &str, cursor_at_end: bool| -> Element<'a, M> {
+        let input = |value: &str, follow: field::Follow| -> Element<'a, M> {
             field::guard(
                 text_input(&f.placeholder, value)
                     .id(format!("form-field-{i}"))
@@ -738,14 +823,14 @@ impl Form {
                             },
                         }
                     }),
-                cursor_at_end,
+                follow,
             )
             .into()
         };
         let input: Element<'a, M> = match &f.value {
-            Value::Text(value) => input(value, false),
-            Value::Masked { text, .. } => input(text, true),
-            Value::Search { text, .. } => {
+            Value::Text(value) => input(value, field::Follow::Never),
+            Value::Masked { text, .. } => input(text, field::Follow::Typing),
+            Value::Search { text: written, .. } => {
                 let shown: Vec<Element<'a, M>> = match offered(&f.value) {
                     Some((suggestions, lit)) if focused => suggestions
                         .iter()
@@ -753,7 +838,7 @@ impl Form {
                         .map(|(n, s)| {
                             ui::list_row(
                                 ui::body(s.label.clone()).shaping(text::Shaping::Advanced),
-                                n == lit,
+                                Some(n) == lit,
                                 Some(on(Message::Take(i, n))),
                                 c,
                             )
@@ -761,21 +846,45 @@ impl Form {
                         .collect(),
                     _ => vec![],
                 };
-                match shown.is_empty() {
-                    true => input(text, false),
-                    false => column![
-                        input(text, false),
-                        container(Column::with_children(shown).spacing(2))
-                            .padding(4)
-                            .style(move |_| container::Style {
-                                background: Some(c.background.into()),
-                                border: edge(false),
-                                ..container::Style::default()
-                            })
-                    ]
-                    .spacing(4)
+                // the rest of the first suggestion in grey, over the field
+                // where the text ends
+                let ghost: Element<'a, M> = match completion(&f.value) {
+                    Some((_, rest)) if focused => container(
+                        row![
+                            text(written.clone())
+                                .size(SIZE_BODY)
+                                .wrapping(text::Wrapping::None)
+                                .color(iced::Color::TRANSPARENT),
+                            text(rest)
+                                .size(SIZE_BODY)
+                                .wrapping(text::Wrapping::None)
+                                .color(c.muted),
+                        ]
+                        .clip(true),
+                    )
+                    .padding(Padding::from([8, 12]))
                     .into(),
-                }
+                    _ => iced::widget::space::horizontal().width(0).into(),
+                };
+                // the same widgets whether offered or not: the field keeps
+                // the keys as the suggestions come and go
+                let list: Element<'a, M> = match shown.is_empty() {
+                    true => iced::widget::space::vertical().height(0).into(),
+                    false => container(Column::with_children(shown).spacing(2))
+                        .padding(4)
+                        .style(move |_| container::Style {
+                            background: Some(c.background.into()),
+                            border: edge(false),
+                            ..container::Style::default()
+                        })
+                        .into(),
+                };
+                column![
+                    iced::widget::stack![input(written, field::Follow::Arrows), ghost],
+                    list
+                ]
+                .spacing(4)
+                .into()
             }
             Value::Check { .. } => iced::widget::space::vertical().height(0).into(),
             Value::Choice { options, index } => {
@@ -821,12 +930,19 @@ impl Form {
             Value::Segments { options, index } => container(
                 Row::with_children(options.iter().enumerate().map(|(n, option)| {
                     let chosen = n == *index;
-                    button(
-                        text(option.clone())
-                            .size(SIZE_BODY)
-                            .width(Length::Fill)
-                            .align_x(Alignment::Center),
-                    )
+                    let ink = match chosen {
+                        true => c.on_accent,
+                        false => c.text,
+                    };
+                    let name = text(option.clone()).size(SIZE_BODY);
+                    let label: Element<'a, M> = match f.icons.get(n) {
+                        Some(icon) => row![ui::icon(icon, 18.0, ink), name]
+                            .spacing(8)
+                            .align_y(Alignment::Center)
+                            .into(),
+                        None => name.into(),
+                    };
+                    button(container(label).width(Length::Fill).align_x(Alignment::Center))
                     .width(Length::Fill)
                     .padding(Padding::from([7, 12]))
                     .on_press(on(Message::Choose(i, n)))
@@ -987,31 +1103,70 @@ mod tests {
     }
 
     #[test]
-    fn a_search_offers_and_the_keys_take() {
+    fn a_search_completes_as_a_search_engine_does() {
+        // "it": the rest of Italia in grey, Enter takes it, the field stays
         let mut f = searching();
+        assert!(f.offering());
+        assert_eq!(completion(&f.fields[0].value), Some((0, "alia".into())));
         assert_eq!(f.lit(), Some(0));
-        // ↓ to the second, Enter takes it: the field stays
-        f.key(key!(down));
         assert_eq!(f.key(key!(enter)), Outcome::Changed(0));
-        assert_eq!(f.text(0), "Haiti");
-        assert_eq!(f.focused, 0);
-        assert_eq!(f.lit(), None);
-        // Tab takes the first and goes on
+        assert_eq!((f.text(0).as_str(), f.focused), ("Italia", 0));
+        assert!(!f.offering());
+        // Tab takes it and goes on
         let mut f = searching();
         f.key(key!(tab));
         assert_eq!((f.text(0).as_str(), f.focused), ("Italia", 1));
-        // Esc closes the suggestions, the form stays
+        // ↓ ↓ write each one in the field, no grey; ↓ past the last, what
+        // was written comes back
         let mut f = searching();
+        f.key(key!(down));
+        assert_eq!(f.text(0), "Italia");
+        f.key(key!(down));
+        assert_eq!((f.text(0).as_str(), f.lit()), ("Haiti", Some(1)));
+        assert_eq!(completion(&f.fields[0].value), None);
+        f.key(key!(down));
+        assert_eq!(f.text(0), "it");
+        f.key(key!(up));
+        assert_eq!(f.text(0), "Haiti");
+        assert_eq!(f.key(key!(enter)), Outcome::Changed(0));
+        assert_eq!(f.text(0), "Haiti");
+        // Esc closes them, what was written back; the form stays
+        let mut f = searching();
+        f.key(key!(down));
         assert_eq!(f.key(BACK_KEY), Outcome::Stay);
-        assert_eq!(f.lit(), None);
+        assert_eq!(f.text(0), "it");
+        assert!(!f.offering());
         assert_eq!(f.key(key!(enter)), Outcome::Save);
-        // a click takes it
+        // a click takes one; undone alone, what was written comes back
         let mut f = searching();
         f.update(Message::Take(0, 1));
         assert_eq!(f.text(0), "Haiti");
-        // undone alone: what was written comes back
         f.key(key!(ctrl - z));
         assert_eq!(f.text(0), "it");
+    }
+
+    #[test]
+    fn what_no_suggestion_begins_with_is_left_as_written() {
+        // "ait": Haiti offered, not completed; Enter saves what's written
+        let mut f = Form::new(
+            "t",
+            vec![Field::search("country", ""), Field::text("name", "")],
+        );
+        f.update(Message::Input(0, "ait".into()));
+        f.suggest(
+            0,
+            vec![Suggestion {
+                label: "Haiti".into(),
+                value: "Haiti".into(),
+            }],
+        );
+        assert!(f.offering());
+        assert_eq!(f.lit(), None);
+        assert_eq!(f.key(key!(enter)), Outcome::Save);
+        assert_eq!(f.text(0), "ait");
+        // Tab goes on with it
+        f.key(key!(tab));
+        assert_eq!((f.text(0).as_str(), f.focused), ("ait", 1));
     }
 
     #[test]

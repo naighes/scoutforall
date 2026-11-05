@@ -541,10 +541,10 @@ impl ScoutingScreen {
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let left = column![self.header(s, c), self.choices(s, c)]
             .spacing(14)
-            .width(Length::Fixed(340.0));
+            .width(Length::Fixed(LEFT_WIDTH));
         let middle = column![
             container(self.court(c)).height(Length::FillPortion(3)),
-            container(self.last_events(s, c)).height(Length::FillPortion(2)),
+            container(self.last_events(s, c)).height(Length::FillPortion(1)),
         ]
         .spacing(14)
         .width(Length::Fill);
@@ -619,29 +619,28 @@ impl ScoutingScreen {
                 c
             ),
             ui::pill(&format!("{}–{}", st.won, st.lost), false, None, c),
-            ui::pill(&format!("{} {}", s.rotation, st.rotation), false, None, c),
             ui::pill(&format!("⇄ {}", st.substitutions_left), false, None, c),
         ]
         .spacing(6)
         .wrap();
-        // the phase at a glance: its color, its icon, its name
+        // the phase at a glance: its color, its icon, its name; then the
+        // rotation (P1: the setter in 1)
         let serving = st.serving_team == TeamSideEnum::Us;
-        let (color, icon, name, detail) = match serving {
-            true => (c.break_point, theme::icons::BREAK, s.break_point, s.serving),
-            false => (c.side_out, theme::icons::SIDE_OUT, s.side_out, s.receiving),
+        let (color, icon, name) = match serving {
+            true => (c.break_point, theme::icons::BREAK, s.break_phase),
+            false => (c.side_out, theme::icons::SIDE_OUT, s.side_out_phase),
+        };
+        let big = |t: String| {
+            text(t)
+                .size(theme::SIZE_TITLE + 2.0)
+                .font(bold)
+                .color(c.background)
         };
         let phase = container(
             row![
-                ui::icon(icon, 30.0, c.background),
-                column![
-                    text(name.to_uppercase())
-                        .size(theme::SIZE_TITLE + 2.0)
-                        .font(bold)
-                        .color(c.background),
-                    text(detail.to_string())
-                        .size(SIZE_SMALL)
-                        .color(c.background),
-                ],
+                ui::icon(icon, 26.0, c.background),
+                big(name.to_string()).width(Length::Fill),
+                ui::tip(big(st.rotation.clone()), s.rotation, c),
             ]
             .spacing(10)
             .align_y(Alignment::Center),
@@ -714,6 +713,24 @@ impl ScoutingScreen {
             list.push(space::vertical().height(8))
                 .push(ui::section(title, c))
         };
+        // a choice in half the panel: the key in less room
+        let half = |key: Option<String>, label: String, chosen: bool, message: Message| {
+            let key: Element<'a, Message> = match key {
+                Some(k) => ui::keycap(&k, c),
+                None => space::horizontal().width(0).into(),
+            };
+            ui::list_row(
+                row![
+                    container(key).width(Length::Fixed(HALF_KEY)),
+                    ui::body(label)
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+                chosen,
+                Some(message),
+                c,
+            )
+        };
         match st.step {
             ScoutingStep::Event => {
                 for e in &snap.events {
@@ -781,41 +798,60 @@ impl ScoutingScreen {
                 }
             }
             ScoutingStep::Eval => {
-                for e in &snap.evals {
-                    let key = self.keys.eval_keybindings.key_for(&e.value);
-                    let key = key.as_ref().map(keymap::label);
-                    // the symbol once: in the key, unless the key is another
-                    let name = match key.as_deref() == Some(e.symbol.as_str()) {
-                        true => e.name.clone(),
-                        false => format!("{}  {}", e.symbol, e.name),
-                    };
-                    list = list.push(choice(key, name, false, Message::Eval(e.value)));
-                }
+                list = list.push(two_by_two(
+                    snap.evals
+                        .iter()
+                        .map(|e| {
+                            let key = self.keys.eval_keybindings.key_for(&e.value);
+                            let key = key.as_ref().map(keymap::label);
+                            // the symbol once: in the key, unless the key is
+                            // another
+                            let name = match key.as_deref() == Some(e.symbol.as_str()) {
+                                true => e.name.clone(),
+                                false => format!("{}  {}", e.symbol, e.name),
+                            };
+                            half(key, name, false, Message::Eval(e.value))
+                        })
+                        .collect(),
+                ));
+                // the techniques and the blockers two by two: all seen, no
+                // scrolling, even for a middle and its many attacks
                 if !snap.techniques.is_empty() {
                     list = group(list, s.techniques);
-                    for t in &snap.techniques {
-                        list = list.push(choice(
-                            self.technique_key(&t.value).as_ref().map(keymap::label),
-                            t.name.clone(),
-                            t.chosen,
-                            Message::Technique(t.value),
-                        ));
-                    }
+                    list = list.push(two_by_two(
+                        snap.techniques
+                            .iter()
+                            .map(|t| {
+                                half(
+                                    self.technique_key(&t.value).as_ref().map(keymap::label),
+                                    t.name.clone(),
+                                    t.chosen,
+                                    Message::Technique(t.value),
+                                )
+                            })
+                            .collect(),
+                    ));
                 }
                 if !snap.blockers.is_empty() {
                     list = group(list, s.blockers);
-                    for b in &snap.blockers {
-                        let message = match b.chosen {
-                            true => Message::Blockers(None),
-                            false => Message::Blockers(Some(b.value)),
-                        };
-                        list = list.push(choice(
-                            Some(keymap::label(&BLOCKERS_KEY)),
-                            b.name.clone(),
-                            b.chosen,
-                            message,
-                        ));
-                    }
+                    // one key goes through them: once, before them all
+                    list = list.push(
+                        row![
+                            ui::keycap(&keymap::label(&BLOCKERS_KEY), c),
+                            iced::widget::Row::with_children(snap.blockers.iter().map(|b| {
+                                let message = match b.chosen {
+                                    true => Message::Blockers(None),
+                                    false => Message::Blockers(Some(b.value)),
+                                };
+                                ui::pill(&b.name, b.chosen, Some(message), c)
+                            }))
+                            .spacing(6)
+                            .wrap()
+                            .vertical_spacing(6),
+                        ]
+                        .spacing(10)
+                        .padding(iced::Padding::from([4, 10])),
+                    );
                 }
                 if !snap.target.is_empty() {
                     list = group(list, s.target);
@@ -882,7 +918,7 @@ impl ScoutingScreen {
             let who = e
                 .player
                 .as_ref()
-                .map(|p| format!("{} {}", p.number, p.name))
+                .map(|p| format!("{} {}", p.number, scout4all_core::names::fitted(&p.name, EVENT_NAME_ROOM)))
                 .unwrap_or_default();
             let extra = [e.technique.clone(), e.target.clone(), e.blockers.clone()]
                 .into_iter()
@@ -1049,6 +1085,35 @@ impl ScoutingScreen {
 /// A player to choose: the number in bold, the name, the role muted.
 /// A player to choose: the number and the name (the role of the slot of
 /// the lineup the core gives is no word for the scout).
+/// The letters of a name in the last events, else abbreviated.
+const EVENT_NAME_ROOM: usize = 14;
+
+/// How wide the column of the score and the choices is.
+const LEFT_WIDTH: f32 = 380.0;
+
+/// How wide the key of a choice in half the panel is.
+const HALF_KEY: f32 = 44.0;
+
+/// The choices two by two, each half as wide.
+fn two_by_two<'a>(choices: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    let mut choices = choices.into_iter().peekable();
+    let mut lines = Column::new().spacing(2);
+    while choices.peek().is_some() {
+        let line: Vec<Element<'a, Message>> = choices
+            .by_ref()
+            .take(2)
+            .map(|choice| container(choice).width(Length::FillPortion(1)).into())
+            .collect();
+        let alone = line.len() < 2;
+        let line = iced::widget::Row::with_children(line).spacing(2);
+        lines = lines.push(match alone {
+            true => line.push(space::horizontal().width(Length::FillPortion(1))),
+            false => line,
+        });
+    }
+    lines.into()
+}
+
 fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
     row![
         text(p.number.to_string())

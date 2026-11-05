@@ -242,7 +242,8 @@ impl Editor {
                 "",
                 vec![s.home_game.to_string(), s.away_game.to_string()],
                 usize::from(!data.home),
-            ),
+            )
+            .icons(vec![theme::icons::HOME, theme::icons::AWAY]),
             Field::text(s.max_substitutions, data.max_substitutions.clone()),
             Field::text(s.notes, data.notes.clone()),
         ];
@@ -312,19 +313,16 @@ impl Editor {
                     .suggest(TEAM_COUNTRY, countries::suggestions(core, &written));
             }
             (Kind::Match(m), MATCH_OPPONENT) => {
-                let written = self.form.text(MATCH_OPPONENT).trim().to_lowercase();
-                let offered = match written.is_empty() {
-                    true => vec![],
-                    false => m
-                        .opponents
-                        .iter()
-                        .filter(|o| o.to_lowercase().contains(&written))
-                        .map(|o| Suggestion {
-                            label: o.clone(),
-                            value: o.clone(),
-                        })
-                        .collect(),
-                };
+                let offered = scout4all_mobile::offered_names(
+                    m.opponents.clone(),
+                    self.form.text(MATCH_OPPONENT),
+                )
+                .into_iter()
+                .map(|o| Suggestion {
+                    label: o.clone(),
+                    value: o,
+                })
+                .collect();
                 self.form.suggest(MATCH_OPPONENT, offered);
             }
             (Kind::Match(m), f) if f >= MATCH_ROSTER => {
@@ -542,6 +540,9 @@ impl Editor {
         }
     }
 
+    /// How tall a tile of the score sheet is.
+    const TILE_HEIGHT: f32 = 80.0;
+
     /// The score sheet: the players as tiles, by number, the ones on it
     /// lit, as on Android; who played in a set stays.
     fn roster_view<'a, M: Clone + 'a>(
@@ -588,9 +589,12 @@ impl Editor {
                     }),
                 ]
                 .spacing(8)
+                .height(Length::Fill)
                 .align_y(Alignment::Center),
             )
             .width(Length::FillPortion(1))
+            // all as tall: a name on two lines and the role fit
+            .height(Length::Fixed(Self::TILE_HEIGHT))
             .padding(Padding::from([10, 12]))
             // who played stays on the score sheet
             .on_press_maybe(

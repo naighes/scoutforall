@@ -424,24 +424,29 @@ impl StartScreen {
                         c,
                     )
                 });
-                let skip: Option<Element<'a, Message>> = match self.step {
-                    Step::FallbackLibero => Some(ui::choice(
-                        Some("Tab".to_string()),
-                        ui::body(s.no_fallback_libero).color(c.muted),
-                        false,
-                        Some(Message::Skip),
-                        c,
-                    )),
-                    _ => None,
+                // the set can start: Continue (or Tab) with no second
+                // libero, above the players, no need to look for it
+                let skip: Element<'a, Message> = match self.step {
+                    Step::FallbackLibero => container(
+                        row![
+                            ui::body(s.no_fallback_libero)
+                                .color(c.muted)
+                                .width(Length::Fill),
+                            ui::keycap("Tab", c),
+                            ui::pill(s.go_on, true, Some(Message::Skip), c),
+                        ]
+                        .spacing(10)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding(iced::Padding::from([0, 4]))
+                    .into(),
+                    _ => space::vertical().height(0).into(),
                 };
-                scrollable(
-                    Column::with_children(rows)
-                        .push(match skip {
-                            Some(skip) => column![space::vertical().height(8), skip].into(),
-                            None => Element::from(space::vertical().height(0)),
-                        })
-                        .spacing(3),
-                )
+                column![
+                    skip,
+                    scrollable(Column::with_children(rows).spacing(3)).height(Length::Fill)
+                ]
+                .spacing(12)
                 .height(Length::Fill)
                 .into()
             }

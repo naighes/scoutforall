@@ -447,7 +447,7 @@ mod tests {
             Some("IT".to_string())
         );
         // the countries offered close with Esc, the settings stay
-        assert!(settings.general.form.lit().is_some());
+        assert!(settings.general.form.offering());
         assert!(matches!(
             settings.key(scout4all_keys::BACK_KEY, s),
             crate::settings::Outcome::Stay

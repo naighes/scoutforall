@@ -29,6 +29,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -74,6 +76,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.MatchField
+import io.github.naighes.scout4all.core.offeredNames
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.RosterPlayer
@@ -302,6 +305,13 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                         selected = form.home == home,
                         onClick = { model.change(null) { it.copy(home = home) } },
                         shape = SegmentedButtonDefaults.itemShape(index, 2),
+                        // the icon of the team's list, not the check
+                        icon = {
+                            when (home) {
+                                true -> Icon(Icons.Outlined.Home, contentDescription = null)
+                                false -> Icon(painterResource(R.drawable.ic_away), contentDescription = null)
+                            }
+                        },
                     ) { Text(stringResource(name)) }
                 }
             }
@@ -337,11 +347,8 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
 @Composable
 private fun OpponentField(value: String, offered: List<String>, error: String?, onChange: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val written = value.trim().lowercase()
-    val shown = when (written) {
-        "" -> emptyList()
-        else -> offered.filter { it.lowercase().contains(written) && it.lowercase() != written }.take(6)
-    }
+    // the ones that begin as written first, as the core orders them
+    val shown = remember(value, offered) { offeredNames(offered, value).take(6) }
     val expanded = open && shown.isNotEmpty()
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it }) {
         OutlinedTextField(

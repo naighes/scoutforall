@@ -215,4 +215,5 @@ pub mod icons {
     pub const THEME: &[u8] = include_bytes!("../assets/icons/theme.svg");
     pub const SIDE_OUT: &[u8] = include_bytes!("../assets/icons/side_out.svg");
     pub const BREAK: &[u8] = include_bytes!("../assets/icons/break.svg");
+    pub const QUIT: &[u8] = include_bytes!("../assets/icons/quit.svg");
 }

@@ -29,6 +29,34 @@ pub fn fitted(name: &str, room: usize) -> String {
     }
 }
 
+/// The names offered as `written` is written, as a search engine does:
+/// the ones that begin with it first, then the ones with a word that does,
+/// then the ones that have it inside; none for nothing written, nor the
+/// one already written whole.
+pub fn offered(names: &[String], written: &str) -> Vec<String> {
+    let written = written.trim().to_lowercase();
+    let rank = |name: &str| {
+        let name = name.to_lowercase();
+        match () {
+            _ if name.starts_with(&written) => Some(0),
+            _ if name.split_whitespace().any(|w| w.starts_with(&written)) => Some(1),
+            _ if name.contains(&written) => Some(2),
+            _ => None,
+        }
+    };
+    let mut found: Vec<(u8, &String)> = match written.is_empty() {
+        true => vec![],
+        false => names
+            .iter()
+            .filter(|name| name.trim().to_lowercase() != written)
+            .filter_map(|name| rank(name).map(|r| (r, name)))
+            .collect(),
+    };
+    // stable: the same rank keeps the order given
+    found.sort_by_key(|(r, _)| *r);
+    found.into_iter().map(|(_, name)| name.clone()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,5 +80,19 @@ mod tests {
     fn a_name_that_fits_stays_whole() {
         assert_eq!(fitted("Anna Rossi", 12), "Anna Rossi");
         assert_eq!(fitted("Alessandro Magrini", 12), "Ale. Mag.");
+    }
+
+    #[test]
+    fn the_names_that_begin_as_written_come_first() {
+        let names: Vec<String> = ["Club Arezzo", "Livorno", "Pallavolo Lucca", "Cortona Volley"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            offered(&names, "l"),
+            vec!["Livorno", "Pallavolo Lucca", "Club Arezzo", "Cortona Volley"]
+        );
+        assert_eq!(offered(&names, "LI"), vec!["Livorno"]);
+        assert_eq!(offered(&names, "livorno"), Vec::<String>::new());
+        assert_eq!(offered(&names, " "), Vec::<String>::new());
     }
 }

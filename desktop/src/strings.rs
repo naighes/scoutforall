@@ -31,6 +31,9 @@ pub struct Strings {
     pub whole_match: &'static str,
     pub side_out: &'static str,
     pub break_point: &'static str,
+    /// the phase as it's scouted, in its band
+    pub side_out_phase: &'static str,
+    pub break_phase: &'static str,
     pub trend: &'static str,
     pub so_far: &'static str,
     pub last_touches: &'static str,
@@ -238,8 +241,7 @@ pub struct Strings {
     pub roster_toggle: &'static str,
     pub home_page: &'static str,
     pub switch_theme: &'static str,
-    pub receiving: &'static str,
-    pub serving: &'static str,
+    pub quit: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -269,6 +271,8 @@ const EN: Strings = Strings {
     whole_match: "Match",
     side_out: "Side out",
     break_point: "Break point",
+    side_out_phase: "SIDE-OUT",
+    break_phase: "BREAK",
     trend: "Trend",
     so_far: "So far",
     last_touches: "Last touches",
@@ -295,8 +299,8 @@ const EN: Strings = Strings {
     position: "Position",
     setter: "Setter",
     libero: "Libero",
-    fallback_libero: "Fallback libero",
-    no_fallback_libero: "no fallback libero",
+    fallback_libero: "Second libero",
+    no_fallback_libero: "no second libero",
     no_available_players: "No available players",
     choose: "Choose",
     new_match: "New match",
@@ -481,8 +485,7 @@ What did you expect instead?
     roster_toggle: "put on / take off",
     home_page: "Home",
     switch_theme: "Light or dark theme",
-    receiving: "we receive",
-    serving: "we serve",
+    quit: "Quit",
 };
 
 const IT: Strings = Strings {
@@ -512,6 +515,8 @@ const IT: Strings = Strings {
     whole_match: "Partita",
     side_out: "Cambio palla",
     break_point: "Break point",
+    side_out_phase: "CAMBIO PALLA",
+    break_phase: "BREAK",
     trend: "Andamento",
     so_far: "Finora",
     last_touches: "Ultimi tocchi",
@@ -538,8 +543,8 @@ const IT: Strings = Strings {
     position: "Posizione",
     setter: "Palleggiatore",
     libero: "Libero",
-    fallback_libero: "Libero di riserva",
-    no_fallback_libero: "nessun libero di riserva",
+    fallback_libero: "Secondo libero",
+    no_fallback_libero: "nessun secondo libero",
     no_available_players: "Nessun giocatore disponibile",
     choose: "Scegli",
     new_match: "Nuova partita",
@@ -724,8 +729,7 @@ Cosa ti aspettavi invece?
     roster_toggle: "metti / togli",
     home_page: "Home",
     switch_theme: "Tema chiaro o scuro",
-    receiving: "in ricezione",
-    serving: "al servizio",
+    quit: "Esci",
 };
 
 const PT: Strings = Strings {
@@ -755,6 +759,8 @@ const PT: Strings = Strings {
     whole_match: "Partida",
     side_out: "Side out",
     break_point: "Break point",
+    side_out_phase: "SIDE-OUT",
+    break_phase: "BREAK",
     trend: "Tendência",
     so_far: "Até agora",
     last_touches: "Últimos toques",
@@ -781,8 +787,8 @@ const PT: Strings = Strings {
     position: "Posição",
     setter: "Levantador",
     libero: "Líbero",
-    fallback_libero: "Líbero reserva",
-    no_fallback_libero: "sem líbero reserva",
+    fallback_libero: "Segundo líbero",
+    no_fallback_libero: "sem segundo líbero",
     no_available_players: "Nenhum jogador disponível",
     choose: "Escolher",
     new_match: "Nova partida",
@@ -967,8 +973,7 @@ O que você esperava?
     roster_toggle: "incluir / tirar",
     home_page: "Início",
     switch_theme: "Tema claro ou escuro",
-    receiving: "recebendo",
-    serving: "sacando",
+    quit: "Sair",
 };
 
 const PL: Strings = Strings {
@@ -998,6 +1003,8 @@ const PL: Strings = Strings {
     whole_match: "Mecz",
     side_out: "Side out",
     break_point: "Break point",
+    side_out_phase: "SIDE-OUT",
+    break_phase: "BREAK",
     trend: "Przebieg",
     so_far: "Dotąd",
     last_touches: "Ostatnie dotknięcia",
@@ -1210,8 +1217,7 @@ Czego się spodziewałeś(-aś)?
     roster_toggle: "dodaj / usuń",
     home_page: "Strona główna",
     switch_theme: "Jasny lub ciemny motyw",
-    receiving: "przyjmujemy",
-    serving: "zagrywamy",
+    quit: "Zakończ",
 };
 
 const JA: Strings = Strings {
@@ -1241,6 +1247,8 @@ const JA: Strings = Strings {
     whole_match: "試合",
     side_out: "サイドアウト",
     break_point: "ブレイク",
+    side_out_phase: "サイドアウト",
+    break_phase: "ブレイク",
     trend: "推移",
     so_far: "これまで",
     last_touches: "直近のタッチ",
@@ -1453,8 +1461,7 @@ const JA: Strings = Strings {
     roster_toggle: "追加 / 削除",
     home_page: "ホーム",
     switch_theme: "ライト / ダークテーマ",
-    receiving: "レシーブ",
-    serving: "サーブ",
+    quit: "終了",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {
