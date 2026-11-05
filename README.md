@@ -14,36 +14,26 @@ It runs on **Windows, macOS and Linux**; an **Android** app is in testing.
 
 ## features
 
-- **scouting from the keyboard**: pick the event, the player and the evaluation; the app follows
-  the rotation, the phase and the libero, offers only what makes sense and keeps the score
-- **zones of play**: serve and attack destination, reception, dig and block zones on the DataVolley
-  grid, plus set tempo and number of blockers, all optional
+- **scouting from the keyboard**: pick the event, the player and the evaluation; the app follows the rotation, the phase and the libero, offers only what makes sense and keeps the score
+- **zones of play**: serve and attack destination, reception, dig and block zones on a grid, plus set tempo and number of blockers, all optional
 - **substitutions, libero and setter changes**, undo and correction of any event of the set
-- **match statistics**, while scouting and afterwards: efficiency and positivity of each
-  fundamental, side-out and break point by rotation, setter distribution, errors, trends rally by
-  rally; filters by set, player, rotation, phase, role and quality of the reception
-- **team analysis** over several matches (the last month, the last N, any period), with
-  match-by-match trends
+- **match statistics**, while scouting and afterwards: efficiency and positivity of each fundamental, side-out and break point by rotation, setter distribution, errors, trends rally by rally; filters by set, player, rotation, phase, role and quality of the reception
+- **team analysis** over several matches (the last month, the last N, any period), with match-by-match trends
 - **DataVolley import** (`.dvw`), with zones
 - **PDF report** laid out as a scoresheet
 - **export and import** of teams and matches, to share them with colleagues
-- **customizable keys**, five languages (English, Italian, Portuguese, Polish, Japanese), light
-  and dark theme
-- **automatic updates**: at startup the app checks for a new version and, if you agree, installs
-  it and restarts
+- **customizable keys**, five languages (English, Italian, Portuguese, Polish, Japanese), light and dark theme
+- **automatic updates**: at startup the app checks for a new version and, if you agree, installs it and restarts
 
-| Match statistics | Team analysis |
+| match statistics | team analysis |
 | --- | --- |
 | ![The summary of the statistics of a match](web/src/assets/screens/en/stats-summary.webp) | ![The analysis of a team over its last matches](web/src/assets/screens/en/team-analysis.webp) |
 | ![The detail of the statistics: serve evaluations, players, serves by zone](web/src/assets/screens/en/stats-detail.webp) | ![The home screen: matches in progress, recent matches and teams](web/src/assets/screens/en/home.webp) |
 
 ## download
 
-Get the latest version for your system from the [website](https://naighes.github.io/scoutforall/#download)
-or from the [releases](https://github.com/naighes/scoutforall/releases/latest).
-
-Coming from the old terminal version? Nothing to do: at its next start it offers to update and
-installs the desktop app in its place, with all your teams and matches.
+Get the latest version for your system from the [website](https://naighes.github.io/scoutforall/#download) or from the [releases](https://github.com/naighes/scoutforall/releases/latest).  
+Coming from the old terminal version? Nothing to do: at its next start it offers to update and installs the desktop app in its place, with all your teams and matches.
 
 ## data folder
 
