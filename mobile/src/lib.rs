@@ -15,7 +15,7 @@ use scout4all_core::{
     },
     archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
-    detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation},
+    detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation_in},
     dvw::{
         self,
         import::{
@@ -31,7 +31,7 @@ use scout4all_core::{
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error},
     match_form::{MatchForm, MatchFormError},
-    overview::{Errors, Fundamental, Overview, distribution, stats_of},
+    overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
     player_form::{PlayerForm, PlayerFormError, removal},
     providers::{
         match_reader::MatchReader,
@@ -56,12 +56,12 @@ use scout4all_core::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
-        flags::BlockersEnum,
+        flags::{BlockersEnum, ReceptionSchemeEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
-        stats::{AttackSummary, Metric, Stats, StatsFilter},
+        stats::{AttackSummary, EvalSet, Metric, SetTypeSet, SituationFilter, Stats, StatsFilter},
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
@@ -87,6 +87,9 @@ use tokio::runtime::{Builder, Runtime};
 use uuid::Uuid;
 
 uniffi::setup_scaffolding!();
+
+mod analysis;
+pub use analysis::*;
 
 // the types of the core the app sees as they are
 
@@ -241,6 +244,13 @@ pub enum Tone {
     Fair,
     Poor,
     Bad,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ReceptionSchemeEnum {
+    Three,
+    Four,
+    Two,
 }
 
 #[uniffi::remote(Enum)]
@@ -414,7 +424,7 @@ impl From<MatchFormError> for MatchField {
 }
 
 /// A role as the form offers it.
-#[derive(Debug, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RoleChoice {
     pub value: RoleEnum,
     pub name: String,
@@ -1344,6 +1354,26 @@ pub struct DetailFilter {
     pub rotation: Option<u8>,
     /// the id of a player
     pub player: Option<String>,
+    // the situation (see `SituationFilter` in the core): empty or none
+    // keeps them all
+    /// the role of the player in the rotation
+    #[uniffi(default)]
+    pub role: Option<RoleEnum>,
+    /// our reception in the rally
+    #[uniffi(default)]
+    pub reception: Vec<EvalEnum>,
+    /// our touch before, in the rally
+    #[uniffi(default)]
+    pub previous: Vec<EvalEnum>,
+    /// the set of the attack
+    #[uniffi(default)]
+    pub set_types: Vec<SetTypeEnum>,
+    /// how many received their serve
+    #[uniffi(default)]
+    pub scheme: Option<ReceptionSchemeEnum>,
+    /// in P1 in side out, the P1 inverted or not
+    #[uniffi(default)]
+    pub inverted_p1: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -1928,6 +1958,17 @@ fn live_stats(
     labels: &Labels,
 ) -> Result<LiveStats, MobileError> {
     let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
+    Ok(LiveStats {
+        scope,
+        sets: all.iter().map(|s| s.set_number).collect(),
+        trend: trend_lines(all, max_substitutions, team, labels)?,
+        ..summary(&stats, &StatsFilter::default(), team, labels)
+    })
+}
+
+/// What the coach wants to know of the statistics, narrowed by the
+/// filter: with no sets to choose and no trend (see `live_stats`).
+fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Labels) -> LiveStats {
     let level = |measure: Measure, value: Option<f64>| {
         value.and_then(|v| grade(team.classification, team.gender, measure, v))
     };
@@ -1939,8 +1980,7 @@ fn live_stats(
         efficiency: a.efficiency(),
         grade: level(Measure::Attack, Some(a.efficiency())),
     };
-    let trend = trend_lines(all, max_substitutions, team, labels)?;
-    let o = Overview::of(&stats);
+    let o = Overview::narrowed(stats, filter);
     let fundamental = |event: EventTypeEnum, f: Fundamental| FundamentalStats {
         event,
         name: event.friendly_name(labels).to_string(),
@@ -1968,7 +2008,7 @@ fn live_stats(
             .collect()
     };
     let zones = |counter_attack| {
-        distribution(&stats, counter_attack)
+        distribution_in(stats, counter_attack, filter)
             .into_iter()
             .map(|z| ZoneStats {
                 zone: zone_number(z.zone),
@@ -1977,9 +2017,9 @@ fn live_stats(
             })
             .collect()
     };
-    Ok(LiveStats {
-        scope,
-        sets: all.iter().map(|s| s.set_number).collect(),
+    LiveStats {
+        scope: StatsScope::Match,
+        sets: vec![],
         fundamentals: vec![
             fundamental(EventTypeEnum::P, o.reception),
             fundamental(EventTypeEnum::A, o.attack),
@@ -2014,8 +2054,8 @@ fn live_stats(
         first_attack_distribution: zones(Some(false)),
         counter_attack_distribution: zones(Some(true)),
         graded: team.classification.is_some() && team.gender.is_some(),
-        trend,
-        rotations: by_rotation(&stats)
+        trend: vec![],
+        rotations: by_rotation_in(stats, filter)
             .into_iter()
             .map(|r| RotationStats {
                 rotation: r.rotation,
@@ -2024,7 +2064,7 @@ fn live_stats(
                 break_points: phase(r.break_points, Measure::BreakPoint),
             })
             .collect(),
-    })
+    }
 }
 
 /// The sets of the scope, among the sets of the match so far.
@@ -2050,16 +2090,43 @@ fn detail_stats(
     event: EventTypeEnum,
     filter: DetailFilter,
 ) -> Result<DetailStats, MobileError> {
-    let player = filter.player.as_deref().map(parse_id).transpose()?;
-    let narrowed = StatsFilter::new(filter.phase, filter.rotation, player);
     let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
+    let everyone = stats_of(all, max_substitutions)?;
+    Ok(DetailStats {
+        scope,
+        sets: all.iter().map(|s| s.set_number).collect(),
+        ..detail_of(&stats, &everyone, &[team], labels, event, filter)?
+    })
+}
+
+/// A fundamental (one of `detail::FUNDAMENTALS`) of the statistics, narrowed
+/// by the filter: the players to choose are the ones with an event in
+/// `everyone`, found in the first of `teams` having them (the team as each
+/// match saw it); the grades by the level of the first team. With no sets
+/// to choose (see `detail_stats`).
+fn detail_of(
+    stats: &Stats,
+    everyone: &Stats,
+    teams: &[&TeamEntry],
+    labels: &Labels,
+    event: EventTypeEnum,
+    filter: DetailFilter,
+) -> Result<DetailStats, MobileError> {
+    let narrowed = narrowed(&filter)?;
+    let team = teams.first().copied().cloned().unwrap_or_default();
+    let team = &team;
     let level = |value: Option<f64>| {
         Measure::of(event)
             .zip(value)
             .and_then(|(m, v)| grade(team.classification, team.gender, m, v))
     };
-    let player_of = |id: Uuid| team.find_player(id).map(|p| scouting_player(p, labels));
-    let (fundamental, freeballs) = match Breakdown::of(&stats, event, &narrowed) {
+    let player_of = |id: Uuid| {
+        teams
+            .iter()
+            .find_map(|t| t.find_player(id))
+            .map(|p| scouting_player(p, labels))
+    };
+    let (fundamental, freeballs) = match Breakdown::of(stats, event, &narrowed) {
         Breakdown::Fundamental(d) => (
             Some(FundamentalDetail {
                 total: d.total,
@@ -2147,7 +2214,7 @@ fn detail_stats(
                         efficiency: b.efficiency,
                     })
                     .collect(),
-                players: by_player(&stats, event, &narrowed)
+                players: by_player(stats, event, &narrowed)
                     .into_iter()
                     .filter_map(|line| {
                         player_of(line.player).map(|player| PlayerStats {
@@ -2177,7 +2244,7 @@ fn detail_stats(
             }),
         ),
     };
-    let mut players: Vec<ScoutingPlayer> = involved(&stats_of(all, max_substitutions)?)
+    let mut players: Vec<ScoutingPlayer> = involved(everyone)
         .into_iter()
         .filter_map(player_of)
         .collect();
@@ -2187,8 +2254,8 @@ fn detail_stats(
         _ => e.friendly_name(labels).to_string(),
     };
     Ok(DetailStats {
-        scope,
-        sets: all.iter().map(|s| s.set_number).collect(),
+        scope: StatsScope::Match,
+        sets: vec![],
         event,
         filter,
         fundamentals: FUNDAMENTALS
@@ -2215,6 +2282,22 @@ fn detail_stats(
         fundamental,
         freeballs,
     })
+}
+
+/// The statistics filter of the app's filter.
+fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
+    let player = filter.player.as_deref().map(parse_id).transpose()?;
+    let some = |evals: &[EvalEnum]| (!evals.is_empty()).then(|| EvalSet::of(evals));
+    Ok(
+        StatsFilter::new(filter.phase, filter.rotation, player).with_situation(SituationFilter {
+            role: filter.role,
+            reception: some(&filter.reception),
+            previous: some(&filter.previous),
+            set_types: (!filter.set_types.is_empty()).then(|| SetTypeSet::of(&filter.set_types)),
+            scheme: filter.scheme,
+            inverted_p1: filter.inverted_p1,
+        }),
+    )
 }
 
 /// The players with an event of ours in the statistics, by their id.
@@ -6566,5 +6649,109 @@ mod tests {
         );
         assert!(app.import_dvw(text.into_bytes(), choice, false).is_err());
         assert!(app.teams().unwrap().is_empty());
+    }
+
+    /// The analysis of a team: the matches of the period in order of date,
+    /// each figure match by match with the moving average, the statistics
+    /// together, the days played; a filter on the phase narrows them all.
+    #[test]
+    fn the_analysis_of_the_matches_of_a_period() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, first) = match_with_a_set(&app);
+        let second = app
+            .save_match(
+                team.clone(),
+                None,
+                match_form("Siena", "2026-10-31T18:00:00+01:00", "8"),
+            )
+            .unwrap();
+        // not played: never in the analysis
+        app.save_match(
+            team.clone(),
+            None,
+            match_form("Pisa", "2026-10-27T18:00:00+01:00", "8"),
+        )
+        .unwrap();
+        let scouting = started_set(&app, &team, &first);
+        for _ in 0..3 {
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        }
+        let scouting = started_set(&app, &team, &second);
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let analysis = |period, filter| {
+            app.team_analysis(team.clone(), period, EventTypeEnum::S, filter)
+                .unwrap()
+        };
+        let last_two = analysis(
+            AnalysisPeriod::LastMatches { count: 2 },
+            DetailFilter::default(),
+        );
+        let opponents: Vec<&str> = last_two
+            .matches
+            .iter()
+            .map(|m| m.opponent.as_str())
+            .collect();
+        assert_eq!(opponents, ["Arezzo", "Siena"]);
+        assert_eq!(last_two.from.as_deref(), Some("2026-10-24"));
+        assert_eq!(last_two.to.as_deref(), Some("2026-10-31"));
+        assert_eq!(last_two.played_days, ["2026-10-24", "2026-10-31"]);
+        let serve = last_two
+            .trend
+            .iter()
+            .find(|t| t.series == Series::Serve)
+            .unwrap();
+        assert_eq!(serve.values, [Some(100.0), Some(0.0)]);
+        assert_eq!(serve.moving, [Some(100.0), Some(60.0)]);
+        assert_eq!(serve.touches, [3, 2]);
+        assert_eq!(serve.overall, Some(60.0));
+        assert_eq!(last_two.summary.aces, 4);
+        let detail = last_two.detail.fundamental.unwrap();
+        assert_eq!(detail.total, 5);
+        // the days the other way round: the same period
+        let between = analysis(
+            AnalysisPeriod::Between {
+                from: "2026-10-31".into(),
+                to: "2026-10-24".into(),
+            },
+            DetailFilter::default(),
+        );
+        assert_eq!(between.matches.len(), 2);
+        let only_last = analysis(
+            AnalysisPeriod::Between {
+                from: "2026-10-25".into(),
+                to: "2026-10-31".into(),
+            },
+            DetailFilter::default(),
+        );
+        assert_eq!(only_last.summary.aces, 1);
+        // the serves are in break: none in side out
+        let side_out = analysis(
+            AnalysisPeriod::LastMatches { count: 2 },
+            DetailFilter {
+                phase: Some(PhaseEnum::SideOut),
+                ..DetailFilter::default()
+            },
+        );
+        assert_eq!(side_out.summary.aces, 0);
+        let serve = side_out
+            .trend
+            .iter()
+            .find(|t| t.series == Series::Serve)
+            .unwrap();
+        assert_eq!(serve.values, [None, None]);
+        assert!(
+            app.team_analysis(
+                team.clone(),
+                AnalysisPeriod::Between {
+                    from: "31/10/2026".into(),
+                    to: "2026-10-24".into(),
+                },
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .is_err()
+        );
     }
 }

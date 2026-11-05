@@ -94,13 +94,7 @@ impl Series {
             Series::BreakPoint => PhaseEnum::Break,
             _ => PhaseEnum::SideOut,
         };
-        match filter.phase {
-            Some(asked) if asked != phase => None,
-            _ => Some(StatsFilter {
-                phase: Some(phase),
-                ..*filter
-            }),
-        }
+        crate::overview::in_phase(filter, phase)
     }
 }
 

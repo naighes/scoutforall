@@ -34,13 +34,12 @@ pub struct Fundamental {
 }
 
 impl Fundamental {
-    fn of(stats: &Stats, event_type: EventTypeEnum) -> Self {
-        let all = StatsFilter::default();
+    fn of(stats: &Stats, event_type: EventTypeEnum, filter: &StatsFilter) -> Self {
         Fundamental {
-            total: stats.event_count(event_type, None, &all),
-            efficiency: stats.metric_percentage(event_type, Metric::Efficiency, &all),
-            perfect: stats.event_count(event_type, Some(EvalEnum::Perfect), &all),
-            errors: stats.errors(event_type, None, &all),
+            total: stats.event_count(event_type, None, filter),
+            efficiency: stats.metric_percentage(event_type, Metric::Efficiency, filter),
+            perfect: stats.event_count(event_type, Some(EvalEnum::Perfect), filter),
+            errors: stats.errors(event_type, None, filter),
         }
     }
 }
@@ -58,11 +57,10 @@ pub struct Errors {
 }
 
 impl Errors {
-    fn of(stats: &Stats, error_type: ErrorTypeEnum) -> Self {
-        let all = StatsFilter::default();
+    fn of(stats: &Stats, error_type: ErrorTypeEnum, filter: &StatsFilter) -> Self {
         let by_event: Vec<(EventTypeEnum, u32)> = Self::events(error_type)
             .iter()
-            .map(|et| (*et, stats.errors(*et, Some(error_type), &all)))
+            .map(|et| (*et, stats.errors(*et, Some(error_type), filter)))
             .collect();
         Errors {
             total: by_event.iter().map(|(_, n)| n).sum(),
@@ -123,28 +121,46 @@ pub struct Overview {
 
 impl Overview {
     pub fn of(stats: &Stats) -> Self {
+        Self::narrowed(stats, &StatsFilter::default())
+    }
+
+    /// The overview narrowed by the filter: a phase asked leaves the other
+    /// one empty.
+    pub fn narrowed(stats: &Stats, filter: &StatsFilter) -> Self {
         use EventTypeEnum::*;
-        let all = StatsFilter::default();
-        let phase = |p| stats.rallies_won(&StatsFilter::new(Some(p), None, None));
+        let phase = |p| in_phase(filter, p).and_then(|f| stats.rallies_won(&f));
         Overview {
-            reception: Fundamental::of(stats, P),
-            attack: Fundamental::of(stats, A),
-            serve: Fundamental::of(stats, S),
-            block: Fundamental::of(stats, B),
-            dig: Fundamental::of(stats, D),
+            reception: Fundamental::of(stats, P, filter),
+            attack: Fundamental::of(stats, A, filter),
+            serve: Fundamental::of(stats, S, filter),
+            block: Fundamental::of(stats, B, filter),
+            dig: Fundamental::of(stats, D, filter),
             side_out: phase(PhaseEnum::SideOut),
-            side_out_possessions: side_out_possessions(stats, &all),
+            side_out_possessions: side_out_possessions(stats, filter),
             break_points: phase(PhaseEnum::Break),
-            first_attack: stats.attack_summary(false, &all),
-            counter_attack: stats.attack_summary(true, &all),
-            unforced_errors: Errors::of(stats, ErrorTypeEnum::Unforced),
-            forced_errors: Errors::of(stats, ErrorTypeEnum::Forced),
-            aces: stats.event_count(S, Some(EvalEnum::Perfect), &all),
-            aces_against: stats.event_count(P, Some(EvalEnum::Error), &all)
-                + stats.untouched_aces(&all),
-            opponent_errors: stats.event_count(OE, None, &all),
-            opponent_points: stats.event_count(OS, None, &all) - stats.untouched_aces(&all),
+            first_attack: stats.attack_summary(false, filter),
+            counter_attack: stats.attack_summary(true, filter),
+            unforced_errors: Errors::of(stats, ErrorTypeEnum::Unforced, filter),
+            forced_errors: Errors::of(stats, ErrorTypeEnum::Forced, filter),
+            aces: stats.event_count(S, Some(EvalEnum::Perfect), filter),
+            aces_against: stats.event_count(P, Some(EvalEnum::Error), filter)
+                + stats.untouched_aces(filter),
+            opponent_errors: stats.event_count(OE, None, filter),
+            opponent_points: stats
+                .event_count(OS, None, filter)
+                .saturating_sub(stats.untouched_aces(filter)),
         }
+    }
+}
+
+/// The filter on a phase, `None` when it asks the other one.
+pub fn in_phase(filter: &StatsFilter, phase: PhaseEnum) -> Option<StatsFilter> {
+    match filter.phase {
+        Some(asked) if asked != phase => None,
+        _ => Some(StatsFilter {
+            phase: Some(phase),
+            ..*filter
+        }),
     }
 }
 
@@ -174,12 +190,20 @@ pub fn stats_of(sets: &[&SetEntry], max_substitutions: u8) -> Result<Stats, AppE
 /// to 100; empty with no attacks. The attacks with no zone (a back row
 /// setter or middle blocker, the libero) aren't in it.
 pub fn distribution(stats: &Stats, counter_attack: Option<bool>) -> Vec<ZoneShare> {
-    let all = StatsFilter::default();
+    distribution_in(stats, counter_attack, &StatsFilter::default())
+}
+
+/// The distribution narrowed by the filter (see `distribution`).
+pub fn distribution_in(
+    stats: &Stats,
+    counter_attack: Option<bool>,
+    filter: &StatsFilter,
+) -> Vec<ZoneShare> {
     let zones: Vec<(ZoneEnum, AttackSummary)> = DISTRIBUTION_ZONES
         .iter()
         .filter_map(|z| {
             stats
-                .zone_attacks(*z, counter_attack, &all)
+                .zone_attacks(*z, counter_attack, filter)
                 .map(|a| (*z, a))
         })
         .collect();
