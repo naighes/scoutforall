@@ -1,5 +1,5 @@
 //! The self update, from the GitHub releases of the repository, as the TUI
-//! does it (`src/updater.rs`): the same asset, `scout4all-<target>` (`.exe`
+//! (released up to v0.13.0, then removed) does it: the same asset, `scout4all-<target>` (`.exe`
 //! on windows), so that the old TUIs update to the desktop app and the app
 //! goes on updating itself. At startup the app looks for a newer release;
 //! when there's one it asks, in the bar, then downloads it, checks that it
@@ -169,7 +169,7 @@ mod tests {
     }
 }
 
-// as the TUI's (src/updater.rs): a release served as the GitHub API does
+// as the TUI's (its src/updater.rs, up to v0.13.0): a release served as the GitHub API does
 #[cfg(test)]
 #[cfg(all(unix, feature = "self-update"))]
 mod release_tests {

@@ -749,7 +749,7 @@ mod tests {
 
     /// Three sets won by the home team (`Home`), on 2015-01-25: the file
     /// of the tests of the TUI.
-    const THREE_SETS: &[u8] = include_bytes!("../../src/tests/fixtures/three_sets.dvw");
+    const THREE_SETS: &[u8] = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw");
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
         Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()

@@ -568,7 +568,7 @@ mod tests {
     /// The match of the tests of the TUI, three sets, imported.
     fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
         let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
-        let bytes = include_bytes!("../../src/tests/fixtures/three_sets.dvw").to_vec();
+        let bytes = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
             side: DvwSide::Home,
             day: "2015-01-25".into(),

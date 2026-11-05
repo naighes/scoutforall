@@ -1,6 +1,6 @@
-//! The desktop app of scout4all (027), replacing the TUI: the home, the
-//! scouting of a set in progress, the keys of the scouting (F2). It reads
-//! the data of the TUI (`~/.scout4all`, or `SCOUT4ALL_DATA_DIR`) and its
+//! The desktop app of scout4all (027), which took the place of the TUI: the
+//! home, the scouting of a set in progress, the keys of the scouting (F2).
+//! It reads the data of the TUI (`~/.scout4all`, or `SCOUT4ALL_DATA_DIR`) and its
 //! keys.
 
 // no console window on windows for the builds of the releases: `--version`

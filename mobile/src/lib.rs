@@ -6397,7 +6397,7 @@ mod tests {
 
     /// Three sets won by the home team ("Home", players 1 to 7, the libero
     /// 7) against "Visiting", on 2015-01-25: the fixture of the TUI.
-    const THREE_SETS: &[u8] = include_bytes!("../../src/tests/fixtures/three_sets.dvw");
+    const THREE_SETS: &[u8] = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw");
 
     fn dvw_choice(side: DvwSide, team_id: Option<String>) -> DvwChoice {
         DvwChoice {

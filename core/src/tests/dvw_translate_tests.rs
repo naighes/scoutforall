@@ -1286,7 +1286,8 @@ mod tests {
     }
 
     /// Writes the match of three sets won to `DVW_OUT`, the fixture of the
-    /// import tests of the TUI and the app.
+    /// import tests of the desktop app, of `mobile` and of the Android app
+    /// (`fixtures/three_sets.dvw`).
     #[test]
     #[ignore]
     fn write_three_sets_won() {

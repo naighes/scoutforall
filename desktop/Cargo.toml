@@ -1,6 +1,6 @@
 [package]
 name = "scout4all-desktop"
-description = "The desktop app of scout4all (Windows, macOS, Linux), written with iced: it will replace the TUI."
+description = "The desktop app of scout4all (Windows, macOS, Linux), written with iced: it took the place of the TUI."
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -37,5 +37,11 @@ self-update = ["self_update"]
 [dev-dependencies]
 tempfile.workspace = true
 
+[build-dependencies]
+winres = "0.1.12"
+
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["winres"]
