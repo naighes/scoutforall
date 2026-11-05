@@ -179,6 +179,11 @@ impl Scout4All {
             self.language.labels(),
         )
     }
+
+    /// What the filters on the situation offer, also for a match.
+    pub fn situation_choices(&self) -> SituationChoices {
+        situation_choices(self.language.labels())
+    }
 }
 
 /// The analysis of the matches of the team (see `Scout4All::team_analysis`).

@@ -41,6 +41,7 @@ pub enum Message {
     Match(usize),
     Import,
     Export,
+    Analysis,
     Form(form::Message),
     Confirm,
     Cancel,
@@ -55,6 +56,8 @@ pub enum Outcome {
     Import,
     /// the archive of the team, to save
     Export,
+    /// the statistics of the team over its matches
+    Analysis,
 }
 
 pub struct TeamScreen {
@@ -238,6 +241,7 @@ impl TeamScreen {
             }
             (Message::Import, Mode::Browse) => Outcome::Import,
             (Message::Export, Mode::Browse) => Outcome::Export,
+            (Message::Analysis, Mode::Browse) => Outcome::Analysis,
             (Message::Form(_) | Message::Confirm, Mode::Browse) => Outcome::Stay,
         }
     }
@@ -284,6 +288,7 @@ impl TeamScreen {
             (_, k) if k == key!(e) => self.edit_team(s),
             (_, k) if k == key!(i) => return Outcome::Import,
             (_, k) if k == key!(x) => return Outcome::Export,
+            (_, k) if k == key!(s) => return Outcome::Analysis,
             (Panel::Players, k) if k == key!(n) => self.edit_player(s, None),
             (Panel::Matches, k) if k == key!(n) => self.new_match(s),
             (Panel::Players, k) if k == key!(enter) && count > 0 => {
@@ -327,6 +332,7 @@ impl TeamScreen {
                         ("e".to_string(), s.edit_team.to_string()),
                         ("i".to_string(), s.import_archive.to_string()),
                         ("x".to_string(), s.export.to_string()),
+                        ("s".to_string(), s.analysis.to_string()),
                     ],
                     remove,
                     vec![("Esc".to_string(), s.back.to_string())],
@@ -382,6 +388,12 @@ impl TeamScreen {
                 line(s.gender, or_dash(&d.gender)),
                 line(s.country, or_dash(&d.country)),
                 space::vertical().height(6),
+                ui::pill(
+                    &format!("▤ {}", s.analysis),
+                    false,
+                    Some(Message::Analysis),
+                    c
+                ),
                 ui::pill(s.edit_team, false, Some(Message::EditTeam), c),
                 ui::pill(
                     &format!("↑ {}", s.export_team),

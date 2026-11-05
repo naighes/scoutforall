@@ -1,27 +1,42 @@
-//! The statistics of a match, the pages of the app side by side: the
-//! summary (fundamentals, phases, rotations, the distribution, the errors),
-//! the trend of every set, and a fundamental in detail. ⇧Tab Tab between
-//! the pages, ↑ ↓ between the filters, ← → change the filter, as in a form.
+//! The statistics of a match, or of a team over a period (010), the pages
+//! of the app side by side: the summary (fundamentals, phases, rotations,
+//! the distribution, the errors), the trend (of every set; of the team,
+//! match by match), and a fundamental in detail. ⇧Tab Tab between the
+//! pages, ↑ ↓ between the filters, ← → change the filter, as in a form.
+//! The filters stand on the left: the period of the team (the last month,
+//! the last matches, two days typed or picked on a calendar), the player,
+//! the rotation, the phase and the situation (role, our reception in the
+//! rally, the touch before, the set, the reception formation, the P1).
 
 use {
     crate::{
-        charts::{self, Trend},
+        calendar::{self, Calendar},
+        charts::{self, MatchesTrend, Trend},
+        form::Mask,
+        keymap,
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, grade_color},
         ui,
     },
+    chrono::{Local, NaiveDate},
     iced::{
         Alignment, Color, Element, Length,
-        widget::{Column, Row, column, container, row, scrollable, space, text},
+        widget::{Column, Row, button, column, container, row, scrollable, space, text},
     },
     scout4all_core::{
+        analysis::MOVING_WINDOW,
         detail::Tone,
-        shapes::enums::{EventTypeEnum, PhaseEnum},
+        shapes::{
+            enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum},
+            flags::ReceptionSchemeEnum,
+            technique::SetTypeEnum,
+        },
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        DetailFilter, DetailStats, ErrorCount, FundamentalDetail, LiveStats, MobileError,
-        PhaseStats, Scout4All, StatsScope, TargetStats,
+        AnalysisPeriod, DetailFilter, DetailStats, ErrorCount, FundamentalDetail, LiveStats,
+        MobileError, PhaseStats, Scout4All, SituationChoices, StatsScope, TargetStats,
+        TeamAnalysis,
     },
     std::sync::Arc,
 };
@@ -39,13 +54,51 @@ const PAGES: [Page; 3] = [Page::Summary, Page::Trend, Page::Detail];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Filter {
     Scope,
+    Period,
     Series,
     Mode,
     Event,
     Player,
     Rotation,
     Phase,
+    Role,
+    Reception,
+    Previous,
+    SetType,
+    Scheme,
+    InvertedP1,
     Zones,
+}
+
+/// The filters on the situation, after the player, rotation and phase.
+const SITUATION: [Filter; 6] = [
+    Filter::Role,
+    Filter::Reception,
+    Filter::Previous,
+    Filter::SetType,
+    Filter::Scheme,
+    Filter::InvertedP1,
+];
+
+/// How the period of a team is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    LastMonth,
+    LastMatches,
+    Between,
+}
+
+const KINDS: [Kind; 3] = [Kind::LastMonth, Kind::LastMatches, Kind::Between];
+
+/// The last matches offered first, as in the coach's "the last 4".
+const LAST_MATCHES: u32 = 4;
+
+/// Where the statistics come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Source {
+    Match(String),
+    /// the matches of the team in the period
+    Team,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +112,20 @@ pub enum Message {
     Rotation(Option<u8>),
     Phase(Option<PhaseEnum>),
     Efficiency(bool),
+    Kind(Kind),
+    Last(u32),
+    /// a day picked on the calendar
+    Day(NaiveDate),
+    /// the calendar a month back (-1) or on (1)
+    Month(i32),
+    /// the day to write: the last of the period (true) or the first
+    Editing(bool),
+    Role(Option<RoleEnum>),
+    Reception(Vec<EvalEnum>),
+    Previous(Vec<EvalEnum>),
+    SetTypes(Vec<SetTypeEnum>),
+    Scheme(Option<ReceptionSchemeEnum>),
+    InvertedP1(Option<bool>),
 }
 
 pub enum Outcome {
@@ -66,10 +133,83 @@ pub enum Outcome {
     Back,
 }
 
+/// The two days of a period, as written, and the month of the calendar.
+#[derive(Debug, Clone)]
+struct Days {
+    from: String,
+    to: String,
+    /// the last day is written (or picked) next, not the first
+    editing_to: bool,
+    /// the first day of the month shown
+    month: NaiveDate,
+}
+
+impl Days {
+    /// A day written whole: chrono would take "2026-10-2" too.
+    fn parse(text: &str) -> Option<NaiveDate> {
+        (text.len() == 10)
+            .then(|| NaiveDate::parse_from_str(text, "%Y-%m-%d").ok())
+            .flatten()
+    }
+
+    fn period(&self) -> Option<AnalysisPeriod> {
+        Self::parse(&self.from)
+            .zip(Self::parse(&self.to))
+            .map(|(from, to)| AnalysisPeriod::Between {
+                from: from.to_string(),
+                to: to.to_string(),
+            })
+    }
+
+    fn editing(&mut self) -> &mut String {
+        match self.editing_to {
+            true => &mut self.to,
+            false => &mut self.from,
+        }
+    }
+
+    /// A digit written on the day being written: the first day done, the
+    /// last one next.
+    fn type_digit(&mut self, digit: u8) {
+        let text = Mask::Date.apply(&format!("{}{digit}", self.editing()));
+        let done = Self::parse(&text);
+        *self.editing() = text;
+        if let (Some(day), false) = (done, self.editing_to) {
+            self.month = calendar::month_of(day);
+            self.editing_to = true;
+        }
+    }
+
+    /// The last digit written taken back, with the separator before it.
+    fn erase(&mut self) {
+        let mut digits: String = self
+            .editing()
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect();
+        digits.pop();
+        *self.editing() = Mask::Date.apply(&digits);
+    }
+
+    /// A day picked: the first, then the last (the two the right way round).
+    fn pick(&mut self, day: NaiveDate) {
+        let text = day.format("%Y-%m-%d").to_string();
+        match (self.editing_to, Self::parse(&self.from)) {
+            (true, Some(from)) if day < from => {
+                self.to = self.from.clone();
+                self.from = text;
+            }
+            (true, _) => self.to = text,
+            (false, _) => self.from = text,
+        }
+        self.editing_to = !self.editing_to;
+    }
+}
+
 pub struct StatsScreen {
     core: Arc<Scout4All>,
     pub team_id: String,
-    pub match_id: String,
+    pub source: Source,
     title: String,
     page: usize,
     scope: StatsScope,
@@ -85,6 +225,34 @@ pub struct StatsScreen {
     /// the filter the arrows change, on the page
     row: usize,
     error: Option<String>,
+    choices: SituationChoices,
+    // the team
+    analysis: Option<TeamAnalysis>,
+    period: AnalysisPeriod,
+    kind: Kind,
+    last: u32,
+    days: Days,
+    today: NaiveDate,
+    /// the days with a match, for the calendar
+    played: Vec<NaiveDate>,
+}
+
+/// The filters on the left.
+const FILTERS_WIDTH: f32 = 500.0;
+
+/// A day as the period shows it: `YYYY-MM-DD` as written.
+fn shown_day(day: &str) -> String {
+    day.to_string()
+}
+
+/// A day under the trend: day and month.
+fn short_day(day: &str) -> String {
+    Days::parse(day).map_or_else(|| day.to_string(), |d| d.format("%d/%m").to_string())
+}
+
+/// The same evaluations, whatever their order.
+fn same_set(a: &[EvalEnum], b: &[EvalEnum]) -> bool {
+    a.len() == b.len() && a.iter().all(|e| b.contains(e))
 }
 
 fn pct(v: Option<f64>) -> String {
@@ -164,14 +332,44 @@ impl StatsScreen {
             .match_details(team_id.clone(), match_id.clone())?
             .opponent;
         let live = core.match_stats(team_id.clone(), match_id.clone(), StatsScope::Match)?;
-        let mut screen = StatsScreen {
+        let mut screen = StatsScreen::with(
             core,
             team_id,
-            match_id,
-            title: format!("{team} – {opponent}"),
+            Source::Match(match_id),
+            format!("{team} – {opponent}"),
+        );
+        screen.live = Some(live);
+        screen.load();
+        Ok(screen)
+    }
+
+    /// The analysis of the team: the last month first.
+    pub fn team(
+        core: Arc<Scout4All>,
+        team_id: String,
+        s: &Strings,
+    ) -> Result<StatsScreen, MobileError> {
+        let team = core.team(team_id.clone())?.name;
+        let title = format!("{team} – {}", s.analysis);
+        let mut screen = StatsScreen::with(core, team_id, Source::Team, title);
+        screen.load();
+        match &screen.error {
+            Some(e) if screen.analysis.is_none() => Err(MobileError::Failed { reason: e.clone() }),
+            _ => Ok(screen),
+        }
+    }
+
+    fn with(core: Arc<Scout4All>, team_id: String, source: Source, title: String) -> Self {
+        let today = Local::now().date_naive();
+        let choices = core.situation_choices();
+        StatsScreen {
+            core,
+            team_id,
+            source,
+            title,
             page: 0,
             scope: StatsScope::Match,
-            live: Some(live),
+            live: None,
             detail: None,
             series: 0,
             recent: false,
@@ -181,30 +379,79 @@ impl StatsScreen {
             efficiency: false,
             row: 0,
             error: None,
-        };
-        screen.load();
-        Ok(screen)
+            choices,
+            analysis: None,
+            period: AnalysisPeriod::LastMonth,
+            kind: Kind::LastMonth,
+            last: LAST_MATCHES,
+            days: Days {
+                from: String::new(),
+                to: String::new(),
+                editing_to: false,
+                month: calendar::month_of(today),
+            },
+            today,
+            played: vec![],
+        }
     }
 
     pub fn title(&self) -> String {
         self.title.clone()
     }
 
-    /// Reads the statistics again, for the scope and the filter chosen.
-    fn load(&mut self) {
-        let (team, m) = (self.team_id.clone(), self.match_id.clone());
-        let live = self.core.match_stats(team.clone(), m.clone(), self.scope);
-        let detail = self
-            .core
-            .match_detail(team, m, self.scope, self.event, self.filter.clone());
-        self.error = None;
-        match live {
-            Ok(live) => self.live = Some(live),
-            Err(e) => self.error = Some(e.to_string()),
+    /// The match the statistics are of, if of a match.
+    pub fn match_id(&self) -> Option<String> {
+        match &self.source {
+            Source::Match(m) => Some(m.clone()),
+            Source::Team => None,
         }
-        match detail {
-            Ok(detail) => self.detail = Some(detail),
-            Err(e) => self.error = Some(e.to_string()),
+    }
+
+    fn is_team(&self) -> bool {
+        self.source == Source::Team
+    }
+
+    /// Reads the statistics again, for the scope (or period) and the
+    /// filter chosen.
+    fn load(&mut self) {
+        self.error = None;
+        let team = self.team_id.clone();
+        match self.source.clone() {
+            Source::Match(m) => {
+                let live = self.core.match_stats(team.clone(), m.clone(), self.scope);
+                let detail =
+                    self.core
+                        .match_detail(team, m, self.scope, self.event, self.filter.clone());
+                match live {
+                    Ok(live) => self.live = Some(live),
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+                match detail {
+                    Ok(detail) => self.detail = Some(detail),
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+            Source::Team => {
+                let analysis = self.core.team_analysis(
+                    team,
+                    self.period.clone(),
+                    self.event,
+                    self.filter.clone(),
+                );
+                match analysis {
+                    Ok(a) => {
+                        self.live = Some(a.summary.clone());
+                        self.detail = Some(a.detail.clone());
+                        self.played = a
+                            .played_days
+                            .iter()
+                            .filter_map(|d| Days::parse(d))
+                            .collect();
+                        self.analysis = Some(a);
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
         }
         self.retrend();
     }
@@ -223,25 +470,22 @@ impl StatsScreen {
             .as_ref()
             .and_then(|d| d.fundamental.as_ref())
             .is_some_and(|f| !f.targets.is_empty());
-        match (self.current(), zones) {
-            (Page::Summary, _) => vec![Filter::Scope],
-            (Page::Trend, _) => vec![Filter::Series, Filter::Mode],
-            (Page::Detail, false) => vec![
-                Filter::Scope,
-                Filter::Event,
-                Filter::Player,
-                Filter::Rotation,
-                Filter::Phase,
-            ],
-            (Page::Detail, true) => vec![
-                Filter::Scope,
-                Filter::Event,
-                Filter::Player,
-                Filter::Rotation,
-                Filter::Phase,
-                Filter::Zones,
-            ],
-        }
+        let narrow = [Filter::Player, Filter::Rotation, Filter::Phase];
+        let first: Vec<Filter> = match (self.is_team(), self.current()) {
+            (false, Page::Summary) => return vec![Filter::Scope],
+            (false, Page::Trend) => return vec![Filter::Series, Filter::Mode],
+            (false, Page::Detail) => vec![Filter::Scope, Filter::Event],
+            (true, Page::Summary) => vec![Filter::Period],
+            (true, Page::Trend) => vec![Filter::Period, Filter::Series],
+            (true, Page::Detail) => vec![Filter::Period, Filter::Event],
+        };
+        let zones = (self.current() == Page::Detail && zones).then_some(Filter::Zones);
+        first
+            .into_iter()
+            .chain(narrow)
+            .chain(SITUATION)
+            .chain(zones)
+            .collect()
     }
 
     fn scopes(&self) -> Vec<StatsScope> {
@@ -255,14 +499,34 @@ impl StatsScreen {
             .collect()
     }
 
+    /// The series of the trend: of the match, or of the team.
+    fn series_count(&self) -> usize {
+        match &self.analysis {
+            Some(a) if self.is_team() => a.trend.len(),
+            _ => self.live.as_ref().map_or(0, |l| l.trend.len()),
+        }
+    }
+
     /// The message ← (or →) sends on a filter.
     fn changed(&self, filter: Filter, forward: bool) -> Option<Message> {
         let detail = self.detail.as_ref();
+        let evals = |groups: bool| -> Vec<Vec<EvalEnum>> {
+            std::iter::once(vec![])
+                .chain(
+                    self.choices
+                        .groups
+                        .iter()
+                        .filter(move |_| groups)
+                        .map(|g| g.evals.clone()),
+                )
+                .chain(self.choices.symbols.iter().map(|s| vec![s.value]))
+                .collect()
+        };
         match filter {
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
+            Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),
             Filter::Series => {
-                let count = self.live.as_ref().map_or(0, |l| l.trend.len());
-                let series: Vec<usize> = (0..count).collect();
+                let series: Vec<usize> = (0..self.series_count()).collect();
                 ui::cycle(&series, &self.series, forward).map(Message::Series)
             }
             Filter::Mode => Some(Message::Recent(!self.recent)),
@@ -306,6 +570,56 @@ impl StatsScreen {
                     .collect();
                 ui::cycle(&phases, &self.filter.phase, forward).map(Message::Phase)
             }
+            Filter::Role => {
+                let roles: Vec<Option<RoleEnum>> = [None]
+                    .into_iter()
+                    .chain(self.choices.roles.iter().map(|r| Some(r.value)))
+                    .collect();
+                ui::cycle(&roles, &self.filter.role, forward).map(Message::Role)
+            }
+            Filter::Reception => {
+                ui::cycle(&evals(true), &self.filter.reception, forward).map(Message::Reception)
+            }
+            Filter::Previous => {
+                ui::cycle(&evals(true), &self.filter.previous, forward).map(Message::Previous)
+            }
+            Filter::SetType => {
+                let sets: Vec<Vec<SetTypeEnum>> = std::iter::once(vec![])
+                    .chain(self.choices.set_types.iter().map(|t| vec![t.value]))
+                    .collect();
+                ui::cycle(&sets, &self.filter.set_types, forward).map(Message::SetTypes)
+            }
+            Filter::Scheme => {
+                let schemes: Vec<Option<ReceptionSchemeEnum>> = [None]
+                    .into_iter()
+                    .chain(self.choices.schemes.iter().map(|s| Some(s.value)))
+                    .collect();
+                ui::cycle(&schemes, &self.filter.scheme, forward).map(Message::Scheme)
+            }
+            Filter::InvertedP1 => ui::cycle(
+                &[None, Some(false), Some(true)],
+                &self.filter.inverted_p1,
+                forward,
+            )
+            .map(Message::InvertedP1),
+        }
+    }
+
+    /// The period of the kind chosen: two days not written yet keep the
+    /// period as it was.
+    fn period_of(&self, kind: Kind) -> Option<AnalysisPeriod> {
+        match kind {
+            Kind::LastMonth => Some(AnalysisPeriod::LastMonth),
+            Kind::LastMatches => Some(AnalysisPeriod::LastMatches { count: self.last }),
+            Kind::Between => self.days.period(),
+        }
+    }
+
+    /// A period changed: read again if it's whole and new.
+    fn reperiod(&mut self) {
+        if let Some(period) = self.period_of(self.kind).filter(|p| *p != self.period) {
+            self.period = period;
+            self.load();
         }
     }
 
@@ -344,10 +658,90 @@ impl StatsScreen {
                 self.load();
             }
             Message::Efficiency(efficiency) => self.efficiency = efficiency,
+            Message::Kind(kind) => {
+                self.kind = kind;
+                // the days of the period shown, to start from
+                if let (Kind::Between, true, Some(a)) =
+                    (kind, self.days.from.is_empty(), &self.analysis)
+                {
+                    self.days.from = a.from.clone().unwrap_or_default();
+                    self.days.to = a.to.clone().unwrap_or_default();
+                    self.days.editing_to = false;
+                    if let Some(to) = Days::parse(&self.days.to) {
+                        self.days.month = calendar::month_of(to);
+                    }
+                }
+                self.reperiod();
+            }
+            Message::Last(last) => {
+                self.last = last.clamp(1, 99);
+                self.kind = Kind::LastMatches;
+                self.reperiod();
+            }
+            Message::Day(day) => {
+                self.days.pick(day);
+                self.kind = Kind::Between;
+                self.reperiod();
+            }
+            Message::Month(months) => self.days.month = calendar::shift(self.days.month, months),
+            Message::Editing(to) => self.days.editing_to = to,
+            Message::Role(role) => {
+                self.filter.role = role;
+                self.load();
+            }
+            Message::Reception(evals) => {
+                self.filter.reception = evals;
+                self.load();
+            }
+            Message::Previous(evals) => {
+                self.filter.previous = evals;
+                self.load();
+            }
+            Message::SetTypes(sets) => {
+                self.filter.set_types = sets;
+                self.load();
+            }
+            Message::Scheme(scheme) => {
+                self.filter.scheme = scheme;
+                self.load();
+            }
+            Message::InvertedP1(inverted) => {
+                self.filter.inverted_p1 = inverted;
+                self.load();
+            }
         }
         let rows = self.filters().len();
         self.row = self.row.min(rows.saturating_sub(1));
         Outcome::Stay
+    }
+
+    /// The keys of the period: + − the last matches; the digits, ⌫,
+    /// space, PgUp PgDn the two days.
+    fn period_key(&mut self, ck: KeyCombination) -> Option<Outcome> {
+        let letter = ck.as_letter();
+        match (self.kind, keymap::digit(&ck)) {
+            (Kind::LastMatches, _) if matches!(letter, Some('+' | '=')) => {
+                Some(self.update(Message::Last(self.last + 1)))
+            }
+            (Kind::LastMatches, _) if letter == Some('-') => {
+                Some(self.update(Message::Last(self.last.saturating_sub(1))))
+            }
+            (Kind::Between, Some(digit)) => {
+                self.days.type_digit(digit);
+                self.reperiod();
+                Some(Outcome::Stay)
+            }
+            (Kind::Between, None) if ck == key!(backspace) => {
+                self.days.erase();
+                Some(Outcome::Stay)
+            }
+            (Kind::Between, None) if ck == key!(space) => {
+                Some(self.update(Message::Editing(!self.days.editing_to)))
+            }
+            (Kind::Between, None) if ck == key!(pageup) => Some(self.update(Message::Month(-1))),
+            (Kind::Between, None) if ck == key!(pagedown) => Some(self.update(Message::Month(1))),
+            _ => None,
+        }
     }
 
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
@@ -355,6 +749,11 @@ impl StatsScreen {
         let pages = PAGES.len();
         let previous_page =
             ck == key!(shift - tab) || ck == key!(shift - backtab) || ck == key!(backtab);
+        if self.filters().get(self.row) == Some(&Filter::Period)
+            && let Some(outcome) = self.period_key(ck)
+        {
+            return outcome;
+        }
         match ck {
             k if k == BACK_KEY => Outcome::Back,
             k if k == key!(tab) => self.update(Message::Page((self.page + 1) % pages)),
@@ -382,12 +781,29 @@ impl StatsScreen {
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        vec![
+        let period = match (self.filters().get(self.row), self.kind) {
+            (Some(Filter::Period), Kind::LastMatches) => {
+                vec![(
+                    "+ −".to_string(),
+                    ui::fill(s.last_matches, &["N".to_string()]),
+                )]
+            }
+            (Some(Filter::Period), Kind::Between) => vec![
+                ("0–9 ⌫".to_string(), s.date.to_string()),
+                ("␣".to_string(), s.from_to.to_string()),
+                ("PgUp PgDn".to_string(), s.calendar_month.to_string()),
+            ],
+            _ => vec![],
+        };
+        [
             ("⇧⇥ ⇥".to_string(), s.page.to_string()),
             ("↑ ↓".to_string(), s.filter.to_string()),
             ("← →".to_string(), s.change.to_string()),
-            ("Esc".to_string(), s.back.to_string()),
         ]
+        .into_iter()
+        .chain(period)
+        .chain([("Esc".to_string(), s.back.to_string())])
+        .collect()
     }
 
     // --- view ------------------------------------------------------------
@@ -405,25 +821,31 @@ impl StatsScreen {
                 .enumerate()
                 .map(|(i, f)| self.filter_row(f, i == self.row, s, c)),
         )
-        .spacing(6);
+        .spacing(8);
         let error: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => space::vertical().height(0).into(),
         };
-        let page: Element<'a, Message> = match (self.current(), &self.live) {
-            (_, None) => space::vertical().into(),
-            (Page::Summary, Some(live)) => summary(live, s, c),
-            (Page::Trend, Some(live)) => self.trend_page(live, s, c),
-            (Page::Detail, _) => self.detail_page(s, c),
+        let empty = self
+            .analysis
+            .as_ref()
+            .is_some_and(|a| self.is_team() && a.matches.is_empty());
+        let page: Element<'a, Message> = match (self.current(), &self.live, empty) {
+            (_, _, true) => ui::panel(None, small(s.no_matches_period, c), c),
+            (_, None, _) => space::vertical().into(),
+            (Page::Summary, Some(live), _) => summary(live, s, c),
+            (Page::Trend, Some(live), _) => match &self.analysis {
+                Some(a) if self.is_team() => self.matches_page(a, s, c),
+                _ => self.trend_page(live, s, c),
+            },
+            (Page::Detail, _, _) => self.detail_page(s, c),
         };
-        column![
-            tabs,
-            ui::panel(None, filters, c),
-            error,
-            container(page).height(Length::Fill)
-        ]
-        .spacing(12)
-        .into()
+        let left = container(scrollable(ui::panel(None, filters, c)).height(Length::Fill))
+            .width(Length::Fixed(FILTERS_WIDTH));
+        let right = column![tabs, error, container(page).height(Length::Fill)]
+            .spacing(12)
+            .width(Length::Fill);
+        row![left, right].spacing(14).into()
     }
 
     /// A filter: its name, then a pill each choice; the row the arrows are
@@ -440,7 +862,46 @@ impl StatsScreen {
         };
         let all = |chosen: bool, message: Message| pill(s.filter_all.to_string(), chosen, message);
         let detail = self.detail.as_ref();
+        let evals = |chosen: &Vec<EvalEnum>, message: fn(Vec<EvalEnum>) -> Message| {
+            let toggled = |e: EvalEnum| -> Vec<EvalEnum> {
+                let mut evals: Vec<EvalEnum> = chosen.iter().copied().filter(|c| *c != e).collect();
+                if !chosen.contains(&e) {
+                    evals.push(e);
+                }
+                evals
+            };
+            let names = [s.positive_group, "!", s.negative_group];
+            [all(chosen.is_empty(), message(vec![]))]
+                .into_iter()
+                .chain(
+                    self.choices
+                        .groups
+                        .iter()
+                        .zip(names)
+                        .filter(|(g, _)| g.evals.len() > 1)
+                        .map(|(g, name)| {
+                            let same = same_set(chosen, &g.evals);
+                            pill(
+                                format!("{name} {}", g.symbols),
+                                same,
+                                message(match same {
+                                    true => vec![],
+                                    false => g.evals.clone(),
+                                }),
+                            )
+                        }),
+                )
+                .chain(self.choices.symbols.iter().map(|sym| {
+                    pill(
+                        sym.symbol.clone(),
+                        chosen.contains(&sym.value),
+                        message(toggled(sym.value)),
+                    )
+                }))
+                .collect::<Vec<_>>()
+        };
         let (name, pills): (&str, Vec<Element<'a, Message>>) = match filter {
+            Filter::Period => return self.period_row(on, s, c),
             Filter::Scope => (
                 s.sets,
                 self.scopes()
@@ -454,20 +915,26 @@ impl StatsScreen {
                     })
                     .collect(),
             ),
-            Filter::Series => (
-                s.series,
-                self.live
-                    .iter()
-                    .flat_map(|l| l.trend.iter().enumerate())
-                    .map(|(i, line)| {
-                        pill(
-                            ui::capitalized(&line.name),
-                            i == self.series,
-                            Message::Series(i),
-                        )
-                    })
-                    .collect(),
-            ),
+            Filter::Series => {
+                let names: Vec<String> = match &self.analysis {
+                    Some(a) if self.is_team() => a.trend.iter().map(|l| l.name.clone()).collect(),
+                    _ => self
+                        .live
+                        .iter()
+                        .flat_map(|l| l.trend.iter().map(|t| t.name.clone()))
+                        .collect(),
+                };
+                (
+                    s.series,
+                    names
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, name)| {
+                            pill(ui::capitalized(&name), i == self.series, Message::Series(i))
+                        })
+                        .collect(),
+                )
+            }
             Filter::Mode => (
                 s.mode,
                 vec![
@@ -547,8 +1014,225 @@ impl StatsScreen {
                     }))
                     .collect(),
             ),
+            Filter::Role => (
+                s.role,
+                [all(self.filter.role.is_none(), Message::Role(None))]
+                    .into_iter()
+                    .chain(self.choices.roles.iter().map(|r| {
+                        pill(
+                            ui::capitalized(&r.name),
+                            self.filter.role == Some(r.value),
+                            Message::Role(Some(r.value)),
+                        )
+                    }))
+                    .collect(),
+            ),
+            Filter::Reception => (
+                s.rally_reception,
+                evals(&self.filter.reception, Message::Reception),
+            ),
+            Filter::Previous => (
+                s.touch_before,
+                evals(&self.filter.previous, Message::Previous),
+            ),
+            Filter::SetType => {
+                let chosen = &self.filter.set_types;
+                (
+                    s.set_type,
+                    [all(chosen.is_empty(), Message::SetTypes(vec![]))]
+                        .into_iter()
+                        .chain(self.choices.set_types.iter().map(|t| {
+                            let mut toggled: Vec<SetTypeEnum> =
+                                chosen.iter().copied().filter(|c| *c != t.value).collect();
+                            if !chosen.contains(&t.value) {
+                                toggled.push(t.value);
+                            }
+                            ui::tip(
+                                pill(
+                                    t.code.clone(),
+                                    chosen.contains(&t.value),
+                                    Message::SetTypes(toggled),
+                                ),
+                                &t.name,
+                                c,
+                            )
+                        }))
+                        .collect(),
+                )
+            }
+            Filter::Scheme => (
+                s.reception_scheme,
+                [all(self.filter.scheme.is_none(), Message::Scheme(None))]
+                    .into_iter()
+                    .chain(self.choices.schemes.iter().map(|sc| {
+                        pill(
+                            ui::fill(s.receivers, &[sc.receivers.to_string()]),
+                            self.filter.scheme == Some(sc.value),
+                            Message::Scheme(Some(sc.value)),
+                        )
+                    }))
+                    .collect(),
+            ),
+            Filter::InvertedP1 => (
+                s.p1_kind,
+                vec![
+                    all(self.filter.inverted_p1.is_none(), Message::InvertedP1(None)),
+                    pill(
+                        s.canonical.to_string(),
+                        self.filter.inverted_p1 == Some(false),
+                        Message::InvertedP1(Some(false)),
+                    ),
+                    pill(
+                        s.inverted.to_string(),
+                        self.filter.inverted_p1 == Some(true),
+                        Message::InvertedP1(Some(true)),
+                    ),
+                ],
+            ),
         };
         ui::choice_line(name, on, pills, c)
+    }
+
+    /// The period: the last month, the last matches (+ −), two days written
+    /// or picked on the calendar; then the matches it takes.
+    fn period_row<'a>(&'a self, on: bool, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let pill = |label: String, chosen: bool, message: Message| {
+            ui::pill(&label, chosen, Some(message), c)
+        };
+        let step = |label: &'static str, message: Message| {
+            button(text(label).size(SIZE_SMALL).align_x(Alignment::Center))
+                .padding([2, 8])
+                .on_press(message)
+                .style(move |_, status| button::Style {
+                    background: matches!(status, button::Status::Hovered)
+                        .then_some(iced::Background::Color(c.button)),
+                    text_color: c.accent,
+                    border: iced::border::rounded(6).color(c.border).width(1),
+                    ..button::Style::default()
+                })
+        };
+        let last = row![
+            pill(
+                ui::fill(s.last_matches, &[self.last.to_string()]),
+                self.kind == Kind::LastMatches,
+                Message::Last(self.last),
+            ),
+            step("−", Message::Last(self.last.saturating_sub(1))),
+            step("+", Message::Last(self.last + 1)),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+        let pills: Vec<Element<'a, Message>> = vec![
+            pill(
+                s.last_month.to_string(),
+                self.kind == Kind::LastMonth,
+                Message::Kind(Kind::LastMonth),
+            ),
+            last.into(),
+            pill(
+                s.between.to_string(),
+                self.kind == Kind::Between,
+                Message::Kind(Kind::Between),
+            ),
+        ];
+        let line = ui::choice_line(s.period, on, pills, c);
+        let chosen: Element<'a, Message> = match &self.analysis {
+            Some(a) => {
+                let days = a
+                    .from
+                    .as_deref()
+                    .zip(a.to.as_deref())
+                    .map(|(from, to)| format!("{} → {}  ·  ", shown_day(from), shown_day(to)))
+                    .unwrap_or_default();
+                let skipped = match a.skipped.is_empty() {
+                    true => String::new(),
+                    false => format!("\n{}", ui::fill(s.skipped, &[a.skipped.join(", ")])),
+                };
+                small(
+                    format!(
+                        "{days}{}{skipped}",
+                        ui::fill(s.matches_count, &[a.matches.len().to_string()])
+                    ),
+                    c,
+                )
+                .into()
+            }
+            None => space::vertical().height(0).into(),
+        };
+        let between: Element<'a, Message> = match self.kind {
+            Kind::Between => self.days_view(s, c),
+            _ => space::vertical().height(0).into(),
+        };
+        column![line, row![space::horizontal().width(148), chosen], between]
+            .spacing(6)
+            .into()
+    }
+
+    /// The two days, as written (the one being written lit), and the
+    /// calendar.
+    fn days_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let field = |label: &'static str, value: &str, editing: bool, to: bool| {
+            let shown = match value.is_empty() {
+                true => s.date_placeholder.to_string(),
+                false => value.to_string(),
+            };
+            let caret = match editing {
+                true => "▏",
+                false => "",
+            };
+            button(
+                column![
+                    small(label, c),
+                    text(format!("{shown}{caret}"))
+                        .size(SIZE_BODY)
+                        .font(theme::fonts().bold)
+                        .color(match value.is_empty() {
+                            true => c.muted,
+                            false => c.text,
+                        }),
+                ]
+                .spacing(2),
+            )
+            .padding([6, 10])
+            .width(Length::Fixed(140.0))
+            .on_press(Message::Editing(to))
+            .style(move |_, _| button::Style {
+                border: iced::border::rounded(8)
+                    .color(match editing {
+                        true => c.accent,
+                        false => c.border,
+                    })
+                    .width(match editing {
+                        true => 2,
+                        false => 1,
+                    }),
+                ..button::Style::default()
+            })
+        };
+        let fields = row![
+            field(s.from_day, &self.days.from, !self.days.editing_to, false),
+            field(s.to_day, &self.days.to, self.days.editing_to, true),
+        ]
+        .spacing(8);
+        let calendar = Calendar {
+            month: self.days.month,
+            from: Days::parse(&self.days.from),
+            to: Days::parse(&self.days.to),
+            marked: &self.played,
+            today: self.today,
+        }
+        .view(s, c, Message::Day, Message::Month);
+        column![
+            fields,
+            small(s.period_hint, c),
+            container(calendar).padding([4, 0])
+        ]
+        .spacing(6)
+        .padding(iced::Padding {
+            left: 148.0,
+            ..iced::Padding::ZERO
+        })
+        .into()
     }
 
     fn trend_page<'a>(
@@ -580,6 +1264,53 @@ impl StatsScreen {
             .get(self.series)
             .map_or(s.trend.to_string(), |l| ui::capitalized(&l.name));
         ui::panel(Some(&name), column![legend, chart].spacing(10), c)
+    }
+
+    /// The figure of the team match by match, with the moving average.
+    fn matches_page<'a>(
+        &'a self,
+        a: &'a TeamAnalysis,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let Some(line) = a.trend.get(self.series) else {
+            return space::vertical().into();
+        };
+        let trend = MatchesTrend::of(
+            line,
+            a.matches.iter().map(|m| short_day(&m.day)).collect(),
+            a.matches.iter().map(|m| m.opponent.clone()).collect(),
+            s.touches,
+        );
+        let legend = row![
+            text(format!("━● {}", s.per_match))
+                .size(SIZE_SMALL)
+                .color(c.text),
+            text(format!(
+                "━━ {}",
+                ui::fill(s.moving_average, &[MOVING_WINDOW.to_string()])
+            ))
+            .size(SIZE_SMALL)
+            .color(c.accent),
+            small(
+                format!(
+                    "- - {}: {}",
+                    ui::fill(s.matches_count, &[a.matches.len().to_string()]),
+                    pct(line.overall)
+                ),
+                c
+            ),
+        ]
+        .spacing(14);
+        let chart: Element<'a, Message> = match trend.is_empty() {
+            true => small(s.no_rallies, c).into(),
+            false => charts::matches_view(trend, c),
+        };
+        ui::panel(
+            Some(&ui::capitalized(&line.name)),
+            column![legend, chart].spacing(10),
+            c,
+        )
     }
 
     fn detail_page<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -1067,8 +1798,14 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
     };
     let attack = |name: &str, a: &Option<scout4all_mobile::AttackStats>| -> Element<'a, Message> {
         match a {
-            Some(a) => row![
-                ui::body(name.to_string()).width(Length::Fill),
+            // the counts under the name: they never run into it
+            Some(a) => column![
+                row![
+                    ui::body(name.to_string()).width(Length::Fill),
+                    graded(Some(a.efficiency), a.grade),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
                 small(
                     format!(
                         "{} · #{} · ={} · /{}",
@@ -1076,10 +1813,7 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
                     ),
                     c
                 ),
-                graded(Some(a.efficiency), a.grade),
             ]
-            .spacing(8)
-            .align_y(Alignment::Center)
             .into(),
             None => space::vertical().height(0).into(),
         }
@@ -1296,6 +2030,7 @@ fn error_name(event: EventTypeEnum, forced: bool, s: &Strings) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreachable)]
 mod tests {
     use super::*;
 
@@ -1315,5 +2050,224 @@ mod tests {
         let numbers = ["3".to_string(), "8".to_string()];
         assert_eq!(ui::fill("{1} su {2}", &numbers), "3 su 8");
         assert_eq!(ui::fill("{2} 中 {1}", &numbers), "8 中 3");
+    }
+
+    use {
+        crate::strings::strings,
+        scout4all_core::{
+            match_form::MatchForm,
+            player_form::PlayerForm,
+            shapes::{
+                country::CountryCode,
+                enums::{GenderEnum, LanguageEnum, TeamClassificationEnum, TeamSideEnum},
+            },
+            team_form::TeamForm,
+        },
+    };
+
+    /// A team of seven and two matches played, a set each with our serves:
+    /// three aces on 24/10, an ace and an error on 31/10.
+    fn team_with_two_matches(core: &Scout4All) -> String {
+        let team = core
+            .save_team(
+                None,
+                TeamForm {
+                    name: "Cortona".into(),
+                    classification: Some(TeamClassificationEnum::Regional),
+                    gender: Some(GenderEnum::Women),
+                    country: CountryCode::known("IT"),
+                    year: "2026".into(),
+                },
+            )
+            .unwrap();
+        for n in 1..=7 {
+            core.save_player(
+                team.clone(),
+                None,
+                PlayerForm {
+                    name: format!("P{n}"),
+                    role: Some(RoleEnum::OutsideHitter),
+                    number: n.to_string(),
+                    birth_date: String::new(),
+                    height_cm: String::new(),
+                    notes: String::new(),
+                },
+            )
+            .unwrap();
+        }
+        let ids: Vec<String> = core
+            .team(team.clone())
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        for (opponent, date, serves) in [
+            (
+                "Arezzo",
+                "2026-10-24T18:00:00+02:00",
+                vec![EvalEnum::Perfect; 3],
+            ),
+            (
+                "Siena",
+                "2026-10-31T18:00:00+01:00",
+                vec![EvalEnum::Perfect, EvalEnum::Error],
+            ),
+        ] {
+            let m = core
+                .save_match(
+                    team.clone(),
+                    None,
+                    MatchForm {
+                        opponent: opponent.into(),
+                        date: chrono::DateTime::parse_from_rfc3339(date).ok(),
+                        home: true,
+                        max_substitutions: "6".into(),
+                        notes: String::new(),
+                        roster: None,
+                    },
+                )
+                .unwrap();
+            let start = core.set_start(team.clone(), m.clone()).unwrap();
+            start.choose_serving_team(TeamSideEnum::Us);
+            for (position, id) in (1..=6).zip(&ids) {
+                start.place(position, Some(id.clone())).unwrap();
+            }
+            start.choose_setter(Some(ids[0].clone())).unwrap();
+            start.choose_libero(Some(ids[6].clone())).unwrap();
+            core.start_set(start).unwrap();
+            let scouting = core.scouting(team.clone(), m).unwrap();
+            for eval in serves {
+                scouting.choose_eval(eval).unwrap();
+            }
+        }
+        team
+    }
+
+    fn aces(screen: &StatsScreen) -> u32 {
+        screen.live.as_ref().map_or(0, |l| l.aces)
+    }
+
+    fn opponents(screen: &StatsScreen) -> Vec<String> {
+        screen
+            .analysis
+            .iter()
+            .flat_map(|a| a.matches.iter().map(|m| m.opponent.clone()))
+            .collect()
+    }
+
+    /// The period by keys: the last matches (+ −), then the two days
+    /// written; a day picked on the calendar; a filter on the situation;
+    /// Esc back to the team.
+    #[test]
+    fn the_analysis_of_a_team_by_keys() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        // from the team, s
+        let mut from = crate::team::TeamScreen::new(core.clone(), team.clone()).unwrap();
+        assert!(matches!(
+            from.key(s, key!(s)),
+            crate::team::Outcome::Analysis
+        ));
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        assert_eq!(screen.filters().first(), Some(&Filter::Period));
+        // the last 4: both
+        screen.key(key!(right));
+        assert_eq!(screen.kind, Kind::LastMatches);
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
+        assert_eq!(aces(&screen), 4);
+        for _ in 0..3 {
+            screen.key(key!('-'));
+        }
+        assert_eq!(screen.period, AnalysisPeriod::LastMatches { count: 1 });
+        assert_eq!(opponents(&screen), ["Siena"]);
+        // from and to, written: the first day done, the last one next
+        screen.key(key!(right));
+        assert_eq!(screen.kind, Kind::Between);
+        screen.days.from.clear();
+        screen.days.to.clear();
+        screen.days.editing_to = false;
+        for d in "20261025".chars().chain("20261101".chars()) {
+            let digit = KeyCombination::from(crokey::crossterm::event::KeyCode::Char(d));
+            screen.key(digit);
+        }
+        assert_eq!(screen.days.from, "2026-10-25");
+        assert_eq!(screen.days.to, "2026-11-01");
+        assert_eq!(opponents(&screen), ["Siena"]);
+        // ⌫ takes a digit back: the period stays the last whole one
+        screen.key(key!(backspace));
+        assert_eq!(screen.days.to, "2026-11-0");
+        assert_eq!(opponents(&screen), ["Siena"]);
+        // picked on the calendar, the last day before the first: swapped
+        let day = |d| NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
+        screen.update(Message::Editing(false));
+        screen.update(Message::Day(day(31)));
+        screen.update(Message::Day(day(20)));
+        assert_eq!(
+            (screen.days.from.as_str(), screen.days.to.as_str()),
+            ("2026-10-20", "2026-10-31")
+        );
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
+        assert_eq!(screen.played, [day(24), day(31)]);
+        // the serves are in break: none with the inverted P1 asked
+        screen.update(Message::InvertedP1(Some(true)));
+        assert_eq!(aces(&screen), 0);
+        screen.update(Message::InvertedP1(None));
+        assert_eq!(aces(&screen), 4);
+        // the trend: a point a match
+        screen.update(Message::Page(1));
+        let serve = screen
+            .analysis
+            .as_ref()
+            .and_then(|a| {
+                a.trend
+                    .iter()
+                    .find(|t| t.series == scout4all_core::trend::Series::Serve)
+            })
+            .map(|t| t.values.clone());
+        assert_eq!(serve, Some(vec![Some(100.0), Some(0.0)]));
+        assert!(matches!(screen.key(BACK_KEY), Outcome::Back));
+        assert_eq!(screen.match_id(), None);
+    }
+
+    /// The detail of a match has the filters on the situation too.
+    #[test]
+    fn the_detail_of_a_match_by_situation() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let first = match core
+            .matches(team.clone())
+            .unwrap()
+            .into_iter()
+            .find_map(|m| match m {
+                scout4all_mobile::MatchListing::Match { id, opponent, .. }
+                    if opponent == "Arezzo" =>
+                {
+                    Some(id)
+                }
+                _ => None,
+            }) {
+            Some(id) => id,
+            None => unreachable!("the match of Arezzo"),
+        };
+        let mut screen = StatsScreen::new(core, team, first).unwrap();
+        assert_eq!(screen.filters(), [Filter::Scope]);
+        screen.update(Message::Page(2));
+        assert!(screen.filters().contains(&Filter::Reception));
+        let total = |screen: &StatsScreen| {
+            screen
+                .detail
+                .as_ref()
+                .and_then(|d| d.fundamental.as_ref())
+                .map_or(0, |f| f.total)
+        };
+        assert_eq!(total(&screen), 3);
+        screen.update(Message::Scheme(Some(ReceptionSchemeEnum::Four)));
+        assert_eq!(total(&screen), 0);
+        let _ = s;
     }
 }

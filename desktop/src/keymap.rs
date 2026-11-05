@@ -30,6 +30,8 @@ pub fn combination(key: &Key, modifiers: Modifiers) -> Option<KeyCombination> {
         Key::Named(Named::ArrowRight) => Some(KeyCode::Right),
         Key::Named(Named::ArrowUp) => Some(KeyCode::Up),
         Key::Named(Named::ArrowDown) => Some(KeyCode::Down),
+        Key::Named(Named::PageUp) => Some(KeyCode::PageUp),
+        Key::Named(Named::PageDown) => Some(KeyCode::PageDown),
         Key::Named(Named::F1) => Some(KeyCode::F(1)),
         Key::Named(Named::F2) => Some(KeyCode::F(2)),
         Key::Named(Named::F3) => Some(KeyCode::F(3)),

@@ -7,6 +7,7 @@
 // still answers whoever reads its output (the self update, the workflow)
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod calendar;
 mod charts;
 mod countries;
 mod court;
@@ -102,6 +103,8 @@ enum Go {
     Team(String),
     Match(String, String),
     Stats(String, String),
+    /// the statistics of the team over its matches
+    Analysis(String),
     /// the events of a set of the match, to correct them
     Events(String, String, u8),
     /// a set of the match: to start, or in progress
@@ -272,6 +275,8 @@ impl App {
             Go::Stats(team, m) => {
                 stats::StatsScreen::new(core, team, m).map(|screen| Screen::Stats(Box::new(screen)))
             }
+            Go::Analysis(team) => stats::StatsScreen::team(core, team, self.strings)
+                .map(|screen| Screen::Stats(Box::new(screen))),
             Go::Scout(open) if open.start => core
                 .set_start(open.team_id.clone(), open.match_id.clone())
                 .map(|start| {
@@ -417,7 +422,10 @@ impl App {
             Screen::Home(_) => Go::Home,
             Screen::Team(t) => Go::Team(t.team_id.clone()),
             Screen::Match(m) => Go::Match(m.team_id.clone(), m.match_id.clone()),
-            Screen::Stats(st) => Go::Stats(st.team_id.clone(), st.match_id.clone()),
+            Screen::Stats(st) => match st.match_id() {
+                Some(m) => Go::Stats(st.team_id.clone(), m),
+                None => Go::Analysis(st.team_id.clone()),
+            },
             Screen::Events(e) => Go::Events(e.team_id.clone(), e.match_id.clone(), e.set_number()),
             Screen::Start(st) => Go::Scout(home::Open {
                 team_id: st.team_id.clone(),
@@ -920,6 +928,7 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::OpenMatch(m) => Go::Match(team_id.to_string(), m),
         team::Outcome::Import => Go::Import(Some(team_id.to_string())),
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
+        team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
     }
 }
 
@@ -942,7 +951,10 @@ fn dvw_go(screen: &dvw::DvwScreen, outcome: dvw::Outcome) -> Go {
 fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome) -> Go {
     match outcome {
         stats::Outcome::Stay => Go::Stay,
-        stats::Outcome::Back => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
+        stats::Outcome::Back => match screen.match_id() {
+            Some(m) => Go::Match(screen.team_id.clone(), m),
+            None => Go::Team(screen.team_id.clone()),
+        },
     }
 }
 

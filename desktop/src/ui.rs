@@ -565,20 +565,24 @@ pub fn choice_line<'a, M: 'a>(
         })
         .width(Length::Fixed(130.0));
     row![
-        text(match on {
-            true => "▸",
-            false => " ",
-        })
-        .size(SIZE_SMALL)
-        .color(c.accent)
-        .width(Length::Fixed(12.0)),
-        label,
+        container(
+            text(match on {
+                true => "▸",
+                false => " ",
+            })
+            .size(SIZE_SMALL)
+            .color(c.accent)
+            .width(Length::Fixed(12.0))
+        )
+        .padding(Padding::from([5, 0])),
+        container(label).padding(Padding::from([5, 0])),
         iced::widget::Row::with_children(pills)
             .spacing(4)
             .wrap()
             .vertical_spacing(4)
     ]
     .spacing(6)
-    .align_y(Alignment::Center)
+    // the name by the first line of pills, when they wrap
+    .align_y(Alignment::Start)
     .into()
 }
