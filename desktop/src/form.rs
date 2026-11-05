@@ -205,19 +205,16 @@ impl Field {
 
     /// A text with suggestions, given by the screen as it changes.
     pub fn search(label: &str, value: impl Into<String>) -> Field {
-        Field::of(
-            label,
-            {
-                let text: String = value.into();
-                Value::Search {
-                    typed: text.clone(),
-                    text,
-                    suggestions: vec![],
-                    highlighted: None,
-                    open: false,
-                }
-            },
-        )
+        Field::of(label, {
+            let text: String = value.into();
+            Value::Search {
+                typed: text.clone(),
+                text,
+                suggestions: vec![],
+                highlighted: None,
+                open: false,
+            }
+        })
     }
 
     pub fn choice(label: &str, options: Vec<String>, index: usize) -> Field {
@@ -942,7 +939,11 @@ impl Form {
                             .into(),
                         None => name.into(),
                     };
-                    button(container(label).width(Length::Fill).align_x(Alignment::Center))
+                    button(
+                        container(label)
+                            .width(Length::Fill)
+                            .align_x(Alignment::Center),
+                    )
                     .width(Length::Fill)
                     .padding(Padding::from([7, 12]))
                     .on_press(on(Message::Choose(i, n)))

@@ -256,7 +256,7 @@ impl App {
             Go::Export(export) => return self.export(export),
             Go::Import(team) => {
                 let s = self.strings;
-                return Task::perform(transfer::pick(s.archives, team.is_none()), move |f| {
+                return Task::perform(transfer::pick(s.archives), move |f| {
                     Message::Picked(team.clone(), f)
                 });
             }
@@ -335,13 +335,15 @@ impl App {
     fn picked(&mut self, team: Option<String>, picked: transfer::Picked) {
         let core = self.core.clone();
         match transfer::is_dvw(&picked.name) {
-            true => match dvw::DvwScreen::new(core, self.strings, picked.name, picked.bytes) {
-                Ok(screen) => {
-                    self.error = None;
-                    self.screen = Screen::Dvw(Box::new(screen));
+            true => {
+                match dvw::DvwScreen::new(core, self.strings, picked.name, picked.bytes, team) {
+                    Ok(screen) => {
+                        self.error = None;
+                        self.screen = Screen::Dvw(Box::new(screen));
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
                 }
-                Err(e) => self.error = Some(e.to_string()),
-            },
+            }
             false => match transfer::Importing::new(&core, picked, team) {
                 Ok(importing) => self.importing = Some(importing),
                 Err(e) => self.error = Some(e.to_string()),
@@ -688,7 +690,10 @@ impl App {
                 let outcome = screen.key(ck);
                 self.started(outcome)
             }
-            (Message::Dvw(m), Screen::Dvw(screen)) => dvw_go(screen.update(s, m)),
+            (Message::Dvw(m), Screen::Dvw(screen)) => {
+                let outcome = screen.update(s, m);
+                dvw_go(screen, outcome)
+            }
             (Message::Events(m), Screen::Events(screen)) => {
                 let outcome = screen.update(m);
                 events_go(screen, outcome)
@@ -697,7 +702,10 @@ impl App {
                 let outcome = screen.key(ck);
                 events_go(screen, outcome)
             }
-            (Message::Key(ck), Screen::Dvw(screen)) => dvw_go(screen.key(s, ck)),
+            (Message::Key(ck), Screen::Dvw(screen)) => {
+                let outcome = screen.key(s, ck);
+                dvw_go(screen, outcome)
+            }
             (Message::Scouting(m), Screen::Scouting(screen)) => {
                 let outcome = screen.update(m);
                 scouting_go(screen, outcome)
@@ -922,10 +930,11 @@ fn events_go(screen: &events::EventsScreen, outcome: events::Outcome) -> Go {
     }
 }
 
-fn dvw_go(outcome: dvw::Outcome) -> Go {
+/// Back where the import was asked from: the team, or the home.
+fn dvw_go(screen: &dvw::DvwScreen, outcome: dvw::Outcome) -> Go {
     match outcome {
         dvw::Outcome::Stay => Go::Stay,
-        dvw::Outcome::Back => Go::Home,
+        dvw::Outcome::Back => screen.from.clone().map_or(Go::Home, Go::Team),
         dvw::Outcome::Team(team) => Go::Team(team),
     }
 }

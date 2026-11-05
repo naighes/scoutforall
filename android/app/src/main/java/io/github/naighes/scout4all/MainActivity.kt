@@ -226,6 +226,7 @@ private fun Navigation(
                 onPlayer = { player -> nav.navigate("team/$id/player/$player") },
                 onNewMatch = { nav.navigate("team/$id/new-match") },
                 onMatch = { m -> nav.navigate("team/$id/match/${Uri.encode(m)}") },
+                onDvw = { nav.navigate("dvw") },
             )
         }
         composable("team/{id}/edit") { entry ->

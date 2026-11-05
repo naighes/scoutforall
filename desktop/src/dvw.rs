@@ -70,6 +70,8 @@ const EMPTY: &str = "–";
 
 pub struct DvwScreen {
     core: Arc<Scout4All>,
+    /// the team the import was asked from: offered first, back to it
+    pub from: Option<String>,
     bytes: Arc<Vec<u8>>,
     name: String,
     preview: DvwPreview,
@@ -95,6 +97,7 @@ impl DvwScreen {
         s: &Strings,
         name: String,
         bytes: Arc<Vec<u8>>,
+        from: Option<String>,
     ) -> Result<DvwScreen, MobileError> {
         let preview = core.preview_dvw(bytes.to_vec())?;
         let year = chrono::Datelike::year(&chrono::Local::now());
@@ -106,6 +109,7 @@ impl DvwScreen {
             classifications: core.classifications(),
             genders: core.genders(),
             core,
+            from,
             bytes,
             name,
             day: preview.days.first().cloned().unwrap_or_default(),
@@ -150,7 +154,7 @@ impl DvwScreen {
                         ui::fill(s.dvw_visiting, std::slice::from_ref(&self.preview.visiting)),
                         s.dvw_both.to_string(),
                     ],
-                    0,
+                    self.side_of_from(),
                 )],
                 None,
             ),
@@ -378,13 +382,39 @@ impl DvwScreen {
         self.to(s, Step::Substitutions);
     }
 
+    /// The side whose team is like the one the import was asked from, of
+    /// the choices of the sides: the home one when neither.
+    fn side_of_from(&self) -> usize {
+        let like = |side| {
+            self.from.as_ref().is_some_and(|from| {
+                self.core
+                    .dvw_similar_teams(self.bytes.to_vec(), side, None)
+                    .is_ok_and(|similar| similar.iter().any(|t| t.id == *from))
+            })
+        };
+        match (like(DvwSide::Home), like(DvwSide::Visiting)) {
+            (false, true) => 1,
+            _ => 0,
+        }
+    }
+
     /// The team of the side being imported: a similar one or a new one;
-    /// done after the last side.
+    /// done after the last side. The team the import was asked from comes
+    /// first, until a side goes into it.
     fn team(&mut self, s: &Strings) {
         let Some(side) = self.sides.get(self.current).copied() else {
             return self.to(s, Step::Done);
         };
-        match self.core.dvw_similar_teams(self.bytes.to_vec(), side) {
+        let first = self.from.clone().filter(|from| {
+            !self
+                .results
+                .iter()
+                .any(|r| r.team_id.as_ref() == Some(from))
+        });
+        match self
+            .core
+            .dvw_similar_teams(self.bytes.to_vec(), side, first)
+        {
             Ok(similar) if similar.is_empty() => self.to(s, Step::NewTeam(similar)),
             Ok(similar) => self.to(s, Step::Team(similar)),
             Err(e) => {
@@ -667,7 +697,10 @@ fn similar_label(s: &Strings, team: &DvwSimilarTeam) -> String {
     .flatten()
     .collect::<Vec<_>>()
     .join(", ");
-    format!("{} {} ({why})", team.name, team.year)
+    match why.is_empty() {
+        true => format!("{} {}", team.name, team.year),
+        false => format!("{} {} ({why})", team.name, team.year),
+    }
 }
 
 fn buttons<'a>(
@@ -725,7 +758,7 @@ mod tests {
     fn screen(core: &Arc<Scout4All>) -> DvwScreen {
         let s = strings(LanguageEnum::It);
         let bytes = Arc::new(THREE_SETS.to_vec());
-        DvwScreen::new(core.clone(), s, "match.dvw".into(), bytes).unwrap()
+        DvwScreen::new(core.clone(), s, "match.dvw".into(), bytes, None).unwrap()
     }
 
     /// The new team: its level, its gender and its country.
@@ -785,6 +818,53 @@ mod tests {
         assert!(matches!(dvw.key(s, key!(enter)), Outcome::Stay));
         assert!(matches!(dvw.key(s, BACK_KEY), Outcome::Back));
         assert_eq!(core.matches(team_id).unwrap().len(), 1);
+    }
+
+    /// Asked from a team: the team offered first, even if not like the
+    /// one of the file; asked again, the side like it chosen to start.
+    #[test]
+    fn imported_from_a_team_into_it() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let form = scout4all_core::team_form::TeamForm {
+            name: "Cortona".into(),
+            classification: Some(scout4all_core::shapes::enums::TeamClassificationEnum::Regional),
+            gender: Some(scout4all_core::shapes::enums::GenderEnum::Women),
+            country: CountryCode::known("IT"),
+            year: "2014".into(),
+        };
+        let cortona = core.save_team(None, form).unwrap();
+        let from = |core: &Arc<Scout4All>| {
+            let bytes = Arc::new(THREE_SETS.to_vec());
+            DvwScreen::new(
+                core.clone(),
+                s,
+                "m.dvw".into(),
+                bytes,
+                Some(cortona.clone()),
+            )
+            .unwrap()
+        };
+        let mut dvw = from(&core);
+        assert_eq!(dvw.form.index(0), 0, "no side like it: the home one");
+        // the visiting team, into ours
+        dvw.update(s, Message::Form(form::Message::Choose(0, 1)));
+        dvw.key(s, key!(enter));
+        dvw.key(s, key!(enter));
+        let Step::Team(similar) = &dvw.step else {
+            unreachable!("the team asked from is offered")
+        };
+        assert_eq!(similar.first().map(|t| t.id.clone()), Some(cortona.clone()));
+        assert_eq!(similar_label(s, &similar[0]), "Cortona 2014");
+        dvw.key(s, key!(enter));
+        assert!(matches!(dvw.step, Step::Ready(..)));
+        dvw.key(s, key!(enter));
+        assert!(matches!(dvw.step, Step::Done));
+        assert!(matches!(dvw.key(s, BACK_KEY), Outcome::Back));
+        assert_eq!(core.matches(cortona.clone()).unwrap().len(), 1);
+        // now with the players of the visiting team
+        assert_eq!(from(&core).form.index(0), 1);
     }
 
     #[test]

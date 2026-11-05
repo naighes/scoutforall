@@ -84,12 +84,22 @@ mod tests {
 
     #[test]
     fn the_names_that_begin_as_written_come_first() {
-        let names: Vec<String> = ["Club Arezzo", "Livorno", "Pallavolo Lucca", "Cortona Volley"]
-            .map(String::from)
-            .to_vec();
+        let names: Vec<String> = [
+            "Club Arezzo",
+            "Livorno",
+            "Pallavolo Lucca",
+            "Cortona Volley",
+        ]
+        .map(String::from)
+        .to_vec();
         assert_eq!(
             offered(&names, "l"),
-            vec!["Livorno", "Pallavolo Lucca", "Club Arezzo", "Cortona Volley"]
+            vec![
+                "Livorno",
+                "Pallavolo Lucca",
+                "Club Arezzo",
+                "Cortona Volley"
+            ]
         );
         assert_eq!(offered(&names, "LI"), vec!["Livorno"]);
         assert_eq!(offered(&names, "livorno"), Vec::<String>::new());

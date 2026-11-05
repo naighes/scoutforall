@@ -73,14 +73,11 @@ pub async fn save_to(name: String) -> Option<PathBuf> {
         .map(|f| f.path().to_path_buf())
 }
 
-/// The file to import: an archive or, with `dvw`, a DataVolley file too.
-pub async fn pick(filter: &'static str, dvw: bool) -> Option<Picked> {
-    let extensions: &[&str] = match dvw {
-        true => &["zip", "dvw", "DVW"],
-        false => &["zip"],
-    };
+/// The file to import: an archive or a DataVolley file, from the home as
+/// from a team.
+pub async fn pick(filter: &'static str) -> Option<Picked> {
     let file = rfd::AsyncFileDialog::new()
-        .add_filter(filter, extensions)
+        .add_filter(filter, &["zip", "dvw", "DVW"])
         .pick_file()
         .await?;
     Some(Picked {

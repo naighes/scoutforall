@@ -81,6 +81,7 @@ fun TeamScreen(
     onPlayer: (String) -> Unit,
     onNewMatch: () -> Unit,
     onMatch: (String) -> Unit,
+    onDvw: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<TeamState>(TeamState.Loading, id) {
@@ -121,6 +122,7 @@ fun TeamScreen(
                                 teamId = id,
                                 onTeam = {},
                                 onMatch = { _, m -> onMatch(m) },
+                                onDvw = onDvw,
                             )
                         }
                         ExportButton(stringResource(R.string.export_team)) { it.exportTeam(id) }

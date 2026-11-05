@@ -214,9 +214,12 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Guard<'_, M> {
                 if self.follow.after(key) && !modifiers.macos_command() =>
             {
                 let mut text = TextOf(None);
-                self.content
-                    .as_widget_mut()
-                    .operate(&mut tree.children[0], layout, renderer, &mut text);
+                self.content.as_widget_mut().operate(
+                    &mut tree.children[0],
+                    layout,
+                    renderer,
+                    &mut text,
+                );
                 let text = text.0.unwrap_or_default();
                 let before = cursor_of(&tree.children[0], &text);
                 self.content.as_widget_mut().update(

@@ -15,10 +15,12 @@ use {
 /// What the court shows.
 pub enum Content {
     /// the players; `pickable`, a click chooses one (only when a player
-    /// is what's chosen now)
+    /// is what's chosen now); `server`, ours about to serve: the ball by
+    /// them, in the color of the phase
     Players {
         players: Vec<CourtPlayer>,
         pickable: bool,
+        server: Option<(String, Color)>,
     },
     /// rows of cells (one row at the net for our block), the net at the
     /// top when the court is ours; the cell of the cursor
@@ -209,11 +211,33 @@ impl Court {
             };
             frame.fill(&Path::circle(center, radius), fill);
             let pickable = matches!(self.content, Content::Players { pickable: true, .. });
-            let ring = match (pickable && p.selectable, p.grade) {
-                (true, _) => Some((c.accent, 3.0)),
-                (false, Some(g)) => Some((grade_color(g, c), 2.0)),
-                (false, None) => None,
+            let serving = match &self.content {
+                Content::Players {
+                    server: Some((id, color)),
+                    ..
+                } if *id == p.id => Some(*color),
+                _ => None,
             };
+            let ring = match (serving, pickable && p.selectable, p.grade) {
+                (Some(color), _, _) => Some((color, 4.0)),
+                (None, true, _) => Some((c.accent, 3.0)),
+                (None, false, Some(g)) => Some((grade_color(g, c), 2.0)),
+                (None, false, None) => None,
+            };
+            // the server with the ball, beside them toward the sideline
+            if let Some(color) = serving {
+                let side = radius * 0.9;
+                frame.draw_svg(
+                    Rectangle::new(
+                        Point::new(center.x + radius * 0.75, center.y - radius * 1.15),
+                        Size::new(side, side),
+                    ),
+                    iced::advanced::svg::Svg::new(iced::advanced::svg::Handle::from_memory(
+                        theme::BALL,
+                    ))
+                    .color(color),
+                );
+            }
             if let Some((color, width)) = ring {
                 frame.stroke(
                     &Path::circle(center, radius),

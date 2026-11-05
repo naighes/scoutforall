@@ -21,7 +21,7 @@ use scout4all_core::{
         import::{
             MatchPlan, TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
             match_date, match_exists, match_plan, save_import, season_year, similar_teams,
-            team_plan,
+            similarity, team_plan,
         },
         model::{DvwFile, MatchDate as DvwDate, Side},
     },
@@ -3350,16 +3350,26 @@ impl Scout4All {
         default_max_substitutions(day.as_deref().and_then(|d| parse_day(d).ok()))
     }
 
-    /// Our teams like the one of the side, the most alike first.
+    /// Our teams like the one of the side, the most alike first; `first`,
+    /// the team the import was asked from, before them all even if not
+    /// alike.
     pub fn dvw_similar_teams(
         &self,
         bytes: Vec<u8>,
         side: DvwSide,
+        first: Option<String>,
     ) -> Result<Vec<DvwSimilarTeam>, MobileError> {
         let file = self.parse_dvw(&bytes)?;
         let teams = self.readable_teams()?;
-        Ok(similar_teams(&file, side.into(), &teams)
+        let side = side.into();
+        let first = first.and_then(|id| teams.iter().find(|t| t.id.to_string() == id));
+        let similar = similar_teams(&file, side, &teams)
             .into_iter()
+            .filter(|s| first.is_none_or(|f| f.id != s.team.id));
+        Ok(first
+            .map(|team| similarity(&file, side, team))
+            .into_iter()
+            .chain(similar)
             .map(|s| DvwSimilarTeam {
                 id: s.team.id.to_string(),
                 name: s.team.name.clone(),
@@ -6372,7 +6382,7 @@ mod tests {
         let app = app(&dir, "en");
         let choice = dvw_choice(DvwSide::Home, None);
         assert!(
-            app.dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Home)
+            app.dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Home, None)
                 .unwrap()
                 .is_empty()
         );
@@ -6422,7 +6432,7 @@ mod tests {
             )
             .unwrap();
         let similar = app
-            .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting)
+            .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting, None)
             .unwrap();
         assert_eq!(
             similar,
@@ -6455,6 +6465,36 @@ mod tests {
             ),
             "{matches:?}"
         );
+    }
+
+    /// Asked from a team, the import offers it first: before the alike
+    /// ones, even if not alike; once only.
+    #[test]
+    fn a_datavolley_import_from_a_team_offers_it_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let alike = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                dvw_choice(DvwSide::Visiting, None),
+                false,
+            )
+            .unwrap()
+            .team_id;
+        let ours = app.save_team(None, form("Cortona")).unwrap();
+        let offered = |first: Option<String>| {
+            app.dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting, first)
+                .unwrap()
+                .into_iter()
+                .map(|t| (t.id, t.same_name))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(offered(None), vec![(alike.clone(), true)]);
+        assert_eq!(
+            offered(Some(ours.clone())),
+            vec![(ours, false), (alike.clone(), true)]
+        );
+        assert_eq!(offered(Some(alike.clone())), vec![(alike, true)]);
     }
 
     /// A new team without its level, gender or country: the field said, as

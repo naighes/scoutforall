@@ -150,25 +150,30 @@ pub fn similar_teams<'a>(
     side: Side,
     teams: &'a [TeamEntry],
 ) -> Vec<SimilarTeam<'a>> {
-    let name = normalized(&file.team(side).name);
-    let players = file.players(side);
     let year = season_year(file);
     let mut similar: Vec<SimilarTeam<'a>> = teams
         .iter()
         .filter(|team| Some(team.year) == year)
-        .map(|team| SimilarTeam {
-            team,
-            same_name: !name.is_empty() && normalized(&team.name) == name,
-            same_players: players
-                .iter()
-                .filter(|p| active_with_number(team, p.number).is_some_and(|t| same(t, p)))
-                .count(),
-            players: players.len(),
-        })
+        .map(|team| similarity(file, side, team))
         .filter(|s| s.same_name || (s.players > 0 && s.same_players * 2 >= s.players))
         .collect();
     similar.sort_by_key(|s| (!s.same_name, std::cmp::Reverse(s.same_players)));
     similar
+}
+
+/// How much `team` is like the one of the side: the name, the players.
+pub fn similarity<'a>(file: &DvwFile, side: Side, team: &'a TeamEntry) -> SimilarTeam<'a> {
+    let name = normalized(&file.team(side).name);
+    let players = file.players(side);
+    SimilarTeam {
+        team,
+        same_name: !name.is_empty() && normalized(&team.name) == name,
+        same_players: players
+            .iter()
+            .filter(|p| active_with_number(team, p.number).is_some_and(|t| same(t, p)))
+            .count(),
+        players: players.len(),
+    }
 }
 
 /// The team with the players of the side: those of the team by number and

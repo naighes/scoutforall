@@ -85,6 +85,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Density
@@ -496,9 +497,13 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                 val players = view.state.court
                 val touch = view.state.lastTouch
                 val touched = touch?.player?.id
-                // the serve waits for its evaluation: the server is in the
-                // serve zone
-                val serving = view.state.step == ScoutingStep.EVAL && view.state.event?.value == EventTypeEnum.S
+                // the serve waits for its evaluation, or ours is about to
+                // be made (no touch yet, nothing chosen): the server is in
+                // the serve zone, with the ball
+                val aboutToServe = view.state.servingTeam == TeamSideEnum.US && view.state.lastTouch == null &&
+                    view.state.event == null && view.state.player == null
+                val serving = aboutToServe ||
+                    (view.state.step == ScoutingStep.EVAL && view.state.event?.value == EventTypeEnum.S)
                 Court(
                     slot = { position ->
                         val player = players.getOrNull(position - 1)
@@ -720,23 +725,56 @@ private fun Phase(serving: Boolean, rotation: String) = Surface(
 }
 
 /** Our serve or our reception being scouted, where the last event is, its
- * line given to the court: the phase (break as we serve, side-out as we
- * receive) and the rotation, the player, and where the ball went if told
- * (the court shows it too). */
+ * line given to the court: in the color of the phase (break as we serve,
+ * side-out as we receive), as the pill it replaces, no higher than the
+ * line of text it was (the zones keep their 48dp); the serve said (the
+ * other events are in the title of the choices), the player, then the
+ * rotation and where the ball went if told (the court shows it too). */
 @Composable
-private fun Serving(state: ScoutingState, told: String?) = Text(
-    listOfNotNull(
-        stringResource(if (state.servingTeam == TeamSideEnum.US) R.string.break_phase else R.string.side_out_phase),
+private fun Serving(state: ScoutingState, told: String?) {
+    val serving = state.servingTeam == TeamSideEnum.US
+    val serve = state.event?.value == EventTypeEnum.S
+    val line = listOfNotNull(
+        state.event?.name?.uppercase()?.takeIf { serve },
+        state.player?.let { "${it.number} ${it.name}" },
         state.rotation,
-        state.player?.let { "${it.number} · ${it.name}" },
         told,
-    ).joinToString(" · "),
-    modifier = Modifier.padding(top = 2.dp),
-    style = MaterialTheme.typography.labelMedium,
-    fontWeight = FontWeight.Bold,
-    maxLines = 1,
-    overflow = TextOverflow.Ellipsis,
-)
+    ).joinToString(" · ")
+    val phase = stringResource(if (serving) R.string.break_phase else R.string.side_out_phase)
+    Surface(
+        modifier = Modifier.padding(top = 2.dp),
+        color = if (serving) BreakPoint else SideOut,
+        contentColor = Color(0xFF121212),
+        shape = RoundedCornerShape(50),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                painterResource(
+                    when {
+                        serve -> R.drawable.ic_ball
+                        serving -> R.drawable.ic_break
+                        else -> R.drawable.ic_side_out
+                    },
+                ),
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+            )
+            Text(
+                line,
+                // TalkBack hears the phase the color shows, after the line
+                modifier = Modifier.semantics { stateDescription = phase },
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
 
 /** The last event saved, what undo takes back: the event, its evaluation
  * and its player. One line, kept also before the first. */

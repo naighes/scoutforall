@@ -13,7 +13,7 @@ use {
         ui,
     },
     iced::{
-        Alignment, Element, Length, Padding,
+        Alignment, Color, Element, Length, Padding,
         widget::{Column, canvas, column, container, row, scrollable, space, text},
     },
     scout4all_core::{
@@ -542,12 +542,12 @@ impl ScoutingScreen {
         let left = column![self.header(s, c), self.choices(s, c)]
             .spacing(14)
             .width(Length::Fixed(LEFT_WIDTH));
-        let middle = column![
-            container(self.court(c)).height(Length::FillPortion(3)),
-            container(self.last_events(s, c)).height(Length::FillPortion(1)),
-        ]
-        .spacing(14)
-        .width(Length::Fill);
+        let middle = column![]
+            .push(self.action(s, c))
+            .push(container(self.court(c)).height(Length::FillPortion(3)))
+            .push(container(self.last_events(s, c)).height(Length::FillPortion(1)))
+            .spacing(14)
+            .width(Length::Fill);
         let body = match self.show_stats {
             true => row![
                 left,
@@ -798,22 +798,6 @@ impl ScoutingScreen {
                 }
             }
             ScoutingStep::Eval => {
-                list = list.push(two_by_two(
-                    snap.evals
-                        .iter()
-                        .map(|e| {
-                            let key = self.keys.eval_keybindings.key_for(&e.value);
-                            let key = key.as_ref().map(keymap::label);
-                            // the symbol once: in the key, unless the key is
-                            // another
-                            let name = match key.as_deref() == Some(e.symbol.as_str()) {
-                                true => e.name.clone(),
-                                false => format!("{}  {}", e.symbol, e.name),
-                            };
-                            half(key, name, false, Message::Eval(e.value))
-                        })
-                        .collect(),
-                ));
                 // the techniques and the blockers two by two: all seen, no
                 // scrolling, even for a middle and its many attacks
                 if !snap.techniques.is_empty() {
@@ -853,6 +837,14 @@ impl ScoutingScreen {
                         .padding(iced::Padding::from([4, 10])),
                     );
                 }
+                // as in the app: the set or serve and the blockers first, then
+                // the evaluation that saves the event, a row of buttons by
+                // their symbol
+                list = match snap.techniques.is_empty() && snap.blockers.is_empty() {
+                    true => list,
+                    false => group(list, s.eval),
+                };
+                list = list.push(self.evals(c));
                 if !snap.target.is_empty() {
                     list = group(list, s.target);
                     list = list.push(
@@ -872,6 +864,147 @@ impl ScoutingScreen {
             scrollable(list).height(Length::Fill),
             true,
             c,
+        )
+    }
+
+    /// The evaluations in a row, by their symbol, as in the app: a click
+    /// or the key saves the event; the key under the symbol when it's
+    /// another, the name under the mouse.
+    fn evals<'a>(&'a self, c: Colors) -> Element<'a, Message> {
+        let bold = theme::fonts().bold;
+        iced::widget::Row::with_children(self.snapshot.evals.iter().map(|e| {
+            let key = self
+                .keys
+                .eval_keybindings
+                .key_for(&e.value)
+                .as_ref()
+                .map(keymap::label)
+                .filter(|k| *k != e.symbol);
+            let face = column![
+                text(e.symbol.clone())
+                    .size(SIZE_SCORE * 0.75)
+                    .font(bold)
+                    .color(c.on_accent),
+            ]
+            .push(key.map(|k| text(k).size(SIZE_SMALL).font(bold).color(c.on_accent)))
+            .align_x(Alignment::Center);
+            let button = iced::widget::button(
+                container(face)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(EVAL_HEIGHT))
+            .padding(0)
+            .on_press(Message::Eval(e.value))
+            .style(move |_, status| {
+                let hovered = matches!(
+                    status,
+                    iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+                );
+                iced::widget::button::Style {
+                    background: Some(
+                        match hovered {
+                            true => theme::mix(c.accent, c.text, 0.25),
+                            false => c.accent,
+                        }
+                        .into(),
+                    ),
+                    text_color: c.on_accent,
+                    border: iced::Border {
+                        radius: 10.0.into(),
+                        ..iced::Border::default()
+                    },
+                    ..iced::widget::button::Style::default()
+                }
+            });
+            container(ui::tip(button, &e.name, c))
+                .width(Length::FillPortion(1))
+                .into()
+        }))
+        .spacing(6)
+        .padding(Padding::from([4, 0]))
+        .into()
+    }
+
+    /// Ours about to serve: in position 1, before the serve is made.
+    fn server(&self) -> Option<&scout4all_mobile::CourtPlayer> {
+        let st = &self.snapshot.state;
+        match (st.serving_team, &st.last_touch, &st.event) {
+            (TeamSideEnum::Us, None, None) => st.court.first(),
+            _ => None,
+        }
+    }
+
+    /// What is being scouted, over the court, in the color of the phase:
+    /// the event and its player, big; the serve with the ball, the server
+    /// by number and name; then what the court asks, if anything. Before
+    /// the event, only ours about to serve: the serve and who.
+    fn action<'a>(&'a self, s: &'static Strings, c: Colors) -> Option<Element<'a, Message>> {
+        let st = &self.snapshot.state;
+        let about_to_serve = self.server().and_then(|p| {
+            let serve = self
+                .snapshot
+                .events
+                .iter()
+                .find(|e| e.value == EventTypeEnum::S)?;
+            Some((serve.clone(), p.number, p.name.clone()))
+        });
+        let (event, player) = match (&st.event, about_to_serve) {
+            (Some(e), _) => (
+                e.clone(),
+                st.player.as_ref().map(|p| (p.number, p.name.clone())),
+            ),
+            (None, Some((serve, number, name))) => (serve, Some((number, name))),
+            (None, None) => return None,
+        };
+        let event = &event;
+        let color = match st.serving_team {
+            TeamSideEnum::Us => c.break_point,
+            TeamSideEnum::Them => c.side_out,
+        };
+        let bold = theme::fonts().bold;
+        let big = |t: String, color| {
+            text(t)
+                .size(theme::SIZE_TITLE + 4.0)
+                .font(bold)
+                .color(color)
+        };
+        let ball: Option<Element<'a, Message>> =
+            (event.value == EventTypeEnum::S).then(|| ui::icon(theme::BALL, 26.0, color).into());
+        let who: Element<'a, Message> = match player {
+            Some((number, name)) => row![big(number.to_string(), color), big(name, c.text),]
+                .spacing(8)
+                .into(),
+            None => big("?".to_string(), c.muted).into(),
+        };
+        let asked = match (st.step, self.snapshot.target.is_empty()) {
+            (ScoutingStep::Eval, false) => Some(s.target),
+            _ => None,
+        };
+        let line = row![]
+            .push(ball)
+            .push(big(event.name.to_uppercase(), color))
+            .push(who)
+            .spacing(12)
+            .align_y(Alignment::Center);
+        let band = column![line]
+            .push(asked.map(|a| text(a.to_string()).size(SIZE_BODY).color(c.muted)))
+            .spacing(2);
+        Some(
+            container(band)
+                .padding(Padding::from([8, 14]))
+                .width(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(Color { a: 0.14, ..color }.into()),
+                    border: iced::Border {
+                        color,
+                        width: 2.0,
+                        radius: 10.0.into(),
+                    },
+                    ..container::Style::default()
+                })
+                .into(),
         )
     }
 
@@ -898,6 +1031,7 @@ impl ScoutingScreen {
                 }
             }
             _ => Content::Players {
+                server: self.server().map(|p| (p.id.clone(), c.break_point)),
                 players: snap.state.court.clone(),
                 pickable: snap.state.step == ScoutingStep::Player,
             },
@@ -918,7 +1052,13 @@ impl ScoutingScreen {
             let who = e
                 .player
                 .as_ref()
-                .map(|p| format!("{} {}", p.number, scout4all_core::names::fitted(&p.name, EVENT_NAME_ROOM)))
+                .map(|p| {
+                    format!(
+                        "{} {}",
+                        p.number,
+                        scout4all_core::names::fitted(&p.name, EVENT_NAME_ROOM)
+                    )
+                })
                 .unwrap_or_default();
             let extra = [e.technique.clone(), e.target.clone(), e.blockers.clone()]
                 .into_iter()
@@ -1093,6 +1233,9 @@ const LEFT_WIDTH: f32 = 380.0;
 
 /// How wide the key of a choice in half the panel is.
 const HALF_KEY: f32 = 44.0;
+
+/// The buttons of the evaluations: big, as in the app.
+const EVAL_HEIGHT: f32 = 56.0;
 
 /// The choices two by two, each half as wide.
 fn two_by_two<'a>(choices: Vec<Element<'a, Message>>) -> Element<'a, Message> {

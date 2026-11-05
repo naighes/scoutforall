@@ -71,8 +71,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** A DataVolley file chosen to import: kept by the app while its import
- * goes on, as the archives are (not in the saved state: too large). */
-class DvwOpened(val bytes: ByteArray, val fileName: String?)
+ * goes on, as the archives are (not in the saved state: too large); the
+ * team it was chosen from, if any, offered first. */
+class DvwOpened(val bytes: ByteArray, val fileName: String?, val teamId: String? = null)
 
 /** Whether the file is a DataVolley one: by its name, as the TUI. */
 fun isDvw(fileName: String?) = fileName?.endsWith(".dvw", ignoreCase = true) == true
@@ -115,6 +116,8 @@ data class DvwState(
     val invalid: Pair<TeamField, String>? = null,
     val results: List<DvwResult> = emptyList(),
     val working: Boolean = false,
+    /** the side like the team the import was chosen from, of the sides */
+    val fromSide: Int = 0,
 ) {
     val side: DvwSide? get() = sides.getOrNull(current)
 }
@@ -130,8 +133,16 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
                 app.core { core ->
                     val preview = core.previewDvw(bytes)
                     val form = core.newTeamForm(Year.now().value.toUShort())
+                    // from a team: the side like it to start, the home one
+                    // when neither
+                    val like = { side: DvwSide ->
+                        file?.teamId?.let { id -> core.dvwSimilarTeams(bytes, side, null).any { it.id == id } } == true
+                    }
+                    val fromSide = if (!like(DvwSide.HOME) && like(DvwSide.VISITING)) 1 else 0
                     DvwState(
                         step = DvwStep.Sides,
+                        selected = fromSide,
+                        fromSide = fromSide,
                         preview = preview,
                         classifications = core.classifications(),
                         genders = core.genders(),
@@ -152,7 +163,9 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     fun gender(gender: GenderEnum) = mutableState.update { it.copy(gender = gender, invalid = null) }
     fun country(country: CountryChoice) = mutableState.update { it.copy(country = country, invalid = null) }
 
-    private fun to(step: DvwStep) = mutableState.update { it.copy(step = step, selected = 0, working = false) }
+    private fun to(step: DvwStep) = mutableState.update {
+        it.copy(step = step, selected = if (step == DvwStep.Sides) it.fromSide else 0, working = false)
+    }
 
     private fun work(action: suspend (DvwState) -> Unit) {
         val s = mutableState.value
@@ -236,12 +249,14 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     }.orEmpty()
 
     /** The team of the side being imported: a similar one or a new one;
-     * done after the last side. */
+     * done after the last side. The team the import was chosen from comes
+     * first, until a side goes into it. */
     private suspend fun team(s: DvwState) {
         val side = s.side ?: return to(DvwStep.Done)
         mutableState.update { it.copy(current = s.current, classification = null, gender = null, invalid = null) }
         try {
-            val similar = app.core { it.dvwSimilarTeams(bytes, side) }
+            val first = file?.teamId?.takeIf { id -> s.results.none { it.teamId == id } }
+            val similar = app.core { it.dvwSimilarTeams(bytes, side, first) }
             to(if (similar.isEmpty()) DvwStep.NewTeam(similar) else DvwStep.Team(similar))
         } catch (e: MobileException) {
             nextSide(s, DvwResult(side(s), app.getString(R.string.dvw_not_imported, side(s), e.reason)))
@@ -458,7 +473,7 @@ private fun similar(team: DvwSimilarTeam): String {
         stringResource(R.string.dvw_same_players, team.samePlayers.toInt(), team.players.toInt())
             .takeIf { team.samePlayers > 0u },
     ).joinToString(", ")
-    return "${team.name} ${team.year} ($why)"
+    return if (why.isEmpty()) "${team.name} ${team.year}" else "${team.name} ${team.year} ($why)"
 }
 
 /** The gender, the country and the level of the new team, as in the form
