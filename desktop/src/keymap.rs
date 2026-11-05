@@ -12,6 +12,13 @@ use {
 /// `modified_key`): "L" for shift-l, "+" for the symbol, as a terminal
 /// reports them.
 pub fn combination(key: &Key, modifiers: Modifiers) -> Option<KeyCombination> {
+    // ⌘ on macOS is ⌃ elsewhere, to undo and do again in a form; the other
+    // shortcuts of ⌘ are the system's
+    match (modifiers.macos_command(), key) {
+        (true, Key::Character(c)) if ["z", "Z", "y"].contains(&c.as_str()) => {}
+        (true, _) => return None,
+        (false, _) => {}
+    }
     let code = match key {
         Key::Named(Named::Escape) => Some(KeyCode::Esc),
         Key::Named(Named::Tab) => Some(KeyCode::Tab),
@@ -32,7 +39,10 @@ pub fn combination(key: &Key, modifiers: Modifiers) -> Option<KeyCombination> {
     }?;
     let mut mods = KeyModifiers::NONE;
     mods.set(KeyModifiers::SHIFT, modifiers.shift());
-    mods.set(KeyModifiers::CONTROL, modifiers.control());
+    mods.set(
+        KeyModifiers::CONTROL,
+        modifiers.control() || modifiers.macos_command(),
+    );
     mods.set(KeyModifiers::ALT, modifiers.alt());
     Some(combination_of(KeyEvent::new(code, mods)))
 }
@@ -113,5 +123,22 @@ mod tests {
         assert_eq!(label(&key!(shift - e)), "⇧E");
         assert_eq!(label(&key!(a)), "a");
         assert_eq!(digit(&key!(a)), None);
+    }
+
+    #[test]
+    fn undo_and_redo_with_the_command_of_the_system() {
+        let command = match cfg!(target_os = "macos") {
+            true => Modifiers::LOGO,
+            false => Modifiers::CTRL,
+        };
+        assert_eq!(combination(&ch("z"), command), Some(key!(ctrl - z)));
+        let redo = combination(&ch("Z"), command | Modifiers::SHIFT);
+        assert!(redo.is_some_and(crate::form::is_redo));
+        assert_eq!(combination(&ch("y"), command), Some(key!(ctrl - y)));
+        // ⌘Q, ⌘W: the system's
+        assert_eq!(
+            combination(&ch("q"), Modifiers::LOGO).is_none(),
+            cfg!(target_os = "macos")
+        );
     }
 }

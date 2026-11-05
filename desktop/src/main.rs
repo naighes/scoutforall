@@ -8,10 +8,12 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod charts;
+mod countries;
 mod court;
 mod dvw;
 mod editors;
 mod events;
+mod field;
 mod form;
 mod game;
 mod general;
@@ -149,6 +151,8 @@ enum Message {
     ToggleTheme,
     /// the arrow on the bar: as Esc
     Back,
+    /// the house on the bar: the home, from wherever
+    GoHome,
     OpenSettings,
     Home(home::Message),
     Team(team::Message),
@@ -593,6 +597,11 @@ impl App {
         if self.on_terms(&message) {
             return Task::none();
         }
+        if let Message::GoHome = message {
+            self.importing = None;
+            self.close_settings();
+            return self.go(Go::Home);
+        }
         // the archive to import, while shown, takes the keys
         let imported = match (&message, &mut self.importing) {
             (Message::Key(ck), Some(importing)) => Some(importing.key(*ck)),
@@ -762,16 +771,23 @@ impl App {
                 c,
             )],
         };
+        // the home from any screen but itself
+        let at_home = matches!(self.screen, Screen::Home(_))
+            && self.settings.is_none()
+            && self.importing.is_none();
+        let home = (!at_home && self.terms.is_none()).then_some(Message::GoHome);
         let top = ui::top_bar(
             back.then_some(Message::Back),
+            home,
             self.title(),
             update
                 .into_iter()
                 .chain([
-                    ui::bar_button("◐", Message::ToggleTheme, c),
-                    ui::bar_button("⚙", Message::OpenSettings, c),
+                    ui::bar_button(theme::icons::THEME, s.switch_theme, Message::ToggleTheme, c),
+                    ui::bar_button(theme::icons::SETTINGS, s.settings, Message::OpenSettings, c),
                 ])
                 .collect(),
+            s,
             c,
         );
         // `u` updates from the home

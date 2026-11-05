@@ -93,7 +93,6 @@ pub struct Strings {
     pub save: &'static str,
     pub cancel: &'static str,
     pub open: &'static str,
-    pub date_format: &'static str,
     pub previous: &'static str,
     pub next: &'static str,
     pub change: &'static str,
@@ -231,6 +230,14 @@ pub struct Strings {
     pub update_to: &'static str,
     pub updating: &'static str,
     pub update_failed: &'static str,
+    pub date_placeholder: &'static str,
+    pub time: &'static str,
+    pub time_placeholder: &'static str,
+    pub go_on: &'static str,
+    pub roster_count: &'static str,
+    pub roster_toggle: &'static str,
+    pub home_page: &'static str,
+    pub switch_theme: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -322,7 +329,6 @@ const EN: Strings = Strings {
     save: "Save",
     cancel: "Cancel",
     open: "Open",
-    date_format: "YYYY-MM-DD HH:MM",
     previous: "previous",
     next: "next",
     change: "change",
@@ -465,6 +471,14 @@ What did you expect instead?
     update_to: "Update to {1}",
     updating: "Updating to {1}…",
     update_failed: "Update failed: {1}",
+    date_placeholder: "YYYY-MM-DD",
+    time: "Time",
+    time_placeholder: "HH:MM",
+    go_on: "Next",
+    roster_count: "{1} on the score sheet",
+    roster_toggle: "put on / take off",
+    home_page: "Home",
+    switch_theme: "Light or dark theme",
 };
 
 const IT: Strings = Strings {
@@ -556,7 +570,6 @@ const IT: Strings = Strings {
     save: "Salva",
     cancel: "Annulla",
     open: "Apri",
-    date_format: "AAAA-MM-GG HH:MM",
     previous: "precedente",
     next: "successivo",
     change: "cambia",
@@ -699,6 +712,14 @@ Cosa ti aspettavi invece?
     update_to: "Aggiorna a {1}",
     updating: "Aggiornamento a {1}…",
     update_failed: "Aggiornamento non riuscito: {1}",
+    date_placeholder: "AAAA-MM-GG",
+    time: "Ora",
+    time_placeholder: "HH:MM",
+    go_on: "Avanti",
+    roster_count: "{1} a referto",
+    roster_toggle: "metti / togli",
+    home_page: "Home",
+    switch_theme: "Tema chiaro o scuro",
 };
 
 const PT: Strings = Strings {
@@ -790,7 +811,6 @@ const PT: Strings = Strings {
     save: "Salvar",
     cancel: "Cancelar",
     open: "Abrir",
-    date_format: "AAAA-MM-DD HH:MM",
     previous: "anterior",
     next: "próximo",
     change: "alterar",
@@ -933,6 +953,14 @@ O que você esperava?
     update_to: "Atualizar para {1}",
     updating: "Atualizando para {1}…",
     update_failed: "Falha na atualização: {1}",
+    date_placeholder: "AAAA-MM-DD",
+    time: "Hora",
+    time_placeholder: "HH:MM",
+    go_on: "Avançar",
+    roster_count: "{1} na súmula",
+    roster_toggle: "incluir / tirar",
+    home_page: "Início",
+    switch_theme: "Tema claro ou escuro",
 };
 
 const PL: Strings = Strings {
@@ -1024,7 +1052,6 @@ const PL: Strings = Strings {
     save: "Zapisz",
     cancel: "Anuluj",
     open: "Otwórz",
-    date_format: "RRRR-MM-DD GG:MM",
     previous: "poprzedni",
     next: "następny",
     change: "zmień",
@@ -1167,6 +1194,14 @@ Czego się spodziewałeś(-aś)?
     update_to: "Aktualizuj do {1}",
     updating: "Aktualizacja do {1}…",
     update_failed: "Aktualizacja nie powiodła się: {1}",
+    date_placeholder: "RRRR-MM-DD",
+    time: "Godzina",
+    time_placeholder: "GG:MM",
+    go_on: "Dalej",
+    roster_count: "{1} w protokole",
+    roster_toggle: "dodaj / usuń",
+    home_page: "Strona główna",
+    switch_theme: "Jasny lub ciemny motyw",
 };
 
 const JA: Strings = Strings {
@@ -1258,7 +1293,6 @@ const JA: Strings = Strings {
     save: "保存",
     cancel: "キャンセル",
     open: "開く",
-    date_format: "YYYY-MM-DD HH:MM",
     previous: "前へ",
     next: "次へ",
     change: "変更",
@@ -1401,6 +1435,14 @@ const JA: Strings = Strings {
     update_to: "{1} に更新",
     updating: "{1} に更新中…",
     update_failed: "更新に失敗しました: {1}",
+    date_placeholder: "YYYY-MM-DD",
+    time: "時刻",
+    time_placeholder: "HH:MM",
+    go_on: "次へ",
+    roster_count: "記録用紙に{1}人",
+    roster_toggle: "追加 / 削除",
+    home_page: "ホーム",
+    switch_theme: "ライト / ダークテーマ",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

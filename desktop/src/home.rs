@@ -208,7 +208,7 @@ impl HomeScreen {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.editor {
-            Some(_) => form::Form::hints(s),
+            Some(editor) => editor.hints(s),
             None => vec![
                 ("← → ⇧⇥ ⇥".to_string(), s.panel.to_string()),
                 ("↑ ↓".to_string(), String::new()),
@@ -300,26 +300,19 @@ impl HomeScreen {
                 }
             })
             .collect();
-        let new_team = row![
-            ui::pill(
-                &format!("+ {}", s.new_team),
-                false,
-                Some(Message::NewTeam),
-                c,
-            ),
+        let actions = vec![
             ui::pill(
                 &format!("↓ {}", s.import_archive),
                 false,
                 Some(Message::Import),
                 c,
             ),
-        ]
-        .spacing(8)
-        .into();
+            ui::add_button(s.new_team, Message::NewTeam, c),
+        ];
         row![
-            list(s.in_progress, None, in_progress, s.no_matches, c),
-            list(s.recent, None, recent, s.no_matches, c),
-            list(s.teams, Some(new_team), teams, "", c),
+            list(s.in_progress, vec![], in_progress, s.no_matches, c),
+            list(s.recent, vec![], recent, s.no_matches, c),
+            list(s.teams, actions, teams, "", c),
         ]
         .spacing(14)
         .height(Length::Fill)
@@ -359,7 +352,12 @@ fn match_row<'a>(
         text(format!("{}–{}", m.won, m.lost))
             .size(22)
             .font(bold)
-            .color(c.accent),
+            .color(ui::score_color(
+                m.won,
+                m.lost,
+                matches!(m.next, NextSetKind::Over),
+                c,
+            )),
     ]
     .align_y(Alignment::Center)
     .spacing(10);
@@ -368,7 +366,7 @@ fn match_row<'a>(
 
 fn list<'a>(
     title: &str,
-    action: Option<Element<'a, Message>>,
+    actions: Vec<Element<'a, Message>>,
     items: Vec<Element<'a, Message>>,
     empty: &str,
     c: Colors,
@@ -380,11 +378,8 @@ fn list<'a>(
             .into(),
         false => Column::with_children(items).spacing(4).into(),
     };
-    let content = match action {
-        Some(action) => column![action, scrollable(body).height(Length::Fill)].spacing(10),
-        None => column![scrollable(body).height(Length::Fill)],
-    };
-    container(ui::panel(Some(title), content, c))
+    let content = scrollable(body).height(Length::Fill);
+    container(ui::panel_with(title, actions, content, c))
         .width(Length::FillPortion(1))
         .height(Length::Fill)
         .into()

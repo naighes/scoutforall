@@ -179,7 +179,7 @@ impl MatchScreen {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.editor {
-            Some(_) => form::Form::hints(s),
+            Some(editor) => editor.hints(s),
             None => [
                 self.next_label(s)
                     .map(|next| ("Enter".to_string(), next))

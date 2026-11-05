@@ -87,6 +87,9 @@ pub struct Colors {
     pub court: Color,
     pub court_lines: Color,
     pub danger: Color,
+    /// the score of a match won, of one lost
+    pub won: Color,
+    pub lost: Color,
 }
 
 /// The surfaces of the site (`web/src/assets/css/global.css`).
@@ -104,6 +107,8 @@ pub const DARK: Colors = Colors {
     court: rgb(0x1B2A44),
     court_lines: rgb(0xCBD5E1),
     danger: LOST,
+    won: WON,
+    lost: LOST,
 };
 
 pub const LIGHT: Colors = Colors {
@@ -121,6 +126,9 @@ pub const LIGHT: Colors = Colors {
     court: rgb(0xE6EEF8),
     court_lines: rgb(0x334155),
     danger: rgb(0xB91C1C),
+    // darker, to read on white
+    won: rgb(0x15803D),
+    lost: rgb(0xB91C1C),
 };
 
 pub fn colors(dark: bool) -> Colors {
@@ -189,3 +197,13 @@ pub fn grade_color(grade: f64, c: Colors) -> Color {
 /// The ball of the logo, white, and the name of the app, as on the site.
 pub const BALL: &[u8] = include_bytes!("../assets/ball.svg");
 pub const WORDMARK: &[u8] = include_bytes!("../assets/wordmark.svg");
+
+/// The icons, the ones of the Android app (`assets/icons`).
+pub mod icons {
+    pub const HOME: &[u8] = include_bytes!("../assets/icons/home.svg");
+    pub const AWAY: &[u8] = include_bytes!("../assets/icons/away.svg");
+    pub const BACK: &[u8] = include_bytes!("../assets/icons/back.svg");
+    pub const ADD: &[u8] = include_bytes!("../assets/icons/add.svg");
+    pub const SETTINGS: &[u8] = include_bytes!("../assets/icons/settings.svg");
+    pub const THEME: &[u8] = include_bytes!("../assets/icons/theme.svg");
+}

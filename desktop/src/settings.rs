@@ -229,7 +229,8 @@ impl SettingsScreen {
             || ck == key!(shift - tab)
             || ck == key!(shift - backtab)
             || ck == key!(backtab);
-        let reading = self.general.terms.is_some();
+        // the terms read, or a country offered to Tab
+        let reading = self.general.terms.is_some() || self.general.form.lit().is_some();
         match (self.page, turn && !self.waiting && !reading) {
             (_, true) => {
                 self.turn();

@@ -6,6 +6,7 @@
 
 use {
     crate::{
+        countries,
         form::{self, Field, Form},
         strings::Strings,
         theme::{Colors, SIZE_BODY, SIZE_SMALL},
@@ -15,7 +16,7 @@ use {
         Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
     },
-    scout4all_core::shapes::{country::CountryCode, enums::LanguageEnum},
+    scout4all_core::shapes::enums::LanguageEnum,
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{Scout4All, Terms},
     std::{path::Path, sync::Arc},
@@ -29,9 +30,8 @@ const REPORTS: &str = "scout4all-0fd59357fbe3@intake.linear.app";
 
 // the fields
 const LANGUAGE: usize = 0;
-const SEARCH: usize = 1;
-const COUNTRY: usize = 2;
-const STATISTICS: usize = 3;
+const COUNTRY: usize = 1;
+const STATISTICS: usize = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Link {
@@ -48,14 +48,15 @@ pub enum Message {
     Terms,
 }
 
-/// The languages, each in its own words.
+/// The languages, each in its own words, after the flag of where it's
+/// spoken (Brazilian Portuguese).
 fn language_name(language: LanguageEnum) -> &'static str {
     match language {
-        LanguageEnum::En => "English",
-        LanguageEnum::It => "Italiano",
-        LanguageEnum::Pt => "Português",
-        LanguageEnum::Pl => "Polski",
-        LanguageEnum::Ja => "日本語",
+        LanguageEnum::En => "🇬🇧  English",
+        LanguageEnum::It => "🇮🇹  Italiano",
+        LanguageEnum::Pt => "🇧🇷  Português",
+        LanguageEnum::Pl => "🇵🇱  Polski",
+        LanguageEnum::Ja => "🇯🇵  日本語",
     }
 }
 
@@ -107,7 +108,6 @@ pub struct General {
     core: Arc<Scout4All>,
     pub language: LanguageEnum,
     pub form: Form,
-    countries: Vec<(CountryCode, String)>,
     /// the terms of use, being read
     pub terms: Option<Terms>,
     pub error: Option<String>,
@@ -115,11 +115,9 @@ pub struct General {
 
 impl General {
     pub fn new(core: Arc<Scout4All>, language: LanguageEnum, s: &Strings) -> General {
-        let country = core.default_country().map(|c| (c.value, c.name));
         let mut general = General {
             language,
             form: Form::new(s.general, vec![]),
-            countries: country.into_iter().collect(),
             terms: None,
             error: None,
             core,
@@ -128,14 +126,12 @@ impl General {
         general
     }
 
-    /// The form, in the words of the language: the search as it was.
+    /// The form, in the words of the language, with the country chosen.
     fn build(&mut self, s: &Strings) {
-        let search = self
-            .form
-            .fields
-            .get(SEARCH)
-            .map(|_| self.form.text(SEARCH))
-            .or_else(|| self.countries.first().map(|(_, n)| n.clone()))
+        let country = self
+            .core
+            .default_country()
+            .map(|c| c.name)
             .unwrap_or_default();
         let focused = self.form.focused;
         let mut form = Form::new(
@@ -152,8 +148,7 @@ impl General {
                         .position(|l| *l == self.language)
                         .unwrap_or(0),
                 ),
-                Field::text(s.default_country, search).hint(s.search_country),
-                Field::choice("", vec![], 0),
+                Field::search(s.default_country, country).hint(s.search_country),
                 Field::check(s.send_statistics, self.core.analytics_enabled(), false)
                     .hint(s.send_statistics_detail),
             ],
@@ -161,17 +156,6 @@ impl General {
         form.plain = true;
         form.focused = focused;
         self.form = form;
-        self.offer_countries(s);
-    }
-
-    fn offer_countries(&mut self, s: &Strings) {
-        let options = match self.countries.is_empty() {
-            true => vec![s.no_country_found.to_string()],
-            false => self.countries.iter().map(|(_, n)| n.clone()).collect(),
-        };
-        if let Some(field) = self.form.fields.get_mut(COUNTRY) {
-            field.value = form::Value::Choice { options, index: 0 };
-        }
     }
 
     pub fn focus_id(&self) -> Option<Id> {
@@ -194,18 +178,19 @@ impl General {
                     self.core.set_language(language.to_string());
                 })
             }
-            SEARCH => {
-                self.countries = self
-                    .core
-                    .countries(self.form.text(SEARCH))
-                    .into_iter()
-                    .take(12)
-                    .map(|c| (c.value, c.name))
-                    .collect();
-                self.offer_countries(s);
-                self.save_country()
+            COUNTRY => {
+                let written = self.form.text(COUNTRY);
+                self.form
+                    .suggest(COUNTRY, countries::suggestions(&self.core, &written));
+                // saved once it's a country: while written, it's not yet
+                match countries::chosen(&self.core, &written) {
+                    Ok(Some(country)) => self
+                        .core
+                        .set_default_country(country)
+                        .map_err(|e| e.to_string()),
+                    Ok(None) | Err(()) => Ok(()),
+                }
             }
-            COUNTRY => self.save_country(),
             STATISTICS => {
                 let on = matches!(
                     self.form.fields.get(STATISTICS).map(|f| &f.value),
@@ -223,16 +208,6 @@ impl General {
             _ => Ok(()),
         };
         self.error = saved.err().map(|e| s.not_saved.replace("{}", &e));
-    }
-
-    fn save_country(&self) -> Result<(), String> {
-        match self.countries.get(self.form.index(COUNTRY)) {
-            Some((country, _)) => self
-                .core
-                .set_default_country(*country)
-                .map_err(|e| e.to_string()),
-            None => Ok(()),
-        }
     }
 
     fn open(&mut self, s: &Strings, link: Link) {
@@ -261,17 +236,6 @@ impl General {
 
     /// The language changed: the form in its words, the country too.
     pub fn relabel(&mut self, s: &Strings) {
-        self.countries = self
-            .core
-            .default_country()
-            .map(|c| (c.value, c.name))
-            .into_iter()
-            .collect();
-        if let Some((_, name)) = self.countries.first()
-            && let Some(field) = self.form.fields.get_mut(SEARCH)
-        {
-            field.value = form::Value::Text(name.clone());
-        }
         self.build(s);
     }
 
@@ -473,7 +437,7 @@ mod tests {
         settings.key(key!(down), s);
         settings.update(
             crate::settings::Message::General(Message::Form(form::Message::Input(
-                SEARCH,
+                COUNTRY,
                 "IT".into(),
             ))),
             s,
@@ -482,9 +446,14 @@ mod tests {
             core.default_country().map(|c| c.value.to_string()),
             Some("IT".to_string())
         );
+        // the countries offered close with Esc, the settings stay
+        assert!(settings.general.form.lit().is_some());
+        assert!(matches!(
+            settings.key(scout4all_keys::BACK_KEY, s),
+            crate::settings::Outcome::Stay
+        ));
         // the statistics: off, then on again
         assert!(core.analytics_enabled());
-        settings.key(key!(down), s);
         settings.key(key!(down), s);
         settings.key(key!(space), s);
         assert!(!core.analytics_enabled());

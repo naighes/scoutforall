@@ -300,7 +300,7 @@ impl TeamScreen {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match (&self.mode, self.panel) {
-            (Mode::Edit(_), _) => form::Form::hints(s),
+            (Mode::Edit(editor), _) => editor.hints(s),
             (Mode::Remove(..), _) => vec![
                 ("Enter".to_string(), s.remove.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
@@ -430,19 +430,10 @@ impl TeamScreen {
                 .height(Length::Fill)
                 .into(),
         };
-        ui::panel(
-            Some(&ui::capitalized(s.players)),
-            column![
-                ui::pill(
-                    &format!("+ {}", s.new_player),
-                    false,
-                    Some(Message::NewPlayer),
-                    c
-                ),
-                list
-            ]
-            .spacing(10)
-            .height(Length::Fill),
+        ui::panel_with(
+            &ui::capitalized(s.players),
+            vec![ui::add_button(s.new_player, Message::NewPlayer, c)],
+            container(list).height(Length::Fill),
             c,
         )
     }
@@ -460,28 +451,41 @@ impl TeamScreen {
                 ..
             } => ui::list_row(
                 row![
+                    // home or away at a glance, as on Android
+                    ui::tip(
+                        ui::icon(
+                            match home {
+                                true => theme::icons::HOME,
+                                false => theme::icons::AWAY,
+                            },
+                            22.0,
+                            c.muted,
+                        ),
+                        match home {
+                            true => s.home_game,
+                            false => s.away_game,
+                        },
+                        c,
+                    ),
                     column![
                         ui::body(opponent.clone()).font(theme::fonts().bold),
-                        text(format!(
-                            "{} · {}",
-                            day(date),
-                            match home {
-                                true => s.home_game,
-                                false => s.away_game,
-                            }
-                        ))
-                        .size(SIZE_SMALL)
-                        .color(c.muted),
+                        row![
+                            text(day(date)).size(SIZE_SMALL).color(c.muted),
+                            text(match finished {
+                                true => String::new(),
+                                false => format!("· {}", s.in_progress),
+                            })
+                            .size(SIZE_SMALL)
+                            .color(c.accent),
+                        ]
+                        .spacing(6),
                     ]
                     .spacing(2)
                     .width(Length::Fill),
                     text(format!("{won}–{lost}"))
                         .size(20)
                         .font(theme::fonts().bold)
-                        .color(match finished {
-                            true => c.text,
-                            false => c.accent,
-                        }),
+                        .color(ui::score_color(*won, *lost, *finished, c)),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),
@@ -506,20 +510,10 @@ impl TeamScreen {
                 .height(Length::Fill)
                 .into(),
         };
-        ui::panel(
-            Some(s.matches),
-            column![
-                ui::pill(
-                    &format!("+ {}", s.new_match),
-                    false,
-                    Some(Message::NewMatch),
-                    c
-                ),
-                list
-            ]
-            .spacing(10)
-            .width(Length::Fill)
-            .height(Length::Fill),
+        ui::panel_with(
+            s.matches,
+            vec![ui::add_button(s.new_match, Message::NewMatch, c)],
+            container(list).width(Length::Fill).height(Length::Fill),
             c,
         )
     }
@@ -535,7 +529,7 @@ mod tests {
             home::{self, HomeScreen},
             strings::strings,
         },
-        form::Message::{Choose, Input, Save},
+        form::Message::{Choose, Input, Save, Take},
         scout4all_core::{player_form::PlayerForm, shapes::enums::LanguageEnum},
     };
 
@@ -563,6 +557,8 @@ mod tests {
             Choose(2, 1),
             Choose(3, 1),
             Input(4, "Ital".into()),
+            // offered, then taken
+            Take(4, 0),
         ] {
             home.update(&core, s, home::Message::Form(m));
         }
@@ -607,6 +603,10 @@ mod tests {
         team.key(s, key!(right));
         team.key(s, key!(n));
         team.update(s, Message::Form(Input(0, "Arezzo".into())));
+        team.update(s, Message::Form(Input(1, "2026-11-05".into())));
+        team.update(s, Message::Form(Input(2, "2030".into())));
+        // the details, then the score sheet
+        assert!(matches!(team.update(s, Message::Form(Save)), Outcome::Stay));
         let Outcome::OpenMatch(match_id) = team.update(s, Message::Form(Save)) else {
             unreachable!("the match is saved and opened")
         };

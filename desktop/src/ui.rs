@@ -8,7 +8,7 @@ use {
     },
     iced::{
         Alignment, Background, Border, Color, Element, Length, Padding,
-        widget::{button, column, container, row, space, svg, text},
+        widget::{button, column, container, row, space, svg, text, tooltip},
     },
 };
 
@@ -196,23 +196,56 @@ pub fn list_row<'a, M: Clone + 'a>(
         .into()
 }
 
-/// A round button on a bar: an outline, amber under the mouse.
-pub fn bar_button<'a, M: Clone + 'a>(label: &str, message: M, c: Colors) -> Element<'a, M> {
-    button(
-        text(label.to_string())
-            .size(SIZE_TITLE)
-            .align_x(Alignment::Center),
+/// An icon of `assets/icons`, `size` wide, in `color`.
+pub fn icon<'a>(bytes: &'static [u8], size: f32, color: Color) -> svg::Svg<'a> {
+    svg(svg::Handle::from_memory(bytes))
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(move |_, _| svg::Style { color: Some(color) })
+}
+
+/// What a button without words does, said under the mouse.
+pub fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, what: &str, c: Colors) -> Element<'a, M> {
+    tooltip(
+        content,
+        container(text(what.to_string()).size(SIZE_SMALL).color(c.text))
+            .padding(Padding::from([4, 10]))
+            .style(move |_| container::Style {
+                background: Some(c.panel.into()),
+                border: border(c.border, BORDER, 8.0),
+                ..container::Style::default()
+            }),
+        tooltip::Position::Bottom,
     )
-    .padding(Padding::from([3, 14]))
+    .gap(6)
+    .into()
+}
+
+/// A round button on a bar, with an icon: an outline, amber under the
+/// mouse; what it does said under the mouse.
+pub fn bar_button<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    what: &str,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    let button = button(
+        container(icon(icon_bytes, 22.0, c.text))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .width(Length::Fixed(42.0))
+    .height(Length::Fixed(42.0))
+    .padding(0)
     .on_press(message)
     .style(move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: None,
-            text_color: match hovered {
-                true => c.accent,
-                false => c.text,
+            background: match hovered {
+                true => Some(Color { a: 0.7, ..c.button }.into()),
+                false => None,
             },
+            text_color: c.text,
             border: border(
                 match hovered {
                     true => c.accent,
@@ -223,8 +256,70 @@ pub fn bar_button<'a, M: Clone + 'a>(label: &str, message: M, c: Colors) -> Elem
             ),
             ..button::Style::default()
         }
-    })
-    .into()
+    });
+    tip(button, what, c)
+}
+
+/// The round amber button that adds one more to a list (a player, a
+/// match), on the title of its panel.
+pub fn add_button<'a, M: Clone + 'a>(what: &str, message: M, c: Colors) -> Element<'a, M> {
+    let button = button(
+        container(icon(theme::icons::ADD, 22.0, c.on_accent))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .width(Length::Fixed(34.0))
+    .height(Length::Fixed(34.0))
+    .padding(0)
+    .on_press(message)
+    .style(move |_, status| button::Style {
+        background: Some(
+            match status {
+                button::Status::Hovered | button::Status::Pressed => Color {
+                    a: 0.85,
+                    ..c.accent
+                },
+                _ => c.accent,
+            }
+            .into(),
+        ),
+        text_color: c.on_accent,
+        border: border(c.accent, BORDER, RADIUS_PILL),
+        ..button::Style::default()
+    });
+    tip(button, what, c)
+}
+
+/// A panel with its title and, on its right, what it offers to do.
+pub fn panel_with<'a, M: 'a>(
+    title: &str,
+    actions: Vec<Element<'a, M>>,
+    content: impl Into<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
+    let head = row![
+        mark(c, 18.0),
+        text(title.to_string())
+            .size(SIZE_TITLE)
+            .font(theme::fonts().bold)
+            .color(c.text)
+            .width(Length::Fill),
+        row(actions).spacing(8).align_y(Alignment::Center),
+    ]
+    .spacing(10)
+    .height(Length::Fixed(34.0))
+    .align_y(Alignment::Center);
+    panel(None, column![head, content.into()].spacing(12), c)
+}
+
+/// The score of a match, the sets of the team first: green when it won,
+/// red when it lost, as on Android; in the color of the text while played.
+pub fn score_color(won: u8, lost: u8, finished: bool, c: Colors) -> Color {
+    match (finished, won > lost) {
+        (false, _) => c.text,
+        (true, true) => c.won,
+        (true, false) => c.lost,
+    }
 }
 
 /// The ball of the logo, in the color of the text.
@@ -272,19 +367,25 @@ fn bar<'a, M: 'a>(content: impl Into<Element<'a, M>>, height: f32, c: Colors) ->
         .into()
 }
 
-/// The bar on top: back and the logo on the left, the screen in the
-/// middle, the buttons on the right; an amber line below.
+/// The bar on top: back, the home and the logo on the left, the screen in
+/// the middle, the buttons on the right; an amber line below.
 pub fn top_bar<'a, M: Clone + 'a>(
     back: Option<M>,
+    home: Option<M>,
     title: String,
     right: Vec<Element<'a, M>>,
+    s: &crate::strings::Strings,
     c: Colors,
 ) -> Element<'a, M> {
     let back: Element<'a, M> = match back {
-        Some(back) => bar_button("←", back, c),
+        Some(back) => bar_button(theme::icons::BACK, s.back, back, c),
         None => space::horizontal().width(0).into(),
     };
-    let logo = row![back, ball(26.0, c), wordmark(17.0, c)]
+    let home: Element<'a, M> = match home {
+        Some(home) => bar_button(theme::icons::HOME, s.home_page, home, c),
+        None => space::horizontal().width(0).into(),
+    };
+    let logo = row![back, home, ball(26.0, c), wordmark(17.0, c)]
         .spacing(12)
         .align_y(Alignment::Center);
     let title = text(title)
