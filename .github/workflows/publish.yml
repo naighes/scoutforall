@@ -53,12 +53,20 @@ jobs:
           persist-credentials: false
       # a draft until every asset is uploaded: the website and the self update
       # follow the latest release, which must never lack an asset
+      # a draft left by an earlier run is kept, so that a failed run can be run
+      # again as a whole; a published release is never touched again
       - name: create github release
-        run: gh release create "v${VERSION}" --generate-notes --draft
+        run: |
+          draft="$(gh release view "v${VERSION}" --json isDraft --jq .isDraft 2> /dev/null || true)"
+          case "${draft}" in
+            true) echo "the draft v${VERSION} exists already: kept" ;;
+            false) echo "v${VERSION} is published already"; exit 1 ;;
+            *) gh release create "v${VERSION}" --generate-notes --draft ;;
+          esac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.version.outputs.version }}
-          ARCHIVE: ${{ steps.variables.outputs.archive }}
 
   build-and-publish:
     needs: [version, create-release]
@@ -184,14 +192,14 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
       - name: upload bare binary
         shell: bash
-        run: gh release upload "v${VERSION}" "dist/${BINARY_ASSET}" --clobber
+        run: bash .github/scripts/release-assets.sh upload "v${VERSION}" "dist/${BINARY_ASSET}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
           BINARY_ASSET: ${{ steps.variables.outputs.binaryAsset }}
       - name: upload archives
         shell: bash
-        run: gh release upload "v${VERSION}" "dist/${ARCHIVE}".* --clobber
+        run: bash .github/scripts/release-assets.sh upload "v${VERSION}" "dist/${ARCHIVE}".*
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -209,11 +217,13 @@ jobs:
       GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.version.outputs.version }}
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: download the binaries of both architectures
         run: |
-          gh release download "v${VERSION}" --dir parts \
-            --pattern scout4all-aarch64-apple-darwin \
-            --pattern scout4all-x86_64-apple-darwin
+          bash .github/scripts/release-assets.sh download "v${VERSION}" parts \
+            scout4all-aarch64-apple-darwin scout4all-x86_64-apple-darwin
       - name: merge them into a universal binary
         run: |
           mkdir -p package dist
@@ -228,7 +238,7 @@ jobs:
           subject-path: package/scout4all
           subject-name: "scout4all-macos-${{ needs.version.outputs.version }}"
       - name: upload archive
-        run: gh release upload "v${VERSION}" dist/scout4all-macos.tar.gz --clobber
+        run: bash .github/scripts/release-assets.sh upload "v${VERSION}" dist/scout4all-macos.tar.gz
 
   publish-release:
     needs: [version, build-and-publish, macos-universal]
