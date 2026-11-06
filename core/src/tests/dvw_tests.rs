@@ -617,6 +617,9 @@ mod tests {
         let mut issues: BTreeMap<String, (usize, String)> = BTreeMap::new();
         let mut mappings: BTreeMap<&str, usize> = BTreeMap::new();
         let mut events = 0;
+        // the events with the P1 inverted (told by the attacks), by file
+        // and team
+        let mut inverted: BTreeMap<String, usize> = BTreeMap::new();
         for path in &paths {
             let name = path.file_name().unwrap().to_string_lossy().to_string();
             let file = parse(&std::fs::read(path).unwrap()).unwrap();
@@ -648,6 +651,11 @@ mod tests {
                         Ok((entry, used)) => {
                             sets_ok += 1;
                             events += entry.events.len();
+                            *inverted.entry(format!("{name} {side:?}")).or_default() += entry
+                                .events
+                                .iter()
+                                .filter(|e| e.flags.inverted_p1())
+                                .count();
                             for (k, v) in used {
                                 *mappings.entry(k).or_default() += v;
                             }
@@ -696,6 +704,7 @@ mod tests {
             println!("{count:5}  {key}\n       {example}");
         }
         println!("\nmappings: {mappings:#?}");
+        println!("\nevents with the P1 inverted: {inverted:#?}");
     }
 
     /// The statistics of the translated sets against the codes of the file,

@@ -1337,6 +1337,60 @@ mod tests {
         );
     }
 
+    /// The P1 inverted, told by where our opposite (4) or outside hitter
+    /// (2) attacks from in P1 in side out: the opposite from 2 or the
+    /// outside hitter from 4 inverted, from 4 or 2 canonical; with no such
+    /// attack (the middle blocker's), canonical. Every event of the set
+    /// after it keeps it, as the scouting does.
+    #[test]
+    fn the_inverted_p1_told_by_the_attacks() {
+        let inverted = |attack: &str| -> Vec<bool> {
+            let mut file = File::new();
+            let serve = format!("{}SM+", file.server());
+            file.rally(&[&serve, "*07RM+", attack], true);
+            let (events, _) = translated_events(&file.finished()).expect("the set");
+            events.iter().map(|e| e.flags.inverted_p1()).collect()
+        };
+        // the opposite from 2: the reception and the attack of the rally,
+        // and all after
+        let from_2 = inverted("*04AH#~~~2");
+        assert!(from_2.len() > 3);
+        assert!(from_2.iter().all(|i| *i), "{from_2:?}");
+        // the outside hitter from 4
+        assert!(inverted("*02AH#~~~4").iter().all(|i| *i));
+        // canonical: the opposite from 4, the outside hitter from 2
+        assert!(inverted("*04AH#~~~4").iter().all(|i| !*i));
+        assert!(inverted("*02AH#~~~2").iter().all(|i| !*i));
+        // the middle blocker, or no start zone: nothing told
+        assert!(inverted("*03AH#~~~3").iter().all(|i| !*i));
+        assert!(inverted("*04AH#").iter().all(|i| !*i));
+    }
+
+    /// The zone of the attack follows the P1 told: the opposite from 2.
+    #[test]
+    fn the_attack_zone_with_the_inverted_p1() {
+        use crate::shapes::{enums::ZoneEnum, set::SetEntry};
+        let mut file = File::new();
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "*07RM+", "*04AH#~~~2"], true);
+        let dvw = parse(file.finished().text().as_bytes()).expect("a DataVolley file");
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
+        let us = Us {
+            side: Side::Home,
+            players: &players,
+            liberos: &[HOME_LIBERO],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let (set, _): (SetEntry, _) = translate_set(&dvw, &us, 1, date, 6).expect("the set");
+        let keys = set.event_keys(6).expect("replayed");
+        let zone = keys
+            .iter()
+            .flatten()
+            .find(|k| k.event_type == A)
+            .and_then(|k| k.zone);
+        assert_eq!(zone, Some(ZoneEnum::Two));
+    }
+
     /// The time of the file, when it has one.
     #[test]
     fn the_time_of_the_file() {

@@ -1647,6 +1647,14 @@ pub(crate) mod screen_tests {
                 p.player.number, p.player.name, p.player.role, p.total
             );
         }
+        for set in &the_match.sets {
+            let all = set.events.len();
+            let inverted = set.events.iter().filter(|e| e.flags.inverted_p1()).count();
+            println!(
+                "set {}: {inverted} of {all} events with the P1 inverted",
+                set.set_number
+            );
+        }
         let zone4 = f.zones.iter().find(|z| z.zone == 4).map(|z| z.share);
         println!("zone 4: {zone4:?}");
         let best = f
