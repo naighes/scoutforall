@@ -247,6 +247,70 @@ mod tests {
         events.iter().take(count).copied().collect()
     }
 
+    /// The lines with the clock `time` and, when given, `video` seconds
+    /// from 100, 10 a line.
+    fn timed(mut file: File, time: &str, video: bool) -> File {
+        file.lines = file
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let mut fields: Vec<String> = line.split(';').map(str::to_string).collect();
+                // the ends of set have no fields
+                if let Some(f) = fields.get_mut(7) {
+                    *f = time.to_string();
+                }
+                if let (true, Some(f)) = (video, fields.get_mut(12)) {
+                    *f = (100 + 10 * i).to_string();
+                }
+                fields.join(";")
+            })
+            .collect();
+        file
+    }
+
+    /// Linked to the video, the times of the events are its seconds from
+    /// midnight, whatever the clock of the file says.
+    #[test]
+    fn the_events_on_the_video_clock() {
+        let mut file = File::new();
+        file.received_by(2);
+        let file = timed(file.finished(), "23.59.59", true);
+        let lines = file.lines.len();
+        let (events, _) = translated_events(&file).expect("expected the set");
+        let midnight = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .expect("a time")
+            .and_utc();
+        let seconds: Vec<i64> = events
+            .iter()
+            .map(|e| (e.timestamp - midnight).num_seconds())
+            .collect();
+        assert!(
+            seconds
+                .iter()
+                .all(|s| (100..100 + 10 * lines as i64).contains(s) && s % 10 == 0),
+            "{seconds:?}"
+        );
+        assert!(seconds.windows(2).all(|w| w[0] <= w[1]), "{seconds:?}");
+    }
+
+    /// Without the video, the clock of the file, as ever.
+    #[test]
+    fn the_events_on_the_clock_of_the_file() {
+        let mut file = File::new();
+        file.received_by(2);
+        let file = timed(file.finished(), "18.30.00", false);
+        let (events, _) = translated_events(&file).expect("expected the set");
+        let start = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .and_then(|d| d.and_hms_opt(18, 30, 0))
+            .expect("a time")
+            .and_utc();
+        // the same time on every line: a second after the previous one
+        let first = events.first().map(|e| (e.timestamp - start).num_seconds());
+        assert!(first.is_some_and(|s| (0..60).contains(&s)), "{first:?}");
+    }
+
     /// The libero touching as it plays: nothing to change.
     #[test]
     fn the_libero_plays_as_ever() {

@@ -36,6 +36,7 @@ impl MatchWriter for StoreMatchWriter {
         let match_id = MatchEntry::id_of(&opponent, &date);
         let m = MatchEntry {
             source: Default::default(),
+            video_clock: false,
             opponent,
             date,
             id: match_id.clone(),
@@ -88,6 +89,7 @@ impl MatchWriter for StoreMatchWriter {
             sets: m.sets.clone(),
             // an imported match stays one when edited
             source: m.source,
+            video_clock: m.video_clock,
         };
         write_json(
             &*self.0,
@@ -101,9 +103,11 @@ impl MatchWriter for StoreMatchWriter {
         &self,
         m: &MatchEntry,
         source: MatchSource,
+        video_clock: bool,
     ) -> Result<MatchEntry, AppError> {
         let saved = MatchEntry {
             source,
+            video_clock,
             ..m.clone()
         };
         write_json(

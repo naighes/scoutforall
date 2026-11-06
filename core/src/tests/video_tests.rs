@@ -1,0 +1,232 @@
+//! The video of a match: the start of its files from their names, the
+//! anchor the events line up with, the profile saved next to the match.
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        shapes::{r#match::MatchEntry, team::TeamEntry},
+        storage::{Store, memory::MemoryStore},
+        video::{
+            Anchor, EventRef, StoredProfile, VIDEO_PROFILE_VERSION, VideoFile, VideoProfile,
+            anchor, anchor_on, in_order, offset_ms, profile_key, read_profile, resolved_path,
+            start_from_name, stored_path, write_profile,
+        },
+    };
+    use chrono::{DateTime, FixedOffset, TimeDelta, TimeZone, Utc};
+    use std::path::Path;
+    use uuid::Uuid;
+
+    fn rome() -> FixedOffset {
+        FixedOffset::east_opt(3600).unwrap()
+    }
+
+    fn at(h: u32, m: u32, s: u32) -> DateTime<FixedOffset> {
+        rome().with_ymd_and_hms(2026, 11, 1, h, m, s).unwrap()
+    }
+
+    fn start(name: &str) -> Option<DateTime<FixedOffset>> {
+        start_from_name(Path::new(name), rome())
+    }
+
+    #[test]
+    fn the_start_from_the_name_of_the_file() {
+        assert_eq!(start("20261101 175252.mp4"), Some(at(17, 52, 52)));
+        assert_eq!(start("/videos/20261101 185442.mp4"), Some(at(18, 54, 42)));
+        assert_eq!(start("VID_20261101_175252.mp4"), Some(at(17, 52, 52)));
+        assert_eq!(start("20261101-175252.mov"), Some(at(17, 52, 52)));
+        assert_eq!(start("20261101175252.mp4"), Some(at(17, 52, 52)));
+        assert_eq!(
+            start("match 20261101T175252 part 2.mp4"),
+            Some(at(17, 52, 52))
+        );
+    }
+
+    #[test]
+    fn no_start_without_a_date_and_a_time() {
+        assert_eq!(start("match.mp4"), None);
+        assert_eq!(start("20261101.mp4"), None);
+        assert_eq!(start("20261399 175252.mp4"), None);
+        assert_eq!(start("20261101 255252.mp4"), None);
+        // more digits than a date and a time: not one
+        assert_eq!(start("120261101 175252.mp4"), None);
+        assert_eq!(start("20261101 1752521.mp4"), None);
+    }
+
+    fn file(path: &str, start: Option<DateTime<FixedOffset>>) -> VideoFile {
+        VideoFile {
+            path: path.into(),
+            start,
+        }
+    }
+
+    #[test]
+    fn the_files_by_start_the_others_after() {
+        let files = vec![
+            file("c", None),
+            file("b", Some(at(18, 54, 42))),
+            file("d", None),
+            file("a", Some(at(17, 52, 52))),
+        ];
+        let paths: Vec<String> = in_order(files).into_iter().map(|f| f.path).collect();
+        assert_eq!(paths, ["a", "b", "c", "d"]);
+    }
+
+    fn a_match(video_clock: bool) -> MatchEntry {
+        MatchEntry {
+            source: Default::default(),
+            video_clock,
+            opponent: "Polisportiva".into(),
+            date: at(18, 0, 0),
+            id: "2026-11-01_polisportiva".into(),
+            team: TeamEntry::default(),
+            home: true,
+            max_substitutions: 6,
+            sets: vec![],
+            notes: String::new(),
+            roster: vec![],
+        }
+    }
+
+    fn profile(files: Vec<VideoFile>, anchor: Option<Anchor>) -> VideoProfile {
+        VideoProfile {
+            files,
+            anchor,
+            ..Default::default()
+        }
+    }
+
+    /// Imported from DataVolley with the video: the seconds from midnight
+    /// are the seconds in the video, whatever the names of the files.
+    #[test]
+    fn on_the_video_clock_the_seconds_from_midnight() {
+        let p = profile(
+            vec![file("20261101 175252.mp4", Some(at(17, 52, 52)))],
+            None,
+        );
+        let m = a_match(true);
+        let found = anchor(&p, &m).unwrap();
+        let midnight = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).unwrap();
+        // the first serve of the file of the test, at 378 s
+        assert_eq!(
+            offset_ms(&found, midnight + TimeDelta::seconds(378)),
+            378_000
+        );
+        // even without files
+        assert_eq!(anchor(&profile(vec![], None), &m), Some(found));
+    }
+
+    /// Scouted here, on the clock: from the start of the first file.
+    #[test]
+    fn on_the_clock_from_the_start_of_the_first_file() {
+        let p = profile(
+            vec![
+                file("20261101 175252.mp4", Some(at(17, 52, 52))),
+                file("20261101 185442.mp4", Some(at(18, 54, 42))),
+            ],
+            None,
+        );
+        let found = anchor(&p, &a_match(false)).unwrap();
+        let serve = at(18, 0, 0).to_utc();
+        assert_eq!(offset_ms(&found, serve), (7 * 60 + 8) * 1000);
+        // before the video
+        assert_eq!(offset_ms(&found, at(17, 52, 50).to_utc()), -2000);
+    }
+
+    #[test]
+    fn no_anchor_without_a_start() {
+        let p = profile(vec![file("match.mp4", None)], None);
+        assert_eq!(anchor(&p, &a_match(false)), None);
+    }
+
+    /// The anchor of the user wins, on any clock.
+    #[test]
+    fn the_anchor_chosen_wins() {
+        let serve = at(18, 0, 0).to_utc();
+        let event = EventRef {
+            set_number: 1,
+            index: 3,
+        };
+        let chosen = anchor_on(event, serve, 95_500);
+        let p = profile(
+            vec![file("20261101 175252.mp4", Some(at(17, 52, 52)))],
+            Some(chosen.clone()),
+        );
+        for clock in [false, true] {
+            let found = anchor(&p, &a_match(clock)).unwrap();
+            assert_eq!(found, chosen);
+            assert_eq!(offset_ms(&found, serve), 95_500);
+            assert_eq!(offset_ms(&found, serve + TimeDelta::seconds(10)), 105_500);
+        }
+    }
+
+    #[test]
+    fn the_paths_in_the_folder_of_the_data_are_relative() {
+        let data = Path::new("/home/me/.scout4all");
+        let inside = Path::new("/home/me/.scout4all/videos/a.mp4");
+        let outside = Path::new("/media/videos/b.mp4");
+        assert_eq!(stored_path(data, inside), "videos/a.mp4");
+        assert_eq!(stored_path(data, outside), "/media/videos/b.mp4");
+        assert_eq!(resolved_path(data, "videos/a.mp4"), inside);
+        assert_eq!(resolved_path(data, "/media/videos/b.mp4"), outside);
+        // the folder moved: the video moves with it
+        let moved = Path::new("/new/place");
+        assert_eq!(
+            resolved_path(moved, &stored_path(data, inside)),
+            Path::new("/new/place/videos/a.mp4")
+        );
+    }
+
+    const MATCH_ID: &str = "2026-11-01_polisportiva";
+
+    #[tokio::test]
+    async fn the_profile_saved_and_read() {
+        let store = MemoryStore::new();
+        let team = Uuid::new_v4();
+        assert_eq!(
+            read_profile(&store, &team, MATCH_ID).await.unwrap(),
+            StoredProfile::Missing
+        );
+        let saved = profile(
+            vec![
+                file("20261101 175252.mp4", Some(at(17, 52, 52))),
+                file("/media/second.mp4", None),
+            ],
+            Some(anchor_on(
+                EventRef {
+                    set_number: 2,
+                    index: 0,
+                },
+                at(19, 0, 0).to_utc(),
+                3_600_000,
+            )),
+        );
+        write_profile(&store, &team, MATCH_ID, &saved)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_profile(&store, &team, MATCH_ID).await.unwrap(),
+            StoredProfile::Profile(saved)
+        );
+    }
+
+    /// A profile of a newer version: neither read nor overwritten.
+    #[tokio::test]
+    async fn a_newer_profile_is_left_as_it_is() {
+        let store = MemoryStore::new();
+        let team = Uuid::new_v4();
+        let key = profile_key(&team, MATCH_ID);
+        let newer = VIDEO_PROFILE_VERSION + 1;
+        let json = format!(r#"{{"version": {newer}, "streams": [{{"url": "rtsp://cam"}}]}}"#);
+        store.write(&key, json.as_bytes()).await.unwrap();
+        assert_eq!(
+            read_profile(&store, &team, MATCH_ID).await.unwrap(),
+            StoredProfile::Newer(newer)
+        );
+        assert!(
+            write_profile(&store, &team, MATCH_ID, &VideoProfile::default())
+                .await
+                .is_err()
+        );
+        assert_eq!(store.read(&key).await.unwrap(), Some(json.into_bytes()));
+    }
+}

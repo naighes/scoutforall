@@ -1,5 +1,6 @@
 //! The lines of `[3SCOUT]`: the code, then the phases, the time, the set,
-//! the zones of the setters and the six on court of both teams.
+//! the zones of the setters, the second in the video and the six on court
+//! of both teams.
 
 use crate::dvw::{
     meta::{Line, at, fields, non_empty},
@@ -21,6 +22,7 @@ pub(crate) fn scout_lines(lines: &[Line]) -> Vec<ScoutLine> {
                 point_phase: at(&f, 1).chars().next(),
                 attack_phase: at(&f, 2).chars().next(),
                 time: non_empty(at(&f, 7)),
+                video_seconds: at(&f, 12).parse().ok(),
                 set_number: at(&f, 8).parse().ok(),
                 setter_zones: (at(&f, 9).parse().ok(), at(&f, 10).parse().ok()),
                 home_court: court(&f, 14),

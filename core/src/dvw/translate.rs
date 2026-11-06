@@ -130,6 +130,7 @@ pub fn translate_set(
         mappings: Mappings::new(),
         clock: date.and_time(NaiveTime::MIN).and_utc(),
         date,
+        video_clock: has_video_clock(file),
         rally_number: 0,
         chosen: HashMap::new(),
         earlier: None,
@@ -147,6 +148,15 @@ pub fn translate_set(
         )),
         None => Err(fail(None, Issue::Unfinished)),
     }
+}
+
+/// Whether the scout is linked to the video of the match: the times of the
+/// events are then its seconds in the video, from midnight of `date` (the
+/// clock of the file can be anything, e.g. a PC with the wrong time).
+pub fn has_video_clock(file: &DvwFile) -> bool {
+    file.scout
+        .iter()
+        .any(|l| l.video_seconds.is_some_and(|s| s > 0))
 }
 
 // the lines of a set: between the ends of set (`**1set`)
@@ -397,6 +407,8 @@ struct SetTranslator<'a> {
     mappings: Mappings,
     clock: DateTime<Utc>,
     date: NaiveDate,
+    // the times from the seconds in the video, not from the clock
+    video_clock: bool,
     // the rallies translated so far
     rally_number: usize,
     // the player the libero is for, chosen before the rally (by number):
@@ -545,13 +557,20 @@ impl SetTranslator<'_> {
         self.rally_number = rally_number;
     }
 
-    // the time of the line, or a second after the previous event
+    // the time of the line (in the video, when linked to it), or a second
+    // after the previous event
     fn tick(&mut self, line: &ScoutLine) {
-        let time = line
-            .time
-            .as_deref()
-            .and_then(|t| NaiveTime::parse_from_str(&t.replace('.', ":"), "%H:%M:%S").ok())
-            .map(|t| self.date.and_time(t).and_utc());
+        let midnight = self.date.and_time(NaiveTime::MIN).and_utc();
+        let time = match self.video_clock {
+            true => line
+                .video_seconds
+                .map(|s| midnight + TimeDelta::seconds(i64::from(s))),
+            false => line
+                .time
+                .as_deref()
+                .and_then(|t| NaiveTime::parse_from_str(&t.replace('.', ":"), "%H:%M:%S").ok())
+                .map(|t| self.date.and_time(t).and_utc()),
+        };
         self.clock = match time {
             Some(t) if t > self.clock => t,
             _ => self.clock + TimeDelta::seconds(1),

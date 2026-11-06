@@ -22,9 +22,17 @@ mod tests {
             team_reader::TeamReader,
             team_writer::{PlayerInput, TeamInput, TeamWriter},
         },
-        shapes::{enums::LineupRulesEnum, r#match::MatchEntry, team::TeamEntry},
+        shapes::{
+            enums::LineupRulesEnum,
+            r#match::{MatchEntry, MatchSource},
+            team::TeamEntry,
+        },
         storage::{Store, layout, memory::MemoryStore},
         tests::EN,
+        video::{
+            StoredProfile, VIDEO_PROFILE_FILE_NAME, VideoFile, VideoProfile, read_profile,
+            write_profile,
+        },
     };
     use std::{io::Write, sync::Arc};
     use uuid::Uuid;
@@ -273,6 +281,49 @@ mod tests {
     }
 
     /// The match moves again, from this version.
+    /// The video stays on this computer; a match on the video clock (from
+    /// DataVolley) stays on it.
+    #[tokio::test]
+    async fn match_archive_without_its_video_on_its_clock() {
+        let from = Providers::new();
+        let (team, m) = from.legacy_match().await;
+        let m = from
+            .match_writer
+            .save_source(&m, MatchSource::Dvw, true)
+            .await
+            .unwrap();
+        let profile = VideoProfile {
+            files: vec![VideoFile {
+                path: "/media/match.mp4".into(),
+                start: None,
+            }],
+            ..Default::default()
+        };
+        write_profile(&*from.store, &team.id, &m.id, &profile)
+            .await
+            .unwrap();
+        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
+        let names: Vec<String> = zip::ZipArchive::new(std::io::Cursor::new(&archive))
+            .unwrap()
+            .file_names()
+            .map(|n| n.unwrap().into_owned())
+            .collect();
+        assert!(
+            !names.iter().any(|n| n == VIDEO_PROFILE_FILE_NAME),
+            "{names:?}"
+        );
+        let to = Providers::new();
+        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
+        let team = to.import_team(&team_archive, None).await.unwrap();
+        to.import_match(&archive, &team).await.unwrap();
+        let again = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        assert_eq!((again.source, again.video_clock), (MatchSource::Dvw, true));
+        assert_eq!(
+            read_profile(&*to.store, &team.id, MATCH_ID).await.unwrap(),
+            StoredProfile::Missing
+        );
+    }
+
     #[tokio::test]
     async fn match_archive_moves_on_with_its_rules() {
         let from = Providers::new();

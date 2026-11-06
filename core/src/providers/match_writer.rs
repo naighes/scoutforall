@@ -33,11 +33,13 @@ pub trait MatchWriter {
         roster: Vec<Uuid>,
     ) -> Result<(), AppError>;
 
-    /// The match, saved, coming from `source`: a match is created as
-    /// scouted here.
+    /// The match, saved, coming from `source`, with the times of its
+    /// events in the video when `video_clock`: a match is created as
+    /// scouted here, on the clock.
     async fn save_source(
         &self,
         m: &MatchEntry,
         source: MatchSource,
+        video_clock: bool,
     ) -> Result<MatchEntry, AppError>;
 }
