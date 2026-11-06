@@ -13,11 +13,18 @@ and how it lines up with the events (the shared archives leave them out).
     scripts/generate_screenshots.py \\
         --video-match ~/.scout4all/<team>/2026-11-06_japan
 
-Options: `--out` the WebP in another folder, to look at them before they
+With `--video-match` it also makes the video at the top of the site
+(`web/public/media/<lang>/scouting.mp4`, `.webm` and the poster): the
+video of the match playing with its events, then a rally scouted on the
+example match in progress, recorded by the app itself.
+
+Options: `--out` the WebP (and the videos) in another folder, to look at them before they
 replace the site's; `--video` another file for the video of the match, `--langs en,it`
 fewer languages, `--examples` another folder of example matches (one
 `<lang>/scout4all` each), `--keep` the temporary folders kept to look at.
-Needs: cargo, node with the packages of `web` (sharp converts to WebP).
+`--no-hero` no video for the site.
+Needs: cargo, ffmpeg (libx264, libvpx-vp9), node with the packages of `web`
+(sharp converts to WebP).
 """
 
 import argparse
@@ -171,13 +178,97 @@ def video_plan(team, match, out):
     }
 
 
+def video_hero_plan(team, match, out):
+    """The video of the match played from its first event: the events lit
+    in the list as they come, the score over the video."""
+    return {
+        "window": WINDOW,
+        "out": str(out),
+        "steps": [
+            {"go": {"video": [team, match]}},
+            {"wait": 2500},
+            {"key": "enter"},
+            {"wait": 1500},
+            {"record": "hero-video"},
+            {"key": "space"},
+            {"wait": 11500},
+            {"key": "space"},
+            {"wait": 300},
+            {"stop": None},
+        ],
+    }
+
+
+def scouting_hero_plan(data, out):
+    """A rally scouted on the match in progress: a reception with its zone,
+    an attack on a super with its zone, a kill, then the serve."""
+    team = the_team(data)
+    steps = [{"go": {"scouting": [team.name, match_on(team, IN_PROGRESS)]}}, {"wait": 1000}]
+    steps += [{"record": "hero-scouting"}, {"wait": 900}]
+
+    def key(k, wait=700):
+        steps.extend([{"key": k}, {"wait": wait}])
+
+    def zone(arrows):
+        for a in arrows:
+            key(a, 180)
+        steps.append({"wait": 350})
+        key("space", 400)
+
+    key("p"), key("2"), zone(["left", "down"]), key("+", 900)
+    key("a"), key("4"), key("s"), zone(["up", "up", "left", "left"]), key("#", 1200)
+    key("s"), key("f"), zone(["down", "right", "down"]), key("+", 1500)
+    steps.append({"stop": None})
+    return {"window": WINDOW, "out": str(out), "steps": steps}
+
+
+def hero(recordings, dest):
+    """The two recordings one after the other, as the site's video: MP4 and
+    WebM at the size of the old one, the poster from the first frame."""
+    dest.mkdir(parents=True, exist_ok=True)
+    video, scouting = recordings / "hero-video.mkv", recordings / "hero-scouting.mkv"
+    joined = recordings / "hero.mkv"
+    run([
+        "ffmpeg", "-v", "error", "-y", "-i", str(video), "-i", str(scouting),
+        "-filter_complex",
+        "[0:v]scale=1600:-2,setsar=1,fps=30[a];[1:v]scale=1600:-2,setsar=1,fps=30[b];"
+        "[a][b]xfade=transition=fade:duration=0.5:offset="
+        f"{max(duration(video) - 0.5, 0):.2f}[v]",
+        "-map", "[v]", "-c:v", "libx264", "-crf", "10", "-preset", "veryfast", str(joined),
+    ])
+    run([
+        "ffmpeg", "-v", "error", "-y", "-i", str(joined), "-an", "-c:v", "libx264",
+        "-crf", "26", "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        str(dest / "scouting.mp4"),
+    ])
+    run([
+        "ffmpeg", "-v", "error", "-y", "-i", str(joined), "-an", "-c:v", "libvpx-vp9",
+        "-crf", "38", "-b:v", "0", "-row-mt", "1", "-deadline", "good", "-cpu-used", "2",
+        str(dest / "scouting.webm"),
+    ])
+    run([
+        "ffmpeg", "-v", "error", "-y", "-ss", "1", "-i", str(joined), "-frames:v", "1",
+        "-q:v", "3", str(dest / "scouting-poster.jpg"),
+    ])
+
+
+def duration(path):
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        check=True, capture_output=True, text=True,
+    )
+    return float(out.stdout.strip())
+
+
 def shoot(app, data, plan, work, name):
     plan_path = work / f"{name}.json"
     plan_path.write_text(json.dumps(plan, indent=2))
     env = {**os.environ, "SCOUT4ALL_DATA_DIR": str(data)}
     run([str(app), "--shots", str(plan_path)], env=env, timeout=600)
     shots = [s["shot"] for s in plan["steps"] if "shot" in s]
+    records = [s["record"] for s in plan["steps"] if "record" in s]
     missing = [s for s in shots if not (Path(plan["out"]) / f"{s}.png").exists()]
+    missing += [r for r in records if not (Path(plan["out"]) / f"{r}.mkv").exists()]
     if missing:
         fail(f"{name}: not taken: {', '.join(missing)}")
 
@@ -207,6 +298,7 @@ def main():
     parser.add_argument("--langs", default=",".join(LANGS))
     parser.add_argument("--keep", action="store_true", help="keep the temporary folders")
     parser.add_argument("--out", type=Path, help="the WebP here (<out>/<lang>/), not in the site, to look at them first")
+    parser.add_argument("--no-hero", action="store_true", help="no video for the site")
     args = parser.parse_args()
     langs = [l for l in args.langs.split(",") if l]
     unknown = [l for l in langs if l not in LANGS]
@@ -214,6 +306,9 @@ def main():
         fail(f"unknown languages: {', '.join(unknown)}")
     if not (ROOT / "web" / "node_modules" / "sharp").exists():
         fail("web/node_modules/sharp missing: npm install in web")
+    making_hero = bool(args.video_match) and not args.no_hero
+    if making_hero and not shutil.which("ffmpeg"):
+        fail("ffmpeg missing (the video of the site), or --no-hero")
     app = build()
     work = Path(tempfile.mkdtemp(prefix="scout4all-shots-"))
     try:
@@ -234,6 +329,16 @@ def main():
             site = ROOT / "web" / "src" / "assets" / "screens"
             to_webp(out, names, (args.out or site) / lang)
             print(f"{lang}: {', '.join(names)}", flush=True)
+            if making_hero:
+                recordings = work / lang / "hero"
+                shoot(app, work / lang / "video-data", video_hero_plan(team, match, recordings), work, f"{lang}-hero-video")
+                fresh = work / lang / "hero-data"
+                shutil.copytree(source, fresh)
+                set_language(fresh, lang)
+                shoot(app, fresh, scouting_hero_plan(fresh, recordings), work, f"{lang}-hero-scouting")
+                media = (args.out / lang) if args.out else ROOT / "web" / "public" / "media" / lang
+                hero(recordings, media)
+                print(f"{lang}: video of the site in {media}", flush=True)
     finally:
         if args.keep:
             print(f"kept: {work}")

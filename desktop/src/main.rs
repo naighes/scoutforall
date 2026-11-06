@@ -248,6 +248,9 @@ enum ShotMessage {
     /// the window to capture, saved as the name
     Take(String),
     Taken(String, window::Screenshot),
+    /// a frame of the recording to take, taken
+    Frame,
+    Framed(window::Screenshot),
 }
 
 impl shots::Open {
@@ -1635,8 +1638,20 @@ impl Main {
                         shots::Next::Do(shots::Step::Keys(keys)) => {
                             tasks.extend(keys.into_iter().map(|key| app.update(Message::Key(key))));
                         }
-                        // waits and captures come as such
-                        shots::Next::Do(shots::Step::Wait(_) | shots::Step::Shot(_)) => {}
+                        // waits, captures and recordings come as such
+                        shots::Next::Do(
+                            shots::Step::Wait(_)
+                            | shots::Step::Shot(_)
+                            | shots::Step::Record(_)
+                            | shots::Step::Stop,
+                        ) => {}
+                        shots::Next::Recording => {
+                            tasks.push(Task::done(Message::Shot(ShotMessage::Frame)));
+                        }
+                        shots::Next::Stopped(done) => match done {
+                            Ok(said) => eprintln!("shots: recorded, {said}"),
+                            Err(e) => eprintln!("shots: recording: {e}"),
+                        },
                         shots::Next::Wait(time) => {
                             tasks.push(Task::perform(shots::after(time), |()| {
                                 Message::Shot(ShotMessage::Next)
@@ -1660,6 +1675,15 @@ impl Main {
             }
             ShotMessage::Take(name) => window::screenshot(self.window)
                 .map(move |shot| Message::Shot(ShotMessage::Taken(name.clone(), shot))),
+            ShotMessage::Frame => match shots.recording() {
+                true => window::screenshot(self.window)
+                    .map(|shot| Message::Shot(ShotMessage::Framed(shot))),
+                false => Task::none(),
+            },
+            ShotMessage::Framed(shot) => {
+                shots.frame(&shot);
+                Task::done(Message::Shot(ShotMessage::Frame))
+            }
             ShotMessage::Taken(name, shot) => {
                 match shots.save(&name, &shot) {
                     Ok(path) => eprintln!("shots: {}", path.display()),

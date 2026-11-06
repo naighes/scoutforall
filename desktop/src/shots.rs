@@ -4,13 +4,28 @@
 //! a capture of the window saved as PNG), then the app closes. The window
 //! is captured by the app, not by the system: no keys sent to other windows,
 //! the same size every time.
+//!
+//! Between `record` and `stop` the window is captured over and over while
+//! the steps go on, the frames given to ffmpeg at 30 a second (the last one
+//! again while the next is taken): `<name>.mkv`, for the video of the site.
 
 use {
     iced::window::Screenshot,
     scout4all_keys::KeyCombination,
     serde::Deserialize,
-    std::{collections::VecDeque, path::PathBuf, time::Duration},
+    std::{
+        collections::VecDeque,
+        io::Write,
+        path::PathBuf,
+        process::{Child, Command, Stdio},
+        sync::mpsc,
+        thread::JoinHandle,
+        time::{Duration, Instant},
+    },
 };
+
+/// The frames a second of the recordings.
+const FPS: u32 = 30;
 
 /// A screen to open, by the ids of its team and match.
 #[derive(Debug, Clone, Deserialize)]
@@ -36,6 +51,9 @@ pub enum Step {
     Wait(u64),
     /// the window saved as `<name>.png` in the folder of the plan
     Shot(String),
+    /// the window recorded from here as `<name>.mkv`, up to `stop`
+    Record(String),
+    Stop,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +73,10 @@ pub enum Next {
     Wait(Duration),
     /// the window captured, saved as the name
     Shot(String),
+    /// the recording started: frames to take, the steps going on
+    Recording,
+    /// the recording over (`Shots::stop`)
+    Stopped(Result<String, String>),
     Done,
 }
 
@@ -63,6 +85,18 @@ pub struct Shots {
     out: PathBuf,
     steps: VecDeque<Step>,
     pub started: bool,
+    recorder: Option<Recorder>,
+}
+
+/// A frame of the window and when it was taken.
+type Frame = (Instant, u32, u32, bytes::Bytes);
+
+/// The frames to ffmpeg, on a thread of their own.
+struct Recorder {
+    frames: mpsc::Sender<Frame>,
+    thread: JoinHandle<Result<usize, String>>,
+    started: Instant,
+    taken: usize,
 }
 
 /// How long the screen is left to draw before a capture.
@@ -90,7 +124,57 @@ impl Shots {
             out: plan.out,
             steps: plan.steps.into(),
             started: false,
+            recorder: None,
         })
+    }
+
+    /// The window recorded as `<name>.mkv` from now on.
+    pub fn record(&mut self, name: &str) {
+        let path = self.out.join(format!("{name}.mkv"));
+        let (frames, rx) = mpsc::channel::<Frame>();
+        let thread = std::thread::spawn(move || encode(&rx, &path));
+        self.recorder = Some(Recorder {
+            frames,
+            thread,
+            started: Instant::now(),
+            taken: 0,
+        });
+    }
+
+    pub fn recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// A frame of the recording.
+    pub fn frame(&mut self, shot: &Screenshot) {
+        if let Some(recorder) = &mut self.recorder {
+            recorder.taken += 1;
+            let _ = recorder.frames.send((
+                Instant::now(),
+                shot.size.width,
+                shot.size.height,
+                shot.rgba.clone(),
+            ));
+        }
+    }
+
+    /// The recording over: the file written; how many frames were taken
+    /// and written, or why not.
+    pub fn stop(&mut self) -> Result<String, String> {
+        let Some(recorder) = self.recorder.take() else {
+            return Err("stop without record".to_string());
+        };
+        let seconds = recorder.started.elapsed().as_secs_f64();
+        drop(recorder.frames);
+        let written = recorder
+            .thread
+            .join()
+            .map_err(|_| "the recording stopped".to_string())??;
+        Ok(format!(
+            "{} frames taken in {seconds:.1} s ({:.1} a second), {written} written",
+            recorder.taken,
+            recorder.taken as f64 / seconds.max(0.001)
+        ))
     }
 
     pub fn next(&mut self) -> Next {
@@ -98,6 +182,11 @@ impl Shots {
             None => Next::Done,
             Some(Step::Wait(ms)) => Next::Wait(Duration::from_millis(ms)),
             Some(Step::Shot(name)) => Next::Shot(name),
+            Some(Step::Record(name)) => {
+                self.record(&name);
+                Next::Recording
+            }
+            Some(Step::Stop) => Next::Stopped(self.stop()),
             Some(step) => Next::Do(step),
         }
     }
@@ -115,6 +204,77 @@ impl Shots {
             .map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(path)
     }
+}
+
+/// The frames at `FPS` into ffmpeg, each written for as long as it was on
+/// screen: the time of the recording as it went. The number written.
+fn encode(frames: &mpsc::Receiver<Frame>, path: &std::path::Path) -> Result<usize, String> {
+    let slot = Duration::from_secs(1) / FPS;
+    let mut ffmpeg: Option<(Child, Instant)> = None;
+    let mut last: Option<bytes::Bytes> = None;
+    let mut written = 0usize;
+    let write = |ffmpeg: &mut Child, bytes: &[u8]| -> Result<(), String> {
+        ffmpeg
+            .stdin
+            .as_mut()
+            .ok_or("ffmpeg without input")?
+            .write_all(bytes)
+            .map_err(|e| format!("ffmpeg: {e}"))
+    };
+    for (at, width, height, rgba) in frames {
+        let (child, start) = match &mut ffmpeg {
+            Some(running) => running,
+            None => ffmpeg.insert((spawn(path, width, height)?, at)),
+        };
+        // the frames the time up to this one asks for: the last one again
+        let due = usize::try_from(at.duration_since(*start).as_nanos() / slot.as_nanos())
+            .unwrap_or(usize::MAX);
+        while written < due {
+            if let Some(bytes) = &last {
+                write(child, bytes)?;
+            }
+            written += 1;
+        }
+        last = Some(rgba);
+    }
+    if let (Some((mut child, _)), Some(bytes)) = (ffmpeg, last) {
+        write(&mut child, &bytes)?;
+        written += 1;
+        drop(child.stdin.take());
+        let status = child.wait().map_err(|e| format!("ffmpeg: {e}"))?;
+        if !status.success() {
+            return Err(format!("ffmpeg: {status}"));
+        }
+    }
+    Ok(written)
+}
+
+fn spawn(path: &std::path::Path, width: u32, height: u32) -> Result<Child, String> {
+    Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+        ])
+        .args([
+            "-s",
+            &format!("{width}x{height}"),
+            "-r",
+            &FPS.to_string(),
+            "-i",
+            "-",
+        ])
+        .args([
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p",
+        ])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("ffmpeg: {e}"))
 }
 
 /// Waits `time` off the thread of the app.
@@ -164,6 +324,7 @@ mod tests {
             out: plan.out,
             steps: plan.steps.into(),
             started: false,
+            recorder: None,
         };
         assert!(matches!(shots.next(), Next::Do(Step::Go(Open::Home))));
         let _ = (shots.next(), shots.next(), shots.next());
