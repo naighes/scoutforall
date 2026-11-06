@@ -291,16 +291,8 @@ impl Worker {
     /// The frame at `target`: decoded from the keyframe before it.
     fn seek(&mut self, target: u64) {
         let target = target.min(self.duration_ms().saturating_sub(self.frame_ms));
-        let segment = self
-            .segments
-            .iter()
-            .rposition(|s| s.start_ms <= target)
-            .unwrap_or(0);
-        let keyframe = self.segments.get(segment).map_or(0, |s| {
-            s.source.keyframe_before(target.saturating_sub(s.start_ms))
-        });
         self.held = None;
-        self.cursor = match Cursor::new(&mut self.segments, segment, keyframe) {
+        self.cursor = match cursor_at(&mut self.segments, target) {
             Ok(cursor) => Some(cursor),
             Err(e) => return self.failed(e),
         };
@@ -369,61 +361,7 @@ impl Worker {
         &mut self,
         wanted: impl Fn(u64) -> bool,
     ) -> Result<Option<(u64, Option<Frame>)>, String> {
-        let Worker {
-            segments, cursor, ..
-        } = self;
-        let Some(cursor) = cursor else {
-            return Ok(None);
-        };
-        loop {
-            if let Some(ready) = cursor.ready.pop_front() {
-                return Ok(Some(ready));
-            }
-            if cursor.done {
-                return Ok(None);
-            }
-            let Some(segment) = segments.get_mut(cursor.segment) else {
-                return Ok(None);
-            };
-            let start = segment.start_ms;
-            match segment.source.samples.get(cursor.next).copied() {
-                Some(sample) => {
-                    let data = segment.source.annex_b(cursor.next)?;
-                    cursor.next += 1;
-                    cursor.pending.push(Reverse(sample.pts_ms));
-                    match cursor.decoder.decode(&data) {
-                        Ok(Some(yuv)) => {
-                            let at = cursor.pending.pop().map_or(sample.pts_ms, |r| r.0) + start;
-                            let frame = wanted(at).then(|| frame(&yuv));
-                            cursor.ready.push_back((at, frame));
-                        }
-                        Ok(None) => {}
-                        // a frame broken: none out for it
-                        Err(_) => cursor.pending.retain(|p| p.0 != sample.pts_ms),
-                    }
-                }
-                None => {
-                    // the end of the file: what the decoder still has
-                    let flushed = cursor.decoder.flush_remaining().unwrap_or_default();
-                    for yuv in flushed {
-                        if let Some(Reverse(pts)) = cursor.pending.pop() {
-                            let at = pts + start;
-                            let frame = wanted(at).then(|| frame(&yuv));
-                            cursor.ready.push_back((at, frame));
-                        }
-                    }
-                    let next = cursor.segment + 1;
-                    match next < segments.len() {
-                        true => {
-                            let ready = std::mem::take(&mut cursor.ready);
-                            *cursor = Cursor::new(segments, next, 0)?;
-                            cursor.ready = ready;
-                        }
-                        false => cursor.done = true,
-                    }
-                }
-            }
-        }
+        next_frame(&mut self.segments, &mut self.cursor, wanted)
     }
 
     fn publish(&mut self, frame: Option<Frame>) {
@@ -449,6 +387,134 @@ impl Worker {
         if let Ok(mut status) = self.status.lock() {
             status.error = Some(error);
             status.playing = false;
+        }
+    }
+}
+
+/// The next frame shown, at its time in the video, with its pixels when
+/// `wanted`; none at the end of the video.
+fn next_frame(
+    segments: &mut [Segment],
+    cursor: &mut Option<Cursor>,
+    wanted: impl Fn(u64) -> bool,
+) -> Result<Option<(u64, Option<Frame>)>, String> {
+    let Some(cursor) = cursor else {
+        return Ok(None);
+    };
+    loop {
+        if let Some(ready) = cursor.ready.pop_front() {
+            return Ok(Some(ready));
+        }
+        if cursor.done {
+            return Ok(None);
+        }
+        let Some(segment) = segments.get_mut(cursor.segment) else {
+            return Ok(None);
+        };
+        let start = segment.start_ms;
+        match segment.source.samples.get(cursor.next).copied() {
+            Some(sample) => {
+                let data = segment.source.annex_b(cursor.next)?;
+                cursor.next += 1;
+                cursor.pending.push(Reverse(sample.pts_ms));
+                match cursor.decoder.decode(&data) {
+                    Ok(Some(yuv)) => {
+                        let at = cursor.pending.pop().map_or(sample.pts_ms, |r| r.0) + start;
+                        let frame = wanted(at).then(|| frame(&yuv));
+                        cursor.ready.push_back((at, frame));
+                    }
+                    Ok(None) => {}
+                    // a frame broken: none out for it
+                    Err(_) => cursor.pending.retain(|p| p.0 != sample.pts_ms),
+                }
+            }
+            None => {
+                // the end of the file: what the decoder still has
+                let flushed = cursor.decoder.flush_remaining().unwrap_or_default();
+                for yuv in flushed {
+                    if let Some(Reverse(pts)) = cursor.pending.pop() {
+                        let at = pts + start;
+                        let frame = wanted(at).then(|| frame(&yuv));
+                        cursor.ready.push_back((at, frame));
+                    }
+                }
+                let next = cursor.segment + 1;
+                match next < segments.len() {
+                    true => {
+                        let ready = std::mem::take(&mut cursor.ready);
+                        *cursor = Cursor::new(segments, next, 0)?;
+                        cursor.ready = ready;
+                    }
+                    false => cursor.done = true,
+                }
+            }
+        }
+    }
+}
+
+/// A cursor at the keyframe before `target`, in the file it's in.
+fn cursor_at(segments: &mut [Segment], target: u64) -> Result<Cursor, String> {
+    let segment = segments
+        .iter()
+        .rposition(|s| s.start_ms <= target)
+        .unwrap_or(0);
+    let keyframe = segments.get(segment).map_or(0, |s| {
+        s.source.keyframe_before(target.saturating_sub(s.start_ms))
+    });
+    Cursor::new(segments, segment, keyframe)
+}
+
+/// The frames of the files one after the other, read in order from a
+/// moment: for a video made of some pieces of them (`montage`), not shown.
+pub struct Frames {
+    segments: Vec<Segment>,
+    cursor: Option<Cursor>,
+    /// how long a frame is shown
+    pub frame_ms: u64,
+}
+
+impl Frames {
+    pub fn open(paths: &[PathBuf]) -> Result<Frames, String> {
+        let sources = paths
+            .iter()
+            .map(|p| Source::open(p).map_err(|e| format!("{}: {e}", p.display())))
+            .collect::<Result<Vec<_>, _>>()?;
+        let segments = segments(sources);
+        Ok(Frames {
+            frame_ms: segments.first().map_or(33, |s| frame_ms(&s.source.samples)),
+            segments,
+            cursor: None,
+        })
+    }
+
+    /// The frames from the one at `ms` on: the ones before it decoded,
+    /// not given.
+    pub fn seek(&mut self, ms: u64) -> Result<(), String> {
+        self.cursor = Some(cursor_at(&mut self.segments, ms)?);
+        let half = self.frame_ms / 2;
+        // the ones before, without their pixels, until the one at `ms`
+        loop {
+            match next_frame(&mut self.segments, &mut self.cursor, |at| at + half >= ms)? {
+                Some((at, Some(frame))) => {
+                    if let Some(cursor) = &mut self.cursor {
+                        cursor.ready.push_front((at, Some(frame)));
+                    }
+                    return Ok(());
+                }
+                Some((_, None)) => {}
+                None => return Ok(()),
+            }
+        }
+    }
+
+    /// The next frame, at its time in the video; none at its end.
+    pub fn next(&mut self) -> Result<Option<(u64, Frame)>, String> {
+        loop {
+            match next_frame(&mut self.segments, &mut self.cursor, |_| true)? {
+                Some((at, Some(frame))) => return Ok(Some((at, frame))),
+                Some((_, None)) => {}
+                None => return Ok(None),
+            }
         }
     }
 }
@@ -539,6 +605,22 @@ mod tests {
                 .unwrap();
             assert_eq!(shown(&w), expected, "at {target} ms");
         }
+    }
+
+    /// The frames read from a moment on, for a montage: the same as played,
+    /// from the one at that moment, across the files.
+    #[test]
+    fn the_frames_read_from_a_moment() {
+        let mut w = worker(2);
+        let played = played(&mut w);
+        let path = PathBuf::from(CLIP);
+        let mut frames = Frames::open(&[path.clone(), path]).unwrap();
+        frames.seek(1500).unwrap();
+        let read: Vec<(u64, u8)> = std::iter::from_fn(|| frames.next().unwrap())
+            .map(|(at, f)| (at, brightness(&f)))
+            .collect();
+        let from = played.iter().position(|(at, _)| at + 16 >= 1500).unwrap();
+        assert_eq!(read, played[from..]);
     }
 
     /// Two files, one after the other: a single video.

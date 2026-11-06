@@ -33,9 +33,27 @@ pub enum Export {
 /// sheet of the system or saved where the user chooses, as on Android.
 pub struct Sharing {
     /// what it is, as the button that made it says
-    pub heading: &'static str,
+    pub heading: String,
     pub name: String,
-    pub bytes: Arc<Vec<u8>>,
+    pub content: Content,
+}
+
+/// What is shared: made in memory (an archive, a report), or a file
+/// already on disk (a video).
+#[derive(Debug, Clone)]
+pub enum Content {
+    Bytes(Arc<Vec<u8>>),
+    File(PathBuf),
+}
+
+impl Content {
+    /// Written at `path`.
+    pub fn write(&self, path: &std::path::Path) -> std::io::Result<()> {
+        match self {
+            Content::Bytes(bytes) => std::fs::write(path, bytes.as_slice()),
+            Content::File(from) => std::fs::copy(from, path).map(|_| ()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -68,7 +86,9 @@ impl Sharing {
             None,
             column![
                 column![
-                    text(self.heading).size(22).font(theme::fonts().bold),
+                    text(self.heading.clone())
+                        .size(22)
+                        .font(theme::fonts().bold),
                     text(self.name.clone()).size(SIZE_SMALL).color(c.muted),
                 ]
                 .spacing(4),
@@ -368,9 +388,9 @@ mod tests {
     #[test]
     fn the_keys_of_the_file_to_share() {
         let sharing = Sharing {
-            heading: "Condividi squadra",
+            heading: "Condividi squadra".into(),
             name: "team.zip".into(),
-            bytes: Arc::new(vec![1, 2, 3]),
+            content: Content::Bytes(Arc::new(vec![1, 2, 3])),
         };
         assert!(matches!(
             sharing.key(key!(enter)),
@@ -379,5 +399,20 @@ mod tests {
         assert!(matches!(sharing.key(key!(s)), Some(ShareMessage::Save)));
         assert!(matches!(sharing.key(BACK_KEY), Some(ShareMessage::Cancel)));
         assert!(sharing.key(key!(x)).is_none());
+    }
+
+    /// Saved where chosen: the bytes made, or a copy of the file.
+    #[test]
+    fn the_file_shared_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let to = dir.path().join("saved");
+        Content::Bytes(Arc::new(b"zip".to_vec()))
+            .write(&to)
+            .unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"zip");
+        let from = dir.path().join("video.mp4");
+        std::fs::write(&from, b"mp4").unwrap();
+        Content::File(from).write(&to).unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"mp4");
     }
 }

@@ -104,6 +104,10 @@ enum Screen {
 /// Where a key or a click leads.
 enum Go {
     Stay,
+    /// the video of the actions picked to make
+    Montage,
+    /// a file made, to share or save: what it shows, the file
+    Share(String, PathBuf),
     Home,
     Team(String),
     Match(String, String),
@@ -211,7 +215,7 @@ enum Message {
     Events(events::Message),
     Video(video::Message),
     /// where the archive goes (none: not saved), and the archive
-    Exported(Option<PathBuf>, Arc<Vec<u8>>),
+    Exported(Option<PathBuf>, transfer::Content),
     /// the file chosen (none: none) to import into the team, if given
     Picked(Option<String>, Option<transfer::Picked>),
     Importing(transfer::Message),
@@ -383,6 +387,23 @@ impl App {
             Go::VideoFrame(frame) => {
                 return video::allocate(frame.0, frame.1).map(Message::Video);
             }
+            Go::Montage => {
+                if let Screen::Video(screen) = &mut self.screen {
+                    screen.start_montage(self.strings);
+                }
+                return Task::none();
+            }
+            Go::Share(heading, path) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                return self.offer(transfer::Sharing {
+                    heading,
+                    name,
+                    content: transfer::Content::File(path),
+                });
+            }
             Go::PickVideo => {
                 return Task::perform(video::pick(self.strings.video_files), |path| {
                     Message::Video(video::Message::Chosen(path))
@@ -448,24 +469,27 @@ impl App {
             transfer::Export::Report(..) => s.match_report,
         };
         match transfer::archive(&self.core, &export) {
-            Ok((name, bytes)) => {
-                let sharing = transfer::Sharing {
-                    heading,
-                    name,
-                    bytes: Arc::new(bytes),
-                };
-                match share::NATIVE {
-                    true => {
-                        self.sharing = Some(sharing);
-                        Task::none()
-                    }
-                    false => save(sharing),
-                }
-            }
+            Ok((name, bytes)) => self.offer(transfer::Sharing {
+                heading: heading.to_string(),
+                name,
+                content: transfer::Content::Bytes(Arc::new(bytes)),
+            }),
             Err(e) => {
                 self.error = Some(e.to_string());
                 Task::none()
             }
+        }
+    }
+
+    /// A file made, to share or save: asked in a dialog, or saved where
+    /// the system has no sheet to share with.
+    fn offer(&mut self, sharing: transfer::Sharing) -> Task<Message> {
+        match share::NATIVE {
+            true => {
+                self.sharing = Some(sharing);
+                Task::none()
+            }
+            false => save(sharing),
         }
     }
 
@@ -478,8 +502,11 @@ impl App {
         match message {
             transfer::ShareMessage::Cancel => Task::none(),
             transfer::ShareMessage::Save => save(sharing),
-            transfer::ShareMessage::Share => match share::staged(&sharing.name, &sharing.bytes) {
-                Ok(path) => share::share(path, sharing.heading.to_string()).map(Message::Shared),
+            transfer::ShareMessage::Share => match match &sharing.content {
+                transfer::Content::Bytes(bytes) => share::staged(&sharing.name, bytes),
+                transfer::Content::File(path) => Ok(path.clone()),
+            } {
+                Ok(path) => share::share(path, sharing.heading).map(Message::Shared),
                 Err(e) => {
                     self.error = Some(e);
                     Task::none()
@@ -488,10 +515,10 @@ impl App {
         }
     }
 
-    /// The archive written where chosen.
-    fn exported(&mut self, path: Option<PathBuf>, bytes: &[u8]) {
+    /// The file written where chosen.
+    fn exported(&mut self, path: Option<PathBuf>, content: &transfer::Content) {
         let s = self.strings;
-        match path.map(|path| std::fs::write(&path, bytes).map(|()| path)) {
+        match path.map(|path| content.write(&path).map(|()| path)) {
             None => {}
             Some(Ok(path)) => {
                 self.notice = Some(format!("{}: {}", s.archive_saved, path.display()));
@@ -902,8 +929,8 @@ impl App {
         }
         // the files: chosen or saved, whatever the screen
         let message = match message {
-            Message::Exported(path, bytes) => {
-                self.exported(path, &bytes);
+            Message::Exported(path, content) => {
+                self.exported(path, &content);
                 return Task::none();
             }
             Message::Picked(team, Some(picked)) => {
@@ -1375,6 +1402,8 @@ fn video_go(screen: &video::VideoScreen, outcome: video::Outcome) -> Go {
         video::Outcome::Back => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
         video::Outcome::Choose => Go::PickVideo,
         video::Outcome::Allocate(frame, handle) => Go::VideoFrame(Box::new((frame, handle))),
+        video::Outcome::Montage => Go::Montage,
+        video::Outcome::Share(path, heading) => Go::Share(heading, path),
     }
 }
 
@@ -1580,8 +1609,8 @@ fn main() -> iced::Result {
 
 /// Where to save the file chosen, then it written there.
 fn save(sharing: transfer::Sharing) -> Task<Message> {
-    let bytes = sharing.bytes;
+    let content = sharing.content;
     Task::perform(transfer::save_to(sharing.name), move |path| {
-        Message::Exported(path, bytes.clone())
+        Message::Exported(path, content.clone())
     })
 }

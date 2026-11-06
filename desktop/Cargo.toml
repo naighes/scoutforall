@@ -43,6 +43,11 @@ rml_rtmp = "0.8"
 qrcode = { version = "0.14", default-features = false }
 # the window of the app, for the share sheet of the system (`share`)
 raw-window-handle = "0.6"
+# the video of the actions picked (`video::montage`): its frames drawn on,
+# with the versions iced draws with
+tiny-skia = "0.11"
+resvg = "0.45"
+ab_glyph = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

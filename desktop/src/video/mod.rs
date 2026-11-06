@@ -13,6 +13,7 @@
 mod files;
 mod list;
 mod margins;
+mod montage;
 mod player;
 pub use player::Frame as Picture;
 pub mod source;
@@ -106,6 +107,9 @@ pub enum Message {
     TimeSubmit,
     /// the actions one after the other, or each stopping
     Sequence,
+    /// the actions picked made a video, to share
+    Montage,
+    StopMontage,
     /// with the actions of a team, the match after (`true`) or before
     OtherMatch(bool),
     /// the seconds of the clip before or after its action, one more (`1`)
@@ -126,6 +130,10 @@ pub enum Outcome {
     /// iced draws a handle only once it's allocated, so a new handle at
     /// every frame would never be drawn
     Allocate(Arc<player::Frame>, image::Handle),
+    /// the video of the actions picked to make (`start_montage`)
+    Montage,
+    /// the video of the actions picked made: to share, what it shows
+    Share(PathBuf, String),
 }
 
 /// A frame of the video and its handle, to allocate.
@@ -198,6 +206,10 @@ pub struct VideoScreen {
     first_ms: Option<i64>,
     /// the video before the first event shown, to tie the events again
     whole: bool,
+    /// the video of the actions picked being made
+    montage: Option<montage::Montage>,
+    /// why the video of the actions picked wasn't made
+    montage_error: Option<String>,
 }
 
 /// The matches of a team with actions picked in its statistics, each with
@@ -258,6 +270,8 @@ impl VideoScreen {
             margin_text: None,
             first_ms: None,
             whole: false,
+            montage: None,
+            montage_error: None,
         };
         screen.margins = Margins::read(&screen.dir);
         // the durations of the files first: the events in them
@@ -374,6 +388,143 @@ impl VideoScreen {
         }
         self.selected = self.selected.min(self.events.len().saturating_sub(1));
         Ok(())
+    }
+
+    /// What the actions picked are, as the statistics named them.
+    fn clips_title(&self) -> String {
+        self.clips
+            .as_ref()
+            .map(|c| c.title.clone())
+            .unwrap_or_default()
+    }
+
+    /// The pieces of the video of the actions picked: each from its margin
+    /// before to its margin after, the ones overlapping as one (the card of
+    /// the first, the others counted).
+    fn pieces(&self, s: &Strings) -> Vec<montage::Piece> {
+        let (before, after) = (self.lead_ms(), self.after_ms());
+        let picked: Vec<(u64, u64, &VideoEvent)> = self
+            .events
+            .iter()
+            .filter_map(|e| {
+                Some((
+                    target(e, before)?,
+                    e.offset_ms?.max(0).unsigned_abs() + after,
+                    e,
+                ))
+            })
+            .collect();
+        let mut merged: Vec<(u64, u64, &VideoEvent, usize)> = vec![];
+        let mut sorted = picked;
+        sorted.sort_by_key(|(from, _, _)| *from);
+        for (from, to, e) in sorted {
+            match merged.last_mut() {
+                Some(last) if from <= last.1 => {
+                    last.1 = last.1.max(to);
+                    last.3 += 1;
+                }
+                _ => merged.push((from, to, e, 1)),
+            }
+        }
+        let count = merged.len();
+        merged
+            .into_iter()
+            .enumerate()
+            .map(|(i, (from, to, e, actions))| montage::Piece {
+                from_ms: from,
+                to_ms: to,
+                card: self.card(e, i + 1, count, actions, s),
+            })
+            .collect()
+    }
+
+    /// The card of an action: what it is, who, the set and the score before
+    /// it, which of how many.
+    fn card(
+        &self,
+        e: &VideoEvent,
+        n: usize,
+        count: usize,
+        actions: usize,
+        s: &Strings,
+    ) -> montage::Card {
+        let name = ui::capitalized(&e.event.event.name);
+        let title = [Some(name), e.event.event.technique.clone()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let title = match &e.event.event.symbol {
+            Some(symbol) => format!("{title}  {symbol}"),
+            None => title,
+        };
+        // the score before it: after the event before it in its set
+        let before = self
+            .all_events
+            .iter()
+            .take_while(|other| !std::ptr::eq(*other, e) && event_ref(other) != event_ref(e))
+            .filter(|other| other.set_number == e.set_number)
+            .last()
+            .map_or((0, 0), |other| {
+                (other.event.score_us, other.event.score_them)
+            });
+        let which = match actions {
+            1 => format!("{n} / {count}"),
+            more => format!("{n} / {count}  (+{})", more - 1),
+        };
+        montage::Card {
+            title,
+            lines: e
+                .event
+                .event
+                .player
+                .as_ref()
+                .map(|p| format!("{} {}", p.number, p.name))
+                .into_iter()
+                .chain([
+                    format!("{} {} · {}–{}", s.set_n, e.set_number, before.0, before.1),
+                    which,
+                ])
+                .collect(),
+        }
+    }
+
+    /// The video of the actions picked to make, when some are and it isn't
+    /// being made.
+    fn montage_asked(&self) -> Outcome {
+        match (&self.clips, &self.montage) {
+            (Some(_), None) => Outcome::Montage,
+            _ => Outcome::Stay,
+        }
+    }
+
+    /// The video of the actions picked, made on its thread.
+    pub fn start_montage(&mut self, s: &'static Strings) {
+        let pieces = self.pieces(s);
+        self.montage_error = None;
+        if pieces.is_empty() {
+            return;
+        }
+        let output = montage::output(&self.clips_title());
+        if let Err(e) = montage::prepare(&output) {
+            self.montage_error = Some(e);
+            return;
+        }
+        let events = self.all_events.clone();
+        let board = self.margins.overlay.then(|| montage::Board {
+            team: self.the_match.team.name.clone(),
+            opponent: self.the_match.opponent.clone(),
+            set_n: s.set_n,
+            side_out: s.side_out_phase,
+            break_point: s.break_phase,
+            at: Box::new(move |ms| standing(&events, ms)),
+        });
+        self.montage = Some(montage::Montage::start(montage::Plan {
+            files: self.paths(),
+            pieces,
+            board,
+            output,
+        }));
     }
 
     /// How the match stands at the moment of the video: from all its
@@ -703,9 +854,10 @@ impl VideoScreen {
     /// Whether the frames of the window are wanted: playing, or a frame on
     /// its way.
     pub fn awake(&self) -> bool {
-        self.player.is_some()
-            && (self.status.as_ref().is_some_and(|s| s.playing)
-                || Instant::now() < self.awake_until)
+        self.montage.is_some()
+            || self.player.is_some()
+                && (self.status.as_ref().is_some_and(|s| s.playing)
+                    || Instant::now() < self.awake_until)
     }
 
     fn wake(&mut self) {
@@ -714,6 +866,13 @@ impl VideoScreen {
 
     /// The frame of the player, to allocate once it's a new one.
     fn tick(&mut self) -> Outcome {
+        if let Some(made) = self.montage.as_ref().and_then(|m| m.progress().result) {
+            self.montage = None;
+            match made {
+                Ok(path) => return Outcome::Share(path, self.clips_title()),
+                Err(e) => self.montage_error = Some(e),
+            }
+        }
         self.status = self.player.as_ref().and_then(Player::status);
         if let Some(position) = self.status.as_ref().map(|s| s.position_ms) {
             self.reached(position);
@@ -915,6 +1074,8 @@ impl VideoScreen {
             }
             Message::TimeSubmit => self.submit_time(),
             Message::Sequence => self.sequence = !self.sequence,
+            Message::Montage => return self.montage_asked(),
+            Message::StopMontage => self.montage = None,
             Message::OtherMatch(after) => {
                 if let Some(at) = self.other_match(after) {
                     self.open_match(at);
@@ -984,6 +1145,7 @@ impl VideoScreen {
             k if k == key!(i) => self.toggle_overlay(),
             k if k == key!(w) => self.detached = !self.detached,
             k if k == key!(s) && self.clips.is_some() => self.sequence = !self.sequence,
+            k if k == key!(x) => return self.montage_asked(),
             k if k == key!(pageup) || k == key!(pagedown) => {
                 if let Some(at) = self.other_match(k == key!(pagedown)) {
                     self.open_match(at);
@@ -1035,7 +1197,10 @@ impl VideoScreen {
             ],
         };
         let sequence = match (&self.clips, &self.player) {
-            (Some(_), Some(_)) => vec![hint("s", s.in_sequence.to_string())],
+            (Some(_), Some(_)) => vec![
+                hint("s", s.in_sequence.to_string()),
+                hint("x", s.share_video.to_string()),
+            ],
             _ => vec![],
         };
         let matches = match &self.tour {
@@ -1466,9 +1631,50 @@ impl VideoScreen {
             .spacing(10)
             .align_y(Alignment::Center),
             self.margins_view(s, c),
+            self.montage_view(s, c),
         ]
         .spacing(8)
         .into()
+    }
+
+    /// With the actions picked: their video to share, or how far it got
+    /// being made, or why it wasn't.
+    fn montage_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let line: Element<'a, Message> = match (&self.clips, &self.montage) {
+            (None, _) => return space::vertical().height(0).into(),
+            (Some(_), Some(montage)) => row![
+                text(ui::fill(
+                    s.making_video,
+                    &[montage.progress().percent().to_string()]
+                ))
+                .size(SIZE_SMALL)
+                .font(theme::fonts().bold)
+                .color(c.accent),
+                ui::pill(s.cancel, false, Some(Message::StopMontage), c),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into(),
+            (Some(_), None) => ui::action(
+                theme::icons::SHARE,
+                s.share_video,
+                Message::Montage,
+                false,
+                c,
+            )
+            .into(),
+        };
+        let error: Element<'a, Message> = match &self.montage_error {
+            Some(e) => text(format!("{}: {e}", s.video_not_made))
+                .size(SIZE_SMALL)
+                .color(c.danger)
+                .into(),
+            None => space::horizontal().width(0).into(),
+        };
+        row![line, error]
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .into()
     }
 
     /// With the actions picked, where their clips are in the video, from
@@ -2543,6 +2749,67 @@ pub(crate) mod screen_tests {
         assert!(!screen.whole);
         assert_eq!(screen.events[0].offset_ms, Some(1000));
         assert_eq!(screen.start_ms(), 0, "1 s in: from the start");
+    }
+
+    /// The actions picked made a video: `x` (or its button) asks for it,
+    /// only with some picked; a piece of the video an action, from its
+    /// margin before to its margin after, after a card telling it.
+    #[test]
+    fn the_video_of_the_actions_picked() {
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let mut whole = with_file(&dir, "20150125 000000.mp4");
+        assert!(
+            matches!(whole.key(key!(x)), Outcome::Stay),
+            "no actions picked"
+        );
+        let serves: Vec<EventRef> = whole
+            .events
+            .iter()
+            .filter(|e| e.event.event.event == scout4all_core::shapes::enums::EventTypeEnum::S)
+            .map(event_ref)
+            .collect();
+        let mut screen = VideoScreen::with_clips(
+            whole.core.clone(),
+            dir.path().to_path_buf(),
+            whole.team_id.clone(),
+            whole.match_id.clone(),
+            serves.clone(),
+            "Battute".into(),
+        )
+        .unwrap();
+        assert!(matches!(screen.key(key!(x)), Outcome::Montage));
+        assert!(matches!(screen.update(Message::Montage), Outcome::Montage));
+        let pieces = screen.pieces(s);
+        let spans = screen.spans();
+        assert_eq!(
+            pieces
+                .iter()
+                .map(|p| (p.from_ms, p.to_ms))
+                .collect::<Vec<_>>(),
+            spans.iter().map(|sp| (sp.from, sp.to)).collect::<Vec<_>>()
+        );
+        let first = &pieces[0].card;
+        assert!(first.title.starts_with("Battuta"), "{}", first.title);
+        // the serves of the file 2 s apart: one piece, the others counted
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(
+            first.lines.last().unwrap(),
+            &format!("1 / 1  (+{})", serves.len() - 1)
+        );
+        // who, the set and the score before it, which of how many
+        assert_eq!(first.lines.len(), 3, "{:?}", first.lines);
+        assert!(first.lines[1].starts_with("Set "), "{:?}", first.lines);
+        // the file isn't there: why, said
+        screen.start_montage(s);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while screen.montage.is_some() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            screen.tick();
+        }
+        assert!(screen.montage.is_none());
+        assert!(screen.montage_error.is_some());
+        whole.key(BACK_KEY);
     }
 
     /// With some actions picked, how the match stands over the video still
