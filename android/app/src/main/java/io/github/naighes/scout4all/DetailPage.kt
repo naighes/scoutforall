@@ -68,7 +68,28 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import io.github.naighes.scout4all.core.TargetStats
+import io.github.naighes.scout4all.core.CourtZoneEnum
+import androidx.compose.foundation.border
 import kotlin.math.roundToInt
+
+/** What of the detail is picked to watch in the video: some evaluations,
+ * a zone of the net, a zone of the court (one each). */
+data class ClipChoice(
+    val evals: List<EvalEnum> = emptyList(),
+    val zone: UByte? = null,
+    val target: CourtZoneEnum? = null,
+) {
+    val empty: Boolean get() = evals.isEmpty() && zone == null && target == null
+
+    fun toggled(eval: EvalEnum) = copy(evals = if (eval in evals) evals - eval else evals + eval)
+    fun toggled(zone: UByte) = copy(zone = if (this.zone == zone) null else zone)
+    fun toggled(target: CourtZoneEnum) = copy(target = if (this.target == target) null else target)
+}
+
+/** Watching the actions of the detail in the video, on top of it: how many
+ * the choice keeps and the button (the match's or the team's). None while
+ * scouting. */
+class Watch(val header: @Composable (detail: DetailStats, query: DetailQuery, choice: ClipChoice, clear: () -> Unit) -> Unit)
 
 /** The detail asked for: a fundamental, narrowed by the filter. */
 data class DetailQuery(val event: EventTypeEnum = EventTypeEnum.S, val filter: DetailFilter = DetailFilter(null, null, null))
@@ -95,10 +116,14 @@ fun Detail(
     situation: SituationChoices? = null,
     // the analysis has them over every page
     filters: Boolean = true,
+    // the actions to watch in the video, picked touching the evaluations
+    // and the zones: anew for each fundamental
+    watch: Watch? = null,
     onQuery: (DetailQuery) -> Unit,
 ) {
     if (detail == null) return
     val filter = query.filter
+    var choice by remember(query.event) { mutableStateOf(ClipChoice()) }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -112,7 +137,10 @@ fun Detail(
         }
     }
     if (filters) DetailFilters(detail, situation, filter) { onQuery(query.copy(filter = it)) }
-    detail.fundamental?.let { FundamentalContent(it, query, onQuery) }
+    watch?.header?.invoke(detail, query, choice) { choice = ClipChoice() }
+    detail.fundamental?.let { f ->
+        FundamentalContent(f, query, onQuery, choice.takeIf { watch != null }) { choice = it }
+    }
     detail.freeballs?.let { FreeballContent(it) }
 }
 
@@ -176,6 +204,18 @@ fun DetailFilters(detail: DetailStats, situation: SituationChoices?, filter: Det
             p1.find { it.second == filter.invertedP1 }?.let { "P1 ${it.first}" },
             p1,
         ) { onFilter(filter.copy(invertedP1 = it)) }
+        val moments = listOf(stringResource(R.string.before_20) to false, stringResource(R.string.from_20) to true)
+        FilterMenu(
+            stringResource(R.string.set_moment),
+            moments.find { it.second == filter.late }?.first,
+            moments,
+        ) { onFilter(filter.copy(late = it)) }
+        val gaps = listOf(stringResource(R.string.close_score) to true, stringResource(R.string.wide_score) to false)
+        FilterMenu(
+            stringResource(R.string.score_gap),
+            gaps.find { it.second == filter.close }?.let { stringResource(R.string.score_gap) + " " + it.first },
+            gaps,
+        ) { onFilter(filter.copy(close = it)) }
     }
 
 /** The evaluations chosen together: the good ones, `!`, the bad ones. */
@@ -291,7 +331,14 @@ private fun <T> FilterMenu(label: String, chosen: String?, options: List<Pair<St
     }
 
 @Composable
-private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery: (DetailQuery) -> Unit) {
+private fun FundamentalContent(
+    f: FundamentalDetail,
+    query: DetailQuery,
+    onQuery: (DetailQuery) -> Unit,
+    // none: nothing to pick
+    choice: ClipChoice?,
+    onChoice: (ClipChoice) -> Unit,
+) {
     if (f.total == 0u) {
         Text(stringResource(R.string.no_events), color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
@@ -313,7 +360,9 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
     // the longest bar across, to tell them apart
     val most = f.evals.maxOfOrNull { it.share }?.coerceAtLeast(1.0) ?: 1.0
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        f.evals.forEach { EvalBar(it, most) }
+        f.evals.forEach { e ->
+            EvalBar(e, most, choice?.let { it.evals.contains(e.eval) }) { choice?.let { onChoice(it.toggled(e.eval)) } }
+        }
     }
     TileRow {
         DetailTile(stringResource(R.string.total), f.total.toString(), null, Modifier.weight(1f))
@@ -343,7 +392,10 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
     if (f.zones.isNotEmpty()) {
         DistributionCourt { zone ->
             val z = f.zones.find { it.zone.toInt() == zone }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(
+                Modifier.picked(choice?.let { it.zone?.toInt() == zone }) { choice?.let { onChoice(it.toggled(zone.toUByte())) } },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Text(zone.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     pct(z?.share),
@@ -361,7 +413,7 @@ private fun FundamentalContent(f: FundamentalDetail, query: DetailQuery, onQuery
             }
         }
     }
-    if (f.targets.isNotEmpty()) TargetZones(f, query.event)
+    if (f.targets.isNotEmpty()) TargetZones(f, query.event, choice, onChoice)
     if (f.blockers.isNotEmpty()) Blockers(f, query.event)
     if (f.players.isNotEmpty()) {
         Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
@@ -416,8 +468,10 @@ private fun DetailTile(label: String, value: String, color: Color?, modifier: Mo
 
 /** An evaluation: its symbol and name, a bar as long as its share. */
 @Composable
-private fun EvalBar(e: EvalStats, most: Double) = Row(
-    Modifier.semantics(mergeDescendants = true) {},
+private fun EvalBar(e: EvalStats, most: Double, picked: Boolean?, onPick: () -> Unit) = Row(
+    // a finger's room when it can be touched
+    Modifier.then(if (picked == null) Modifier else Modifier.heightIn(min = 48.dp))
+        .picked(picked, onPick).semantics(mergeDescendants = true) {},
     verticalAlignment = Alignment.CenterVertically,
 ) {
     // its name next to it
@@ -524,7 +578,7 @@ private fun FreeballContent(f: FreeballStats) = TileRow {
  * of two zones count half in each. On our court also the conflict zones,
  * between the zones, and all of them under the court. */
 @Composable
-private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum, choice: ClipChoice?, onChoice: (ClipChoice) -> Unit) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     var efficiency by rememberSaveable { mutableStateOf(false) }
     val (title, told) = when (event) {
         EventTypeEnum.P -> R.string.receptions_by_zone to R.string.reception_zones_told
@@ -564,7 +618,9 @@ private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum) = Column(ver
             // too few to tell
             else -> Triple(null, if (t.count > 0.0) "(${count(t.count)})" else "", "")
         }
-        ZoneCell(t, background, value, detail)
+        Box(Modifier.fillMaxSize().picked(choice?.let { it.target == t.value }) { choice?.let { onChoice(it.toggled(t.value)) } }) {
+            ZoneCell(t, background, value, detail)
+        }
     }
     f.onConflicts?.let { on ->
         val all = stringResource(R.string.on_conflicts, on.count.toInt(), on.share.roundToInt())
@@ -608,6 +664,17 @@ private fun Blockers(f: FundamentalDetail, event: EventTypeEnum) = Column(vertic
             }
         }
     }
+}
+
+/** What can be picked to watch in the video: touched, it's picked or not;
+ * picked, an amber border. Nothing when there's nothing to pick
+ * (`picked` none). */
+@Composable
+private fun Modifier.picked(picked: Boolean?, onPick: () -> Unit): Modifier = when (picked) {
+    null -> this
+    else -> this.clip(MaterialTheme.shapes.small)
+        .border(2.dp, if (picked) MaterialTheme.colorScheme.primary else Color.Transparent, MaterialTheme.shapes.small)
+        .clickable(onClick = onPick)
 }
 
 /** How many in a zone: whole, or with the half of two cells of two zones

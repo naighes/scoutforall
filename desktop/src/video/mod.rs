@@ -17,7 +17,6 @@ mod montage;
 mod player;
 pub use player::Frame as Picture;
 pub mod source;
-mod sync;
 
 use {
     crate::{
@@ -37,7 +36,13 @@ use {
         video::{self, Anchor, AnchorSource, EventRef, StoredProfile, VideoFile, VideoProfile},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
-    scout4all_mobile::{MatchClips, MobileError, Scout4All, VideoEvent},
+    scout4all_mobile::{
+        MatchClips, MobileError, Scout4All, VideoEvent,
+        video::{
+            VideoStanding as Standing, current, event_ref, inside, parse_time, standing, target,
+            written,
+        },
+    },
     std::{
         path::PathBuf,
         sync::Arc,
@@ -693,12 +698,12 @@ impl VideoScreen {
             .map(i64::unsigned_abs)
             .unwrap_or_else(|| self.position());
         if !self.events.is_empty() {
-            self.editing = Some(sync::written(now));
+            self.editing = Some(written(now));
         }
     }
 
     fn submit_time(&mut self) {
-        match self.editing.as_deref().map(sync::parse_time) {
+        match self.editing.as_deref().map(parse_time) {
             Some(Some(ms)) => {
                 self.editing = None;
                 self.invalid_time = false;
@@ -785,9 +790,9 @@ impl VideoScreen {
         let seen = self.event_target(self.selected);
         match (self.clips.is_some(), self.sequence) {
             (true, true) => (self.selected + 1..self.events.len()).find(|i| {
-                self.events.get(*i).is_some_and(|e| {
-                    list::inside(e.offset_ms, duration) && self.event_target(*i) != seen
-                })
+                self.events
+                    .get(*i)
+                    .is_some_and(|e| inside(e.offset_ms, duration) && self.event_target(*i) != seen)
             }),
             _ => None,
         }
@@ -1393,7 +1398,7 @@ impl VideoScreen {
         let outside = self
             .events
             .iter()
-            .filter(|e| e.offset_ms.is_some() && !list::inside(e.offset_ms, duration))
+            .filter(|e| e.offset_ms.is_some() && !inside(e.offset_ms, duration))
             .count();
         match (source, outside) {
             (None, _) => (said, false),
@@ -1874,44 +1879,6 @@ fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message>
         })
 }
 
-/// How the match stands at a moment of the video: after the last event
-/// passed (the score turns when the point is scouted, as on TV after the
-/// rally), with the sets won before its set; none before the first.
-#[derive(Debug, Clone, PartialEq)]
-struct Standing {
-    set_number: u8,
-    /// the sets won before this one, ours first
-    sets: (u8, u8),
-    score: (u8, u8),
-    rotation: String,
-    phase: PhaseEnum,
-}
-
-fn standing(events: &[VideoEvent], position_ms: u64) -> Option<Standing> {
-    let at = events.get(current(events, position_ms, 0)?)?;
-    // the last event of each set before: who won it
-    let sets = events
-        .iter()
-        .zip(events.iter().skip(1).map(Some).chain([None]))
-        .filter(|(e, next)| {
-            e.set_number < at.set_number && next.is_none_or(|n| n.set_number != e.set_number)
-        })
-        .fold((0, 0), |(us, them), (e, _)| {
-            match e.event.score_us.cmp(&e.event.score_them) {
-                std::cmp::Ordering::Greater => (us + 1, them),
-                std::cmp::Ordering::Less => (us, them + 1),
-                std::cmp::Ordering::Equal => (us, them),
-            }
-        });
-    Some(Standing {
-        set_number: at.set_number,
-        sets,
-        score: (at.event.score_us, at.event.score_them),
-        rotation: at.rotation.clone(),
-        phase: at.phase,
-    })
-}
-
 /// How the match stands, over the corner of the video: on a veil, not a
 /// box, the letters as large as the body's or more. A line a team, ours
 /// first, as on TV: the ball by the one to serve, its name, the sets won
@@ -1974,8 +1941,8 @@ fn overlay_view<'a>(
     container(
         row![
             column![
-                team(serving_us, us, st.sets.0, st.score.0),
-                team(!serving_us, them, st.sets.1, st.score.1),
+                team(serving_us, us, st.sets_us, st.score_us),
+                team(!serving_us, them, st.sets_them, st.score_them),
             ]
             .spacing(2),
             divider,
@@ -2034,57 +2001,7 @@ fn overlay_name(name: &str) -> String {
     }
 }
 
-/// Where the video goes for the event: `lead_ms` before it, not before
-/// the start; none when not lined up.
-fn target(e: &VideoEvent, lead_ms: i64) -> Option<u64> {
-    e.offset_ms.map(|ms| (ms - lead_ms).max(0).unsigned_abs())
-}
-
-/// The event being seen at `position_ms`: the latest whose target the video
-/// passed (the one gone to stays the one seen); the later in the list when
-/// two have the same time. None before the first.
-fn current(events: &[VideoEvent], position_ms: u64, lead_ms: i64) -> Option<usize> {
-    events
-        .iter()
-        .enumerate()
-        .filter_map(|(i, e)| {
-            target(e, lead_ms)
-                .filter(|t| *t <= position_ms)
-                .map(|t| (t, i))
-        })
-        .max()
-        .map(|(_, i)| i)
-}
-
-/// The event as an anchor names it.
-fn event_ref(e: &VideoEvent) -> EventRef {
-    EventRef {
-        set_number: e.set_number,
-        index: e.event.index as usize,
-    }
-}
-
-/// `h:mm:ss`, or `m:ss` under the hour.
-pub fn clock(ms: u64) -> String {
-    let seconds = ms / 1000;
-    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
-    match h {
-        0 => format!("{m}:{s:02}"),
-        h => format!("{h}:{m:02}:{s:02}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::clock;
-
-    #[test]
-    fn the_time_in_the_video() {
-        assert_eq!(clock(0), "0:00");
-        assert_eq!(clock(378_400), "6:18");
-        assert_eq!(clock(5_686_000), "1:34:46");
-    }
-}
+pub use scout4all_mobile::video::video_clock as clock;
 
 #[cfg(test)]
 pub(crate) mod screen_tests {
@@ -2845,7 +2762,11 @@ pub(crate) mod screen_tests {
         });
         let seen = screen.standing().unwrap();
         assert_eq!(Some(seen.clone()), standing(&whole.events, at));
-        assert_ne!(seen.sets, (0, 0), "the first set counted");
+        assert_ne!(
+            (seen.sets_us, seen.sets_them),
+            (0, 0),
+            "the first set counted"
+        );
     }
 
     /// Over the video, how the match stands at that moment: nothing before
@@ -2876,15 +2797,18 @@ pub(crate) mod screen_tests {
         let at = |e: &VideoEvent| e.offset_ms.unwrap().unsigned_abs();
         let seen = standing(&events, at(&events[last])).unwrap();
         assert_eq!(seen.set_number, 1);
-        assert_eq!(seen.sets, (0, 0));
-        assert_eq!(seen.score, (end.score_us, end.score_them));
+        assert_eq!((seen.sets_us, seen.sets_them), (0, 0));
+        assert_eq!(
+            (seen.score_us, seen.score_them),
+            (end.score_us, end.score_them)
+        );
         let won = match end.score_us > end.score_them {
             true => (1, 0),
             false => (0, 1),
         };
         let seen = standing(&events, at(next)).unwrap();
         assert_eq!(seen.set_number, 2);
-        assert_eq!(seen.sets, won);
+        assert_eq!((seen.sets_us, seen.sets_them), won);
         // a point of ours: we serve, a break to play
         let point = events
             .iter()

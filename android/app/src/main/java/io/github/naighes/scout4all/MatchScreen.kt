@@ -59,6 +59,7 @@ fun MatchScreen(
     onResumeSet: () -> Unit,
     onSet: (set: Int) -> Unit,
     onStats: () -> Unit,
+    onVideo: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<MatchState>(MatchState.Loading, teamId, matchId) {
@@ -88,7 +89,7 @@ fun MatchScreen(
         when (val s = state) {
             MatchState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is MatchState.Failed -> Centered(modifier) { Text(s.message) }
-            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, onSet, onStats, modifier)
+            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, onSet, onStats, onVideo, modifier)
         }
     }
 }
@@ -100,6 +101,7 @@ private fun MatchContent(
     onResumeSet: () -> Unit,
     onSet: (set: Int) -> Unit,
     onStats: () -> Unit,
+    onVideo: () -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
     val place = stringResource(if (m.home) R.string.home else R.string.away)
@@ -129,6 +131,16 @@ private fun MatchContent(
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.match_stats), Modifier.weight(1f, fill = false))
         }
+    }
+    // the video of the match, to watch it with its events (never while
+    // scouting)
+    OutlinedButton(
+        onClick = onVideo,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).heightIn(min = 48.dp),
+    ) {
+        Icon(painterResource(R.drawable.ic_video), contentDescription = null, Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.video), Modifier.weight(1f, fill = false))
     }
     val sets = Modifier.weight(1f).fillMaxWidth()
     when {

@@ -31,7 +31,7 @@ private sealed interface MatchStatsState {
  * `set` at first, or of the whole match with no `set`. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> Unit) {
+fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> Unit, onWatch: (VideoRequest.Clips) -> Unit = {}) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     // the set shown, 0 for the match: saved as a number on rotation
     var shown by rememberSaveable { mutableIntStateOf(set ?: 0) }
@@ -72,6 +72,7 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
                             null
                         }
                     },
+                    watch = { scope -> matchWatch(teamId, matchId, scope, onWatch) },
                 )
             }
         }

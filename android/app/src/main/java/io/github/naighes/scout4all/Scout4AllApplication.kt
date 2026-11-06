@@ -20,6 +20,10 @@ import kotlinx.coroutines.withContext
 
 /** Holds the core, one for the whole app. */
 open class Scout4AllApplication : Application() {
+    /** The video of a match is on screen: a phone turns there, and the
+     * activity made again as it turns mustn't put it upright. */
+    var turning = false
+
     // the language chosen for the app, from the activity
     @Volatile private var language: String = Locale.getDefault().language
 

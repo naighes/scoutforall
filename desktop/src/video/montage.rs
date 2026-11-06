@@ -396,8 +396,8 @@ impl Painter<'_> {
         );
         let serving_us = st.phase == PhaseEnum::Break;
         let rows = [
-            (serving_us, &names[0], st.sets.0, st.score.0),
-            (!serving_us, &names[1], st.sets.1, st.score.1),
+            (serving_us, &names[0], st.sets_us, st.score_us),
+            (!serving_us, &names[1], st.sets_them, st.score_them),
         ];
         for (i, (serving, name, sets, points)) in rows.into_iter().enumerate() {
             let middle = y0 + pad_y + row_h * (i as f32 + 0.5);
@@ -620,20 +620,7 @@ fn draw_text(
 /// The file the video goes to: in the folder of the files to share, named
 /// after what it shows.
 pub fn output(title: &str) -> PathBuf {
-    let name: String = title
-        .chars()
-        .map(|c| match c.is_alphanumeric() || c == ' ' || c == '-' {
-            true => c,
-            false => ' ',
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let name = match name.is_empty() {
-        true => "scout4all".to_string(),
-        false => name,
-    };
+    let name = scout4all_mobile::video::montage_name(title);
     std::env::temp_dir()
         .join("scout4all-share")
         .join(format!("{name}.mp4"))
@@ -660,8 +647,10 @@ mod tests {
     fn standing(set: u8) -> Standing {
         Standing {
             set_number: set,
-            sets: (1, 0),
-            score: (12, 10),
+            sets_us: 1,
+            sets_them: 0,
+            score_us: 12,
+            score_them: 10,
             rotation: "P3".into(),
             phase: PhaseEnum::SideOut,
         }

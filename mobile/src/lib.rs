@@ -94,6 +94,7 @@ uniffi::setup_scaffolding!();
 
 mod analysis;
 pub use analysis::*;
+pub mod video;
 
 // the types of the core the app sees as they are
 
@@ -2532,7 +2533,7 @@ pub struct VideoEvent {
 /// filter of the detail, and, when chosen, some evaluations, the zone of
 /// the net of the attacks (2, 3, 4, 8, 9) and a zone of the court
 /// (`TargetStats::value`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ClipPick {
     pub scope: StatsScope,
     pub event: EventTypeEnum,

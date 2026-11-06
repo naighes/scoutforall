@@ -13,7 +13,7 @@ use {
         widget::{Column, Id, column, row, scrollable, text},
     },
     scout4all_core::video::EventRef,
-    scout4all_mobile::VideoEvent,
+    scout4all_mobile::{VideoEvent, video::inside},
 };
 
 /// The list, to keep the event chosen in sight.
@@ -27,15 +27,6 @@ fn time(offset_ms: Option<i64>, duration_ms: Option<u64>) -> String {
         (Some(ms), _) if ms < 0 => format!("<{}", clock(ms.unsigned_abs())),
         (Some(ms), Some(d)) if ms.unsigned_abs() > d => format!(">{}", clock(d)),
         (Some(ms), _) => clock(ms.unsigned_abs()),
-    }
-}
-
-/// Whether the event is in the video.
-pub fn inside(offset_ms: Option<i64>, duration_ms: Option<u64>) -> bool {
-    match (offset_ms, duration_ms) {
-        (Some(ms), Some(d)) => ms >= 0 && ms.unsigned_abs() <= d,
-        (Some(ms), None) => ms >= 0,
-        (None, _) => false,
     }
 }
 
