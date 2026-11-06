@@ -109,6 +109,44 @@ impl StatsFilter {
     }
 }
 
+/// The events behind a statistic of a fundamental, to see them (in the
+/// video): the ones the filter keeps, with one of the evaluations, set to
+/// the zone of the net (an attack), and sent to or played in the zone of
+/// the court (see `CourtTarget::zones`, a conflict zone by
+/// `CourtTarget::conflict`), when given.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EventPick {
+    pub event_type: EventTypeEnum,
+    pub evals: Option<EvalSet>,
+    pub zone: Option<ZoneEnum>,
+    pub target: Option<CourtZoneEnum>,
+    pub filter: StatsFilter,
+}
+
+impl EventPick {
+    /// Whether the statistics counted the event (its key) among these.
+    pub fn keeps(&self, k: &EventKey) -> bool {
+        let in_target = |zone: CourtZoneEnum| {
+            k.target.is_some_and(|t| {
+                t.conflict() == Some(zone) || t.zones().iter().any(|(z, w)| *z == zone && *w > 0.0)
+            })
+        };
+        k.event_type == self.event_type
+            && self.filter.matches(
+                k.phase,
+                k.rotation,
+                k.player,
+                &k.situation,
+                k.touch.as_ref(),
+            )
+            && self
+                .evals
+                .is_none_or(|set| k.eval.is_some_and(|e| set.contains(e)))
+            && self.zone.is_none_or(|z| k.zone == Some(z))
+            && self.target.is_none_or(in_target)
+    }
+}
+
 /// Narrows the statistics to a situation of the game: `None` keeps them
 /// all. A filter on our reception keeps only the side outs where we
 /// received; a filter on the touch only the touches having it (the set
@@ -128,6 +166,10 @@ pub struct SituationFilter {
     pub scheme: Option<ReceptionSchemeEnum>,
     /// in P1 in side out, the P1 inverted or not
     pub inverted_p1: Option<bool>,
+    /// the end of the set (from 20, from 10 in the tie-break) or before
+    pub late: Option<bool>,
+    /// a close score (two points apart at most) or not
+    pub close: Option<bool>,
 }
 
 impl SituationFilter {
@@ -154,6 +196,8 @@ impl SituationFilter {
             && self
                 .inverted_p1
                 .is_none_or(|i| situation.inverted_p1 == Some(i))
+            && self.late.is_none_or(|l| situation.moment.late == l)
+            && self.close.is_none_or(|c| situation.moment.close == c)
     }
 }
 
@@ -259,6 +303,28 @@ pub struct Situation {
     pub scheme: Option<ReceptionSchemeEnum>,
     /// in P1 in side out, whether the P1 was inverted; `None` elsewhere
     pub inverted_p1: Option<bool>,
+    /// the score the rally was played at
+    pub moment: Moment,
+}
+
+/// The moment of the set a rally was played at, by its score before the
+/// point.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Moment {
+    /// the end of the set: a team at 20 (10 in the tie-break) or more
+    pub late: bool,
+    /// two points apart at most
+    pub close: bool,
+}
+
+impl Moment {
+    /// The moment of a rally at `us`–`them`, in a set to `target`.
+    pub fn at(us: u8, them: u8, target: u8) -> Moment {
+        Moment {
+            late: us.max(them) >= target.saturating_sub(5),
+            close: us.abs_diff(them) <= 2,
+        }
+    }
 }
 
 /// A touch of ours: who touched the ball and how it came.

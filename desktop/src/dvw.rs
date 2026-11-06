@@ -14,7 +14,7 @@ use {
     },
     chrono::NaiveDate,
     iced::{
-        Alignment, Element, Length,
+        Element, Length,
         widget::{Column, Id, column, container, row, text},
     },
     scout4all_core::shapes::country::CountryCode,
@@ -225,7 +225,10 @@ impl DvwScreen {
         };
         let mut form = Form::new(s.import_dvw, fields);
         form.sections = section.map(|t| (0, t)).into_iter().collect();
-        form.actions = Some((s.back.to_string(), s.dvw_next.to_string()));
+        form.actions = Some((
+            (theme::icons::BACK, s.back.to_string()),
+            (theme::icons::FORWARD_ARROW, s.dvw_next.to_string()),
+        ));
         self.form = form;
         self.step = step;
         self.selected = 0;
@@ -603,11 +606,11 @@ impl DvwScreen {
                                 ]
                             )),
                             warning,
-                            buttons(
-                                &format!("Esc  {}", s.dvw_dont_import),
-                                Message::Skip,
-                                &format!("Enter  {yes}"),
-                                Message::Save,
+                            ui::answers(
+                                Some((theme::icons::CLOSE, s.dvw_dont_import, Message::Skip)),
+                                theme::icons::IMPORT,
+                                yes,
+                                Some(Message::Save),
                                 c
                             ),
                         ]
@@ -631,9 +634,7 @@ impl DvwScreen {
                         Some(s.dvw_done),
                         column![
                             Column::with_children(rows).spacing(3),
-                            container(ui::pill(s.ok, true, Some(Message::Close), c))
-                                .width(Length::Fill)
-                                .align_x(Alignment::End),
+                            ui::answers(None, theme::icons::CHECK, s.ok, Some(Message::Close), c),
                         ]
                         .spacing(16),
                         c,
@@ -701,25 +702,6 @@ fn similar_label(s: &Strings, team: &DvwSimilarTeam) -> String {
         true => format!("{} {}", team.name, team.year),
         false => format!("{} {} ({why})", team.name, team.year),
     }
-}
-
-fn buttons<'a>(
-    no: &str,
-    on_no: Message,
-    yes: &str,
-    on_yes: Message,
-    c: Colors,
-) -> Element<'a, Message> {
-    container(
-        row![
-            ui::pill(no, false, Some(on_no), c),
-            ui::pill(yes, true, Some(on_yes), c),
-        ]
-        .spacing(10),
-    )
-    .width(Length::Fill)
-    .align_x(Alignment::End)
-    .into()
 }
 
 /// The step, the file beside it, as the forms with an aside.

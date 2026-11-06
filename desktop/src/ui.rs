@@ -270,8 +270,24 @@ pub fn bar_button<'a, M: Clone + 'a>(
     message: M,
     c: Colors,
 ) -> Element<'a, M> {
+    icon_button(icon_bytes, what, message, false, c)
+}
+
+/// A round button with an icon, as on the bar; amber when `filled` (the
+/// main one, e.g. play).
+pub fn icon_button<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    what: &str,
+    message: M,
+    filled: bool,
+    c: Colors,
+) -> Element<'a, M> {
+    let color = match filled {
+        true => c.on_accent,
+        false => c.text,
+    };
     let button = button(
-        container(icon(icon_bytes, 22.0, c.text))
+        container(icon(icon_bytes, 22.0, color))
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
@@ -282,15 +298,23 @@ pub fn bar_button<'a, M: Clone + 'a>(
     .style(move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: match hovered {
-                true => Some(Color { a: 0.7, ..c.button }.into()),
-                false => None,
+            background: match (filled, hovered) {
+                (true, false) => Some(c.accent.into()),
+                (true, true) => Some(
+                    Color {
+                        a: 0.85,
+                        ..c.accent
+                    }
+                    .into(),
+                ),
+                (false, true) => Some(Color { a: 0.7, ..c.button }.into()),
+                (false, false) => None,
             },
-            text_color: c.text,
+            text_color: color,
             border: border(
-                match hovered {
-                    true => c.accent,
-                    false => c.border,
+                match (filled, hovered) {
+                    (true, _) | (false, true) => c.accent,
+                    (false, false) => c.border,
                 },
                 BORDER,
                 RADIUS_PILL,
@@ -299,6 +323,96 @@ pub fn bar_button<'a, M: Clone + 'a>(
         }
     });
     tip(button, what, c)
+}
+
+/// A button of what a screen offers to do (analysis, edit, export...):
+/// as tall as the round ones on the bar, its icon and its name; amber
+/// when `filled` (the main one, e.g. the next set).
+pub fn action<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    message: M,
+    filled: bool,
+    c: Colors,
+) -> iced::widget::Button<'a, M> {
+    action_maybe(icon_bytes, label, Some(message), filled, c)
+}
+
+/// An `action` that can't be done yet without its message, faded.
+pub fn action_maybe<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    message: Option<M>,
+    filled: bool,
+    c: Colors,
+) -> iced::widget::Button<'a, M> {
+    let faded = |color: Color| match message.is_some() {
+        true => color,
+        false => Color { a: 0.45, ..color },
+    };
+    let color = faded(match filled {
+        true => c.on_accent,
+        false => c.text,
+    });
+    let accent = faded(c.accent);
+    button(
+        container(
+            row![
+                icon(icon_bytes, 20.0, color),
+                text(label.to_string()).size(SIZE_BODY).color(color),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+        )
+        .center_y(Length::Fill),
+    )
+    .height(Length::Fixed(42.0))
+    .padding(Padding::from([0, 16]))
+    .on_press_maybe(message)
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: match (filled, hovered) {
+                (true, false) => Some(accent.into()),
+                (true, true) => Some(Color { a: 0.85, ..accent }.into()),
+                (false, true) => Some(Color { a: 0.7, ..c.button }.into()),
+                (false, false) => None,
+            },
+            text_color: color,
+            border: border(
+                match (filled, hovered) {
+                    (true, _) | (false, true) => accent,
+                    (false, false) => c.border,
+                },
+                BORDER,
+                RADIUS_PILL,
+            ),
+            ..button::Style::default()
+        }
+    })
+}
+
+/// Buttons of `action` in rows of `per_row`, all as wide: the last row
+/// filled up with room.
+pub fn action_grid<'a, M: Clone + 'a>(
+    buttons: Vec<iced::widget::Button<'a, M>>,
+    per_row: usize,
+) -> Element<'a, M> {
+    let per_row = per_row.max(1);
+    let mut rows = vec![];
+    let mut buttons = buttons.into_iter().peekable();
+    while buttons.peek().is_some() {
+        let mut line: Vec<Element<'a, M>> = buttons
+            .by_ref()
+            .take(per_row)
+            .map(|b| b.width(Length::Fill).into())
+            .collect();
+        while line.len() < per_row {
+            line.push(space::horizontal().into());
+        }
+        rows.push(iced::widget::Row::with_children(line).spacing(10).into());
+    }
+    iced::widget::Column::with_children(rows).spacing(10).into()
 }
 
 /// The round amber button that adds one more to a list (a player, a
@@ -513,9 +627,50 @@ pub fn capitalized(word: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The answers of a dialog, on the right, the same everywhere: the way
+/// out (if any: a cross to cancel, an arrow to go back), then what it
+/// does, amber, with its icon; no keys written on them, the bar under the
+/// page has them.
+pub fn answers<'a, M: Clone + 'a>(
+    no: Option<(&'static [u8], &str, M)>,
+    icon: &'static [u8],
+    yes: &str,
+    on_yes: Option<M>,
+    c: Colors,
+) -> Element<'a, M> {
+    answers_with(no, vec![], icon, yes, on_yes, c)
+}
+
+/// The answers of a dialog with others between the way out and the main
+/// one (e.g. to save the file, besides sharing it).
+pub fn answers_with<'a, M: Clone + 'a>(
+    no: Option<(&'static [u8], &str, M)>,
+    others: Vec<(&'static [u8], &str, M)>,
+    icon: &'static [u8],
+    yes: &str,
+    on_yes: Option<M>,
+    c: Colors,
+) -> Element<'a, M> {
+    let others = no
+        .into_iter()
+        .chain(others)
+        .map(|(icon, label, message)| action(icon, &capitalized(label), message, false, c));
+    let yes = action_maybe(icon, &capitalized(yes), on_yes, true, c);
+    container(
+        iced::widget::Row::with_children(others.chain([yes]).map(Element::from))
+            .spacing(10)
+            .wrap()
+            .vertical_spacing(10),
+    )
+    .width(Length::Fill)
+    .align_x(Alignment::End)
+    .into()
+}
+
 /// A question to confirm, in the middle: Enter does it, Esc doesn't.
 pub fn confirm<'a, M: Clone + 'a>(
     question: &str,
+    icon: &'static [u8],
     yes: &str,
     on_yes: M,
     no: &str,
@@ -526,11 +681,13 @@ pub fn confirm<'a, M: Clone + 'a>(
         None,
         column![
             body(question.to_string()),
-            row![
-                pill(&format!("Esc  {no}"), false, Some(on_no), c),
-                pill(&format!("Enter  {yes}"), true, Some(on_yes), c),
-            ]
-            .spacing(10)
+            answers(
+                Some((theme::icons::CLOSE, no, on_no)),
+                icon,
+                yes,
+                Some(on_yes),
+                c
+            )
         ]
         .spacing(18)
         .align_x(Alignment::Center),

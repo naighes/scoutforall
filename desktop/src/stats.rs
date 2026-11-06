@@ -21,22 +21,26 @@ use {
     chrono::{Local, NaiveDate},
     iced::{
         Alignment, Color, Element, Length,
-        widget::{Column, Row, button, column, container, row, scrollable, space, text},
+        widget::{
+            Column, Row, button, column, container, responsive, row, scrollable, space, text,
+        },
     },
     scout4all_core::{
         analysis::MOVING_WINDOW,
         detail::Tone,
+        shapes::court_zone::CourtZoneEnum,
         shapes::{
             enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum},
             flags::ReceptionSchemeEnum,
             technique::SetTypeEnum,
         },
+        video::StoredProfile,
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        AnalysisPeriod, DetailFilter, DetailStats, ErrorCount, FundamentalDetail, LiveStats,
-        MobileError, PhaseStats, Scout4All, SituationChoices, StatsScope, TargetStats,
-        TeamAnalysis,
+        AnalysisPeriod, ClipPick, DetailFilter, DetailStats, ErrorCount, FundamentalDetail,
+        LiveStats, MatchClips, MobileError, PhaseStats, Scout4All, SituationChoices, StatsScope,
+        TargetStats, TeamAnalysis,
     },
     std::sync::Arc,
 };
@@ -67,17 +71,21 @@ enum Filter {
     SetType,
     Scheme,
     InvertedP1,
+    Late,
+    Close,
     Zones,
 }
 
 /// The filters on the situation, after the player, rotation and phase.
-const SITUATION: [Filter; 6] = [
+const SITUATION: [Filter; 8] = [
     Filter::Role,
     Filter::Reception,
     Filter::Previous,
     Filter::SetType,
     Filter::Scheme,
     Filter::InvertedP1,
+    Filter::Late,
+    Filter::Close,
 ];
 
 /// How the period of a team is told.
@@ -126,11 +134,30 @@ pub enum Message {
     SetTypes(Vec<SetTypeEnum>),
     Scheme(Option<ReceptionSchemeEnum>),
     InvertedP1(Option<bool>),
+    /// the end of the set (from 20) or before
+    Late(Option<bool>),
+    /// a close score or not
+    Close(Option<bool>),
+    /// an evaluation of the detail, to watch only those (or all again)
+    ClipEval(EvalEnum),
+    /// a zone of the net of the attacks, to watch only those
+    ClipZone(u8),
+    /// a zone of the court, to watch only those
+    ClipTarget(CourtZoneEnum),
+    /// all the actions of the detail again
+    ClearPick,
+    /// the actions of the detail in the video
+    Watch,
 }
 
 pub enum Outcome {
     Stay,
     Back,
+    /// the actions picked, one after the other in the video
+    Watch(ClipPick),
+    /// the actions picked of the team, match after match: only the
+    /// matches with a video
+    WatchTour(Vec<MatchClips>),
 }
 
 /// The two days of a period, as written, and the month of the calendar.
@@ -224,6 +251,8 @@ pub struct StatsScreen {
     efficiency: bool,
     /// the filter the arrows change, on the page
     row: usize,
+    /// the arrows moved the row: the filters scroll to keep it in sight
+    scroll: bool,
     error: Option<String>,
     choices: SituationChoices,
     // the team
@@ -235,10 +264,29 @@ pub struct StatsScreen {
     today: NaiveDate,
     /// the days with a match, for the calendar
     played: Vec<NaiveDate>,
+    /// of the detail, to watch in the video: only these evaluations (all
+    /// with none), the attacks set to this zone, the ones in this zone of
+    /// the court
+    clip_evals: Vec<EvalEnum>,
+    clip_zone: Option<u8>,
+    clip_target: Option<CourtZoneEnum>,
+    /// how many actions are picked: none for a team
+    clips: Option<usize>,
+    /// the match has files of its video; of a team, one of the matches
+    /// with actions picked
+    has_video: bool,
+    /// of a team, the matches of the period with actions picked
+    tour: Vec<MatchClips>,
 }
 
 /// The filters on the left.
 const FILTERS_WIDTH: f32 = 500.0;
+
+/// The column of the filters, scrolled to the row of the arrows.
+const FILTERS: &str = "stats-filters";
+
+/// Up to how many filters go in a bar over the page, not in a column.
+const FILTERS_ON_TOP: usize = 2;
 
 /// A day as the period shows it: `YYYY-MM-DD` as written.
 fn shown_day(day: &str) -> String {
@@ -332,6 +380,13 @@ impl StatsScreen {
             .match_details(team_id.clone(), match_id.clone())?
             .opponent;
         let live = core.match_stats(team_id.clone(), match_id.clone(), StatsScope::Match)?;
+        // the files of its video, to watch the actions
+        let has_video = core
+            .video(&team_id, &match_id)
+            .is_ok_and(|(_, stored)| match stored {
+                StoredProfile::Profile(p) => !p.files.is_empty(),
+                StoredProfile::Missing | StoredProfile::Newer(_) => false,
+            });
         let mut screen = StatsScreen::with(
             core,
             team_id,
@@ -339,6 +394,7 @@ impl StatsScreen {
             format!("{team} – {opponent}"),
         );
         screen.live = Some(live);
+        screen.has_video = has_video;
         screen.load();
         Ok(screen)
     }
@@ -378,6 +434,7 @@ impl StatsScreen {
             filter: DetailFilter::default(),
             efficiency: false,
             row: 0,
+            scroll: false,
             error: None,
             choices,
             analysis: None,
@@ -392,6 +449,12 @@ impl StatsScreen {
             },
             today,
             played: vec![],
+            clip_evals: vec![],
+            clip_zone: None,
+            clip_target: None,
+            clips: None,
+            has_video: false,
+            tour: vec![],
         }
     }
 
@@ -453,11 +516,179 @@ impl StatsScreen {
                 }
             }
         }
+        self.recount();
         self.retrend();
+    }
+
+    /// What of the detail is picked to watch in the video.
+    fn pick(&self) -> ClipPick {
+        ClipPick {
+            scope: self.scope,
+            event: self.event,
+            filter: self.filter.clone(),
+            evals: self.clip_evals.clone(),
+            zone: self.clip_zone,
+            target: self.clip_target,
+        }
+    }
+
+    /// How many actions are picked, of a match.
+    /// Of a team, the ones in the matches with a video: the ones to watch.
+    fn recount(&mut self) {
+        self.clips = match &self.source {
+            Source::Match(m) => self
+                .core
+                .match_clips(&self.team_id, m, &self.pick())
+                .ok()
+                .map(|clips| clips.len()),
+            Source::Team => {
+                self.tour = self
+                    .core
+                    .team_clips(&self.team_id, &self.period, &self.pick())
+                    .unwrap_or_default();
+                self.has_video = self.tour.iter().any(|m| m.has_video);
+                Some(self.watched().map(|m| m.events.len()).sum())
+            }
+        };
+    }
+
+    /// Of a team, the matches with actions picked and a video.
+    fn watched(&self) -> impl Iterator<Item = &MatchClips> {
+        self.tour.iter().filter(|m| m.has_video)
+    }
+
+    /// Whether the actions of the detail can be watched: of a match with a
+    /// video, some picked.
+    fn watchable(&self) -> bool {
+        self.has_video && self.current() == Page::Detail && self.clips.is_some_and(|n| n > 0)
+    }
+
+    /// What the actions picked are, as the title of the list beside the
+    /// video: the fundamental, the filters chosen, the evaluations and
+    /// zones picked.
+    pub fn clips_title(&self, s: &Strings) -> String {
+        let detail = self.detail.as_ref();
+        let fundamental = detail
+            .and_then(|d| d.fundamentals.iter().find(|f| f.value == self.event))
+            .map(|f| ui::capitalized(&f.name));
+        let scope = match self.scope {
+            StatsScope::Set { number } => Some(format!("{} {number}", s.set_n)),
+            StatsScope::Match => None,
+        };
+        let player = self.filter.player.as_ref().and_then(|id| {
+            detail
+                .and_then(|d| d.players.iter().find(|p| &p.id == id))
+                .map(|p| format!("{} {}", p.number, p.name))
+        });
+        let rotation = self.filter.rotation.and_then(|r| {
+            detail
+                .and_then(|d| d.rotations.iter().find(|x| x.value == r))
+                .map(|x| x.name.clone())
+        });
+        let phase = self.filter.phase.and_then(|ph| {
+            detail
+                .and_then(|d| d.phases.iter().find(|x| x.value == ph))
+                .map(|x| ui::capitalized(&x.name))
+        });
+        let role = self.filter.role.and_then(|r| {
+            self.choices
+                .roles
+                .iter()
+                .find(|x| x.value == r)
+                .map(|x| ui::capitalized(&x.name))
+        });
+        let symbols = |evals: &[EvalEnum]| -> Option<String> {
+            let found: Vec<String> = self
+                .choices
+                .symbols
+                .iter()
+                .filter(|x| evals.contains(&x.value))
+                .map(|x| x.symbol.clone())
+                .collect();
+            (!found.is_empty()).then(|| found.join(" "))
+        };
+        let reception =
+            symbols(&self.filter.reception).map(|x| format!("{} {x}", s.rally_reception));
+        let previous = symbols(&self.filter.previous).map(|x| format!("{} {x}", s.touch_before));
+        let sets: Vec<String> = self
+            .choices
+            .set_types
+            .iter()
+            .filter(|t| self.filter.set_types.contains(&t.value))
+            .map(|t| t.code.clone())
+            .collect();
+        let sets = (!sets.is_empty()).then(|| format!("{} {}", s.set_type, sets.join(" ")));
+        let scheme = self
+            .filter
+            .scheme
+            .and_then(|sc| self.choices.schemes.iter().find(|x| x.value == sc))
+            .map(|x| ui::fill(s.receivers, &[x.receivers.to_string()]));
+        let p1 = self.filter.inverted_p1.map(|i| match i {
+            true => s.inverted.to_string(),
+            false => s.canonical.to_string(),
+        });
+        let late = self.filter.late.map(|l| match l {
+            true => s.from_20.to_string(),
+            false => s.before_20.to_string(),
+        });
+        let close = self.filter.close.map(|c| match c {
+            true => s.close_score.to_string(),
+            false => s.wide_score.to_string(),
+        });
+        // in the order of the detail, from the best
+        let evals: Vec<String> = detail
+            .and_then(|d| d.fundamental.as_ref())
+            .iter()
+            .flat_map(|f| f.evals.iter())
+            .filter(|e| self.clip_evals.contains(&e.eval))
+            .map(|e| e.symbol.clone())
+            .collect();
+        let evals = (!evals.is_empty()).then(|| evals.join(" "));
+        let zone = self.clip_zone.map(|z| ui::fill(s.zone_n, &[z.to_string()]));
+        let target = self.clip_target.and_then(|t| {
+            detail
+                .and_then(|d| d.fundamental.as_ref())
+                .and_then(|f| f.targets.iter().flatten().find(|x| x.value == t))
+                .map(|x| ui::fill(s.zone_n, std::slice::from_ref(&x.label)))
+        });
+        [
+            fundamental,
+            evals,
+            player,
+            zone,
+            target,
+            sets,
+            rotation,
+            phase,
+            role,
+            reception,
+            previous,
+            scheme,
+            p1,
+            late,
+            close,
+            scope,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
     }
 
     fn retrend(&mut self) {
         self.trend = Trend::of_stats(self.live.as_ref(), self.series, self.recent);
+    }
+
+    /// Where the column of the filters goes, to keep the row of the arrows
+    /// in sight, once they moved it.
+    pub fn take_scroll(&mut self) -> Option<(iced::widget::Id, f32)> {
+        let last = self.filters().len().saturating_sub(1).max(1);
+        std::mem::take(&mut self.scroll).then(|| {
+            (
+                iced::widget::Id::new(FILTERS),
+                self.row as f32 / last as f32,
+            )
+        })
     }
 
     fn current(&self) -> Page {
@@ -602,6 +833,14 @@ impl StatsScreen {
                 forward,
             )
             .map(Message::InvertedP1),
+            Filter::Late => ui::cycle(&[None, Some(false), Some(true)], &self.filter.late, forward)
+                .map(Message::Late),
+            Filter::Close => ui::cycle(
+                &[None, Some(true), Some(false)],
+                &self.filter.close,
+                forward,
+            )
+            .map(Message::Close),
         }
     }
 
@@ -643,6 +882,7 @@ impl StatsScreen {
             }
             Message::Event(event) => {
                 self.event = event;
+                self.clear_pick();
                 self.load();
             }
             Message::Player(player) => {
@@ -709,10 +949,54 @@ impl StatsScreen {
                 self.filter.inverted_p1 = inverted;
                 self.load();
             }
+            Message::Late(late) => {
+                self.filter.late = late;
+                self.load();
+            }
+            Message::Close(close) => {
+                self.filter.close = close;
+                self.load();
+            }
+            Message::ClipEval(eval) => {
+                let picked = self.clip_evals.contains(&eval);
+                self.clip_evals.retain(|e| *e != eval);
+                if !picked {
+                    self.clip_evals.push(eval);
+                }
+                self.recount();
+            }
+            Message::ClipZone(zone) => {
+                self.clip_zone = (self.clip_zone != Some(zone)).then_some(zone);
+                self.recount();
+            }
+            Message::ClipTarget(target) => {
+                self.clip_target = (self.clip_target != Some(target)).then_some(target);
+                self.recount();
+            }
+            Message::ClearPick => {
+                self.clear_pick();
+                self.recount();
+            }
+            Message::Watch => return self.watch(),
         }
         let rows = self.filters().len();
         self.row = self.row.min(rows.saturating_sub(1));
         Outcome::Stay
+    }
+
+    fn clear_pick(&mut self) {
+        self.clip_evals.clear();
+        self.clip_zone = None;
+        self.clip_target = None;
+    }
+
+    /// The actions picked in the video, if they can be watched.
+    fn watch(&self) -> Outcome {
+        match (self.watchable(), self.is_team()) {
+            (true, false) => Outcome::Watch(self.pick()),
+            (true, true) => Outcome::WatchTour(self.watched().cloned().collect()),
+            (false, _) => Outcome::Stay,
+        }
     }
 
     /// The keys of the period: + − the last matches; the digits, ⌫,
@@ -756,14 +1040,17 @@ impl StatsScreen {
         }
         match ck {
             k if k == BACK_KEY => Outcome::Back,
+            k if k == key!(v) => self.watch(),
             k if k == key!(tab) => self.update(Message::Page((self.page + 1) % pages)),
             _ if previous_page => self.update(Message::Page((self.page + pages - 1) % pages)),
             k if k == key!(down) => {
                 self.row = (self.row + 1) % rows;
+                self.scroll = true;
                 Outcome::Stay
             }
             k if k == key!(up) => {
                 self.row = (self.row + rows - 1) % rows;
+                self.scroll = true;
                 Outcome::Stay
             }
             k if k == key!(left) || k == key!(right) => {
@@ -802,6 +1089,10 @@ impl StatsScreen {
         ]
         .into_iter()
         .chain(period)
+        .chain(
+            self.watchable()
+                .then(|| ("v".to_string(), s.watch_clips.to_string())),
+        )
         .chain([("Esc".to_string(), s.back.to_string())])
         .collect()
     }
@@ -815,13 +1106,14 @@ impl StatsScreen {
             .enumerate()
             .map(|(i, name)| ui::pill(name, i == self.page, Some(Message::Page(i)), c)))
         .spacing(6);
-        let filters = Column::with_children(
-            self.filters()
-                .into_iter()
-                .enumerate()
-                .map(|(i, f)| self.filter_row(f, i == self.row, s, c)),
-        )
-        .spacing(8);
+        let filters: Vec<Element<'a, Message>> = self
+            .filters()
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| self.filter_row(f, i == self.row, s, c))
+            .collect();
+        // a few filters: a bar over the page, the page as wide as the screen
+        let few = filters.len() <= FILTERS_ON_TOP;
         let error: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => space::vertical().height(0).into(),
@@ -833,19 +1125,50 @@ impl StatsScreen {
         let page: Element<'a, Message> = match (self.current(), &self.live, empty) {
             (_, _, true) => ui::panel(None, small(s.no_matches_period, c), c),
             (_, None, _) => space::vertical().into(),
-            (Page::Summary, Some(live), _) => summary(live, s, c),
+            (Page::Summary, Some(live), _) => {
+                responsive(move |size| summary(live, s, c, size.height >= SUMMARY_TALL)).into()
+            }
             (Page::Trend, Some(live), _) => match &self.analysis {
                 Some(a) if self.is_team() => self.matches_page(a, s, c),
                 _ => self.trend_page(live, s, c),
             },
             (Page::Detail, _, _) => self.detail_page(s, c),
         };
-        let left = container(scrollable(ui::panel(None, filters, c)).height(Length::Fill))
-            .width(Length::Fixed(FILTERS_WIDTH));
-        let right = column![tabs, error, container(page).height(Length::Fill)]
-            .spacing(12)
-            .width(Length::Fill);
-        row![left, right].spacing(14).into()
+        match few {
+            true => {
+                let bar = Row::with_children(
+                    filters
+                        .into_iter()
+                        .map(|f| container(f).width(Length::Fill).into()),
+                )
+                .spacing(24);
+                column![
+                    tabs,
+                    ui::panel(None, bar, c),
+                    error,
+                    container(page).height(Length::Fill)
+                ]
+                .spacing(12)
+                .into()
+            }
+            // the filters fill the column, scrolling inside when many
+            false => {
+                let left = container(ui::panel(
+                    None,
+                    scrollable(Column::with_children(filters).spacing(8))
+                        .id(iced::widget::Id::new(FILTERS))
+                        .height(Length::Fill)
+                        .width(Length::Fill),
+                    c,
+                ))
+                .height(Length::Fill)
+                .width(Length::Fixed(FILTERS_WIDTH));
+                let right = column![tabs, error, container(page).height(Length::Fill)]
+                    .spacing(12)
+                    .width(Length::Fill);
+                row![left, right].spacing(14).into()
+            }
+        }
     }
 
     /// A filter: its name, then a pill each choice; the row the arrows are
@@ -1089,6 +1412,38 @@ impl StatsScreen {
                     ),
                 ],
             ),
+            Filter::Late => (
+                s.set_moment,
+                vec![
+                    all(self.filter.late.is_none(), Message::Late(None)),
+                    pill(
+                        s.before_20.to_string(),
+                        self.filter.late == Some(false),
+                        Message::Late(Some(false)),
+                    ),
+                    pill(
+                        s.from_20.to_string(),
+                        self.filter.late == Some(true),
+                        Message::Late(Some(true)),
+                    ),
+                ],
+            ),
+            Filter::Close => (
+                s.score_gap,
+                vec![
+                    all(self.filter.close.is_none(), Message::Close(None)),
+                    pill(
+                        s.close_score.to_string(),
+                        self.filter.close == Some(true),
+                        Message::Close(Some(true)),
+                    ),
+                    pill(
+                        s.wide_score.to_string(),
+                        self.filter.close == Some(false),
+                        Message::Close(Some(false)),
+                    ),
+                ],
+            ),
         };
         ui::choice_line(name, on, pills, c)
     }
@@ -1314,6 +1669,62 @@ impl StatsScreen {
     }
 
     fn detail_page<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let page = self.detail_figures(s, c);
+        match self.clips {
+            Some(_) => column![self.watch_bar(s, c), page].spacing(10).into(),
+            None => page,
+        }
+    }
+
+    /// The actions of the detail in the video: how many, the evaluations
+    /// and zones picked cleared, or why not.
+    fn watch_bar<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let count = self.clips.unwrap_or(0);
+        let picked =
+            !self.clip_evals.is_empty() || self.clip_zone.is_some() || self.clip_target.is_some();
+        let clear: Element<'a, Message> = match picked {
+            true => ui::pill(
+                &format!("✕ {}", s.filter_all),
+                false,
+                Some(Message::ClearPick),
+                c,
+            ),
+            false => space::horizontal().width(0).into(),
+        };
+        let without = self.tour.iter().filter(|m| !m.has_video).count();
+        let said: Element<'a, Message> = match (self.is_team(), self.has_video, count, without) {
+            (true, _, _, 1..) => {
+                small(ui::fill(s.clips_without_video, &[without.to_string()]), c).into()
+            }
+            (false, false, _, _) => small(s.clips_no_video, c).into(),
+            (_, _, 0, _) => small(s.clips_none, c).into(),
+            (_, _, _, _) => small(s.clips_pick_hint, c).into(),
+        };
+        let how_many = match self.is_team() {
+            true => ui::fill(
+                s.clips_in_matches,
+                &[count.to_string(), self.watched().count().to_string()],
+            ),
+            false => ui::fill(s.clips_count, &[count.to_string()]),
+        };
+        let watch = ui::pill(
+            &format!("▶ {}", s.watch_clips),
+            self.watchable(),
+            self.watchable().then_some(Message::Watch),
+            c,
+        );
+        row![
+            watch,
+            ui::body(how_many),
+            clear,
+            container(said).width(Length::Fill).align_x(Alignment::End),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    fn detail_figures<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let Some(detail) = &self.detail else {
             return space::vertical().into();
         };
@@ -1358,7 +1769,7 @@ impl StatsScreen {
         let most = f.evals.iter().map(|e| e.share).fold(1.0, f64::max);
         let evals = f.evals.iter().map(|e| {
             let color = grade_color(tone_grade(&e.tone), c);
-            row![
+            let body = row![
                 text(e.symbol.clone())
                     .size(SIZE_BODY)
                     .font(theme::fonts().bold)
@@ -1374,8 +1785,10 @@ impl StatsScreen {
                     .align_x(Alignment::End),
             ]
             .spacing(8)
-            .align_y(Alignment::Center)
-            .into()
+            .align_y(Alignment::Center);
+            // picked to watch only those, of a match
+            let message = self.clips.map(|_| Message::ClipEval(e.eval));
+            ui::list_row(body, self.clip_evals.contains(&e.eval), message, c)
         });
         let grade = f.grade.map_or(c.text, |g| grade_color(g, c));
         let figures = column![
@@ -1430,11 +1843,11 @@ impl StatsScreen {
         .spacing(8);
         let left = ui::panel(
             None,
-            column![Column::with_children(evals).spacing(6), figures].spacing(16),
+            column![Column::with_children(evals).spacing(2), figures].spacing(16),
             c,
         );
         let zones: Vec<Element<'a, Message>> = [
-            (!f.zones.is_empty()).then(|| attack_zones(f, s, c)),
+            (!f.zones.is_empty()).then(|| self.attack_zones(f, s, c)),
             (!f.targets.is_empty()).then(|| self.targets(f, s, c)),
             (!f.blockers.is_empty()).then(|| self.blockers(f, s, c)),
         ]
@@ -1442,14 +1855,18 @@ impl StatsScreen {
         .flatten()
         .collect();
         let middle = Column::with_children(zones).spacing(12);
+        // the players fill their column, scrolling on their own
         let right = self.players(f, s, c);
-        scrollable(
-            row![
-                container(column![left, middle].spacing(12)).width(Length::FillPortion(1)),
-                container(right).width(Length::FillPortion(1)),
-            ]
-            .spacing(14),
-        )
+        row![
+            scrollable(column![left, middle].spacing(12))
+                .height(Length::Fill)
+                .width(Length::FillPortion(1)),
+            container(right)
+                .height(Length::Fill)
+                .width(Length::FillPortion(1)),
+        ]
+        .spacing(14)
+        .height(Length::Fill)
         .into()
     }
 
@@ -1545,7 +1962,7 @@ impl StatsScreen {
             Some(b) if b.r * 0.299 + b.g * 0.587 + b.b * 0.114 > 0.55 => theme::DARK.background,
             _ => c.text,
         };
-        container(
+        let cell = container(
             column![
                 text(t.label.clone()).size(SIZE_SMALL).color(ink),
                 text(value)
@@ -1558,15 +1975,27 @@ impl StatsScreen {
             .spacing(1),
         )
         .padding(6)
-        .width(match t.zone {
-            true => Length::FillPortion(3),
-            false => Length::FillPortion(1),
-        })
+        .width(Length::Fill)
         .align_x(Alignment::Center)
         .style(move |_| container::Style {
             background: background.map(Into::into),
             border: iced::border::rounded(6).color(c.border).width(1),
             ..container::Style::default()
+        });
+        // picked to watch only its actions, of a match
+        let message = self
+            .clips
+            .filter(|_| some)
+            .map(|_| Message::ClipTarget(t.value));
+        container(pickable(
+            cell,
+            self.clip_target == Some(t.value),
+            message,
+            c,
+        ))
+        .width(match t.zone {
+            true => Length::FillPortion(3),
+            false => Length::FillPortion(1),
         })
         .into()
     }
@@ -1682,58 +2111,132 @@ impl StatsScreen {
         });
         ui::panel(
             Some(&ui::capitalized(s.players)),
-            column![head, Column::with_children(rows).spacing(2)].spacing(6),
+            column![
+                head,
+                scrollable(Column::with_children(rows).spacing(2)).height(Length::Fill)
+            ]
+            .spacing(6)
+            .height(Length::Fill),
             c,
         )
     }
 }
 
-/// The attacks set to each zone of the net, and the kills.
-fn attack_zones<'a>(
-    f: &'a FundamentalDetail,
-    s: &'static Strings,
+/// A cell of the detail to click, to watch only its actions: lit when
+/// picked.
+fn pickable<'a>(
+    content: impl Into<Element<'a, Message>>,
+    picked: bool,
+    message: Option<Message>,
     c: Colors,
 ) -> Element<'a, Message> {
-    let cell = |zone: u8| -> Element<'a, Message> {
-        let z = f.zones.iter().find(|z| z.zone == zone);
-        container(
-            column![
-                small(zone, c),
-                big(
-                    pct(z.map(|z| z.share)),
-                    match z {
-                        Some(_) => c.text,
-                        None => c.muted,
-                    }
-                ),
-                small(
-                    z.map_or(String::new(), |z| ui::fill(
-                        s.kill_rate,
-                        &[pct(Some(z.conversion))]
-                    )),
-                    c
-                ),
-            ]
-            .align_x(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .align_x(Alignment::Center)
+    button(content)
+        .padding(0)
+        .on_press_maybe(message)
+        .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            let ring = match (picked, hovered) {
+                (true, _) => c.accent,
+                (false, true) => c.border,
+                (false, false) => Color::TRANSPARENT,
+            };
+            button::Style {
+                background: None,
+                text_color: c.text,
+                border: iced::border::rounded(8).color(ring).width(2),
+                ..button::Style::default()
+            }
+        })
         .into()
-    };
-    ui::panel(
-        Some(s.distribution),
-        column![
-            row![cell(4), cell(3), cell(2)],
-            row![space::horizontal(), cell(8), cell(9)],
-        ]
-        .spacing(10),
-        c,
-    )
+}
+
+impl StatsScreen {
+    /// The attacks set to each zone of the net, and the kills.
+    fn attack_zones<'a>(
+        &'a self,
+        f: &'a FundamentalDetail,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let cell = |zone: u8| -> Element<'a, Message> {
+            let z = f.zones.iter().find(|z| z.zone == zone);
+            let cell = container(
+                column![
+                    small(zone, c),
+                    big(
+                        pct(z.map(|z| z.share)),
+                        match z {
+                            Some(_) => c.text,
+                            None => c.muted,
+                        }
+                    ),
+                    small(
+                        z.map_or(String::new(), |z| ui::fill(
+                            s.kill_rate,
+                            &[pct(Some(z.conversion))]
+                        )),
+                        c
+                    ),
+                ]
+                .align_x(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .align_x(Alignment::Center);
+            let message = self.clips.map(|_| Message::ClipZone(zone));
+            container(pickable(cell, self.clip_zone == Some(zone), message, c))
+                .width(Length::Fill)
+                .into()
+        };
+        ui::panel(
+            Some(s.distribution),
+            column![
+                row![cell(4), cell(3), cell(2)],
+                row![space::horizontal(), cell(8), cell(9)],
+            ]
+            .spacing(10),
+            c,
+        )
+    }
 }
 
 /// The summary: the fundamentals and the phases; the rotations and the
 /// distribution; the errors.
-fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+/// How tall the summary must have room for, its columns filling it; less,
+/// they scroll as they are.
+const SUMMARY_TALL: f32 = 540.0;
+
+/// Room between the parts of a panel: as it fills, the parts spread.
+fn gap<'a>(tall: bool) -> Element<'a, Message> {
+    match tall {
+        true => space::vertical().into(),
+        false => space::vertical().height(4).into(),
+    }
+}
+
+/// A part of a panel taking its share of the height, when tall.
+fn share<'a>(content: impl Into<Element<'a, Message>>, tall: bool) -> Element<'a, Message> {
+    match tall {
+        true => container(content)
+            .height(Length::Fill)
+            .align_y(Alignment::Center)
+            .into(),
+        false => content.into(),
+    }
+}
+
+fn height(tall: bool) -> Length {
+    match tall {
+        true => Length::Fill,
+        false => Length::Shrink,
+    }
+}
+
+fn summary<'a>(
+    live: &'a LiveStats,
+    s: &'static Strings,
+    c: Colors,
+    tall: bool,
+) -> Element<'a, Message> {
     let graded = |v: Option<f64>, g: Option<f64>| {
         text(pct(v))
             .size(SIZE_BODY)
@@ -1835,18 +2338,25 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
         Some(s.summary),
         column![
             head,
-            Column::with_children(fundamentals).spacing(4),
+            Column::with_children(fundamentals).spacing(match tall {
+                true => 10,
+                false => 4,
+            }),
             level,
-            space::vertical().height(4),
+            gap(tall),
             phase(s.side_out, &live.side_out),
             phase(s.break_point, &live.break_points),
             attack(s.first_attack, &live.first_attack),
             attack(s.counter_attack, &live.counter_attack),
-            space::vertical().height(4),
+            gap(tall),
             ui::section(s.side_out_by_possession, c),
-            Column::with_children(possessions).spacing(4),
+            Column::with_children(possessions).spacing(match tall {
+                true => 10,
+                false => 4,
+            }),
         ]
-        .spacing(6),
+        .spacing(6)
+        .height(height(tall)),
         c,
     );
     let rotations = live.rotations.iter().map(|r| {
@@ -1867,14 +2377,16 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
             .width(Length::Fixed(90.0))
             .into()
         };
-        row![
-            ui::body(r.name.clone()).width(Length::Fill),
-            side(&r.side_out),
-            side(&r.break_points),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
+        share(
+            row![
+                ui::body(r.name.clone()).width(Length::Fill),
+                side(&r.side_out),
+                side(&r.break_points),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            tall,
+        )
     });
     let second = ui::panel(
         Some(s.rotations),
@@ -1889,9 +2401,12 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
                     .align_x(Alignment::End),
             ]
             .spacing(8),
-            Column::with_children(rotations).spacing(6),
+            Column::with_children(rotations)
+                .spacing(6)
+                .height(height(tall)),
         ]
-        .spacing(6),
+        .spacing(6)
+        .height(height(tall)),
         c,
     );
     let zone = |zone: u8| -> Element<'a, Message> {
@@ -1925,10 +2440,11 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
     let distribution: Element<'a, Message> = match live.distribution.is_empty() {
         true => small(s.no_attacks, c).into(),
         false => column![
-            row![zone(4), zone(3), zone(2)],
-            row![space::horizontal(), zone(8), zone(9)],
+            share(row![zone(4), zone(3), zone(2)], tall),
+            share(row![space::horizontal(), zone(8), zone(9)], tall),
         ]
         .spacing(10)
+        .height(height(tall))
         .into(),
     };
     let third = ui::panel(Some(s.distribution), distribution, c);
@@ -1976,12 +2492,14 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
                 &live.unforced_by_event,
                 false
             ),
+            gap(tall),
             group(
                 s.forced_errors,
                 live.forced_errors,
                 &live.forced_by_event,
                 true
             ),
+            gap(tall),
             row![
                 tile(
                     s.opponent_errors,
@@ -2000,18 +2518,38 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
             ]
             .spacing(8),
         ]
-        .spacing(14),
+        .spacing(14)
+        .height(height(tall)),
         c,
     );
-    scrollable(
-        row![
-            container(first).width(Length::FillPortion(1)),
-            container(column![second, third].spacing(14)).width(Length::FillPortion(1)),
-            container(fourth).width(Length::FillPortion(1)),
-        ]
-        .spacing(14),
-    )
-    .into()
+    let columns = row![
+        container(first)
+            .width(Length::FillPortion(1))
+            .height(height(tall)),
+        container(
+            column![
+                container(second).height(match tall {
+                    true => Length::FillPortion(3),
+                    false => Length::Shrink,
+                }),
+                container(third).height(match tall {
+                    true => Length::FillPortion(2),
+                    false => Length::Shrink,
+                }),
+            ]
+            .spacing(14)
+        )
+        .width(Length::FillPortion(1))
+        .height(height(tall)),
+        container(fourth)
+            .width(Length::FillPortion(1))
+            .height(height(tall)),
+    ]
+    .spacing(14);
+    match tall {
+        true => columns.height(Length::Fill).into(),
+        false => scrollable(columns).into(),
+    }
 }
 
 fn error_name(event: EventTypeEnum, forced: bool, s: &Strings) -> String {
@@ -2031,7 +2569,7 @@ fn error_name(event: EventTypeEnum, forced: bool, s: &Strings) -> String {
 
 #[cfg(test)]
 #[allow(clippy::unreachable)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -2067,7 +2605,7 @@ mod tests {
 
     /// A team of seven and two matches played, a set each with our serves:
     /// three aces on 24/10, an ace and an error on 31/10.
-    fn team_with_two_matches(core: &Scout4All) -> String {
+    pub(crate) fn team_with_two_matches(core: &Scout4All) -> String {
         let team = core
             .save_team(
                 None,
@@ -2139,9 +2677,161 @@ mod tests {
             let scouting = core.scouting(team.clone(), m).unwrap();
             for eval in serves {
                 scouting.choose_eval(eval).unwrap();
+                // each action at its own millisecond of the clock (its time),
+                // as when scouting by hand: on a fast machine two in the same
+                // one would be the same clip
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
         team
+    }
+
+    /// The serves of the detail of a match, picked to watch in its video:
+    /// how many, only the errors by clicking their row, the pick cleared
+    /// with another fundamental; `v` only with a video.
+    #[test]
+    fn the_actions_of_the_detail_to_watch() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let siena = core
+            .matches(team.clone())
+            .unwrap()
+            .into_iter()
+            .find_map(|m| match m {
+                scout4all_mobile::MatchListing::Match { id, opponent, .. }
+                    if opponent == "Siena" =>
+                {
+                    Some(id)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let open = |core: &Arc<Scout4All>| {
+            let mut screen = StatsScreen::new(core.clone(), team.clone(), siena.clone()).unwrap();
+            screen.update(Message::Page(2));
+            screen
+        };
+        let mut screen = open(&core);
+        assert_eq!(screen.event, EventTypeEnum::S);
+        assert_eq!(screen.clips, Some(2));
+        // no video: nothing to watch
+        assert!(!screen.has_video && !screen.watchable());
+        assert!(matches!(screen.key(key!(v)), Outcome::Stay));
+        screen.update(Message::ClipEval(EvalEnum::Error));
+        assert_eq!(screen.clips, Some(1));
+        assert_eq!(screen.clips_title(s), "Battuta · =");
+        screen.update(Message::ClipEval(EvalEnum::Error));
+        assert_eq!(screen.clips, Some(2));
+        screen.update(Message::ClipEval(EvalEnum::Perfect));
+        screen.update(Message::Event(EventTypeEnum::A));
+        assert!(screen.clip_evals.is_empty());
+        // a video of the match: `v` watches the serves picked
+        let (the_match, _) = core.video(&team, &siena).unwrap();
+        let profile = scout4all_core::video::VideoProfile {
+            files: vec![scout4all_core::video::VideoFile {
+                path: "match.mp4".into(),
+                start: None,
+            }],
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+        let mut screen = open(&core);
+        assert!(screen.has_video && screen.watchable());
+        screen.update(Message::ClipEval(EvalEnum::Error));
+        match screen.key(key!(v)) {
+            Outcome::Watch(pick) => {
+                assert_eq!(pick.event, EventTypeEnum::S);
+                assert_eq!(pick.evals, vec![EvalEnum::Error]);
+            }
+            _ => unreachable!("the serves to watch"),
+        }
+        assert!(screen.hints(s).iter().any(|(k, _)| k == "v"));
+        // on another page, no
+        screen.update(Message::Page(0));
+        assert!(matches!(screen.key(key!(v)), Outcome::Stay));
+        // a team: its matches (see `the_actions_of_the_team_to_watch`)
+        let analysis = StatsScreen::team(core.clone(), team.clone(), s).unwrap();
+        assert!(analysis.clips.is_some());
+    }
+
+    /// The match of the team against `opponent`.
+    pub(crate) fn match_against(core: &Scout4All, team: &str, opponent: &str) -> String {
+        core.matches(team.to_string())
+            .unwrap()
+            .into_iter()
+            .find_map(|m| match m {
+                scout4all_mobile::MatchListing::Match {
+                    id, opponent: o, ..
+                } if o == opponent => Some(id),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// A video for the match, starting a minute before now: its events,
+    /// just scouted, in it.
+    pub(crate) fn with_a_video(core: &Scout4All, team: &str, m: &str) {
+        let (the_match, _) = core.video(team, m).unwrap();
+        let start = chrono::Utc::now().fixed_offset() - chrono::TimeDelta::seconds(60);
+        let profile = scout4all_core::video::VideoProfile {
+            files: vec![scout4all_core::video::VideoFile {
+                path: format!("{m}.mp4"),
+                start: Some(start),
+            }],
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+    }
+
+    /// The serves of the team in the period, to watch: the matches with
+    /// some, the ones without a video left out; `v` watches the others.
+    #[test]
+    fn the_actions_of_the_team_to_watch() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let open = |core: &Arc<Scout4All>| {
+            let mut screen = StatsScreen::team(core.clone(), team.clone(), s).unwrap();
+            screen.update(Message::Kind(Kind::LastMatches));
+            screen.update(Message::Page(2));
+            screen
+        };
+        let mut screen = open(&core);
+        let actions = |screen: &StatsScreen| -> Vec<(String, usize, bool)> {
+            screen
+                .tour
+                .iter()
+                .map(|m| (m.opponent.clone(), m.events.len(), m.has_video))
+                .collect()
+        };
+        assert_eq!(
+            actions(&screen),
+            [
+                ("Arezzo".to_string(), 3, false),
+                ("Siena".to_string(), 2, false)
+            ]
+        );
+        // no video: nothing to watch
+        assert_eq!(screen.clips, Some(0));
+        assert!(matches!(screen.key(key!(v)), Outcome::Stay));
+        // the errors: only Siena
+        screen.update(Message::ClipEval(EvalEnum::Error));
+        assert_eq!(actions(&screen), [("Siena".to_string(), 1, false)]);
+        // a video of Siena: its serves to watch, Arezzo left out
+        with_a_video(&core, &team, &match_against(&core, &team, "Siena"));
+        let mut screen = open(&core);
+        assert!(screen.has_video && screen.watchable());
+        assert_eq!(screen.clips, Some(2));
+        match screen.key(key!(v)) {
+            Outcome::WatchTour(matches) => {
+                assert_eq!(matches.len(), 1);
+                assert_eq!(matches[0].opponent, "Siena");
+            }
+            _ => unreachable!("the serves of Siena to watch"),
+        }
     }
 
     fn aces(screen: &StatsScreen) -> u32 {
@@ -2268,6 +2958,46 @@ mod tests {
         assert_eq!(total(&screen), 3);
         screen.update(Message::Scheme(Some(ReceptionSchemeEnum::Four)));
         assert_eq!(total(&screen), 0);
-        let _ = s;
+        screen.update(Message::Scheme(None));
+        // the moment of the set: the three aces at 0–0, 1–0, 2–0
+        assert!(screen.filters().contains(&Filter::Late));
+        // the players as narrowed, but their own
+        let players = |screen: &StatsScreen| -> u32 {
+            screen
+                .detail
+                .as_ref()
+                .and_then(|d| d.fundamental.as_ref())
+                .map_or(0, |f| f.players.iter().map(|p| p.total).sum())
+        };
+        assert_eq!(players(&screen), 3);
+        screen.update(Message::Late(Some(true)));
+        assert_eq!(total(&screen), 0);
+        assert_eq!(players(&screen), 0, "the players narrowed too");
+        assert!(screen.clips_title(s).contains(s.from_20));
+        screen.update(Message::Late(Some(false)));
+        assert_eq!(total(&screen), 3);
+        screen.update(Message::Late(None));
+        screen.update(Message::Close(Some(false)));
+        assert_eq!(total(&screen), 0);
+        // by the arrows, on its row: close, then wide, then all
+        screen.row = screen
+            .filters()
+            .iter()
+            .position(|f| *f == Filter::Close)
+            .unwrap_or_default();
+        screen.key(key!(right));
+        assert_eq!(screen.filter.close, None);
+        screen.key(key!(right));
+        assert_eq!(screen.filter.close, Some(true));
+        assert_eq!(total(&screen), 3);
+        // the column of the filters follows the row of the arrows
+        assert_eq!(screen.take_scroll(), None);
+        screen.key(key!(down));
+        let last = (screen.filters().len() - 1) as f32;
+        let (_, y) = screen
+            .take_scroll()
+            .unwrap_or_else(|| unreachable!("a scroll"));
+        assert!((y - screen.row as f32 / last).abs() < f32::EPSILON);
+        assert_eq!(screen.take_scroll(), None, "once");
     }
 }

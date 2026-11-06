@@ -27,6 +27,19 @@
     "image_alt": "The detail of the statistics of a match: the evaluations of the serve, the players and the serves by zone"
   },
   {
+    "id": "video",
+    "eyebrow": "Video",
+    "title": "Scouting synced with the video",
+    "content": "Link the match video to its scouting: tie one event to the right moment and all the others line up. As the video plays the events light up one by one and the score appears over the picture; select an event and the video jumps to that action.",
+    "points": [
+      "Each event's time can be fine-tuned by hand, for a precise sync",
+      "The actions behind a statistic, one after another, across several matches too",
+      "An MP4 montage of the chosen actions, with the score overlaid, ready to share"
+    ],
+    "image": "video",
+    "image_alt": "The video screen: the match with the score overlaid and the scouted events beside it"
+  },
+  {
     "id": "analysis",
     "eyebrow": "Team analysis",
     "title": "Comparing several matches",
@@ -34,7 +47,7 @@
     "points": [
       "The same filters available for a single match",
       "Match-by-match trends of the statistics, with a moving average",
-      "Matches scouted with scout4all and imported from DataVolley, shown together"
+      "Matches scouted with scout4all and imported ones, shown together"
     ],
     "image": "team-analysis",
     "image_alt": "The analysis of a team over its last matches: summary, rotations, distribution and errors"

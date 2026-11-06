@@ -213,7 +213,13 @@ private fun Scopes(stats: LiveStats, onScope: (StatsScope) -> Unit) = Row(
 /** The pages, a swipe aside; the scope on top, but on the trend, which
  * shows every set. While scouting and on the page of a match. */
 @Composable
-fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit, loadDetail: LoadDetail) {
+fun StatsPages(
+    stats: LiveStats,
+    onScope: (StatsScope) -> Unit,
+    loadDetail: LoadDetail,
+    // the actions of the detail in the video: not while scouting
+    watch: ((StatsScope) -> Watch)? = null,
+) {
     val pages = StatsPage.entries
     val pager = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
@@ -246,7 +252,7 @@ fun StatsPages(stats: LiveStats, onScope: (StatsScope) -> Unit, loadDetail: Load
                 StatsPage.Distribution -> Distribution(stats)
                 StatsPage.Errors -> Errors(stats)
                 StatsPage.Trend -> Trend(stats)
-                StatsPage.Detail -> Detail(detail, query, situation) { query = it }
+                StatsPage.Detail -> Detail(detail, query, situation, watch = watch?.invoke(stats.scope)) { query = it }
             }
         }
     }

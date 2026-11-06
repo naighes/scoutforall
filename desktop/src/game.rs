@@ -1,5 +1,5 @@
 //! A match: its result, its sets, what comes next. Enter starts or resumes
-//! the set to scout, `e` edits the match.
+//! the set to scout, `e` edits the match, `v` opens its video.
 
 use {
     crate::{
@@ -26,6 +26,8 @@ pub enum Message {
     Stats,
     Export,
     Report,
+    Video,
+    Record,
     /// the events of the set, to correct them
     Set(u8),
     Form(form::Message),
@@ -41,6 +43,10 @@ pub enum Outcome {
     Export,
     /// the report of the match as a PDF, to save
     Report,
+    /// the video of the match
+    Video,
+    /// a camera to record the match with (or the recording stopped)
+    Record,
     /// the events of the set, to correct them
     Events(u8),
 }
@@ -131,6 +137,8 @@ impl MatchScreen {
             (Message::Stats, None) => Outcome::Stats,
             (Message::Export, None) => Outcome::Export,
             (Message::Report, None) => Outcome::Report,
+            (Message::Video, None) => Outcome::Video,
+            (Message::Record, None) => Outcome::Record,
             (Message::Set(n), None) => Outcome::Events(n),
             (Message::Edit, None) => {
                 self.edit(s);
@@ -151,6 +159,8 @@ impl MatchScreen {
             (None, k) if k == key!(s) => Outcome::Stats,
             (None, k) if k == key!(x) => Outcome::Export,
             (None, k) if k == key!(p) => Outcome::Report,
+            (None, k) if k == key!(v) => Outcome::Video,
+            (None, k) if k == key!(r) => Outcome::Record,
             (None, k) if k == key!(e) => {
                 self.edit(s);
                 Outcome::Stay
@@ -190,6 +200,8 @@ impl MatchScreen {
                     ("e".to_string(), s.edit_match.to_string()),
                     ("x".to_string(), s.export_match.to_string()),
                     ("p".to_string(), s.match_report.to_string()),
+                    ("v".to_string(), s.video.to_string()),
+                    ("r".to_string(), s.record_video.to_string()),
                     (
                         format!("1–{}", self.details.sets.len().max(1)),
                         s.set_events.to_string(),
@@ -207,28 +219,45 @@ impl MatchScreen {
         }
         let d = &self.details;
         let bold = theme::fonts().bold;
+        // won or lost, once over: a quiet mark by the score
+        let result: Element<'a, Message> = match (self.next_label(s), d.won > d.lost) {
+            (Some(_), _) => space::horizontal().width(0).into(),
+            (None, true) => ui::tip(ui::icon(theme::icons::WON, 30.0, c.won), s.match_won, c),
+            (None, false) => ui::tip(ui::icon(theme::icons::LOST, 30.0, c.lost), s.match_lost, c),
+        };
         let score = row![
             column![
-                text(self.team.clone()).size(SIZE_BODY).font(bold),
-                text(d.opponent.clone()).size(SIZE_BODY).color(c.muted),
+                text(self.team.clone()).size(22).font(bold),
+                text(d.opponent.clone()).size(22).color(c.muted),
             ]
-            .spacing(6)
+            .spacing(16)
             .width(Length::Fill),
+            result,
             column![
-                text(d.won.to_string()).size(40).font(bold).color(c.accent),
-                text(d.lost.to_string()).size(40).font(bold),
+                text(d.won.to_string()).size(44).font(bold).color(c.accent),
+                text(d.lost.to_string()).size(44).font(bold),
             ]
             .align_x(Alignment::End),
         ]
+        .spacing(18)
         .align_y(Alignment::Center);
-        let place = match d.home {
-            true => s.home_game,
-            false => s.away_game,
+        let (place_icon, place) = match d.home {
+            true => (theme::icons::HOME, s.home_game),
+            false => (theme::icons::AWAY, s.away_game),
         };
-        let next: Element<'a, Message> = match self.next_label(s) {
-            Some(label) => ui::pill(&label, true, Some(Message::Next), c),
-            None => text(s.match_over).size(SIZE_BODY).color(c.muted).into(),
+        let fact = |icon: &'static [u8], what: String| {
+            row![
+                ui::icon(icon, 18.0, c.muted),
+                text(what).size(SIZE_BODY).color(c.muted),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
         };
+        let facts = row![
+            fact(theme::icons::CALENDAR, day(&d.date).to_string()),
+            fact(place_icon, place.to_string()),
+        ]
+        .spacing(24);
         let notes: Element<'a, Message> = match d.notes.trim().is_empty() {
             true => space::vertical().height(0).into(),
             false => column![
@@ -238,32 +267,38 @@ impl MatchScreen {
             .spacing(2)
             .into(),
         };
+        let next: Element<'a, Message> = match self.next_label(s) {
+            Some(label) => {
+                ui::action(theme::icons::VOLLEYBALL, &label, Message::Next, true, c).into()
+            }
+            None => space::horizontal().width(0).into(),
+        };
+        let action = |icon: &'static [u8], label: &str, message: Message| {
+            ui::action(icon, label, message, false, c)
+        };
         let summary = ui::panel(
             Some(s.a_match),
             column![
+                space::vertical().height(4),
                 score,
-                text(format!("{} · {place}", day(&d.date)))
-                    .size(SIZE_SMALL)
-                    .color(c.muted),
+                facts,
                 notes,
-                space::vertical().height(6),
-                row![
-                    next,
-                    ui::pill(s.stats, false, Some(Message::Stats), c),
-                    ui::pill(s.edit_match, false, Some(Message::Edit), c),
-                    ui::pill(
-                        &format!("↑ {}", s.export_match),
-                        false,
-                        Some(Message::Export),
-                        c
-                    ),
-                    ui::pill(s.match_report, false, Some(Message::Report), c),
-                ]
-                .spacing(10)
-                .wrap()
-                .vertical_spacing(8),
+                space::vertical(),
+                next,
+                ui::action_grid(
+                    vec![
+                        action(theme::icons::STATS, s.stats, Message::Stats),
+                        action(theme::icons::EDIT, s.edit_match, Message::Edit),
+                        action(theme::icons::SHARE, s.export_match, Message::Export),
+                        action(theme::icons::PDF, s.match_report, Message::Report),
+                        action(theme::icons::VIDEO, s.video, Message::Video),
+                        action(theme::icons::RECORD, s.record_video, Message::Record),
+                    ],
+                    3
+                ),
             ]
-            .spacing(12),
+            .spacing(18)
+            .height(Length::Fill),
             c,
         );
         let sets = d.sets.iter().map(|set| {
@@ -288,7 +323,9 @@ impl MatchScreen {
         });
         let sets: Element<'a, Message> = match d.sets.is_empty() {
             true => ui::body(s.no_rallies).color(c.muted).into(),
-            false => Column::with_children(sets).spacing(8).into(),
+            false => iced::widget::scrollable(Column::with_children(sets).spacing(8))
+                .height(Length::Fill)
+                .into(),
         };
         let error: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
@@ -298,9 +335,15 @@ impl MatchScreen {
             error,
             row![
                 container(summary).width(Length::FillPortion(3)),
-                container(ui::panel(Some(s.sets), sets, c)).width(Length::FillPortion(2)),
+                container(ui::panel(
+                    Some(s.sets),
+                    column![sets].height(Length::Fill).width(Length::Fill),
+                    c
+                ))
+                .width(Length::FillPortion(2)),
             ]
             .spacing(14)
+            .height(Length::Fill)
         ]
         .spacing(10)
         .into()

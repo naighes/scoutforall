@@ -82,6 +82,7 @@ mod tests {
     fn played() -> MatchEntry {
         MatchEntry {
             source: Default::default(),
+            video_clock: false,
             opponent: "Arezzo".into(),
             date: date(),
             id: "2026-10-24_arezzo".into(),

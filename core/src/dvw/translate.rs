@@ -9,7 +9,7 @@ use crate::{
     dvw::model::{Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols},
     shapes::{
         court_zone::{CourtTarget, SubzoneEnum, TargetKind},
-        enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum},
+        enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
         flags::{BlockersEnum, EventFlags},
         lineup::Lineup,
         refusal::Refusal,
@@ -18,7 +18,7 @@ use crate::{
         technique::{ServeTypeEnum, TechniqueEnum},
     },
 };
-use chrono::{DateTime, NaiveDate, NaiveTime, TimeDelta, Utc};
+use chrono::{DateTime, FixedOffset, NaiveTime, TimeDelta, Utc};
 use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 
@@ -109,7 +109,7 @@ pub fn translate_set(
     file: &DvwFile,
     us: &Us,
     set_number: u8,
-    date: NaiveDate,
+    date: DateTime<FixedOffset>,
     max_substitutions: u8,
 ) -> Result<(SetEntry, Mappings), TranslateError> {
     let fail = |line: Option<usize>, issue: Issue| TranslateError {
@@ -121,6 +121,7 @@ pub fn translate_set(
     let start = set_start(lines, us, set_number).map_err(|(line, issue)| fail(line, issue))?;
     let snapshot = Snapshot::new(&start, max_substitutions)
         .map_err(|e| fail(None, Issue::Event(e.to_string())))?;
+    let video_clock = has_video_clock(file);
     let mut set = SetTranslator {
         us,
         symbols: file.winning_symbols.clone().unwrap_or_else(default_symbols),
@@ -128,12 +129,14 @@ pub fn translate_set(
         events: vec![],
         rally_start: 0,
         mappings: Mappings::new(),
-        clock: date.and_time(NaiveTime::MIN).and_utc(),
+        clock: midnight(date, video_clock),
         date,
+        video_clock,
         rally_number: 0,
         chosen: HashMap::new(),
         earlier: None,
         at: None,
+        inverted_p1: false,
     };
     set.translate(lines)
         .map_err(|(line, issue)| fail(line, issue))?;
@@ -147,6 +150,36 @@ pub fn translate_set(
         )),
         None => Err(fail(None, Issue::Unfinished)),
     }
+}
+
+/// Where the times of the events start from: midnight of the day of the
+/// match in UTC on the video clock (`video::video_midnight`), otherwise in
+/// the time zone of the match, as its clock.
+fn midnight(date: DateTime<FixedOffset>, video_clock: bool) -> DateTime<Utc> {
+    match video_clock {
+        true => date.date_naive().and_time(NaiveTime::MIN).and_utc(),
+        false => wall_clock(date, NaiveTime::MIN),
+    }
+}
+
+/// The time of the clock of the file on the day of the match: a local time,
+/// in the time zone of the match (as the start of a video from its name).
+fn wall_clock(date: DateTime<FixedOffset>, time: NaiveTime) -> DateTime<Utc> {
+    let local = date.date_naive().and_time(time);
+    // out of the range of the dates only at their ends
+    local
+        .checked_sub_offset(*date.offset())
+        .unwrap_or(local)
+        .and_utc()
+}
+
+/// Whether the scout is linked to the video of the match: the times of the
+/// events are then its seconds in the video, from midnight of `date` (the
+/// clock of the file can be anything, e.g. a PC with the wrong time).
+pub fn has_video_clock(file: &DvwFile) -> bool {
+    file.scout
+        .iter()
+        .any(|l| l.video_seconds.is_some_and(|s| s > 0))
 }
 
 // the lines of a set: between the ends of set (`**1set`)
@@ -396,7 +429,10 @@ struct SetTranslator<'a> {
     rally_start: usize,
     mappings: Mappings,
     clock: DateTime<Utc>,
-    date: NaiveDate,
+    // the match: its day, and the time zone of the clock of the file
+    date: DateTime<FixedOffset>,
+    // the times from the seconds in the video, not from the clock
+    video_clock: bool,
     // the rallies translated so far
     rally_number: usize,
     // the player the libero is for, chosen before the rally (by number):
@@ -407,6 +443,10 @@ struct SetTranslator<'a> {
     // the line the rally being translated is at: its first touch for what
     // comes before the touches, then each touch; none for the point
     at: Option<usize>,
+    // the P1 inverted, as the scouting keeps it: told by where our opposite
+    // or outside hitter attacked from in P1 in side out (see
+    // `inverted_p1_of`), the last one told going on; canonical until then
+    inverted_p1: bool,
 }
 
 /// Where a rally starts (the dead ball before it): to translate again from
@@ -417,6 +457,7 @@ struct Checkpoint {
     events: usize,
     mappings: Mappings,
     clock: DateTime<Utc>,
+    inverted_p1: bool,
 }
 
 impl SetTranslator<'_> {
@@ -534,6 +575,7 @@ impl SetTranslator<'_> {
             events: self.events.len(),
             mappings: self.mappings.clone(),
             clock: self.clock,
+            inverted_p1: self.inverted_p1,
         }
     }
 
@@ -542,16 +584,24 @@ impl SetTranslator<'_> {
         self.events.truncate(checkpoint.events);
         self.mappings = checkpoint.mappings.clone();
         self.clock = checkpoint.clock;
+        self.inverted_p1 = checkpoint.inverted_p1;
         self.rally_number = rally_number;
     }
 
-    // the time of the line, or a second after the previous event
+    // the time of the line (in the video, when linked to it), or a second
+    // after the previous event
     fn tick(&mut self, line: &ScoutLine) {
-        let time = line
-            .time
-            .as_deref()
-            .and_then(|t| NaiveTime::parse_from_str(&t.replace('.', ":"), "%H:%M:%S").ok())
-            .map(|t| self.date.and_time(t).and_utc());
+        let midnight = midnight(self.date, self.video_clock);
+        let time = match self.video_clock {
+            true => line
+                .video_seconds
+                .map(|s| midnight + TimeDelta::seconds(i64::from(s))),
+            false => line
+                .time
+                .as_deref()
+                .and_then(|t| NaiveTime::parse_from_str(&t.replace('.', ":"), "%H:%M:%S").ok())
+                .map(|t| wall_clock(self.date, t)),
+        };
         self.clock = match time {
             Some(t) if t > self.clock => t,
             _ => self.clock + TimeDelta::seconds(1),
@@ -596,7 +646,7 @@ impl SetTranslator<'_> {
             eval,
             target_player,
             technique,
-            flags,
+            flags: flags.with_inverted_p1(self.inverted_p1),
         };
         if let Some(refusal) = self.snapshot.refusal(&event) {
             return Err(Issue::Refused {
@@ -656,6 +706,7 @@ impl SetTranslator<'_> {
         winner: TeamSideEnum,
     ) -> Result<(), Issue> {
         self.rally_start = self.events.len();
+        self.inverted_p1 = self.inverted_p1_of(touches).unwrap_or(self.inverted_p1);
         let touches = &freeballs_sent(touches);
         self.at = touches.first().map(|(line, _)| line.line);
         self.change_libero(touches)?;
@@ -764,6 +815,40 @@ impl SetTranslator<'_> {
                 self.apply(EventTypeEnum::F, None, None, None, None)
             }
             (false, _, _) => Err(Issue::Untranslatable(Untranslatable::PointWithoutCause)),
+        }
+    }
+
+    /// Whether the P1 is inverted in the rally, when it tells: in P1 in
+    /// side out, our opposite in the front row attacking from 2 (inverted)
+    /// or 4 (canonical), or our outside hitter from 4 (inverted) or 2
+    /// (canonical), the first of them attacking with its start zone told.
+    /// None elsewhere, or with no such attack (an ace, an attack of the
+    /// middle blocker, a pipe).
+    fn inverted_p1_of(&self, touches: &[(&ScoutLine, Touch)]) -> Option<bool> {
+        let lineup = &self.snapshot.current_lineup;
+        let p1_side_out = lineup.get_current_phase() == PhaseEnum::SideOut
+            && lineup.get_current_rotation().is_ok_and(|r| r == 0);
+        let told = |skill: &SkillCode| -> Option<bool> {
+            let id = skill.player.and_then(|n| self.us.players.get(&n))?;
+            let front = !lineup.is_back_row_player(id);
+            match (lineup.get_role(id).ok()?, front, skill.start_zone?) {
+                (RoleEnum::OppositeHitter, true, 2) | (RoleEnum::OutsideHitter, true, 4) => {
+                    Some(true)
+                }
+                (RoleEnum::OppositeHitter, true, 4) | (RoleEnum::OutsideHitter, true, 2) => {
+                    Some(false)
+                }
+                _ => None,
+            }
+        };
+        match p1_side_out {
+            true => touches.iter().find_map(|(_, t)| match t.played() {
+                Some((side, skill)) if side == self.us.side && skill.skill == Skill::Attack => {
+                    told(skill)
+                }
+                _ => None,
+            }),
+            false => None,
         }
     }
 

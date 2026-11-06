@@ -3,8 +3,8 @@
 //! match, each figure match by match with its moving average, and the
 //! choices of the filters on the situation.
 use super::{
-    DetailFilter, DetailStats, GradeBand, LiveStats, MobileError, RoleChoice, Scout4All, detail_of,
-    narrowed, series_name, summary,
+    ClipPick, DetailFilter, DetailStats, GradeBand, LiveStats, MobileError, RoleChoice, Scout4All,
+    StatsScope, clips_of, detail_of, narrowed, series_name, summary,
 };
 use chrono::{Local, NaiveDate};
 use scout4all_core::providers::match_reader::MatchReader;
@@ -20,6 +20,7 @@ use scout4all_core::{
         technique::{SetTypeEnum, TechniqueEnum},
     },
     trend::Series,
+    video::{EventRef, StoredProfile, read_profile},
 };
 
 /// The matches to analyse: only the ones with a set scouted, up to today.
@@ -183,6 +184,64 @@ impl Scout4All {
     /// What the filters on the situation offer, also for a match.
     pub fn situation_choices(&self) -> SituationChoices {
         situation_choices(self.language.labels())
+    }
+}
+
+/// The actions of a match of the period picked in the statistics of the
+/// team, to watch in its video (desktop only).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchClips {
+    pub match_id: String,
+    pub opponent: String,
+    /// `YYYY-MM-DD`, where it was played
+    pub day: String,
+    pub events: Vec<EventRef>,
+    /// the match has files of its video
+    pub has_video: bool,
+}
+
+/// For the apps written in Rust (the desktop app), not exported to the
+/// bindings.
+impl Scout4All {
+    /// The actions picked of each match of the period with some, in the
+    /// order of the analysis (the scope of the pick left aside: every set).
+    pub fn team_clips(
+        &self,
+        team_id: &str,
+        period: &AnalysisPeriod,
+        pick: &ClipPick,
+    ) -> Result<Vec<MatchClips>, MobileError> {
+        let team = self.read_team(team_id)?;
+        let all: Vec<MatchEntry> = self
+            .runtime
+            .block_on(self.match_reader.read_all(&team))?
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect();
+        let matches = period.period()?.select(&all, Local::now().date_naive());
+        let analysis = Analysis::of(&matches);
+        let pick = ClipPick {
+            scope: StatsScope::Match,
+            ..pick.clone()
+        };
+        let mut found = vec![];
+        for m in analysis.matches.iter().map(|m| m.entry) {
+            let events = clips_of(m, &pick)?;
+            if events.is_empty() {
+                continue;
+            }
+            let profile = self
+                .runtime
+                .block_on(read_profile(&*self.store, &m.team.id, &m.id));
+            found.push(MatchClips {
+                match_id: m.id.clone(),
+                opponent: m.opponent.clone(),
+                day: day(m).format(DAY).to_string(),
+                events,
+                has_video: matches!(profile, Ok(StoredProfile::Profile(p)) if !p.files.is_empty()),
+            });
+        }
+        Ok(found)
     }
 }
 

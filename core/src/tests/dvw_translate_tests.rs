@@ -14,7 +14,7 @@ mod tests {
     use crate::shapes::refusal::Refusal;
     use crate::shapes::snapshot::EventEntry;
     use EventTypeEnum::*;
-    use chrono::NaiveDate;
+    use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, Utc};
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -25,6 +25,7 @@ mod tests {
 
     /// The file being written: the six on court of both teams, P1 first,
     /// the score, who serves.
+    #[derive(Clone)]
     struct File {
         lines: Vec<String>,
         home: [u8; 6],
@@ -202,6 +203,15 @@ mod tests {
     /// The set translated for the home team: the events, and the number of
     /// each player.
     fn translated_events(file: &File) -> Result<(Vec<EventEntry>, HashMap<Uuid, u8>), Issue> {
+        translated_in(file, 0)
+    }
+
+    /// The set translated for the home team, played on 2015-01-25 in the
+    /// time zone `east_s` seconds east of UTC.
+    fn translated_in(
+        file: &File,
+        east_s: i32,
+    ) -> Result<(Vec<EventEntry>, HashMap<Uuid, u8>), Issue> {
         let dvw = parse(file.text().as_bytes()).expect("expected a DataVolley file");
         let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
         let numbers: HashMap<Uuid, u8> = players.iter().map(|(n, id)| (*id, *n)).collect();
@@ -210,7 +220,12 @@ mod tests {
             players: &players,
             liberos: &[HOME_LIBERO],
         };
-        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_local_timezone(FixedOffset::east_opt(east_s).expect("an offset"))
+            .single()
+            .expect("a time");
         translate_set(&dvw, &us, 1, date, 6)
             .map(|(set, _)| (set.events, numbers))
             .map_err(|e| e.issue)
@@ -245,6 +260,114 @@ mod tests {
         count: usize,
     ) -> Vec<(EventTypeEnum, Option<u8>)> {
         events.iter().take(count).copied().collect()
+    }
+
+    /// The lines with the clock `time` and, when given, `video` seconds
+    /// from 100, 10 a line.
+    fn timed(mut file: File, time: &str, video: bool) -> File {
+        file.lines = file
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let mut fields: Vec<String> = line.split(';').map(str::to_string).collect();
+                // the ends of set have no fields
+                if let Some(f) = fields.get_mut(7) {
+                    *f = time.to_string();
+                }
+                if let (true, Some(f)) = (video, fields.get_mut(12)) {
+                    *f = (100 + 10 * i).to_string();
+                }
+                fields.join(";")
+            })
+            .collect();
+        file
+    }
+
+    /// Linked to the video, the times of the events are its seconds from
+    /// midnight, whatever the clock of the file says.
+    #[test]
+    fn the_events_on_the_video_clock() {
+        let mut file = File::new();
+        file.received_by(2);
+        let file = timed(file.finished(), "23.59.59", true);
+        let lines = file.lines.len();
+        let (events, _) = translated_events(&file).expect("expected the set");
+        let midnight = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .expect("a time")
+            .and_utc();
+        let seconds: Vec<i64> = events
+            .iter()
+            .map(|e| (e.timestamp - midnight).num_seconds())
+            .collect();
+        assert!(
+            seconds
+                .iter()
+                .all(|s| (100..100 + 10 * lines as i64).contains(s) && s % 10 == 0),
+            "{seconds:?}"
+        );
+        assert!(seconds.windows(2).all(|w| w[0] <= w[1]), "{seconds:?}");
+    }
+
+    /// Without the video, the clock of the file, as ever.
+    #[test]
+    fn the_events_on_the_clock_of_the_file() {
+        let mut file = File::new();
+        file.received_by(2);
+        let file = timed(file.finished(), "18.30.00", false);
+        let (events, _) = translated_events(&file).expect("expected the set");
+        let start = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .and_then(|d| d.and_hms_opt(18, 30, 0))
+            .expect("a time")
+            .and_utc();
+        // the same time on every line: a second after the previous one
+        let first = events.first().map(|e| (e.timestamp - start).num_seconds());
+        assert!(first.is_some_and(|s| (0..60).contains(&s)), "{first:?}");
+    }
+
+    /// The clock of the file is the local time where the match is played
+    /// (as the names of the videos): 18:30 in Rome is 17:30 UTC; 08:00 in
+    /// Tokyo is the day before in UTC, not after midnight UTC.
+    #[test]
+    fn the_clock_of_the_file_in_the_time_zone_of_the_match() {
+        let mut file = File::new();
+        file.received_by(2);
+        let at = |time: &str, east_s: i32| {
+            let file = timed(file.clone().finished(), time, false);
+            let (events, _) = translated_in(&file, east_s).expect("expected the set");
+            events.first().map(|e| e.timestamp)
+        };
+        let utc = |d: u32, h: u32, m: u32| {
+            NaiveDate::from_ymd_opt(2015, 1, d)
+                .and_then(|d| d.and_hms_opt(h, m, 0))
+                .expect("a time")
+                .and_utc()
+        };
+        let near = |t: Option<DateTime<Utc>>, expected: DateTime<Utc>| {
+            t.is_some_and(|t| (0..60).contains(&(t - expected).num_seconds()))
+        };
+        assert!(near(at("18.30.00", 3600), utc(25, 17, 30)));
+        assert!(near(at("08.00.00", 9 * 3600), utc(24, 23, 0)));
+        assert!(near(at("18.30.00", -5 * 3600), utc(25, 23, 30)));
+    }
+
+    /// On the video clock the time zone doesn't count: the seconds from
+    /// midnight UTC, as the video reads them (`video::video_midnight`).
+    #[test]
+    fn the_video_clock_whatever_the_time_zone() {
+        let mut file = File::new();
+        file.received_by(2);
+        let file = timed(file.finished(), "18.30.00", true);
+        let times = |east_s| {
+            translated_in(&file, east_s)
+                .expect("expected the set")
+                .0
+                .iter()
+                .map(|e| e.timestamp)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(times(3600), times(0));
     }
 
     /// The libero touching as it plays: nothing to change.
@@ -429,7 +552,11 @@ mod tests {
             players: &players,
             liberos: &[HOME_LIBERO],
         };
-        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
         let error = translate_set(&dvw, &us, 1, date, 6).expect_err("the dig refused");
         assert_eq!(
             error.issue,
@@ -1145,7 +1272,11 @@ mod tests {
             players: &players,
             liberos: &[HOME_LIBERO],
         };
-        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
         let (set, _) = translate_set(&dvw, &us, 1, date, 6).expect("the set");
         assert_eq!(set.events[0].eval, Some(EvalEnum::Positive));
     }
@@ -1271,6 +1402,64 @@ mod tests {
                 ours: (25, 0),
             })
         );
+    }
+
+    /// The P1 inverted, told by where our opposite (4) or outside hitter
+    /// (2) attacks from in P1 in side out: the opposite from 2 or the
+    /// outside hitter from 4 inverted, from 4 or 2 canonical; with no such
+    /// attack (the middle blocker's), canonical. Every event of the set
+    /// after it keeps it, as the scouting does.
+    #[test]
+    fn the_inverted_p1_told_by_the_attacks() {
+        let inverted = |attack: &str| -> Vec<bool> {
+            let mut file = File::new();
+            let serve = format!("{}SM+", file.server());
+            file.rally(&[&serve, "*07RM+", attack], true);
+            let (events, _) = translated_events(&file.finished()).expect("the set");
+            events.iter().map(|e| e.flags.inverted_p1()).collect()
+        };
+        // the opposite from 2: the reception and the attack of the rally,
+        // and all after
+        let from_2 = inverted("*04AH#~~~2");
+        assert!(from_2.len() > 3);
+        assert!(from_2.iter().all(|i| *i), "{from_2:?}");
+        // the outside hitter from 4
+        assert!(inverted("*02AH#~~~4").iter().all(|i| *i));
+        // canonical: the opposite from 4, the outside hitter from 2
+        assert!(inverted("*04AH#~~~4").iter().all(|i| !*i));
+        assert!(inverted("*02AH#~~~2").iter().all(|i| !*i));
+        // the middle blocker, or no start zone: nothing told
+        assert!(inverted("*03AH#~~~3").iter().all(|i| !*i));
+        assert!(inverted("*04AH#").iter().all(|i| !*i));
+    }
+
+    /// The zone of the attack follows the P1 told: the opposite from 2.
+    #[test]
+    fn the_attack_zone_with_the_inverted_p1() {
+        use crate::shapes::{enums::ZoneEnum, set::SetEntry};
+        let mut file = File::new();
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "*07RM+", "*04AH#~~~2"], true);
+        let dvw = parse(file.finished().text().as_bytes()).expect("a DataVolley file");
+        let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
+        let us = Us {
+            side: Side::Home,
+            players: &players,
+            liberos: &[HOME_LIBERO],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
+        let (set, _): (SetEntry, _) = translate_set(&dvw, &us, 1, date, 6).expect("the set");
+        let keys = set.event_keys(6).expect("replayed");
+        let zone = keys
+            .iter()
+            .flatten()
+            .find(|k| k.event_type == A)
+            .and_then(|k| k.zone);
+        assert_eq!(zone, Some(ZoneEnum::Two));
     }
 
     /// The time of the file, when it has one.

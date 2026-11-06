@@ -84,6 +84,7 @@ mod tests {
     fn unplayed(day: (i32, u32, u32)) -> MatchEntry {
         MatchEntry {
             source: Default::default(),
+            video_clock: false,
             opponent: format!("{day:?}"),
             date: Utc
                 .with_ymd_and_hms(day.0, day.1, day.2, 18, 0, 0)

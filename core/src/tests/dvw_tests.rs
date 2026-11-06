@@ -617,6 +617,9 @@ mod tests {
         let mut issues: BTreeMap<String, (usize, String)> = BTreeMap::new();
         let mut mappings: BTreeMap<&str, usize> = BTreeMap::new();
         let mut events = 0;
+        // the events with the P1 inverted (told by the attacks), by file
+        // and team
+        let mut inverted: BTreeMap<String, usize> = BTreeMap::new();
         for path in &paths {
             let name = path.file_name().unwrap().to_string_lossy().to_string();
             let file = parse(&std::fs::read(path).unwrap()).unwrap();
@@ -644,10 +647,21 @@ mod tests {
                 };
                 let mut all_ok = true;
                 for set in &file.sets {
-                    match translate_set(&file, &us, set.set_number, date, max_substitutions) {
+                    match translate_set(
+                        &file,
+                        &us,
+                        set.set_number,
+                        date.and_time(NaiveTime::MIN).and_utc().fixed_offset(),
+                        max_substitutions,
+                    ) {
                         Ok((entry, used)) => {
                             sets_ok += 1;
                             events += entry.events.len();
+                            *inverted.entry(format!("{name} {side:?}")).or_default() += entry
+                                .events
+                                .iter()
+                                .filter(|e| e.flags.inverted_p1())
+                                .count();
                             for (k, v) in used {
                                 *mappings.entry(k).or_default() += v;
                             }
@@ -696,6 +710,7 @@ mod tests {
             println!("{count:5}  {key}\n       {example}");
         }
         println!("\nmappings: {mappings:#?}");
+        println!("\nevents with the P1 inverted: {inverted:#?}");
     }
 
     /// The statistics of the translated sets against the codes of the file,
@@ -761,7 +776,13 @@ mod tests {
                 let mut ours: BTreeMap<u8, [i64; 13]> = BTreeMap::new();
                 let mut translated = 0;
                 for set in &file.sets {
-                    let Ok((entry, _)) = translate_set(&file, &us, set.set_number, date, 6) else {
+                    let Ok((entry, _)) = translate_set(
+                        &file,
+                        &us,
+                        set.set_number,
+                        date.and_time(NaiveTime::MIN).and_utc().fixed_offset(),
+                        6,
+                    ) else {
                         continue;
                     };
                     let Ok(snapshot) = entry.compute_snapshot(6) else {

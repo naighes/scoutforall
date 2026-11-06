@@ -20,10 +20,6 @@
     "answer": "Nem todas: o app faz algumas escolhas consistentes para não comprometer a produtividade. O líbero substitui automaticamente o central no fundo da quadra, exceto quando o central está sacando; ainda é possível desfazer essa substituição. As zonas de ataque decorrem das posições e do lugar do levantador. Você pode declarar um P1 invertido e uma recepção com dois, três ou quatro jogadores."
   },
   {
-    "question": "Posso abrir partidas registradas com o DataVolley?",
-    "answer": "Sim: importe um arquivo <code>.dvw</code> numa das suas equipes, com as suas zonas. A partida importada é analisada como as outras, sozinha ou junto com várias partidas."
-  },
-  {
     "question": "Com que frequência é atualizado? Preciso instalar as atualizações manualmente?",
     "answer": "Está em desenvolvimento ativo e novas versões saem com regularidade. Você não precisa baixá-las: a cada abertura o app verifica se há uma nova versão e, depois de perguntar, instala e reinicia."
   },

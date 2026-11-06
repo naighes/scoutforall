@@ -7,7 +7,9 @@ use crate::{
     constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
     dvw::{
         model::{DvwFile, DvwRole, MatchDate, Player, Side},
-        translate::{Issue, Mappings, TranslateError, Untranslatable, Us, translate_set},
+        translate::{
+            Issue, Mappings, TranslateError, Untranslatable, Us, has_video_clock, translate_set,
+        },
     },
     errors::{AppError, MatchError},
     localization::Labels,
@@ -385,14 +387,8 @@ pub fn match_plan(
     let mut sets = vec![];
     let mut mappings = Mappings::new();
     for result in &file.sets {
-        let (set, used) = translate_set(
-            file,
-            &us,
-            result.set_number,
-            date.date_naive(),
-            max_substitutions,
-        )
-        .map_err(MatchIssue::Set)?;
+        let (set, used) = translate_set(file, &us, result.set_number, date, max_substitutions)
+            .map_err(MatchIssue::Set)?;
         let snapshot = set.compute_snapshot(max_substitutions).map_err(|e| {
             MatchIssue::Set(TranslateError {
                 set_number: result.set_number,
@@ -431,6 +427,7 @@ pub fn match_plan(
         roster: team.roster.clone(),
         sets,
         source: MatchSource::Dvw,
+        video_clock: has_video_clock(file),
     };
     if let Some(issue) = entry.replay_issue() {
         return Err(MatchIssue::Replay(issue));
@@ -505,7 +502,9 @@ pub async fn save_import(
                     entry.roster.clone(),
                 )
                 .await?;
-            match_writer.save_source(&created, entry.source).await?
+            match_writer
+                .save_source(&created, entry.source, entry.video_clock)
+                .await?
         }
     };
     for set_number in 1..=5u8 {

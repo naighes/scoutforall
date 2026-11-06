@@ -1,6 +1,7 @@
 package io.github.naighes.scout4all
 
 import android.content.Intent
+import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
@@ -53,10 +54,8 @@ class MainActivity : ComponentActivity() {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         // a phone stays upright: the court of the scouting needs the height;
-        // a tablet turns
-        if (resources.configuration.smallestScreenWidthDp < TABLET_WIDTH) {
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
+        // a tablet turns, and a phone on the video of a match
+        if (!(application as Scout4AllApplication).turning) upright()
         // again when the user chooses another language for the app
         (application as Scout4AllApplication).followLanguage(resources.configuration.locales[0].language)
         // the logo stays until the teams and the terms are there: no empty
@@ -106,6 +105,13 @@ class MainActivity : ComponentActivity() {
 
 /** The smallest width of a tablet, in dp. */
 private const val TABLET_WIDTH = 600
+
+/** A phone upright, a tablet as it's held. */
+fun Activity.upright() {
+    if (resources.configuration.smallestScreenWidthDp < TABLET_WIDTH) {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    }
+}
 
 /** The archive of "Open with" (a file manager, WhatsApp) or of the share
  * sheet (Quick Share). */
@@ -232,7 +238,7 @@ private fun Navigation(
         }
         composable("team/{id}/analysis") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            AnalysisScreen(id, onBack = { nav.back(entry) })
+            AnalysisScreen(id, onBack = { nav.back(entry) }, onWatch = { nav.watch(it) })
         }
         composable("team/{id}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
@@ -270,6 +276,7 @@ private fun Navigation(
                 onResumeSet = { nav.navigate("$match/scouting") },
                 onSet = { set -> nav.navigate("$match/set/$set") },
                 onStats = { nav.navigate("$match/stats?set=0") },
+                onVideo = { nav.navigate("$match/video") },
             )
         }
         composable("team/{id}/match/{match}/set/{set}") { entry ->
@@ -288,7 +295,19 @@ private fun Navigation(
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
             val set = entry.arguments?.getString("set")?.toIntOrNull()?.takeIf { it > 0 }
-            MatchStatsScreen(id, m, set, onBack = { nav.back(entry) })
+            MatchStatsScreen(id, m, set, onBack = { nav.back(entry) }, onWatch = { nav.watch(it) })
+        }
+        composable("team/{id}/match/{match}/video") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val m = entry.arguments?.getString("match").orEmpty()
+            VideoScreen(VideoRequest.Match(id, m), onBack = { nav.back(entry) })
+        }
+        composable("team/{id}/clips") { entry ->
+            // lost with the process: back to the statistics
+            when (val request = ClipRequests.current) {
+                null -> LaunchedEffect(Unit) { nav.back(entry) }
+                else -> VideoScreen(request, onBack = { nav.back(entry) })
+            }
         }
         composable("team/{id}/match/{match}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
@@ -375,4 +394,10 @@ private fun NavController.back(entry: NavBackStackEntry) {
 private fun NavController.openMatch(teamId: String, matchId: String) {
     navigate("team/$teamId")
     navigate("team/$teamId/match/${Uri.encode(matchId)}")
+}
+
+/** The actions picked in the statistics, in the video. */
+private fun NavController.watch(request: VideoRequest.Clips) {
+    ClipRequests.current = request
+    navigate("team/${request.teamId}/clips")
 }

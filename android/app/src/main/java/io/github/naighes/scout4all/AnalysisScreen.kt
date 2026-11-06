@@ -96,7 +96,7 @@ private enum class PeriodKind { LastMonth, LastMatches, Between }
  * filters, the situation of the game too, on every page. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AnalysisScreen(teamId: String, onBack: () -> Unit) {
+fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Clips) -> Unit = {}) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     var kind by rememberSaveable { mutableStateOf(PeriodKind.LastMonth) }
     var count by rememberSaveable { mutableIntStateOf(LAST_MATCHES) }
@@ -187,7 +187,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit) {
                                 TrendLegend(a.matches.size)
                                 a.trend.forEach { MatchTrendChart(it, a.matches) }
                             }
-                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false) { query = it }
+                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = teamWatch(teamId, period, onWatch)) { query = it }
                         }
                     }
                 }
@@ -357,7 +357,7 @@ private fun TrendLegend(matches: Int) = FlowRow(
 
 private val shortDay = DateTimeFormatter.ofPattern("dd/MM")
 
-private fun shortDay(day: String): String = try {
+internal fun shortDay(day: String): String = try {
     LocalDate.parse(day).format(shortDay)
 } catch (_: DateTimeException) {
     day

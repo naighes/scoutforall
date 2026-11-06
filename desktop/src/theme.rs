@@ -216,4 +216,26 @@ pub mod icons {
     pub const SIDE_OUT: &[u8] = include_bytes!("../assets/icons/side_out.svg");
     pub const BREAK: &[u8] = include_bytes!("../assets/icons/break.svg");
     pub const QUIT: &[u8] = include_bytes!("../assets/icons/quit.svg");
+    pub const PLAY: &[u8] = include_bytes!("../assets/icons/play.svg");
+    pub const PAUSE: &[u8] = include_bytes!("../assets/icons/pause.svg");
+    pub const REWIND: &[u8] = include_bytes!("../assets/icons/rewind.svg");
+    pub const FORWARD: &[u8] = include_bytes!("../assets/icons/forward.svg");
+    pub const ANALYSIS: &[u8] = include_bytes!("../assets/icons/analytics.svg");
+    pub const EDIT: &[u8] = include_bytes!("../assets/icons/edit.svg");
+    pub const IMPORT: &[u8] = include_bytes!("../assets/icons/file_download.svg");
+    pub const STATS: &[u8] = include_bytes!("../assets/icons/insert_chart.svg");
+    pub const PDF: &[u8] = include_bytes!("../assets/icons/picture_as_pdf.svg");
+    pub const VIDEO: &[u8] = include_bytes!("../assets/icons/videocam.svg");
+    pub const RECORD: &[u8] = include_bytes!("../assets/icons/radio_button_checked.svg");
+    pub const WON: &[u8] = include_bytes!("../assets/icons/emoji_events.svg");
+    pub const LOST: &[u8] = include_bytes!("../assets/icons/cancel.svg");
+    pub const COIN: &[u8] = include_bytes!("../assets/icons/toll.svg");
+    pub const CALENDAR: &[u8] = include_bytes!("../assets/icons/event.svg");
+    pub const VOLLEYBALL: &[u8] = include_bytes!("../assets/icons/sports_volleyball.svg");
+    pub const CLOSE: &[u8] = include_bytes!("../assets/icons/close.svg");
+    pub const CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
+    pub const FORWARD_ARROW: &[u8] = include_bytes!("../assets/icons/arrow_forward.svg");
+    pub const SHARE: &[u8] = include_bytes!("../assets/icons/share.svg");
+    pub const SAVE: &[u8] = include_bytes!("../assets/icons/save.svg");
+    pub const DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
 }

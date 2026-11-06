@@ -12,7 +12,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, column, container, row, text},
+        widget::{Column, column, container, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{ArchivePreview, MobileError, Scout4All},
@@ -27,6 +27,90 @@ pub enum Export {
     Match(String, String),
     /// the report of the match as a PDF, as the TUI prints it
     Report(String, String),
+}
+
+/// A file made to share (an archive, a report, a video): shared with the
+/// sheet of the system or saved where the user chooses, as on Android.
+pub struct Sharing {
+    /// what it is, as the button that made it says
+    pub heading: String,
+    pub name: String,
+    pub content: Content,
+}
+
+/// What is shared: made in memory (an archive, a report), or a file
+/// already on disk (a video).
+#[derive(Debug, Clone)]
+pub enum Content {
+    Bytes(Arc<Vec<u8>>),
+    File(PathBuf),
+}
+
+impl Content {
+    /// Written at `path`.
+    pub fn write(&self, path: &std::path::Path) -> std::io::Result<()> {
+        match self {
+            Content::Bytes(bytes) => std::fs::write(path, bytes.as_slice()),
+            Content::File(from) => std::fs::copy(from, path).map(|_| ()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ShareMessage {
+    Share,
+    Save,
+    Cancel,
+}
+
+impl Sharing {
+    pub fn key(&self, ck: KeyCombination) -> Option<ShareMessage> {
+        match ck {
+            k if k == BACK_KEY => Some(ShareMessage::Cancel),
+            k if k == key!(enter) => Some(ShareMessage::Share),
+            k if k == key!(s) => Some(ShareMessage::Save),
+            _ => None,
+        }
+    }
+
+    pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        vec![
+            ("Enter".to_string(), s.share.to_string()),
+            ("s".to_string(), s.save_to_file.to_string()),
+            ("Esc".to_string(), s.cancel.to_string()),
+        ]
+    }
+
+    pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, ShareMessage> {
+        let body = ui::panel(
+            None,
+            column![
+                column![
+                    text(self.heading.clone())
+                        .size(22)
+                        .font(theme::fonts().bold),
+                    text(self.name.clone()).size(SIZE_SMALL).color(c.muted),
+                ]
+                .spacing(4),
+                ui::answers_with(
+                    Some((theme::icons::CLOSE, s.cancel, ShareMessage::Cancel)),
+                    vec![(theme::icons::SAVE, s.save_to_file, ShareMessage::Save)],
+                    theme::icons::SHARE,
+                    s.share,
+                    Some(ShareMessage::Share),
+                    c,
+                ),
+            ]
+            .spacing(18),
+            c,
+        );
+        container(container(body).max_width(640))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .into()
+    }
 }
 
 /// A file chosen to import: its name and what it holds.
@@ -275,25 +359,13 @@ impl Importing {
                 ]
                 .spacing(4),
                 teams,
-                container(
-                    row![
-                        ui::pill(
-                            &format!("Esc  {}", s.cancel),
-                            false,
-                            Some(Message::Cancel),
-                            c
-                        ),
-                        ui::pill(
-                            &format!("Enter  {}", s.import_archive),
-                            true,
-                            Some(Message::Import),
-                            c
-                        ),
-                    ]
-                    .spacing(10)
-                )
-                .width(Length::Fill)
-                .align_x(Alignment::End),
+                ui::answers(
+                    Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
+                    theme::icons::IMPORT,
+                    s.import_archive,
+                    Some(Message::Import),
+                    c
+                ),
             ]
             .spacing(18),
             c,
@@ -304,5 +376,43 @@ impl Importing {
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The file to share: Enter shares it, `s` saves it, Esc leaves it;
+    /// the other keys do nothing.
+    #[test]
+    fn the_keys_of_the_file_to_share() {
+        let sharing = Sharing {
+            heading: "Condividi squadra".into(),
+            name: "team.zip".into(),
+            content: Content::Bytes(Arc::new(vec![1, 2, 3])),
+        };
+        assert!(matches!(
+            sharing.key(key!(enter)),
+            Some(ShareMessage::Share)
+        ));
+        assert!(matches!(sharing.key(key!(s)), Some(ShareMessage::Save)));
+        assert!(matches!(sharing.key(BACK_KEY), Some(ShareMessage::Cancel)));
+        assert!(sharing.key(key!(x)).is_none());
+    }
+
+    /// Saved where chosen: the bytes made, or a copy of the file.
+    #[test]
+    fn the_file_shared_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let to = dir.path().join("saved");
+        Content::Bytes(Arc::new(b"zip".to_vec()))
+            .write(&to)
+            .unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"zip");
+        let from = dir.path().join("video.mp4");
+        std::fs::write(&from, b"mp4").unwrap();
+        Content::File(from).write(&to).unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"mp4");
     }
 }

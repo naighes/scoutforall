@@ -192,6 +192,7 @@ mod tests {
     fn match_entry(team: TeamEntry, opponent: &str, home: bool, sets: Vec<SetEntry>) -> MatchEntry {
         MatchEntry {
             source: Default::default(),
+            video_clock: false,
             roster: vec![],
             opponent: opponent.to_string(),
             date: Utc::now().fixed_offset(),

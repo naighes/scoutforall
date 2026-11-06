@@ -331,7 +331,7 @@ impl TeamScreen {
                         ("n".to_string(), new.to_string()),
                         ("e".to_string(), s.edit_team.to_string()),
                         ("i".to_string(), s.import_archive.to_string()),
-                        ("x".to_string(), s.export.to_string()),
+                        ("x".to_string(), s.export_team.to_string()),
                         ("s".to_string(), s.analysis.to_string()),
                     ],
                     remove,
@@ -347,6 +347,7 @@ impl TeamScreen {
             Mode::Edit(editor) => editor.view(s, c, Message::Form),
             Mode::Remove(_, name) => ui::confirm(
                 &s.remove_confirm.replace("{}", name),
+                theme::icons::DELETE,
                 s.remove,
                 Message::Confirm,
                 s.cancel,
@@ -387,29 +388,37 @@ impl TeamScreen {
                 line(s.classification, or_dash(&d.classification)),
                 line(s.gender, or_dash(&d.gender)),
                 line(s.country, or_dash(&d.country)),
-                space::vertical().height(6),
-                ui::pill(
-                    &format!("▤ {}", s.analysis),
+                space::vertical(),
+                ui::action(
+                    theme::icons::ANALYSIS,
+                    s.analysis,
+                    Message::Analysis,
                     false,
-                    Some(Message::Analysis),
                     c
-                ),
-                ui::pill(s.edit_team, false, Some(Message::EditTeam), c),
-                ui::pill(
-                    &format!("↑ {}", s.export_team),
+                )
+                .width(Length::Fill),
+                ui::action(theme::icons::EDIT, s.edit_team, Message::EditTeam, false, c)
+                    .width(Length::Fill),
+                ui::action(
+                    theme::icons::SHARE,
+                    s.export_team,
+                    Message::Export,
                     false,
-                    Some(Message::Export),
                     c
-                ),
-                ui::pill(
-                    &format!("↓ {}", s.import_match),
+                )
+                .width(Length::Fill),
+                ui::action(
+                    theme::icons::IMPORT,
+                    s.import_match,
+                    Message::Import,
                     false,
-                    Some(Message::Import),
                     c
-                ),
+                )
+                .width(Length::Fill),
             ]
             .spacing(12)
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .height(Length::Fill),
             c,
         )
     }

@@ -6,7 +6,7 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
 use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
@@ -61,7 +61,10 @@ use scout4all_core::{
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
-        stats::{AttackSummary, EvalSet, Metric, SetTypeSet, SituationFilter, Stats, StatsFilter},
+        stats::{
+            AttackSummary, EvalSet, EventPick, Metric, SetTypeSet, SituationFilter, Stats,
+            StatsFilter,
+        },
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
@@ -72,6 +75,7 @@ use scout4all_core::{
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
+    video::{EventRef, StoredProfile, VideoProfile, place, read_profile, write_profile},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
@@ -90,6 +94,7 @@ uniffi::setup_scaffolding!();
 
 mod analysis;
 pub use analysis::*;
+pub mod video;
 
 // the types of the core the app sees as they are
 
@@ -1374,6 +1379,12 @@ pub struct DetailFilter {
     /// in P1 in side out, the P1 inverted or not
     #[uniffi(default)]
     pub inverted_p1: Option<bool>,
+    /// the end of the set (from 20, from 10 in the tie-break) or before
+    #[uniffi(default)]
+    pub late: Option<bool>,
+    /// a close score (two points apart at most) or not
+    #[uniffi(default)]
+    pub close: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -2296,6 +2307,8 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
             set_types: (!filter.set_types.is_empty()).then(|| SetTypeSet::of(&filter.set_types)),
             scheme: filter.scheme,
             inverted_p1: filter.inverted_p1,
+            late: filter.late,
+            close: filter.close,
         }),
     )
 }
@@ -2498,6 +2511,41 @@ impl Scouting {
     }
 }
 
+/// An event of the match, in the list beside its video (desktop only).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoEvent {
+    pub set_number: u8,
+    pub event: SetEvent,
+    /// when it was scouted (or in the video, for a match on the video
+    /// clock): what an anchor ties to the video
+    pub timestamp: DateTime<Utc>,
+    /// where it is in the video, from the start of the first file
+    pub offset_ms: Option<i64>,
+    /// put at its own time by the user: how far from where the anchor puts
+    /// it (`VideoProfile::correction`)
+    pub corrected_ms: Option<i64>,
+    /// after it, for the rally to come: our rotation ("-" without the
+    /// setter on the court) and the phase, to show over the video (the
+    /// score is the event's)
+    pub rotation: String,
+    pub phase: PhaseEnum,
+}
+
+/// The events behind a statistic of the detail of a fundamental, to see
+/// them in the video (desktop only): the scope, the fundamental and the
+/// filter of the detail, and, when chosen, some evaluations, the zone of
+/// the net of the attacks (2, 3, 4, 8, 9) and a zone of the court
+/// (`TargetStats::value`).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ClipPick {
+    pub scope: StatsScope,
+    pub event: EventTypeEnum,
+    pub filter: DetailFilter,
+    pub evals: Vec<EvalEnum>,
+    pub zone: Option<u8>,
+    pub target: Option<CourtZoneEnum>,
+}
+
 /// For the apps written in Rust (the desktop app), not exported to the
 /// bindings: they drive the scouting from the keyboard as the TUI does.
 impl Scout4All {
@@ -2530,6 +2578,86 @@ impl Scout4All {
                 reason: format!("no set in progress in {match_id}"),
             }),
         }
+    }
+
+    /// The match and the profile of its video (`video` in the core): only
+    /// the desktop app plays it.
+    pub fn video(
+        &self,
+        team_id: &str,
+        match_id: &str,
+    ) -> Result<(MatchEntry, StoredProfile), MobileError> {
+        let m = self.read_match(team_id, match_id)?;
+        let profile = self
+            .runtime
+            .block_on(read_profile(&*self.store, &m.team.id, &m.id))
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?;
+        Ok((m, profile))
+    }
+
+    /// The events of the match, set by set, and where each is in its
+    /// video, the files `durations_ms` long (none: the video and the events
+    /// not lined up).
+    pub fn video_events(
+        &self,
+        m: &MatchEntry,
+        profile: &VideoProfile,
+        durations_ms: &[u64],
+    ) -> Result<Vec<VideoEvent>, MobileError> {
+        let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
+        sets.sort_by_key(|s| s.set_number);
+        let mut events = vec![];
+        for set in sets {
+            let labels = self.language.labels();
+            let rows = set_event_rows(m, set, labels)?;
+            let states = set.states(m.max_substitutions)?;
+            events.extend(
+                set.events
+                    .iter()
+                    .zip(rows)
+                    .zip(states)
+                    .map(|((e, row), state)| {
+                        let corrected_ms = profile.correction(EventRef {
+                            set_number: set.set_number,
+                            index: row.index as usize,
+                        });
+                        VideoEvent {
+                            set_number: set.set_number,
+                            event: row,
+                            timestamp: e.timestamp,
+                            offset_ms: place(profile, m, durations_ms, e.timestamp)
+                                .map(|ms| ms + corrected_ms.unwrap_or(0)),
+                            corrected_ms,
+                            rotation: state
+                                .rotation
+                                .map_or_else(|| "-".to_string(), |r| rotation_name(r, labels)),
+                            phase: state.phase,
+                        }
+                    }),
+            );
+        }
+        Ok(events)
+    }
+
+    /// The events of the match the statistics counted for the pick, in
+    /// order: the ones to see one after the other in the video.
+    pub fn match_clips(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        pick: &ClipPick,
+    ) -> Result<Vec<EventRef>, MobileError> {
+        let m = self.read_match(team_id, match_id)?;
+        clips_of(&m, pick)
+    }
+
+    /// Saves the profile of the video of the match.
+    pub fn save_video(&self, m: &MatchEntry, profile: &VideoProfile) -> Result<(), MobileError> {
+        self.runtime
+            .block_on(write_profile(&*self.store, &m.team.id, &m.id, profile))
+            .map_err(|e| MobileError::Failed {
+                reason: e.to_string(),
+            })
     }
 }
 
@@ -2917,33 +3045,12 @@ impl Scout4All {
         set_number: u8,
     ) -> Result<SetEvents, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
-        let labels = self.language.labels();
         let set = find_set(&m, set_number)?;
-        let scores = set.scores(m.max_substitutions)?;
         Ok(SetEvents {
             set_number,
             team: m.team.name.clone(),
             opponent: m.opponent.clone(),
-            events: set
-                .events
-                .iter()
-                .zip(scores)
-                .enumerate()
-                .map(|(i, (e, (score_us, score_them)))| SetEvent {
-                    index: u32::try_from(i).unwrap_or(u32::MAX),
-                    event: scouted_event(&m.team, e, labels),
-                    score_us,
-                    score_them,
-                    editable: !matches!(
-                        e.event_type,
-                        EventTypeEnum::R
-                            | EventTypeEnum::CL
-                            | EventTypeEnum::LR
-                            | EventTypeEnum::LF
-                            | EventTypeEnum::CS
-                    ),
-                })
-                .collect(),
+            events: set_event_rows(&m, set, self.language.labels())?,
         })
     }
 
@@ -3959,6 +4066,68 @@ fn lineup_player(p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
 }
 
 /// A set of the match, by its number.
+/// The events of the set, each with the score after it.
+fn set_event_rows(
+    m: &MatchEntry,
+    set: &SetEntry,
+    labels: &Labels,
+) -> Result<Vec<SetEvent>, MobileError> {
+    let scores = set.scores(m.max_substitutions)?;
+    Ok(set
+        .events
+        .iter()
+        .zip(scores)
+        .enumerate()
+        .map(|(i, (e, (score_us, score_them)))| SetEvent {
+            index: u32::try_from(i).unwrap_or(u32::MAX),
+            event: scouted_event(&m.team, e, labels),
+            score_us,
+            score_them,
+            editable: !matches!(
+                e.event_type,
+                EventTypeEnum::R
+                    | EventTypeEnum::CL
+                    | EventTypeEnum::LR
+                    | EventTypeEnum::LF
+                    | EventTypeEnum::CS
+            ),
+        })
+        .collect())
+}
+
+/// The events of the match the statistics counted for the pick, set by
+/// set in order.
+fn clips_of(m: &MatchEntry, pick: &ClipPick) -> Result<Vec<EventRef>, MobileError> {
+    let filter = narrowed(&pick.filter)?;
+    let picked = EventPick {
+        event_type: pick.event,
+        evals: (!pick.evals.is_empty()).then(|| EvalSet::of(&pick.evals)),
+        zone: pick.zone.and_then(|z| ZoneEnum::try_from(z).ok()),
+        target: pick.target,
+        filter,
+    };
+    let mut sets: Vec<&SetEntry> = in_scope(&m.sets.iter().collect::<Vec<_>>(), pick.scope);
+    sets.sort_by_key(|s| s.set_number);
+    let mut refs = vec![];
+    for set in sets {
+        let keys = set
+            .event_keys(m.max_substitutions)
+            .map_err(|e| MobileError::Failed {
+                reason: e.to_string(),
+            })?;
+        refs.extend(
+            keys.iter()
+                .enumerate()
+                .filter(|(_, k)| k.as_ref().is_some_and(|k| picked.keeps(k)))
+                .map(|(index, _)| EventRef {
+                    set_number: set.set_number,
+                    index,
+                }),
+        );
+    }
+    Ok(refs)
+}
+
 fn find_set(m: &MatchEntry, set_number: u8) -> Result<&SetEntry, MobileError> {
     m.sets
         .iter()
@@ -6438,6 +6607,72 @@ mod tests {
         assert_eq!(app.dvw_max_substitutions(Some("2025-12-31".into())), 6);
         assert_eq!(app.dvw_max_substitutions(Some("2026-01-01".into())), 8);
         assert_eq!(app.dvw_max_substitutions(None), 8);
+    }
+
+    /// The events behind the detail of each fundamental, to see in the
+    /// video: as many as it counts, by evaluation, set and player too.
+    #[test]
+    fn the_clips_of_a_statistic() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        let scopes = [StatsScope::Match, StatsScope::Set { number: 2 }];
+        let mut seen = 0;
+        for (scope, event) in scopes.into_iter().flat_map(|s| {
+            use EventTypeEnum::*;
+            [S, P, D, B, A].map(|e| (s, e))
+        }) {
+            let detail = app
+                .match_detail(
+                    team.clone(),
+                    m.clone(),
+                    scope,
+                    event,
+                    DetailFilter::default(),
+                )
+                .unwrap();
+            let Some(f) = detail.fundamental else {
+                continue;
+            };
+            let pick = ClipPick {
+                scope,
+                event,
+                filter: DetailFilter::default(),
+                evals: vec![],
+                zone: None,
+                target: None,
+            };
+            let clips = app.match_clips(&team, &m, &pick).unwrap();
+            assert_eq!(clips.len() as u32, f.total, "{event:?} in {scope:?}");
+            seen += clips.len();
+            if let StatsScope::Set { number } = scope {
+                assert!(clips.iter().all(|c| c.set_number == number));
+            }
+            for e in &f.evals {
+                let by_eval = ClipPick {
+                    evals: vec![e.eval],
+                    ..pick.clone()
+                };
+                let clips = app.match_clips(&team, &m, &by_eval).unwrap();
+                assert_eq!(clips.len() as u32, e.count, "{event:?} {:?}", e.eval);
+            }
+            for p in &f.players {
+                let filter = DetailFilter {
+                    player: Some(p.player.id.clone()),
+                    ..DetailFilter::default()
+                };
+                let by_player = ClipPick {
+                    filter,
+                    ..pick.clone()
+                };
+                let clips = app.match_clips(&team, &m, &by_player).unwrap();
+                assert_eq!(clips.len() as u32, p.total, "{event:?} {}", p.player.name);
+            }
+        }
+        assert!(seen > 0, "the match has events");
     }
 
     #[test]

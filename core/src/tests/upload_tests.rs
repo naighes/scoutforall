@@ -430,7 +430,7 @@ mod tests {
         let api = FakeApi::start().await;
         let (app, m) = App::with_a_finished_match().await;
         StoreMatchWriter::new(app.store.clone())
-            .save_source(&m, MatchSource::Dvw)
+            .save_source(&m, MatchSource::Dvw, false)
             .await
             .unwrap();
         assert_eq!(app.upload_next(&api).await, UploadStep::Uploaded);

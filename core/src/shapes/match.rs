@@ -52,6 +52,11 @@ pub struct MatchEntry {
     // versions ignore it
     #[serde(default, skip_serializing_if = "MatchSource::is_scouted")]
     pub source: MatchSource,
+    // since v0.15, written only when true: the times of the events are the
+    // seconds in the video of the match from midnight of its day, as the
+    // DataVolley files linked to their video tell (`video::Anchor`)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub video_clock: bool,
 }
 
 /// Where the events of a match come from.

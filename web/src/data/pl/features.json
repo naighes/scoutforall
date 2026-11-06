@@ -27,6 +27,19 @@
     "image_alt": "Szczegóły statystyk meczu: oceny zagrywki, zawodnicy i zagrywki według stref"
   },
   {
+    "id": "video",
+    "eyebrow": "Wideo",
+    "title": "Scouting zsynchronizowany z wideo",
+    "content": "Połącz nagranie meczu z jego scoutingiem: wystarczy przypiąć jedno zdarzenie do właściwego momentu, a wszystkie pozostałe same się dopasują. Podczas odtwarzania zdarzenia podświetlają się po kolei, a wynik pojawia się na obrazie; po wybraniu zdarzenia wideo przechodzi do tej akcji.",
+    "points": [
+      "Czas każdego zdarzenia można poprawić ręcznie, dla dokładnej synchronizacji",
+      "Akcje stojące za statystyką, jedna po drugiej, także z wielu meczów",
+      "Montaż MP4 wybranych akcji z nałożonym wynikiem, gotowy do udostępnienia"
+    ],
+    "image": "video",
+    "image_alt": "Ekran wideo: mecz z nałożonym wynikiem, a obok zdarzenia ze scoutingu"
+  },
+  {
     "id": "analysis",
     "eyebrow": "Analiza drużyny",
     "title": "Porównanie wielu meczów",
@@ -34,7 +47,7 @@
     "points": [
       "Te same filtry co dla pojedynczego meczu",
       "Przebieg statystyk mecz po meczu, ze średnią kroczącą",
-      "Mecze zapisane w scout4all i zaimportowane z DataVolley, pokazane razem"
+      "Mecze zapisane w scout4all i zaimportowane, pokazane razem"
     ],
     "image": "team-analysis",
     "image_alt": "Analiza drużyny z ostatnich meczów: podsumowanie, ustawienia, rozegranie i błędy"

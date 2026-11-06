@@ -9,7 +9,6 @@
   "highlights_title": "And also",
   "highlights": [
     { "title": "Zones of play", "content": "Serve, reception, attack, dig and block zones. Recording of the block composition." },
-    { "title": "DataVolley files", "content": "Import <code>.dvw</code> matches, with their zones, and analyse them next to your own." },
     { "title": "PDF report", "content": "A scoresheet-style report of the match, ready to print or share with the team." },
     { "title": "Your keys", "content": "Every event, evaluation and set type can be bound to the key you prefer." },
     { "title": "Five languages", "content": "English, Italian, Portuguese, Polish and Japanese." },

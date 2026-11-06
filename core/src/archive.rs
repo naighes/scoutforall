@@ -27,6 +27,7 @@ use crate::{
         team::TeamEntry,
     },
     storage::{Store, StoreEntry, layout},
+    video::VIDEO_PROFILE_FILE_NAME,
 };
 use serde::Deserialize;
 use std::{
@@ -63,7 +64,7 @@ pub async fn export_team(store: &dyn Store, team_id: &Uuid) -> Result<Vec<u8>, A
     )
 }
 
-/// The descriptor of the match and its sets.
+/// The descriptor of the match and its sets (not its video).
 pub async fn export_match(
     store: &dyn Store,
     team_id: &Uuid,
@@ -72,7 +73,10 @@ pub async fn export_match(
     let folder = layout::match_folder(team_id, match_id);
     let mut files = Vec::new();
     for entry in store.list(&folder).await? {
-        if let StoreEntry::Blob(name) = entry {
+        // the video has paths of this computer
+        if let StoreEntry::Blob(name) = entry
+            && name != VIDEO_PROFILE_FILE_NAME
+        {
             let data = read_blob(store, &layout::child(&folder, &name)).await?;
             files.push((name, data));
         }
@@ -323,9 +327,9 @@ pub async fn import_match(
         )
         .await?;
     // an imported match exported, and imported again: still imported
-    let m = match archived.source {
-        MatchSource::Scout4all => m,
-        source => match_writer.save_source(&m, source).await?,
+    let m = match (archived.source, archived.video_clock) {
+        (MatchSource::Scout4all, false) => m,
+        (source, video_clock) => match_writer.save_source(&m, source, video_clock).await?,
     };
     for mut set in archived.sets {
         // the new descriptor has the substitutions, so the sets saved

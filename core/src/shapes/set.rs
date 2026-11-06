@@ -2,8 +2,9 @@ use crate::{
     errors::{AppError, MatchError},
     localization::Labels,
     shapes::{
-        enums::{LineupRulesEnum, TeamSideEnum},
+        enums::{LineupRulesEnum, PhaseEnum, TeamSideEnum},
         snapshot::{EventEntry, Snapshot},
+        stats::EventKey,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,15 @@ pub struct SetEntry {
     pub lineup_rules: Option<LineupRulesEnum>,
     #[serde(skip_serializing, skip_deserializing)]
     pub events: Vec<EventEntry>,
+}
+
+/// How a set stands after an event (see `SetEntry::states`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetState {
+    pub score_us: u8,
+    pub score_them: u8,
+    pub rotation: Option<u8>,
+    pub phase: PhaseEnum,
 }
 
 /// The first event of a set that doesn't replay: saved by a version whose
@@ -171,6 +181,36 @@ impl SetEntry {
                     .add_event(event)
                     .map(|_| (snapshot.score_us, snapshot.score_them))
             })
+            .collect()
+    }
+
+    /// How the set stands after each event: the score, the rotation (none
+    /// when the setter isn't on the court) and the phase of the rally to
+    /// come; to show over the video.
+    pub fn states(&self, max_substitutions: u8) -> Result<Vec<SetState>, AppError> {
+        let rules = self.find_lineup_rules(max_substitutions)?;
+        let mut snapshot = Snapshot::with_rules(self, max_substitutions, rules)?;
+        self.events
+            .iter()
+            .map(|event| {
+                snapshot.add_event(event).map(|_| SetState {
+                    score_us: snapshot.score_us,
+                    score_them: snapshot.score_them,
+                    rotation: snapshot.current_lineup.get_current_rotation().ok(),
+                    phase: snapshot.current_lineup.get_current_phase(),
+                })
+            })
+            .collect()
+    }
+
+    /// What the statistics counted of each event, in order (see
+    /// `Snapshot::last_key`): to find the events behind a statistic.
+    pub fn event_keys(&self, max_substitutions: u8) -> Result<Vec<Option<EventKey>>, AppError> {
+        let rules = self.find_lineup_rules(max_substitutions)?;
+        let mut snapshot = Snapshot::with_rules(self, max_substitutions, rules)?;
+        self.events
+            .iter()
+            .map(|event| snapshot.add_event(event).map(|_| snapshot.last_key.take()))
             .collect()
     }
 

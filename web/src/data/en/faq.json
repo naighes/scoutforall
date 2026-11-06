@@ -20,10 +20,6 @@
     "answer": "Not all of them: the app makes some consistent choices so as not to compromise productivity. The libero automatically replaces the middle blocker in the back row, except when the middle blocker is serving; it is still possible to undo this substitution. The attack zones follow from the roles and the position of the setter. You can declare an inverted P1 and a reception with two, three or four players."
   },
   {
-    "question": "Can I open matches scouted with DataVolley?",
-    "answer": "Yes: import a <code>.dvw</code> file into one of your teams, with its zones. The imported match is analysed like the others, alone or across several matches."
-  },
-  {
     "question": "How often is it updated? Do I need to install updates manually?",
     "answer": "It is under active development and new versions come out regularly. You don't need to download them yourself: at every start the app checks for a new version and, after asking you, installs it and restarts."
   },

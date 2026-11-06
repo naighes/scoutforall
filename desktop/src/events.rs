@@ -13,7 +13,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, text},
+        widget::{Column, Id, column, container, row, scrollable, space, text},
     },
     scout4all_core::{
         event_edit::EditField,
@@ -343,7 +343,9 @@ impl EventsScreen {
             ))
             .width(Length::FillPortion(3))
             .height(Length::Fill),
-            container(side).width(Length::FillPortion(2)),
+            container(side)
+                .width(Length::FillPortion(2))
+                .height(Length::Fill),
         ]
         .spacing(14)
         .height(Length::Fill)
@@ -359,15 +361,13 @@ impl EventsScreen {
             (_, Some(error), _) => ui::body(error.clone()).color(c.danger).into(),
             (true, None, _) => ui::body(s.corrected).color(c.accent).into(),
             (false, None, false) => ui::body(s.lineup_fixed).color(c.muted).into(),
-            (false, None, true) => container(ui::pill(
-                &format!("Enter  {}", s.correct),
-                true,
+            (false, None, true) => ui::answers(
+                None,
+                theme::icons::EDIT,
+                s.correct,
                 Some(Message::Event(self.selected)),
                 c,
-            ))
-            .width(Length::Fill)
-            .align_x(Alignment::End)
-            .into(),
+            ),
         };
         ui::panel(
             Some(&ui::fill(s.event_n, &[(e.index + 1).to_string()])),
@@ -378,10 +378,12 @@ impl EventsScreen {
                     .size(22)
                     .font(theme::fonts().bold)
                     .color(c.accent),
+                space::vertical(),
                 note,
             ]
             .spacing(10)
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .height(Length::Fill),
             c,
         )
     }
@@ -477,26 +479,27 @@ impl EventsScreen {
                 .size(SIZE_SMALL)
                 .color(c.muted),
                 ui::body(player),
-                Column::with_children(choices).spacing(10),
-                text(eval_name).size(SIZE_SMALL).color(c.muted),
-                error,
-                container(
-                    row![
-                        ui::pill(
-                            &format!("Esc  {}", s.cancel),
-                            false,
-                            Some(Message::Cancel),
-                            c
-                        ),
-                        ui::pill(&format!("Enter  {}", s.save), true, Some(Message::Save), c),
+                // the choices scroll when many; the buttons stay at the bottom
+                scrollable(
+                    column![
+                        Column::with_children(choices).spacing(10),
+                        text(eval_name).size(SIZE_SMALL).color(c.muted),
                     ]
-                    .spacing(10)
+                    .spacing(12)
                 )
-                .width(Length::Fill)
-                .align_x(Alignment::End),
+                .height(Length::Fill),
+                error,
+                ui::answers(
+                    Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
+                    theme::icons::CHECK,
+                    s.save,
+                    Some(Message::Save),
+                    c
+                ),
             ]
             .spacing(12)
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .height(Length::Fill),
             c,
         )
     }

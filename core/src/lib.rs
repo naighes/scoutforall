@@ -27,6 +27,7 @@ pub mod storage;
 pub mod team_form;
 pub mod trend;
 pub mod util;
+pub mod video;
 
 // the tests may panic on what they don't expect (see clippy.toml)
 #[cfg(test)]

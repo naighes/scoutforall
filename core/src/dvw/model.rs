@@ -282,6 +282,9 @@ pub struct ScoutLine {
     /// `r` reception, `s`/`p` transition in sideout/breakpoint.
     pub attack_phase: Option<char>,
     pub time: Option<String>,
+    /// The seconds from the start of the video of the match (the files of
+    /// the video one after the other), when the scout is linked to it.
+    pub video_seconds: Option<u32>,
     pub set_number: Option<u8>,
     /// The zones of the setters, home and visiting.
     pub setter_zones: (Option<u8>, Option<u8>),
