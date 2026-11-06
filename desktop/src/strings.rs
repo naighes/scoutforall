@@ -308,6 +308,8 @@ pub struct Strings {
     pub video_files_title: &'static str,
     pub move_earlier: &'static str,
     pub move_later: &'static str,
+    pub clip: &'static str,
+    pub clip_explained: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -626,6 +628,8 @@ What did you expect instead?
     video_files_title: "Files of the video",
     move_earlier: "Earlier",
     move_later: "Later",
+    clip: "Clip",
+    clip_explained: "Going to an event, the video stops by itself {0} s after it",
 };
 
 const IT: Strings = Strings {
@@ -944,6 +948,8 @@ Cosa ti aspettavi invece?
     video_files_title: "File del video",
     move_earlier: "Prima",
     move_later: "Dopo",
+    clip: "Clip",
+    clip_explained: "Andando a un evento, il video si ferma da solo {0} s dopo",
 };
 
 const PT: Strings = Strings {
@@ -1262,6 +1268,8 @@ O que você esperava?
     video_files_title: "Arquivos do vídeo",
     move_earlier: "Antes",
     move_later: "Depois",
+    clip: "Clipe",
+    clip_explained: "Indo a um evento, o vídeo para sozinho {0} s depois",
 };
 
 const PL: Strings = Strings {
@@ -1580,6 +1588,8 @@ Czego się spodziewałeś(-aś)?
     video_files_title: "Pliki wideo",
     move_earlier: "Wcześniej",
     move_later: "Później",
+    clip: "Klip",
+    clip_explained: "Po przejściu do zdarzenia wideo zatrzymuje się samo {0} s później",
 };
 
 const JA: Strings = Strings {
@@ -1887,6 +1897,8 @@ const JA: Strings = Strings {
     video_files_title: "ビデオのファイル",
     move_earlier: "前へ",
     move_later: "後へ",
+    clip: "クリップ",
+    clip_explained: "イベントへ移動すると、{0} 秒後にビデオが自動で止まります",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

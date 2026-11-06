@@ -48,6 +48,9 @@ const STEP_SECONDS: u64 = 5;
 /// coming.
 const LEAD_MS: i64 = 2000;
 
+/// In clip mode, how long after the event gone to the video stops.
+const CLIP_AFTER_MS: u64 = 5000;
+
 /// How far `[` and `]` shift the sync.
 const SHIFT_MS: i64 = 500;
 
@@ -69,6 +72,8 @@ pub enum Message {
     Step(bool),
     Seek(f64),
     Speed(f32),
+    /// clip mode on or off
+    Clip,
     Choose,
     /// the files chosen, to add
     Chosen(Vec<PathBuf>),
@@ -144,6 +149,10 @@ pub struct VideoScreen {
     /// the event chosen follows the video: off once chosen with the keys,
     /// on again when the video is moved or played
     follow: bool,
+    /// clip mode: going to an event plays it and stops a little after
+    clip: bool,
+    /// where the clip playing stops
+    clip_end: Option<u64>,
     /// the time of the event chosen, being written
     editing: Option<String>,
     /// the time written isn't one
@@ -180,6 +189,8 @@ impl VideoScreen {
             selected: 0,
             scroll: false,
             follow: true,
+            clip: false,
+            clip_end: None,
             editing: None,
             invalid_time: false,
         };
@@ -331,7 +342,40 @@ impl VideoScreen {
         self.selected = i.min(self.events.len().saturating_sub(1));
         if let Some(ms) = self.event_target(self.selected) {
             self.seek(ms);
+            self.play_clip();
         }
+    }
+
+    /// In clip mode, the event gone to played up to a little after it.
+    fn play_clip(&mut self) {
+        let end = self
+            .events
+            .get(self.selected)
+            .and_then(|e| e.offset_ms)
+            .map(|ms| ms.max(0).unsigned_abs() + CLIP_AFTER_MS);
+        if let (true, Some(end)) = (self.clip, end) {
+            self.clip_end = Some(end);
+            if let Some(player) = &self.player {
+                player.play();
+            }
+        }
+    }
+
+    /// Whether the clip playing is over at `position_ms`: then no more
+    /// clip, the video to stop.
+    fn clip_over(&mut self, position_ms: u64) -> bool {
+        match self.clip_end {
+            Some(end) if position_ms >= end => {
+                self.clip_end = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn toggle_clip(&mut self) {
+        self.clip = !self.clip;
+        self.clip_end = None;
     }
 
     pub fn title(&self, s: &Strings) -> String {
@@ -394,6 +438,11 @@ impl VideoScreen {
         self.status = self.player.as_ref().and_then(Player::status);
         if let Some(position) = self.status.as_ref().map(|s| s.position_ms) {
             self.follow_video(position);
+            if self.clip_over(position)
+                && let Some(player) = &self.player
+            {
+                player.pause();
+            }
         }
         match self.status.as_ref().and_then(|s| s.frame.clone()) {
             Some(frame) if frame.serial > self.requested => {
@@ -452,6 +501,8 @@ impl VideoScreen {
 
     fn seek(&mut self, ms: u64) {
         self.follow = true;
+        // moved by hand: no clip to stop at
+        self.clip_end = None;
         if let Some(player) = &self.player {
             player.seek(ms);
         }
@@ -535,6 +586,7 @@ impl VideoScreen {
             Message::Step(forward) => self.step(forward),
             Message::Seek(ms) => self.seek(ms.max(0.0) as u64),
             Message::Speed(speed) => self.speed(speed),
+            Message::Clip => self.toggle_clip(),
             Message::Choose => return self.choose(),
             Message::Chosen(paths) if paths.is_empty() => {}
             Message::Chosen(paths) => self.chosen(&paths),
@@ -609,6 +661,7 @@ impl VideoScreen {
             k if k == key!('[') => self.shift(-SHIFT_MS),
             k if k == key!(']') => self.shift(SHIFT_MS),
             k if k == key!(r) => self.save_anchor(None),
+            k if k == key!(k) => self.toggle_clip(),
             _ => {}
         }
         Outcome::Stay
@@ -640,6 +693,7 @@ impl VideoScreen {
                 hint("a", s.anchor_here.to_string()),
                 hint("t", s.anchor_time.to_string()),
                 hint("[ ]", format!("±{} s", SHIFT_MS as f64 / 1000.0)),
+                hint("k", s.clip.to_string()),
             ],
         };
         [playing, events, vec![hint("Esc", s.back.to_string())]].concat()
@@ -899,6 +953,11 @@ impl VideoScreen {
                 ),
                 text(time).size(SIZE_SMALL).font(theme::fonts().bold),
                 space::horizontal(),
+                ui::tip(
+                    ui::pill(s.clip, self.clip, Some(Message::Clip), c),
+                    &ui::fill(s.clip_explained, &[(CLIP_AFTER_MS / 1000).to_string()]),
+                    c
+                ),
                 text(s.speed).size(SIZE_SMALL).color(c.muted),
             ]
             .extend(speeds)
@@ -1221,6 +1280,30 @@ mod screen_tests {
         assert_eq!(current(events, first), Some(same));
         let unplaced = with_file(&tempfile::tempdir().unwrap(), "match.mp4");
         assert_eq!(current(&unplaced.events, 10_000_000), None);
+    }
+
+    /// In clip mode, the event gone to stops a little after it; moved by
+    /// hand, no stop; mode off, no clip.
+    #[test]
+    fn a_clip_of_the_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        let i = 3;
+        let end = screen.events[i].offset_ms.unwrap().unsigned_abs() + CLIP_AFTER_MS;
+        screen.key(key!(enter));
+        assert_eq!(screen.clip_end, None);
+        screen.key(key!(k));
+        screen.go_to_event(i);
+        assert!(!screen.clip_over(end - 1));
+        assert!(screen.clip_over(end));
+        // once
+        assert!(!screen.clip_over(end + 1));
+        screen.go_to_event(i);
+        screen.update(Message::Step(true));
+        assert!(!screen.clip_over(end));
+        screen.go_to_event(i);
+        screen.update(Message::Clip);
+        assert!(!screen.clip && !screen.clip_over(end));
     }
 
     /// Esc leaves the time being written, not the screen.
