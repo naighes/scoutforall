@@ -45,6 +45,16 @@ pub fn suggestions(core: &Scout4All, written: &str) -> Vec<Suggestion> {
     }
 }
 
+/// The country whose name, in the language of the app, is `written`
+/// whole: not its code, which may be the start of another's name.
+pub fn named(core: &Scout4All, written: &str) -> Option<CountryCode> {
+    let written = written.trim().to_lowercase();
+    core.countries(written.clone())
+        .into_iter()
+        .find(|c| !written.is_empty() && c.name.to_lowercase() == written)
+        .map(|c| c.value)
+}
+
 /// The country `written` is: none for nothing written, an error when it's
 /// no country (its name, in the language of the app, or its code).
 pub fn chosen(core: &Scout4All, written: &str) -> Result<Option<CountryCode>, ()> {

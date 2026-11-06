@@ -182,13 +182,15 @@ impl General {
                 let written = self.form.text(COUNTRY);
                 self.form
                     .suggest(COUNTRY, countries::suggestions(&self.core, &written));
-                // saved once it's a country: while written, it's not yet
-                match countries::chosen(&self.core, &written) {
-                    Ok(Some(country)) => self
+                // saved once it's a country written whole (or chosen among
+                // the ones offered: their names); while written, not yet,
+                // not even as a code ("Ge" on the way to "Germania")
+                match countries::named(&self.core, &written) {
+                    Some(country) => self
                         .core
                         .set_default_country(country)
                         .map_err(|e| e.to_string()),
-                    Ok(None) | Err(()) => Ok(()),
+                    None => Ok(()),
                 }
             }
             STATISTICS => {
@@ -432,21 +434,32 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(config()["language"], "pt");
-        // the country of new teams, searched (by its code: "Itália" in
-        // Portuguese)
+        // the country of new teams, searched: saved once written whole, or
+        // chosen among the ones offered (their names), in the language of
+        // the app ("Itália" in Portuguese)
         settings.key(key!(down), s);
-        settings.update(
-            crate::settings::Message::General(Message::Form(form::Message::Input(
-                COUNTRY,
-                "IT".into(),
-            ))),
-            s,
-        );
-        assert_eq!(
-            core.default_country().map(|c| c.value.to_string()),
-            Some("IT".to_string())
-        );
+        let write = |settings: &mut crate::settings::SettingsScreen, text: &str| {
+            settings.update(
+                crate::settings::Message::General(Message::Form(form::Message::Input(
+                    COUNTRY,
+                    text.into(),
+                ))),
+                s,
+            );
+        };
+        let saved = || core.default_country().map(|c| c.value.to_string());
+        write(&mut settings, "Itália");
+        assert_eq!(saved().as_deref(), Some("IT"));
+        // while written, a code is no country chosen: "Ge" isn't Georgia
+        // on the way to Germany
+        for text in ["A", "Al", "Ge", "IT", "Alem"] {
+            write(&mut settings, text);
+            assert_eq!(saved().as_deref(), Some("IT"), "{text}");
+        }
+        write(&mut settings, "Alemanha");
+        assert_eq!(saved().as_deref(), Some("DE"));
         // the countries offered close with Esc, the settings stay
+        write(&mut settings, "Alem");
         assert!(settings.general.form.offering());
         assert!(matches!(
             settings.key(scout4all_keys::BACK_KEY, s),
