@@ -93,9 +93,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -696,10 +700,14 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
     }
 }
 
-/** The time of the event chosen, written. */
+/** The time of the event chosen, written: the one there selected, the
+ * keyboard open, so that what is typed takes its place. */
 @Composable
 private fun TimeDialog(model: VideoModel, initial: String, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf(initial) }
+    var field by remember { mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length))) }
+    val text = field.text
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
     var invalid by remember { mutableStateOf(false) }
     val onlyThis = remember { model.timeOnlyThis() }
     val scope = rememberCoroutineScope()
@@ -708,11 +716,12 @@ private fun TimeDialog(model: VideoModel, initial: String, onDismiss: () -> Unit
         title = { Text(stringResource(R.string.video_anchor_time)) },
         text = {
             OutlinedTextField(
-                value = text,
+                value = field,
                 onValueChange = {
-                    text = it
-                    invalid = false
+                    if (it.text != field.text) invalid = false
+                    field = it
                 },
+                modifier = Modifier.focusRequester(focus),
                 singleLine = true,
                 isError = invalid,
                 supportingText = {
