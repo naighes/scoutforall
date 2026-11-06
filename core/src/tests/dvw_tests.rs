@@ -647,7 +647,13 @@ mod tests {
                 };
                 let mut all_ok = true;
                 for set in &file.sets {
-                    match translate_set(&file, &us, set.set_number, date, max_substitutions) {
+                    match translate_set(
+                        &file,
+                        &us,
+                        set.set_number,
+                        date.and_time(NaiveTime::MIN).and_utc().fixed_offset(),
+                        max_substitutions,
+                    ) {
                         Ok((entry, used)) => {
                             sets_ok += 1;
                             events += entry.events.len();
@@ -770,7 +776,13 @@ mod tests {
                 let mut ours: BTreeMap<u8, [i64; 13]> = BTreeMap::new();
                 let mut translated = 0;
                 for set in &file.sets {
-                    let Ok((entry, _)) = translate_set(&file, &us, set.set_number, date, 6) else {
+                    let Ok((entry, _)) = translate_set(
+                        &file,
+                        &us,
+                        set.set_number,
+                        date.and_time(NaiveTime::MIN).and_utc().fixed_offset(),
+                        6,
+                    ) else {
                         continue;
                     };
                     let Ok(snapshot) = entry.compute_snapshot(6) else {

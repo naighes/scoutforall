@@ -2536,7 +2536,8 @@ pub(crate) mod screen_tests {
             .filter_map(|e| e.offset_ms)
             .min()
             .unwrap();
-        assert_eq!(spans[0].from, first.unsigned_abs() - 5000);
+        // from the margin before, not before the start of the video
+        assert_eq!(spans[0].from, first.unsigned_abs().saturating_sub(5000));
         assert!(spans[0].to >= first.unsigned_abs() + 5000);
         // the clips playing: the one with the action chosen in it
         let playing = |screen: &VideoScreen, at: u64| {
@@ -2554,7 +2555,7 @@ pub(crate) mod screen_tests {
         screen.update(Message::MarginInput(Margin::Before, "30".into()));
         screen.update(Message::MarginInput(Margin::After, "20".into()));
         let wider = screen.spans();
-        assert_eq!(wider[0].from, first.unsigned_abs() - 30_000);
+        assert_eq!(wider[0].from, first.unsigned_abs().saturating_sub(30_000));
         assert!(wider[0].to >= first.unsigned_abs() + 20_000);
     }
 
@@ -2867,7 +2868,7 @@ pub(crate) mod screen_tests {
         assert_eq!(screen.position(), start);
         // with the clips, their margin before
         screen.key(key!(k));
-        assert_eq!(screen.start_ms(), (first - 5000).unsigned_abs());
+        assert_eq!(screen.start_ms(), (first - 5000).max(0).unsigned_abs());
         screen.key(key!(k));
         // the whole video, to tie the first event again
         screen.update(Message::WholeVideo);

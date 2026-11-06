@@ -387,14 +387,8 @@ pub fn match_plan(
     let mut sets = vec![];
     let mut mappings = Mappings::new();
     for result in &file.sets {
-        let (set, used) = translate_set(
-            file,
-            &us,
-            result.set_number,
-            date.date_naive(),
-            max_substitutions,
-        )
-        .map_err(MatchIssue::Set)?;
+        let (set, used) = translate_set(file, &us, result.set_number, date, max_substitutions)
+            .map_err(MatchIssue::Set)?;
         let snapshot = set.compute_snapshot(max_substitutions).map_err(|e| {
             MatchIssue::Set(TranslateError {
                 set_number: result.set_number,

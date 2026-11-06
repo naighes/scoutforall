@@ -18,7 +18,7 @@ use crate::{
         technique::{ServeTypeEnum, TechniqueEnum},
     },
 };
-use chrono::{DateTime, NaiveDate, NaiveTime, TimeDelta, Utc};
+use chrono::{DateTime, FixedOffset, NaiveTime, TimeDelta, Utc};
 use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 
@@ -109,7 +109,7 @@ pub fn translate_set(
     file: &DvwFile,
     us: &Us,
     set_number: u8,
-    date: NaiveDate,
+    date: DateTime<FixedOffset>,
     max_substitutions: u8,
 ) -> Result<(SetEntry, Mappings), TranslateError> {
     let fail = |line: Option<usize>, issue: Issue| TranslateError {
@@ -121,6 +121,7 @@ pub fn translate_set(
     let start = set_start(lines, us, set_number).map_err(|(line, issue)| fail(line, issue))?;
     let snapshot = Snapshot::new(&start, max_substitutions)
         .map_err(|e| fail(None, Issue::Event(e.to_string())))?;
+    let video_clock = has_video_clock(file);
     let mut set = SetTranslator {
         us,
         symbols: file.winning_symbols.clone().unwrap_or_else(default_symbols),
@@ -128,9 +129,9 @@ pub fn translate_set(
         events: vec![],
         rally_start: 0,
         mappings: Mappings::new(),
-        clock: date.and_time(NaiveTime::MIN).and_utc(),
+        clock: midnight(date, video_clock),
         date,
-        video_clock: has_video_clock(file),
+        video_clock,
         rally_number: 0,
         chosen: HashMap::new(),
         earlier: None,
@@ -149,6 +150,27 @@ pub fn translate_set(
         )),
         None => Err(fail(None, Issue::Unfinished)),
     }
+}
+
+/// Where the times of the events start from: midnight of the day of the
+/// match in UTC on the video clock (`video::video_midnight`), otherwise in
+/// the time zone of the match, as its clock.
+fn midnight(date: DateTime<FixedOffset>, video_clock: bool) -> DateTime<Utc> {
+    match video_clock {
+        true => date.date_naive().and_time(NaiveTime::MIN).and_utc(),
+        false => wall_clock(date, NaiveTime::MIN),
+    }
+}
+
+/// The time of the clock of the file on the day of the match: a local time,
+/// in the time zone of the match (as the start of a video from its name).
+fn wall_clock(date: DateTime<FixedOffset>, time: NaiveTime) -> DateTime<Utc> {
+    let local = date.date_naive().and_time(time);
+    // out of the range of the dates only at their ends
+    local
+        .checked_sub_offset(*date.offset())
+        .unwrap_or(local)
+        .and_utc()
 }
 
 /// Whether the scout is linked to the video of the match: the times of the
@@ -407,7 +429,8 @@ struct SetTranslator<'a> {
     rally_start: usize,
     mappings: Mappings,
     clock: DateTime<Utc>,
-    date: NaiveDate,
+    // the match: its day, and the time zone of the clock of the file
+    date: DateTime<FixedOffset>,
     // the times from the seconds in the video, not from the clock
     video_clock: bool,
     // the rallies translated so far
@@ -568,7 +591,7 @@ impl SetTranslator<'_> {
     // the time of the line (in the video, when linked to it), or a second
     // after the previous event
     fn tick(&mut self, line: &ScoutLine) {
-        let midnight = self.date.and_time(NaiveTime::MIN).and_utc();
+        let midnight = midnight(self.date, self.video_clock);
         let time = match self.video_clock {
             true => line
                 .video_seconds
@@ -577,7 +600,7 @@ impl SetTranslator<'_> {
                 .time
                 .as_deref()
                 .and_then(|t| NaiveTime::parse_from_str(&t.replace('.', ":"), "%H:%M:%S").ok())
-                .map(|t| self.date.and_time(t).and_utc()),
+                .map(|t| wall_clock(self.date, t)),
         };
         self.clock = match time {
             Some(t) if t > self.clock => t,

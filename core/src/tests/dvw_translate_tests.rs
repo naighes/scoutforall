@@ -14,7 +14,7 @@ mod tests {
     use crate::shapes::refusal::Refusal;
     use crate::shapes::snapshot::EventEntry;
     use EventTypeEnum::*;
-    use chrono::NaiveDate;
+    use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, Utc};
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -25,6 +25,7 @@ mod tests {
 
     /// The file being written: the six on court of both teams, P1 first,
     /// the score, who serves.
+    #[derive(Clone)]
     struct File {
         lines: Vec<String>,
         home: [u8; 6],
@@ -202,6 +203,15 @@ mod tests {
     /// The set translated for the home team: the events, and the number of
     /// each player.
     fn translated_events(file: &File) -> Result<(Vec<EventEntry>, HashMap<Uuid, u8>), Issue> {
+        translated_in(file, 0)
+    }
+
+    /// The set translated for the home team, played on 2015-01-25 in the
+    /// time zone `east_s` seconds east of UTC.
+    fn translated_in(
+        file: &File,
+        east_s: i32,
+    ) -> Result<(Vec<EventEntry>, HashMap<Uuid, u8>), Issue> {
         let dvw = parse(file.text().as_bytes()).expect("expected a DataVolley file");
         let players: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
         let numbers: HashMap<Uuid, u8> = players.iter().map(|(n, id)| (*id, *n)).collect();
@@ -210,7 +220,12 @@ mod tests {
             players: &players,
             liberos: &[HOME_LIBERO],
         };
-        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_local_timezone(FixedOffset::east_opt(east_s).expect("an offset"))
+            .single()
+            .expect("a time");
         translate_set(&dvw, &us, 1, date, 6)
             .map(|(set, _)| (set.events, numbers))
             .map_err(|e| e.issue)
@@ -309,6 +324,50 @@ mod tests {
         // the same time on every line: a second after the previous one
         let first = events.first().map(|e| (e.timestamp - start).num_seconds());
         assert!(first.is_some_and(|s| (0..60).contains(&s)), "{first:?}");
+    }
+
+    /// The clock of the file is the local time where the match is played
+    /// (as the names of the videos): 18:30 in Rome is 17:30 UTC; 08:00 in
+    /// Tokyo is the day before in UTC, not after midnight UTC.
+    #[test]
+    fn the_clock_of_the_file_in_the_time_zone_of_the_match() {
+        let mut file = File::new();
+        file.received_by(2);
+        let at = |time: &str, east_s: i32| {
+            let file = timed(file.clone().finished(), time, false);
+            let (events, _) = translated_in(&file, east_s).expect("expected the set");
+            events.first().map(|e| e.timestamp)
+        };
+        let utc = |d: u32, h: u32, m: u32| {
+            NaiveDate::from_ymd_opt(2015, 1, d)
+                .and_then(|d| d.and_hms_opt(h, m, 0))
+                .expect("a time")
+                .and_utc()
+        };
+        let near = |t: Option<DateTime<Utc>>, expected: DateTime<Utc>| {
+            t.is_some_and(|t| (0..60).contains(&(t - expected).num_seconds()))
+        };
+        assert!(near(at("18.30.00", 3600), utc(25, 17, 30)));
+        assert!(near(at("08.00.00", 9 * 3600), utc(24, 23, 0)));
+        assert!(near(at("18.30.00", -5 * 3600), utc(25, 23, 30)));
+    }
+
+    /// On the video clock the time zone doesn't count: the seconds from
+    /// midnight UTC, as the video reads them (`video::video_midnight`).
+    #[test]
+    fn the_video_clock_whatever_the_time_zone() {
+        let mut file = File::new();
+        file.received_by(2);
+        let file = timed(file.finished(), "18.30.00", true);
+        let times = |east_s| {
+            translated_in(&file, east_s)
+                .expect("expected the set")
+                .0
+                .iter()
+                .map(|e| e.timestamp)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(times(3600), times(0));
     }
 
     /// The libero touching as it plays: nothing to change.
@@ -493,7 +552,11 @@ mod tests {
             players: &players,
             liberos: &[HOME_LIBERO],
         };
-        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
         let error = translate_set(&dvw, &us, 1, date, 6).expect_err("the dig refused");
         assert_eq!(
             error.issue,
@@ -1209,7 +1272,11 @@ mod tests {
             players: &players,
             liberos: &[HOME_LIBERO],
         };
-        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
         let (set, _) = translate_set(&dvw, &us, 1, date, 6).expect("the set");
         assert_eq!(set.events[0].eval, Some(EvalEnum::Positive));
     }
@@ -1380,7 +1447,11 @@ mod tests {
             players: &players,
             liberos: &[HOME_LIBERO],
         };
-        let date = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
         let (set, _): (SetEntry, _) = translate_set(&dvw, &us, 1, date, 6).expect("the set");
         let keys = set.event_keys(6).expect("replayed");
         let zone = keys
