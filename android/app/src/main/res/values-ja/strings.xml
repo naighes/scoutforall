@@ -205,8 +205,8 @@
     <string name="report_body">何が起きましたか？\n\n本来はどうなるはずでしたか？\n\n---\n%1$s</string>
     <string name="no_app_to_open">開けるアプリがありません</string>
     <!-- archives -->
-    <string name="export_team">チームをエクスポート</string>
-    <string name="export_match">試合をエクスポート</string>
+    <string name="export_team">チームを共有</string>
+    <string name="export_match">試合を共有</string>
     <string name="share">共有…</string>
     <string name="save_to_file">ファイルに保存…</string>
     <string name="archive_saved">保存しました</string>

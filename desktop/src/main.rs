@@ -23,6 +23,7 @@ mod keymap;
 mod live;
 mod scouting;
 mod settings;
+mod share;
 mod splash;
 mod start;
 mod stats;
@@ -156,6 +157,8 @@ struct App {
     notice: Option<String>,
     /// an archive chosen, to confirm, over the screen
     importing: Option<transfer::Importing>,
+    /// a file made, to share or save
+    sharing: Option<transfer::Sharing>,
     /// the terms of use, at the first start and when they change: over
     /// everything until accepted
     terms: Option<scout4all_mobile::Terms>,
@@ -212,6 +215,9 @@ enum Message {
     /// the file chosen (none: none) to import into the team, if given
     Picked(Option<String>, Option<transfer::Picked>),
     Importing(transfer::Message),
+    Sharing(transfer::ShareMessage),
+    /// the sheet of the system shown, or why not
+    Shared(Result<(), String>),
     AcceptTerms,
     /// the statistics sent or not, from the terms
     ToggleStatistics,
@@ -263,6 +269,7 @@ impl App {
             error,
             notice: None,
             importing: None,
+            sharing: None,
             terms: None,
             focused: None,
             update: Update::None,
@@ -431,19 +438,53 @@ impl App {
         }
     }
 
-    /// The archive made, then where to save it chosen.
+    /// The archive made, then shared or saved where chosen (only saved
+    /// where the system has no sheet to share with).
     fn export(&mut self, export: transfer::Export) -> Task<Message> {
+        let s = self.strings;
+        let heading = match export {
+            transfer::Export::Team(_) => s.export_team,
+            transfer::Export::Match(..) => s.export_match,
+            transfer::Export::Report(..) => s.match_report,
+        };
         match transfer::archive(&self.core, &export) {
             Ok((name, bytes)) => {
-                let bytes = Arc::new(bytes);
-                Task::perform(transfer::save_to(name), move |path| {
-                    Message::Exported(path, bytes.clone())
-                })
+                let sharing = transfer::Sharing {
+                    heading,
+                    name,
+                    bytes: Arc::new(bytes),
+                };
+                match share::NATIVE {
+                    true => {
+                        self.sharing = Some(sharing);
+                        Task::none()
+                    }
+                    false => save(sharing),
+                }
             }
             Err(e) => {
                 self.error = Some(e.to_string());
                 Task::none()
             }
+        }
+    }
+
+    /// The file shared with the sheet of the system, or saved: chosen in
+    /// the dialog.
+    fn sharing(&mut self, message: transfer::ShareMessage) -> Task<Message> {
+        let Some(sharing) = self.sharing.take() else {
+            return Task::none();
+        };
+        match message {
+            transfer::ShareMessage::Cancel => Task::none(),
+            transfer::ShareMessage::Save => save(sharing),
+            transfer::ShareMessage::Share => match share::staged(&sharing.name, &sharing.bytes) {
+                Ok(path) => share::share(path, sharing.heading.to_string()).map(Message::Shared),
+                Err(e) => {
+                    self.error = Some(e);
+                    Task::none()
+                }
+            },
         }
     }
 
@@ -627,7 +668,11 @@ impl App {
     /// The text field of the screen the keys are on, if any.
     fn focus_id(&self) -> Option<Id> {
         match (&self.settings, &self.screen) {
-            (_, _) if self.importing.is_some() || self.terms.is_some() => None,
+            (_, _)
+                if self.importing.is_some() || self.sharing.is_some() || self.terms.is_some() =>
+            {
+                None
+            }
             (Some(settings), _) => settings.focus_id(),
             (None, Screen::Home(screen)) => screen.focus_id(),
             (None, Screen::Team(screen)) => screen.focus_id(),
@@ -866,8 +911,26 @@ impl App {
                 return Task::none();
             }
             Message::Picked(_, None) => return Task::none(),
+            Message::Shared(Err(e)) => {
+                self.error = Some(e);
+                return Task::none();
+            }
+            Message::Shared(Ok(())) => return Task::none(),
             other => other,
         };
+        // the file to share, while asked, takes the keys
+        let chosen = match (&message, &self.sharing) {
+            (Message::Key(ck), Some(sharing)) => match sharing.key(*ck) {
+                Some(chosen) => Some(chosen),
+                None => return Task::none(),
+            },
+            (Message::Sharing(chosen), Some(_)) => Some(chosen.clone()),
+            (Message::Back | Message::GoHome, Some(_)) => Some(transfer::ShareMessage::Cancel),
+            _ => None,
+        };
+        if let Some(chosen) = chosen {
+            return self.sharing(chosen);
+        }
         if let Message::Quit = message {
             return iced::exit();
         }
@@ -1013,6 +1076,15 @@ impl App {
                 // the terms, over everything until accepted
                 _ if self.terms.is_some() => match &self.terms {
                     Some(terms) => (self.terms_view(terms), self.terms_hints(), false),
+                    None => (space::vertical().into(), vec![], false),
+                },
+                // the file to share, over the screen
+                _ if self.sharing.is_some() => match &self.sharing {
+                    Some(sharing) => (
+                        sharing.view(s, c).map(Message::Sharing),
+                        sharing.hints(s),
+                        true,
+                    ),
                     None => (space::vertical().into(), vec![], false),
                 },
                 // the archive to import, over the screen
@@ -1504,4 +1576,12 @@ fn main() -> iced::Result {
         .theme(Main::theme)
         .subscription(Main::subscription)
         .run()
+}
+
+/// Where to save the file chosen, then it written there.
+fn save(sharing: transfer::Sharing) -> Task<Message> {
+    let bytes = sharing.bytes;
+    Task::perform(transfer::save_to(sharing.name), move |path| {
+        Message::Exported(path, bytes.clone())
+    })
 }

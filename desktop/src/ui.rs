@@ -638,11 +638,29 @@ pub fn answers<'a, M: Clone + 'a>(
     on_yes: Option<M>,
     c: Colors,
 ) -> Element<'a, M> {
-    let no = no.map(|(icon, label, message)| action(icon, &capitalized(label), message, false, c));
+    answers_with(no, vec![], icon, yes, on_yes, c)
+}
+
+/// The answers of a dialog with others between the way out and the main
+/// one (e.g. to save the file, besides sharing it).
+pub fn answers_with<'a, M: Clone + 'a>(
+    no: Option<(&'static [u8], &str, M)>,
+    others: Vec<(&'static [u8], &str, M)>,
+    icon: &'static [u8],
+    yes: &str,
+    on_yes: Option<M>,
+    c: Colors,
+) -> Element<'a, M> {
+    let others = no
+        .into_iter()
+        .chain(others)
+        .map(|(icon, label, message)| action(icon, &capitalized(label), message, false, c));
     let yes = action_maybe(icon, &capitalized(yes), on_yes, true, c);
     container(
-        iced::widget::Row::with_children(no.into_iter().chain([yes]).map(Element::from))
-            .spacing(10),
+        iced::widget::Row::with_children(others.chain([yes]).map(Element::from))
+            .spacing(10)
+            .wrap()
+            .vertical_spacing(10),
     )
     .width(Length::Fill)
     .align_x(Alignment::End)

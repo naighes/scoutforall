@@ -331,7 +331,7 @@ impl TeamScreen {
                         ("n".to_string(), new.to_string()),
                         ("e".to_string(), s.edit_team.to_string()),
                         ("i".to_string(), s.import_archive.to_string()),
-                        ("x".to_string(), s.export.to_string()),
+                        ("x".to_string(), s.export_team.to_string()),
                         ("s".to_string(), s.analysis.to_string()),
                     ],
                     remove,
@@ -400,7 +400,7 @@ impl TeamScreen {
                 ui::action(theme::icons::EDIT, s.edit_team, Message::EditTeam, false, c)
                     .width(Length::Fill),
                 ui::action(
-                    theme::icons::EXPORT,
+                    theme::icons::SHARE,
                     s.export_team,
                     Message::Export,
                     false,

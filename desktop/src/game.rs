@@ -289,7 +289,7 @@ impl MatchScreen {
                     vec![
                         action(theme::icons::STATS, s.stats, Message::Stats),
                         action(theme::icons::EDIT, s.edit_match, Message::Edit),
-                        action(theme::icons::EXPORT, s.export_match, Message::Export),
+                        action(theme::icons::SHARE, s.export_match, Message::Export),
                         action(theme::icons::PDF, s.match_report, Message::Report),
                         action(theme::icons::VIDEO, s.video, Message::Video),
                         action(theme::icons::RECORD, s.record_video, Message::Record),

@@ -6059,9 +6059,13 @@ dependencies = [
  "keyring",
  "mp4",
  "nokhwa",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "open",
  "openh264",
  "qrcode",
+ "raw-window-handle",
  "retina",
  "rfd",
  "rml_rtmp",
@@ -6076,6 +6080,8 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+ "windows 0.62.2",
+ "windows-collections",
  "winres",
 ]
 

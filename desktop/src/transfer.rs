@@ -29,6 +29,70 @@ pub enum Export {
     Report(String, String),
 }
 
+/// A file made to share (an archive, a report, a video): shared with the
+/// sheet of the system or saved where the user chooses, as on Android.
+pub struct Sharing {
+    /// what it is, as the button that made it says
+    pub heading: &'static str,
+    pub name: String,
+    pub bytes: Arc<Vec<u8>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ShareMessage {
+    Share,
+    Save,
+    Cancel,
+}
+
+impl Sharing {
+    pub fn key(&self, ck: KeyCombination) -> Option<ShareMessage> {
+        match ck {
+            k if k == BACK_KEY => Some(ShareMessage::Cancel),
+            k if k == key!(enter) => Some(ShareMessage::Share),
+            k if k == key!(s) => Some(ShareMessage::Save),
+            _ => None,
+        }
+    }
+
+    pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        vec![
+            ("Enter".to_string(), s.share.to_string()),
+            ("s".to_string(), s.save_to_file.to_string()),
+            ("Esc".to_string(), s.cancel.to_string()),
+        ]
+    }
+
+    pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, ShareMessage> {
+        let body = ui::panel(
+            None,
+            column![
+                column![
+                    text(self.heading).size(22).font(theme::fonts().bold),
+                    text(self.name.clone()).size(SIZE_SMALL).color(c.muted),
+                ]
+                .spacing(4),
+                ui::answers_with(
+                    Some((theme::icons::CLOSE, s.cancel, ShareMessage::Cancel)),
+                    vec![(theme::icons::SAVE, s.save_to_file, ShareMessage::Save)],
+                    theme::icons::SHARE,
+                    s.share,
+                    Some(ShareMessage::Share),
+                    c,
+                ),
+            ]
+            .spacing(18),
+            c,
+        );
+        container(container(body).max_width(640))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .into()
+    }
+}
+
 /// A file chosen to import: its name and what it holds.
 #[derive(Clone)]
 pub struct Picked {
@@ -292,5 +356,28 @@ impl Importing {
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The file to share: Enter shares it, `s` saves it, Esc leaves it;
+    /// the other keys do nothing.
+    #[test]
+    fn the_keys_of_the_file_to_share() {
+        let sharing = Sharing {
+            heading: "Condividi squadra",
+            name: "team.zip".into(),
+            bytes: Arc::new(vec![1, 2, 3]),
+        };
+        assert!(matches!(
+            sharing.key(key!(enter)),
+            Some(ShareMessage::Share)
+        ));
+        assert!(matches!(sharing.key(key!(s)), Some(ShareMessage::Save)));
+        assert!(matches!(sharing.key(BACK_KEY), Some(ShareMessage::Cancel)));
+        assert!(sharing.key(key!(x)).is_none());
     }
 }
