@@ -20,6 +20,7 @@ mod game;
 mod general;
 mod home;
 mod keymap;
+mod live;
 mod scouting;
 mod settings;
 mod splash;
@@ -96,6 +97,7 @@ enum Screen {
     Dvw(Box<dvw::DvwScreen>),
     Events(Box<events::EventsScreen>),
     Video(Box<video::VideoScreen>),
+    Live(Box<live::screen::LiveScreen>),
 }
 
 /// Where a key or a click leads.
@@ -115,6 +117,16 @@ enum Go {
     PickVideo,
     /// a frame of the video to allocate before it's shown
     VideoFrame(Box<video::Frame>),
+    /// the video source of the match, to record it
+    Live(String, String),
+    /// the system asked whether the cameras may be used
+    AskCameras,
+    /// the folder of the recordings to choose
+    PickRecordings,
+    /// a picture of the camera to allocate before it's shown
+    LiveFrame(Box<(Arc<video::Picture>, iced::widget::image::Handle)>),
+    /// the camera of the source screen recording, the app keeping it
+    Record,
     /// a set of the match: to start, or in progress
     Scout(home::Open),
     /// the zip of a team or of a match, to save
@@ -147,6 +159,10 @@ struct App {
     update: Update,
     /// the own window of the video, while open
     video_window: Option<window::Id>,
+    /// the camera recording a match, whatever the screen; kept until its
+    /// MP4 is saved
+    recorder: Option<live::capture::Capture>,
+    recorder_status: Option<live::capture::Status>,
 }
 
 /// The self update (`update`), as the bar shows it.
@@ -197,6 +213,10 @@ enum Message {
     Installed(Result<String, String>),
     /// a window other than the app's closed (the app's ends it)
     WindowClosed(window::Id),
+    Live(live::screen::Message),
+    /// the recording looked at: how long, saved
+    LiveTick,
+    StopRecording,
 }
 
 impl App {
@@ -238,7 +258,18 @@ impl App {
             focused: None,
             update: Update::None,
             video_window: None,
+            recorder: None,
+            recorder_status: None,
         };
+        // the recordings cut short last time (the app closed while
+        // recording): made videos of their matches
+        let folder = live::LiveConfig::read(&app.dir).folder(&app.dir);
+        for recovered in live::recover(&app.core, &app.dir, &folder) {
+            match recovered {
+                Ok(name) => app.notice = Some(ui::fill(strings.recording_recovered, &[name])),
+                Err(e) => app.error = Some(ui::fill(strings.recording_failed, &[e])),
+            }
+        }
         app.terms = (!app.core.terms_seen()).then(|| app.core.terms());
         // the matches queued while offline, sent now
         general::send_statistics(app.core.clone());
@@ -259,6 +290,7 @@ impl App {
             (None, Screen::Dvw(_)) => self.strings.import_dvw.to_string(),
             (None, Screen::Events(screen)) => screen.title(self.strings),
             (None, Screen::Video(screen)) => screen.title(self.strings),
+            (None, Screen::Live(screen)) => screen.title(self.strings),
         }
     }
 
@@ -289,6 +321,31 @@ impl App {
                 .map(|screen| Screen::Events(Box::new(screen))),
             Go::Video(team, m) => video::VideoScreen::new(core, self.dir.clone(), team, m)
                 .map(|screen| Screen::Video(Box::new(screen))),
+            Go::Live(team, m) => match &self.recorder_status {
+                // the camera taken: `r` stops the recording
+                Some(status) if status.recording.is_some() => {
+                    self.stop_recording();
+                    return Task::none();
+                }
+                _ => core.video(&team, &m).map(|(the_match, _)| {
+                    Screen::Live(Box::new(live::screen::LiveScreen::new(
+                        team,
+                        m,
+                        the_match.opponent,
+                        self.dir.clone(),
+                    )))
+                }),
+            },
+            Go::AskCameras => return ask_cameras(),
+            Go::PickRecordings => {
+                return Task::perform(pick_folder(), |folder| {
+                    Message::Live(live::screen::Message::Folder(folder))
+                });
+            }
+            Go::LiveFrame(frame) => {
+                return live::screen::allocate(frame.0, frame.1).map(Message::Live);
+            }
+            Go::Record => return self.record(),
             Go::VideoFrame(frame) => {
                 return video::allocate(frame.0, frame.1).map(Message::Video);
             }
@@ -453,6 +510,7 @@ impl App {
             },
             Screen::Events(e) => Go::Events(e.team_id.clone(), e.match_id.clone(), e.set_number()),
             Screen::Video(v) => Go::Video(v.team_id.clone(), v.match_id.clone()),
+            Screen::Live(l) => Go::Live(l.team_id.clone(), l.match_id.clone()),
             Screen::Start(st) => Go::Scout(home::Open {
                 team_id: st.team_id.clone(),
                 match_id: st.match_id.clone(),
@@ -536,7 +594,11 @@ impl App {
             (None, Screen::Video(screen)) => screen.focus_id(),
             (
                 None,
-                Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_) | Screen::Events(_),
+                Screen::Start(_)
+                | Screen::Scouting(_)
+                | Screen::Stats(_)
+                | Screen::Events(_)
+                | Screen::Live(_),
             ) => None,
         }
     }
@@ -545,6 +607,11 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         let handled = match message {
             Message::WindowClosed(id) => self.window_closed(id),
+            Message::LiveTick => self.live_tick(),
+            Message::StopRecording => {
+                self.stop_recording();
+                Task::none()
+            }
             message => self.handle(message),
         };
         let handled = Task::batch([handled, self.video_window()]);
@@ -580,6 +647,80 @@ impl App {
                 ])
             }
         }
+    }
+
+    /// The camera of the source screen recording into the folder chosen,
+    /// the app keeping it; back to the match.
+    fn record(&mut self) -> Task<Message> {
+        let Screen::Live(screen) = &mut self.screen else {
+            return Task::none();
+        };
+        let Some((capture, quality, folder)) = screen.take_capture() else {
+            return Task::none();
+        };
+        let (team, m) = (screen.team_id.clone(), screen.match_id.clone());
+        let started = chrono::Local::now();
+        let base = live::capture::base_name(&folder, started);
+        let sidecar = live::Sidecar {
+            team_id: team.clone(),
+            match_id: m.clone(),
+            started: started.fixed_offset(),
+        };
+        let written = std::fs::create_dir_all(&folder)
+            .map_err(|e| format!("{}: {e}", folder.display()))
+            .and_then(|()| live::write_sidecar(&base, &sidecar));
+        match written {
+            Ok(()) => {
+                capture.record(base, started, quality);
+                self.recorder = Some(capture);
+                self.go(Go::Match(team, m))
+            }
+            Err(e) => {
+                self.error = Some(e);
+                Task::none()
+            }
+        }
+    }
+
+    fn stop_recording(&mut self) {
+        if let Some(recorder) = &self.recorder {
+            recorder.stop();
+        }
+    }
+
+    /// The recording looked at: the ones saved given to their matches; the
+    /// camera let go once nothing is left to save.
+    fn live_tick(&mut self) -> Task<Message> {
+        let s = self.strings;
+        let Some(recorder) = &self.recorder else {
+            return Task::none();
+        };
+        let status = recorder.status();
+        for done in recorder.take_done() {
+            let attached = done.result.and_then(|_| {
+                live::attach(&self.core, &self.dir, &done.base, &done.mp4, done.started)
+            });
+            match attached {
+                Ok(()) => {
+                    self.notice = Some(ui::fill(
+                        s.recording_saved,
+                        &[done.mp4.display().to_string()],
+                    ));
+                }
+                Err(e) => self.error = Some(ui::fill(s.recording_failed, &[e])),
+            }
+        }
+        let idle = status
+            .as_ref()
+            .is_none_or(|st| st.recording.is_none() && !st.saving);
+        match idle {
+            true => {
+                self.recorder = None;
+                self.recorder_status = None;
+            }
+            false => self.recorder_status = status,
+        }
+        Task::none()
     }
 
     /// The own window of the video, open while the screen wants it: closed
@@ -797,6 +938,14 @@ impl App {
                 let outcome = screen.key(ck);
                 video_go(screen, outcome)
             }
+            (Message::Live(m), Screen::Live(screen)) => {
+                let outcome = screen.update(m);
+                live_go(screen, outcome)
+            }
+            (Message::Key(ck), Screen::Live(screen)) => {
+                let outcome = screen.key(ck);
+                live_go(screen, outcome)
+            }
             (Message::Key(ck), Screen::Dvw(screen)) => {
                 let outcome = screen.key(s, ck);
                 dvw_go(screen, outcome)
@@ -858,6 +1007,9 @@ impl App {
                 (None, None, Screen::Video(screen)) => {
                     (screen.view(s, c).map(Message::Video), screen.hints(s), true)
                 }
+                (None, None, Screen::Live(screen)) => {
+                    (screen.view(s, c).map(Message::Live), screen.hints(s), true)
+                }
                 (None, None, Screen::Dvw(screen)) => {
                     (screen.view(s, c).map(Message::Dvw), screen.hints(s), true)
                 }
@@ -867,6 +1019,25 @@ impl App {
                     true,
                 ),
             };
+        // the recording, on every screen: how long, a click stops it
+        let recording: Vec<Element<'_, Message>> = match &self.recorder_status {
+            Some(live::capture::Status {
+                recording: Some(r), ..
+            }) => vec![ui::tip(
+                ui::pill(
+                    &format!("● REC {}", video::clock(r.elapsed_ms)),
+                    true,
+                    Some(Message::StopRecording),
+                    c,
+                ),
+                s.stop_recording,
+                c,
+            )],
+            Some(live::capture::Status { saving: true, .. }) => {
+                vec![ui::pill(s.saving_recording, false, None, c)]
+            }
+            _ => vec![],
+        };
         let update: Vec<Element<'_, Message>> = match &self.update {
             Update::None => vec![],
             Update::Available(version) => vec![ui::pill(
@@ -891,8 +1062,9 @@ impl App {
             back.then_some(Message::Back),
             home,
             self.title(),
-            update
+            recording
                 .into_iter()
+                .chain(update)
                 .chain([
                     ui::bar_button(theme::icons::THEME, s.switch_theme, Message::ToggleTheme, c),
                     ui::bar_button(theme::icons::SETTINGS, s.settings, Message::OpenSettings, c),
@@ -987,7 +1159,15 @@ impl App {
             (Screen::Video(screen), None) if screen.awake() => {
                 window::frames().map(|_| Message::Video(video::Message::Tick))
             }
+            (Screen::Live(screen), None) if screen.awake() => {
+                window::frames().map(|_| Message::Live(live::screen::Message::Tick))
+            }
             _ => Subscription::none(),
+        };
+        // the recording, twice a second, whatever the screen
+        let recording = match self.recorder {
+            Some(_) => Subscription::run(live_ticks),
+            None => Subscription::none(),
         };
         let keys = event::listen_with(|event, status, _| match (event, status) {
             (
@@ -1005,7 +1185,7 @@ impl App {
             }
             _ => None,
         });
-        Subscription::batch([keys, video])
+        Subscription::batch([keys, video, recording])
     }
 }
 
@@ -1028,6 +1208,51 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
     }
+}
+
+fn live_go(screen: &live::screen::LiveScreen, outcome: live::screen::Outcome) -> Go {
+    match outcome {
+        live::screen::Outcome::Stay => Go::Stay,
+        live::screen::Outcome::Back => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
+        live::screen::Outcome::AskPermission => Go::AskCameras,
+        live::screen::Outcome::PickFolder => Go::PickRecordings,
+        live::screen::Outcome::Allocate(frame, handle) => Go::LiveFrame(Box::new((frame, handle))),
+        live::screen::Outcome::Record => Go::Record,
+    }
+}
+
+/// Whether the cameras may be used: the Mac asks the user the first time.
+fn ask_cameras() -> Task<Message> {
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    let tx = Mutex::new(Some(tx));
+    live::capture::ask_permission(move |allowed| {
+        if let Some(tx) = tx.lock().ok().and_then(|mut tx| tx.take()) {
+            let _ = tx.send(allowed);
+        }
+    });
+    Task::perform(async move { rx.await.unwrap_or(false) }, |allowed| {
+        Message::Live(live::screen::Message::Allowed(allowed))
+    })
+}
+
+async fn pick_folder() -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
+        .pick_folder()
+        .await
+        .map(|f| f.path().to_path_buf())
+}
+
+/// A tick every half a second, from a thread: no timer in the executor.
+fn live_ticks() -> impl iced::futures::Stream<Item = Message> {
+    iced::futures::stream::unfold((), |()| async {
+        let (tx, rx) = iced::futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let _ = tx.send(());
+        });
+        let _ = rx.await;
+        Some((Message::LiveTick, ()))
+    })
 }
 
 fn video_go(screen: &video::VideoScreen, outcome: video::Outcome) -> Go {
@@ -1074,6 +1299,7 @@ fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
             Go::Events(screen.team_id.clone(), screen.match_id.clone(), set)
         }
         game::Outcome::Video => Go::Video(screen.team_id.clone(), screen.match_id.clone()),
+        game::Outcome::Record => Go::Live(screen.team_id.clone(), screen.match_id.clone()),
         game::Outcome::Report => Go::Export(transfer::Export::Report(
             screen.team_id.clone(),
             screen.match_id.clone(),

@@ -27,6 +27,7 @@ pub enum Message {
     Export,
     Report,
     Video,
+    Record,
     /// the events of the set, to correct them
     Set(u8),
     Form(form::Message),
@@ -44,6 +45,8 @@ pub enum Outcome {
     Report,
     /// the video of the match
     Video,
+    /// a camera to record the match with (or the recording stopped)
+    Record,
     /// the events of the set, to correct them
     Events(u8),
 }
@@ -135,6 +138,7 @@ impl MatchScreen {
             (Message::Export, None) => Outcome::Export,
             (Message::Report, None) => Outcome::Report,
             (Message::Video, None) => Outcome::Video,
+            (Message::Record, None) => Outcome::Record,
             (Message::Set(n), None) => Outcome::Events(n),
             (Message::Edit, None) => {
                 self.edit(s);
@@ -156,6 +160,7 @@ impl MatchScreen {
             (None, k) if k == key!(x) => Outcome::Export,
             (None, k) if k == key!(p) => Outcome::Report,
             (None, k) if k == key!(v) => Outcome::Video,
+            (None, k) if k == key!(r) => Outcome::Record,
             (None, k) if k == key!(e) => {
                 self.edit(s);
                 Outcome::Stay
@@ -196,6 +201,7 @@ impl MatchScreen {
                     ("x".to_string(), s.export_match.to_string()),
                     ("p".to_string(), s.match_report.to_string()),
                     ("v".to_string(), s.video.to_string()),
+                    ("r".to_string(), s.record_video.to_string()),
                     (
                         format!("1–{}", self.details.sets.len().max(1)),
                         s.set_events.to_string(),
@@ -265,6 +271,7 @@ impl MatchScreen {
                     ),
                     ui::pill(s.match_report, false, Some(Message::Report), c),
                     ui::pill(s.video, false, Some(Message::Video), c),
+                    ui::pill(s.record_video, false, Some(Message::Record), c),
                 ]
                 .spacing(10)
                 .wrap()

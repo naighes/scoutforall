@@ -13,7 +13,8 @@
 mod files;
 mod list;
 mod player;
-mod source;
+pub use player::Frame as Picture;
+pub mod source;
 mod sync;
 
 use {
@@ -1070,7 +1071,7 @@ fn event_ref(e: &VideoEvent) -> EventRef {
 }
 
 /// `h:mm:ss`, or `m:ss` under the hour.
-fn clock(ms: u64) -> String {
+pub fn clock(ms: u64) -> String {
     let seconds = ms / 1000;
     let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
     match h {
@@ -1092,7 +1093,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod screen_tests {
+pub(crate) mod screen_tests {
     use {
         super::*,
         scout4all_core::video::{offset_ms, start_from_name},
@@ -1101,7 +1102,7 @@ mod screen_tests {
 
     /// The match of the tests of the TUI, three sets, imported: the file
     /// has no video column, the events are on the clock.
-    fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
+    pub(crate) fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
         let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
