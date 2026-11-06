@@ -141,6 +141,9 @@ pub struct VideoScreen {
     selected: usize,
     /// the list to scroll to the event chosen
     scroll: bool,
+    /// the event chosen follows the video: off once chosen with the keys,
+    /// on again when the video is moved or played
+    follow: bool,
     /// the time of the event chosen, being written
     editing: Option<String>,
     /// the time written isn't one
@@ -176,6 +179,7 @@ impl VideoScreen {
             events: vec![],
             selected: 0,
             scroll: false,
+            follow: true,
             editing: None,
             invalid_time: false,
         };
@@ -216,10 +220,23 @@ impl VideoScreen {
     /// Where the video goes for the event: a little before it, not before
     /// the start; none when not lined up.
     fn event_target(&self, i: usize) -> Option<u64> {
-        self.events
-            .get(i)
-            .and_then(|e| e.offset_ms)
-            .map(|ms| (ms - LEAD_MS).max(0).unsigned_abs())
+        self.events.get(i).and_then(target)
+    }
+
+    /// The event being seen chosen, the list after it, while following.
+    fn follow_video(&mut self, position_ms: u64) {
+        let seen = current(&self.events, position_ms);
+        // the one chosen at the same time as the one seen stays
+        let same_time = seen.is_some_and(|i| {
+            self.events.get(i).and_then(target) == self.event_target(self.selected)
+        });
+        match (self.follow && !same_time, seen) {
+            (true, Some(i)) if i != self.selected => {
+                self.selected = i;
+                self.scroll = true;
+            }
+            _ => {}
+        }
     }
 
     /// The field the keys go to, while the time is written.
@@ -375,6 +392,9 @@ impl VideoScreen {
     /// The frame of the player, to allocate once it's a new one.
     fn tick(&mut self) -> Outcome {
         self.status = self.player.as_ref().and_then(Player::status);
+        if let Some(position) = self.status.as_ref().map(|s| s.position_ms) {
+            self.follow_video(position);
+        }
         match self.status.as_ref().and_then(|s| s.frame.clone()) {
             Some(frame) if frame.serial > self.requested => {
                 self.requested = frame.serial;
@@ -411,6 +431,7 @@ impl VideoScreen {
     }
 
     fn play_pause(&mut self) {
+        self.follow = true;
         if let Some(player) = &self.player {
             match self.status.as_ref().is_some_and(|s| s.playing) {
                 true => player.pause(),
@@ -430,6 +451,7 @@ impl VideoScreen {
     }
 
     fn seek(&mut self, ms: u64) {
+        self.follow = true;
         if let Some(player) = &self.player {
             player.seek(ms);
         }
@@ -573,8 +595,14 @@ impl VideoScreen {
                 }
             }
             k if k == key!(c) => return self.choose(),
-            k if k == key!(up) => self.select(self.selected.saturating_sub(1)),
-            k if k == key!(down) => self.select(self.selected + 1),
+            k if k == key!(up) => {
+                self.follow = false;
+                self.select(self.selected.saturating_sub(1));
+            }
+            k if k == key!(down) => {
+                self.follow = false;
+                self.select(self.selected + 1);
+            }
             k if k == key!(enter) => self.go_to_event(self.selected),
             k if k == key!(a) => self.anchor_event(self.position()),
             k if k == key!(t) => self.edit_time(),
@@ -894,6 +922,24 @@ pub async fn pick(filter: &'static str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Where the video goes for the event: `LEAD_MS` before it, not before
+/// the start; none when not lined up.
+fn target(e: &VideoEvent) -> Option<u64> {
+    e.offset_ms.map(|ms| (ms - LEAD_MS).max(0).unsigned_abs())
+}
+
+/// The event being seen at `position_ms`: the latest whose target the video
+/// passed (the one gone to stays the one seen); the later in the list when
+/// two have the same time. None before the first.
+fn current(events: &[VideoEvent], position_ms: u64) -> Option<usize> {
+    events
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| target(e).filter(|t| *t <= position_ms).map(|t| (t, i)))
+        .max()
+        .map(|(_, i)| i)
+}
+
 /// The event as an anchor names it.
 fn event_ref(e: &VideoEvent) -> EventRef {
     EventRef {
@@ -1117,6 +1163,64 @@ mod screen_tests {
             *again.the_match.date.offset(),
         );
         assert_eq!(Some(first.at), start.map(|t| t.to_utc()));
+    }
+
+    /// The event seen chosen as the video goes, from the one gone to; the
+    /// keys stop it, going to an event starts it again.
+    #[test]
+    fn the_event_chosen_follows_the_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        let rally = screen
+            .events
+            .iter()
+            .position(|e| e.offset_ms > screen.events[0].offset_ms)
+            .unwrap();
+        let at = |screen: &VideoScreen, i: usize| screen.event_target(i).unwrap();
+        // gone to: that one, even with an event 2 s before
+        screen.go_to_event(rally);
+        screen.follow_video(at(&screen, rally));
+        assert_eq!(screen.selected, rally);
+        // a little before its time: the latest one before it
+        screen.follow_video(at(&screen, rally) - 1);
+        let before = screen.selected;
+        assert_ne!(before, rally);
+        assert!(at(&screen, before) < at(&screen, rally));
+        assert!(
+            (0..screen.events.len())
+                .all(|i| at(&screen, i) <= at(&screen, before)
+                    || at(&screen, i) >= at(&screen, rally))
+        );
+        assert!(screen.take_scroll().is_some());
+        // at its time again: one at that time (the fixture has events of
+        // other sets at the same times)
+        screen.follow_video(at(&screen, rally));
+        assert_eq!(at(&screen, screen.selected), at(&screen, rally));
+        // chosen with the keys: the video doesn't move it
+        screen.key(key!(down));
+        let chosen = screen.selected;
+        screen.follow_video(0);
+        assert_eq!(screen.selected, chosen);
+        // going to an event follows again
+        screen.key(key!(enter));
+        screen.follow_video(at(&screen, rally));
+        assert_eq!(at(&screen, screen.selected), at(&screen, rally));
+    }
+
+    #[test]
+    fn the_event_seen() {
+        let dir = tempfile::tempdir().unwrap();
+        let screen = with_file(&dir, "20150125 000000.mp4");
+        let events = &screen.events;
+        let first = target(&events[0]).unwrap();
+        // the later in the list of the ones at the same time
+        let same = events
+            .iter()
+            .rposition(|e| e.offset_ms == events[0].offset_ms)
+            .unwrap();
+        assert_eq!(current(events, first), Some(same));
+        let unplaced = with_file(&tempfile::tempdir().unwrap(), "match.mp4");
+        assert_eq!(current(&unplaced.events, 10_000_000), None);
     }
 
     /// Esc leaves the time being written, not the screen.
