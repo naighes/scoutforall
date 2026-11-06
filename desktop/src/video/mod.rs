@@ -3,12 +3,16 @@
 //! the bar goes anywhere; `c` chooses the file. Beside it the events of the
 //! match, at their time in the video when it lines up with them (`video`
 //! in the core: DataVolley, or the start of the file from its name): ↑ ↓
-//! choose one, Enter (or a click) goes a little before it. Only the desktop
-//! app has it: the profile (`video.json`) is saved next to the match.
+//! choose one, Enter (or a click) goes a little before it. By hand (when
+//! the clocks differ): `a` ties the event chosen to the moment of the
+//! video, `t` to a time written, `[` `]` shift all by half a second, `r`
+//! goes back to the sync found by itself. Only the desktop app has it: the
+//! profile (`video.json`) is saved next to the match.
 
 mod list;
 mod player;
 mod source;
+mod sync;
 
 use {
     crate::{
@@ -24,7 +28,7 @@ use {
     player::{Player, Status},
     scout4all_core::{
         shapes::r#match::MatchEntry,
-        video::{self, AnchorSource, StoredProfile, VideoFile, VideoProfile},
+        video::{self, Anchor, AnchorSource, EventRef, StoredProfile, VideoFile, VideoProfile},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{MobileError, Scout4All, VideoEvent},
@@ -41,6 +45,12 @@ const STEP_SECONDS: u64 = 5;
 /// How long before an event the video goes to it: the serve is seen
 /// coming.
 const LEAD_MS: i64 = 2000;
+
+/// How far `[` and `]` shift the sync.
+const SHIFT_MS: i64 = 500;
+
+/// The field of the time of the event.
+const TIME_FIELD: &str = "video-anchor-time";
 
 /// The speeds, `-` and `+` among them.
 const SPEEDS: [f32; 4] = [0.5, 1.0, 1.5, 2.0];
@@ -64,6 +74,16 @@ pub enum Message {
     Allocated(Arc<player::Frame>, image::Handle, Option<Allocation>),
     /// an event of the list: chosen, and the video at it
     Event(usize),
+    /// the event chosen tied to the moment of the video
+    AnchorHere,
+    /// the sync shifted, the events later in the video when positive
+    Shift(i64),
+    /// back to the sync found by itself
+    Automatic,
+    /// the time of the event chosen, to write
+    EditTime,
+    TimeInput(String),
+    TimeSubmit,
 }
 
 pub enum Outcome {
@@ -116,6 +136,10 @@ pub struct VideoScreen {
     selected: usize,
     /// the list to scroll to the event chosen
     scroll: bool,
+    /// the time of the event chosen, being written
+    editing: Option<String>,
+    /// the time written isn't one
+    invalid_time: bool,
 }
 
 impl VideoScreen {
@@ -147,6 +171,8 @@ impl VideoScreen {
             events: vec![],
             selected: 0,
             scroll: false,
+            editing: None,
+            invalid_time: false,
         };
         screen.load_events()?;
         screen.open_player();
@@ -185,6 +211,94 @@ impl VideoScreen {
             .get(i)
             .and_then(|e| e.offset_ms)
             .map(|ms| (ms - LEAD_MS).max(0).unsigned_abs())
+    }
+
+    /// The field the keys go to, while the time is written.
+    pub fn focus_id(&self) -> Option<iced::widget::Id> {
+        self.editing
+            .as_ref()
+            .map(|_| iced::widget::Id::new(TIME_FIELD))
+    }
+
+    /// The event of the list tied to the video, if any.
+    fn anchored(&self) -> Option<EventRef> {
+        self.profile
+            .as_ref()
+            .and_then(|p| p.anchor.as_ref())
+            .and_then(|a| a.event)
+    }
+
+    /// The anchor saved in place of the one there: the events lined up
+    /// again.
+    fn save_anchor(&mut self, anchor: Option<Anchor>) {
+        let Some(profile) = &self.profile else {
+            return;
+        };
+        let profile = VideoProfile {
+            anchor,
+            ..profile.clone()
+        };
+        match self.core.save_video(&self.the_match, &profile) {
+            Ok(()) => {
+                self.profile = Some(profile);
+                if let Err(e) = self.load_events() {
+                    self.error = Some(e.to_string());
+                }
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// The event chosen happens at `ms` in the video.
+    fn anchor_event(&mut self, ms: u64) {
+        let Some(e) = self.events.get(self.selected) else {
+            return;
+        };
+        let at = i64::try_from(ms).unwrap_or(i64::MAX);
+        self.save_anchor(Some(video::anchor_on(event_ref(e), e.timestamp, at)));
+    }
+
+    /// All the events shifted by `ms` in the video: the sync found by
+    /// itself becomes the user's.
+    fn shift(&mut self, ms: i64) {
+        let current = self
+            .profile
+            .as_ref()
+            .and_then(|p| video::anchor(p, &self.the_match));
+        if let Some(anchor) = current {
+            self.save_anchor(Some(Anchor {
+                offset_ms: anchor.offset_ms + ms,
+                ..anchor
+            }));
+        }
+    }
+
+    /// Writing the time of the event chosen: where it is now, or where the
+    /// video is.
+    fn edit_time(&mut self) {
+        let now = self
+            .events
+            .get(self.selected)
+            .and_then(|e| e.offset_ms)
+            .filter(|ms| *ms >= 0)
+            .map(i64::unsigned_abs)
+            .unwrap_or_else(|| self.position());
+        if !self.events.is_empty() {
+            self.editing = Some(sync::written(now));
+        }
+    }
+
+    fn submit_time(&mut self) {
+        match self.editing.as_deref().map(sync::parse_time) {
+            Some(Some(ms)) => {
+                self.editing = None;
+                self.invalid_time = false;
+                self.anchor_event(ms);
+                self.go_to_event(self.selected);
+            }
+            Some(None) => self.invalid_time = true,
+            None => {}
+        }
     }
 
     fn go_to_event(&mut self, i: usize) {
@@ -369,6 +483,15 @@ impl VideoScreen {
             Message::Chosen(Some(path)) => self.chosen(&path),
             Message::Chosen(None) => {}
             Message::Event(i) => self.go_to_event(i),
+            Message::AnchorHere => self.anchor_event(self.position()),
+            Message::Shift(ms) => self.shift(ms),
+            Message::Automatic => self.save_anchor(None),
+            Message::EditTime => self.edit_time(),
+            Message::TimeInput(text) => {
+                self.invalid_time = false;
+                self.editing = Some(text);
+            }
+            Message::TimeSubmit => self.submit_time(),
         }
         Outcome::Stay
     }
@@ -381,6 +504,14 @@ impl VideoScreen {
     }
 
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
+        // the time being written takes the keys; Esc leaves it
+        if self.editing.is_some() {
+            if ck == BACK_KEY {
+                self.editing = None;
+                self.invalid_time = false;
+            }
+            return Outcome::Stay;
+        }
         match ck {
             k if k == BACK_KEY => return Outcome::Back,
             k if k == key!(space) => self.play_pause(),
@@ -400,48 +531,45 @@ impl VideoScreen {
             k if k == key!(up) => self.select(self.selected.saturating_sub(1)),
             k if k == key!(down) => self.select(self.selected + 1),
             k if k == key!(enter) => self.go_to_event(self.selected),
+            k if k == key!(a) => self.anchor_event(self.position()),
+            k if k == key!(t) => self.edit_time(),
+            k if k == key!('[') => self.shift(-SHIFT_MS),
+            k if k == key!(']') => self.shift(SHIFT_MS),
+            k if k == key!(r) => self.save_anchor(None),
             _ => {}
         }
         Outcome::Stay
     }
 
+    /// The keys, the short way: the ones with a button of their own on
+    /// screen (the speed `-` `+`, the file `c` once chosen, `r`) left out,
+    /// for the bar to fit.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        let choose = match self.paths().is_empty() {
-            true => s.choose_video,
-            false => s.change_video,
-        };
-        let playing = [
-            (s.space.to_string(), format!("{} / {}", s.play, s.pause)),
-            (
-                "← →".to_string(),
-                format!(
-                    "{} / {}",
-                    ui::fill(s.back_seconds, &[STEP_SECONDS.to_string()]),
-                    ui::fill(s.forward_seconds, &[STEP_SECONDS.to_string()])
-                ),
-            ),
-            ("- +".to_string(), s.speed.to_string()),
-        ];
-        let playing = match self.player {
-            Some(_) => playing.to_vec(),
-            None => vec![],
-        };
-        let events = match self.events.is_empty() {
-            true => vec![],
-            false => vec![
-                ("↑ ↓".to_string(), s.match_events.to_string()),
-                ("Enter".to_string(), s.go_to_event.to_string()),
-            ],
-        };
-        let playing = [playing, events].concat();
-        [
-            playing,
-            vec![
-                ("c".to_string(), choose.to_string()),
+        if self.editing.is_some() {
+            return vec![
+                ("Enter".to_string(), s.anchor_time.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
+            ];
+        }
+        let hint = |key: &str, what: String| (key.to_string(), what);
+        let playing = match self.player {
+            Some(_) => vec![
+                hint(s.space, format!("{} / {}", s.play, s.pause)),
+                hint("← →", format!("±{STEP_SECONDS} s")),
             ],
-        ]
-        .concat()
+            None => vec![hint("c", s.choose_video.to_string())],
+        };
+        let events = match (self.events.is_empty(), &self.player) {
+            (true, _) => vec![],
+            (false, None) => vec![hint("↑ ↓ Enter", s.go_to_event.to_string())],
+            (false, Some(_)) => vec![
+                hint("↑ ↓ Enter", s.go_to_event.to_string()),
+                hint("a", s.anchor_here.to_string()),
+                hint("t", s.anchor_time.to_string()),
+                hint("[ ]", format!("±{} s", SHIFT_MS as f64 / 1000.0)),
+            ],
+        };
+        [playing, events, vec![hint("Esc", s.back.to_string())]].concat()
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -549,12 +677,89 @@ impl VideoScreen {
             false => c.danger,
         });
         let duration = self.status.as_ref().map(|st| st.duration_ms);
+        let anchored = self.anchored();
         column![
             said,
-            list::view(&self.events, self.selected, duration, s, c)
+            list::view(&self.events, self.selected, anchored, duration, s, c),
+            self.sync_view(s, c),
         ]
         .spacing(10)
         .height(Length::Fill)
+        .into()
+    }
+
+    /// Whether the user chose the sync.
+    fn anchored_by_hand(&self) -> bool {
+        self.profile.as_ref().is_some_and(|p| p.anchor.is_some())
+    }
+
+    /// The sync by hand, under the events.
+    fn sync_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let time: Element<'a, Message> = match &self.editing {
+            Some(written) => column![
+                iced::widget::text_input("m:ss.s", written)
+                    .id(iced::widget::Id::new(TIME_FIELD))
+                    .on_input(Message::TimeInput)
+                    .on_submit(Message::TimeSubmit)
+                    .size(theme::SIZE_BODY)
+                    .padding(iced::Padding::from([6, 10]))
+                    .width(Length::Fixed(140.0))
+                    .style(move |_, _| iced::widget::text_input::Style {
+                        background: c.background.into(),
+                        border: iced::Border {
+                            color: c.accent,
+                            width: 1.0,
+                            radius: 8.0.into(),
+                        },
+                        icon: c.muted,
+                        placeholder: c.muted,
+                        value: c.text,
+                        selection: iced::Color {
+                            a: 0.35,
+                            ..c.accent
+                        },
+                    }),
+                match self.invalid_time {
+                    true => text(s.invalid_time).size(SIZE_SMALL).color(c.danger),
+                    false => text(s.anchor_time).size(SIZE_SMALL).color(c.muted),
+                },
+            ]
+            .spacing(4)
+            .into(),
+            None => ui::pill(s.anchor_time, false, Some(Message::EditTime), c),
+        };
+        let half = SHIFT_MS as f64 / 1000.0;
+        let shift = row![
+            text(s.shift_sync).size(SIZE_SMALL).color(c.muted),
+            ui::pill(
+                &format!("−{half} s"),
+                false,
+                Some(Message::Shift(-SHIFT_MS)),
+                c
+            ),
+            ui::pill(
+                &format!("+{half} s"),
+                false,
+                Some(Message::Shift(SHIFT_MS)),
+                c
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        let automatic: Element<'a, Message> = match self.anchored_by_hand() {
+            true => ui::pill(s.automatic_sync, false, Some(Message::Automatic), c),
+            false => space::horizontal().width(0).into(),
+        };
+        let here: Element<'a, Message> = match self.player {
+            Some(_) => ui::pill(s.anchor_here, true, Some(Message::AnchorHere), c),
+            None => space::horizontal().width(0).into(),
+        };
+        column![
+            row![here, time].spacing(8).align_y(Alignment::Center),
+            shift,
+            automatic,
+        ]
+        .spacing(8)
         .into()
     }
 
@@ -628,6 +833,14 @@ pub async fn pick(filter: &'static str) -> Option<PathBuf> {
         .pick_file()
         .await
         .map(|f| f.path().to_path_buf())
+}
+
+/// The event as an anchor names it.
+fn event_ref(e: &VideoEvent) -> EventRef {
+    EventRef {
+        set_number: e.set_number,
+        index: e.event.index as usize,
+    }
 }
 
 /// `h:mm:ss`, or `m:ss` under the hour.
@@ -743,6 +956,89 @@ mod screen_tests {
                 &[start.format("%Y-%m-%d %H:%M:%S").to_string()]
             )
         );
+    }
+
+    /// By hand: the event chosen at the time written, the others the same
+    /// distance from it as their times; shifted, then back to the start of
+    /// the file. Kept when the screen opens again.
+    #[test]
+    fn the_events_lined_up_by_hand() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        let automatic: Vec<Option<i64>> = screen.events.iter().map(|e| e.offset_ms).collect();
+        let distance = |events: &[VideoEvent]| -> Vec<i64> {
+            events
+                .iter()
+                .map(|e| (e.timestamp - events[0].timestamp).num_milliseconds())
+                .collect()
+        };
+        screen.key(key!(down));
+        screen.key(key!(down));
+        screen.key(key!(t));
+        assert!(screen.focus_id().is_some());
+        // while written, the keys don't choose
+        screen.key(key!(down));
+        assert_eq!(screen.selected, 2);
+        screen.update(Message::TimeInput("1:0x".into()));
+        screen.update(Message::TimeSubmit);
+        assert!(screen.invalid_time && screen.editing.is_some());
+        screen.update(Message::TimeInput("1:00.5".into()));
+        screen.update(Message::TimeSubmit);
+        assert!(screen.editing.is_none() && !screen.invalid_time);
+        assert_eq!(screen.events[2].offset_ms, Some(60_500));
+        assert_eq!(screen.anchored(), Some(event_ref(&screen.events[2])));
+        let first = screen.events[0].offset_ms.unwrap();
+        let offsets: Vec<i64> = screen
+            .events
+            .iter()
+            .map(|e| e.offset_ms.unwrap() - first)
+            .collect();
+        assert_eq!(offsets, distance(&screen.events));
+        // half a second later, all of them
+        screen.key(key!(']'));
+        assert_eq!(screen.events[2].offset_ms, Some(61_000));
+        screen.key(key!('['));
+        screen.key(key!('['));
+        assert_eq!(screen.events[2].offset_ms, Some(60_000));
+        // opened again: as left
+        let (core, team, m) = (
+            screen.core.clone(),
+            screen.team_id.clone(),
+            screen.match_id.clone(),
+        );
+        let mut again = VideoScreen::new(core, dir.path().to_path_buf(), team, m).unwrap();
+        assert_eq!(again.events[2].offset_ms, Some(60_000));
+        again.key(key!(r));
+        let back: Vec<Option<i64>> = again.events.iter().map(|e| e.offset_ms).collect();
+        assert_eq!(back, automatic);
+        assert_eq!(again.anchored(), None);
+    }
+
+    /// Esc leaves the time being written, not the screen.
+    #[test]
+    fn esc_leaves_the_time_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        screen.key(key!(t));
+        assert!(matches!(screen.key(BACK_KEY), Outcome::Stay));
+        assert!(screen.editing.is_none());
+        assert!(matches!(screen.key(BACK_KEY), Outcome::Back));
+    }
+
+    /// The sync found by itself shifted becomes the user's; without any,
+    /// nothing to shift.
+    #[test]
+    fn a_shift_without_a_sync_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "match.mp4");
+        screen.key(key!(']'));
+        assert!(screen.events.iter().all(|e| e.offset_ms.is_none()));
+        let other = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&other, "20150125 000000.mp4");
+        let before = screen.events[0].offset_ms.unwrap();
+        screen.key(key!(']'));
+        assert_eq!(screen.events[0].offset_ms, Some(before + 500));
+        assert!(screen.anchored_by_hand());
     }
 
     /// A name without the time: the events not lined up.

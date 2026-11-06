@@ -528,13 +528,10 @@ impl App {
             (None, Screen::Team(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
             (None, Screen::Dvw(screen)) => screen.focus_id(),
+            (None, Screen::Video(screen)) => screen.focus_id(),
             (
                 None,
-                Screen::Start(_)
-                | Screen::Scouting(_)
-                | Screen::Stats(_)
-                | Screen::Events(_)
-                | Screen::Video(_),
+                Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_) | Screen::Events(_),
             ) => None,
         }
     }

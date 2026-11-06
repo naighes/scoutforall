@@ -6,7 +6,7 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
 use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
@@ -2506,6 +2506,9 @@ impl Scouting {
 pub struct VideoEvent {
     pub set_number: u8,
     pub event: SetEvent,
+    /// when it was scouted (or in the video, for a match on the video
+    /// clock): what an anchor ties to the video
+    pub timestamp: DateTime<Utc>,
     /// where it is in the video, from the start of the first file
     pub offset_ms: Option<i64>,
 }
@@ -2575,6 +2578,7 @@ impl Scout4All {
             events.extend(set.events.iter().zip(rows).map(|(e, row)| VideoEvent {
                 set_number: set.set_number,
                 event: row,
+                timestamp: e.timestamp,
                 offset_ms: anchor.as_ref().map(|a| offset_ms(a, e.timestamp)),
             }));
         }

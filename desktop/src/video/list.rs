@@ -12,6 +12,7 @@ use {
         Alignment, Element, Length,
         widget::{Column, Id, column, row, scrollable, text},
     },
+    scout4all_core::video::EventRef,
     scout4all_mobile::VideoEvent,
 };
 
@@ -42,7 +43,9 @@ fn row_of<'a>(
     e: &VideoEvent,
     i: usize,
     chosen: bool,
+    anchored: bool,
     duration_ms: Option<u64>,
+    s: &'static Strings,
     c: Colors,
 ) -> Element<'a, Message> {
     let color = match (e.event.editable, inside(e.offset_ms, duration_ms)) {
@@ -62,11 +65,24 @@ fn row_of<'a>(
             .into(),
         None => column![].into(),
     };
-    let body = row![
-        text(time(e.offset_ms, duration_ms))
+    // the event the video is tied to: its time lit, a pin
+    let at: Element<'a, Message> = match anchored {
+        true => ui::tip(
+            text(format!("⚓ {}", time(e.offset_ms, duration_ms)))
+                .size(SIZE_SMALL)
+                .font(bold)
+                .color(c.accent)
+                .shaping(text::Shaping::Advanced),
+            s.anchored_event,
+            c,
+        ),
+        false => text(time(e.offset_ms, duration_ms))
             .size(SIZE_SMALL)
             .color(c.muted)
-            .width(Length::Fixed(64.0)),
+            .into(),
+    };
+    let body = row![
+        iced::widget::container(at).width(Length::Fixed(72.0)),
         text(e.event.event.symbol.clone().unwrap_or_default())
             .size(SIZE_BODY)
             .font(bold)
@@ -87,6 +103,7 @@ fn row_of<'a>(
 pub fn view<'a>(
     events: &[VideoEvent],
     selected: usize,
+    anchored: Option<EventRef>,
     duration_ms: Option<u64>,
     s: &'static Strings,
     c: Colors,
@@ -98,7 +115,9 @@ pub fn view<'a>(
             set = Some(e.set_number);
             rows.push(ui::section(&format!("{} {}", s.set_n, e.set_number), c));
         }
-        rows.push(row_of(e, i, i == selected, duration_ms, c));
+        let is_anchored = anchored
+            .is_some_and(|a| a.set_number == e.set_number && a.index == e.event.index as usize);
+        rows.push(row_of(e, i, i == selected, is_anchored, duration_ms, s, c));
     }
     scrollable(Column::with_children(rows).spacing(4).padding([0, 12]))
         .id(Id::new(LIST))

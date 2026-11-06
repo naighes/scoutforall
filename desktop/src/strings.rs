@@ -299,6 +299,12 @@ pub struct Strings {
     pub outside_video: &'static str,
     pub go_to_event: &'static str,
     pub match_events: &'static str,
+    pub anchor_here: &'static str,
+    pub anchor_time: &'static str,
+    pub shift_sync: &'static str,
+    pub automatic_sync: &'static str,
+    pub invalid_time: &'static str,
+    pub anchored_event: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -608,6 +614,12 @@ What did you expect instead?
     outside_video: "{1} events outside the video",
     go_to_event: "Go to the event",
     match_events: "Events of the match",
+    anchor_here: "Sync here",
+    anchor_time: "Time of the event",
+    shift_sync: "Shift the sync",
+    automatic_sync: "Back to automatic",
+    invalid_time: "Not a time: write it as m:ss or m:ss.s",
+    anchored_event: "the event the video is synced on",
 };
 
 const IT: Strings = Strings {
@@ -917,6 +929,12 @@ Cosa ti aspettavi invece?
     outside_video: "{1} eventi fuori dal video",
     go_to_event: "Vai all'evento",
     match_events: "Eventi della partita",
+    anchor_here: "Aggancia qui",
+    anchor_time: "Tempo dell'evento",
+    shift_sync: "Sposta l'allineamento",
+    automatic_sync: "Torna automatico",
+    invalid_time: "Tempo non valido: scrivilo come m:ss o m:ss.s",
+    anchored_event: "l'evento a cui è agganciato il video",
 };
 
 const PT: Strings = Strings {
@@ -1226,6 +1244,12 @@ O que você esperava?
     outside_video: "{1} eventos fora do vídeo",
     go_to_event: "Ir ao evento",
     match_events: "Eventos da partida",
+    anchor_here: "Sincronizar aqui",
+    anchor_time: "Tempo do evento",
+    shift_sync: "Deslocar a sincronização",
+    automatic_sync: "Voltar ao automático",
+    invalid_time: "Tempo inválido: escreva como m:ss ou m:ss.s",
+    anchored_event: "o evento em que o vídeo está sincronizado",
 };
 
 const PL: Strings = Strings {
@@ -1535,6 +1559,12 @@ Czego się spodziewałeś(-aś)?
     outside_video: "Zdarzenia poza wideo: {1}",
     go_to_event: "Przejdź do zdarzenia",
     match_events: "Zdarzenia meczu",
+    anchor_here: "Synchronizuj tutaj",
+    anchor_time: "Czas zdarzenia",
+    shift_sync: "Przesuń synchronizację",
+    automatic_sync: "Wróć do automatycznej",
+    invalid_time: "Nieprawidłowy czas: wpisz jako m:ss lub m:ss.s",
+    anchored_event: "zdarzenie, z którym zsynchronizowano wideo",
 };
 
 const JA: Strings = Strings {
@@ -1833,6 +1863,12 @@ const JA: Strings = Strings {
     outside_video: "ビデオ外のイベント: {1}",
     go_to_event: "イベントへ移動",
     match_events: "試合のイベント",
+    anchor_here: "ここで同期",
+    anchor_time: "イベントの時間",
+    shift_sync: "同期をずらす",
+    automatic_sync: "自動に戻す",
+    invalid_time: "時間が正しくありません。m:ss または m:ss.s で入力してください",
+    anchored_event: "ビデオの同期の基準になっているイベント",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {
