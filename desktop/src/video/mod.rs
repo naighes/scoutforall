@@ -186,6 +186,10 @@ pub struct VideoScreen {
     /// the event chosen follows the video: off once chosen with the keys,
     /// on again when the video is moved or played
     follow: bool,
+    /// where the video went for the event chosen: that one stays chosen
+    /// until the video passes an event after it (the seek lands on the
+    /// frame a little before, the position read may still be the old one)
+    gone_to: Option<u64>,
     /// clip mode: going to an event plays it and stops a little after
     clip: bool,
     /// where the clip playing stops
@@ -263,6 +267,7 @@ impl VideoScreen {
             selected: 0,
             scroll: false,
             follow: true,
+            gone_to: None,
             clip: false,
             clip_end: None,
             detached: false,
@@ -611,6 +616,15 @@ impl VideoScreen {
     /// The event being seen chosen, the list after it, while following.
     fn follow_video(&mut self, position_ms: u64) {
         let seen = current(&self.events, position_ms, self.lead_ms());
+        let past = |i: usize, gone: u64| self.event_target(i).is_some_and(|t| t > gone);
+        let seen = match (self.gone_to, seen) {
+            (Some(gone), Some(i)) if past(i, gone) => {
+                self.gone_to = None;
+                Some(i)
+            }
+            (Some(_), _) => None,
+            (None, seen) => seen,
+        };
         // the one chosen at the same time as the one seen stays
         let same_time =
             seen.is_some_and(|i| self.event_target(i) == self.event_target(self.selected));
@@ -719,6 +733,7 @@ impl VideoScreen {
         self.selected = i.min(self.events.len().saturating_sub(1));
         if let Some(ms) = self.event_target(self.selected) {
             self.seek(ms);
+            self.gone_to = Some(ms);
             self.play_clip();
         }
     }
@@ -958,6 +973,7 @@ impl VideoScreen {
     fn seek(&mut self, ms: u64) {
         let ms = ms.max(self.start_ms());
         self.follow = true;
+        self.gone_to = None;
         // moved by hand: no clip to stop at
         self.clip_end = None;
         if let Some(player) = &self.player {
@@ -2214,7 +2230,22 @@ pub(crate) mod screen_tests {
         screen.go_to_event(rally);
         screen.follow_video(at(&screen, rally));
         assert_eq!(screen.selected, rally);
-        // a little before its time: the latest one before it
+        // the seek on the frame a little before, or the old position still
+        // read: the one gone to stays chosen (clicked, it wasn't chosen)
+        screen.go_to_event(rally);
+        screen.follow_video(at(&screen, rally) - 16);
+        assert_eq!(screen.selected, rally);
+        screen.follow_video(0);
+        assert_eq!(screen.selected, rally);
+        // the video past an event after it: that one
+        let next = (0..screen.events.len())
+            .filter(|i| at(&screen, *i) > at(&screen, rally))
+            .min_by_key(|i| at(&screen, *i))
+            .unwrap();
+        screen.follow_video(at(&screen, next));
+        assert_eq!(at(&screen, screen.selected), at(&screen, next));
+        // moved by hand a little before its time: the latest one before it
+        screen.seek(at(&screen, rally) - 1);
         screen.follow_video(at(&screen, rally) - 1);
         let before = screen.selected;
         assert_ne!(before, rally);
@@ -2234,10 +2265,16 @@ pub(crate) mod screen_tests {
         let chosen = screen.selected;
         screen.follow_video(0);
         assert_eq!(screen.selected, chosen);
-        // going to an event follows again
+        // going to an event follows again, from it
         screen.key(key!(enter));
         screen.follow_video(at(&screen, rally));
-        assert_eq!(at(&screen, screen.selected), at(&screen, rally));
+        assert_eq!(screen.selected, chosen);
+        let later = (0..screen.events.len())
+            .filter(|i| at(&screen, *i) > at(&screen, chosen))
+            .min_by_key(|i| at(&screen, *i))
+            .unwrap();
+        screen.follow_video(at(&screen, later));
+        assert_eq!(at(&screen, screen.selected), at(&screen, later));
     }
 
     #[test]
