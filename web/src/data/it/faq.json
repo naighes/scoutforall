@@ -1,15 +1,15 @@
 [
   {
     "question": "Il software è gratuito?",
-    "answer": "Sì. scout4all è completamente gratuito e open source (AGPL-3.0). Chiunque può aiutare a migliorarlo, suggerire funzionalità o segnalare problemi su <a href=\"https://github.com/naighes/scoutforall\">GitHub</a>."
+    "answer": "Sì. scout4all è completamente gratuito e open source (AGPL-3.0). Chiunque può contribuire a migliorarlo, suggerire funzionalità o segnalare problemi."
   },
   {
     "question": "Usavo la versione da terminale. Cosa succede adesso?",
-    "answer": "Non devi fare niente: al prossimo avvio la versione da terminale propone l'aggiornamento, e l'aggiornamento installa al suo posto l'app desktop. Squadre e partite sono nella stessa cartella e le ritrovi tutte. Da quel momento, avviando scout4all si apre una finestra invece dell'interfaccia da terminale."
+    "answer": "Non devi fare niente: al prossimo avvio dell'applicazione ti verrà proposto l'aggiornamento, e l'aggiornamento installa al suo posto l'app desktop. Squadre e partite sono nella stessa cartella e le ritrovi tutte. Da quel momento, avviando scout4all si apre una finestra invece dell'interfaccia da terminale."
   },
   {
-    "question": "Perché lo scouting si fa dalla tastiera?",
-    "answer": "Per la velocità. Uno scambio dura pochi secondi: con un tasto per ogni evento, giocatore e valutazione, gli occhi restano sul campo e si sta dietro al gioco. Ogni tasto si può cambiare nelle impostazioni. Anche lo scouting si può fare con il mouse o il touchpad."
+    "question": "Sono obbligato a usare la tastiera?",
+    "answer": "Ovviamente no! Il vantaggio derivante dall'uso della tastiera è legato alla produttività. Uno scambio dura pochi secondi: con un tasto per ogni evento, giocatore e valutazione, gli occhi restano sul campo. È possibile modificare la configurazione dei tasti dalle impostazioni. L'applicazione consente naturalmente l'utilizzo di altri dispositivi di input (ad esempio il mouse)."
   },
   {
     "question": "È possibile registrare le zone di gioco?",
@@ -17,11 +17,11 @@
   },
   {
     "question": "Le posizioni dei giocatori e le zone di attacco sono tutte personalizzabili?",
-    "answer": "Non tutte: l'app fa alcune scelte coerenti per tenere veloce l'inserimento dei dati. Il libero sostituisce sempre il centrale in seconda linea (tranne quando il centrale è in battuta), e le zone di attacco derivano dai ruoli e dalla posizione del palleggiatore. Puoi dichiarare la P1 invertita e la ricezione a due, tre o quattro giocatori."
+    "answer": "Non tutte: l'app fa alcune scelte coerenti al fine di non compromettere l'aspetto della produttività. Il libero sostituisce automaticamente il centrale in seconda linea, tranne quando quest'ultimo è in battuta; è comunque possibile annullare tale sostituzione. Le zone di attacco derivano dai ruoli e dalla posizione del palleggiatore. Puoi dichiarare la P1 invertita e la ricezione a due, tre o quattro giocatori."
   },
   {
     "question": "Posso aprire le partite registrate con DataVolley?",
-    "answer": "Sì: importa un file <code>.dvw</code> in una delle tue squadre, con le sue zone. La partita importata si analizza come le altre, da sola o insieme a più partite."
+    "answer": "Sì: importa un file <code>.dvw</code> in una delle tue squadre, con le sue zone. La partita importata si analizza come le altre, da sola o assieme a più partite."
   },
   {
     "question": "Quanto spesso viene aggiornato? Devo installare gli aggiornamenti a mano?",

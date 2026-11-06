@@ -1,15 +1,15 @@
 [
   {
     "question": "Is the software free to use?",
-    "answer": "Yes. scout4all is completely free and open source (AGPL-3.0). Anyone can help improve it, suggest features or report problems on <a href=\"https://github.com/naighes/scoutforall\">GitHub</a>."
+    "answer": "Yes. scout4all is completely free and open source (AGPL-3.0). Anyone can contribute to improving it, suggest features or report problems."
   },
   {
     "question": "I was using the terminal version. What happens now?",
-    "answer": "Nothing to do: at its next start, the terminal version offers to update, and the update installs the desktop app in its place. Your teams and matches are in the same folder and you will find them all. From then on, starting scout4all opens a window instead of the terminal interface."
+    "answer": "Nothing to do: at the next start of the application, an update will be offered, and the update installs the desktop app in its place. Your teams and matches are in the same folder and you will find them all. From then on, starting scout4all opens a window instead of the terminal interface."
   },
   {
-    "question": "Why is scouting done from the keyboard?",
-    "answer": "Speed. A rally lasts a few seconds: with a key for each event, player and evaluation, your eyes stay on the court and you can keep up with the game. Every key can be changed in the settings. Scouting can be done with a mouse or touchpad too."
+    "question": "Am I required to use the keyboard?",
+    "answer": "Of course not! The advantage of using the keyboard is tied to productivity. A rally lasts a few seconds: with a key for each event, player and evaluation, your eyes stay on the court. Every key can be changed in the settings. The application naturally supports other input devices too (for example, the mouse)."
   },
   {
     "question": "Can I record the zones of play?",
@@ -17,7 +17,7 @@
   },
   {
     "question": "Are all player positions and attack zones customizable?",
-    "answer": "Not all of them: the app makes some consistent choices to keep data entry quick. The libero always replaces the middle blocker in the back row (except when the middle blocker serves), and the attack zones follow from the roles and the position of the setter. You can declare an inverted P1 and a reception with two, three or four players."
+    "answer": "Not all of them: the app makes some consistent choices so as not to compromise productivity. The libero automatically replaces the middle blocker in the back row, except when the middle blocker is serving; it is still possible to undo this substitution. The attack zones follow from the roles and the position of the setter. You can declare an inverted P1 and a reception with two, three or four players."
   },
   {
     "question": "Can I open matches scouted with DataVolley?",

@@ -1,15 +1,15 @@
 [
   {
     "question": "O software é gratuito?",
-    "answer": "Sim. O scout4all é totalmente gratuito e de código aberto (AGPL-3.0). Qualquer pessoa pode ajudar a melhorá-lo, sugerir recursos ou relatar problemas no <a href=\"https://github.com/naighes/scoutforall\">GitHub</a>."
+    "answer": "Sim. O scout4all é totalmente gratuito e de código aberto (AGPL-3.0). Qualquer pessoa pode contribuir para melhorá-lo, sugerir recursos ou relatar problemas."
   },
   {
     "question": "Eu usava a versão de terminal. O que acontece agora?",
-    "answer": "Você não precisa fazer nada: na próxima vez que abrir, a versão de terminal oferece a atualização, e a atualização instala o app desktop no lugar dela. Equipes e partidas ficam na mesma pasta e você encontra todas. A partir daí, abrir o scout4all mostra uma janela em vez da interface de terminal."
+    "answer": "Você não precisa fazer nada: na próxima vez que o aplicativo for aberto, uma atualização será oferecida, e a atualização instala o app desktop no lugar dela. Equipes e partidas ficam na mesma pasta e você encontra todas. A partir daí, abrir o scout4all mostra uma janela em vez da interface de terminal."
   },
   {
-    "question": "Por que o scout é feito pelo teclado?",
-    "answer": "Velocidade. Um rali dura poucos segundos: com uma tecla para cada evento, jogador e avaliação, seus olhos ficam na quadra e você acompanha o jogo. Todas as teclas podem ser alteradas nas configurações. Também é possível fazer o scout com o mouse ou o touchpad."
+    "question": "Sou obrigado a usar o teclado?",
+    "answer": "Claro que não! A vantagem do uso do teclado está relacionada à produtividade. Um rali dura poucos segundos: com uma tecla para cada evento, jogador e avaliação, seus olhos ficam na quadra. É possível alterar a configuração das teclas nas configurações. O aplicativo naturalmente permite o uso de outros dispositivos de entrada (por exemplo, o mouse)."
   },
   {
     "question": "É possível registrar as zonas de jogo?",
@@ -17,7 +17,7 @@
   },
   {
     "question": "Todas as posições dos jogadores e zonas de ataque são personalizáveis?",
-    "answer": "Nem todas: o app faz algumas escolhas consistentes para manter a entrada de dados rápida. O líbero sempre substitui o central no fundo da quadra (exceto quando o central está sacando), e as zonas de ataque decorrem das posições e do lugar do levantador. Você pode declarar um P1 invertido e uma recepção com dois, três ou quatro jogadores."
+    "answer": "Nem todas: o app faz algumas escolhas consistentes para não comprometer a produtividade. O líbero substitui automaticamente o central no fundo da quadra, exceto quando o central está sacando; ainda é possível desfazer essa substituição. As zonas de ataque decorrem das posições e do lugar do levantador. Você pode declarar um P1 invertido e uma recepção com dois, três ou quatro jogadores."
   },
   {
     "question": "Posso abrir partidas registradas com o DataVolley?",

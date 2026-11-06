@@ -1,15 +1,15 @@
 [
   {
     "question": "Czy program jest darmowy?",
-    "answer": "Tak. scout4all jest całkowicie darmowy i otwartoźródłowy (AGPL-3.0). Każdy może pomóc go ulepszać, proponować funkcje lub zgłaszać problemy na <a href=\"https://github.com/naighes/scoutforall\">GitHubie</a>."
+    "answer": "Tak. scout4all jest całkowicie darmowy i otwartoźródłowy (AGPL-3.0). Każdy może przyczynić się do jego ulepszania, proponować funkcje lub zgłaszać problemy."
   },
   {
     "question": "Mam wersję terminalową. Co teraz?",
-    "answer": "Nie musisz nic robić: przy następnym uruchomieniu wersja terminalowa zaproponuje aktualizację, która zainstaluje w jej miejsce aplikację desktopową. Drużyny i mecze są w tym samym folderze, więc znajdziesz je wszystkie. Od tej pory uruchomienie scout4all otwiera okno zamiast interfejsu w terminalu."
+    "answer": "Nie musisz nic robić: przy następnym uruchomieniu aplikacji zostanie zaproponowana aktualizacja, która zainstaluje w jej miejsce aplikację desktopową. Drużyny i mecze są w tym samym folderze, więc znajdziesz je wszystkie. Od tej pory uruchomienie scout4all otwiera okno zamiast interfejsu w terminalu."
   },
   {
-    "question": "Dlaczego scouting odbywa się z klawiatury?",
-    "answer": "Dla szybkości. Akcja trwa kilka sekund: z klawiszem dla każdego zdarzenia, zawodnika i oceny wzrok zostaje na boisku i nadążasz za grą. Każdy klawisz można zmienić w ustawieniach. Scouting można prowadzić także myszą lub touchpadem."
+    "question": "Czy muszę używać klawiatury?",
+    "answer": "Oczywiście nie! Zaleta korzystania z klawiatury wiąże się z produktywnością. Akcja trwa kilka sekund: z klawiszem dla każdego zdarzenia, zawodnika i oceny wzrok zostaje na boisku. Konfigurację klawiszy można zmienić w ustawieniach. Aplikacja naturalnie obsługuje też inne urządzenia wejściowe (na przykład mysz)."
   },
   {
     "question": "Czy można zapisywać strefy gry?",
@@ -17,7 +17,7 @@
   },
   {
     "question": "Czy wszystkie pozycje zawodników i strefy ataku można dostosować?",
-    "answer": "Nie wszystkie: aplikacja przyjmuje kilka spójnych założeń, żeby wprowadzanie danych było szybkie. Libero zawsze zastępuje środkowego w drugiej linii (z wyjątkiem sytuacji, gdy środkowy zagrywa), a strefy ataku wynikają z pozycji zawodników i miejsca rozgrywającego. Możesz zadeklarować odwrócone ustawienie 1 oraz przyjęcie w dwójkę, trójkę lub czwórkę."
+    "answer": "Nie wszystkie: aplikacja przyjmuje kilka spójnych założeń, aby nie obniżać produktywności. Libero automatycznie zastępuje środkowego w drugiej linii, z wyjątkiem sytuacji gdy środkowy serwuje; nadal można cofnąć tę zmianę. Strefy ataku wynikają z pozycji zawodników i miejsca rozgrywającego. Możesz zadeklarować odwrócone ustawienie 1 oraz przyjęcie w dwójkę, trójkę lub czwórkę."
   },
   {
     "question": "Czy mogę otworzyć mecze zapisane w DataVolley?",
