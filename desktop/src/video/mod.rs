@@ -26,13 +26,13 @@ use {
     },
     iced::{
         Alignment, ContentFit, Element, Length,
-        widget::{column, container, image, row, slider, space, text},
+        widget::{column, container, image, row, slider, space, stack, text},
     },
     iced_runtime::image::Allocation,
     margins::{Margin, Margins},
     player::{Player, Status},
     scout4all_core::{
-        shapes::r#match::MatchEntry,
+        shapes::{enums::PhaseEnum, r#match::MatchEntry},
         video::{self, Anchor, AnchorSource, EventRef, StoredProfile, VideoFile, VideoProfile},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
@@ -78,6 +78,8 @@ pub enum Message {
     Speed(f32),
     /// clip mode on or off
     Clip,
+    /// how the match stands over the video, or not
+    Overlay,
     /// the video in its own window, or back in the screen
     Detach,
     Choose,
@@ -193,6 +195,8 @@ pub struct VideoScreen {
     first_ms: Option<i64>,
     /// the video before the first event shown, to tie the events again
     whole: bool,
+    /// how the match stands (set, score, phase, rotation) over the video
+    overlay: bool,
 }
 
 /// The matches of a team with actions picked in its statistics, each with
@@ -252,6 +256,7 @@ impl VideoScreen {
             margin_text: None,
             first_ms: None,
             whole: false,
+            overlay: true,
         };
         screen.margins = Margins::read(&screen.dir);
         // the durations of the files first: the events in them
@@ -859,6 +864,7 @@ impl VideoScreen {
             Message::Seek(ms) => self.seek(ms.max(0.0) as u64),
             Message::Speed(speed) => self.speed(speed),
             Message::Clip => self.toggle_clip(),
+            Message::Overlay => self.overlay = !self.overlay,
             Message::Detach => self.detached = !self.detached,
             Message::Choose => return self.choose(),
             Message::Chosen(paths) if paths.is_empty() => {}
@@ -958,6 +964,7 @@ impl VideoScreen {
             k if k == key!(']') => self.shift(SHIFT_MS),
             k if k == key!(r) => self.save_anchor(None),
             k if k == key!(k) => self.toggle_clip(),
+            k if k == key!(i) => self.overlay = !self.overlay,
             k if k == key!(w) => self.detached = !self.detached,
             k if k == key!(s) && self.clips.is_some() => self.sequence = !self.sequence,
             k if k == key!(pageup) || k == key!(pagedown) => {
@@ -1021,14 +1028,17 @@ impl VideoScreen {
             _ => vec![],
         };
         let window = match (self.events.is_empty(), &self.player) {
-            (false, Some(_)) => vec![hint(
-                "w",
-                match self.detached {
-                    true => s.attach_video,
-                    false => s.detach_video,
-                }
-                .to_string(),
-            )],
+            (false, Some(_)) => vec![
+                hint("i", s.match_overlay.to_string()),
+                hint(
+                    "w",
+                    match self.detached {
+                        true => s.attach_video,
+                        false => s.detach_video,
+                    }
+                    .to_string(),
+                ),
+            ],
             _ => vec![],
         };
         [
@@ -1234,11 +1244,23 @@ impl VideoScreen {
     /// The frame shown, as large as it fits.
     fn frame_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         match (&self.shown, &self.player) {
-            (Some(shown), _) => image(shown.handle.clone())
-                .content_fit(ContentFit::Contain)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
+            (Some(shown), _) => {
+                let frame = image(shown.handle.clone())
+                    .content_fit(ContentFit::Contain)
+                    .width(Length::Fill)
+                    .height(Length::Fill);
+                match standing(&self.events, self.position()).filter(|_| self.overlay) {
+                    Some(st) => stack![
+                        frame,
+                        container(overlay_view(st, s, c))
+                            .padding(16)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                    ]
+                    .into(),
+                    None => frame.into(),
+                }
+            }
             (None, Some(_)) => space::vertical().height(Length::Fill).into(),
             (None, None) => container(ui::body(s.no_video).color(c.muted))
                 .center(Length::Fill)
@@ -1389,6 +1411,11 @@ impl VideoScreen {
                 ),
                 text(time).size(SIZE_SMALL).font(theme::fonts().bold),
                 space::horizontal(),
+                ui::tip(
+                    ui::pill(s.match_overlay, self.overlay, Some(Message::Overlay), c),
+                    s.match_overlay_explained,
+                    c
+                ),
                 ui::pill(
                     match self.detached {
                         true => s.attach_video,
@@ -1617,6 +1644,109 @@ fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message>
             background: Some(iced::Color::BLACK.into()),
             ..container::Style::default()
         })
+}
+
+/// How the match stands at a moment of the video: after the last event
+/// passed (the score turns when the point is scouted, as on TV after the
+/// rally), with the sets won before its set; none before the first.
+#[derive(Debug, Clone, PartialEq)]
+struct Standing {
+    set_number: u8,
+    /// the sets won before this one, ours first
+    sets: (u8, u8),
+    score: (u8, u8),
+    rotation: String,
+    phase: PhaseEnum,
+}
+
+fn standing(events: &[VideoEvent], position_ms: u64) -> Option<Standing> {
+    let at = events.get(current(events, position_ms, 0)?)?;
+    // the last event of each set before: who won it
+    let sets = events
+        .iter()
+        .zip(events.iter().skip(1).map(Some).chain([None]))
+        .filter(|(e, next)| {
+            e.set_number < at.set_number && next.is_none_or(|n| n.set_number != e.set_number)
+        })
+        .fold((0, 0), |(us, them), (e, _)| {
+            match e.event.score_us.cmp(&e.event.score_them) {
+                std::cmp::Ordering::Greater => (us + 1, them),
+                std::cmp::Ordering::Less => (us, them + 1),
+                std::cmp::Ordering::Equal => (us, them),
+            }
+        });
+    Some(Standing {
+        set_number: at.set_number,
+        sets,
+        score: (at.event.score_us, at.event.score_them),
+        rotation: at.rotation.clone(),
+        phase: at.phase,
+    })
+}
+
+/// How the match stands, over the corner of the video: on a veil, not a
+/// box, the letters as large as the body's or more: the set (the sets
+/// won, from the second), the score, the phase in its color and with its
+/// icon, as while scouting, and the rotation.
+fn overlay_view<'a>(st: Standing, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+    let white = iced::Color::WHITE;
+    let soft = iced::Color { a: 0.8, ..white };
+    let (color, icon, name) = match st.phase {
+        PhaseEnum::Break => (c.break_point, theme::icons::BREAK, s.break_phase),
+        PhaseEnum::SideOut => (c.side_out, theme::icons::SIDE_OUT, s.side_out_phase),
+    };
+    let bold = theme::fonts().bold;
+    let label = |t: String| text(t).size(theme::SIZE_BODY).color(soft);
+    let divider = || {
+        container(space::vertical().height(Length::Fixed(20.0)))
+            .width(Length::Fixed(1.0))
+            .style(move |_| container::Style {
+                background: Some(iced::Color { a: 0.35, ..white }.into()),
+                ..container::Style::default()
+            })
+    };
+    container(
+        row![
+            label(match st.sets {
+                (0, 0) => format!("{} {}", s.set_n, st.set_number),
+                (us, them) => format!("{} {} ({us}–{them})", s.set_n, st.set_number),
+            }),
+            divider(),
+            text(format!("{}–{}", st.score.0, st.score.1))
+                .size(theme::SIZE_TITLE + 6.0)
+                .font(bold)
+                .color(white),
+            divider(),
+            ui::icon(icon, 20.0, color),
+            text(name).size(theme::SIZE_BODY).font(bold).color(color),
+            ui::tip(
+                text(st.rotation)
+                    .size(theme::SIZE_BODY)
+                    .font(bold)
+                    .color(white),
+                s.rotation,
+                c
+            ),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+    )
+    .padding(iced::Padding::from([8, 14]))
+    .style(move |_| container::Style {
+        background: Some(
+            iced::Color {
+                a: 0.55,
+                ..iced::Color::BLACK
+            }
+            .into(),
+        ),
+        border: iced::Border {
+            radius: 10.0.into(),
+            ..iced::Border::default()
+        },
+        ..container::Style::default()
+    })
+    .into()
 }
 
 /// Where the video goes for the event: `lead_ms` before it, not before
@@ -2334,6 +2464,64 @@ pub(crate) mod screen_tests {
         assert!(!screen.whole);
         assert_eq!(screen.events[0].offset_ms, Some(1000));
         assert_eq!(screen.start_ms(), 0, "1 s in: from the start");
+    }
+
+    /// Over the video, how the match stands at that moment: nothing before
+    /// the first event; then after the last event passed: its set, the sets
+    /// won before it, the score, the phase and the rotation to come. `i`
+    /// hides it and shows it again.
+    #[test]
+    fn how_the_match_stands_over_the_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        // the times of the file made up (sets starting at the same second):
+        // a second after the other
+        let events: Vec<VideoEvent> = screen
+            .events
+            .iter()
+            .enumerate()
+            .map(|(i, e)| VideoEvent {
+                offset_ms: Some(1000 * (i as i64 + 1)),
+                ..e.clone()
+            })
+            .collect();
+        let first: i64 = 1000;
+        assert_eq!(standing(&events, (first - 1).unsigned_abs()), None);
+        // the last of the first set, then the first of the second
+        let last = events.iter().rposition(|e| e.set_number == 1).unwrap();
+        let next = &events[last + 1];
+        let end = &events[last].event;
+        let at = |e: &VideoEvent| e.offset_ms.unwrap().unsigned_abs();
+        let seen = standing(&events, at(&events[last])).unwrap();
+        assert_eq!(seen.set_number, 1);
+        assert_eq!(seen.sets, (0, 0));
+        assert_eq!(seen.score, (end.score_us, end.score_them));
+        let won = match end.score_us > end.score_them {
+            true => (1, 0),
+            false => (0, 1),
+        };
+        let seen = standing(&events, at(next)).unwrap();
+        assert_eq!(seen.set_number, 2);
+        assert_eq!(seen.sets, won);
+        // a point of ours: we serve, a break to play
+        let point = events
+            .iter()
+            .zip(events.iter().skip(1))
+            .find(|(a, b)| {
+                a.set_number == b.set_number
+                    && b.event.score_us == a.event.score_us + 1
+                    && b.offset_ms > a.offset_ms
+            })
+            .map(|(_, b)| b)
+            .unwrap();
+        let seen = standing(&events, at(point)).unwrap();
+        assert_eq!(seen.phase, PhaseEnum::Break);
+        assert!(seen.rotation.starts_with('P') || seen.rotation.starts_with('S'));
+        assert!(screen.overlay);
+        screen.key(key!(i));
+        assert!(!screen.overlay);
+        screen.update(Message::Overlay);
+        assert!(screen.overlay);
     }
 
     /// In clip mode the clip starts and ends the seconds chosen before and

@@ -2520,6 +2520,11 @@ pub struct VideoEvent {
     pub timestamp: DateTime<Utc>,
     /// where it is in the video, from the start of the first file
     pub offset_ms: Option<i64>,
+    /// after it, for the rally to come: our rotation ("-" without the
+    /// setter on the court) and the phase, to show over the video (the
+    /// score is the event's)
+    pub rotation: String,
+    pub phase: PhaseEnum,
 }
 
 /// The events behind a statistic of the detail of a fundamental, to see
@@ -2599,13 +2604,25 @@ impl Scout4All {
         sets.sort_by_key(|s| s.set_number);
         let mut events = vec![];
         for set in sets {
-            let rows = set_event_rows(m, set, self.language.labels())?;
-            events.extend(set.events.iter().zip(rows).map(|(e, row)| VideoEvent {
-                set_number: set.set_number,
-                event: row,
-                timestamp: e.timestamp,
-                offset_ms: place(profile, m, durations_ms, e.timestamp),
-            }));
+            let labels = self.language.labels();
+            let rows = set_event_rows(m, set, labels)?;
+            let states = set.states(m.max_substitutions)?;
+            events.extend(
+                set.events
+                    .iter()
+                    .zip(rows)
+                    .zip(states)
+                    .map(|((e, row), state)| VideoEvent {
+                        set_number: set.set_number,
+                        event: row,
+                        timestamp: e.timestamp,
+                        offset_ms: place(profile, m, durations_ms, e.timestamp),
+                        rotation: state
+                            .rotation
+                            .map_or_else(|| "-".to_string(), |r| rotation_name(r, labels)),
+                        phase: state.phase,
+                    }),
+            );
         }
         Ok(events)
     }

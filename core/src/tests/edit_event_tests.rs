@@ -10,7 +10,7 @@ mod tests {
     use crate::shapes::enums::LanguageEnum;
     use crate::shapes::{
         court_zone::{CourtTarget, SubzoneEnum},
-        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
+        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
         set::SetEntry,
         snapshot::EventEntry,
         technique::{ServeTypeEnum, TechniqueEnum},
@@ -114,6 +114,30 @@ mod tests {
         set.events
             .insert(0, event(S, Some(team.setter()), Some(Perfect)));
         assert!(set.scores(DEFAULT_MAX_SUBSTITUTIONS).is_err());
+    }
+
+    #[test]
+    fn how_the_set_stands_after_each_event() {
+        let team = Team::new();
+        let states = side_out(&team).states(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
+        let seen: Vec<_> = states
+            .iter()
+            .map(|s| (s.score_us, s.score_them, s.rotation, s.phase))
+            .collect();
+        // receiving in P1; the point won, we rotate and serve: a break to
+        // play
+        assert_eq!(
+            seen,
+            vec![
+                (0, 0, Some(0), PhaseEnum::SideOut),
+                (1, 0, Some(5), PhaseEnum::Break),
+                (1, 0, Some(5), PhaseEnum::Break),
+            ]
+        );
+        let mut set = side_out(&team);
+        set.events
+            .insert(0, event(S, Some(team.setter()), Some(Perfect)));
+        assert!(set.states(DEFAULT_MAX_SUBSTITUTIONS).is_err());
     }
 
     #[test]
