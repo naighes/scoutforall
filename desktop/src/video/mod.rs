@@ -12,6 +12,7 @@
 
 mod files;
 mod list;
+mod margins;
 mod player;
 pub use player::Frame as Picture;
 pub mod source;
@@ -28,13 +29,14 @@ use {
         widget::{column, container, image, row, slider, space, text},
     },
     iced_runtime::image::Allocation,
+    margins::{Margin, Margins},
     player::{Player, Status},
     scout4all_core::{
         shapes::r#match::MatchEntry,
         video::{self, Anchor, AnchorSource, EventRef, StoredProfile, VideoFile, VideoProfile},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
-    scout4all_mobile::{MobileError, Scout4All, VideoEvent},
+    scout4all_mobile::{MatchClips, MobileError, Scout4All, VideoEvent},
     std::{
         path::PathBuf,
         sync::Arc,
@@ -49,13 +51,9 @@ const STEP_SECONDS: u64 = 5;
 /// coming.
 const LEAD_MS: i64 = 2000;
 
-/// With the actions picked in the statistics, how long before each the
-/// clip starts: DataVolley gives a rally a single second of the video,
-/// often noted after the action, so 2 s may miss it.
-const CLIPS_LEAD_MS: i64 = 5000;
-
-/// In clip mode, how long after the event gone to the video stops.
-const CLIP_AFTER_MS: u64 = 5000;
+/// The fields of the seconds of a clip before and after its action.
+const BEFORE_FIELD: &str = "video-clip-before";
+const AFTER_FIELD: &str = "video-clip-after";
 
 /// How far `[` and `]` shift the sync.
 const SHIFT_MS: i64 = 500;
@@ -104,6 +102,15 @@ pub enum Message {
     TimeSubmit,
     /// the actions one after the other, or each stopping
     Sequence,
+    /// with the actions of a team, the match after (`true`) or before
+    OtherMatch(bool),
+    /// the seconds of the clip before or after its action, one more (`1`)
+    /// or less
+    MarginStep(Margin, i32),
+    /// the seconds being written
+    MarginInput(Margin, String),
+    /// the seconds written, done
+    MarginSubmit,
 }
 
 pub enum Outcome {
@@ -173,6 +180,19 @@ pub struct VideoScreen {
     clips: Option<Clips>,
     /// with the actions picked, at the end of a clip the next one starts
     sequence: bool,
+    /// the actions picked of a team, match after match: this one of them
+    tour: Option<Tour>,
+    /// the seconds of a clip before and after its action, as chosen
+    margins: Margins,
+    /// the seconds of one of them being written
+    margin_text: Option<(Margin, String)>,
+}
+
+/// The matches of a team with actions picked in its statistics, each with
+/// a video, and the one shown.
+struct Tour {
+    matches: Vec<MatchClips>,
+    at: usize,
 }
 
 /// The actions of the match picked in its statistics, to watch one after
@@ -220,7 +240,11 @@ impl VideoScreen {
             invalid_time: false,
             clips: None,
             sequence: true,
+            tour: None,
+            margins: Margins::default(),
+            margin_text: None,
         };
+        screen.margins = Margins::read(&screen.dir);
         // the durations of the files first: the events in them
         screen.open_player();
         screen.load_events()?;
@@ -246,6 +270,72 @@ impl VideoScreen {
             screen.go_to_event(first);
         }
         Ok(screen)
+    }
+
+    /// The actions picked in the statistics of a team, match after match
+    /// (`matches`, each with a video): the first one played at once.
+    pub fn with_tour(
+        core: Arc<Scout4All>,
+        dir: PathBuf,
+        team_id: String,
+        matches: Vec<MatchClips>,
+        title: String,
+    ) -> Result<VideoScreen, MobileError> {
+        let first = matches
+            .first()
+            .cloned()
+            .ok_or_else(|| MobileError::Failed {
+                reason: "no match with actions to watch".to_string(),
+            })?;
+        let mut screen =
+            VideoScreen::with_clips(core, dir, team_id, first.match_id, first.events, title)?;
+        screen.tour = Some(Tour { matches, at: 0 });
+        Ok(screen)
+    }
+
+    /// The match `at` of the tour in place of this one, its first action
+    /// played; the mode, the speed and the own window kept.
+    fn open_match(&mut self, at: usize) {
+        let (Some(tour), Some(clips)) = (self.tour.take(), &self.clips) else {
+            return;
+        };
+        let Some(m) = tour.matches.get(at).cloned() else {
+            self.tour = Some(tour);
+            return;
+        };
+        let opened = VideoScreen::with_clips(
+            self.core.clone(),
+            self.dir.clone(),
+            self.team_id.clone(),
+            m.match_id,
+            m.events,
+            clips.title.clone(),
+        );
+        match opened {
+            Ok(mut next) => {
+                next.tour = Some(Tour {
+                    matches: tour.matches,
+                    at,
+                });
+                next.sequence = self.sequence;
+                next.detached = self.detached;
+                next.speed(self.current_speed());
+                *self = next;
+            }
+            Err(e) => {
+                self.tour = Some(tour);
+                self.error = Some(e.to_string());
+            }
+        }
+    }
+
+    /// The match of the tour after (or before) this one, if any.
+    fn other_match(&self, after: bool) -> Option<usize> {
+        let tour = self.tour.as_ref()?;
+        match after {
+            true => Some(tour.at + 1).filter(|i| *i < tour.matches.len()),
+            false => tour.at.checked_sub(1),
+        }
     }
 
     /// Whether only the actions picked in the statistics are shown.
@@ -291,12 +381,42 @@ impl VideoScreen {
         self.events.get(i).and_then(|e| target(e, self.lead_ms()))
     }
 
-    /// How long before an event the video goes to it.
+    /// How long before an event the video goes to it: in clip mode (always
+    /// with the actions picked), the seconds chosen.
     fn lead_ms(&self) -> i64 {
-        match self.clips {
-            Some(_) => CLIPS_LEAD_MS,
-            None => LEAD_MS,
+        match self.clip || self.clips.is_some() {
+            true => i64::from(self.margins.before_s) * 1000,
+            false => LEAD_MS,
         }
+    }
+
+    /// In clip mode, how long after the event gone to the video stops.
+    fn after_ms(&self) -> u64 {
+        u64::from(self.margins.after_s) * 1000
+    }
+
+    /// The seconds before or after the actions at `seconds`, saved.
+    fn set_margin(&mut self, margin: Margin, seconds: u32) {
+        self.margins = self.margins.with(margin, seconds);
+        if let Err(e) = self.margins.write(&self.dir) {
+            self.error = Some(e);
+        }
+    }
+
+    fn step_margin(&mut self, margin: Margin, by: i32) {
+        self.margin_text = None;
+        let seconds = self.margins.get(margin).saturating_add_signed(by);
+        self.set_margin(margin, seconds);
+    }
+
+    /// The seconds written: kept while they're a number (empty: being
+    /// written), the field showing them.
+    fn write_margin(&mut self, margin: Margin, text: String) {
+        let digits: String = text.chars().filter(char::is_ascii_digit).take(2).collect();
+        if let Ok(seconds) = digits.parse::<u32>() {
+            self.set_margin(margin, seconds);
+        }
+        self.margin_text = Some((margin, digits));
     }
 
     /// The event being seen chosen, the list after it, while following.
@@ -316,9 +436,12 @@ impl VideoScreen {
 
     /// The field the keys go to, while the time is written.
     pub fn focus_id(&self) -> Option<iced::widget::Id> {
-        self.editing
-            .as_ref()
-            .map(|_| iced::widget::Id::new(TIME_FIELD))
+        match (&self.editing, &self.margin_text) {
+            (Some(_), _) => Some(iced::widget::Id::new(TIME_FIELD)),
+            (None, Some((Margin::Before, _))) => Some(iced::widget::Id::new(BEFORE_FIELD)),
+            (None, Some((Margin::After, _))) => Some(iced::widget::Id::new(AFTER_FIELD)),
+            (None, None) => None,
+        }
     }
 
     /// The event of the list tied to the video, if any.
@@ -416,7 +539,7 @@ impl VideoScreen {
             .events
             .get(self.selected)
             .and_then(|e| e.offset_ms)
-            .map(|ms| ms.max(0).unsigned_abs() + CLIP_AFTER_MS);
+            .map(|ms| ms.max(0).unsigned_abs() + self.after_ms());
         if let (true, Some(end)) = (self.clip, end) {
             self.clip_end = Some(end);
             if let Some(player) = &self.player {
@@ -445,9 +568,10 @@ impl VideoScreen {
     fn reached(&mut self, position_ms: u64) {
         let playing = self.clips.is_some() && self.clip_end.is_some();
         match (self.clip_over(position_ms), playing) {
-            (true, _) => match self.next_clip() {
-                Some(next) => self.go_to_event(next),
-                None => {
+            (true, _) => match (self.next_clip(), self.next_match()) {
+                (Some(next), _) => self.go_to_event(next),
+                (None, Some(at)) => self.open_match(at),
+                (None, None) => {
                     if let Some(player) = &self.player {
                         player.pause();
                     }
@@ -455,6 +579,15 @@ impl VideoScreen {
             },
             (false, true) => {}
             (false, false) => self.follow_video(position_ms),
+        }
+    }
+
+    /// With the actions of a team in sequence, the match after this one
+    /// when its last action is over.
+    fn next_match(&self) -> Option<usize> {
+        match self.sequence {
+            true => self.other_match(true),
+            false => None,
         }
     }
 
@@ -720,6 +853,14 @@ impl VideoScreen {
             }
             Message::TimeSubmit => self.submit_time(),
             Message::Sequence => self.sequence = !self.sequence,
+            Message::OtherMatch(after) => {
+                if let Some(at) = self.other_match(after) {
+                    self.open_match(at);
+                }
+            }
+            Message::MarginStep(margin, by) => self.step_margin(margin, by),
+            Message::MarginInput(margin, text) => self.write_margin(margin, text),
+            Message::MarginSubmit => self.margin_text = None,
         }
         Outcome::Stay
     }
@@ -732,6 +873,13 @@ impl VideoScreen {
     }
 
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
+        // the seconds being written take the keys; Esc leaves them
+        if self.margin_text.is_some() {
+            if ck == BACK_KEY {
+                self.margin_text = None;
+            }
+            return Outcome::Stay;
+        }
         // the time being written takes the keys; Esc leaves it
         if self.editing.is_some() {
             if ck == BACK_KEY {
@@ -773,6 +921,11 @@ impl VideoScreen {
             k if k == key!(k) => self.toggle_clip(),
             k if k == key!(w) => self.detached = !self.detached,
             k if k == key!(s) && self.clips.is_some() => self.sequence = !self.sequence,
+            k if k == key!(pageup) || k == key!(pagedown) => {
+                if let Some(at) = self.other_match(k == key!(pagedown)) {
+                    self.open_match(at);
+                }
+            }
             _ => {}
         }
         Outcome::Stay
@@ -782,6 +935,12 @@ impl VideoScreen {
     /// screen (the speed `-` `+`, the file `c` once chosen, `r`) left out,
     /// for the bar to fit.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        if self.margin_text.is_some() {
+            return vec![
+                ("0–9".to_string(), s.clip_margins_explained.to_string()),
+                ("Esc".to_string(), s.back.to_string()),
+            ];
+        }
         if self.editing.is_some() {
             return vec![
                 ("Enter".to_string(), s.anchor_time.to_string()),
@@ -799,6 +958,11 @@ impl VideoScreen {
         let events = match (self.events.is_empty(), &self.player) {
             (true, _) => vec![],
             (false, None) => vec![hint("↑ ↓ Enter", s.go_to_event.to_string())],
+            // with the actions picked, the sync left to its buttons
+            (false, Some(_)) if self.clips.is_some() => vec![
+                hint("↑ ↓ Enter", s.go_to_event.to_string()),
+                hint("k", s.clip.to_string()),
+            ],
             (false, Some(_)) => vec![
                 hint("↑ ↓ Enter", s.go_to_event.to_string()),
                 hint("a", s.anchor_here.to_string()),
@@ -809,6 +973,12 @@ impl VideoScreen {
         };
         let sequence = match (&self.clips, &self.player) {
             (Some(_), Some(_)) => vec![hint("s", s.in_sequence.to_string())],
+            _ => vec![],
+        };
+        let matches = match &self.tour {
+            Some(tour) if tour.matches.len() > 1 => {
+                vec![hint("PgUp PgDn", s.other_match.to_string())]
+            }
             _ => vec![],
         };
         let window = match (self.events.is_empty(), &self.player) {
@@ -826,6 +996,7 @@ impl VideoScreen {
             playing,
             events,
             sequence,
+            matches,
             window,
             vec![hint("Esc", s.back.to_string())],
         ]
@@ -916,6 +1087,7 @@ impl VideoScreen {
                     text(clips.title.clone())
                         .size(theme::SIZE_BODY)
                         .font(theme::fonts().bold),
+                    self.tour_view(s, c),
                     text(ui::fill(s.clips_count, &[self.events.len().to_string()]))
                         .size(SIZE_SMALL)
                         .color(c.muted),
@@ -928,6 +1100,49 @@ impl VideoScreen {
             .into(),
         };
         row![video.width(Length::Fill), events].spacing(14).into()
+    }
+
+    /// With the actions of a team: which match of how many, against whom
+    /// and when, and the ones before and after.
+    fn tour_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let Some(tour) = &self.tour else {
+            return space::vertical().height(0).into();
+        };
+        let day = tour
+            .matches
+            .get(tour.at)
+            .map(|m| m.day.clone())
+            .unwrap_or_default();
+        let which = ui::fill(
+            s.clips_match_of,
+            &[(tour.at + 1).to_string(), tour.matches.len().to_string()],
+        );
+        let arrow = |label: &str, what: &str, after: bool| {
+            ui::tip(
+                ui::pill(
+                    label,
+                    false,
+                    self.other_match(after).map(|_| Message::OtherMatch(after)),
+                    c,
+                ),
+                what,
+                c,
+            )
+        };
+        row![
+            arrow("◀", s.previous_match, false),
+            column![
+                text(which).size(SIZE_SMALL).font(theme::fonts().bold),
+                text(format!("{} · {day}", self.the_match.opponent))
+                    .size(SIZE_SMALL)
+                    .color(c.muted),
+            ]
+            .width(Length::Fill),
+            arrow("▶", s.next_match, true),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
     }
 
     /// How the events line up with the video, and how many are outside it.
@@ -1145,7 +1360,7 @@ impl VideoScreen {
                 },
                 ui::tip(
                     ui::pill(s.clip, self.clip, Some(Message::Clip), c),
-                    &ui::fill(s.clip_explained, &[(CLIP_AFTER_MS / 1000).to_string()]),
+                    &ui::fill(s.clip_explained, &[self.margins.after_s.to_string()]),
                     c
                 ),
                 text(s.speed).size(SIZE_SMALL).color(c.muted),
@@ -1153,9 +1368,67 @@ impl VideoScreen {
             .extend(speeds)
             .spacing(10)
             .align_y(Alignment::Center),
+            self.margins_view(s, c),
         ]
         .spacing(8)
         .into()
+    }
+
+    /// In clip mode, the seconds of each clip before and after its action:
+    /// written, or one more or less.
+    fn margins_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        if !(self.clip || self.clips.is_some()) {
+            return space::vertical().height(0).into();
+        }
+        let field = |margin: Margin, id: &'static str, name: &str| -> Element<'a, Message> {
+            let shown = match &self.margin_text {
+                Some((m, text)) if *m == margin => text.clone(),
+                _ => self.margins.get(margin).to_string(),
+            };
+            row![
+                text(name.to_string()).size(SIZE_SMALL).color(c.muted),
+                ui::pill("−", false, Some(Message::MarginStep(margin, -1)), c),
+                iced::widget::text_input("0", &shown)
+                    .id(iced::widget::Id::new(id))
+                    .on_input(move |t| Message::MarginInput(margin, t))
+                    .on_submit(Message::MarginSubmit)
+                    .size(theme::SIZE_BODY)
+                    .align_x(Alignment::Center)
+                    .padding(iced::Padding::from([4, 6]))
+                    .width(Length::Fixed(48.0))
+                    .style(move |_, _| iced::widget::text_input::Style {
+                        background: c.background.into(),
+                        border: iced::Border {
+                            color: c.border,
+                            width: 1.0,
+                            radius: 8.0.into(),
+                        },
+                        icon: c.muted,
+                        placeholder: c.muted,
+                        value: c.text,
+                        selection: iced::Color {
+                            a: 0.35,
+                            ..c.accent
+                        },
+                    }),
+                ui::pill("+", false, Some(Message::MarginStep(margin, 1)), c),
+                text("s").size(SIZE_SMALL).color(c.muted),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into()
+        };
+        ui::tip(
+            row![
+                text(s.clip).size(SIZE_SMALL).font(theme::fonts().bold),
+                field(Margin::Before, BEFORE_FIELD, s.clip_before),
+                field(Margin::After, AFTER_FIELD, s.clip_after),
+            ]
+            .spacing(16)
+            .align_y(Alignment::Center),
+            s.clip_margins_explained,
+            c,
+        )
     }
 }
 
@@ -1494,7 +1767,7 @@ pub(crate) mod screen_tests {
         let dir = tempfile::tempdir().unwrap();
         let mut screen = with_file(&dir, "20150125 000000.mp4");
         let i = 3;
-        let end = screen.events[i].offset_ms.unwrap().unsigned_abs() + CLIP_AFTER_MS;
+        let end = screen.events[i].offset_ms.unwrap().unsigned_abs() + screen.after_ms();
         screen.key(key!(enter));
         assert_eq!(screen.clip_end, None);
         screen.key(key!(k));
@@ -1554,7 +1827,7 @@ pub(crate) mod screen_tests {
         let first = screen.events[0].offset_ms.unwrap();
         assert_eq!(
             screen.event_target(0),
-            Some((first - CLIPS_LEAD_MS).max(0).unsigned_abs())
+            Some((first - 5000).max(0).unsigned_abs())
         );
         let end = |screen: &VideoScreen| screen.clip_end.unwrap();
         let first_end = end(&screen);
@@ -1611,8 +1884,18 @@ pub(crate) mod screen_tests {
             gender: core.genders().first().map(|g| g.value),
             country: core.countries("Ital".into()).first().map(|c| c.value),
         };
-        let imported = core.import_dvw(bytes, choice, false).unwrap();
+        let imported = core.import_dvw(bytes, choice.clone(), false).unwrap();
         let (team, m) = (imported.team_id, imported.match_id);
+        // another match of the team, without its video
+        let cascina = std::fs::read(downloads.join("&And01 CORTONA V vs CASCINA 2.dvw")).unwrap();
+        let other = DvwChoice {
+            team_id: Some(team.clone()),
+            day: core.preview_dvw(cascina.clone()).unwrap().days[0].clone(),
+            ..choice
+        };
+        if let Err(e) = core.import_dvw(cascina, other, false) {
+            println!("Cascina not imported: {e}");
+        }
         let (the_match, _) = core.video(&team, &m).unwrap();
         let files = ["20261101 175252.mp4", "20261101 185442.mp4"]
             .iter()
@@ -1694,6 +1977,98 @@ pub(crate) mod screen_tests {
                 e.offset_ms
             );
         }
+    }
+
+    /// The serves of a team in two matches, each with its video: the first
+    /// match played, at the end of its last clip the next match opened
+    /// (in sequence), PgUp back to the first.
+    #[test]
+    fn the_actions_of_a_team_match_after_match() {
+        use crate::stats::tests::{match_against, team_with_two_matches, with_a_video};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let (arezzo, siena) = (
+            match_against(&core, &team, "Arezzo"),
+            match_against(&core, &team, "Siena"),
+        );
+        with_a_video(&core, &team, &arezzo);
+        with_a_video(&core, &team, &siena);
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
+        let matches = core.team_clips(&team, &period, &pick).unwrap();
+        assert_eq!(matches.len(), 2);
+        let mut screen = VideoScreen::with_tour(
+            core,
+            dir.path().to_path_buf(),
+            team,
+            matches,
+            "Serve".into(),
+        )
+        .unwrap();
+        assert_eq!(screen.match_id, arezzo);
+        assert_eq!(screen.events.len(), 3);
+        // the clips of Arezzo one after the other, then Siena
+        for _ in 0..3 {
+            let end = screen.clip_end.unwrap();
+            screen.reached(end);
+        }
+        assert_eq!(screen.match_id, siena);
+        assert_eq!(screen.events.len(), 2);
+        assert_eq!(screen.selected, 0);
+        assert!(screen.clip_end.is_some(), "its first clip playing");
+        // the last one: nothing after
+        assert_eq!(screen.other_match(true), None);
+        screen.key(key!(pageup));
+        assert_eq!(screen.match_id, arezzo);
+        assert!(screen.is_clips() && screen.sequence);
+        // out of sequence, the last clip of Arezzo stays there
+        screen.key(key!(s));
+        screen.go_to_event(2);
+        screen.reached(screen.clip_end.unwrap());
+        assert_eq!(screen.match_id, arezzo);
+        // by hand, PgDn
+        screen.key(key!(pagedown));
+        assert_eq!(screen.match_id, siena);
+        assert!(!screen.sequence, "the mode kept");
+    }
+
+    /// In clip mode the clip starts and ends the seconds chosen before and
+    /// after the event: − and +, or written; saved for the next time; Esc
+    /// leaves the field, not the screen. Out of clip mode, 2 s before.
+    #[test]
+    fn the_margins_of_the_clips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        let i = 3;
+        let at = screen.events[i].offset_ms.unwrap();
+        let target = |screen: &VideoScreen| screen.event_target(i).unwrap();
+        assert_eq!(target(&screen), (at - LEAD_MS).unsigned_abs());
+        screen.key(key!(k));
+        assert_eq!(target(&screen), (at - 5000).unsigned_abs());
+        screen.update(Message::MarginStep(Margin::Before, 1));
+        screen.update(Message::MarginStep(Margin::After, -1));
+        assert_eq!(target(&screen), (at - 6000).unsigned_abs());
+        screen.go_to_event(i);
+        assert_eq!(screen.clip_end, Some(at.unsigned_abs() + 4000));
+        // written: only digits, the field kept while empty
+        screen.update(Message::MarginInput(Margin::After, String::new()));
+        assert_eq!(screen.margins.after_s, 4);
+        screen.update(Message::MarginInput(Margin::After, "1x2".into()));
+        assert_eq!(screen.margins.after_s, 12);
+        assert!(screen.focus_id().is_some());
+        assert!(matches!(screen.key(BACK_KEY), Outcome::Stay));
+        assert!(screen.focus_id().is_none());
+        // the next time, as chosen
+        let again = with_file(&dir, "20150125 000000.mp4");
+        assert_eq!((again.margins.before_s, again.margins.after_s), (6, 12));
     }
 
     /// `w` (or the pill) asks for the own window and back; its window

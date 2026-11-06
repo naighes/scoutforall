@@ -115,6 +115,8 @@ enum Go {
     Video(String, String),
     /// the actions of the match picked in its statistics, in the video
     Clips(String, String, scout4all_mobile::ClipPick, String),
+    /// the actions of the team picked in its statistics, match after match
+    TeamClips(String, Vec<scout4all_mobile::MatchClips>, String),
     /// back to the statistics the actions were picked in
     Unpark,
     /// the file of the video to choose
@@ -333,17 +335,13 @@ impl App {
                 let opened = core.match_clips(&team, &m, &pick).and_then(|events| {
                     video::VideoScreen::with_clips(core, self.dir.clone(), team, m, events, title)
                 });
-                match opened {
-                    Ok(screen) => {
-                        self.error = None;
-                        let left =
-                            std::mem::replace(&mut self.screen, Screen::Video(Box::new(screen)));
-                        if let Screen::Stats(stats) = left {
-                            self.parked = Some(stats);
-                        }
-                    }
-                    Err(e) => self.error = Some(e.to_string()),
-                }
+                self.watch(opened);
+                return Task::none();
+            }
+            Go::TeamClips(team, matches, title) => {
+                let opened =
+                    video::VideoScreen::with_tour(core, self.dir.clone(), team, matches, title);
+                self.watch(opened);
                 return Task::none();
             }
             Go::Unpark => match self.parked.take() {
@@ -416,6 +414,21 @@ impl App {
             Err(e) => self.error = Some(e.to_string()),
         }
         Task::none()
+    }
+
+    /// The actions picked in the statistics, in the video: the statistics
+    /// parked, to go back to them as they were.
+    fn watch(&mut self, opened: Result<video::VideoScreen, scout4all_mobile::MobileError>) {
+        match opened {
+            Ok(screen) => {
+                self.error = None;
+                let left = std::mem::replace(&mut self.screen, Screen::Video(Box::new(screen)));
+                if let Screen::Stats(stats) = left {
+                    self.parked = Some(stats);
+                }
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
     }
 
     /// The archive made, then where to save it chosen.
@@ -1316,6 +1329,9 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
             Some(m) => Go::Clips(screen.team_id.clone(), m, pick, screen.clips_title(s)),
             None => Go::Stay,
         },
+        stats::Outcome::WatchTour(matches) => {
+            Go::TeamClips(screen.team_id.clone(), matches, screen.clips_title(s))
+        }
         stats::Outcome::Back => match screen.match_id() {
             Some(m) => Go::Match(screen.team_id.clone(), m),
             None => Go::Team(screen.team_id.clone()),

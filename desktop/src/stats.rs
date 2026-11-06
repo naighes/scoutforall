@@ -37,8 +37,8 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         AnalysisPeriod, ClipPick, DetailFilter, DetailStats, ErrorCount, FundamentalDetail,
-        LiveStats, MobileError, PhaseStats, Scout4All, SituationChoices, StatsScope, TargetStats,
-        TeamAnalysis,
+        LiveStats, MatchClips, MobileError, PhaseStats, Scout4All, SituationChoices, StatsScope,
+        TargetStats, TeamAnalysis,
     },
     std::sync::Arc,
 };
@@ -145,6 +145,9 @@ pub enum Outcome {
     Back,
     /// the actions picked, one after the other in the video
     Watch(ClipPick),
+    /// the actions picked of the team, match after match: only the
+    /// matches with a video
+    WatchTour(Vec<MatchClips>),
 }
 
 /// The two days of a period, as written, and the month of the calendar.
@@ -257,8 +260,11 @@ pub struct StatsScreen {
     clip_target: Option<CourtZoneEnum>,
     /// how many actions are picked: none for a team
     clips: Option<usize>,
-    /// the match has files of its video
+    /// the match has files of its video; of a team, one of the matches
+    /// with actions picked
     has_video: bool,
+    /// of a team, the matches of the period with actions picked
+    tour: Vec<MatchClips>,
 }
 
 /// The filters on the left.
@@ -429,6 +435,7 @@ impl StatsScreen {
             clip_target: None,
             clips: None,
             has_video: false,
+            tour: vec![],
         }
     }
 
@@ -507,6 +514,7 @@ impl StatsScreen {
     }
 
     /// How many actions are picked, of a match.
+    /// Of a team, the ones in the matches with a video: the ones to watch.
     fn recount(&mut self) {
         self.clips = match &self.source {
             Source::Match(m) => self
@@ -514,8 +522,20 @@ impl StatsScreen {
                 .match_clips(&self.team_id, m, &self.pick())
                 .ok()
                 .map(|clips| clips.len()),
-            Source::Team => None,
+            Source::Team => {
+                self.tour = self
+                    .core
+                    .team_clips(&self.team_id, &self.period, &self.pick())
+                    .unwrap_or_default();
+                self.has_video = self.tour.iter().any(|m| m.has_video);
+                Some(self.watched().map(|m| m.events.len()).sum())
+            }
         };
+    }
+
+    /// Of a team, the matches with actions picked and a video.
+    fn watched(&self) -> impl Iterator<Item = &MatchClips> {
+        self.tour.iter().filter(|m| m.has_video)
     }
 
     /// Whether the actions of the detail can be watched: of a match with a
@@ -915,9 +935,10 @@ impl StatsScreen {
 
     /// The actions picked in the video, if they can be watched.
     fn watch(&self) -> Outcome {
-        match self.watchable() {
-            true => Outcome::Watch(self.pick()),
-            false => Outcome::Stay,
+        match (self.watchable(), self.is_team()) {
+            (true, false) => Outcome::Watch(self.pick()),
+            (true, true) => Outcome::WatchTour(self.watched().cloned().collect()),
+            (false, _) => Outcome::Stay,
         }
     }
 
@@ -1547,10 +1568,21 @@ impl StatsScreen {
             ),
             false => space::horizontal().width(0).into(),
         };
-        let said: Element<'a, Message> = match (self.has_video, count) {
-            (false, _) => small(s.clips_no_video, c).into(),
-            (true, 0) => small(s.clips_none, c).into(),
-            (true, _) => small(s.clips_pick_hint, c).into(),
+        let without = self.tour.iter().filter(|m| !m.has_video).count();
+        let said: Element<'a, Message> = match (self.is_team(), self.has_video, count, without) {
+            (true, _, _, 1..) => {
+                small(ui::fill(s.clips_without_video, &[without.to_string()]), c).into()
+            }
+            (false, false, _, _) => small(s.clips_no_video, c).into(),
+            (_, _, 0, _) => small(s.clips_none, c).into(),
+            (_, _, _, _) => small(s.clips_pick_hint, c).into(),
+        };
+        let how_many = match self.is_team() {
+            true => ui::fill(
+                s.clips_in_matches,
+                &[count.to_string(), self.watched().count().to_string()],
+            ),
+            false => ui::fill(s.clips_count, &[count.to_string()]),
         };
         let watch = ui::pill(
             &format!("▶ {}", s.watch_clips),
@@ -1560,7 +1592,7 @@ impl StatsScreen {
         );
         row![
             watch,
-            ui::body(ui::fill(s.clips_count, &[count.to_string()])),
+            ui::body(how_many),
             clear,
             container(said).width(Length::Fill).align_x(Alignment::End),
         ]
@@ -2335,7 +2367,7 @@ fn error_name(event: EventTypeEnum, forced: bool, s: &Strings) -> String {
 
 #[cfg(test)]
 #[allow(clippy::unreachable)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -2371,7 +2403,7 @@ mod tests {
 
     /// A team of seven and two matches played, a set each with our serves:
     /// three aces on 24/10, an ace and an error on 31/10.
-    fn team_with_two_matches(core: &Scout4All) -> String {
+    pub(crate) fn team_with_two_matches(core: &Scout4All) -> String {
         let team = core
             .save_team(
                 None,
@@ -2450,7 +2482,7 @@ mod tests {
 
     /// The serves of the detail of a match, picked to watch in its video:
     /// how many, only the errors by clicking their row, the pick cleared
-    /// with another fundamental; `v` only with a video; a team has none.
+    /// with another fundamental; `v` only with a video.
     #[test]
     fn the_actions_of_the_detail_to_watch() {
         let s = strings(LanguageEnum::It);
@@ -2513,9 +2545,87 @@ mod tests {
         // on another page, no
         screen.update(Message::Page(0));
         assert!(matches!(screen.key(key!(v)), Outcome::Stay));
-        // a team: none
+        // a team: its matches (see `the_actions_of_the_team_to_watch`)
         let analysis = StatsScreen::team(core.clone(), team.clone(), s).unwrap();
-        assert_eq!(analysis.clips, None);
+        assert!(analysis.clips.is_some());
+    }
+
+    /// The match of the team against `opponent`.
+    pub(crate) fn match_against(core: &Scout4All, team: &str, opponent: &str) -> String {
+        core.matches(team.to_string())
+            .unwrap()
+            .into_iter()
+            .find_map(|m| match m {
+                scout4all_mobile::MatchListing::Match {
+                    id, opponent: o, ..
+                } if o == opponent => Some(id),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// A video for the match, starting a minute before now: its events,
+    /// just scouted, in it.
+    pub(crate) fn with_a_video(core: &Scout4All, team: &str, m: &str) {
+        let (the_match, _) = core.video(team, m).unwrap();
+        let start = chrono::Utc::now().fixed_offset() - chrono::TimeDelta::seconds(60);
+        let profile = scout4all_core::video::VideoProfile {
+            files: vec![scout4all_core::video::VideoFile {
+                path: format!("{m}.mp4"),
+                start: Some(start),
+            }],
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+    }
+
+    /// The serves of the team in the period, to watch: the matches with
+    /// some, the ones without a video left out; `v` watches the others.
+    #[test]
+    fn the_actions_of_the_team_to_watch() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let open = |core: &Arc<Scout4All>| {
+            let mut screen = StatsScreen::team(core.clone(), team.clone(), s).unwrap();
+            screen.update(Message::Kind(Kind::LastMatches));
+            screen.update(Message::Page(2));
+            screen
+        };
+        let mut screen = open(&core);
+        let actions = |screen: &StatsScreen| -> Vec<(String, usize, bool)> {
+            screen
+                .tour
+                .iter()
+                .map(|m| (m.opponent.clone(), m.events.len(), m.has_video))
+                .collect()
+        };
+        assert_eq!(
+            actions(&screen),
+            [
+                ("Arezzo".to_string(), 3, false),
+                ("Siena".to_string(), 2, false)
+            ]
+        );
+        // no video: nothing to watch
+        assert_eq!(screen.clips, Some(0));
+        assert!(matches!(screen.key(key!(v)), Outcome::Stay));
+        // the errors: only Siena
+        screen.update(Message::ClipEval(EvalEnum::Error));
+        assert_eq!(actions(&screen), [("Siena".to_string(), 1, false)]);
+        // a video of Siena: its serves to watch, Arezzo left out
+        with_a_video(&core, &team, &match_against(&core, &team, "Siena"));
+        let mut screen = open(&core);
+        assert!(screen.has_video && screen.watchable());
+        assert_eq!(screen.clips, Some(2));
+        match screen.key(key!(v)) {
+            Outcome::WatchTour(matches) => {
+                assert_eq!(matches.len(), 1);
+                assert_eq!(matches[0].opponent, "Siena");
+            }
+            _ => unreachable!("the serves of Siena to watch"),
+        }
     }
 
     fn aces(screen: &StatsScreen) -> u32 {
