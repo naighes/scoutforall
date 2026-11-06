@@ -9,7 +9,6 @@
   "highlights_title": "A także",
   "highlights": [
     { "title": "Strefy gry", "content": "Strefy zagrywki, przyjęcia, ataku, obrony i bloku. Zapis składu bloku." },
-    { "title": "Pliki DataVolley", "content": "Importuj mecze <code>.dvw</code>, razem ze strefami, i analizuj je obok własnych." },
     { "title": "Raport PDF", "content": "Raport z meczu w formie protokołu, gotowy do wydruku lub udostępnienia drużynie." },
     { "title": "Twoje klawisze", "content": "Każde zdarzenie, ocenę i rodzaj wystawy można przypisać do wybranego klawisza." },
     { "title": "Pięć języków", "content": "Polski, angielski, włoski, portugalski i japoński." },

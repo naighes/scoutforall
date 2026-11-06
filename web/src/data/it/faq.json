@@ -20,10 +20,6 @@
     "answer": "Non tutte: l'app fa alcune scelte coerenti al fine di non compromettere l'aspetto della produttività. Il libero sostituisce automaticamente il centrale in seconda linea, tranne quando quest'ultimo è in battuta; è comunque possibile annullare tale sostituzione. Le zone di attacco derivano dai ruoli e dalla posizione del palleggiatore. Puoi dichiarare la P1 invertita e la ricezione a due, tre o quattro giocatori."
   },
   {
-    "question": "Posso aprire le partite registrate con DataVolley?",
-    "answer": "Sì: importa un file <code>.dvw</code> in una delle tue squadre, con le sue zone. La partita importata si analizza come le altre, da sola o assieme a più partite."
-  },
-  {
     "question": "Quanto spesso viene aggiornato? Devo installare gli aggiornamenti a mano?",
     "answer": "È in sviluppo attivo e le nuove versioni escono con regolarità. Non devi scaricarle tu: a ogni avvio l'app controlla se c'è una nuova versione e, dopo avertelo chiesto, la installa e si riavvia."
   },

@@ -27,6 +27,19 @@
     "image_alt": "O detalhe das estatísticas de uma partida: as avaliações do saque, os jogadores e os saques por zona"
   },
   {
+    "id": "video",
+    "eyebrow": "Vídeo",
+    "title": "Scout sincronizado com o vídeo",
+    "content": "Vincule o vídeo da partida ao seu scout: basta ancorar um evento no momento certo e todos os outros se alinham. Durante a reprodução os eventos se iluminam um a um e o placar aparece sobre as imagens; ao selecionar um evento o vídeo vai para aquela jogada.",
+    "points": [
+      "Tempo de cada evento ajustável manualmente, para uma sincronização precisa",
+      "As jogadas por trás de uma estatística, uma após a outra, também em várias partidas",
+      "Montagem em MP4 das jogadas escolhidas, com o placar sobreposto, pronta para compartilhar"
+    ],
+    "image": "video",
+    "image_alt": "A tela do vídeo: a partida com o placar sobreposto e, ao lado, os eventos do scout"
+  },
+  {
     "id": "analysis",
     "eyebrow": "Análise da equipe",
     "title": "Comparação entre várias partidas",
@@ -34,7 +47,7 @@
     "points": [
       "Os mesmos filtros disponíveis para uma única partida",
       "Evolução das estatísticas partida a partida, com média móvel",
-      "Partidas registradas com o scout4all e importadas do DataVolley, exibidas juntas"
+      "Partidas registradas com o scout4all e importadas, exibidas juntas"
     ],
     "image": "team-analysis",
     "image_alt": "A análise de uma equipe nas últimas partidas: resumo, rodízios, distribuição e erros"

@@ -9,7 +9,6 @@
   "highlights_title": "E também",
   "highlights": [
     { "title": "Zonas de jogo", "content": "Zonas de saque, recepção, ataque, defesa e bloqueio. Registro da composição do bloqueio." },
-    { "title": "Arquivos do DataVolley", "content": "Importe partidas <code>.dvw</code>, com as suas zonas, e analise-as junto com as suas." },
     { "title": "Relatório em PDF", "content": "O relatório da partida, no formato de súmula, pronto para imprimir ou compartilhar com a equipe." },
     { "title": "Suas teclas", "content": "Cada evento, avaliação e tipo de levantamento pode usar a tecla que você preferir." },
     { "title": "Cinco idiomas", "content": "Português, inglês, italiano, polonês e japonês." },

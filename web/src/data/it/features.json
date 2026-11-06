@@ -27,6 +27,19 @@
     "image_alt": "Il dettaglio delle statistiche di una partita: le valutazioni della battuta, i giocatori e le battute per zona"
   },
   {
+    "id": "video",
+    "eyebrow": "Video",
+    "title": "Lo scout sincronizzato con il video",
+    "content": "Collega il video della partita al suo scout: basta agganciare un evento al momento giusto e tutti gli altri si allineano. Durante la riproduzione gli eventi si illuminano man mano e il punteggio compare sopra le immagini; selezionando un evento il video si sposta a quell'azione.",
+    "points": [
+      "Tempo del singolo evento correggibile a mano, per una sincronizzazione precisa",
+      "Le azioni dietro una statistica, una dopo l'altra, anche su più partite",
+      "Montaggio in MP4 delle azioni scelte, con il punteggio sovrimpresso, da condividere"
+    ],
+    "image": "video",
+    "image_alt": "La schermata del video: la partita con il punteggio sovrimpresso e accanto gli eventi dello scout"
+  },
+  {
     "id": "analysis",
     "eyebrow": "Analisi della squadra",
     "title": "Confronto tra più partite",
@@ -34,7 +47,7 @@
     "points": [
       "Gli stessi filtri disponibili per la singola partita",
       "Andamento delle statistiche partita per partita, con media mobile",
-      "Partite registrate con scout4all e importate da DataVolley, visualizzate assieme"
+      "Partite registrate con scout4all e importate, visualizzate assieme"
     ],
     "image": "team-analysis",
     "image_alt": "L'analisi di una squadra sulle ultime partite: riepilogo, rotazioni, distribuzione ed errori"

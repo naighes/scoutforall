@@ -20,10 +20,6 @@
     "answer": "Nie wszystkie: aplikacja przyjmuje kilka spójnych założeń, aby nie obniżać produktywności. Libero automatycznie zastępuje środkowego w drugiej linii, z wyjątkiem sytuacji gdy środkowy serwuje; nadal można cofnąć tę zmianę. Strefy ataku wynikają z pozycji zawodników i miejsca rozgrywającego. Możesz zadeklarować odwrócone ustawienie 1 oraz przyjęcie w dwójkę, trójkę lub czwórkę."
   },
   {
-    "question": "Czy mogę otworzyć mecze zapisane w DataVolley?",
-    "answer": "Tak: zaimportuj plik <code>.dvw</code> do jednej ze swoich drużyn, razem ze strefami. Zaimportowany mecz analizuje się tak jak pozostałe, osobno lub razem z innymi meczami."
-  },
-  {
     "question": "Jak często jest aktualizowany? Czy muszę instalować aktualizacje ręcznie?",
     "answer": "Jest aktywnie rozwijany, a nowe wersje wychodzą regularnie. Nie musisz ich pobierać samodzielnie: przy każdym uruchomieniu aplikacja sprawdza, czy jest nowa wersja, i po zapytaniu cię instaluje ją i uruchamia się ponownie."
   },
