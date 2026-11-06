@@ -6,10 +6,13 @@ mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::errors::{AppError, SnapshotError};
     use crate::shapes::{
-        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, RoleEnum, TeamSideEnum},
+        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, RoleEnum, TeamSideEnum, ZoneEnum},
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        stats::{AttackKey, Counter, EventKey, Touch},
+        stats::{
+            AttackKey, Counter, EvalSet, EventKey, EventPick, SetTypeSet, SituationFilter,
+            StatsFilter, Touch,
+        },
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     };
     use crate::tests::EN;
@@ -758,6 +761,111 @@ mod tests {
                 .is_ok()
             );
         }
+    }
+
+    /// The events behind a statistic, to see them in the video: the ones
+    /// the statistics counted, by fundamental, evaluation, set, zone of the
+    /// net and player.
+    #[test]
+    fn the_events_behind_a_statistic() {
+        let t = Team::new();
+        let events = vec![
+            act(P, t.libero, Positive, None),
+            act(A, t.oh1, Positive, Some(TechniqueEnum::Set(Five))),
+            act(A, t.opposite, Perfect, Some(TechniqueEnum::Set(Super))),
+        ];
+        let set = SetEntry {
+            set_number: 1,
+            serving_team: TeamSideEnum::Them,
+            initial_positions: [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.mb1],
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events,
+        };
+        let keys = set
+            .event_keys(DEFAULT_MAX_SUBSTITUTIONS)
+            .unwrap_or_else(|e| panic!("expected the set to replay: {e}"));
+        assert_eq!(keys.len(), 3);
+        let stats = t.setter_in_the_back_row(set.events.clone()).stats;
+        let picked = |pick: EventPick| -> Vec<usize> {
+            let found: Vec<usize> = keys
+                .iter()
+                .enumerate()
+                .filter(|(_, k)| k.as_ref().is_some_and(|k| pick.keeps(k)))
+                .map(|(i, _)| i)
+                .collect();
+            // as many as the statistics count
+            let counted = match (pick.evals, pick.zone, pick.target) {
+                (None, None, None) => stats.event_count(pick.event_type, None, &pick.filter),
+                (Some(evals), None, None) => {
+                    [Perfect, Positive, Exclamative, Negative, Over, Error]
+                        .into_iter()
+                        .filter(|e| evals.contains(*e))
+                        .map(|e| stats.event_count(pick.event_type, Some(e), &pick.filter))
+                        .sum()
+                }
+                _ => found.len() as u32,
+            };
+            assert_eq!(found.len() as u32, counted, "{pick:?}");
+            found
+        };
+        let attacks = EventPick {
+            event_type: A,
+            evals: None,
+            zone: None,
+            target: None,
+            filter: StatsFilter::default(),
+        };
+        assert_eq!(picked(attacks), vec![1, 2]);
+        assert_eq!(
+            picked(EventPick {
+                event_type: P,
+                ..attacks
+            }),
+            vec![0]
+        );
+        assert_eq!(
+            picked(EventPick {
+                evals: Some(EvalSet::of(&[Perfect])),
+                ..attacks
+            }),
+            vec![2]
+        );
+        // in P1 in side out the opposite attacks from 4, the outside
+        // hitter from 2
+        assert_eq!(
+            picked(EventPick {
+                zone: Some(ZoneEnum::Four),
+                ..attacks
+            }),
+            vec![2]
+        );
+        assert_eq!(
+            picked(EventPick {
+                zone: Some(ZoneEnum::Two),
+                ..attacks
+            }),
+            vec![1]
+        );
+        assert_eq!(
+            picked(EventPick {
+                filter: StatsFilter::new(None, None, Some(t.opposite)),
+                ..attacks
+            }),
+            vec![2]
+        );
+        assert_eq!(
+            picked(EventPick {
+                filter: StatsFilter::default().with_situation(SituationFilter {
+                    set_types: Some(SetTypeSet::of(&[Five])),
+                    ..SituationFilter::default()
+                }),
+                ..attacks
+            }),
+            vec![1]
+        );
     }
 
     /// The techniques don't change score and statistics: only the set of

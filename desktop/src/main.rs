@@ -113,6 +113,10 @@ enum Go {
     Events(String, String, u8),
     /// the video of the match
     Video(String, String),
+    /// the actions of the match picked in its statistics, in the video
+    Clips(String, String, scout4all_mobile::ClipPick, String),
+    /// back to the statistics the actions were picked in
+    Unpark,
     /// the file of the video to choose
     PickVideo,
     /// a frame of the video to allocate before it's shown
@@ -163,6 +167,9 @@ struct App {
     /// MP4 is saved
     recorder: Option<live::capture::Capture>,
     recorder_status: Option<live::capture::Status>,
+    /// the statistics the actions were picked in, while they're watched
+    /// in the video: back to them as they were
+    parked: Option<Box<stats::StatsScreen>>,
 }
 
 /// The self update (`update`), as the bar shows it.
@@ -260,6 +267,7 @@ impl App {
             video_window: None,
             recorder: None,
             recorder_status: None,
+            parked: None,
         };
         // the recordings cut short last time (the app closed while
         // recording): made videos of their matches
@@ -321,6 +329,27 @@ impl App {
                 .map(|screen| Screen::Events(Box::new(screen))),
             Go::Video(team, m) => video::VideoScreen::new(core, self.dir.clone(), team, m)
                 .map(|screen| Screen::Video(Box::new(screen))),
+            Go::Clips(team, m, pick, title) => {
+                let opened = core.match_clips(&team, &m, &pick).and_then(|events| {
+                    video::VideoScreen::with_clips(core, self.dir.clone(), team, m, events, title)
+                });
+                match opened {
+                    Ok(screen) => {
+                        self.error = None;
+                        let left =
+                            std::mem::replace(&mut self.screen, Screen::Video(Box::new(screen)));
+                        if let Screen::Stats(stats) = left {
+                            self.parked = Some(stats);
+                        }
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+                return Task::none();
+            }
+            Go::Unpark => match self.parked.take() {
+                Some(stats) => Ok(Screen::Stats(stats)),
+                None => return Task::none(),
+            },
             Go::Live(team, m) => match &self.recorder_status {
                 // the camera taken: `r` stops the recording
                 Some(status) if status.recording.is_some() => {
@@ -903,11 +932,11 @@ impl App {
             }
             (Message::Stats(m), Screen::Stats(screen)) => {
                 let outcome = screen.update(m);
-                stats_go(screen, outcome)
+                stats_go(screen, outcome, s)
             }
             (Message::Key(ck), Screen::Stats(screen)) => {
                 let outcome = screen.key(ck);
-                stats_go(screen, outcome)
+                stats_go(screen, outcome, s)
             }
             (Message::Start(m), Screen::Start(screen)) => {
                 let outcome = screen.update(m);
@@ -1257,6 +1286,7 @@ fn live_ticks() -> impl iced::futures::Stream<Item = Message> {
 fn video_go(screen: &video::VideoScreen, outcome: video::Outcome) -> Go {
     match outcome {
         video::Outcome::Stay => Go::Stay,
+        video::Outcome::Back if screen.is_clips() => Go::Unpark,
         video::Outcome::Back => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
         video::Outcome::Choose => Go::PickVideo,
         video::Outcome::Allocate(frame, handle) => Go::VideoFrame(Box::new((frame, handle))),
@@ -1279,9 +1309,13 @@ fn dvw_go(screen: &dvw::DvwScreen, outcome: dvw::Outcome) -> Go {
     }
 }
 
-fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome) -> Go {
+fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -> Go {
     match outcome {
         stats::Outcome::Stay => Go::Stay,
+        stats::Outcome::Watch(pick) => match screen.match_id() {
+            Some(m) => Go::Clips(screen.team_id.clone(), m, pick, screen.clips_title(s)),
+            None => Go::Stay,
+        },
         stats::Outcome::Back => match screen.match_id() {
             Some(m) => Go::Match(screen.team_id.clone(), m),
             None => Go::Team(screen.team_id.clone()),

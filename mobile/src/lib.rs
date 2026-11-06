@@ -61,7 +61,10 @@ use scout4all_core::{
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
-        stats::{AttackSummary, EvalSet, Metric, SetTypeSet, SituationFilter, Stats, StatsFilter},
+        stats::{
+            AttackSummary, EvalSet, EventPick, Metric, SetTypeSet, SituationFilter, Stats,
+            StatsFilter,
+        },
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
@@ -72,7 +75,7 @@ use scout4all_core::{
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
-    video::{StoredProfile, VideoProfile, place, read_profile, write_profile},
+    video::{EventRef, StoredProfile, VideoProfile, place, read_profile, write_profile},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
@@ -2511,6 +2514,21 @@ pub struct VideoEvent {
     pub offset_ms: Option<i64>,
 }
 
+/// The events behind a statistic of the detail of a fundamental, to see
+/// them in the video (desktop only): the scope, the fundamental and the
+/// filter of the detail, and, when chosen, some evaluations, the zone of
+/// the net of the attacks (2, 3, 4, 8, 9) and a zone of the court
+/// (`TargetStats::value`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipPick {
+    pub scope: StatsScope,
+    pub event: EventTypeEnum,
+    pub filter: DetailFilter,
+    pub evals: Vec<EvalEnum>,
+    pub zone: Option<u8>,
+    pub target: Option<CourtZoneEnum>,
+}
+
 /// For the apps written in Rust (the desktop app), not exported to the
 /// bindings: they drive the scouting from the keyboard as the TUI does.
 impl Scout4All {
@@ -2582,6 +2600,18 @@ impl Scout4All {
             }));
         }
         Ok(events)
+    }
+
+    /// The events of the match the statistics counted for the pick, in
+    /// order: the ones to see one after the other in the video.
+    pub fn match_clips(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        pick: &ClipPick,
+    ) -> Result<Vec<EventRef>, MobileError> {
+        let m = self.read_match(team_id, match_id)?;
+        clips_of(&m, pick)
     }
 
     /// Saves the profile of the video of the match.
@@ -4026,6 +4056,39 @@ fn set_event_rows(
             ),
         })
         .collect())
+}
+
+/// The events of the match the statistics counted for the pick, set by
+/// set in order.
+fn clips_of(m: &MatchEntry, pick: &ClipPick) -> Result<Vec<EventRef>, MobileError> {
+    let filter = narrowed(&pick.filter)?;
+    let picked = EventPick {
+        event_type: pick.event,
+        evals: (!pick.evals.is_empty()).then(|| EvalSet::of(&pick.evals)),
+        zone: pick.zone.and_then(|z| ZoneEnum::try_from(z).ok()),
+        target: pick.target,
+        filter,
+    };
+    let mut sets: Vec<&SetEntry> = in_scope(&m.sets.iter().collect::<Vec<_>>(), pick.scope);
+    sets.sort_by_key(|s| s.set_number);
+    let mut refs = vec![];
+    for set in sets {
+        let keys = set
+            .event_keys(m.max_substitutions)
+            .map_err(|e| MobileError::Failed {
+                reason: e.to_string(),
+            })?;
+        refs.extend(
+            keys.iter()
+                .enumerate()
+                .filter(|(_, k)| k.as_ref().is_some_and(|k| picked.keeps(k)))
+                .map(|(index, _)| EventRef {
+                    set_number: set.set_number,
+                    index,
+                }),
+        );
+    }
+    Ok(refs)
 }
 
 fn find_set(m: &MatchEntry, set_number: u8) -> Result<&SetEntry, MobileError> {
@@ -6507,6 +6570,72 @@ mod tests {
         assert_eq!(app.dvw_max_substitutions(Some("2025-12-31".into())), 6);
         assert_eq!(app.dvw_max_substitutions(Some("2026-01-01".into())), 8);
         assert_eq!(app.dvw_max_substitutions(None), 8);
+    }
+
+    /// The events behind the detail of each fundamental, to see in the
+    /// video: as many as it counts, by evaluation, set and player too.
+    #[test]
+    fn the_clips_of_a_statistic() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        let scopes = [StatsScope::Match, StatsScope::Set { number: 2 }];
+        let mut seen = 0;
+        for (scope, event) in scopes.into_iter().flat_map(|s| {
+            use EventTypeEnum::*;
+            [S, P, D, B, A].map(|e| (s, e))
+        }) {
+            let detail = app
+                .match_detail(
+                    team.clone(),
+                    m.clone(),
+                    scope,
+                    event,
+                    DetailFilter::default(),
+                )
+                .unwrap();
+            let Some(f) = detail.fundamental else {
+                continue;
+            };
+            let pick = ClipPick {
+                scope,
+                event,
+                filter: DetailFilter::default(),
+                evals: vec![],
+                zone: None,
+                target: None,
+            };
+            let clips = app.match_clips(&team, &m, &pick).unwrap();
+            assert_eq!(clips.len() as u32, f.total, "{event:?} in {scope:?}");
+            seen += clips.len();
+            if let StatsScope::Set { number } = scope {
+                assert!(clips.iter().all(|c| c.set_number == number));
+            }
+            for e in &f.evals {
+                let by_eval = ClipPick {
+                    evals: vec![e.eval],
+                    ..pick.clone()
+                };
+                let clips = app.match_clips(&team, &m, &by_eval).unwrap();
+                assert_eq!(clips.len() as u32, e.count, "{event:?} {:?}", e.eval);
+            }
+            for p in &f.players {
+                let filter = DetailFilter {
+                    player: Some(p.player.id.clone()),
+                    ..DetailFilter::default()
+                };
+                let by_player = ClipPick {
+                    filter,
+                    ..pick.clone()
+                };
+                let clips = app.match_clips(&team, &m, &by_player).unwrap();
+                assert_eq!(clips.len() as u32, p.total, "{event:?} {}", p.player.name);
+            }
+        }
+        assert!(seen > 0, "the match has events");
     }
 
     #[test]

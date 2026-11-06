@@ -4,6 +4,7 @@ use crate::{
     shapes::{
         enums::{LineupRulesEnum, TeamSideEnum},
         snapshot::{EventEntry, Snapshot},
+        stats::EventKey,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -171,6 +172,17 @@ impl SetEntry {
                     .add_event(event)
                     .map(|_| (snapshot.score_us, snapshot.score_them))
             })
+            .collect()
+    }
+
+    /// What the statistics counted of each event, in order (see
+    /// `Snapshot::last_key`): to find the events behind a statistic.
+    pub fn event_keys(&self, max_substitutions: u8) -> Result<Vec<Option<EventKey>>, AppError> {
+        let rules = self.find_lineup_rules(max_substitutions)?;
+        let mut snapshot = Snapshot::with_rules(self, max_substitutions, rules)?;
+        self.events
+            .iter()
+            .map(|event| snapshot.add_event(event).map(|_| snapshot.last_key.take()))
             .collect()
     }
 

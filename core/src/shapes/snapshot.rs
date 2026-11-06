@@ -138,6 +138,11 @@ pub struct Snapshot {
     ball_ours: bool,
     // the situation of the rally being played
     rally: Situation,
+    /// what the statistics counted of the last event added: none for a
+    /// substitution, a libero or setter change, or an action missing its
+    /// evaluation (to find the events behind a statistic, e.g. to see them
+    /// in the video)
+    pub last_key: Option<EventKey>,
 }
 
 // snapshot should be SetSnapshot, and it should guarantees set invariants
@@ -181,6 +186,7 @@ impl Snapshot {
             possession: 0,
             ball_ours: false,
             rally: Situation::default(),
+            last_key: None,
         };
         // the events available before the first serve: also the ones after a
         // substitution, setter or libero change opening the set
@@ -597,37 +603,38 @@ impl Snapshot {
             Some(TechniqueEnum::Set(t)) => Some(t),
             _ => None,
         };
-        if !skip {
-            self.stats.events.add(EventKey {
-                event_type: event.event_type,
-                phase,
-                rotation,
-                player: event.player.filter(|_| event.event_type.asks_player()),
-                zone,
-                // where our serve or attack went, or where we received,
-                // dug or blocked theirs, if told as the event tells it
-                target: event
-                    .flags
-                    .target()
-                    .filter(|t| TargetKind::of(event.event_type).is_some_and(|k| k.fits(t))),
-                // how many blocked against our attack or on our block, if told
-                blockers: event
-                    .flags
-                    .blockers()
-                    .filter(|b| BlockersEnum::of(event.event_type).contains(b)),
-                eval: event.eval,
-                situation,
-                touch: event.event_type.asks_player().then(|| Touch {
-                    role: role(&event.player),
-                    // our touch before in the same rally
-                    previous: self
-                        .last_event
-                        .as_ref()
-                        .filter(|e| e.event_type.rally_winner(e.eval).is_none())
-                        .and_then(|e| e.eval),
-                    set_type,
-                }),
-            });
+        self.last_key = (!skip).then(|| EventKey {
+            event_type: event.event_type,
+            phase,
+            rotation,
+            player: event.player.filter(|_| event.event_type.asks_player()),
+            zone,
+            // where our serve or attack went, or where we received,
+            // dug or blocked theirs, if told as the event tells it
+            target: event
+                .flags
+                .target()
+                .filter(|t| TargetKind::of(event.event_type).is_some_and(|k| k.fits(t))),
+            // how many blocked against our attack or on our block, if told
+            blockers: event
+                .flags
+                .blockers()
+                .filter(|b| BlockersEnum::of(event.event_type).contains(b)),
+            eval: event.eval,
+            situation,
+            touch: event.event_type.asks_player().then(|| Touch {
+                role: role(&event.player),
+                // our touch before in the same rally
+                previous: self
+                    .last_event
+                    .as_ref()
+                    .filter(|e| e.event_type.rally_winner(e.eval).is_none())
+                    .and_then(|e| e.eval),
+                set_type,
+            }),
+        });
+        if let Some(key) = &self.last_key {
+            self.stats.events.add(key.clone());
         }
         if let Some(winner) = event.event_type.rally_winner(event.eval) {
             self.stats.rallies.add(RallyKey {

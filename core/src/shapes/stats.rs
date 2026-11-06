@@ -109,6 +109,44 @@ impl StatsFilter {
     }
 }
 
+/// The events behind a statistic of a fundamental, to see them (in the
+/// video): the ones the filter keeps, with one of the evaluations, set to
+/// the zone of the net (an attack), and sent to or played in the zone of
+/// the court (see `CourtTarget::zones`, a conflict zone by
+/// `CourtTarget::conflict`), when given.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EventPick {
+    pub event_type: EventTypeEnum,
+    pub evals: Option<EvalSet>,
+    pub zone: Option<ZoneEnum>,
+    pub target: Option<CourtZoneEnum>,
+    pub filter: StatsFilter,
+}
+
+impl EventPick {
+    /// Whether the statistics counted the event (its key) among these.
+    pub fn keeps(&self, k: &EventKey) -> bool {
+        let in_target = |zone: CourtZoneEnum| {
+            k.target.is_some_and(|t| {
+                t.conflict() == Some(zone) || t.zones().iter().any(|(z, w)| *z == zone && *w > 0.0)
+            })
+        };
+        k.event_type == self.event_type
+            && self.filter.matches(
+                k.phase,
+                k.rotation,
+                k.player,
+                &k.situation,
+                k.touch.as_ref(),
+            )
+            && self
+                .evals
+                .is_none_or(|set| k.eval.is_some_and(|e| set.contains(e)))
+            && self.zone.is_none_or(|z| k.zone == Some(z))
+            && self.target.is_none_or(in_target)
+    }
+}
+
 /// Narrows the statistics to a situation of the game: `None` keeps them
 /// all. A filter on our reception keeps only the side outs where we
 /// received; a filter on the touch only the touches having it (the set

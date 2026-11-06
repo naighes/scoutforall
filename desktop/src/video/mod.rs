@@ -49,6 +49,11 @@ const STEP_SECONDS: u64 = 5;
 /// coming.
 const LEAD_MS: i64 = 2000;
 
+/// With the actions picked in the statistics, how long before each the
+/// clip starts: DataVolley gives a rally a single second of the video,
+/// often noted after the action, so 2 s may miss it.
+const CLIPS_LEAD_MS: i64 = 5000;
+
 /// In clip mode, how long after the event gone to the video stops.
 const CLIP_AFTER_MS: u64 = 5000;
 
@@ -97,6 +102,8 @@ pub enum Message {
     EditTime,
     TimeInput(String),
     TimeSubmit,
+    /// the actions one after the other, or each stopping
+    Sequence,
 }
 
 pub enum Outcome {
@@ -162,6 +169,18 @@ pub struct VideoScreen {
     editing: Option<String>,
     /// the time written isn't one
     invalid_time: bool,
+    /// only some actions of the match, picked in its statistics
+    clips: Option<Clips>,
+    /// with the actions picked, at the end of a clip the next one starts
+    sequence: bool,
+}
+
+/// The actions of the match picked in its statistics, to watch one after
+/// the other.
+struct Clips {
+    /// what they are: the fundamental, the filters
+    title: String,
+    events: Vec<EventRef>,
 }
 
 impl VideoScreen {
@@ -199,6 +218,8 @@ impl VideoScreen {
             detached: false,
             editing: None,
             invalid_time: false,
+            clips: None,
+            sequence: true,
         };
         // the durations of the files first: the events in them
         screen.open_player();
@@ -206,13 +227,43 @@ impl VideoScreen {
         Ok(screen)
     }
 
-    /// The events at their time in the video, as the profile lines them up.
+    /// Only the actions picked in the statistics (`events`, `title` says
+    /// what they are), in clip mode, one after the other: the first one
+    /// played at once.
+    pub fn with_clips(
+        core: Arc<Scout4All>,
+        dir: PathBuf,
+        team_id: String,
+        match_id: String,
+        events: Vec<EventRef>,
+        title: String,
+    ) -> Result<VideoScreen, MobileError> {
+        let mut screen = VideoScreen::new(core, dir, team_id, match_id)?;
+        screen.clips = Some(Clips { title, events });
+        screen.clip = true;
+        screen.load_events()?;
+        if let Some(first) = (0..screen.events.len()).find(|i| screen.event_target(*i).is_some()) {
+            screen.go_to_event(first);
+        }
+        Ok(screen)
+    }
+
+    /// Whether only the actions picked in the statistics are shown.
+    pub fn is_clips(&self) -> bool {
+        self.clips.is_some()
+    }
+
+    /// The events at their time in the video, as the profile lines them up:
+    /// only the ones picked, with some.
     fn load_events(&mut self) -> Result<(), MobileError> {
         let profile = self.profile.clone().unwrap_or_default();
         let durations = self.durations();
         self.events = self
             .core
             .video_events(&self.the_match, &profile, &durations)?;
+        if let Some(clips) = &self.clips {
+            self.events.retain(|e| clips.events.contains(&event_ref(e)));
+        }
         self.selected = self.selected.min(self.events.len().saturating_sub(1));
         Ok(())
     }
@@ -237,16 +288,23 @@ impl VideoScreen {
     /// Where the video goes for the event: a little before it, not before
     /// the start; none when not lined up.
     fn event_target(&self, i: usize) -> Option<u64> {
-        self.events.get(i).and_then(target)
+        self.events.get(i).and_then(|e| target(e, self.lead_ms()))
+    }
+
+    /// How long before an event the video goes to it.
+    fn lead_ms(&self) -> i64 {
+        match self.clips {
+            Some(_) => CLIPS_LEAD_MS,
+            None => LEAD_MS,
+        }
     }
 
     /// The event being seen chosen, the list after it, while following.
     fn follow_video(&mut self, position_ms: u64) {
-        let seen = current(&self.events, position_ms);
+        let seen = current(&self.events, position_ms, self.lead_ms());
         // the one chosen at the same time as the one seen stays
-        let same_time = seen.is_some_and(|i| {
-            self.events.get(i).and_then(target) == self.event_target(self.selected)
-        });
+        let same_time =
+            seen.is_some_and(|i| self.event_target(i) == self.event_target(self.selected));
         match (self.follow && !same_time, seen) {
             (true, Some(i)) if i != self.selected => {
                 self.selected = i;
@@ -379,6 +437,44 @@ impl VideoScreen {
         }
     }
 
+    /// The video at `position_ms`: the event seen chosen; the clip over,
+    /// the next one played (in sequence) or the video stopped.
+    /// With the actions picked, the one whose clip is playing stays chosen
+    /// (the next one may start before it ends): the next one is the one
+    /// after it.
+    fn reached(&mut self, position_ms: u64) {
+        let playing = self.clips.is_some() && self.clip_end.is_some();
+        match (self.clip_over(position_ms), playing) {
+            (true, _) => match self.next_clip() {
+                Some(next) => self.go_to_event(next),
+                None => {
+                    if let Some(player) = &self.player {
+                        player.pause();
+                    }
+                }
+            },
+            (false, true) => {}
+            (false, false) => self.follow_video(position_ms),
+        }
+    }
+
+    /// The action after the one chosen, in the video, to play at the end
+    /// of its clip: only with the actions picked, in sequence. The ones at
+    /// the same time as it skipped, the clip already seen (DataVolley gives
+    /// the touches of a rally the same second of the video).
+    fn next_clip(&self) -> Option<usize> {
+        let duration = self.status.as_ref().map(|st| st.duration_ms);
+        let seen = self.event_target(self.selected);
+        match (self.clips.is_some(), self.sequence) {
+            (true, true) => (self.selected + 1..self.events.len()).find(|i| {
+                self.events.get(*i).is_some_and(|e| {
+                    list::inside(e.offset_ms, duration) && self.event_target(*i) != seen
+                })
+            }),
+            _ => None,
+        }
+    }
+
     /// Whether the video wants its own window.
     pub fn detached(&self) -> bool {
         self.detached
@@ -453,12 +549,7 @@ impl VideoScreen {
     fn tick(&mut self) -> Outcome {
         self.status = self.player.as_ref().and_then(Player::status);
         if let Some(position) = self.status.as_ref().map(|s| s.position_ms) {
-            self.follow_video(position);
-            if self.clip_over(position)
-                && let Some(player) = &self.player
-            {
-                player.pause();
-            }
+            self.reached(position);
         }
         match self.status.as_ref().and_then(|s| s.frame.clone()) {
             Some(frame) if frame.serial > self.requested => {
@@ -628,6 +719,7 @@ impl VideoScreen {
                 self.editing = Some(text);
             }
             Message::TimeSubmit => self.submit_time(),
+            Message::Sequence => self.sequence = !self.sequence,
         }
         Outcome::Stay
     }
@@ -680,6 +772,7 @@ impl VideoScreen {
             k if k == key!(r) => self.save_anchor(None),
             k if k == key!(k) => self.toggle_clip(),
             k if k == key!(w) => self.detached = !self.detached,
+            k if k == key!(s) && self.clips.is_some() => self.sequence = !self.sequence,
             _ => {}
         }
         Outcome::Stay
@@ -712,17 +805,31 @@ impl VideoScreen {
                 hint("t", s.anchor_time.to_string()),
                 hint("[ ]", format!("±{} s", SHIFT_MS as f64 / 1000.0)),
                 hint("k", s.clip.to_string()),
-                hint(
-                    "w",
-                    match self.detached {
-                        true => s.attach_video,
-                        false => s.detach_video,
-                    }
-                    .to_string(),
-                ),
             ],
         };
-        [playing, events, vec![hint("Esc", s.back.to_string())]].concat()
+        let sequence = match (&self.clips, &self.player) {
+            (Some(_), Some(_)) => vec![hint("s", s.in_sequence.to_string())],
+            _ => vec![],
+        };
+        let window = match (self.events.is_empty(), &self.player) {
+            (false, Some(_)) => vec![hint(
+                "w",
+                match self.detached {
+                    true => s.attach_video,
+                    false => s.detach_video,
+                }
+                .to_string(),
+            )],
+            _ => vec![],
+        };
+        [
+            playing,
+            events,
+            sequence,
+            window,
+            vec![hint("Esc", s.back.to_string())],
+        ]
+        .concat()
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -789,13 +896,36 @@ impl VideoScreen {
             None => space::vertical().height(0).into(),
         };
         let video = column![notice, screen, controls, file_line].spacing(10);
-        let events: Element<'a, Message> = match self.events.is_empty() {
-            true => space::horizontal().width(0).into(),
-            false => {
+        let events: Element<'a, Message> = match (self.events.is_empty(), &self.clips) {
+            (true, None) => space::horizontal().width(0).into(),
+            (true, Some(_)) => iced::widget::container(ui::panel(
+                Some(s.clips_title),
+                ui::body(s.clips_none).color(c.muted),
+                c,
+            ))
+            .width(Length::Fixed(400.0))
+            .into(),
+            (false, None) => {
                 iced::widget::container(ui::panel(Some(s.match_events), self.events_view(s, c), c))
                     .width(Length::Fixed(400.0))
                     .into()
             }
+            (false, Some(clips)) => iced::widget::container(ui::panel(
+                Some(s.clips_title),
+                column![
+                    text(clips.title.clone())
+                        .size(theme::SIZE_BODY)
+                        .font(theme::fonts().bold),
+                    text(ui::fill(s.clips_count, &[self.events.len().to_string()]))
+                        .size(SIZE_SMALL)
+                        .color(c.muted),
+                    self.events_view(s, c),
+                ]
+                .spacing(6),
+                c,
+            ))
+            .width(Length::Fixed(400.0))
+            .into(),
         };
         row![video.width(Length::Fill), events].spacing(14).into()
     }
@@ -1005,6 +1135,14 @@ impl VideoScreen {
                     Some(Message::Detach),
                     c
                 ),
+                match self.clips {
+                    Some(_) => ui::tip(
+                        ui::pill(s.in_sequence, self.sequence, Some(Message::Sequence), c),
+                        s.in_sequence_explained,
+                        c,
+                    ),
+                    None => space::horizontal().width(0).into(),
+                },
                 ui::tip(
                     ui::pill(s.clip, self.clip, Some(Message::Clip), c),
                     &ui::fill(s.clip_explained, &[(CLIP_AFTER_MS / 1000).to_string()]),
@@ -1044,20 +1182,24 @@ fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message>
         })
 }
 
-/// Where the video goes for the event: `LEAD_MS` before it, not before
+/// Where the video goes for the event: `lead_ms` before it, not before
 /// the start; none when not lined up.
-fn target(e: &VideoEvent) -> Option<u64> {
-    e.offset_ms.map(|ms| (ms - LEAD_MS).max(0).unsigned_abs())
+fn target(e: &VideoEvent, lead_ms: i64) -> Option<u64> {
+    e.offset_ms.map(|ms| (ms - lead_ms).max(0).unsigned_abs())
 }
 
 /// The event being seen at `position_ms`: the latest whose target the video
 /// passed (the one gone to stays the one seen); the later in the list when
 /// two have the same time. None before the first.
-fn current(events: &[VideoEvent], position_ms: u64) -> Option<usize> {
+fn current(events: &[VideoEvent], position_ms: u64, lead_ms: i64) -> Option<usize> {
     events
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| target(e).filter(|t| *t <= position_ms).map(|t| (t, i)))
+        .filter_map(|(i, e)| {
+            target(e, lead_ms)
+                .filter(|t| *t <= position_ms)
+                .map(|t| (t, i))
+        })
         .max()
         .map(|(_, i)| i)
 }
@@ -1334,15 +1476,15 @@ pub(crate) mod screen_tests {
         let dir = tempfile::tempdir().unwrap();
         let screen = with_file(&dir, "20150125 000000.mp4");
         let events = &screen.events;
-        let first = target(&events[0]).unwrap();
+        let first = target(&events[0], LEAD_MS).unwrap();
         // the later in the list of the ones at the same time
         let same = events
             .iter()
             .rposition(|e| e.offset_ms == events[0].offset_ms)
             .unwrap();
-        assert_eq!(current(events, first), Some(same));
+        assert_eq!(current(events, first, LEAD_MS), Some(same));
         let unplaced = with_file(&tempfile::tempdir().unwrap(), "match.mp4");
-        assert_eq!(current(&unplaced.events, 10_000_000), None);
+        assert_eq!(current(&unplaced.events, 10_000_000, LEAD_MS), None);
     }
 
     /// In clip mode, the event gone to stops a little after it; moved by
@@ -1367,6 +1509,183 @@ pub(crate) mod screen_tests {
         screen.go_to_event(i);
         screen.update(Message::Clip);
         assert!(!screen.clip && !screen.clip_over(end));
+    }
+
+    /// The serves of the match picked in its statistics (the fixture has
+    /// only aces): only those in
+    /// the list, the first one played at once in clip mode, then the next
+    /// one at the end of each clip; out of sequence (`s`), it stops.
+    #[test]
+    fn the_actions_picked_one_after_the_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let screen = with_file(&dir, "20150125 000000.mp4");
+        let (core, team, m) = (
+            screen.core.clone(),
+            screen.team_id.clone(),
+            screen.match_id.clone(),
+        );
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let refs = core.match_clips(&team, &m, &pick).unwrap();
+        assert_eq!(refs.len(), 72, "the aces of the match");
+        let mut screen = VideoScreen::with_clips(
+            core,
+            dir.path().to_path_buf(),
+            team,
+            m,
+            refs.clone(),
+            "Serve".into(),
+        )
+        .unwrap();
+        assert!(screen.is_clips());
+        assert_eq!(
+            screen.events.iter().map(event_ref).collect::<Vec<_>>(),
+            refs
+        );
+        // the first one played, in clip mode, from 5 s before it
+        assert!(screen.clip);
+        assert_eq!(screen.selected, 0);
+        let first = screen.events[0].offset_ms.unwrap();
+        assert_eq!(
+            screen.event_target(0),
+            Some((first - CLIPS_LEAD_MS).max(0).unsigned_abs())
+        );
+        let end = |screen: &VideoScreen| screen.clip_end.unwrap();
+        let first_end = end(&screen);
+        // its clip over: the next one
+        screen.reached(first_end);
+        assert_eq!(screen.selected, 1);
+        assert!(end(&screen) > first_end);
+        // out of sequence: the clip over, it stays and stops
+        screen.key(key!(s));
+        assert!(!screen.sequence);
+        screen.reached(end(&screen));
+        assert_eq!(screen.selected, 1);
+        assert_eq!(screen.clip_end, None);
+        // the last one: nothing after it
+        screen.key(key!(s));
+        let last = screen.events.len() - 1;
+        screen.go_to_event(last);
+        screen.reached(end(&screen));
+        assert_eq!(screen.selected, last);
+        assert_eq!(screen.clip_end, None);
+        // two at the same time (DataVolley, a rally): seen once
+        screen.events[2].offset_ms = screen.events[1].offset_ms;
+        screen.go_to_event(1);
+        screen.reached(end(&screen));
+        assert_eq!(screen.selected, 3);
+        // `s` does nothing with the whole match
+        let mut whole = with_file(&tempfile::tempdir().unwrap(), "20150125 000000.mp4");
+        whole.key(key!(s));
+        assert!(whole.sequence && !whole.is_clips());
+    }
+
+    /// The real match (TODO/001, files in ~/Downloads): the attacks from 4
+    /// of the outside hitter with the most, their time in the video, to
+    /// look at the frames with ffmpeg. `cargo test -p scout4all-desktop --
+    /// --ignored real_clips --nocapture`
+    #[test]
+    #[ignore]
+    fn real_clips() {
+        let home = std::env::var("HOME").unwrap();
+        let downloads = PathBuf::from(home).join("Downloads");
+        // `S4A_CLIPS_DIR`: the data kept there, to open in the app
+        let temp = tempfile::tempdir().unwrap();
+        let kept = std::env::var("S4A_CLIPS_DIR").map(PathBuf::from).ok();
+        let dir = kept.as_deref().unwrap_or(temp.path());
+        let core = Scout4All::new(dir.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let bytes = std::fs::read(downloads.join("&And03 CORTONA V vs POLISPORTIV.dvw")).unwrap();
+        let day = core.preview_dvw(bytes.clone()).unwrap().days[0].clone();
+        let choice = DvwChoice {
+            side: DvwSide::Home,
+            day,
+            max_substitutions: 6,
+            team_id: None,
+            classification: core.classifications().first().map(|c| c.value),
+            gender: core.genders().first().map(|g| g.value),
+            country: core.countries("Ital".into()).first().map(|c| c.value),
+        };
+        let imported = core.import_dvw(bytes, choice, false).unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        let (the_match, _) = core.video(&team, &m).unwrap();
+        let files = ["20261101 175252.mp4", "20261101 185442.mp4"]
+            .iter()
+            .map(|name| {
+                let path = downloads.join(name);
+                VideoFile {
+                    path: video::stored_path(dir, &path),
+                    start: start_from_name(&path, *the_match.date.offset()),
+                }
+            })
+            .collect();
+        let profile = VideoProfile {
+            files,
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+        use scout4all_core::shapes::enums::EventTypeEnum::A;
+        use scout4all_mobile::{ClipPick, DetailFilter, StatsScope};
+        let detail = core
+            .match_detail(
+                team.clone(),
+                m.clone(),
+                StatsScope::Match,
+                A,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        let f = detail.fundamental.unwrap();
+        for p in &f.players {
+            println!(
+                "{} {} {}: {} attacks",
+                p.player.number, p.player.name, p.player.role, p.total
+            );
+        }
+        let zone4 = f.zones.iter().find(|z| z.zone == 4).map(|z| z.share);
+        println!("zone 4: {zone4:?}");
+        let best = f
+            .players
+            .iter()
+            .filter_map(|p| {
+                let pick = ClipPick {
+                    scope: StatsScope::Match,
+                    event: A,
+                    filter: DetailFilter {
+                        player: Some(p.player.id.clone()),
+                        ..DetailFilter::default()
+                    },
+                    evals: vec![],
+                    zone: Some(4),
+                    target: None,
+                };
+                let n = core.match_clips(&team, &m, &pick).ok()?.len();
+                Some((n, p.player.name.clone(), pick))
+            })
+            .max_by_key(|(n, _, _)| *n)
+            .unwrap();
+        println!("from 4: {} by {}", best.0, best.1);
+        let refs = core.match_clips(&team, &m, &best.2).unwrap();
+        let screen =
+            VideoScreen::with_clips(core, dir.to_path_buf(), team, m, refs, best.1.clone())
+                .unwrap();
+        for e in &screen.events {
+            println!(
+                "set {} #{} {} {:?} {}-{} at {:?} ms",
+                e.set_number,
+                e.event.index,
+                e.event.event.name,
+                e.event.event.symbol,
+                e.event.score_us,
+                e.event.score_them,
+                e.offset_ms
+            );
+        }
     }
 
     /// `w` (or the pill) asks for the own window and back; its window
