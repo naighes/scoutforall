@@ -2677,6 +2677,10 @@ pub(crate) mod tests {
             let scouting = core.scouting(team.clone(), m).unwrap();
             for eval in serves {
                 scouting.choose_eval(eval).unwrap();
+                // each action at its own millisecond of the clock (its time),
+                // as when scouting by hand: on a fast machine two in the same
+                // one would be the same clip
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
         team
