@@ -1,6 +1,7 @@
 //! The video of a match (001): its file played in the app, Space plays and
 //! pauses, ← → go back and forward a few seconds, `-` `+` change the speed,
-//! the bar goes anywhere; `c` chooses the file. Beside it the events of the
+//! the bar goes anywhere; `c` adds files, played one after the other as a
+//! single video (in the order of their starts, then as moved). Beside it the events of the
 //! match, at their time in the video when it lines up with them (`video`
 //! in the core: DataVolley, or the start of the file from its name): ↑ ↓
 //! choose one, Enter (or a click) goes a little before it. By hand (when
@@ -9,6 +10,7 @@
 //! goes back to the sync found by itself. Only the desktop app has it: the
 //! profile (`video.json`) is saved next to the match.
 
+mod files;
 mod list;
 mod player;
 mod source;
@@ -33,7 +35,7 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{MobileError, Scout4All, VideoEvent},
     std::{
-        path::{Path, PathBuf},
+        path::PathBuf,
         sync::Arc,
         time::{Duration, Instant},
     },
@@ -68,8 +70,11 @@ pub enum Message {
     Seek(f64),
     Speed(f32),
     Choose,
-    /// the file chosen, if any
-    Chosen(Option<PathBuf>),
+    /// the files chosen, to add
+    Chosen(Vec<PathBuf>),
+    /// the file one place earlier (`true`) or later
+    MoveFile(usize, bool),
+    RemoveFile(usize),
     /// a frame ready to be drawn at once, if it could be
     Allocated(Arc<player::Frame>, image::Handle, Option<Allocation>),
     /// an event of the list: chosen, and the video at it
@@ -89,7 +94,7 @@ pub enum Message {
 pub enum Outcome {
     Stay,
     Back,
-    /// a file to choose (`Message::Chosen`)
+    /// the files to choose (`Message::Chosen`)
     Choose,
     /// a new frame to allocate before showing it (`Message::Allocated`):
     /// iced draws a handle only once it's allocated, so a new handle at
@@ -174,15 +179,19 @@ impl VideoScreen {
             editing: None,
             invalid_time: false,
         };
-        screen.load_events()?;
+        // the durations of the files first: the events in them
         screen.open_player();
+        screen.load_events()?;
         Ok(screen)
     }
 
     /// The events at their time in the video, as the profile lines them up.
     fn load_events(&mut self) -> Result<(), MobileError> {
         let profile = self.profile.clone().unwrap_or_default();
-        self.events = self.core.video_events(&self.the_match, &profile)?;
+        let durations = self.durations();
+        self.events = self
+            .core
+            .video_events(&self.the_match, &profile, &durations)?;
         self.selected = self.selected.min(self.events.len().saturating_sub(1));
         Ok(())
     }
@@ -310,6 +319,14 @@ impl VideoScreen {
 
     pub fn title(&self, s: &Strings) -> String {
         format!("{} – {}", s.video, self.the_match.opponent)
+    }
+
+    /// Of each file, once read by the player.
+    fn durations(&self) -> Vec<u64> {
+        self.player
+            .as_ref()
+            .map(|p| p.durations_ms().to_vec())
+            .unwrap_or_default()
     }
 
     fn paths(&self) -> Vec<PathBuf> {
@@ -443,30 +460,47 @@ impl VideoScreen {
         }
     }
 
-    /// The file chosen in place of the video: saved, then played.
-    fn chosen(&mut self, path: &Path) {
+    /// The files saved in place of the ones there: played, the events
+    /// lined up with them.
+    fn save_files(&mut self, files: Vec<VideoFile>) {
         let Some(profile) = &self.profile else {
             return;
         };
-        let offset = *self.the_match.date.offset();
-        let file = VideoFile {
-            path: video::stored_path(&self.dir, path),
-            start: video::start_from_name(path, offset),
-        };
         let profile = VideoProfile {
-            files: vec![file],
+            files,
             ..profile.clone()
         };
         match self.core.save_video(&self.the_match, &profile) {
             Ok(()) => {
                 self.profile = Some(profile);
+                self.open_player();
                 if let Err(e) = self.load_events() {
                     self.error = Some(e.to_string());
                 }
-                self.open_player();
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+    }
+
+    fn files(&self) -> Vec<VideoFile> {
+        self.profile
+            .as_ref()
+            .map(|p| p.files.clone())
+            .unwrap_or_default()
+    }
+
+    /// The files chosen, with when each starts from its name.
+    fn chosen(&mut self, paths: &[PathBuf]) {
+        let offset = *self.the_match.date.offset();
+        let new = paths
+            .iter()
+            .map(|path| VideoFile {
+                path: video::stored_path(&self.dir, path),
+                start: video::start_from_name(path, offset),
+            })
+            .collect();
+        let files = files::added(&self.files(), new);
+        self.save_files(files);
     }
 
     pub fn update(&mut self, message: Message) -> Outcome {
@@ -480,8 +514,19 @@ impl VideoScreen {
             Message::Seek(ms) => self.seek(ms.max(0.0) as u64),
             Message::Speed(speed) => self.speed(speed),
             Message::Choose => return self.choose(),
-            Message::Chosen(Some(path)) => self.chosen(&path),
-            Message::Chosen(None) => {}
+            Message::Chosen(paths) if paths.is_empty() => {}
+            Message::Chosen(paths) => self.chosen(&paths),
+            Message::MoveFile(i, earlier) => {
+                let files = files::moved(&self.files(), i, earlier);
+                self.save_files(files);
+            }
+            Message::RemoveFile(i) => {
+                let mut files = self.files();
+                if i < files.len() {
+                    files.remove(i);
+                    self.save_files(files);
+                }
+            }
             Message::Event(i) => self.go_to_event(i),
             Message::AnchorHere => self.anchor_event(self.position()),
             Message::Shift(ms) => self.shift(ms),
@@ -602,25 +647,35 @@ impl VideoScreen {
                 background: Some(iced::Color::BLACK.into()),
                 ..container::Style::default()
             });
-        let choose = match self.paths().is_empty() {
-            true => s.choose_video,
-            false => s.change_video,
+        let files = self.files();
+        let add = ui::pill(
+            match files.is_empty() {
+                true => s.choose_video,
+                false => s.add_videos,
+            },
+            self.player.is_none(),
+            Some(Message::Choose),
+            c,
+        );
+        let file_line: Element<'a, Message> = match files.is_empty() {
+            true => container(add)
+                .width(Length::Fill)
+                .align_x(Alignment::End)
+                .into(),
+            false => column![
+                row![
+                    text(s.video_files_title)
+                        .size(SIZE_SMALL)
+                        .color(c.muted)
+                        .width(Length::Fill),
+                    add,
+                ]
+                .align_y(Alignment::Center),
+                files::view(&files, &self.durations(), s, c),
+            ]
+            .spacing(6)
+            .into(),
         };
-        let file_name = self
-            .paths()
-            .first()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let file_line = row![
-            text(file_name)
-                .size(SIZE_SMALL)
-                .color(c.muted)
-                .width(Length::Fill),
-            ui::pill(choose, self.player.is_none(), Some(Message::Choose), c),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center);
         let controls: Element<'a, Message> = match &self.status {
             Some(status) => self.controls(status, s, c),
             None => space::vertical().height(0).into(),
@@ -797,6 +852,7 @@ impl VideoScreen {
         );
         column![
             bar,
+            files::band(&self.files(), &self.durations(), c),
             row![
                 ui::icon_button(
                     theme::icons::REWIND,
@@ -826,13 +882,16 @@ impl VideoScreen {
     }
 }
 
-/// The file of the video, chosen by the user.
-pub async fn pick(filter: &'static str) -> Option<PathBuf> {
+/// The files of the video, chosen by the user: none when given up.
+pub async fn pick(filter: &'static str) -> Vec<PathBuf> {
     rfd::AsyncFileDialog::new()
         .add_filter(filter, &["mp4", "MP4", "mov", "MOV", "m4v", "M4V"])
-        .pick_file()
+        .pick_files()
         .await
+        .unwrap_or_default()
+        .iter()
         .map(|f| f.path().to_path_buf())
+        .collect()
 }
 
 /// The event as an anchor names it.
@@ -913,7 +972,11 @@ mod screen_tests {
         let dir = tempfile::tempdir().unwrap();
         let mut screen = with_file(&dir, "20150125 000000.mp4");
         let m = &screen.the_match;
-        let start = start_from_name(Path::new("20150125 000000.mp4"), *m.date.offset()).unwrap();
+        let start = start_from_name(
+            std::path::Path::new("20150125 000000.mp4"),
+            *m.date.offset(),
+        )
+        .unwrap();
         let anchor = video::anchor(screen.profile.as_ref().unwrap(), m).unwrap();
         assert_eq!(anchor.at, start.to_utc());
         let mut sets: Vec<_> = m.sets.iter().collect();
@@ -1012,6 +1075,48 @@ mod screen_tests {
         let back: Vec<Option<i64>> = again.events.iter().map(|e| e.offset_ms).collect();
         assert_eq!(back, automatic);
         assert_eq!(again.anchored(), None);
+    }
+
+    /// Files added at once in the order of their starts, then moved and
+    /// taken out: saved each time.
+    #[test]
+    fn the_files_of_the_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 190000.mp4");
+        let names = |screen: &VideoScreen| -> Vec<String> {
+            screen.files().iter().map(|f| f.path.clone()).collect()
+        };
+        screen.update(Message::Chosen(vec![
+            dir.path().join("20150125 200000.mp4"),
+            dir.path().join("20150125 180000.mp4"),
+            dir.path().join("20150125 190000.mp4"),
+        ]));
+        assert_eq!(
+            names(&screen),
+            [
+                "20150125 180000.mp4",
+                "20150125 190000.mp4",
+                "20150125 200000.mp4"
+            ]
+        );
+        screen.update(Message::MoveFile(2, true));
+        screen.update(Message::RemoveFile(0));
+        let saved = ["20150125 200000.mp4", "20150125 190000.mp4"];
+        assert_eq!(names(&screen), saved);
+        let (core, team, m) = (
+            screen.core.clone(),
+            screen.team_id.clone(),
+            screen.match_id.clone(),
+        );
+        let again = VideoScreen::new(core, dir.path().to_path_buf(), team, m).unwrap();
+        assert_eq!(names(&again), saved);
+        // the first file starts the video: the events from it
+        let first = video::anchor(again.profile.as_ref().unwrap(), &again.the_match).unwrap();
+        let start = start_from_name(
+            std::path::Path::new(saved[0]),
+            *again.the_match.date.offset(),
+        );
+        assert_eq!(Some(first.at), start.map(|t| t.to_utc()));
     }
 
     /// Esc leaves the time being written, not the screen.

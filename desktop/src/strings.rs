@@ -281,7 +281,6 @@ pub struct Strings {
     /// the video of the match (001)
     pub video: &'static str,
     pub choose_video: &'static str,
-    pub change_video: &'static str,
     pub video_files: &'static str,
     pub no_video: &'static str,
     pub video_unplayable: &'static str,
@@ -305,6 +304,10 @@ pub struct Strings {
     pub automatic_sync: &'static str,
     pub invalid_time: &'static str,
     pub anchored_event: &'static str,
+    pub add_videos: &'static str,
+    pub video_files_title: &'static str,
+    pub move_earlier: &'static str,
+    pub move_later: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -596,7 +599,6 @@ What did you expect instead?
     week_from_sunday: true,
     video: "Video",
     choose_video: "Choose the video",
-    change_video: "Change the video",
     video_files: "Videos",
     no_video: "No video linked to this match yet: choose its file.",
     video_unplayable: "The video can't be played",
@@ -620,6 +622,10 @@ What did you expect instead?
     automatic_sync: "Back to automatic",
     invalid_time: "Not a time: write it as m:ss or m:ss.s",
     anchored_event: "the event the video is synced on",
+    add_videos: "Add files",
+    video_files_title: "Files of the video",
+    move_earlier: "Earlier",
+    move_later: "Later",
 };
 
 const IT: Strings = Strings {
@@ -911,7 +917,6 @@ Cosa ti aspettavi invece?
     week_from_sunday: false,
     video: "Video",
     choose_video: "Scegli il video",
-    change_video: "Cambia il video",
     video_files: "Video",
     no_video: "Nessun video collegato a questa partita: scegli il suo file.",
     video_unplayable: "Il video non si può riprodurre",
@@ -935,6 +940,10 @@ Cosa ti aspettavi invece?
     automatic_sync: "Torna automatico",
     invalid_time: "Tempo non valido: scrivilo come m:ss o m:ss.s",
     anchored_event: "l'evento a cui è agganciato il video",
+    add_videos: "Aggiungi file",
+    video_files_title: "File del video",
+    move_earlier: "Prima",
+    move_later: "Dopo",
 };
 
 const PT: Strings = Strings {
@@ -1226,7 +1235,6 @@ O que você esperava?
     week_from_sunday: true,
     video: "Vídeo",
     choose_video: "Escolher o vídeo",
-    change_video: "Trocar o vídeo",
     video_files: "Vídeos",
     no_video: "Nenhum vídeo ligado a esta partida: escolha o arquivo.",
     video_unplayable: "Não é possível reproduzir o vídeo",
@@ -1250,6 +1258,10 @@ O que você esperava?
     automatic_sync: "Voltar ao automático",
     invalid_time: "Tempo inválido: escreva como m:ss ou m:ss.s",
     anchored_event: "o evento em que o vídeo está sincronizado",
+    add_videos: "Adicionar arquivos",
+    video_files_title: "Arquivos do vídeo",
+    move_earlier: "Antes",
+    move_later: "Depois",
 };
 
 const PL: Strings = Strings {
@@ -1541,7 +1553,6 @@ Czego się spodziewałeś(-aś)?
     week_from_sunday: false,
     video: "Wideo",
     choose_video: "Wybierz wideo",
-    change_video: "Zmień wideo",
     video_files: "Pliki wideo",
     no_video: "Brak wideo powiązanego z tym meczem: wybierz jego plik.",
     video_unplayable: "Nie można odtworzyć wideo",
@@ -1565,6 +1576,10 @@ Czego się spodziewałeś(-aś)?
     automatic_sync: "Wróć do automatycznej",
     invalid_time: "Nieprawidłowy czas: wpisz jako m:ss lub m:ss.s",
     anchored_event: "zdarzenie, z którym zsynchronizowano wideo",
+    add_videos: "Dodaj pliki",
+    video_files_title: "Pliki wideo",
+    move_earlier: "Wcześniej",
+    move_later: "Później",
 };
 
 const JA: Strings = Strings {
@@ -1845,7 +1860,6 @@ const JA: Strings = Strings {
     week_from_sunday: true,
     video: "ビデオ",
     choose_video: "ビデオを選ぶ",
-    change_video: "ビデオを変更",
     video_files: "ビデオ",
     no_video: "この試合にはまだビデオがありません。ファイルを選んでください。",
     video_unplayable: "ビデオを再生できません",
@@ -1869,6 +1883,10 @@ const JA: Strings = Strings {
     automatic_sync: "自動に戻す",
     invalid_time: "時間が正しくありません。m:ss または m:ss.s で入力してください",
     anchored_event: "ビデオの同期の基準になっているイベント",
+    add_videos: "ファイルを追加",
+    video_files_title: "ビデオのファイル",
+    move_earlier: "前へ",
+    move_later: "後へ",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

@@ -72,9 +72,7 @@ use scout4all_core::{
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
-    video::{
-        StoredProfile, VideoProfile, anchor as video_anchor, offset_ms, read_profile, write_profile,
-    },
+    video::{StoredProfile, VideoProfile, place, read_profile, write_profile},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
@@ -2563,13 +2561,14 @@ impl Scout4All {
     }
 
     /// The events of the match, set by set, and where each is in its
-    /// video (none: the video and the events not lined up).
+    /// video, the files `durations_ms` long (none: the video and the events
+    /// not lined up).
     pub fn video_events(
         &self,
         m: &MatchEntry,
         profile: &VideoProfile,
+        durations_ms: &[u64],
     ) -> Result<Vec<VideoEvent>, MobileError> {
-        let anchor = video_anchor(profile, m);
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
         sets.sort_by_key(|s| s.set_number);
         let mut events = vec![];
@@ -2579,7 +2578,7 @@ impl Scout4All {
                 set_number: set.set_number,
                 event: row,
                 timestamp: e.timestamp,
-                offset_ms: anchor.as_ref().map(|a| offset_ms(a, e.timestamp)),
+                offset_ms: place(profile, m, durations_ms, e.timestamp),
             }));
         }
         Ok(events)

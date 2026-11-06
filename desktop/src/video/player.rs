@@ -62,6 +62,8 @@ enum Command {
 pub struct Player {
     commands: Sender<Command>,
     status: Arc<Mutex<Status>>,
+    /// of each file, in the order played
+    durations_ms: Vec<u64>,
 }
 
 impl Player {
@@ -72,6 +74,7 @@ impl Player {
             .map(|p| Source::open(p).map_err(|e| format!("{}: {e}", p.display())))
             .collect::<Result<Vec<_>, _>>()?;
         let segments = segments(sources);
+        let durations_ms = segments.iter().map(|s| s.source.duration_ms).collect();
         let status = Arc::new(Mutex::new(Status {
             frame: None,
             position_ms: 0,
@@ -88,9 +91,17 @@ impl Player {
             .name("video".into())
             .spawn(move || worker.run())
             .map_err(|e| e.to_string())?;
-        let player = Player { commands, status };
+        let player = Player {
+            commands,
+            status,
+            durations_ms,
+        };
         player.seek(0);
         Ok(player)
+    }
+
+    pub fn durations_ms(&self) -> &[u64] {
+        &self.durations_ms
     }
 
     pub fn status(&self) -> Option<Status> {

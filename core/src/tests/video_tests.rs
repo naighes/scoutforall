@@ -8,8 +8,8 @@ mod tests {
         storage::{Store, memory::MemoryStore},
         video::{
             Anchor, AnchorSource, EventRef, StoredProfile, VIDEO_PROFILE_VERSION, VideoFile,
-            VideoProfile, anchor, anchor_on, anchor_source, in_order, offset_ms, profile_key,
-            read_profile, resolved_path, start_from_name, stored_path, write_profile,
+            VideoProfile, anchor, anchor_on, anchor_source, in_order, offset_ms, place,
+            profile_key, read_profile, resolved_path, start_from_name, stored_path, write_profile,
         },
     };
     use chrono::{DateTime, FixedOffset, TimeDelta, TimeZone, Utc};
@@ -135,6 +135,83 @@ mod tests {
         assert_eq!(offset_ms(&found, serve), (7 * 60 + 8) * 1000);
         // before the video
         assert_eq!(offset_ms(&found, at(17, 52, 50).to_utc()), -2000);
+    }
+
+    /// The two files of the test: 3708.65 s from 17:52:52, then from
+    /// 18:54:42 (a pause of 1.35 s).
+    fn two_files() -> VideoProfile {
+        profile(
+            vec![
+                file("20261101 175252.mp4", Some(at(17, 52, 52))),
+                file("20261101 185442.mp4", Some(at(18, 54, 42))),
+            ],
+            None,
+        )
+    }
+
+    const DURATIONS: [u64; 2] = [3_708_650, 2_050_668];
+
+    /// Each event in the file recording at its time: the pause between the
+    /// files doesn't count.
+    #[test]
+    fn the_events_in_the_file_recording() {
+        let p = two_files();
+        let m = a_match(false);
+        let place = |t: DateTime<FixedOffset>| place(&p, &m, &DURATIONS, t.to_utc());
+        assert_eq!(place(at(18, 0, 0)), Some(428_000));
+        // 2 minutes into the second file: after the whole first
+        assert_eq!(place(at(18, 56, 42)), Some(3_708_650 + 120_000));
+        // in the pause: the start of the second file
+        assert_eq!(place(at(18, 54, 41)), Some(3_708_650));
+        // before the video, past its end
+        assert_eq!(place(at(17, 52, 50)), Some(-2000));
+        let end = 3_708_650 + 2_050_668;
+        assert_eq!(
+            place(at(19, 30, 0)),
+            Some(3_708_650 + (35 * 60 + 18) * 1000)
+        );
+        assert!(place(at(19, 30, 0)).unwrap() > end);
+    }
+
+    /// On the video clock, by hand, or a file without its start: a single
+    /// video from the anchor.
+    #[test]
+    fn otherwise_a_single_video() {
+        let p = two_files();
+        let midnight = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).unwrap();
+        let t = midnight + TimeDelta::seconds(3864);
+        assert_eq!(place(&p, &a_match(true), &DURATIONS, t), Some(3_864_000));
+        let chosen = profile(
+            p.files.clone(),
+            Some(anchor_on(
+                EventRef {
+                    set_number: 1,
+                    index: 0,
+                },
+                at(18, 0, 0).to_utc(),
+                1000,
+            )),
+        );
+        let later = at(19, 0, 0).to_utc();
+        assert_eq!(
+            place(&chosen, &a_match(false), &DURATIONS, later),
+            Some(3_601_000)
+        );
+        let unnamed = profile(vec![p.files[0].clone(), file("second.mp4", None)], None);
+        assert_eq!(
+            place(
+                &unnamed,
+                &a_match(false),
+                &DURATIONS,
+                at(18, 56, 42).to_utc()
+            ),
+            Some((63 * 60 + 50) * 1000)
+        );
+        // the durations not known: a single video too
+        assert_eq!(
+            place(&p, &a_match(false), &[], at(18, 0, 0).to_utc()),
+            Some(428_000)
+        );
     }
 
     #[test]

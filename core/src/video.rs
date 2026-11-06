@@ -216,6 +216,52 @@ pub fn offset_ms(anchor: &Anchor, timestamp: DateTime<Utc>) -> i64 {
     (timestamp - anchor.at).num_milliseconds() + anchor.offset_ms
 }
 
+/// Where the event of the time is in the video (the files one after the
+/// other, each `durations_ms` long), as `anchor_source` lines it up; none
+/// when not lined up. From the starts of the files, each event in the file
+/// recording at its time: the pauses between the files don't count, a time
+/// in one of them at the start of the next file. Otherwise from the anchor,
+/// as a single video.
+pub fn place(
+    profile: &VideoProfile,
+    m: &MatchEntry,
+    durations_ms: &[u64],
+    timestamp: DateTime<Utc>,
+) -> Option<i64> {
+    let starts: Option<Vec<DateTime<Utc>>> = profile
+        .files
+        .iter()
+        .map(|f| f.start.map(|s| s.to_utc()))
+        .collect();
+    match (anchor_source(profile, m)?, starts) {
+        (AnchorSource::FileStart(_), Some(starts)) if starts.len() == durations_ms.len() => {
+            Some(by_file(&starts, durations_ms, timestamp))
+        }
+        _ => anchor(profile, m).map(|a| offset_ms(&a, timestamp)),
+    }
+}
+
+// the time in the file recording at it: before the first, before the
+// video; past the last, past its end
+fn by_file(starts: &[DateTime<Utc>], durations_ms: &[u64], timestamp: DateTime<Utc>) -> i64 {
+    let ms = |d: u64| i64::try_from(d).unwrap_or(i64::MAX);
+    let mut before = 0i64;
+    let mut last = None;
+    for (start, duration) in starts.iter().zip(durations_ms) {
+        let into = (timestamp - *start).num_milliseconds();
+        match (into < 0, into <= ms(*duration)) {
+            // in a pause (or before the first): the start of this file
+            (true, _) if last.is_some() => return before,
+            (true, _) => return into,
+            (false, true) => return before + into,
+            (false, false) => {}
+        }
+        last = Some((before, into));
+        before += ms(*duration);
+    }
+    last.map_or(0, |(start, into)| start + into)
+}
+
 /// The anchor of the user: the event of the time happens at `offset_ms`.
 pub fn anchor_on(event: EventRef, timestamp: DateTime<Utc>, offset_ms: i64) -> Anchor {
     Anchor {
