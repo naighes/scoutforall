@@ -49,11 +49,27 @@ impl RawWriter {
     }
 
     /// A frame of the encoder (Annex B), `pts_ms` from the start.
+    #[cfg(test)]
     pub fn write(&mut self, pts_ms: u64, annex_b: &[u8]) -> Result<(), String> {
+        self.write_shown(pts_ms, 0, annex_b)
+    }
+
+    /// A frame decoded at `at_ms` and shown `shown_after_ms` later (a
+    /// stream with B-frames): in the index after the length, when not 0.
+    pub fn write_shown(
+        &mut self,
+        at_ms: u64,
+        shown_after_ms: i32,
+        annex_b: &[u8],
+    ) -> Result<(), String> {
         let key = nals(annex_b).iter().any(|n| nal_type(n) == Some(5));
         self.stream.write_all(annex_b).map_err(|e| e.to_string())?;
-        writeln!(self.index, "{pts_ms} {} {}", u8::from(key), annex_b.len())
-            .map_err(|e| e.to_string())
+        let len = annex_b.len();
+        let line = match shown_after_ms {
+            0 => format!("{at_ms} {} {len}", u8::from(key)),
+            after => format!("{at_ms} {} {len} {after}", u8::from(key)),
+        };
+        writeln!(self.index, "{line}").map_err(|e| e.to_string())
     }
 
     /// On disk: what a crash would leave.
@@ -96,9 +112,12 @@ fn nal_type(nal: &[u8]) -> Option<u8> {
 }
 
 struct Entry {
+    /// decoded at, from the start: shown at, without B-frames
     pts_ms: u64,
     key: bool,
     len: usize,
+    /// shown after it's decoded (B-frames)
+    shown_after_ms: i32,
 }
 
 // the lines of the index: a line cut by a crash, or past the stream, and
@@ -108,15 +127,24 @@ fn entries(index: &str, stream_len: usize) -> Vec<Entry> {
     let mut out = vec![];
     for line in index.lines() {
         let fields: Vec<&str> = line.split(' ').collect();
-        let entry = match fields.as_slice() {
-            [pts, key, len] => match (pts.parse(), key.parse::<u8>(), len.parse::<usize>()) {
-                (Ok(pts_ms), Ok(key), Ok(len)) => Some(Entry {
-                    pts_ms,
-                    key: key == 1,
-                    len,
-                }),
-                _ => None,
-            },
+        let (shown_after, fields) = match fields.as_slice() {
+            [pts, key, len, after] => (after.parse::<i32>().ok(), [*pts, *key, *len]),
+            [pts, key, len] => (Some(0), [*pts, *key, *len]),
+            _ => (None, ["", "", ""]),
+        };
+        let [pts, key, len] = fields;
+        let entry = match (
+            pts.parse(),
+            key.parse::<u8>(),
+            len.parse::<usize>(),
+            shown_after,
+        ) {
+            (Ok(pts_ms), Ok(key), Ok(len), Some(shown_after_ms)) => Some(Entry {
+                pts_ms,
+                key: key == 1,
+                len,
+                shown_after_ms,
+            }),
             _ => None,
         };
         match entry {
@@ -235,7 +263,8 @@ pub fn remux(base: &Path, mp4: &Path) -> Result<Remuxed, String> {
                 &mp4::Mp4Sample {
                     start_time,
                     duration,
-                    rendering_offset: 0,
+                    // shown before decoded can't be: as decoded, then
+                    rendering_offset: e.shown_after_ms.max(0),
                     is_sync: e.key,
                     bytes: Bytes::from(sample),
                 },
@@ -457,6 +486,32 @@ mod tests {
         // from the keyframe at 1 s
         assert_eq!(made.skipped_ms, 1000);
         assert!((1990..=2010).contains(&made.length_ms), "{made:?}");
+    }
+
+    /// A stream with B-frames: each frame shown as long after its
+    /// decoding as the index says, in the MP4 (other players need it).
+    #[test]
+    fn a_recording_shown_out_of_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("reordered");
+        record(&base, 30);
+        let (_, index) = raw_paths(&base);
+        let text = fs::read_to_string(&index).unwrap();
+        let lines: Vec<String> = text
+            .lines()
+            .enumerate()
+            .map(|(i, l)| match i {
+                1 => format!("{l} 66"),
+                _ => l.to_string(),
+            })
+            .collect();
+        fs::write(&index, lines.join("\n") + "\n").unwrap();
+        let mp4 = base.with_extension("mp4");
+        remux(&base, &mp4).unwrap();
+        let samples = Source::open(&mp4).unwrap().samples;
+        assert_eq!(samples.len(), 30);
+        assert_eq!(samples[1].pts_ms, 33 + 66);
+        assert_eq!(samples[2].pts_ms, 66);
     }
 
     #[test]

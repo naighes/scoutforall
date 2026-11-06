@@ -7,6 +7,7 @@ pub mod capture;
 pub mod network;
 pub mod picture;
 pub mod raw;
+pub mod rtmp;
 pub mod screen;
 
 use {
@@ -36,6 +37,15 @@ pub struct LiveConfig {
     /// the source on the network used last: its password in the keychain
     #[serde(default)]
     pub network: Option<SavedNetwork>,
+    /// the port and the key the apps send to (RTMP received)
+    #[serde(default)]
+    pub receiver: Option<SavedReceiver>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedReceiver {
+    pub port: u16,
+    pub key: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -274,6 +284,10 @@ mod tests {
             network: Some(SavedNetwork {
                 url: "rtsp://cam.local/live".into(),
                 username: "scout".into(),
+            }),
+            receiver: Some(SavedReceiver {
+                port: 1936,
+                key: "abcd1234".into(),
             }),
         };
         config.write(dir.path()).unwrap();

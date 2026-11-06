@@ -39,6 +39,7 @@ nokhwa = { version = "0.10", features = ["input-native", "output-threaded"] }
 open = "5.4.5"
 rfd = "0.17.2"
 self_update = { version = "1", optional = true, features = ["checksums"] }
+rml_rtmp = "0.8"
 
 [features]
 # the builds of the releases only: they update themselves (`update`)

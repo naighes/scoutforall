@@ -1,8 +1,9 @@
 //! A source of video on the network: RTSP (an IP camera, a phone app, a
-//! streamer), with its user and password. The H.264 that comes is recorded
-//! as it is (no encoding again) and decoded only for the preview. Cut off
-//! while recording, it connects again and goes on in the same recording.
-//! RTMP and HLS are known, not read yet.
+//! streamer), with its user and password; RTMP read from a server, or
+//! received from an app (`rtmp`). The H.264 that comes is recorded as it
+//! is (no encoding again) and decoded only for the preview. Cut off while
+//! recording, it connects again and goes on in the same recording. HLS is
+//! known, not read yet.
 
 use {
     super::{
@@ -33,13 +34,13 @@ use {
 const PREVIEW_WIDTH: usize = 960;
 
 /// How long to wait for the source to answer.
-const ANSWER_WITHIN: Duration = Duration::from_secs(10);
+pub(super) const ANSWER_WITHIN: Duration = Duration::from_secs(10);
 
 /// How long to wait before connecting again, once cut off.
 const AGAIN_AFTER: Duration = Duration::from_secs(2);
 
 /// How often the commands are looked at while no frame comes.
-const LOOK_EVERY: Duration = Duration::from_millis(100);
+pub(super) const LOOK_EVERY: Duration = Duration::from_millis(100);
 
 /// The ports of the protocols, when not written.
 const RTSP_PORT: u16 = 554;
@@ -80,6 +81,14 @@ pub enum Problem {
     Hevc,
     /// no video, or a video that isn't H.264
     NoVideo(String),
+    /// closed by the server before the video: the key, the user
+    Closed,
+    /// `rtmps://`: not read yet
+    Encrypted,
+    /// the port to receive on taken by another program
+    PortTaken(u16),
+    /// an app sent with another key: from where
+    WrongKey(String),
     /// as it was said
     Other(String),
 }
@@ -172,18 +181,26 @@ pub fn parameters_annex_b(avcc: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// A frame as RTSP gives it (each NAL after its length, four bytes) as
-/// Annex B, its parameters before it when it starts a picture anew.
-pub fn frame_annex_b(data: &[u8], parameters: Option<&[u8]>) -> Option<Vec<u8>> {
+/// How many bytes say the length of each NAL, as an `avcC` box says.
+pub fn length_size(avcc: &[u8]) -> Option<usize> {
+    avcc.get(4).map(|b| usize::from(b & 3) + 1)
+}
+
+/// A frame as RTSP and RTMP give it (each NAL after its length, in
+/// `size` bytes: four, mostly) as Annex B, its parameters before it when
+/// it starts a picture anew.
+pub fn frame_annex_b(data: &[u8], size: usize, parameters: Option<&[u8]>) -> Option<Vec<u8>> {
     let mut out = parameters.map(<[u8]>::to_vec).unwrap_or_default();
     let mut at = 0;
     while at < data.len() {
-        let len = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?);
-        let len = usize::try_from(len).ok()?;
-        let nal = data.get(at + 4..at + 4 + len)?;
+        let len = data
+            .get(at..at + size)?
+            .iter()
+            .fold(0usize, |len, b| (len << 8) | usize::from(*b));
+        let nal = data.get(at + size..at + size + len)?;
         out.extend_from_slice(&[0, 0, 0, 1]);
         out.extend_from_slice(nal);
-        at += 4 + len;
+        at += size + len;
     }
     Some(out)
 }
@@ -211,13 +228,110 @@ fn shown_of(yuv: &openh264::decoder::DecodedYUV) -> Option<(I420, (usize, usize,
     Some((picture, shown))
 }
 
+/// The frames of a source on the network as they come: recorded on the
+/// clock of the recording, decoded for the preview while it's shown. One
+/// for the source, over its connections: the preview counted on.
+pub(super) struct Feed {
+    decoder: Decoder,
+    /// where the stream was (ms on its clock) and the recording, at the
+    /// first frame recorded since connected
+    first: Option<(u64, u64)>,
+    serial: u64,
+    decoding: bool,
+}
+
+impl Feed {
+    pub(super) fn new() -> Result<Feed, Problem> {
+        Ok(Feed {
+            decoder: Decoder::new().map_err(|e| Problem::Other(e.to_string()))?,
+            first: None,
+            serial: 0,
+            decoding: false,
+        })
+    }
+
+    /// Connected (again): a clock of its own, a picture that starts anew.
+    pub(super) fn connected(&mut self, status: &Mutex<Status>) {
+        self.first = None;
+        self.decoding = false;
+        set(status, |s| {
+            s.problem = None;
+            s.error = None;
+        });
+    }
+
+    /// A frame (Annex B), `at_ms` on the clock of the stream, shown
+    /// `shown_after_ms` later (B-frames); `starts` a picture anew (a
+    /// keyframe).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn frame(
+        &mut self,
+        annex_b: &[u8],
+        starts: bool,
+        at_ms: u64,
+        shown_after_ms: i32,
+        take: &mut Option<Take>,
+        preview: bool,
+        status: &Mutex<Status>,
+    ) {
+        match take.as_mut() {
+            Some(t) => {
+                let (at0, ms0) = *self.first.get_or_insert((at_ms, t.elapsed_ms()));
+                if let Err(e) =
+                    t.write_shown(ms0 + at_ms.saturating_sub(at0), shown_after_ms, annex_b)
+                {
+                    set(status, |s| s.error = Some(e));
+                    finish(take.take(), status);
+                }
+            }
+            None => self.first = None,
+        }
+        // decoded only for the preview: not shown, not decoded, from the
+        // next picture that starts anew when shown again
+        let shown = match (preview, starts, self.decoding) {
+            (false, _, _) => {
+                self.decoding = false;
+                None
+            }
+            (true, false, false) => None,
+            (true, _, _) => {
+                self.decoding = true;
+                let decoded = self.decoder.decode(annex_b).ok().flatten();
+                decoded.as_ref().and_then(shown_of)
+            }
+        };
+        let recording = take.as_ref().map(Take::recording);
+        match shown {
+            Some((picture, (w, h, rgba))) => {
+                self.serial += 1;
+                let frame = Arc::new(Frame {
+                    serial: self.serial,
+                    width: u32::try_from(w).unwrap_or(0),
+                    height: u32::try_from(h).unwrap_or(0),
+                    rgba: Bytes::from(rgba),
+                });
+                let size = (
+                    u32::try_from(picture.width).unwrap_or(0),
+                    u32::try_from(picture.height).unwrap_or(0),
+                );
+                set(status, |s| {
+                    s.frame = Some(frame);
+                    s.size = Some(size);
+                    s.recording = recording;
+                });
+            }
+            None => set(status, |s| s.recording = recording),
+        }
+    }
+}
+
 /// What the loop is asked between frames.
-enum Asked {
+pub(super) enum Asked {
     Nothing,
     Quit,
 }
 
-fn look(
+pub(super) fn look(
     commands: &Receiver<Command>,
     take: &mut Option<Take>,
     preview: &mut bool,
@@ -243,7 +357,16 @@ fn look(
     }
 }
 
-pub(super) fn run(source: NetworkSource, commands: Receiver<Command>, status: &Mutex<Status>) {
+/// How a source on the network is read: connected to, or waited for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reading {
+    /// at an address
+    Pull(NetworkSource),
+    /// an app sending it to this computer (RTMP), on `port` with `key`
+    Receive(super::rtmp::Receiver),
+}
+
+pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<Status>) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build();
@@ -254,8 +377,27 @@ pub(super) fn run(source: NetworkSource, commands: Receiver<Command>, status: &M
     runtime.block_on(async {
         let mut take: Option<Take> = None;
         let mut preview = true;
+        let mut feed = match Feed::new() {
+            Ok(f) => f,
+            Err(problem) => return set(status, |s| s.problem = Some(problem)),
+        };
+        let mut io = Io {
+            commands: &commands,
+            take: &mut take,
+            preview: &mut preview,
+            status,
+            feed: &mut feed,
+        };
         loop {
-            let ended = stream(&source, &commands, &mut take, &mut preview, status).await;
+            let ended = match &reading {
+                Reading::Pull(source) => match parse(&source.url) {
+                    Ok((url, Protocol::Rtsp, in_url)) => stream(url, source, in_url, &mut io).await,
+                    Ok((url, Protocol::Rtmp, _)) => super::rtmp::pull(url, &mut io).await,
+                    Ok((_, protocol, _)) => Err(Problem::NotYet(protocol)),
+                    Err(problem) => Err(problem),
+                },
+                Reading::Receive(receiver) => super::rtmp::receive(receiver, &mut io).await,
+            };
             match ended {
                 Ok(Asked::Quit) => return,
                 Ok(Asked::Nothing) => {}
@@ -265,7 +407,7 @@ pub(super) fn run(source: NetworkSource, commands: Receiver<Command>, status: &M
             // going on (the frames missed, missing)
             let mut waited = Duration::ZERO;
             while waited < AGAIN_AFTER {
-                if let Asked::Quit = look(&commands, &mut take, &mut preview, status) {
+                if let Asked::Quit = io.look() {
                     return;
                 }
                 tokio::time::sleep(LOOK_EVERY).await;
@@ -275,19 +417,46 @@ pub(super) fn run(source: NetworkSource, commands: Receiver<Command>, status: &M
     });
 }
 
-/// Connected and read until cut off (`Ok(Nothing)`) or asked to quit.
-async fn stream(
-    source: &NetworkSource,
-    commands: &Receiver<Command>,
-    take: &mut Option<Take>,
-    preview: &mut bool,
-    status: &Mutex<Status>,
-) -> Result<Asked, Problem> {
-    let (url, protocol, in_url) = parse(&source.url)?;
-    if protocol != Protocol::Rtsp {
-        return Err(Problem::NotYet(protocol));
+/// What a connection reads into: the commands of the app, the recording,
+/// the preview.
+pub(super) struct Io<'a> {
+    commands: &'a Receiver<Command>,
+    pub(super) take: &'a mut Option<Take>,
+    pub(super) preview: &'a mut bool,
+    pub(super) status: &'a Mutex<Status>,
+    pub(super) feed: &'a mut Feed,
+}
+
+impl Io<'_> {
+    pub(super) fn look(&mut self) -> Asked {
+        look(self.commands, self.take, self.preview, self.status)
     }
-    let mut url = url;
+
+    pub(super) fn connected(&mut self) {
+        self.feed.connected(self.status);
+    }
+
+    pub(super) fn frame(&mut self, annex_b: &[u8], starts: bool, at_ms: u64, shown_after_ms: i32) {
+        self.feed.frame(
+            annex_b,
+            starts,
+            at_ms,
+            shown_after_ms,
+            self.take,
+            *self.preview,
+            self.status,
+        );
+    }
+}
+
+/// Connected over RTSP and read until cut off (`Ok(Nothing)`) or asked to
+/// quit.
+async fn stream(
+    mut url: url::Url,
+    source: &NetworkSource,
+    in_url: Option<(String, String)>,
+    io: &mut Io<'_>,
+) -> Result<Asked, Problem> {
     if url.port().is_none() {
         let _ = url.set_port(Some(RTSP_PORT));
     }
@@ -332,20 +501,11 @@ async fn stream(
         .map_err(|_| Problem::Silent)?
         .map_err(|e| problem_of(&e.to_string()))?;
     let mut demuxed = playing.demuxed().map_err(|e| problem_of(&e.to_string()))?;
-    let mut decoder = Decoder::new().map_err(|e| Problem::Other(e.to_string()))?;
-    set(status, |s| {
-        s.problem = None;
-        s.error = None;
-    });
-    // the frames on the clock of the recording: from where it is when
-    // connected, then as the stream counts them
-    let mut first: Option<(i64, u64)> = None;
-    let mut serial = 0u64;
+    io.connected();
     let mut parameters: Option<Vec<u8>> = None;
     let mut silent = Duration::ZERO;
-    let mut decoding = false;
     loop {
-        if let Asked::Quit = look(commands, take, preview, status) {
+        if let Asked::Quit = io.look() {
             return Ok(Asked::Quit);
         }
         let item = match tokio::time::timeout(LOOK_EVERY, demuxed.next()).await {
@@ -374,58 +534,14 @@ async fn stream(
                 });
         }
         let starts = frame.is_random_access_point();
-        let Some(annex_b) = frame_annex_b(frame.data(), parameters.as_deref().filter(|_| starts))
-        else {
+        let annex_b = frame_annex_b(frame.data(), 4, parameters.as_deref().filter(|_| starts));
+        let Some(annex_b) = annex_b else {
             continue;
         };
-        let clock = i64::from(frame.timestamp().clock_rate().get());
-        let ticks = frame.timestamp().elapsed();
-        if let Some(t) = take.as_mut() {
-            let (ticks0, ms0) = *first.get_or_insert((ticks, t.elapsed_ms()));
-            let since = u64::try_from((ticks - ticks0).max(0).saturating_mul(1000) / clock).unwrap_or(0);
-            if let Err(e) = t.write(ms0 + since, &annex_b) {
-                set(status, |s| s.error = Some(e));
-                finish(take.take(), status);
-            }
-        } else {
-            first = None;
-        }
-        // decoded only for the preview: not shown, not decoded, from the
-        // next picture that starts anew when shown again
-        let shown = match (*preview, starts, decoding) {
-            (false, _, _) => {
-                decoding = false;
-                None
-            }
-            (true, false, false) => None,
-            (true, _, _) => {
-                decoding = true;
-                let decoded = decoder.decode(&annex_b).ok().flatten();
-                decoded.as_ref().and_then(shown_of)
-            }
-        };
-        let recording = take.as_ref().map(Take::recording);
-        match shown {
-            Some((picture, (w, h, rgba))) => {
-                serial += 1;
-                let frame = Arc::new(Frame {
-                    serial,
-                    width: u32::try_from(w).unwrap_or(0),
-                    height: u32::try_from(h).unwrap_or(0),
-                    rgba: Bytes::from(rgba),
-                });
-                let size = (
-                    u32::try_from(picture.width).unwrap_or(0),
-                    u32::try_from(picture.height).unwrap_or(0),
-                );
-                set(status, |s| {
-                    s.frame = Some(frame);
-                    s.size = Some(size);
-                    s.recording = recording;
-                });
-            }
-            None => set(status, |s| s.recording = recording),
-        }
+        let clock = i64::from(frame.timestamp().clock_rate().get()).max(1);
+        let ticks = frame.timestamp().elapsed().max(0);
+        let at_ms = u64::try_from(ticks.saturating_mul(1000) / clock).unwrap_or(0);
+        io.frame(&annex_b, starts, at_ms, 0);
     }
 }
 
@@ -484,6 +600,28 @@ mod tests {
         assert!(video.samples.len() as u64 >= made.length_ms * 30 / 1000 - 3);
     }
 
+    /// Connected again: the preview counted on from where it was, for
+    /// the screen (which shows only newer ones) to show it.
+    #[test]
+    fn the_preview_after_connecting_again() {
+        use openh264::{OpenH264API, encoder::Encoder, formats::YUVBuffer};
+        let mut encoder = Encoder::with_api_config(
+            OpenH264API::from_source(),
+            openh264::encoder::EncoderConfig::new(),
+        )
+        .unwrap();
+        let yuv = YUVBuffer::from_vec(vec![90; 64 * 48 * 3 / 2], 64, 48);
+        let keyframe = encoder.encode(&yuv).unwrap().to_vec();
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        let serial = |status: &Mutex<Status>| status.lock().unwrap().frame.as_ref().unwrap().serial;
+        feed.frame(&keyframe, true, 0, 0, &mut None, true, &status);
+        let before = serial(&status);
+        feed.connected(&status);
+        feed.frame(&keyframe, true, 0, 0, &mut None, true, &status);
+        assert!(serial(&status) > before);
+    }
+
     #[test]
     fn the_addresses_written() {
         let (url, protocol, user) = parse("192.168.1.20/stream1").unwrap();
@@ -539,12 +677,12 @@ mod tests {
         let parameters = parameters_annex_b(&avcc).unwrap();
         assert_eq!(parameters, [0, 0, 0, 1, 0x67, 1, 2, 0, 0, 0, 1, 0x68, 9]);
         let data = [0, 0, 0, 2, 0x65, 7, 0, 0, 0, 1, 0x06];
-        let frame = frame_annex_b(&data, Some(&parameters)).unwrap();
+        let frame = frame_annex_b(&data, 4, Some(&parameters)).unwrap();
         assert_eq!(frame[..13], parameters[..]);
         assert_eq!(frame[13..], [0, 0, 0, 1, 0x65, 7, 0, 0, 0, 1, 0x06]);
-        assert_eq!(frame_annex_b(&data, None).unwrap(), frame[13..]);
+        assert_eq!(frame_annex_b(&data, 4, None).unwrap(), frame[13..]);
         // cut short: not a frame
-        assert_eq!(frame_annex_b(&[0, 0, 0, 9, 1], None), None);
+        assert_eq!(frame_annex_b(&[0, 0, 0, 9, 1], 4, None), None);
         assert_eq!(parameters_annex_b(&[1, 2]), None);
     }
 }

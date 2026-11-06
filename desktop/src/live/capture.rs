@@ -146,6 +146,8 @@ pub struct Status {
     pub error: Option<String>,
     /// what went wrong with a source on the network, to say it plainly
     pub problem: Option<super::network::Problem>,
+    /// where the app sending the video is (RTMP received), while it sends
+    pub sender: Option<String>,
 }
 
 /// Where the video comes from.
@@ -153,6 +155,8 @@ pub struct Status {
 pub enum Source {
     Camera(CameraEntry),
     Network(super::network::NetworkSource),
+    /// an app sending it to this computer
+    Receiver(super::rtmp::Receiver),
 }
 
 pub(super) enum Command {
@@ -185,7 +189,12 @@ impl Capture {
                 std::thread::spawn(move || run(camera.index, received, &shared));
             }
             Source::Network(network) => {
-                std::thread::spawn(move || super::network::run(network, received, &shared));
+                let reading = super::network::Reading::Pull(network);
+                std::thread::spawn(move || super::network::run(reading, received, &shared));
+            }
+            Source::Receiver(receiver) => {
+                let reading = super::network::Reading::Receive(receiver);
+                std::thread::spawn(move || super::network::run(reading, received, &shared));
             }
         }
         Capture {
@@ -299,8 +308,18 @@ impl Take {
 
     /// A frame (Annex B) at `pts_ms`; on disk every `FLUSH_EVERY`.
     pub(super) fn write(&mut self, pts_ms: u64, annex_b: &[u8]) -> Result<(), String> {
+        self.write_shown(pts_ms, 0, annex_b)
+    }
+
+    /// As `write`, the frame shown `shown_after_ms` after it's decoded.
+    pub(super) fn write_shown(
+        &mut self,
+        pts_ms: u64,
+        shown_after_ms: i32,
+        annex_b: &[u8],
+    ) -> Result<(), String> {
         if !annex_b.is_empty() {
-            self.raw.write(pts_ms, annex_b)?;
+            self.raw.write_shown(pts_ms, shown_after_ms, annex_b)?;
         }
         self.frames += 1;
         match self.frames % FLUSH_EVERY {
