@@ -40,12 +40,14 @@ open = "5.4.5"
 rfd = "0.17.2"
 self_update = { version = "1", optional = true, features = ["checksums"] }
 rml_rtmp = "0.8"
+qrcode = { version = "0.14", default-features = false }
 
 [features]
 # the builds of the releases only: they update themselves (`update`)
 self-update = ["self_update"]
 
 [dev-dependencies]
+rqrr = { version = "0.10", default-features = false }
 tempfile.workspace = true
 
 [build-dependencies]

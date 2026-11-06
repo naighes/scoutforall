@@ -117,6 +117,8 @@ pub struct LiveScreen {
     form: Form,
     /// this computer on its network, for the app to send to
     here: Option<String>,
+    /// the QR code that sets Larix to send here, and its link
+    qr: Option<(String, image::Handle)>,
 }
 
 /// The problem of a source on the network, in the user's words.
@@ -179,6 +181,23 @@ impl LiveScreen {
             error: None,
             form: Form::new("", vec![]),
             here: None,
+            qr: None,
+        }
+    }
+
+    /// The QR code for the address written, made again when it changes.
+    fn refresh_qr(&mut self) {
+        let host = self.here.clone().unwrap_or_else(|| "127.0.0.1".to_string());
+        let link = match self.written() {
+            Some(Source::Receiver(r)) => Some(rtmp::larix_link(&r.address(&host))),
+            _ => None,
+        };
+        let same = self.qr.as_ref().map(|(l, _)| l) == link.as_ref();
+        if !same {
+            self.qr = link.and_then(|link| {
+                rtmp::qr_rgba(&link, 4)
+                    .map(|(w, h, rgba)| (link, image::Handle::from_rgba(w, h, rgba)))
+            });
         }
     }
 
@@ -367,6 +386,7 @@ impl LiveScreen {
                 self.step = Step::Receiver;
                 self.here = rtmp::this_computer().map(|ip| ip.to_string());
                 self.try_written(s);
+                self.refresh_qr();
                 Outcome::Stay
             }
         }
@@ -509,6 +529,10 @@ impl LiveScreen {
             form::Outcome::Cancel => self.back(),
             form::Outcome::Changed(_) if self.step == Step::Network => {
                 self.form.shown = Some(Self::network_fields(&self.form));
+                Outcome::Stay
+            }
+            form::Outcome::Changed(_) if self.step == Step::Receiver => {
+                self.refresh_qr();
                 Outcome::Stay
             }
             form::Outcome::Stay | form::Outcome::Changed(_) => Outcome::Stay,
@@ -713,9 +737,21 @@ impl LiveScreen {
             (None, true) => s.receiver_waiting.to_string(),
             (None, false) => String::new(),
         };
+        let qr: Element<'a, Message> = match &self.qr {
+            Some((_, handle)) => column![
+                image(handle.clone())
+                    .width(Length::Fixed(180.0))
+                    .filter_method(image::FilterMethod::Nearest),
+                text(s.receiver_qr).size(SIZE_SMALL).color(c.muted),
+            ]
+            .spacing(6)
+            .into(),
+            None => space::vertical().height(0).into(),
+        };
         let folder = self.config.folder(&self.dir);
         let aside = column![
             ui::section(s.receiver_in_app, c),
+            qr,
             address,
             text(s.receiver_firewall).size(SIZE_SMALL).color(c.muted),
             text(state).size(SIZE_SMALL),
@@ -1035,6 +1071,8 @@ mod tests {
         assert!(matches!(screen.key(key!(enter), s()), Outcome::Stay));
         assert_eq!(screen.step, Step::Receiver);
         assert!(screen.tried());
+        let link = screen.qr.as_ref().unwrap().0.clone();
+        assert!(link.contains("chiave01"), "{link}");
         assert!(matches!(screen.key(key!(enter), s()), Outcome::Stay));
         assert!(matches!(screen.update(Message::Start, s()), Outcome::Stay));
         screen.update(
@@ -1042,6 +1080,8 @@ mod tests {
             s(),
         );
         assert!(!screen.tried());
+        // the QR follows what's written
+        assert!(screen.qr.as_ref().unwrap().0.contains("19362"));
         screen.key(key!(enter), s());
         assert!(screen.tried());
         assert_eq!(LiveConfig::read(dir.path()).receiver.unwrap().port, 19362);

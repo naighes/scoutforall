@@ -367,6 +367,7 @@ pub struct Strings {
     pub receiver_server: &'static str,
     pub receiver_whole: &'static str,
     pub receiver_firewall: &'static str,
+    pub receiver_qr: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -744,6 +745,7 @@ What did you expect instead?
     receiver_server: "Server",
     receiver_whole: "Whole address",
     receiver_firewall: "The computer may ask whether the app can accept connections: allow it",
+    receiver_qr: "Frame it with the phone: Larix opens with the connection ready (other apps: the address below)",
 };
 
 const IT: Strings = Strings {
@@ -1121,6 +1123,7 @@ Cosa ti aspettavi invece?
     receiver_server: "Server",
     receiver_whole: "Indirizzo completo",
     receiver_firewall: "Il computer potrebbe chiedere se l'app può accettare connessioni: consentilo",
+    receiver_qr: "Inquadralo con il telefono: Larix si apre con la connessione già pronta (altre app: l'indirizzo sotto)",
 };
 
 const PT: Strings = Strings {
@@ -1498,6 +1501,7 @@ O que você esperava?
     receiver_server: "Servidor",
     receiver_whole: "Endereço completo",
     receiver_firewall: "O computador pode perguntar se o app pode aceitar conexões: permita",
+    receiver_qr: "Aponte o celular: o Larix abre com a conexão pronta (outros apps: o endereço abaixo)",
 };
 
 const PL: Strings = Strings {
@@ -1875,6 +1879,7 @@ Czego się spodziewałeś(-aś)?
     receiver_server: "Serwer",
     receiver_whole: "Pełny adres",
     receiver_firewall: "Komputer może zapytać, czy aplikacja może przyjmować połączenia: zezwól",
+    receiver_qr: "Zeskanuj telefonem: Larix otworzy się z gotowym połączeniem (inne aplikacje: adres poniżej)",
 };
 
 const JA: Strings = Strings {
@@ -2241,6 +2246,7 @@ const JA: Strings = Strings {
     receiver_server: "サーバー",
     receiver_whole: "完全なアドレス",
     receiver_firewall: "コンピューターが接続の受け入れを確認することがあります。許可してください",
+    receiver_qr: "スマホで読み取ると、接続設定済みの Larix が開きます(他のアプリは下のアドレス)",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

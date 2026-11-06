@@ -50,6 +50,44 @@ impl Receiver {
     }
 }
 
+/// The link that sets Larix (Larix Grove) to send to `address`: video
+/// only, H.264, a keyframe every 2 s; the connection named as the app,
+/// replaced if there.
+pub fn larix_link(address: &str) -> String {
+    let address: String = url::form_urlencoded::byte_serialize(address.as_bytes()).collect();
+    format!(
+        "larix://set/v1?conn[][url]={address}&conn[][name]=scout4all&conn[][overwrite]=on\
+         &conn[][mode]=v&enc[vid][format]=avc&enc[vid][keyframe]=2"
+    )
+}
+
+/// The QR code of `text` as an RGBA picture: dark on white, each module
+/// `scale` pixels, the white margin round it the standard requires.
+pub fn qr_rgba(text: &str, scale: usize) -> Option<(u32, u32, Vec<u8>)> {
+    let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
+    let modules = code.width();
+    let colors = code.to_colors();
+    const MARGIN: usize = 4;
+    let side = (modules + 2 * MARGIN) * scale;
+    let mut rgba = vec![255u8; side * side * 4];
+    for (i, color) in colors.iter().enumerate() {
+        if *color != qrcode::Color::Dark {
+            continue;
+        }
+        let (mx, my) = (i % modules + MARGIN, i / modules + MARGIN);
+        for y in my * scale..(my + 1) * scale {
+            for x in mx * scale..(mx + 1) * scale {
+                let at = (y * side + x) * 4;
+                if let Some(pixel) = rgba.get_mut(at..at + 3) {
+                    pixel.fill(0);
+                }
+            }
+        }
+    }
+    let side = u32::try_from(side).ok()?;
+    Some((side, side, rgba))
+}
+
 /// A key not guessed: eight letters and digits.
 pub fn new_key() -> String {
     uuid::Uuid::new_v4()
@@ -646,6 +684,27 @@ mod tests {
         // the old way: H.265 (as some send it), Sorenson
         assert_eq!(video_tag(&[0x1c, 0]), Err(Problem::Hevc));
         assert_eq!(video_tag(&[0x12, 0]), Err(Problem::NoVideo("H.263".into())));
+    }
+
+    /// The QR of the link for Larix read back as it was written.
+    #[test]
+    fn the_qr_for_larix() {
+        let link = larix_link("rtmp://192.168.1.9:1935/live/1c65e4eb");
+        assert_eq!(
+            link,
+            "larix://set/v1?conn[][url]=rtmp%3A%2F%2F192.168.1.9%3A1935%2Flive%2F1c65e4eb\
+             &conn[][name]=scout4all&conn[][overwrite]=on&conn[][mode]=v\
+             &enc[vid][format]=avc&enc[vid][keyframe]=2"
+        );
+        let (w, h, rgba) = qr_rgba(&link, 4).unwrap();
+        assert_eq!(w, h);
+        let side = w as usize;
+        let mut image = rqrr::PreparedImage::prepare_from_greyscale(side, side, |x, y| {
+            rgba[(y * side + x) * 4]
+        });
+        let grids = image.detect_grids();
+        assert_eq!(grids.len(), 1);
+        assert_eq!(grids[0].decode().unwrap().1, link);
     }
 
     #[test]
