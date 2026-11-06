@@ -13,7 +13,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, text},
+        widget::{Column, Id, column, container, row, scrollable, space, text},
     },
     scout4all_core::{
         event_edit::EditField,
@@ -343,7 +343,9 @@ impl EventsScreen {
             ))
             .width(Length::FillPortion(3))
             .height(Length::Fill),
-            container(side).width(Length::FillPortion(2)),
+            container(side)
+                .width(Length::FillPortion(2))
+                .height(Length::Fill),
         ]
         .spacing(14)
         .height(Length::Fill)
@@ -378,10 +380,12 @@ impl EventsScreen {
                     .size(22)
                     .font(theme::fonts().bold)
                     .color(c.accent),
+                space::vertical(),
                 note,
             ]
             .spacing(10)
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .height(Length::Fill),
             c,
         )
     }
@@ -477,8 +481,15 @@ impl EventsScreen {
                 .size(SIZE_SMALL)
                 .color(c.muted),
                 ui::body(player),
-                Column::with_children(choices).spacing(10),
-                text(eval_name).size(SIZE_SMALL).color(c.muted),
+                // the choices scroll when many; the buttons stay at the bottom
+                scrollable(
+                    column![
+                        Column::with_children(choices).spacing(10),
+                        text(eval_name).size(SIZE_SMALL).color(c.muted),
+                    ]
+                    .spacing(12)
+                )
+                .height(Length::Fill),
                 error,
                 container(
                     row![
@@ -496,7 +507,8 @@ impl EventsScreen {
                 .align_x(Alignment::End),
             ]
             .spacing(12)
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .height(Length::Fill),
             c,
         )
     }
