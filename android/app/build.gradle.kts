@@ -50,6 +50,8 @@ android {
         targetSdk = 37
         versionCode = workspaceVersionCode
         versionName = workspaceVersion
+        // only the screenshots of Play (androidTest, on a phone)
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // the core is built for these only (see cargoNdk); its symbols go
         // in the bundle, for Play to name the functions of a native crash
         ndk {
@@ -122,6 +124,13 @@ dependencies {
     // JNA with the native part of this machine: the tests call the real core
     testImplementation("net.java.dev.jna:jna:5.19.1")
     testImplementation("androidx.work:work-testing:2.12.0")
+    // the screenshots of Play, taken on a phone by
+    // scripts/generate_phone_screenshots.py: the real app, the real core
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
 }
 
 // The core is the Rust crate `mobile` of the workspace, two folders up: cargo
