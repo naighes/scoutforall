@@ -6021,7 +6021,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scout4all-core"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6048,7 +6048,7 @@ dependencies = [
 
 [[package]]
 name = "scout4all-desktop"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -6090,7 +6090,7 @@ dependencies = [
 
 [[package]]
 name = "scout4all-keys"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "crokey",
  "scout4all-core",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "scout4all-mobile"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "chrono",
  "scout4all-core",

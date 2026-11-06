@@ -1,0 +1,6 @@
+- Match video: pick videos from your phone, the events follow playback and each action opens at its moment.
+- Automatic sync from DataVolley files or the file name, manual correction even of a single event.
+- The actions behind a statistic one after another in the video, across matches too.
+- A video of the chosen actions with cards and score, ready to share.
+- Filters for set endings and close scores.
+- "Export" is now "Share".

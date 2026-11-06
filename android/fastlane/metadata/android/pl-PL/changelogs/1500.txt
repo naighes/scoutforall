@@ -1,0 +1,6 @@
+- Wideo meczu: wybierz nagrania z telefonu, zdarzenia podążają za odtwarzaniem, a każda akcja otwiera się w swoim momencie.
+- Automatyczna synchronizacja z plików DataVolley lub nazwy pliku, ręczna korekta nawet pojedynczego zdarzenia.
+- Akcje danej statystyki jedna po drugiej na wideo, także z wielu meczów.
+- Wideo z wybranych akcji z planszami i wynikiem, gotowe do udostępnienia.
+- Filtry końcówek setów i wyrównanego wyniku.
+- „Eksportuj” to teraz „Udostępnij”.

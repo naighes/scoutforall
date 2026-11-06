@@ -1,0 +1,6 @@
+- Vídeo da partida: escolha vídeos do celular, os eventos acompanham a reprodução e cada ação abre no seu momento.
+- Sincronização automática pelos arquivos DataVolley ou pelo nome do arquivo, correção manual até de um só evento.
+- As ações de uma estatística uma após a outra no vídeo, também em várias partidas.
+- Um vídeo das ações escolhidas com cartões e placar, pronto para compartilhar.
+- Filtros para final de set e placar equilibrado.
+- "Exportar" agora é "Compartilhar".

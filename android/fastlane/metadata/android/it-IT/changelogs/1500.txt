@@ -1,0 +1,6 @@
+- Video della partita: scegli i video dal telefono, gli eventi seguono la riproduzione e ogni azione si apre nel suo momento.
+- Allineamento automatico dai file DataVolley o dal nome del file, correzione a mano anche di un solo evento.
+- Le azioni di una statistica una dopo l'altra in video, anche su più partite.
+- Un video delle azioni scelte con schede e punteggio, pronto da condividere.
+- Filtri per fine set e punteggio in equilibrio.
+- "Esporta" diventa "Condividi".
