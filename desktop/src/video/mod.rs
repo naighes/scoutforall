@@ -1369,6 +1369,7 @@ impl VideoScreen {
         );
         column![
             bar,
+            self.spans_view(status.duration_ms, c),
             files::band(&self.files(), &self.durations(), c),
             row![
                 ui::icon_button(
@@ -1419,6 +1420,76 @@ impl VideoScreen {
         ]
         .spacing(8)
         .into()
+    }
+
+    /// With the actions picked, where their clips are in the video, from
+    /// its start: the ones overlapping as one, in order. The one playing
+    /// told apart.
+    fn spans(&self) -> Vec<Span> {
+        let (before, after) = (self.lead_ms(), self.after_ms());
+        let chosen = self.event_target(self.selected);
+        let mut spans: Vec<Span> = match &self.clips {
+            Some(_) => self
+                .events
+                .iter()
+                .filter_map(|e| target(e, before).map(|t| (t, e)))
+                .filter_map(|(t, e)| {
+                    let end = e.offset_ms?.max(0).unsigned_abs() + after;
+                    Some(Span {
+                        from: t,
+                        to: end,
+                        playing: Some(t) == chosen,
+                    })
+                })
+                .collect(),
+            None => vec![],
+        };
+        spans.sort_by_key(|sp| sp.from);
+        spans.into_iter().fold(vec![], |mut merged: Vec<Span>, sp| {
+            match merged.last_mut() {
+                Some(last) if sp.from <= last.to => {
+                    last.to = last.to.max(sp.to);
+                    last.playing |= sp.playing;
+                }
+                _ => merged.push(sp),
+            }
+            merged
+        })
+    }
+
+    /// The clips of the actions picked, under the bar of the video: red,
+    /// the one playing in the accent.
+    fn spans_view<'a>(&self, duration_ms: u64, c: Colors) -> Element<'a, Message> {
+        let spans = self.spans();
+        if spans.is_empty() || duration_ms == 0 {
+            return space::vertical().height(0).into();
+        }
+        let parts = portions(&spans, duration_ms)
+            .into_iter()
+            .map(|(portion, mark)| {
+                let color = match mark {
+                    Mark::Gap => iced::Color::TRANSPARENT,
+                    Mark::Clip => c.danger,
+                    Mark::Playing => c.accent,
+                };
+                container(space::horizontal())
+                    .width(Length::FillPortion(portion))
+                    .height(Length::Fixed(6.0))
+                    .style(move |_| container::Style {
+                        background: Some(color.into()),
+                        border: iced::Border {
+                            radius: 2.0.into(),
+                            ..iced::Border::default()
+                        },
+                        ..container::Style::default()
+                    })
+                    .into()
+            });
+        // the handle of the bar goes from half its width to the other end
+        container(iced::widget::Row::with_children(parts))
+            .padding(iced::Padding::from([0.0, HANDLE_HALF]))
+            .width(Length::Fill)
+            .into()
     }
 
     /// In clip mode, the seconds of each clip before and after its action:
@@ -1489,6 +1560,52 @@ pub async fn pick(filter: &'static str) -> Vec<PathBuf> {
         .iter()
         .map(|f| f.path().to_path_buf())
         .collect()
+}
+
+/// Half the width of the handle of the bar of the video (iced's default):
+/// where its start and its end are.
+const HANDLE_HALF: f32 = 7.0;
+
+/// A clip of the actions picked, in the video.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Span {
+    from: u64,
+    to: u64,
+    playing: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Gap,
+    Clip,
+    Playing,
+}
+
+/// How much of the strip each stretch takes: the video as `UNITS`, a clip
+/// at least one so that none goes missing.
+fn portions(spans: &[Span], duration_ms: u64) -> Vec<(u16, Mark)> {
+    const UNITS: u64 = 10_000;
+    let unit = |ms: u64| ms.min(duration_ms) * UNITS / duration_ms.max(1);
+    let portion = |n: u64| u16::try_from(n).unwrap_or(u16::MAX);
+    let mut parts = vec![];
+    let mut at = 0;
+    for sp in spans {
+        let (from, to) = (unit(sp.from).max(at), unit(sp.to));
+        if from > at {
+            parts.push((portion(from - at), Mark::Gap));
+        }
+        let width = to.saturating_sub(from).max(1);
+        let mark = match sp.playing {
+            true => Mark::Playing,
+            false => Mark::Clip,
+        };
+        parts.push((portion(width), mark));
+        at = from + width;
+    }
+    if UNITS > at {
+        parts.push((portion(UNITS - at), Mark::Gap));
+    }
+    parts
 }
 
 /// The video on black, filling its place.
@@ -1833,6 +1950,94 @@ pub(crate) mod screen_tests {
 
     /// The serves of the match picked in its statistics (the fixture has
     /// only aces): only those in
+    /// With the actions picked, their clips on the bar: in order, from the
+    /// margin before to the margin after, the overlapping ones as one, the
+    /// one playing told apart.
+    #[test]
+    fn the_clips_of_the_actions_picked_on_the_bar() {
+        let dir = tempfile::tempdir().unwrap();
+        let screen = with_file(&dir, "20150125 000000.mp4");
+        assert!(screen.spans().is_empty(), "no actions picked: no clips");
+        let (core, team, m) = (
+            screen.core.clone(),
+            screen.team_id.clone(),
+            screen.match_id.clone(),
+        );
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let refs = core.match_clips(&team, &m, &pick).unwrap();
+        let mut screen = VideoScreen::with_clips(
+            core,
+            dir.path().to_path_buf(),
+            team,
+            m,
+            refs,
+            "Serve".into(),
+        )
+        .unwrap();
+        let spans = screen.spans();
+        assert!(!spans.is_empty());
+        // in order, apart, each from its margin before to its margin after
+        assert!(spans.windows(2).all(|w| w[0].to < w[1].from));
+        let first = screen
+            .events
+            .iter()
+            .filter_map(|e| e.offset_ms)
+            .min()
+            .unwrap();
+        assert_eq!(spans[0].from, first.unsigned_abs() - 5000);
+        assert!(spans[0].to >= first.unsigned_abs() + 5000);
+        // the clips playing: the one with the action chosen in it
+        let playing = |screen: &VideoScreen, at: u64| {
+            let playing: Vec<Span> = screen.spans().into_iter().filter(|sp| sp.playing).collect();
+            playing.len() == 1 && playing[0].from <= at && at <= playing[0].to
+        };
+        let chosen = screen.event_target(screen.selected).unwrap();
+        assert!(playing(&screen, chosen), "the one chosen playing");
+        // the next one playing
+        let next = screen.next_clip().unwrap();
+        screen.go_to_event(next);
+        let chosen = screen.event_target(next).unwrap();
+        assert!(playing(&screen, chosen));
+        // the margins chosen
+        screen.update(Message::MarginInput(Margin::Before, "30".into()));
+        screen.update(Message::MarginInput(Margin::After, "20".into()));
+        let wider = screen.spans();
+        assert_eq!(wider[0].from, first.unsigned_abs() - 30_000);
+        assert!(wider[0].to >= first.unsigned_abs() + 20_000);
+    }
+
+    /// The strip: the clips where they are in the video, a short one still
+    /// seen, the whole video in its units.
+    #[test]
+    fn the_strip_of_the_clips() {
+        let span = |from, to, playing| Span { from, to, playing };
+        let parts = portions(&[span(1000, 2000, false), span(5000, 5001, true)], 10_000);
+        assert_eq!(
+            parts,
+            [
+                (1000, Mark::Gap),
+                (1000, Mark::Clip),
+                (3000, Mark::Gap),
+                (1, Mark::Playing),
+                (4999, Mark::Gap),
+            ]
+        );
+        let total: u32 = parts.iter().map(|(p, _)| u32::from(*p)).sum();
+        assert_eq!(total, 10_000);
+        // past the end: up to it
+        assert_eq!(
+            portions(&[span(9000, 99_000, false)], 10_000),
+            [(9000, Mark::Gap), (1000, Mark::Clip)]
+        );
+    }
+
     /// the list, the first one played at once in clip mode, then the next
     /// one at the end of each clip; out of sequence (`s`), it stops.
     #[test]
