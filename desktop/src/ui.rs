@@ -270,8 +270,24 @@ pub fn bar_button<'a, M: Clone + 'a>(
     message: M,
     c: Colors,
 ) -> Element<'a, M> {
+    icon_button(icon_bytes, what, message, false, c)
+}
+
+/// A round button with an icon, as on the bar; amber when `filled` (the
+/// main one, e.g. play).
+pub fn icon_button<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    what: &str,
+    message: M,
+    filled: bool,
+    c: Colors,
+) -> Element<'a, M> {
+    let color = match filled {
+        true => c.on_accent,
+        false => c.text,
+    };
     let button = button(
-        container(icon(icon_bytes, 22.0, c.text))
+        container(icon(icon_bytes, 22.0, color))
             .center_x(Length::Fill)
             .center_y(Length::Fill),
     )
@@ -282,15 +298,23 @@ pub fn bar_button<'a, M: Clone + 'a>(
     .style(move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: match hovered {
-                true => Some(Color { a: 0.7, ..c.button }.into()),
-                false => None,
+            background: match (filled, hovered) {
+                (true, false) => Some(c.accent.into()),
+                (true, true) => Some(
+                    Color {
+                        a: 0.85,
+                        ..c.accent
+                    }
+                    .into(),
+                ),
+                (false, true) => Some(Color { a: 0.7, ..c.button }.into()),
+                (false, false) => None,
             },
-            text_color: c.text,
+            text_color: color,
             border: border(
-                match hovered {
-                    true => c.accent,
-                    false => c.border,
+                match (filled, hovered) {
+                    (true, _) | (false, true) => c.accent,
+                    (false, false) => c.border,
                 },
                 BORDER,
                 RADIUS_PILL,

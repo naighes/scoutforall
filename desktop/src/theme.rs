@@ -216,4 +216,8 @@ pub mod icons {
     pub const SIDE_OUT: &[u8] = include_bytes!("../assets/icons/side_out.svg");
     pub const BREAK: &[u8] = include_bytes!("../assets/icons/break.svg");
     pub const QUIT: &[u8] = include_bytes!("../assets/icons/quit.svg");
+    pub const PLAY: &[u8] = include_bytes!("../assets/icons/play.svg");
+    pub const PAUSE: &[u8] = include_bytes!("../assets/icons/pause.svg");
+    pub const REWIND: &[u8] = include_bytes!("../assets/icons/rewind.svg");
+    pub const FORWARD: &[u8] = include_bytes!("../assets/icons/forward.svg");
 }

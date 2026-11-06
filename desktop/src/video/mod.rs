@@ -438,9 +438,9 @@ impl VideoScreen {
         s: &'static Strings,
         c: Colors,
     ) -> Element<'a, Message> {
-        let play = match status.playing {
-            true => s.pause,
-            false => s.play,
+        let (play_icon, play) = match status.playing {
+            true => (theme::icons::PAUSE, s.pause),
+            false => (theme::icons::PLAY, s.play),
         };
         let step = STEP_SECONDS.to_string();
         let duration = status.duration_ms as f64;
@@ -467,17 +467,19 @@ impl VideoScreen {
         column![
             bar,
             row![
-                ui::pill(play, true, Some(Message::PlayPause), c),
-                ui::pill(
+                ui::icon_button(
+                    theme::icons::REWIND,
                     &ui::fill(s.back_seconds, std::slice::from_ref(&step)),
+                    Message::Step(false),
                     false,
-                    Some(Message::Step(false)),
                     c
                 ),
-                ui::pill(
+                ui::icon_button(play_icon, play, Message::PlayPause, true, c),
+                ui::icon_button(
+                    theme::icons::FORWARD,
                     &ui::fill(s.forward_seconds, std::slice::from_ref(&step)),
+                    Message::Step(true),
                     false,
-                    Some(Message::Step(true)),
                     c
                 ),
                 text(time).size(SIZE_SMALL).font(theme::fonts().bold),
