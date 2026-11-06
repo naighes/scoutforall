@@ -96,6 +96,8 @@ pub enum Message {
     Shift(i64),
     /// back to the sync found by itself
     Automatic,
+    /// the video before the first event shown, to tie it again, or not
+    WholeVideo,
     /// the time of the event chosen, to write
     EditTime,
     TimeInput(String),
@@ -186,6 +188,11 @@ pub struct VideoScreen {
     margins: Margins,
     /// the seconds of one of them being written
     margin_text: Option<(Margin, String)>,
+    /// where the first event of the match is in the video, when lined up:
+    /// the video before it (the warm-up) left out
+    first_ms: Option<i64>,
+    /// the video before the first event shown, to tie the events again
+    whole: bool,
 }
 
 /// The matches of a team with actions picked in its statistics, each with
@@ -243,11 +250,14 @@ impl VideoScreen {
             tour: None,
             margins: Margins::default(),
             margin_text: None,
+            first_ms: None,
+            whole: false,
         };
         screen.margins = Margins::read(&screen.dir);
         // the durations of the files first: the events in them
         screen.open_player();
         screen.load_events()?;
+        screen.after_start();
         Ok(screen)
     }
 
@@ -351,6 +361,7 @@ impl VideoScreen {
         self.events = self
             .core
             .video_events(&self.the_match, &profile, &durations)?;
+        self.first_ms = self.events.iter().filter_map(|e| e.offset_ms).min();
         if let Some(clips) = &self.clips {
             self.events.retain(|e| clips.events.contains(&event_ref(e)));
         }
@@ -480,6 +491,7 @@ impl VideoScreen {
         };
         let at = i64::try_from(ms).unwrap_or(i64::MAX);
         self.save_anchor(Some(video::anchor_on(event_ref(e), e.timestamp, at)));
+        self.whole = false;
     }
 
     /// All the events shifted by `ms` in the video: the sync found by
@@ -739,7 +751,26 @@ impl VideoScreen {
         self.seek(to);
     }
 
+    /// Where the video starts: a little before the first event of the
+    /// match once lined up (the warm-up left out), unless the whole video
+    /// is asked for, to tie the events again.
+    fn start_ms(&self) -> u64 {
+        match (self.whole, self.first_ms) {
+            (false, Some(first)) => (first - self.lead_ms()).max(0).unsigned_abs(),
+            _ => 0,
+        }
+    }
+
+    /// The video before its start taken to it.
+    fn after_start(&mut self) {
+        let start = self.start_ms();
+        if self.player.is_some() && self.position() < start {
+            self.seek(start);
+        }
+    }
+
     fn seek(&mut self, ms: u64) {
+        let ms = ms.max(self.start_ms());
         self.follow = true;
         // moved by hand: no clip to stop at
         self.clip_end = None;
@@ -790,6 +821,7 @@ impl VideoScreen {
                 if let Err(e) = self.load_events() {
                     self.error = Some(e.to_string());
                 }
+                self.after_start();
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -845,7 +877,14 @@ impl VideoScreen {
             Message::Event(i) => self.go_to_event(i),
             Message::AnchorHere => self.anchor_event(self.position()),
             Message::Shift(ms) => self.shift(ms),
-            Message::Automatic => self.save_anchor(None),
+            Message::Automatic => {
+                self.save_anchor(None);
+                self.after_start();
+            }
+            Message::WholeVideo => {
+                self.whole = !self.whole;
+                self.after_start();
+            }
             Message::EditTime => self.edit_time(),
             Message::TimeInput(text) => {
                 self.invalid_time = false;
@@ -1275,6 +1314,14 @@ impl VideoScreen {
             true => ui::pill(s.automatic_sync, false, Some(Message::Automatic), c),
             false => space::horizontal().width(0).into(),
         };
+        let redo: Element<'a, Message> = match (self.player.is_some(), self.first_ms) {
+            (true, Some(first)) if first > 0 => ui::tip(
+                ui::pill(s.redo_anchor, self.whole, Some(Message::WholeVideo), c),
+                s.redo_anchor_explained,
+                c,
+            ),
+            _ => space::horizontal().width(0).into(),
+        };
         let here: Element<'a, Message> = match self.player {
             Some(_) => ui::pill(s.anchor_here, true, Some(Message::AnchorHere), c),
             None => space::horizontal().width(0).into(),
@@ -1282,7 +1329,7 @@ impl VideoScreen {
         column![
             row![here, time].spacing(8).align_y(Alignment::Center),
             shift,
-            automatic,
+            row![redo, automatic].spacing(8).align_y(Alignment::Center),
         ]
         .spacing(8)
         .into()
@@ -2038,6 +2085,50 @@ pub(crate) mod screen_tests {
         screen.key(key!(pagedown));
         assert_eq!(screen.match_id, siena);
         assert!(!screen.sequence, "the mode kept");
+    }
+
+    /// Once lined up, the video before the first event (the warm-up) is
+    /// left out: going back stops a little before it. "Redo the sync"
+    /// shows it, to tie the events again; tying them leaves it out again.
+    #[test]
+    fn the_video_before_the_first_event_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        screen.status = Some(Status {
+            frame: None,
+            position_ms: 0,
+            duration_ms: u64::MAX / 2,
+            playing: false,
+            speed: 1.0,
+            error: None,
+        });
+        let first = screen
+            .events
+            .iter()
+            .filter_map(|e| e.offset_ms)
+            .min()
+            .unwrap();
+        let start = (first - LEAD_MS).unsigned_abs();
+        assert!(start > 0);
+        assert_eq!(screen.start_ms(), start);
+        screen.seek(0);
+        assert_eq!(screen.position(), start);
+        screen.key(key!(left));
+        assert_eq!(screen.position(), start);
+        // with the clips, their margin before
+        screen.key(key!(k));
+        assert_eq!(screen.start_ms(), (first - 5000).unsigned_abs());
+        screen.key(key!(k));
+        // the whole video, to tie the first event again
+        screen.update(Message::WholeVideo);
+        screen.seek(0);
+        assert_eq!(screen.position(), 0);
+        screen.select(0);
+        screen.seek(1000);
+        screen.update(Message::AnchorHere);
+        assert!(!screen.whole);
+        assert_eq!(screen.events[0].offset_ms, Some(1000));
+        assert_eq!(screen.start_ms(), 0, "1 s in: from the start");
     }
 
     /// In clip mode the clip starts and ends the seconds chosen before and
