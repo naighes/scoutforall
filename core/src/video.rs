@@ -168,19 +168,39 @@ pub fn in_order(mut files: Vec<VideoFile>) -> Vec<VideoFile> {
     files
 }
 
-/// The anchor the events line up with: the one chosen by the user, or the
-/// one found by itself (see the module), if any.
+/// Where the anchor comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnchorSource {
+    /// the user's
+    Chosen,
+    /// the times of the events are the seconds in the video (DataVolley)
+    VideoClock,
+    /// the start of the first file, from its name
+    FileStart(DateTime<FixedOffset>),
+}
+
+/// Where the anchor the events line up with comes from, if any: the user's,
+/// or found by itself (see the module).
+pub fn anchor_source(profile: &VideoProfile, m: &MatchEntry) -> Option<AnchorSource> {
+    match (&profile.anchor, m.video_clock, profile.files.first()) {
+        (Some(_), _, _) => Some(AnchorSource::Chosen),
+        (None, true, _) => Some(AnchorSource::VideoClock),
+        (None, false, Some(VideoFile { start: Some(s), .. })) => Some(AnchorSource::FileStart(*s)),
+        (None, false, _) => None,
+    }
+}
+
+/// The anchor the events line up with, if any (`anchor_source`).
 pub fn anchor(profile: &VideoProfile, m: &MatchEntry) -> Option<Anchor> {
     let found = |at: DateTime<Utc>| Anchor {
         at,
         offset_ms: 0,
         event: None,
     };
-    match (&profile.anchor, m.video_clock, profile.files.first()) {
-        (Some(chosen), _, _) => Some(chosen.clone()),
-        (None, true, _) => Some(found(video_midnight(m))),
-        (None, false, Some(VideoFile { start: Some(s), .. })) => Some(found(s.to_utc())),
-        (None, false, _) => None,
+    match anchor_source(profile, m)? {
+        AnchorSource::Chosen => profile.anchor.clone(),
+        AnchorSource::VideoClock => Some(found(video_midnight(m))),
+        AnchorSource::FileStart(start) => Some(found(start.to_utc())),
     }
 }
 

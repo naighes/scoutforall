@@ -1,9 +1,12 @@
 //! The video of a match (001): its file played in the app, Space plays and
 //! pauses, ← → go back and forward a few seconds, `-` `+` change the speed,
-//! the bar goes anywhere; `c` chooses the file. Only the desktop app has
-//! it: the profile (`video.json`, see `video` in the core) is saved next to
-//! the match.
+//! the bar goes anywhere; `c` chooses the file. Beside it the events of the
+//! match, at their time in the video when it lines up with them (`video`
+//! in the core: DataVolley, or the start of the file from its name): ↑ ↓
+//! choose one, Enter (or a click) goes a little before it. Only the desktop
+//! app has it: the profile (`video.json`) is saved next to the match.
 
+mod list;
 mod player;
 mod source;
 
@@ -21,10 +24,10 @@ use {
     player::{Player, Status},
     scout4all_core::{
         shapes::r#match::MatchEntry,
-        video::{self, StoredProfile, VideoFile, VideoProfile},
+        video::{self, AnchorSource, StoredProfile, VideoFile, VideoProfile},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
-    scout4all_mobile::{MobileError, Scout4All},
+    scout4all_mobile::{MobileError, Scout4All, VideoEvent},
     std::{
         path::{Path, PathBuf},
         sync::Arc,
@@ -34,6 +37,10 @@ use {
 
 /// How far ← and → go.
 const STEP_SECONDS: u64 = 5;
+
+/// How long before an event the video goes to it: the serve is seen
+/// coming.
+const LEAD_MS: i64 = 2000;
 
 /// The speeds, `-` and `+` among them.
 const SPEEDS: [f32; 4] = [0.5, 1.0, 1.5, 2.0];
@@ -55,6 +62,8 @@ pub enum Message {
     Chosen(Option<PathBuf>),
     /// a frame ready to be drawn at once, if it could be
     Allocated(Arc<player::Frame>, image::Handle, Option<Allocation>),
+    /// an event of the list: chosen, and the video at it
+    Event(usize),
 }
 
 pub enum Outcome {
@@ -102,6 +111,11 @@ pub struct VideoScreen {
     requested: u64,
     awake_until: Instant,
     error: Option<String>,
+    /// the events of the match, at their time in the video
+    events: Vec<VideoEvent>,
+    selected: usize,
+    /// the list to scroll to the event chosen
+    scroll: bool,
 }
 
 impl VideoScreen {
@@ -130,9 +144,54 @@ impl VideoScreen {
             requested: 0,
             awake_until: Instant::now(),
             error: None,
+            events: vec![],
+            selected: 0,
+            scroll: false,
         };
+        screen.load_events()?;
         screen.open_player();
         Ok(screen)
+    }
+
+    /// The events at their time in the video, as the profile lines them up.
+    fn load_events(&mut self) -> Result<(), MobileError> {
+        let profile = self.profile.clone().unwrap_or_default();
+        self.events = self.core.video_events(&self.the_match, &profile)?;
+        self.selected = self.selected.min(self.events.len().saturating_sub(1));
+        Ok(())
+    }
+
+    /// Where the list goes, to keep the event chosen in sight, once the
+    /// keys moved it.
+    pub fn take_scroll(&mut self) -> Option<(iced::widget::Id, f32)> {
+        let last = self.events.len().saturating_sub(1).max(1);
+        std::mem::take(&mut self.scroll).then(|| {
+            (
+                iced::widget::Id::new(list::LIST),
+                self.selected as f32 / last as f32,
+            )
+        })
+    }
+
+    fn select(&mut self, i: usize) {
+        self.selected = i.min(self.events.len().saturating_sub(1));
+        self.scroll = true;
+    }
+
+    /// Where the video goes for the event: a little before it, not before
+    /// the start; none when not lined up.
+    fn event_target(&self, i: usize) -> Option<u64> {
+        self.events
+            .get(i)
+            .and_then(|e| e.offset_ms)
+            .map(|ms| (ms - LEAD_MS).max(0).unsigned_abs())
+    }
+
+    fn go_to_event(&mut self, i: usize) {
+        self.selected = i.min(self.events.len().saturating_sub(1));
+        if let Some(ms) = self.event_target(self.selected) {
+            self.seek(ms);
+        }
     }
 
     pub fn title(&self, s: &Strings) -> String {
@@ -287,6 +346,9 @@ impl VideoScreen {
         match self.core.save_video(&self.the_match, &profile) {
             Ok(()) => {
                 self.profile = Some(profile);
+                if let Err(e) = self.load_events() {
+                    self.error = Some(e.to_string());
+                }
                 self.open_player();
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -306,6 +368,7 @@ impl VideoScreen {
             Message::Choose => return self.choose(),
             Message::Chosen(Some(path)) => self.chosen(&path),
             Message::Chosen(None) => {}
+            Message::Event(i) => self.go_to_event(i),
         }
         Outcome::Stay
     }
@@ -334,6 +397,9 @@ impl VideoScreen {
                 }
             }
             k if k == key!(c) => return self.choose(),
+            k if k == key!(up) => self.select(self.selected.saturating_sub(1)),
+            k if k == key!(down) => self.select(self.selected + 1),
+            k if k == key!(enter) => self.go_to_event(self.selected),
             _ => {}
         }
         Outcome::Stay
@@ -360,6 +426,14 @@ impl VideoScreen {
             Some(_) => playing.to_vec(),
             None => vec![],
         };
+        let events = match self.events.is_empty() {
+            true => vec![],
+            false => vec![
+                ("↑ ↓".to_string(), s.match_events.to_string()),
+                ("Enter".to_string(), s.go_to_event.to_string()),
+            ],
+        };
+        let playing = [playing, events].concat();
         [
             playing,
             vec![
@@ -427,9 +501,61 @@ impl VideoScreen {
             Some(n) => ui::body(n).color(c.danger).into(),
             None => space::vertical().height(0).into(),
         };
-        column![notice, screen, controls, file_line]
-            .spacing(10)
-            .into()
+        let video = column![notice, screen, controls, file_line].spacing(10);
+        let events: Element<'a, Message> = match self.events.is_empty() {
+            true => space::horizontal().width(0).into(),
+            false => {
+                iced::widget::container(ui::panel(Some(s.match_events), self.events_view(s, c), c))
+                    .width(Length::Fixed(400.0))
+                    .into()
+            }
+        };
+        row![video.width(Length::Fill), events].spacing(14).into()
+    }
+
+    /// How the events line up with the video, and how many are outside it.
+    fn alignment(&self, s: &Strings) -> (String, bool) {
+        let profile = self.profile.clone().unwrap_or_default();
+        let source = video::anchor_source(&profile, &self.the_match);
+        let said = match source {
+            Some(AnchorSource::VideoClock) => s.aligned_dvw.to_string(),
+            Some(AnchorSource::Chosen) => s.aligned_chosen.to_string(),
+            Some(AnchorSource::FileStart(start)) => ui::fill(
+                s.aligned_file,
+                &[start.format("%Y-%m-%d %H:%M:%S").to_string()],
+            ),
+            None => s.not_aligned.to_string(),
+        };
+        let duration = self.status.as_ref().map(|st| st.duration_ms);
+        let outside = self
+            .events
+            .iter()
+            .filter(|e| e.offset_ms.is_some() && !list::inside(e.offset_ms, duration))
+            .count();
+        match (source, outside) {
+            (None, _) => (said, false),
+            (Some(_), 0) => (said, true),
+            (Some(_), n) => (
+                format!("{said} · {}", ui::fill(s.outside_video, &[n.to_string()])),
+                false,
+            ),
+        }
+    }
+
+    fn events_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let (said, fine) = self.alignment(s);
+        let said = text(said).size(SIZE_SMALL).color(match fine {
+            true => c.muted,
+            false => c.danger,
+        });
+        let duration = self.status.as_ref().map(|st| st.duration_ms);
+        column![
+            said,
+            list::view(&self.events, self.selected, duration, s, c)
+        ]
+        .spacing(10)
+        .height(Length::Fill)
+        .into()
     }
 
     fn controls<'a>(
@@ -523,5 +649,111 @@ mod tests {
         assert_eq!(clock(0), "0:00");
         assert_eq!(clock(378_400), "6:18");
         assert_eq!(clock(5_686_000), "1:34:46");
+    }
+}
+
+#[cfg(test)]
+mod screen_tests {
+    use {
+        super::*,
+        scout4all_core::video::{offset_ms, start_from_name},
+        scout4all_mobile::{DvwChoice, DvwSide},
+    };
+
+    /// The match of the tests of the TUI, three sets, imported: the file
+    /// has no video column, the events are on the clock.
+    fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
+        let choice = DvwChoice {
+            side: DvwSide::Home,
+            day: "2015-01-25".into(),
+            max_substitutions: 6,
+            team_id: None,
+            classification: core.classifications().first().map(|c| c.value),
+            gender: core.genders().first().map(|g| g.value),
+            country: core.countries("Ital".into()).first().map(|c| c.value),
+        };
+        let imported = core.import_dvw(bytes, choice, false).unwrap();
+        (core, imported.team_id, imported.match_id)
+    }
+
+    fn with_file(dir: &tempfile::TempDir, name: &str) -> VideoScreen {
+        let (core, team, m) = imported(dir);
+        let (the_match, _) = core.video(&team, &m).unwrap();
+        let path = dir.path().join(name);
+        let profile = VideoProfile {
+            files: vec![VideoFile {
+                path: video::stored_path(dir.path(), &path),
+                start: start_from_name(&path, *the_match.date.offset()),
+            }],
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+        VideoScreen::new(core, dir.path().to_path_buf(), team, m).unwrap()
+    }
+
+    /// The file starting at midnight of the match: each event at its time
+    /// from it, the video a little before it.
+    #[test]
+    fn the_events_lined_up_from_the_start_of_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        let m = &screen.the_match;
+        let start = start_from_name(Path::new("20150125 000000.mp4"), *m.date.offset()).unwrap();
+        let anchor = video::anchor(screen.profile.as_ref().unwrap(), m).unwrap();
+        assert_eq!(anchor.at, start.to_utc());
+        let mut sets: Vec<_> = m.sets.iter().collect();
+        sets.sort_by_key(|s| s.set_number);
+        let expected: Vec<Option<i64>> = sets
+            .iter()
+            .flat_map(|s| {
+                s.events
+                    .iter()
+                    .map(|e| Some(offset_ms(&anchor, e.timestamp)))
+            })
+            .collect();
+        let offsets: Vec<Option<i64>> = screen.events.iter().map(|e| e.offset_ms).collect();
+        assert_eq!(offsets, expected);
+        assert_eq!(screen.events.first().map(|e| e.set_number), Some(1));
+        assert_eq!(screen.events.last().map(|e| e.set_number), Some(3));
+        // the keys choose, Enter goes 2 s before (not before the start)
+        screen.key(key!(down));
+        screen.key(key!(down));
+        assert_eq!(screen.selected, 2);
+        assert!(screen.take_scroll().is_some());
+        assert!(screen.take_scroll().is_none());
+        let at = expected[2].unwrap();
+        assert_eq!(
+            screen.event_target(2),
+            Some((at - 2000).max(0).unsigned_abs())
+        );
+        screen.key(key!(up));
+        screen.key(key!(up));
+        screen.key(key!(up));
+        assert_eq!(screen.selected, 0);
+        // the file isn't there: said, no player
+        assert!(screen.player.is_none());
+        assert!(screen.error.is_some());
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        assert_eq!(
+            screen.alignment(s).0,
+            ui::fill(
+                s.aligned_file,
+                &[start.format("%Y-%m-%d %H:%M:%S").to_string()]
+            )
+        );
+    }
+
+    /// A name without the time: the events not lined up.
+    #[test]
+    fn no_events_lined_up_without_the_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let screen = with_file(&dir, "match.mp4");
+        assert!(!screen.events.is_empty());
+        assert!(screen.events.iter().all(|e| e.offset_ms.is_none()));
+        assert_eq!(screen.event_target(0), None);
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        assert_eq!(screen.alignment(s), (s.not_aligned.to_string(), false));
     }
 }

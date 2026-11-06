@@ -292,6 +292,13 @@ pub struct Strings {
     pub back_seconds: &'static str,
     pub forward_seconds: &'static str,
     pub speed: &'static str,
+    pub aligned_dvw: &'static str,
+    pub aligned_file: &'static str,
+    pub aligned_chosen: &'static str,
+    pub not_aligned: &'static str,
+    pub outside_video: &'static str,
+    pub go_to_event: &'static str,
+    pub match_events: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -594,6 +601,13 @@ What did you expect instead?
     back_seconds: "Back {1} s",
     forward_seconds: "Forward {1} s",
     speed: "Speed",
+    aligned_dvw: "Lined up with the video by DataVolley",
+    aligned_file: "Lined up from the start of the file: {1}",
+    aligned_chosen: "Lined up by hand",
+    not_aligned: "Not lined up with the video: the name of the file doesn't tell when it starts",
+    outside_video: "{1} events outside the video",
+    go_to_event: "Go to the event",
+    match_events: "Events of the match",
 };
 
 const IT: Strings = Strings {
@@ -896,6 +910,13 @@ Cosa ti aspettavi invece?
     back_seconds: "Indietro {1} s",
     forward_seconds: "Avanti {1} s",
     speed: "Velocità",
+    aligned_dvw: "Allineata al video da DataVolley",
+    aligned_file: "Allineata dall'inizio del file: {1}",
+    aligned_chosen: "Allineata a mano",
+    not_aligned: "Non allineata al video: il nome del file non dice quando inizia",
+    outside_video: "{1} eventi fuori dal video",
+    go_to_event: "Vai all'evento",
+    match_events: "Eventi della partita",
 };
 
 const PT: Strings = Strings {
@@ -1198,6 +1219,13 @@ O que você esperava?
     back_seconds: "Voltar {1} s",
     forward_seconds: "Avançar {1} s",
     speed: "Velocidade",
+    aligned_dvw: "Alinhada ao vídeo pelo DataVolley",
+    aligned_file: "Alinhada pelo início do arquivo: {1}",
+    aligned_chosen: "Alinhada manualmente",
+    not_aligned: "Não alinhada ao vídeo: o nome do arquivo não diz quando começa",
+    outside_video: "{1} eventos fora do vídeo",
+    go_to_event: "Ir ao evento",
+    match_events: "Eventos da partida",
 };
 
 const PL: Strings = Strings {
@@ -1500,6 +1528,13 @@ Czego się spodziewałeś(-aś)?
     back_seconds: "Wstecz {1} s",
     forward_seconds: "Naprzód {1} s",
     speed: "Prędkość",
+    aligned_dvw: "Zsynchronizowano z wideo przez DataVolley",
+    aligned_file: "Zsynchronizowano od początku pliku: {1}",
+    aligned_chosen: "Zsynchronizowano ręcznie",
+    not_aligned: "Nie zsynchronizowano z wideo: nazwa pliku nie podaje, kiedy się zaczyna",
+    outside_video: "Zdarzenia poza wideo: {1}",
+    go_to_event: "Przejdź do zdarzenia",
+    match_events: "Zdarzenia meczu",
 };
 
 const JA: Strings = Strings {
@@ -1791,6 +1826,13 @@ const JA: Strings = Strings {
     back_seconds: "{1}秒戻る",
     forward_seconds: "{1}秒進む",
     speed: "速度",
+    aligned_dvw: "DataVolleyでビデオと同期済み",
+    aligned_file: "ファイルの開始時刻で同期: {1}",
+    aligned_chosen: "手動で同期済み",
+    not_aligned: "ビデオと同期していません。ファイル名から開始時刻がわかりません",
+    outside_video: "ビデオ外のイベント: {1}",
+    go_to_event: "イベントへ移動",
+    match_events: "試合のイベント",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

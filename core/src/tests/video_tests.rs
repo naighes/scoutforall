@@ -7,9 +7,9 @@ mod tests {
         shapes::{r#match::MatchEntry, team::TeamEntry},
         storage::{Store, memory::MemoryStore},
         video::{
-            Anchor, EventRef, StoredProfile, VIDEO_PROFILE_VERSION, VideoFile, VideoProfile,
-            anchor, anchor_on, in_order, offset_ms, profile_key, read_profile, resolved_path,
-            start_from_name, stored_path, write_profile,
+            Anchor, AnchorSource, EventRef, StoredProfile, VIDEO_PROFILE_VERSION, VideoFile,
+            VideoProfile, anchor, anchor_on, anchor_source, in_order, offset_ms, profile_key,
+            read_profile, resolved_path, start_from_name, stored_path, write_profile,
         },
     };
     use chrono::{DateTime, FixedOffset, TimeDelta, TimeZone, Utc};
@@ -105,6 +105,7 @@ mod tests {
         );
         let m = a_match(true);
         let found = anchor(&p, &m).unwrap();
+        assert_eq!(anchor_source(&p, &m), Some(AnchorSource::VideoClock));
         let midnight = Utc.with_ymd_and_hms(2026, 11, 1, 0, 0, 0).unwrap();
         // the first serve of the file of the test, at 378 s
         assert_eq!(
@@ -126,6 +127,10 @@ mod tests {
             None,
         );
         let found = anchor(&p, &a_match(false)).unwrap();
+        assert_eq!(
+            anchor_source(&p, &a_match(false)),
+            Some(AnchorSource::FileStart(at(17, 52, 52)))
+        );
         let serve = at(18, 0, 0).to_utc();
         assert_eq!(offset_ms(&found, serve), (7 * 60 + 8) * 1000);
         // before the video
@@ -136,6 +141,7 @@ mod tests {
     fn no_anchor_without_a_start() {
         let p = profile(vec![file("match.mp4", None)], None);
         assert_eq!(anchor(&p, &a_match(false)), None);
+        assert_eq!(anchor_source(&p, &a_match(false)), None);
     }
 
     /// The anchor of the user wins, on any clock.
@@ -153,6 +159,10 @@ mod tests {
         );
         for clock in [false, true] {
             let found = anchor(&p, &a_match(clock)).unwrap();
+            assert_eq!(
+                anchor_source(&p, &a_match(clock)),
+                Some(AnchorSource::Chosen)
+            );
             assert_eq!(found, chosen);
             assert_eq!(offset_ms(&found, serve), 95_500);
             assert_eq!(offset_ms(&found, serve + TimeDelta::seconds(10)), 105_500);

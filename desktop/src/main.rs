@@ -543,20 +543,24 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         let handled = self.handle(message);
         // the event chosen kept in sight
-        let task = match &self.screen {
-            Screen::Events(screen) => {
-                let (id, y) = screen.scroll();
-                Task::batch([
-                    handled,
-                    iced::widget::operation::snap_to(
-                        id,
-                        iced::widget::operation::RelativeOffset {
-                            x: None,
-                            y: Some(y),
-                        },
-                    ),
-                ])
-            }
+        let scroll = match &mut self.screen {
+            Screen::Events(screen) => Some(screen.scroll()),
+            // only once the keys move the event chosen: the frames of the
+            // video don't take the list back while scrolled
+            Screen::Video(screen) => screen.take_scroll(),
+            _ => None,
+        };
+        let task = match scroll {
+            Some((id, y)) => Task::batch([
+                handled,
+                iced::widget::operation::snap_to(
+                    id,
+                    iced::widget::operation::RelativeOffset {
+                        x: None,
+                        y: Some(y),
+                    },
+                ),
+            ]),
             _ => handled,
         };
         let focus = self.focus_id();

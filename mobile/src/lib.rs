@@ -72,7 +72,9 @@ use scout4all_core::{
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
-    video::{StoredProfile, VideoProfile, read_profile, write_profile},
+    video::{
+        StoredProfile, VideoProfile, anchor as video_anchor, offset_ms, read_profile, write_profile,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
@@ -2499,6 +2501,15 @@ impl Scouting {
     }
 }
 
+/// An event of the match, in the list beside its video (desktop only).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoEvent {
+    pub set_number: u8,
+    pub event: SetEvent,
+    /// where it is in the video, from the start of the first file
+    pub offset_ms: Option<i64>,
+}
+
 /// For the apps written in Rust (the desktop app), not exported to the
 /// bindings: they drive the scouting from the keyboard as the TUI does.
 impl Scout4All {
@@ -2546,6 +2557,28 @@ impl Scout4All {
             .block_on(read_profile(&*self.store, &m.team.id, &m.id))
             .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?;
         Ok((m, profile))
+    }
+
+    /// The events of the match, set by set, and where each is in its
+    /// video (none: the video and the events not lined up).
+    pub fn video_events(
+        &self,
+        m: &MatchEntry,
+        profile: &VideoProfile,
+    ) -> Result<Vec<VideoEvent>, MobileError> {
+        let anchor = video_anchor(profile, m);
+        let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
+        sets.sort_by_key(|s| s.set_number);
+        let mut events = vec![];
+        for set in sets {
+            let rows = set_event_rows(m, set, self.language.labels())?;
+            events.extend(set.events.iter().zip(rows).map(|(e, row)| VideoEvent {
+                set_number: set.set_number,
+                event: row,
+                offset_ms: anchor.as_ref().map(|a| offset_ms(a, e.timestamp)),
+            }));
+        }
+        Ok(events)
     }
 
     /// Saves the profile of the video of the match.
@@ -2942,33 +2975,12 @@ impl Scout4All {
         set_number: u8,
     ) -> Result<SetEvents, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
-        let labels = self.language.labels();
         let set = find_set(&m, set_number)?;
-        let scores = set.scores(m.max_substitutions)?;
         Ok(SetEvents {
             set_number,
             team: m.team.name.clone(),
             opponent: m.opponent.clone(),
-            events: set
-                .events
-                .iter()
-                .zip(scores)
-                .enumerate()
-                .map(|(i, (e, (score_us, score_them)))| SetEvent {
-                    index: u32::try_from(i).unwrap_or(u32::MAX),
-                    event: scouted_event(&m.team, e, labels),
-                    score_us,
-                    score_them,
-                    editable: !matches!(
-                        e.event_type,
-                        EventTypeEnum::R
-                            | EventTypeEnum::CL
-                            | EventTypeEnum::LR
-                            | EventTypeEnum::LF
-                            | EventTypeEnum::CS
-                    ),
-                })
-                .collect(),
+            events: set_event_rows(&m, set, self.language.labels())?,
         })
     }
 
@@ -3984,6 +3996,35 @@ fn lineup_player(p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
 }
 
 /// A set of the match, by its number.
+/// The events of the set, each with the score after it.
+fn set_event_rows(
+    m: &MatchEntry,
+    set: &SetEntry,
+    labels: &Labels,
+) -> Result<Vec<SetEvent>, MobileError> {
+    let scores = set.scores(m.max_substitutions)?;
+    Ok(set
+        .events
+        .iter()
+        .zip(scores)
+        .enumerate()
+        .map(|(i, (e, (score_us, score_them)))| SetEvent {
+            index: u32::try_from(i).unwrap_or(u32::MAX),
+            event: scouted_event(&m.team, e, labels),
+            score_us,
+            score_them,
+            editable: !matches!(
+                e.event_type,
+                EventTypeEnum::R
+                    | EventTypeEnum::CL
+                    | EventTypeEnum::LR
+                    | EventTypeEnum::LF
+                    | EventTypeEnum::CS
+            ),
+        })
+        .collect())
+}
+
 fn find_set(m: &MatchEntry, set_number: u8) -> Result<&SetEntry, MobileError> {
     m.sets
         .iter()
