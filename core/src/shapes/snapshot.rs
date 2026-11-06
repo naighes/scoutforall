@@ -17,8 +17,8 @@ use crate::{
         refusal::Refusal,
         set::SetEntry,
         stats::{
-            AttackKey, EventKey, FirstRallyKey, FreeballKey, PossessionKey, RallyKey, Situation,
-            Stats, Touch,
+            AttackKey, EventKey, FirstRallyKey, FreeballKey, Moment, PossessionKey, RallyKey,
+            Situation, Stats, Touch,
         },
         technique::{SetTypeEnum, TechniqueEnum},
     },
@@ -695,7 +695,23 @@ impl Snapshot {
                 (true, _) => self.rally.scheme,
             },
             inverted_p1: (side_out && rotation == 0).then(|| event.flags.inverted_p1()),
+            moment: self.moment(event),
         }
+    }
+
+    /// The moment of the set of the rally of the event: the score before
+    /// its point (the score already counts the point the event wins).
+    fn moment(&self, event: &EventEntry) -> Moment {
+        let (us, them) = match event.event_type.rally_winner(event.eval) {
+            Some(TeamSideEnum::Us) => (self.score_us.saturating_sub(1), self.score_them),
+            Some(TeamSideEnum::Them) => (self.score_us, self.score_them.saturating_sub(1)),
+            None => (self.score_us, self.score_them),
+        };
+        let target = match self.set_number {
+            5 => TIE_BREAK_SET_TARGET_SCORE,
+            _ => DEFAULT_SET_TARGET_SCORE,
+        };
+        Moment::at(us, them, target)
     }
 
     /// Their freeball (`OF`) is exploited when we win the rally before they

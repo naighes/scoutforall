@@ -374,7 +374,11 @@ pub fn by_player(
     let mut lines: Vec<PlayerLine> = players
         .into_iter()
         .map(|player| {
-            let only = StatsFilter::new(filter.phase, filter.rotation, Some(player));
+            // the situation too: only the player is theirs
+            let only = StatsFilter {
+                player: Some(player),
+                ..*filter
+            };
             PlayerLine {
                 player,
                 total: stats.event_count(event_type, None, &only),

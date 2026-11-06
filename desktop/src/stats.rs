@@ -71,17 +71,21 @@ enum Filter {
     SetType,
     Scheme,
     InvertedP1,
+    Late,
+    Close,
     Zones,
 }
 
 /// The filters on the situation, after the player, rotation and phase.
-const SITUATION: [Filter; 6] = [
+const SITUATION: [Filter; 8] = [
     Filter::Role,
     Filter::Reception,
     Filter::Previous,
     Filter::SetType,
     Filter::Scheme,
     Filter::InvertedP1,
+    Filter::Late,
+    Filter::Close,
 ];
 
 /// How the period of a team is told.
@@ -130,6 +134,10 @@ pub enum Message {
     SetTypes(Vec<SetTypeEnum>),
     Scheme(Option<ReceptionSchemeEnum>),
     InvertedP1(Option<bool>),
+    /// the end of the set (from 20) or before
+    Late(Option<bool>),
+    /// a close score or not
+    Close(Option<bool>),
     /// an evaluation of the detail, to watch only those (or all again)
     ClipEval(EvalEnum),
     /// a zone of the net of the attacks, to watch only those
@@ -243,6 +251,8 @@ pub struct StatsScreen {
     efficiency: bool,
     /// the filter the arrows change, on the page
     row: usize,
+    /// the arrows moved the row: the filters scroll to keep it in sight
+    scroll: bool,
     error: Option<String>,
     choices: SituationChoices,
     // the team
@@ -271,6 +281,9 @@ pub struct StatsScreen {
 
 /// The filters on the left.
 const FILTERS_WIDTH: f32 = 500.0;
+
+/// The column of the filters, scrolled to the row of the arrows.
+const FILTERS: &str = "stats-filters";
 
 /// Up to how many filters go in a bar over the page, not in a column.
 const FILTERS_ON_TOP: usize = 2;
@@ -421,6 +434,7 @@ impl StatsScreen {
             filter: DetailFilter::default(),
             efficiency: false,
             row: 0,
+            scroll: false,
             error: None,
             choices,
             analysis: None,
@@ -613,6 +627,14 @@ impl StatsScreen {
             true => s.inverted.to_string(),
             false => s.canonical.to_string(),
         });
+        let late = self.filter.late.map(|l| match l {
+            true => s.from_20.to_string(),
+            false => s.before_20.to_string(),
+        });
+        let close = self.filter.close.map(|c| match c {
+            true => s.close_score.to_string(),
+            false => s.wide_score.to_string(),
+        });
         // in the order of the detail, from the best
         let evals: Vec<String> = detail
             .and_then(|d| d.fundamental.as_ref())
@@ -643,6 +665,8 @@ impl StatsScreen {
             previous,
             scheme,
             p1,
+            late,
+            close,
             scope,
         ]
         .into_iter()
@@ -653,6 +677,18 @@ impl StatsScreen {
 
     fn retrend(&mut self) {
         self.trend = Trend::of_stats(self.live.as_ref(), self.series, self.recent);
+    }
+
+    /// Where the column of the filters goes, to keep the row of the arrows
+    /// in sight, once they moved it.
+    pub fn take_scroll(&mut self) -> Option<(iced::widget::Id, f32)> {
+        let last = self.filters().len().saturating_sub(1).max(1);
+        std::mem::take(&mut self.scroll).then(|| {
+            (
+                iced::widget::Id::new(FILTERS),
+                self.row as f32 / last as f32,
+            )
+        })
     }
 
     fn current(&self) -> Page {
@@ -797,6 +833,14 @@ impl StatsScreen {
                 forward,
             )
             .map(Message::InvertedP1),
+            Filter::Late => ui::cycle(&[None, Some(false), Some(true)], &self.filter.late, forward)
+                .map(Message::Late),
+            Filter::Close => ui::cycle(
+                &[None, Some(true), Some(false)],
+                &self.filter.close,
+                forward,
+            )
+            .map(Message::Close),
         }
     }
 
@@ -905,6 +949,14 @@ impl StatsScreen {
                 self.filter.inverted_p1 = inverted;
                 self.load();
             }
+            Message::Late(late) => {
+                self.filter.late = late;
+                self.load();
+            }
+            Message::Close(close) => {
+                self.filter.close = close;
+                self.load();
+            }
             Message::ClipEval(eval) => {
                 let picked = self.clip_evals.contains(&eval);
                 self.clip_evals.retain(|e| *e != eval);
@@ -993,10 +1045,12 @@ impl StatsScreen {
             _ if previous_page => self.update(Message::Page((self.page + pages - 1) % pages)),
             k if k == key!(down) => {
                 self.row = (self.row + 1) % rows;
+                self.scroll = true;
                 Outcome::Stay
             }
             k if k == key!(up) => {
                 self.row = (self.row + rows - 1) % rows;
+                self.scroll = true;
                 Outcome::Stay
             }
             k if k == key!(left) || k == key!(right) => {
@@ -1102,6 +1156,7 @@ impl StatsScreen {
                 let left = container(ui::panel(
                     None,
                     scrollable(Column::with_children(filters).spacing(8))
+                        .id(iced::widget::Id::new(FILTERS))
                         .height(Length::Fill)
                         .width(Length::Fill),
                     c,
@@ -1354,6 +1409,38 @@ impl StatsScreen {
                         s.inverted.to_string(),
                         self.filter.inverted_p1 == Some(true),
                         Message::InvertedP1(Some(true)),
+                    ),
+                ],
+            ),
+            Filter::Late => (
+                s.set_moment,
+                vec![
+                    all(self.filter.late.is_none(), Message::Late(None)),
+                    pill(
+                        s.before_20.to_string(),
+                        self.filter.late == Some(false),
+                        Message::Late(Some(false)),
+                    ),
+                    pill(
+                        s.from_20.to_string(),
+                        self.filter.late == Some(true),
+                        Message::Late(Some(true)),
+                    ),
+                ],
+            ),
+            Filter::Close => (
+                s.score_gap,
+                vec![
+                    all(self.filter.close.is_none(), Message::Close(None)),
+                    pill(
+                        s.close_score.to_string(),
+                        self.filter.close == Some(true),
+                        Message::Close(Some(true)),
+                    ),
+                    pill(
+                        s.wide_score.to_string(),
+                        self.filter.close == Some(false),
+                        Message::Close(Some(false)),
                     ),
                 ],
             ),
@@ -2867,6 +2954,46 @@ pub(crate) mod tests {
         assert_eq!(total(&screen), 3);
         screen.update(Message::Scheme(Some(ReceptionSchemeEnum::Four)));
         assert_eq!(total(&screen), 0);
-        let _ = s;
+        screen.update(Message::Scheme(None));
+        // the moment of the set: the three aces at 0–0, 1–0, 2–0
+        assert!(screen.filters().contains(&Filter::Late));
+        // the players as narrowed, but their own
+        let players = |screen: &StatsScreen| -> u32 {
+            screen
+                .detail
+                .as_ref()
+                .and_then(|d| d.fundamental.as_ref())
+                .map_or(0, |f| f.players.iter().map(|p| p.total).sum())
+        };
+        assert_eq!(players(&screen), 3);
+        screen.update(Message::Late(Some(true)));
+        assert_eq!(total(&screen), 0);
+        assert_eq!(players(&screen), 0, "the players narrowed too");
+        assert!(screen.clips_title(s).contains(s.from_20));
+        screen.update(Message::Late(Some(false)));
+        assert_eq!(total(&screen), 3);
+        screen.update(Message::Late(None));
+        screen.update(Message::Close(Some(false)));
+        assert_eq!(total(&screen), 0);
+        // by the arrows, on its row: close, then wide, then all
+        screen.row = screen
+            .filters()
+            .iter()
+            .position(|f| *f == Filter::Close)
+            .unwrap_or_default();
+        screen.key(key!(right));
+        assert_eq!(screen.filter.close, None);
+        screen.key(key!(right));
+        assert_eq!(screen.filter.close, Some(true));
+        assert_eq!(total(&screen), 3);
+        // the column of the filters follows the row of the arrows
+        assert_eq!(screen.take_scroll(), None);
+        screen.key(key!(down));
+        let last = (screen.filters().len() - 1) as f32;
+        let (_, y) = screen
+            .take_scroll()
+            .unwrap_or_else(|| unreachable!("a scroll"));
+        assert!((y - screen.row as f32 / last).abs() < f32::EPSILON);
+        assert_eq!(screen.take_scroll(), None, "once");
     }
 }

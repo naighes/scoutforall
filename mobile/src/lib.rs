@@ -1378,6 +1378,12 @@ pub struct DetailFilter {
     /// in P1 in side out, the P1 inverted or not
     #[uniffi(default)]
     pub inverted_p1: Option<bool>,
+    /// the end of the set (from 20, from 10 in the tie-break) or before
+    #[uniffi(default)]
+    pub late: Option<bool>,
+    /// a close score (two points apart at most) or not
+    #[uniffi(default)]
+    pub close: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -2300,6 +2306,8 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
             set_types: (!filter.set_types.is_empty()).then(|| SetTypeSet::of(&filter.set_types)),
             scheme: filter.scheme,
             inverted_p1: filter.inverted_p1,
+            late: filter.late,
+            close: filter.close,
         }),
     )
 }

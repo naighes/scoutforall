@@ -763,6 +763,88 @@ mod tests {
         }
     }
 
+    /// The moment of the set of each rally, by its score before the point:
+    /// the end of the set from 20 (10 in the tie-break), a close score two
+    /// points apart at most; the point an event wins not counted yet.
+    #[test]
+    fn the_moment_of_the_set() {
+        let t = Team::new();
+        // our serve and their error, 22 times: 0–0 to 21–0 (12 in the
+        // tie-break, to 15)
+        let rallies = |n: usize| -> Vec<EventEntry> {
+            (0..n)
+                .flat_map(|_| [act(S, t.setter, Positive, None), opp(OE)])
+                .collect()
+        };
+        let events = rallies(22);
+        let set = |set_number: u8| SetEntry {
+            set_number,
+            serving_team: TeamSideEnum::Us,
+            initial_positions: [t.setter, t.oh1, t.mb2, t.opposite, t.oh2, t.mb1],
+            libero: t.libero,
+            fallback_libero: None,
+            setter: t.setter,
+            lineup_rules: Some(LineupRulesEnum::CURRENT),
+            events: match set_number {
+                5 => rallies(12),
+                _ => events.clone(),
+            },
+        };
+        let moments = |set_number: u8| -> Vec<(bool, bool)> {
+            set(set_number)
+                .event_keys(DEFAULT_MAX_SUBSTITUTIONS)
+                .unwrap_or_else(|e| panic!("expected the set to replay: {e}"))
+                .into_iter()
+                .flatten()
+                .filter(|k| k.event_type == S)
+                .map(|k| (k.situation.moment.late, k.situation.moment.close))
+                .collect()
+        };
+        let first = moments(1);
+        assert_eq!(first.len(), 22);
+        assert_eq!(moments(5).len(), 12);
+        // the serve at 0–0, 2–0 and 3–0
+        assert_eq!(first[0], (false, true));
+        assert_eq!(first[2], (false, true));
+        assert_eq!(first[3], (false, false));
+        // at 19–0 and at 20–0
+        assert_eq!(first[19], (false, false));
+        assert_eq!(first[20], (true, false));
+        // the tie-break: from 10
+        let fifth = moments(5);
+        assert_eq!((fifth[9], fifth[10]), ((false, false), (true, false)));
+        // the error winning the point at 20–0: still at 20–0, not 21–0
+        let errors: Vec<bool> = set(1)
+            .event_keys(DEFAULT_MAX_SUBSTITUTIONS)
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .filter(|k| k.event_type == OE)
+            .map(|k| k.situation.moment.late)
+            .collect();
+        assert_eq!((errors[19], errors[20]), (false, true));
+        // the filter
+        let late = SituationFilter {
+            late: Some(true),
+            ..SituationFilter::default()
+        };
+        let mut snapshot = Snapshot::new(&set(1), DEFAULT_MAX_SUBSTITUTIONS)
+            .unwrap_or_else(|e| panic!("expected a snapshot: {e}"));
+        for e in &events {
+            snapshot
+                .add_event(e)
+                .unwrap_or_else(|e| panic!("expected the event: {e}"));
+        }
+        let stats = snapshot.stats;
+        let filter = StatsFilter::default().with_situation(late);
+        assert_eq!(stats.event_count(S, None, &filter), 2);
+        let close = StatsFilter::default().with_situation(SituationFilter {
+            close: Some(true),
+            ..SituationFilter::default()
+        });
+        assert_eq!(stats.event_count(S, None, &close), 3);
+    }
+
     /// The events behind a statistic, to see them in the video: the ones
     /// the statistics counted, by fundamental, evaluation, set, zone of the
     /// net and player.

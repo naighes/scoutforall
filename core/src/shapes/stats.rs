@@ -166,6 +166,10 @@ pub struct SituationFilter {
     pub scheme: Option<ReceptionSchemeEnum>,
     /// in P1 in side out, the P1 inverted or not
     pub inverted_p1: Option<bool>,
+    /// the end of the set (from 20, from 10 in the tie-break) or before
+    pub late: Option<bool>,
+    /// a close score (two points apart at most) or not
+    pub close: Option<bool>,
 }
 
 impl SituationFilter {
@@ -192,6 +196,8 @@ impl SituationFilter {
             && self
                 .inverted_p1
                 .is_none_or(|i| situation.inverted_p1 == Some(i))
+            && self.late.is_none_or(|l| situation.moment.late == l)
+            && self.close.is_none_or(|c| situation.moment.close == c)
     }
 }
 
@@ -297,6 +303,28 @@ pub struct Situation {
     pub scheme: Option<ReceptionSchemeEnum>,
     /// in P1 in side out, whether the P1 was inverted; `None` elsewhere
     pub inverted_p1: Option<bool>,
+    /// the score the rally was played at
+    pub moment: Moment,
+}
+
+/// The moment of the set a rally was played at, by its score before the
+/// point.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Moment {
+    /// the end of the set: a team at 20 (10 in the tie-break) or more
+    pub late: bool,
+    /// two points apart at most
+    pub close: bool,
+}
+
+impl Moment {
+    /// The moment of a rally at `us`–`them`, in a set to `target`.
+    pub fn at(us: u8, them: u8, target: u8) -> Moment {
+        Moment {
+            late: us.max(them) >= target.saturating_sub(5),
+            close: us.abs_diff(them) <= 2,
+        }
+    }
 }
 
 /// A touch of ours: who touched the ball and how it came.

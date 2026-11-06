@@ -660,6 +660,7 @@ impl App {
             // only once the keys move the event chosen: the frames of the
             // video don't take the list back while scrolled
             Screen::Video(screen) => screen.take_scroll(),
+            Screen::Stats(screen) => screen.take_scroll(),
             _ => None,
         };
         let task = match scroll {
