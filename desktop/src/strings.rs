@@ -278,6 +278,20 @@ pub struct Strings {
     pub weekdays: [&'static str; 7],
     /// the calendar starts the week on Sunday
     pub week_from_sunday: bool,
+    /// the video of the match (001)
+    pub video: &'static str,
+    pub choose_video: &'static str,
+    pub change_video: &'static str,
+    pub video_files: &'static str,
+    pub no_video: &'static str,
+    pub video_unplayable: &'static str,
+    pub video_newer: &'static str,
+    pub video_missing: &'static str,
+    pub play: &'static str,
+    pub pause: &'static str,
+    pub back_seconds: &'static str,
+    pub forward_seconds: &'static str,
+    pub speed: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -567,6 +581,19 @@ What did you expect instead?
     ],
     weekdays: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
     week_from_sunday: true,
+    video: "Video",
+    choose_video: "Choose the video",
+    change_video: "Change the video",
+    video_files: "Videos",
+    no_video: "No video linked to this match yet: choose its file.",
+    video_unplayable: "The video can't be played",
+    video_newer: "The video of this match was set up by a newer version of the app: update it to play it.",
+    video_missing: "File not found: {1}",
+    play: "Play",
+    pause: "Pause",
+    back_seconds: "Back {1} s",
+    forward_seconds: "Forward {1} s",
+    speed: "Speed",
 };
 
 const IT: Strings = Strings {
@@ -856,6 +883,19 @@ Cosa ti aspettavi invece?
     ],
     weekdays: ["Lu", "Ma", "Me", "Gi", "Ve", "Sa", "Do"],
     week_from_sunday: false,
+    video: "Video",
+    choose_video: "Scegli il video",
+    change_video: "Cambia il video",
+    video_files: "Video",
+    no_video: "Nessun video collegato a questa partita: scegli il suo file.",
+    video_unplayable: "Il video non si può riprodurre",
+    video_newer: "Il video di questa partita è stato impostato da una versione più nuova dell'app: aggiornala per riprodurlo.",
+    video_missing: "File non trovato: {1}",
+    play: "Riproduci",
+    pause: "Pausa",
+    back_seconds: "Indietro {1} s",
+    forward_seconds: "Avanti {1} s",
+    speed: "Velocità",
 };
 
 const PT: Strings = Strings {
@@ -1145,6 +1185,19 @@ O que você esperava?
     ],
     weekdays: ["Se", "Te", "Qa", "Qi", "Sx", "Sá", "Do"],
     week_from_sunday: true,
+    video: "Vídeo",
+    choose_video: "Escolher o vídeo",
+    change_video: "Trocar o vídeo",
+    video_files: "Vídeos",
+    no_video: "Nenhum vídeo ligado a esta partida: escolha o arquivo.",
+    video_unplayable: "Não é possível reproduzir o vídeo",
+    video_newer: "O vídeo desta partida foi configurado por uma versão mais recente do app: atualize-o para reproduzi-lo.",
+    video_missing: "Arquivo não encontrado: {1}",
+    play: "Reproduzir",
+    pause: "Pausar",
+    back_seconds: "Voltar {1} s",
+    forward_seconds: "Avançar {1} s",
+    speed: "Velocidade",
 };
 
 const PL: Strings = Strings {
@@ -1434,6 +1487,19 @@ Czego się spodziewałeś(-aś)?
     ],
     weekdays: ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"],
     week_from_sunday: false,
+    video: "Wideo",
+    choose_video: "Wybierz wideo",
+    change_video: "Zmień wideo",
+    video_files: "Pliki wideo",
+    no_video: "Brak wideo powiązanego z tym meczem: wybierz jego plik.",
+    video_unplayable: "Nie można odtworzyć wideo",
+    video_newer: "Wideo tego meczu ustawiła nowsza wersja aplikacji: zaktualizuj ją, aby je odtworzyć.",
+    video_missing: "Nie znaleziono pliku: {1}",
+    play: "Odtwórz",
+    pause: "Pauza",
+    back_seconds: "Wstecz {1} s",
+    forward_seconds: "Naprzód {1} s",
+    speed: "Prędkość",
 };
 
 const JA: Strings = Strings {
@@ -1712,6 +1778,19 @@ const JA: Strings = Strings {
     ],
     weekdays: ["月", "火", "水", "木", "金", "土", "日"],
     week_from_sunday: true,
+    video: "ビデオ",
+    choose_video: "ビデオを選ぶ",
+    change_video: "ビデオを変更",
+    video_files: "ビデオ",
+    no_video: "この試合にはまだビデオがありません。ファイルを選んでください。",
+    video_unplayable: "ビデオを再生できません",
+    video_newer: "この試合のビデオは新しいバージョンのアプリで設定されています。再生するにはアップデートしてください。",
+    video_missing: "ファイルが見つかりません: {1}",
+    play: "再生",
+    pause: "一時停止",
+    back_seconds: "{1}秒戻る",
+    forward_seconds: "{1}秒進む",
+    speed: "速度",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

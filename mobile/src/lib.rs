@@ -72,6 +72,7 @@ use scout4all_core::{
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
+    video::{StoredProfile, VideoProfile, read_profile, write_profile},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
@@ -2530,6 +2531,30 @@ impl Scout4All {
                 reason: format!("no set in progress in {match_id}"),
             }),
         }
+    }
+
+    /// The match and the profile of its video (`video` in the core): only
+    /// the desktop app plays it.
+    pub fn video(
+        &self,
+        team_id: &str,
+        match_id: &str,
+    ) -> Result<(MatchEntry, StoredProfile), MobileError> {
+        let m = self.read_match(team_id, match_id)?;
+        let profile = self
+            .runtime
+            .block_on(read_profile(&*self.store, &m.team.id, &m.id))
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?;
+        Ok((m, profile))
+    }
+
+    /// Saves the profile of the video of the match.
+    pub fn save_video(&self, m: &MatchEntry, profile: &VideoProfile) -> Result<(), MobileError> {
+        self.runtime
+            .block_on(write_profile(&*self.store, &m.team.id, &m.id, profile))
+            .map_err(|e| MobileError::Failed {
+                reason: e.to_string(),
+            })
     }
 }
 

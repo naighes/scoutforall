@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 dirs.workspace = true
-iced = { version = "=0.14.0", features = ["canvas", "advanced", "svg"] }
+iced = { version = "=0.14.0", features = ["canvas", "advanced", "svg", "image-without-codecs"] }
 scout4all-core.workspace = true
 scout4all-keys = { path = "../keys" }
 scout4all-mobile = { path = "../mobile" }
@@ -24,7 +24,13 @@ serde_json.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+bytes = "1"
 crokey = "1.3.0"
+# the images allocated before they're shown (the frames of the video), the
+# same crate iced uses: its `image` feature re-exports it with all the codecs
+iced_runtime = "=0.14.0"
+mp4 = "0.14"
+openh264 = "0.9"
 open = "5.4.5"
 rfd = "0.17.2"
 self_update = { version = "1", optional = true, features = ["checksums"] }

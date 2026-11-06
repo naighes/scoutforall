@@ -31,6 +31,7 @@ mod theme;
 mod transfer;
 mod ui;
 mod update;
+mod video;
 
 use {
     game::MatchScreen,
@@ -94,6 +95,7 @@ enum Screen {
     Stats(Box<stats::StatsScreen>),
     Dvw(Box<dvw::DvwScreen>),
     Events(Box<events::EventsScreen>),
+    Video(Box<video::VideoScreen>),
 }
 
 /// Where a key or a click leads.
@@ -107,6 +109,12 @@ enum Go {
     Analysis(String),
     /// the events of a set of the match, to correct them
     Events(String, String, u8),
+    /// the video of the match
+    Video(String, String),
+    /// the file of the video to choose
+    PickVideo,
+    /// a frame of the video to allocate before it's shown
+    VideoFrame(Box<video::Frame>),
     /// a set of the match: to start, or in progress
     Scout(home::Open),
     /// the zip of a team or of a match, to save
@@ -171,6 +179,7 @@ enum Message {
     Settings(settings::Message),
     Dvw(dvw::Message),
     Events(events::Message),
+    Video(video::Message),
     /// where the archive goes (none: not saved), and the archive
     Exported(Option<PathBuf>, Arc<Vec<u8>>),
     /// the file chosen (none: none) to import into the team, if given
@@ -244,6 +253,7 @@ impl App {
             (None, Screen::Stats(screen)) => screen.title(),
             (None, Screen::Dvw(_)) => self.strings.import_dvw.to_string(),
             (None, Screen::Events(screen)) => screen.title(self.strings),
+            (None, Screen::Video(screen)) => screen.title(self.strings),
         }
     }
 
@@ -272,6 +282,16 @@ impl App {
             }
             Go::Events(team, m, set) => events::EventsScreen::new(core, team, m, set)
                 .map(|screen| Screen::Events(Box::new(screen))),
+            Go::Video(team, m) => video::VideoScreen::new(core, self.dir.clone(), team, m)
+                .map(|screen| Screen::Video(Box::new(screen))),
+            Go::VideoFrame(frame) => {
+                return video::allocate(frame.0, frame.1).map(Message::Video);
+            }
+            Go::PickVideo => {
+                return Task::perform(video::pick(self.strings.video_files), |path| {
+                    Message::Video(video::Message::Chosen(path))
+                });
+            }
             Go::Stats(team, m) => {
                 stats::StatsScreen::new(core, team, m).map(|screen| Screen::Stats(Box::new(screen)))
             }
@@ -427,6 +447,7 @@ impl App {
                 None => Go::Analysis(st.team_id.clone()),
             },
             Screen::Events(e) => Go::Events(e.team_id.clone(), e.match_id.clone(), e.set_number()),
+            Screen::Video(v) => Go::Video(v.team_id.clone(), v.match_id.clone()),
             Screen::Start(st) => Go::Scout(home::Open {
                 team_id: st.team_id.clone(),
                 match_id: st.match_id.clone(),
@@ -509,7 +530,11 @@ impl App {
             (None, Screen::Dvw(screen)) => screen.focus_id(),
             (
                 None,
-                Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_) | Screen::Events(_),
+                Screen::Start(_)
+                | Screen::Scouting(_)
+                | Screen::Stats(_)
+                | Screen::Events(_)
+                | Screen::Video(_),
             ) => None,
         }
     }
@@ -710,6 +735,14 @@ impl App {
                 let outcome = screen.key(ck);
                 events_go(screen, outcome)
             }
+            (Message::Video(m), Screen::Video(screen)) => {
+                let outcome = screen.update(m);
+                video_go(screen, outcome)
+            }
+            (Message::Key(ck), Screen::Video(screen)) => {
+                let outcome = screen.key(ck);
+                video_go(screen, outcome)
+            }
             (Message::Key(ck), Screen::Dvw(screen)) => {
                 let outcome = screen.key(s, ck);
                 dvw_go(screen, outcome)
@@ -768,6 +801,9 @@ impl App {
                     screen.hints(s),
                     true,
                 ),
+                (None, None, Screen::Video(screen)) => {
+                    (screen.view(s, c).map(Message::Video), screen.hints(s), true)
+                }
                 (None, None, Screen::Dvw(screen)) => {
                     (screen.view(s, c).map(Message::Dvw), screen.hints(s), true)
                 }
@@ -892,7 +928,14 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(|event, status, _| match (event, status) {
+        // the frames of the video, while it plays or a frame is on its way
+        let video = match (&self.screen, &self.settings) {
+            (Screen::Video(screen), None) if screen.awake() => {
+                window::frames().map(|_| Message::Video(video::Message::Tick))
+            }
+            _ => Subscription::none(),
+        };
+        let keys = event::listen_with(|event, status, _| match (event, status) {
             (
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     modified_key,
@@ -907,7 +950,8 @@ impl App {
                 keymap::combination(&modified_key, modifiers).map(Message::Key)
             }
             _ => None,
-        })
+        });
+        Subscription::batch([keys, video])
     }
 }
 
@@ -929,6 +973,15 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Import => Go::Import(Some(team_id.to_string())),
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
+    }
+}
+
+fn video_go(screen: &video::VideoScreen, outcome: video::Outcome) -> Go {
+    match outcome {
+        video::Outcome::Stay => Go::Stay,
+        video::Outcome::Back => Go::Match(screen.team_id.clone(), screen.match_id.clone()),
+        video::Outcome::Choose => Go::PickVideo,
+        video::Outcome::Allocate(frame, handle) => Go::VideoFrame(Box::new((frame, handle))),
     }
 }
 
@@ -966,6 +1019,7 @@ fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
         game::Outcome::Events(set) => {
             Go::Events(screen.team_id.clone(), screen.match_id.clone(), set)
         }
+        game::Outcome::Video => Go::Video(screen.team_id.clone(), screen.match_id.clone()),
         game::Outcome::Report => Go::Export(transfer::Export::Report(
             screen.team_id.clone(),
             screen.match_id.clone(),

@@ -1,5 +1,5 @@
 //! A match: its result, its sets, what comes next. Enter starts or resumes
-//! the set to scout, `e` edits the match.
+//! the set to scout, `e` edits the match, `v` opens its video.
 
 use {
     crate::{
@@ -26,6 +26,7 @@ pub enum Message {
     Stats,
     Export,
     Report,
+    Video,
     /// the events of the set, to correct them
     Set(u8),
     Form(form::Message),
@@ -41,6 +42,8 @@ pub enum Outcome {
     Export,
     /// the report of the match as a PDF, to save
     Report,
+    /// the video of the match
+    Video,
     /// the events of the set, to correct them
     Events(u8),
 }
@@ -131,6 +134,7 @@ impl MatchScreen {
             (Message::Stats, None) => Outcome::Stats,
             (Message::Export, None) => Outcome::Export,
             (Message::Report, None) => Outcome::Report,
+            (Message::Video, None) => Outcome::Video,
             (Message::Set(n), None) => Outcome::Events(n),
             (Message::Edit, None) => {
                 self.edit(s);
@@ -151,6 +155,7 @@ impl MatchScreen {
             (None, k) if k == key!(s) => Outcome::Stats,
             (None, k) if k == key!(x) => Outcome::Export,
             (None, k) if k == key!(p) => Outcome::Report,
+            (None, k) if k == key!(v) => Outcome::Video,
             (None, k) if k == key!(e) => {
                 self.edit(s);
                 Outcome::Stay
@@ -190,6 +195,7 @@ impl MatchScreen {
                     ("e".to_string(), s.edit_match.to_string()),
                     ("x".to_string(), s.export_match.to_string()),
                     ("p".to_string(), s.match_report.to_string()),
+                    ("v".to_string(), s.video.to_string()),
                     (
                         format!("1–{}", self.details.sets.len().max(1)),
                         s.set_events.to_string(),
@@ -258,6 +264,7 @@ impl MatchScreen {
                         c
                     ),
                     ui::pill(s.match_report, false, Some(Message::Report), c),
+                    ui::pill(s.video, false, Some(Message::Video), c),
                 ]
                 .spacing(10)
                 .wrap()
