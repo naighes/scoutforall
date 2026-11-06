@@ -310,6 +310,9 @@ pub struct Strings {
     pub move_later: &'static str,
     pub clip: &'static str,
     pub clip_explained: &'static str,
+    pub detach_video: &'static str,
+    pub attach_video: &'static str,
+    pub video_in_window: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -630,6 +633,9 @@ What did you expect instead?
     move_later: "Later",
     clip: "Clip",
     clip_explained: "Going to an event, the video stops by itself {0} s after it",
+    detach_video: "Own window",
+    attach_video: "Bring back here",
+    video_in_window: "The video is in its own window",
 };
 
 const IT: Strings = Strings {
@@ -950,6 +956,9 @@ Cosa ti aspettavi invece?
     move_later: "Dopo",
     clip: "Clip",
     clip_explained: "Andando a un evento, il video si ferma da solo {0} s dopo",
+    detach_video: "Finestra a parte",
+    attach_video: "Riporta qui",
+    video_in_window: "Il video è nella sua finestra",
 };
 
 const PT: Strings = Strings {
@@ -1270,6 +1279,9 @@ O que você esperava?
     move_later: "Depois",
     clip: "Clipe",
     clip_explained: "Indo a um evento, o vídeo para sozinho {0} s depois",
+    detach_video: "Janela separada",
+    attach_video: "Trazer de volta",
+    video_in_window: "O vídeo está na sua janela",
 };
 
 const PL: Strings = Strings {
@@ -1590,6 +1602,9 @@ Czego się spodziewałeś(-aś)?
     move_later: "Później",
     clip: "Klip",
     clip_explained: "Po przejściu do zdarzenia wideo zatrzymuje się samo {0} s później",
+    detach_video: "Osobne okno",
+    attach_video: "Przywróć tutaj",
+    video_in_window: "Wideo jest w osobnym oknie",
 };
 
 const JA: Strings = Strings {
@@ -1899,6 +1914,9 @@ const JA: Strings = Strings {
     move_later: "後へ",
     clip: "クリップ",
     clip_explained: "イベントへ移動すると、{0} 秒後にビデオが自動で止まります",
+    detach_video: "別ウィンドウ",
+    attach_video: "ここに戻す",
+    video_in_window: "ビデオは別ウィンドウにあります",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

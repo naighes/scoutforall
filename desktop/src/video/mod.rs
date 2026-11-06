@@ -74,6 +74,8 @@ pub enum Message {
     Speed(f32),
     /// clip mode on or off
     Clip,
+    /// the video in its own window, or back in the screen
+    Detach,
     Choose,
     /// the files chosen, to add
     Chosen(Vec<PathBuf>),
@@ -153,6 +155,8 @@ pub struct VideoScreen {
     clip: bool,
     /// where the clip playing stops
     clip_end: Option<u64>,
+    /// the video in its own window (the app opens and closes it)
+    detached: bool,
     /// the time of the event chosen, being written
     editing: Option<String>,
     /// the time written isn't one
@@ -191,6 +195,7 @@ impl VideoScreen {
             follow: true,
             clip: false,
             clip_end: None,
+            detached: false,
             editing: None,
             invalid_time: false,
         };
@@ -371,6 +376,16 @@ impl VideoScreen {
             }
             _ => false,
         }
+    }
+
+    /// Whether the video wants its own window.
+    pub fn detached(&self) -> bool {
+        self.detached
+    }
+
+    /// Its window closed: the video back in the screen.
+    pub fn attach(&mut self) {
+        self.detached = false;
     }
 
     fn toggle_clip(&mut self) {
@@ -587,6 +602,7 @@ impl VideoScreen {
             Message::Seek(ms) => self.seek(ms.max(0.0) as u64),
             Message::Speed(speed) => self.speed(speed),
             Message::Clip => self.toggle_clip(),
+            Message::Detach => self.detached = !self.detached,
             Message::Choose => return self.choose(),
             Message::Chosen(paths) if paths.is_empty() => {}
             Message::Chosen(paths) => self.chosen(&paths),
@@ -662,6 +678,7 @@ impl VideoScreen {
             k if k == key!(']') => self.shift(SHIFT_MS),
             k if k == key!(r) => self.save_anchor(None),
             k if k == key!(k) => self.toggle_clip(),
+            k if k == key!(w) => self.detached = !self.detached,
             _ => {}
         }
         Outcome::Stay
@@ -694,6 +711,14 @@ impl VideoScreen {
                 hint("t", s.anchor_time.to_string()),
                 hint("[ ]", format!("±{} s", SHIFT_MS as f64 / 1000.0)),
                 hint("k", s.clip.to_string()),
+                hint(
+                    "w",
+                    match self.detached {
+                        true => s.attach_video,
+                        false => s.detach_video,
+                    }
+                    .to_string(),
+                ),
             ],
         };
         [playing, events, vec![hint("Esc", s.back.to_string())]].concat()
@@ -711,24 +736,20 @@ impl VideoScreen {
             }
             _ => None,
         };
-        let screen: Element<'a, Message> = match (&self.shown, &self.player) {
-            (Some(shown), _) => image(shown.handle.clone())
-                .content_fit(ContentFit::Contain)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            (None, Some(_)) => space::vertical().height(Length::Fill).into(),
-            (None, None) => container(ui::body(s.no_video).color(c.muted))
-                .center(Length::Fill)
-                .into(),
+        let screen: Element<'a, Message> = match self.detached {
+            true => container(
+                column![
+                    ui::body(s.video_in_window).color(c.muted),
+                    ui::pill(s.attach_video, true, Some(Message::Detach), c),
+                ]
+                .spacing(12)
+                .align_x(Alignment::Center),
+            )
+            .center(Length::Fill)
+            .into(),
+            false => self.frame_view(s, c),
         };
-        let screen = container(screen)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(iced::Color::BLACK.into()),
-                ..container::Style::default()
-            });
+        let screen = black(screen);
         let files = self.files();
         let add = ui::pill(
             match files.is_empty() {
@@ -823,6 +844,27 @@ impl VideoScreen {
         .spacing(10)
         .height(Length::Fill)
         .into()
+    }
+
+    /// The frame shown, as large as it fits.
+    fn frame_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        match (&self.shown, &self.player) {
+            (Some(shown), _) => image(shown.handle.clone())
+                .content_fit(ContentFit::Contain)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            (None, Some(_)) => space::vertical().height(Length::Fill).into(),
+            (None, None) => container(ui::body(s.no_video).color(c.muted))
+                .center(Length::Fill)
+                .into(),
+        }
+    }
+
+    /// The own window of the video: the frame alone, the keys as in the
+    /// screen.
+    pub fn window_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        black(self.frame_view(s, c)).into()
     }
 
     /// Whether the user chose the sync.
@@ -953,6 +995,15 @@ impl VideoScreen {
                 ),
                 text(time).size(SIZE_SMALL).font(theme::fonts().bold),
                 space::horizontal(),
+                ui::pill(
+                    match self.detached {
+                        true => s.attach_video,
+                        false => s.detach_video,
+                    },
+                    self.detached,
+                    Some(Message::Detach),
+                    c
+                ),
                 ui::tip(
                     ui::pill(s.clip, self.clip, Some(Message::Clip), c),
                     &ui::fill(s.clip_explained, &[(CLIP_AFTER_MS / 1000).to_string()]),
@@ -979,6 +1030,17 @@ pub async fn pick(filter: &'static str) -> Vec<PathBuf> {
         .iter()
         .map(|f| f.path().to_path_buf())
         .collect()
+}
+
+/// The video on black, filling its place.
+fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message> {
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(iced::Color::BLACK.into()),
+            ..container::Style::default()
+        })
 }
 
 /// Where the video goes for the event: `LEAD_MS` before it, not before
@@ -1304,6 +1366,22 @@ mod screen_tests {
         screen.go_to_event(i);
         screen.update(Message::Clip);
         assert!(!screen.clip && !screen.clip_over(end));
+    }
+
+    /// `w` (or the pill) asks for the own window and back; its window
+    /// closed, the video is back in the screen.
+    #[test]
+    fn the_video_in_its_own_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        assert!(!screen.detached());
+        screen.key(key!(w));
+        assert!(screen.detached());
+        screen.update(Message::Detach);
+        assert!(!screen.detached());
+        screen.key(key!(w));
+        screen.attach();
+        assert!(!screen.detached());
     }
 
     /// Esc leaves the time being written, not the screen.

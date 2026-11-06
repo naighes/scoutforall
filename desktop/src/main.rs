@@ -145,6 +145,8 @@ struct App {
     focused: Option<Id>,
     /// a newer release, offered in the bar
     update: Update,
+    /// the own window of the video, while open
+    video_window: Option<window::Id>,
 }
 
 /// The self update (`update`), as the bar shows it.
@@ -193,6 +195,8 @@ enum Message {
     InstallUpdate,
     /// the new version in place of the app, or why not
     Installed(Result<String, String>),
+    /// a window other than the app's closed (the app's ends it)
+    WindowClosed(window::Id),
 }
 
 impl App {
@@ -233,6 +237,7 @@ impl App {
             terms: None,
             focused: None,
             update: Update::None,
+            video_window: None,
         };
         app.terms = (!app.core.terms_seen()).then(|| app.core.terms());
         // the matches queued while offline, sent now
@@ -538,7 +543,11 @@ impl App {
 
     /// Updates, then moves the focus where the keys went.
     fn update(&mut self, message: Message) -> Task<Message> {
-        let handled = self.handle(message);
+        let handled = match message {
+            Message::WindowClosed(id) => self.window_closed(id),
+            message => self.handle(message),
+        };
+        let handled = Task::batch([handled, self.video_window()]);
         // the event chosen kept in sight
         let scroll = match &mut self.screen {
             Screen::Events(screen) => Some(screen.scroll()),
@@ -570,6 +579,50 @@ impl App {
                     focus.map_or_else(Task::none, iced::widget::operation::focus),
                 ])
             }
+        }
+    }
+
+    /// The own window of the video, open while the screen wants it: closed
+    /// once the screen is left or the video brought back.
+    fn video_window(&mut self) -> Task<Message> {
+        let wanted = matches!(&self.screen, Screen::Video(screen) if screen.detached());
+        match (wanted, self.video_window) {
+            (true, None) => {
+                let (id, opened) = window::open(window::Settings {
+                    size: Size::new(1280.0, 720.0),
+                    min_size: Some(Size::new(320.0, 180.0)),
+                    ..window::Settings::default()
+                });
+                self.video_window = Some(id);
+                opened.discard()
+            }
+            (false, Some(id)) => {
+                self.video_window = None;
+                window::close(id)
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// The video's window closed by the user: the video back in the
+    /// screen. Closed by the app (`video_window`), already forgotten.
+    fn window_closed(&mut self, id: window::Id) -> Task<Message> {
+        if let (true, Screen::Video(screen)) = (self.video_window == Some(id), &mut self.screen) {
+            screen.attach();
+        }
+        if self.video_window == Some(id) {
+            self.video_window = None;
+        }
+        Task::none()
+    }
+
+    /// What the own window of the video shows.
+    fn video_window_view(&self) -> Element<'_, Message> {
+        match &self.screen {
+            Screen::Video(screen) => screen
+                .window_view(self.strings, self.colors())
+                .map(Message::Video),
+            _ => space::vertical().into(),
         }
     }
 
@@ -1058,6 +1111,8 @@ impl std::fmt::Debug for Loaded {
 /// The splash until the app is read and the ball has come in, then the
 /// app.
 struct Main {
+    /// the app's window: closed, the app ends
+    window: window::Id,
     splash: Option<splash::Splash>,
     app: Option<App>,
     first_frame: OnceLock<()>,
@@ -1069,7 +1124,14 @@ impl Main {
         std::thread::spawn(move || {
             let _ = tx.send(App::load());
         });
+        // the app's window: the others (the video's) open from it
+        let (window, opened) = window::open(window::Settings {
+            size: Size::new(1400.0, 860.0),
+            min_size: Some(Size::new(1000.0, 640.0)),
+            ..window::Settings::default()
+        });
         let main = Main {
+            window,
             splash: Some(splash::Splash::new()),
             app: None,
             first_frame: OnceLock::new(),
@@ -1077,7 +1139,7 @@ impl Main {
         let loaded = Task::perform(async move { rx.await.ok() }, |app| {
             Message::Loaded(Loaded(Arc::new(Mutex::new(app))))
         });
-        (main, loaded)
+        (main, Task::batch([opened.discard(), loaded]))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -1101,6 +1163,8 @@ impl Main {
             }
             // the answer can come while the splash is still on
             (message @ Message::UpdateFound(_), _, Some(app)) => app.update(message),
+            (Message::WindowClosed(id), _, _) if id == self.window => iced::exit(),
+            (message @ Message::WindowClosed(_), _, Some(app)) => app.update(message),
             (message, None, Some(app)) => app.update(message),
             _ => Task::none(),
         };
@@ -1112,7 +1176,10 @@ impl Main {
         task
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    fn view(&self, id: window::Id) -> Element<'_, Message> {
+        if let Some(app) = self.app.as_ref().filter(|app| app.video_window == Some(id)) {
+            return app.video_window_view();
+        }
         if let (Ok(()), Some(started)) = (self.first_frame.set(()), STARTED.get()) {
             eprintln!("first frame after {} ms", started.elapsed().as_millis());
         }
@@ -1125,15 +1192,24 @@ impl Main {
         }
     }
 
-    fn theme(&self) -> Theme {
+    fn theme(&self, _: window::Id) -> Theme {
         theme::theme(self.app.as_ref().is_none_or(|app| app.dark))
     }
 
+    fn title(&self, id: window::Id) -> String {
+        match self.app.as_ref().filter(|app| app.video_window == Some(id)) {
+            Some(app) => app.title(),
+            None => "scout4all".to_string(),
+        }
+    }
+
     fn subscription(&self) -> Subscription<Message> {
-        match (&self.splash, &self.app) {
+        let closed = window::close_events().map(Message::WindowClosed);
+        let app = match (&self.splash, &self.app) {
             (None, Some(app)) => app.subscription(),
             _ => window::frames().map(Message::Frame),
-        }
+        };
+        Subscription::batch([closed, app])
     }
 }
 
@@ -1145,17 +1221,12 @@ fn main() -> iced::Result {
         return Ok(());
     }
     let fonts = theme::fonts();
-    iced::application(Main::boot, Main::update, Main::view)
-        .title("scout4all")
+    iced::daemon(Main::boot, Main::update, Main::view)
+        .title(Main::title)
         .font(fonts.bytes[0])
         .font(fonts.bytes[1])
         .default_font(fonts.regular)
         .theme(Main::theme)
         .subscription(Main::subscription)
-        .window(window::Settings {
-            size: Size::new(1400.0, 860.0),
-            min_size: Some(Size::new(1000.0, 640.0)),
-            ..window::Settings::default()
-        })
         .run()
 }
