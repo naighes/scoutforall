@@ -195,10 +195,11 @@ pub struct VideoScreen {
     /// the event chosen follows the video: off once chosen with the keys,
     /// on again when the video is moved or played
     follow: bool,
-    /// where the video went for the event chosen: that one stays chosen
-    /// until the video passes an event after it (the seek lands on the
-    /// frame a little before, the position read may still be the old one)
-    gone_to: Option<u64>,
+    /// the time of the event gone to (the video a little before it): that
+    /// one stays chosen until the video reaches an event after it (also
+    /// when the seek lands on the frame a little before, or the position
+    /// read is still the old one)
+    gone_to: Option<i64>,
     /// clip mode: going to an event plays it and stops a little after
     clip: bool,
     /// where the clip playing stops
@@ -623,9 +624,12 @@ impl VideoScreen {
     }
 
     /// The event being seen chosen, the list after it, while following.
+    /// The event seen is the last whose time the video reached: at its time,
+    /// not before (going to it, the video starts a little before).
     fn follow_video(&mut self, position_ms: u64) {
-        let seen = current(&self.events, position_ms, self.lead_ms());
-        let past = |i: usize, gone: u64| self.event_target(i).is_some_and(|t| t > gone);
+        let seen = current(&self.events, position_ms, 0);
+        let offset = |i: usize| self.events.get(i).and_then(|e| e.offset_ms);
+        let past = |i: usize, gone: i64| offset(i).is_some_and(|t| t > gone);
         let seen = match (self.gone_to, seen) {
             (Some(gone), Some(i)) if past(i, gone) => {
                 self.gone_to = None;
@@ -635,8 +639,7 @@ impl VideoScreen {
             (None, seen) => seen,
         };
         // the one chosen at the same time as the one seen stays
-        let same_time =
-            seen.is_some_and(|i| self.event_target(i) == self.event_target(self.selected));
+        let same_time = seen.is_some_and(|i| offset(i) == offset(self.selected));
         match (self.follow && !same_time, seen) {
             (true, Some(i)) if i != self.selected => {
                 self.selected = i;
@@ -778,7 +781,7 @@ impl VideoScreen {
         self.selected = i.min(self.events.len().saturating_sub(1));
         if let Some(ms) = self.event_target(self.selected) {
             self.seek(ms);
-            self.gone_to = Some(ms);
+            self.gone_to = self.events.get(self.selected).and_then(|e| e.offset_ms);
             self.play_clip();
         }
     }
@@ -2378,8 +2381,9 @@ pub(crate) mod screen_tests {
         assert_eq!(Some(first.at), start.map(|t| t.to_utc()));
     }
 
-    /// The event seen chosen as the video goes, from the one gone to; the
-    /// keys stop it, going to an event starts it again.
+    /// The event seen chosen as the video goes, at its time (not the 2 s
+    /// before the video goes to), from the one gone to; the keys stop it,
+    /// going to an event starts it again.
     #[test]
     fn the_event_chosen_follows_the_video() {
         let dir = tempfile::tempdir().unwrap();
@@ -2389,11 +2393,19 @@ pub(crate) mod screen_tests {
             .iter()
             .position(|e| e.offset_ms > screen.events[0].offset_ms)
             .unwrap();
-        let at = |screen: &VideoScreen, i: usize| screen.event_target(i).unwrap();
+        let at =
+            |screen: &VideoScreen, i: usize| screen.events[i].offset_ms.unwrap().unsigned_abs();
         // gone to: that one, even with an event 2 s before
         screen.go_to_event(rally);
         screen.follow_video(at(&screen, rally));
         assert_eq!(screen.selected, rally);
+        // played from 2 s before it (moved by hand): not yet it, the one
+        // before; at its time, it
+        screen.seek(at(&screen, rally) - LEAD_MS.unsigned_abs());
+        screen.follow_video(at(&screen, rally) - LEAD_MS.unsigned_abs());
+        assert!(at(&screen, screen.selected) < at(&screen, rally));
+        screen.follow_video(at(&screen, rally));
+        assert_eq!(at(&screen, screen.selected), at(&screen, rally));
         // the seek on the frame a little before, or the old position still
         // read: the one gone to stays chosen (clicked, it wasn't chosen)
         screen.go_to_event(rally);

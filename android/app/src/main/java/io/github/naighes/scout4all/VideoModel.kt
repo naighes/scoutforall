@@ -121,9 +121,8 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
     /** the event chosen follows the video: off once chosen by hand, on
      * again when the video is moved or played */
     private var follow = true
-    /** where the video went for the event chosen: that one stays chosen
-     * until the video passes an event after it (the position read may still
-     * be the old one, or a little before) */
+    /** the time of the event gone to (the video a little before it): that
+     * one stays chosen until the video reaches an event after it */
     private var goneTo: Long? = null
     /** where the clip playing stops */
     private var clipEnd: Long? = null
@@ -245,15 +244,18 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         }
     }
 
+    /** The event seen is the last whose time the video reached: at its
+     * time, not before (going to it, the video starts a little before). */
     private fun followVideo(ms: Long) {
         val r = review ?: return
-        val seen = r.current(ms.toULong(), lead())?.toInt() ?: return
+        val seen = r.current(ms.toULong(), 0L)?.toInt() ?: return
+        val offset = { i: Int -> events.getOrNull(i)?.offsetMs }
         val gone = goneTo
         if (gone != null) {
-            if ((target(seen) ?: return) <= gone) return
+            if ((offset(seen) ?: return) <= gone) return
             goneTo = null
         }
-        val sameTime = target(seen) == target(selected)
+        val sameTime = offset(seen) == offset(selected)
         if (follow && !sameTime && seen != selected) {
             selected = seen
             scrolls++
@@ -313,7 +315,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         scrolls++
         val to = target(selected) ?: return
         seek(to)
-        goneTo = to
+        goneTo = events.getOrNull(selected)?.offsetMs
         val offset = events.getOrNull(selected)?.offsetMs ?: return
         if (clip) {
             clipEnd = offset.coerceAtLeast(0) + margins.afterS.toLong() * 1000
