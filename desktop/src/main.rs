@@ -24,6 +24,7 @@ mod live;
 mod scouting;
 mod settings;
 mod share;
+mod shots;
 mod splash;
 mod start;
 mod stats;
@@ -236,12 +237,42 @@ enum Message {
     /// the recording looked at: how long, saved
     LiveTick,
     StopRecording,
+    /// the screenshots of a plan (`shots`)
+    Shot(ShotMessage),
+}
+
+#[derive(Debug, Clone)]
+enum ShotMessage {
+    /// the steps of the plan up to a wait or a capture
+    Next,
+    /// the window to capture, saved as the name
+    Take(String),
+    Taken(String, window::Screenshot),
+}
+
+impl shots::Open {
+    fn go(self) -> Go {
+        match self {
+            shots::Open::Home => Go::Home,
+            shots::Open::Team(team) => Go::Team(team),
+            shots::Open::Match(team, m) => Go::Match(team, m),
+            shots::Open::Scouting(team_id, match_id) => Go::Scout(home::Open {
+                team_id,
+                match_id,
+                start: false,
+            }),
+            shots::Open::Stats(team, m) => Go::Stats(team, m),
+            shots::Open::Analysis(team) => Go::Analysis(team),
+            shots::Open::Video(team, m) => Go::Video(team, m),
+        }
+    }
 }
 
 impl App {
     /// Reads the configuration and the data: on a thread, the splash on
-    /// screen meanwhile.
-    fn load() -> App {
+    /// screen meanwhile. `quiet` for the screenshots: nothing sent, no
+    /// terms over the screens.
+    fn load(quiet: bool) -> App {
         let dir = data_dir().unwrap_or_else(|| PathBuf::from(".scout4all"));
         let (language, keys) = config(&dir);
         let strings = strings::strings(language);
@@ -291,9 +322,11 @@ impl App {
                 Err(e) => app.error = Some(ui::fill(strings.recording_failed, &[e])),
             }
         }
-        app.terms = (!app.core.terms_seen()).then(|| app.core.terms());
+        app.terms = (!quiet && !app.core.terms_seen()).then(|| app.core.terms());
         // the matches queued while offline, sent now
-        general::send_statistics(app.core.clone());
+        if !quiet {
+            general::send_statistics(app.core.clone());
+        }
         let _ = app.go(Go::Home);
         app
     }
@@ -1492,25 +1525,46 @@ struct Main {
     splash: Option<splash::Splash>,
     app: Option<App>,
     first_frame: OnceLock<()>,
+    /// the screenshots asked with `--shots`
+    shots: Option<shots::Shots>,
 }
 
 impl Main {
     fn boot() -> (Main, Task<Message>) {
+        let shots = match shots::Shots::from_args() {
+            Some(Ok(shots)) => Some(shots),
+            Some(Err(e)) => {
+                eprintln!("{e}");
+                std::process::exit(2)
+            }
+            None => None,
+        };
+        let quiet = shots.is_some();
         let (tx, rx) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(App::load());
+            let _ = tx.send(App::load(quiet));
         });
-        // the app's window: the others (the video's) open from it
-        let (window, opened) = window::open(window::Settings {
-            size: Size::new(1400.0, 860.0),
-            min_size: Some(Size::new(1000.0, 640.0)),
-            ..window::Settings::default()
-        });
+        // the app's window: the others (the video's) open from it; for the
+        // screenshots, the size of the plan
+        let settings = match &shots {
+            Some(shots) => window::Settings {
+                size: Size::new(shots.plan_window.0, shots.plan_window.1),
+                resizable: false,
+                ..window::Settings::default()
+            },
+            None => window::Settings {
+                size: Size::new(1400.0, 860.0),
+                min_size: Some(Size::new(1000.0, 640.0)),
+                ..window::Settings::default()
+            },
+        };
+        let (window, opened) = window::open(settings);
         let main = Main {
             window,
             splash: Some(splash::Splash::new()),
             app: None,
             first_frame: OnceLock::new(),
+            shots,
         };
         let loaded = Task::perform(async move { rx.await.ok() }, |app| {
             Message::Loaded(Loaded(Arc::new(Mutex::new(app))))
@@ -1534,9 +1588,14 @@ impl Main {
                 if let Some(started) = STARTED.get() {
                     eprintln!("data read after {} ms", started.elapsed().as_millis());
                 }
-                // a newer release, looked for once the app is there
-                Task::perform(update::newer(), Message::UpdateFound)
+                // a newer release, looked for once the app is there (not
+                // for the screenshots)
+                match self.shots {
+                    Some(_) => Task::none(),
+                    None => Task::perform(update::newer(), Message::UpdateFound),
+                }
             }
+            (Message::Shot(message), _, Some(_)) => return self.shot(message),
             // the answer can come while the splash is still on
             (message @ Message::UpdateFound(_), _, Some(app)) => app.update(message),
             (Message::WindowClosed(id), _, _) if id == self.window => iced::exit(),
@@ -1549,7 +1608,66 @@ impl Main {
         {
             self.splash = None;
         }
-        task
+        // the app on screen: the screenshots start
+        match (&mut self.shots, &self.splash, &self.app) {
+            (Some(shots), None, Some(_)) if !shots.started => {
+                shots.started = true;
+                Task::batch([task, Task::done(Message::Shot(ShotMessage::Next))])
+            }
+            _ => task,
+        }
+    }
+
+    /// A step of the screenshots (`shots`).
+    fn shot(&mut self, message: ShotMessage) -> Task<Message> {
+        let (Some(shots), Some(app)) = (&mut self.shots, &mut self.app) else {
+            return Task::none();
+        };
+        match message {
+            ShotMessage::Next => {
+                let mut tasks = vec![];
+                loop {
+                    match shots.next() {
+                        shots::Next::Do(shots::Step::Go(open)) => tasks.push(app.go(open.go())),
+                        shots::Next::Do(shots::Step::Key(key)) => {
+                            tasks.push(app.update(Message::Key(key)));
+                        }
+                        shots::Next::Do(shots::Step::Keys(keys)) => {
+                            tasks.extend(keys.into_iter().map(|key| app.update(Message::Key(key))));
+                        }
+                        // waits and captures come as such
+                        shots::Next::Do(shots::Step::Wait(_) | shots::Step::Shot(_)) => {}
+                        shots::Next::Wait(time) => {
+                            tasks.push(Task::perform(shots::after(time), |()| {
+                                Message::Shot(ShotMessage::Next)
+                            }));
+                            break;
+                        }
+                        shots::Next::Shot(name) => {
+                            tasks.push(Task::perform(shots::after(shots::settle()), move |()| {
+                                Message::Shot(ShotMessage::Take(name.clone()))
+                            }));
+                            break;
+                        }
+                        shots::Next::Done => {
+                            eprintln!("shots: done");
+                            tasks.push(iced::exit());
+                            break;
+                        }
+                    }
+                }
+                Task::batch(tasks)
+            }
+            ShotMessage::Take(name) => window::screenshot(self.window)
+                .map(move |shot| Message::Shot(ShotMessage::Taken(name.clone(), shot))),
+            ShotMessage::Taken(name, shot) => {
+                match shots.save(&name, &shot) {
+                    Ok(path) => eprintln!("shots: {}", path.display()),
+                    Err(e) => eprintln!("shots: {e}"),
+                }
+                Task::done(Message::Shot(ShotMessage::Next))
+            }
+        }
     }
 
     fn view(&self, id: window::Id) -> Element<'_, Message> {
