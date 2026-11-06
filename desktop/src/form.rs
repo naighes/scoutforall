@@ -172,6 +172,8 @@ pub struct Field {
     pub placeholder: String,
     /// the icons of the segments, before their names
     pub icons: Vec<&'static [u8]>,
+    /// a password: its letters not shown
+    pub secret: bool,
 }
 
 impl Field {
@@ -182,6 +184,22 @@ impl Field {
             hint: None,
             placeholder: String::new(),
             icons: vec![],
+            secret: false,
+        }
+    }
+
+    /// A password: written, not shown.
+    pub fn secret(label: &str, value: impl Into<String>) -> Field {
+        Field {
+            secret: true,
+            ..Field::text(label, value)
+        }
+    }
+
+    pub fn placeholder(self, placeholder: &str) -> Field {
+        Field {
+            placeholder: placeholder.to_string(),
+            ..self
         }
     }
 
@@ -801,6 +819,7 @@ impl Form {
         let input = |value: &str, follow: field::Follow| -> Element<'a, M> {
             field::guard(
                 text_input(&f.placeholder, value)
+                    .secure(f.secret)
                     .id(format!("form-field-{i}"))
                     .on_input(move |v| on(Message::Input(i, v)))
                     .size(SIZE_BODY)

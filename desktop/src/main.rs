@@ -592,13 +592,10 @@ impl App {
             (None, Screen::Match(screen)) => screen.focus_id(),
             (None, Screen::Dvw(screen)) => screen.focus_id(),
             (None, Screen::Video(screen)) => screen.focus_id(),
+            (None, Screen::Live(screen)) => screen.focus_id(),
             (
                 None,
-                Screen::Start(_)
-                | Screen::Scouting(_)
-                | Screen::Stats(_)
-                | Screen::Events(_)
-                | Screen::Live(_),
+                Screen::Start(_) | Screen::Scouting(_) | Screen::Stats(_) | Screen::Events(_),
             ) => None,
         }
     }
@@ -672,6 +669,8 @@ impl App {
         match written {
             Ok(()) => {
                 capture.record(base, started, quality);
+                // nothing shows it while scouting: the recording keeps up
+                capture.preview(false);
                 self.recorder = Some(capture);
                 self.go(Go::Match(team, m))
             }
@@ -939,11 +938,11 @@ impl App {
                 video_go(screen, outcome)
             }
             (Message::Live(m), Screen::Live(screen)) => {
-                let outcome = screen.update(m);
+                let outcome = screen.update(m, s);
                 live_go(screen, outcome)
             }
             (Message::Key(ck), Screen::Live(screen)) => {
-                let outcome = screen.key(ck);
+                let outcome = screen.key(ck, s);
                 live_go(screen, outcome)
             }
             (Message::Key(ck), Screen::Dvw(screen)) => {

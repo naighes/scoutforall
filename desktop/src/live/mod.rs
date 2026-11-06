@@ -4,6 +4,7 @@
 //! clock.
 
 pub mod capture;
+pub mod network;
 pub mod picture;
 pub mod raw;
 pub mod screen;
@@ -32,6 +33,44 @@ pub struct LiveConfig {
     pub quality: Option<String>,
     #[serde(default)]
     pub folder: Option<PathBuf>,
+    /// the source on the network used last: its password in the keychain
+    #[serde(default)]
+    pub network: Option<SavedNetwork>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedNetwork {
+    pub url: String,
+    #[serde(default)]
+    pub username: String,
+}
+
+/// The name of the app in the keychain of the system.
+const KEYCHAIN_SERVICE: &str = "scout4all";
+
+fn keychain_entry(url: &str, username: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, &format!("{username}@{url}")).map_err(|e| e.to_string())
+}
+
+/// The password of a source on the network kept in the keychain of the
+/// system (macOS Keychain, Windows Credential Manager, the keyring of the
+/// Linux kernel); none written, none kept.
+pub fn keep_password(url: &str, username: &str, password: &str) -> Result<(), String> {
+    let entry = keychain_entry(url, username)?;
+    match password.is_empty() {
+        true => match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        },
+        false => entry.set_password(password).map_err(|e| e.to_string()),
+    }
+}
+
+/// The password kept for the source, if any.
+pub fn kept_password(url: &str, username: &str) -> Option<String> {
+    keychain_entry(url, username)
+        .ok()
+        .and_then(|e| e.get_password().ok())
 }
 
 impl LiveConfig {
@@ -134,8 +173,11 @@ pub fn recover(core: &Scout4All, data_dir: &Path, folder: &Path) -> Vec<Result<S
                 .map(|s| s.started.with_timezone(&Local))
                 .ok_or_else(|| format!("{name}: the match of the recording is not known"))?;
             let mp4 = base.with_extension("mp4");
-            raw::remux(&base, &mp4).map_err(|e| format!("{name}: {e}"))?;
-            attach(core, data_dir, &base, &mp4, started).map_err(|e| format!("{name}: {e}"))?;
+            let made = raw::remux(&base, &mp4).map_err(|e| format!("{name}: {e}"))?;
+            let skipped =
+                chrono::TimeDelta::milliseconds(i64::try_from(made.skipped_ms).unwrap_or(0));
+            attach(core, data_dir, &base, &mp4, started + skipped)
+                .map_err(|e| format!("{name}: {e}"))?;
             Ok(name)
         })
         .collect()
@@ -229,6 +271,10 @@ mod tests {
             camera: Some("FaceTime HD Camera".into()),
             quality: Some("1080p".into()),
             folder: Some(dir.path().join("rec")),
+            network: Some(SavedNetwork {
+                url: "rtsp://cam.local/live".into(),
+                username: "scout".into(),
+            }),
         };
         config.write(dir.path()).unwrap();
         let read = LiveConfig::read(dir.path());

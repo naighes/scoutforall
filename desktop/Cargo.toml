@@ -22,7 +22,10 @@ scout4all-keys = { path = "../keys" }
 scout4all-mobile = { path = "../mobile" }
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["time", "net", "rt"] }
+retina = "0.4"
+url = "2"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 uuid.workspace = true
 chrono.workspace = true
 bytes = "1"

@@ -130,10 +130,18 @@ fn entries(index: &str, stream_len: usize) -> Vec<Entry> {
     out
 }
 
+/// An MP4 made of a raw recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Remuxed {
+    pub length_ms: u64,
+    /// left out before the first keyframe (a stream joined between two):
+    /// the video starts this much after the recording
+    pub skipped_ms: u64,
+}
+
 /// The raw recording `base` made the MP4 `mp4`; the raw files removed once
-/// it's written. Its length in milliseconds. A frame at a time: a match is
-/// gigabytes.
-pub fn remux(base: &Path, mp4: &Path) -> Result<u64, String> {
+/// it's written. A frame at a time: a match is gigabytes.
+pub fn remux(base: &Path, mp4: &Path) -> Result<Remuxed, String> {
     let (stream_path, index_path) = raw_paths(base);
     let open = |p: &Path| File::open(p).map_err(|e| format!("{}: {e}", p.display()));
     let stream_len = open(&stream_path)?
@@ -197,6 +205,7 @@ pub fn remux(base: &Path, mp4: &Path) -> Result<u64, String> {
         })
         .map_err(|e| e.to_string())?;
     let start = first.pts_ms;
+    let skipped_ms = start;
     let mut end = 0;
     let mut current = Some((first, data));
     while let Some((e, data)) = current.take() {
@@ -241,7 +250,10 @@ pub fn remux(base: &Path, mp4: &Path) -> Result<u64, String> {
     // the MP4 there: the raw files no longer needed
     let _ = fs::remove_file(&stream_path);
     let _ = fs::remove_file(&index_path);
-    Ok(end)
+    Ok(Remuxed {
+        length_ms: end,
+        skipped_ms,
+    })
 }
 
 /// The recordings in `folder` left raw (the app closed while recording):
@@ -393,8 +405,9 @@ mod tests {
         let base = dir.path().join("20261106 111400");
         record(&base, 90);
         let mp4 = base.with_extension("mp4");
-        let length = remux(&base, &mp4).unwrap();
-        assert!((2990..=3010).contains(&length), "{length}");
+        let made = remux(&base, &mp4).unwrap();
+        assert!((2990..=3010).contains(&made.length_ms), "{made:?}");
+        assert_eq!(made.skipped_ms, 0);
         let source = Source::open(&mp4).unwrap();
         assert_eq!(source.samples.len(), 90);
         assert_eq!(source.samples.iter().filter(|s| s.sync).count(), 3);
@@ -418,6 +431,32 @@ mod tests {
         let mp4 = base.with_extension("mp4");
         remux(&base, &mp4).unwrap();
         assert_eq!(Source::open(&mp4).unwrap().samples.len(), 59);
+    }
+
+    /// Joined between two keyframes (a stream): the frames before the
+    /// first left out, said how long they were.
+    #[test]
+    fn a_recording_from_its_first_keyframe() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("joined");
+        record(&base, 90);
+        // the first 10 frames as if not a picture to start from
+        let (stream, index) = raw_paths(&base);
+        let text = fs::read_to_string(&index).unwrap();
+        let bytes = fs::read(&stream).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        let cut: usize = lines[..10]
+            .iter()
+            .map(|l| l.split(' ').nth(2).unwrap().parse::<usize>().unwrap())
+            .sum();
+        // the first keyframe's bytes made a frame of no parameters
+        let p_frame = bytes[cut..].to_vec();
+        fs::write(&stream, [&bytes[cut..cut], &p_frame[..]].concat()).unwrap();
+        fs::write(&index, lines[10..].join("\n") + "\n").unwrap();
+        let made = remux(&base, &base.with_extension("mp4")).unwrap();
+        // from the keyframe at 1 s
+        assert_eq!(made.skipped_ms, 1000);
+        assert!((1990..=2010).contains(&made.length_ms), "{made:?}");
     }
 
     #[test]
