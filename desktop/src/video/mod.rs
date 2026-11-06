@@ -195,8 +195,6 @@ pub struct VideoScreen {
     first_ms: Option<i64>,
     /// the video before the first event shown, to tie the events again
     whole: bool,
-    /// how the match stands (set, score, phase, rotation) over the video
-    overlay: bool,
 }
 
 /// The matches of a team with actions picked in its statistics, each with
@@ -256,7 +254,6 @@ impl VideoScreen {
             margin_text: None,
             first_ms: None,
             whole: false,
-            overlay: true,
         };
         screen.margins = Margins::read(&screen.dir);
         // the durations of the files first: the events in them
@@ -414,6 +411,15 @@ impl VideoScreen {
     /// The seconds before or after the actions at `seconds`, saved.
     fn set_margin(&mut self, margin: Margin, seconds: u32) {
         self.margins = self.margins.with(margin, seconds);
+        if let Err(e) = self.margins.write(&self.dir) {
+            self.error = Some(e);
+        }
+    }
+
+    /// How the match stands over the video, or not: kept for the next
+    /// time.
+    fn toggle_overlay(&mut self) {
+        self.margins.overlay = !self.margins.overlay;
         if let Err(e) = self.margins.write(&self.dir) {
             self.error = Some(e);
         }
@@ -864,7 +870,7 @@ impl VideoScreen {
             Message::Seek(ms) => self.seek(ms.max(0.0) as u64),
             Message::Speed(speed) => self.speed(speed),
             Message::Clip => self.toggle_clip(),
-            Message::Overlay => self.overlay = !self.overlay,
+            Message::Overlay => self.toggle_overlay(),
             Message::Detach => self.detached = !self.detached,
             Message::Choose => return self.choose(),
             Message::Chosen(paths) if paths.is_empty() => {}
@@ -964,7 +970,7 @@ impl VideoScreen {
             k if k == key!(']') => self.shift(SHIFT_MS),
             k if k == key!(r) => self.save_anchor(None),
             k if k == key!(k) => self.toggle_clip(),
-            k if k == key!(i) => self.overlay = !self.overlay,
+            k if k == key!(i) => self.toggle_overlay(),
             k if k == key!(w) => self.detached = !self.detached,
             k if k == key!(s) && self.clips.is_some() => self.sequence = !self.sequence,
             k if k == key!(pageup) || k == key!(pagedown) => {
@@ -1249,10 +1255,10 @@ impl VideoScreen {
                     .content_fit(ContentFit::Contain)
                     .width(Length::Fill)
                     .height(Length::Fill);
-                match standing(&self.events, self.position()).filter(|_| self.overlay) {
+                match standing(&self.events, self.position()).filter(|_| self.margins.overlay) {
                     Some(st) => stack![
                         frame,
-                        container(overlay_view(st, s, c))
+                        container(overlay_view(st, &self.the_match, s, c))
                             .padding(16)
                             .width(Length::Fill)
                             .height(Length::Fill)
@@ -1412,7 +1418,12 @@ impl VideoScreen {
                 text(time).size(SIZE_SMALL).font(theme::fonts().bold),
                 space::horizontal(),
                 ui::tip(
-                    ui::pill(s.match_overlay, self.overlay, Some(Message::Overlay), c),
+                    ui::pill(
+                        s.match_overlay,
+                        self.margins.overlay,
+                        Some(Message::Overlay),
+                        c
+                    ),
                     s.match_overlay_explained,
                     c
                 ),
@@ -1685,10 +1696,16 @@ fn standing(events: &[VideoEvent], position_ms: u64) -> Option<Standing> {
 }
 
 /// How the match stands, over the corner of the video: on a veil, not a
-/// box, the letters as large as the body's or more: the set (the sets
-/// won, from the second), the score, the phase in its color and with its
-/// icon, as while scouting, and the rotation.
-fn overlay_view<'a>(st: Standing, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+/// box, the letters as large as the body's or more. A line a team, ours
+/// first, as on TV: the ball by the one to serve, its name, the sets won
+/// and the points; beside them the set, the phase in its color and with
+/// its icon, as while scouting, and the rotation.
+fn overlay_view<'a>(
+    st: Standing,
+    m: &MatchEntry,
+    s: &'static Strings,
+    c: Colors,
+) -> Element<'a, Message> {
     let white = iced::Color::WHITE;
     let soft = iced::Color { a: 0.8, ..white };
     let (color, icon, name) = match st.phase {
@@ -1696,39 +1713,77 @@ fn overlay_view<'a>(st: Standing, s: &'static Strings, c: Colors) -> Element<'a,
         PhaseEnum::SideOut => (c.side_out, theme::icons::SIDE_OUT, s.side_out_phase),
     };
     let bold = theme::fonts().bold;
-    let label = |t: String| text(t).size(theme::SIZE_BODY).color(soft);
-    let divider = || {
-        container(space::vertical().height(Length::Fixed(20.0)))
-            .width(Length::Fixed(1.0))
-            .style(move |_| container::Style {
-                background: Some(iced::Color { a: 0.35, ..white }.into()),
-                ..container::Style::default()
-            })
+    let names = [overlay_name(&m.team.name), overlay_name(&m.opponent)];
+    // the font is monospaced: the names, the sets and the points in
+    // columns, as long as the longer
+    let letters = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
+    let letter = theme::SIZE_BODY * 0.6;
+    let score_letter = (theme::SIZE_TITLE + 4.0) * 0.6;
+    let team = |serving: bool, name: String, sets: u8, points: u8| {
+        let ball: Element<'a, Message> = match serving {
+            true => ui::icon(theme::icons::VOLLEYBALL, 16.0, white).into(),
+            false => space::horizontal().width(Length::Fixed(16.0)).into(),
+        };
+        row![
+            container(ball).width(Length::Fixed(16.0)),
+            text(name)
+                .size(theme::SIZE_BODY)
+                .font(bold)
+                .color(white)
+                .width(Length::Fixed(letter * letters as f32 + 2.0)),
+            text(sets.to_string())
+                .size(theme::SIZE_BODY)
+                .color(soft)
+                .width(Length::Fixed(letter * 2.0))
+                .align_x(Alignment::End),
+            text(points.to_string())
+                .size(theme::SIZE_TITLE + 4.0)
+                .font(bold)
+                .color(white)
+                .width(Length::Fixed(score_letter * 2.0 + 2.0))
+                .align_x(Alignment::End),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center)
     };
+    let [us, them] = names;
+    let serving_us = st.phase == PhaseEnum::Break;
+    let divider = container(space::vertical().height(Length::Fixed(44.0)))
+        .width(Length::Fixed(1.0))
+        .style(move |_| container::Style {
+            background: Some(iced::Color { a: 0.35, ..white }.into()),
+            ..container::Style::default()
+        });
     container(
         row![
-            label(match st.sets {
-                (0, 0) => format!("{} {}", s.set_n, st.set_number),
-                (us, them) => format!("{} {} ({us}–{them})", s.set_n, st.set_number),
-            }),
-            divider(),
-            text(format!("{}–{}", st.score.0, st.score.1))
-                .size(theme::SIZE_TITLE + 6.0)
-                .font(bold)
-                .color(white),
-            divider(),
-            ui::icon(icon, 20.0, color),
-            text(name).size(theme::SIZE_BODY).font(bold).color(color),
-            ui::tip(
-                text(st.rotation)
+            column![
+                team(serving_us, us, st.sets.0, st.score.0),
+                team(!serving_us, them, st.sets.1, st.score.1),
+            ]
+            .spacing(2),
+            divider,
+            column![
+                text(format!("{} {}", s.set_n, st.set_number))
                     .size(theme::SIZE_BODY)
-                    .font(bold)
-                    .color(white),
-                s.rotation,
-                c
-            ),
+                    .color(soft),
+                row![
+                    ui::icon(icon, 18.0, color),
+                    text(name).size(theme::SIZE_BODY).font(bold).color(color),
+                    ui::tip(
+                        text(st.rotation)
+                            .size(theme::SIZE_BODY)
+                            .font(bold)
+                            .color(white),
+                        s.rotation,
+                        c
+                    ),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            ]
+            .spacing(4),
         ]
-        .spacing(12)
+        .spacing(14)
         .align_y(Alignment::Center),
     )
     .padding(iced::Padding::from([8, 14]))
@@ -1747,6 +1802,19 @@ fn overlay_view<'a>(st: Standing, s: &'static Strings, c: Colors) -> Element<'a,
         ..container::Style::default()
     })
     .into()
+}
+
+/// The name of a team over the video: whole up to a point, then cut, so
+/// that the corner stays a corner.
+fn overlay_name(name: &str) -> String {
+    const ROOM: usize = 22;
+    match name.chars().count() > ROOM {
+        true => format!(
+            "{}…",
+            name.chars().take(ROOM - 1).collect::<String>().trim_end()
+        ),
+        false => name.to_string(),
+    }
 }
 
 /// Where the video goes for the event: `lead_ms` before it, not before
@@ -2517,11 +2585,28 @@ pub(crate) mod screen_tests {
         let seen = standing(&events, at(point)).unwrap();
         assert_eq!(seen.phase, PhaseEnum::Break);
         assert!(seen.rotation.starts_with('P') || seen.rotation.starts_with('S'));
-        assert!(screen.overlay);
+        assert!(screen.margins.overlay);
         screen.key(key!(i));
-        assert!(!screen.overlay);
+        assert!(!screen.margins.overlay);
+        assert!(
+            !Margins::read(&screen.dir).overlay,
+            "kept for the next time"
+        );
         screen.update(Message::Overlay);
-        assert!(screen.overlay);
+        assert!(screen.margins.overlay);
+    }
+
+    /// The names of the teams over the video: whole when short, cut when
+    /// long.
+    #[test]
+    fn the_names_over_the_video() {
+        assert_eq!(
+            overlay_name("POLISPORTIVA SAVINESE"),
+            "POLISPORTIVA SAVINESE"
+        );
+        let long = "ASSOCIAZIONE SPORTIVA DILETTANTISTICA";
+        assert_eq!(overlay_name(long), "ASSOCIAZIONE SPORTIVA…");
+        assert_eq!(overlay_name(long).chars().count(), 22);
     }
 
     /// In clip mode the clip starts and ends the seconds chosen before and

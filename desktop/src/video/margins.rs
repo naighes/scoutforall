@@ -1,7 +1,8 @@
 //! How long a clip of an action lasts, as the user chose: the seconds
 //! before it (DataVolley gives a rally a single second, often noted after
-//! the action) and after it. Saved in `clips.json` in the folder of the
-//! data, on this computer.
+//! the action) and after it; and whether how the match stands is shown
+//! over the video. Saved in `clips.json` in the folder of the data, on
+//! this computer.
 
 use {
     serde::{Deserialize, Serialize},
@@ -18,6 +19,13 @@ pub const MAX_SECONDS: u32 = 30;
 pub struct Margins {
     pub before_s: u32,
     pub after_s: u32,
+    /// the set, the score... over the video; on in the files without it
+    #[serde(default = "on")]
+    pub overlay: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 impl Default for Margins {
@@ -25,6 +33,7 @@ impl Default for Margins {
         Margins {
             before_s: 5,
             after_s: 5,
+            overlay: true,
         }
     }
 }
@@ -77,6 +86,7 @@ impl Margins {
         Margins {
             before_s: self.before_s.min(MAX_SECONDS),
             after_s: self.after_s.clamp(1, MAX_SECONDS),
+            ..self
         }
     }
 }
@@ -108,5 +118,12 @@ mod tests {
         std::fs::write(dir.path().join(FILE), r#"{"before_s": 90, "after_s": 0}"#).unwrap();
         let read = Margins::read(dir.path());
         assert_eq!((read.before_s, read.after_s), (MAX_SECONDS, 1));
+        assert!(read.overlay, "saved before it: on");
+        let off = Margins {
+            overlay: false,
+            ..Margins::default()
+        };
+        off.write(dir.path()).unwrap();
+        assert!(!Margins::read(dir.path()).overlay);
     }
 }
