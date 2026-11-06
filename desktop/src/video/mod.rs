@@ -162,8 +162,11 @@ pub struct VideoScreen {
     requested: u64,
     awake_until: Instant,
     error: Option<String>,
-    /// the events of the match, at their time in the video
+    /// the events of the match, at their time in the video: the ones
+    /// picked, with some
     events: Vec<VideoEvent>,
+    /// all of them, for how the match stands over the video
+    all_events: Vec<VideoEvent>,
     selected: usize,
     /// the list to scroll to the event chosen
     scroll: bool,
@@ -239,6 +242,7 @@ impl VideoScreen {
             awake_until: Instant::now(),
             error: None,
             events: vec![],
+            all_events: vec![],
             selected: 0,
             scroll: false,
             follow: true,
@@ -364,11 +368,18 @@ impl VideoScreen {
             .core
             .video_events(&self.the_match, &profile, &durations)?;
         self.first_ms = self.events.iter().filter_map(|e| e.offset_ms).min();
+        self.all_events = self.events.clone();
         if let Some(clips) = &self.clips {
             self.events.retain(|e| clips.events.contains(&event_ref(e)));
         }
         self.selected = self.selected.min(self.events.len().saturating_sub(1));
         Ok(())
+    }
+
+    /// How the match stands at the moment of the video: from all its
+    /// events, not only the ones picked.
+    fn standing(&self) -> Option<Standing> {
+        standing(&self.all_events, self.position())
     }
 
     /// Where the list goes, to keep the event chosen in sight, once the
@@ -1255,7 +1266,7 @@ impl VideoScreen {
                     .content_fit(ContentFit::Contain)
                     .width(Length::Fill)
                     .height(Length::Fill);
-                match standing(&self.events, self.position()).filter(|_| self.margins.overlay) {
+                match self.standing().filter(|_| self.margins.overlay) {
                     Some(st) => stack![
                         frame,
                         container(overlay_view(st, &self.the_match, s, c))
@@ -2532,6 +2543,42 @@ pub(crate) mod screen_tests {
         assert!(!screen.whole);
         assert_eq!(screen.events[0].offset_ms, Some(1000));
         assert_eq!(screen.start_ms(), 0, "1 s in: from the start");
+    }
+
+    /// With some actions picked, how the match stands over the video still
+    /// from all its events: the sets won before, the score after the last
+    /// event passed.
+    #[test]
+    fn how_the_match_stands_with_the_actions_picked() {
+        let dir = tempfile::tempdir().unwrap();
+        let whole = with_file(&dir, "20150125 000000.mp4");
+        let later: Vec<EventRef> = whole
+            .events
+            .iter()
+            .filter(|e| e.set_number > 1)
+            .map(event_ref)
+            .collect();
+        let mut screen = VideoScreen::with_clips(
+            whole.core.clone(),
+            dir.path().to_path_buf(),
+            whole.team_id.clone(),
+            whole.match_id.clone(),
+            later,
+            "Set 2–3".into(),
+        )
+        .unwrap();
+        let at = screen.events[0].offset_ms.unwrap().unsigned_abs();
+        screen.status = Some(Status {
+            frame: None,
+            position_ms: at,
+            duration_ms: u64::MAX / 2,
+            playing: false,
+            speed: 1.0,
+            error: None,
+        });
+        let seen = screen.standing().unwrap();
+        assert_eq!(Some(seen.clone()), standing(&whole.events, at));
+        assert_ne!(seen.sets, (0, 0), "the first set counted");
     }
 
     /// Over the video, how the match stands at that moment: nothing before
