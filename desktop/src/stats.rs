@@ -21,7 +21,9 @@ use {
     chrono::{Local, NaiveDate},
     iced::{
         Alignment, Color, Element, Length,
-        widget::{Column, Row, button, column, container, row, scrollable, space, text},
+        widget::{
+            Column, Row, button, column, container, responsive, row, scrollable, space, text,
+        },
     },
     scout4all_core::{
         analysis::MOVING_WINDOW,
@@ -269,6 +271,9 @@ pub struct StatsScreen {
 
 /// The filters on the left.
 const FILTERS_WIDTH: f32 = 500.0;
+
+/// Up to how many filters go in a bar over the page, not in a column.
+const FILTERS_ON_TOP: usize = 2;
 
 /// A day as the period shows it: `YYYY-MM-DD` as written.
 fn shown_day(day: &str) -> String {
@@ -1047,13 +1052,14 @@ impl StatsScreen {
             .enumerate()
             .map(|(i, name)| ui::pill(name, i == self.page, Some(Message::Page(i)), c)))
         .spacing(6);
-        let filters = Column::with_children(
-            self.filters()
-                .into_iter()
-                .enumerate()
-                .map(|(i, f)| self.filter_row(f, i == self.row, s, c)),
-        )
-        .spacing(8);
+        let filters: Vec<Element<'a, Message>> = self
+            .filters()
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| self.filter_row(f, i == self.row, s, c))
+            .collect();
+        // a few filters: a bar over the page, the page as wide as the screen
+        let few = filters.len() <= FILTERS_ON_TOP;
         let error: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => space::vertical().height(0).into(),
@@ -1065,19 +1071,49 @@ impl StatsScreen {
         let page: Element<'a, Message> = match (self.current(), &self.live, empty) {
             (_, _, true) => ui::panel(None, small(s.no_matches_period, c), c),
             (_, None, _) => space::vertical().into(),
-            (Page::Summary, Some(live), _) => summary(live, s, c),
+            (Page::Summary, Some(live), _) => {
+                responsive(move |size| summary(live, s, c, size.height >= SUMMARY_TALL)).into()
+            }
             (Page::Trend, Some(live), _) => match &self.analysis {
                 Some(a) if self.is_team() => self.matches_page(a, s, c),
                 _ => self.trend_page(live, s, c),
             },
             (Page::Detail, _, _) => self.detail_page(s, c),
         };
-        let left = container(scrollable(ui::panel(None, filters, c)).height(Length::Fill))
-            .width(Length::Fixed(FILTERS_WIDTH));
-        let right = column![tabs, error, container(page).height(Length::Fill)]
-            .spacing(12)
-            .width(Length::Fill);
-        row![left, right].spacing(14).into()
+        match few {
+            true => {
+                let bar = Row::with_children(
+                    filters
+                        .into_iter()
+                        .map(|f| container(f).width(Length::Fill).into()),
+                )
+                .spacing(24);
+                column![
+                    tabs,
+                    ui::panel(None, bar, c),
+                    error,
+                    container(page).height(Length::Fill)
+                ]
+                .spacing(12)
+                .into()
+            }
+            // the filters fill the column, scrolling inside when many
+            false => {
+                let left = container(ui::panel(
+                    None,
+                    scrollable(Column::with_children(filters).spacing(8))
+                        .height(Length::Fill)
+                        .width(Length::Fill),
+                    c,
+                ))
+                .height(Length::Fill)
+                .width(Length::Fixed(FILTERS_WIDTH));
+                let right = column![tabs, error, container(page).height(Length::Fill)]
+                    .spacing(12)
+                    .width(Length::Fill);
+                row![left, right].spacing(14).into()
+            }
+        }
     }
 
     /// A filter: its name, then a pill each choice; the row the arrows are
@@ -1732,14 +1768,18 @@ impl StatsScreen {
         .flatten()
         .collect();
         let middle = Column::with_children(zones).spacing(12);
+        // the players fill their column, scrolling on their own
         let right = self.players(f, s, c);
-        scrollable(
-            row![
-                container(column![left, middle].spacing(12)).width(Length::FillPortion(1)),
-                container(right).width(Length::FillPortion(1)),
-            ]
-            .spacing(14),
-        )
+        row![
+            scrollable(column![left, middle].spacing(12))
+                .height(Length::Fill)
+                .width(Length::FillPortion(1)),
+            container(right)
+                .height(Length::Fill)
+                .width(Length::FillPortion(1)),
+        ]
+        .spacing(14)
+        .height(Length::Fill)
         .into()
     }
 
@@ -1984,7 +2024,12 @@ impl StatsScreen {
         });
         ui::panel(
             Some(&ui::capitalized(s.players)),
-            column![head, Column::with_children(rows).spacing(2)].spacing(6),
+            column![
+                head,
+                scrollable(Column::with_children(rows).spacing(2)).height(Length::Fill)
+            ]
+            .spacing(6)
+            .height(Length::Fill),
             c,
         )
     }
@@ -2069,7 +2114,42 @@ impl StatsScreen {
 
 /// The summary: the fundamentals and the phases; the rotations and the
 /// distribution; the errors.
-fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+/// How tall the summary must have room for, its columns filling it; less,
+/// they scroll as they are.
+const SUMMARY_TALL: f32 = 540.0;
+
+/// Room between the parts of a panel: as it fills, the parts spread.
+fn gap<'a>(tall: bool) -> Element<'a, Message> {
+    match tall {
+        true => space::vertical().into(),
+        false => space::vertical().height(4).into(),
+    }
+}
+
+/// A part of a panel taking its share of the height, when tall.
+fn share<'a>(content: impl Into<Element<'a, Message>>, tall: bool) -> Element<'a, Message> {
+    match tall {
+        true => container(content)
+            .height(Length::Fill)
+            .align_y(Alignment::Center)
+            .into(),
+        false => content.into(),
+    }
+}
+
+fn height(tall: bool) -> Length {
+    match tall {
+        true => Length::Fill,
+        false => Length::Shrink,
+    }
+}
+
+fn summary<'a>(
+    live: &'a LiveStats,
+    s: &'static Strings,
+    c: Colors,
+    tall: bool,
+) -> Element<'a, Message> {
     let graded = |v: Option<f64>, g: Option<f64>| {
         text(pct(v))
             .size(SIZE_BODY)
@@ -2171,18 +2251,25 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
         Some(s.summary),
         column![
             head,
-            Column::with_children(fundamentals).spacing(4),
+            Column::with_children(fundamentals).spacing(match tall {
+                true => 10,
+                false => 4,
+            }),
             level,
-            space::vertical().height(4),
+            gap(tall),
             phase(s.side_out, &live.side_out),
             phase(s.break_point, &live.break_points),
             attack(s.first_attack, &live.first_attack),
             attack(s.counter_attack, &live.counter_attack),
-            space::vertical().height(4),
+            gap(tall),
             ui::section(s.side_out_by_possession, c),
-            Column::with_children(possessions).spacing(4),
+            Column::with_children(possessions).spacing(match tall {
+                true => 10,
+                false => 4,
+            }),
         ]
-        .spacing(6),
+        .spacing(6)
+        .height(height(tall)),
         c,
     );
     let rotations = live.rotations.iter().map(|r| {
@@ -2203,14 +2290,16 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
             .width(Length::Fixed(90.0))
             .into()
         };
-        row![
-            ui::body(r.name.clone()).width(Length::Fill),
-            side(&r.side_out),
-            side(&r.break_points),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
+        share(
+            row![
+                ui::body(r.name.clone()).width(Length::Fill),
+                side(&r.side_out),
+                side(&r.break_points),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            tall,
+        )
     });
     let second = ui::panel(
         Some(s.rotations),
@@ -2225,9 +2314,12 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
                     .align_x(Alignment::End),
             ]
             .spacing(8),
-            Column::with_children(rotations).spacing(6),
+            Column::with_children(rotations)
+                .spacing(6)
+                .height(height(tall)),
         ]
-        .spacing(6),
+        .spacing(6)
+        .height(height(tall)),
         c,
     );
     let zone = |zone: u8| -> Element<'a, Message> {
@@ -2261,10 +2353,11 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
     let distribution: Element<'a, Message> = match live.distribution.is_empty() {
         true => small(s.no_attacks, c).into(),
         false => column![
-            row![zone(4), zone(3), zone(2)],
-            row![space::horizontal(), zone(8), zone(9)],
+            share(row![zone(4), zone(3), zone(2)], tall),
+            share(row![space::horizontal(), zone(8), zone(9)], tall),
         ]
         .spacing(10)
+        .height(height(tall))
         .into(),
     };
     let third = ui::panel(Some(s.distribution), distribution, c);
@@ -2312,12 +2405,14 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
                 &live.unforced_by_event,
                 false
             ),
+            gap(tall),
             group(
                 s.forced_errors,
                 live.forced_errors,
                 &live.forced_by_event,
                 true
             ),
+            gap(tall),
             row![
                 tile(
                     s.opponent_errors,
@@ -2336,18 +2431,38 @@ fn summary<'a>(live: &'a LiveStats, s: &'static Strings, c: Colors) -> Element<'
             ]
             .spacing(8),
         ]
-        .spacing(14),
+        .spacing(14)
+        .height(height(tall)),
         c,
     );
-    scrollable(
-        row![
-            container(first).width(Length::FillPortion(1)),
-            container(column![second, third].spacing(14)).width(Length::FillPortion(1)),
-            container(fourth).width(Length::FillPortion(1)),
-        ]
-        .spacing(14),
-    )
-    .into()
+    let columns = row![
+        container(first)
+            .width(Length::FillPortion(1))
+            .height(height(tall)),
+        container(
+            column![
+                container(second).height(match tall {
+                    true => Length::FillPortion(3),
+                    false => Length::Shrink,
+                }),
+                container(third).height(match tall {
+                    true => Length::FillPortion(2),
+                    false => Length::Shrink,
+                }),
+            ]
+            .spacing(14)
+        )
+        .width(Length::FillPortion(1))
+        .height(height(tall)),
+        container(fourth)
+            .width(Length::FillPortion(1))
+            .height(height(tall)),
+    ]
+    .spacing(14);
+    match tall {
+        true => columns.height(Length::Fill).into(),
+        false => scrollable(columns).into(),
+    }
 }
 
 fn error_name(event: EventTypeEnum, forced: bool, s: &Strings) -> String {

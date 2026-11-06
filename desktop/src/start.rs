@@ -396,11 +396,23 @@ impl StartScreen {
                         ..container::Style::default()
                     })
                 };
+                // the coin toss, said as on the court
                 column![
+                    container(ui::icon(theme::icons::COIN, 56.0, c.accent))
+                        .width(Length::Fill)
+                        .align_x(Alignment::Center),
+                    container(
+                        ui::body(s.serving_hint)
+                            .color(c.muted)
+                            .align_x(Alignment::Center)
+                    )
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center),
+                    space::vertical().height(4),
                     side(&self.lineup.team, TeamSideEnum::Us),
                     side(&self.lineup.opponent, TeamSideEnum::Them),
                 ]
-                .spacing(8)
+                .spacing(12)
                 .into()
             }
             _ if self.choices.is_empty() => ui::body(s.no_available_players).color(c.muted).into(),

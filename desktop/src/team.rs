@@ -387,29 +387,37 @@ impl TeamScreen {
                 line(s.classification, or_dash(&d.classification)),
                 line(s.gender, or_dash(&d.gender)),
                 line(s.country, or_dash(&d.country)),
-                space::vertical().height(6),
-                ui::pill(
-                    &format!("▤ {}", s.analysis),
+                space::vertical(),
+                ui::action(
+                    theme::icons::ANALYSIS,
+                    s.analysis,
+                    Message::Analysis,
                     false,
-                    Some(Message::Analysis),
                     c
-                ),
-                ui::pill(s.edit_team, false, Some(Message::EditTeam), c),
-                ui::pill(
-                    &format!("↑ {}", s.export_team),
+                )
+                .width(Length::Fill),
+                ui::action(theme::icons::EDIT, s.edit_team, Message::EditTeam, false, c)
+                    .width(Length::Fill),
+                ui::action(
+                    theme::icons::EXPORT,
+                    s.export_team,
+                    Message::Export,
                     false,
-                    Some(Message::Export),
                     c
-                ),
-                ui::pill(
-                    &format!("↓ {}", s.import_match),
+                )
+                .width(Length::Fill),
+                ui::action(
+                    theme::icons::IMPORT,
+                    s.import_match,
+                    Message::Import,
                     false,
-                    Some(Message::Import),
                     c
-                ),
+                )
+                .width(Length::Fill),
             ]
             .spacing(12)
-            .width(Length::Fill),
+            .width(Length::Fill)
+            .height(Length::Fill),
             c,
         )
     }

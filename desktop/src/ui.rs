@@ -325,6 +325,86 @@ pub fn icon_button<'a, M: Clone + 'a>(
     tip(button, what, c)
 }
 
+/// A button of what a screen offers to do (analysis, edit, export...):
+/// as tall as the round ones on the bar, its icon and its name; amber
+/// when `filled` (the main one, e.g. the next set).
+pub fn action<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    message: M,
+    filled: bool,
+    c: Colors,
+) -> iced::widget::Button<'a, M> {
+    let color = match filled {
+        true => c.on_accent,
+        false => c.text,
+    };
+    button(
+        container(
+            row![
+                icon(icon_bytes, 20.0, color),
+                text(label.to_string()).size(SIZE_BODY).color(color),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+        )
+        .center_y(Length::Fill),
+    )
+    .height(Length::Fixed(42.0))
+    .padding(Padding::from([0, 16]))
+    .on_press(message)
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: match (filled, hovered) {
+                (true, false) => Some(c.accent.into()),
+                (true, true) => Some(
+                    Color {
+                        a: 0.85,
+                        ..c.accent
+                    }
+                    .into(),
+                ),
+                (false, true) => Some(Color { a: 0.7, ..c.button }.into()),
+                (false, false) => None,
+            },
+            text_color: color,
+            border: border(
+                match (filled, hovered) {
+                    (true, _) | (false, true) => c.accent,
+                    (false, false) => c.border,
+                },
+                BORDER,
+                RADIUS_PILL,
+            ),
+            ..button::Style::default()
+        }
+    })
+}
+
+/// Buttons of `action` in rows of `per_row`, all as wide: the last row
+/// filled up with room.
+pub fn action_grid<'a, M: Clone + 'a>(
+    buttons: Vec<iced::widget::Button<'a, M>>,
+    per_row: usize,
+) -> Element<'a, M> {
+    let per_row = per_row.max(1);
+    let mut rows = vec![];
+    let mut buttons = buttons.into_iter().peekable();
+    while buttons.peek().is_some() {
+        let mut line: Vec<Element<'a, M>> = buttons
+            .by_ref()
+            .take(per_row)
+            .map(|b| b.width(Length::Fill).into())
+            .collect();
+        while line.len() < per_row {
+            line.push(space::horizontal().into());
+        }
+        rows.push(iced::widget::Row::with_children(line).spacing(10).into());
+    }
+    iced::widget::Column::with_children(rows).spacing(10).into()
+}
+
 /// The round amber button that adds one more to a list (a player, a
 /// match), on the title of its panel.
 pub fn add_button<'a, M: Clone + 'a>(what: &str, message: M, c: Colors) -> Element<'a, M> {

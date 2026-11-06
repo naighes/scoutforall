@@ -542,10 +542,13 @@ impl ScoutingScreen {
         let left = column![self.header(s, c), self.choices(s, c)]
             .spacing(14)
             .width(Length::Fixed(LEFT_WIDTH));
+        // the last events once there are some: before the first, the court
+        let last = (!self.snapshot.state.events.is_empty())
+            .then(|| container(self.last_events(s, c)).height(Length::FillPortion(1)));
         let middle = column![]
             .push(self.action(s, c))
             .push(container(self.court(c)).height(Length::FillPortion(3)))
-            .push(container(self.last_events(s, c)).height(Length::FillPortion(1)))
+            .push(last)
             .spacing(14)
             .width(Length::Fill);
         let body = match self.show_stats {
