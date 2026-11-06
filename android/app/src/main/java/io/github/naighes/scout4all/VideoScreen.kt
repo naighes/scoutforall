@@ -585,10 +585,16 @@ private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: ()
         }
         if (e.anchored) {
             Text("⚓", Modifier.readAs(stringResource(R.string.video_anchored)))
+        } else if (e.correctedMs != null) {
+            Text("✎", Modifier.readAs(stringResource(R.string.video_corrected)))
         }
         Text("${e.event.scoreUs}-${e.event.scoreThem}", style = MaterialTheme.typography.labelLarge, color = color)
     }
 }
+
+/** How far an event was moved, signed: `+3.0 s`, `−9.0 s`. */
+internal fun signedSeconds(ms: Long): String =
+    (if (ms < 0) "−" else "+") + String.format(java.util.Locale.getDefault(), "%.1f s", kotlin.math.abs(ms) / 1000.0)
 
 /** The time of the event in the video, `–` when not lined up; `<` before
  * the start, `>` past the end. */
@@ -618,6 +624,10 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
     if (outside > 0) {
         Text(stringResource(R.string.video_outside, outside), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+    val corrections = model.events.count { it.correctedMs != null }
+    if (corrections > 0) {
+        Text(stringResource(R.string.video_corrections, corrections), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
     model.events.getOrNull(model.selected)?.let { e ->
         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -642,6 +652,27 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
         Text(stringResource(R.string.video_anchor_time))
     }
     writing?.let { TimeDialog(model, it) { writing = null } }
+    // once tied to another event: the one chosen alone; put there, how far,
+    // and back
+    if (ready && model.timeOnlyThis()) {
+        OutlinedButton(onClick = model::correctHere, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.video_correct_here))
+        }
+        Text(stringResource(R.string.video_correct_here_explained), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    model.events.getOrNull(model.selected)?.correctedMs?.let { by ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.video_corrected_by, signedSeconds(by)),
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = model::uncorrect, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.video_uncorrect))
+            }
+        }
+    }
     val automatic = model.alignment != VideoAlignment.Missing
     Text(stringResource(R.string.video_shift), style = MaterialTheme.typography.titleSmall)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -670,6 +701,7 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
 private fun TimeDialog(model: VideoModel, initial: String, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(initial) }
     var invalid by remember { mutableStateOf(false) }
+    val onlyThis = remember { model.timeOnlyThis() }
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -683,10 +715,16 @@ private fun TimeDialog(model: VideoModel, initial: String, onDismiss: () -> Unit
                 },
                 singleLine = true,
                 isError = invalid,
-                supportingText = if (invalid) {
-                    { Text(stringResource(R.string.video_invalid_time)) }
-                } else {
-                    null
+                supportingText = {
+                    Text(
+                        stringResource(
+                            when {
+                                invalid -> R.string.video_invalid_time
+                                onlyThis -> R.string.video_time_only_this
+                                else -> R.string.video_time_aligns_all
+                            },
+                        ),
+                    )
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
             )

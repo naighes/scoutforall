@@ -107,6 +107,9 @@ pub struct VideoEventRow {
     pub inside: bool,
     /// the event tied to the video by hand
     pub anchored: bool,
+    /// put at its own time by the user: how far from where the anchor puts
+    /// it
+    pub corrected_ms: Option<i64>,
 }
 
 /// How the match stands at a moment of the video: after the last event
@@ -430,22 +433,47 @@ impl VideoReview {
     }
 
     /// The event shown at `index` happens at `ms` in the video: all of
-    /// them lined up with it.
+    /// them lined up with it (its own correction gone).
     pub fn anchor_here(&self, index: u32, ms: u64) -> Result<(), MobileError> {
-        let mut st = self.state();
-        let Some(e) = st.shown().nth(index as usize).cloned() else {
-            return Ok(());
-        };
-        let at = i64::try_from(ms).unwrap_or(i64::MAX);
-        let anchor = video::anchor_on(event_ref(&e), e.timestamp, at);
-        self.save_anchor(&mut st, Some(anchor))
+        self.with_event(index, |profile, e| {
+            profile.tied_to(event_ref(e), e.timestamp, millis(ms))
+        })
+    }
+
+    /// The event shown at `index` alone at `ms` in the video, the others
+    /// where they are.
+    pub fn correct_here(&self, index: u32, ms: u64) -> Result<(), MobileError> {
+        self.with_event(index, |profile, e| match uncorrected(e) {
+            Some(placed) => profile.corrected(event_ref(e), millis(ms) - placed),
+            None => profile.clone(),
+        })
+    }
+
+    /// The event shown at `index` back where the anchor puts it.
+    pub fn uncorrect(&self, index: u32) -> Result<(), MobileError> {
+        self.with_event(index, |profile, e| profile.corrected(event_ref(e), 0))
+    }
+
+    /// Whether a time written for the event shown at `index` moves it
+    /// alone (the video tied to another event) rather than all of them.
+    pub fn time_only_this(&self, index: u32) -> bool {
+        let st = self.state();
+        let profile = st.current_profile();
+        st.shown()
+            .nth(index as usize)
+            .is_some_and(|e| profile.time_effect(event_ref(e)) == video::TimeEffect::OnlyThis)
     }
 
     /// The time written of the event at `index` (`m:ss`, `m:ss.s`,
-    /// `h:mm:ss` or seconds): false when it isn't a time.
+    /// `h:mm:ss` or seconds): the first ties the video, then the event
+    /// alone (`VideoProfile::with_time`); false when it isn't a time.
     pub fn anchor_written(&self, index: u32, written: String) -> Result<bool, MobileError> {
         match parse_time(&written) {
-            Some(ms) => self.anchor_here(index, ms).map(|()| true),
+            Some(ms) => self
+                .with_event(index, |profile, e| {
+                    profile.with_time(event_ref(e), e.timestamp, uncorrected(e), millis(ms))
+                })
+                .map(|()| true),
             None => Ok(false),
         }
     }
@@ -483,10 +511,13 @@ impl VideoReview {
         }
     }
 
-    /// Back to the sync found by itself.
+    /// Back to the sync found by itself, no event corrected.
     pub fn automatic(&self) -> Result<(), MobileError> {
         let mut st = self.state();
-        self.save_anchor(&mut st, None)
+        match st.profile.clone() {
+            Some(profile) => self.save(&mut st, profile.automatic()),
+            None => Ok(()),
+        }
     }
 
     /// Where the video goes for the event shown at `index`: `lead_ms` before
@@ -592,6 +623,22 @@ impl VideoReview {
         Ok(())
     }
 
+    /// The profile changed for the event shown at `index`, saved.
+    fn with_event(
+        &self,
+        index: u32,
+        change: impl FnOnce(&VideoProfile, &VideoEvent) -> VideoProfile,
+    ) -> Result<(), MobileError> {
+        let mut st = self.state();
+        let (Some(profile), Some(e)) =
+            (st.profile.clone(), st.shown().nth(index as usize).cloned())
+        else {
+            return Ok(());
+        };
+        let changed = change(&profile, &e);
+        self.save(&mut st, changed)
+    }
+
     fn save(&self, st: &mut Review, profile: VideoProfile) -> Result<(), MobileError> {
         self.core.save_video(&st.the_match, &profile)?;
         st.profile = Some(profile);
@@ -638,6 +685,7 @@ impl Review {
             offset_ms: e.offset_ms,
             inside: inside(e.offset_ms, total),
             anchored: self.anchored() == Some(event_ref(e)),
+            corrected_ms: e.corrected_ms,
         }
     }
 
@@ -688,6 +736,15 @@ fn percent_decoded(text: &str) -> String {
 }
 
 /// The event as an anchor names it.
+/// Where the anchor puts the event, without its correction.
+pub fn uncorrected(e: &VideoEvent) -> Option<i64> {
+    e.offset_ms.map(|ms| ms - e.corrected_ms.unwrap_or(0))
+}
+
+fn millis(ms: u64) -> i64 {
+    i64::try_from(ms).unwrap_or(i64::MAX)
+}
+
 pub fn event_ref(e: &VideoEvent) -> EventRef {
     EventRef {
         set_number: e.set_number,
@@ -1086,6 +1143,52 @@ mod tests {
         assert_eq!(review.written_time(0, 0), "1:30.5");
         review.automatic().unwrap();
         assert_eq!(review.alignment(), VideoAlignment::Missing);
+    }
+
+    /// The first time written ties the video; then a time written, or the
+    /// moment of the video, puts the event alone there; it moves with the
+    /// video, comes back where the video puts it, goes with automatic.
+    #[test]
+    fn an_event_put_at_its_own_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, team, m) = imported(&dir);
+        let review = app.clone().video_review(team, m, None).unwrap();
+        review.add_files(vec![file("partita.mp4")], 0).unwrap();
+        review.set_durations(vec![3 * 3600 * 1000]).unwrap();
+        let at = |i: usize| review.events()[i].offset_ms;
+        assert!(!review.time_only_this(1));
+        assert!(review.anchor_written(0, "1:00".into()).unwrap());
+        assert_eq!(at(0), Some(60_000));
+        let placed: Vec<Option<i64>> = review.events().iter().map(|e| e.offset_ms).collect();
+        // the video tied to the first: a time for another, it alone
+        assert!(review.time_only_this(1) && !review.time_only_this(0));
+        assert!(review.anchor_written(1, "1:05".into()).unwrap());
+        let events = review.events();
+        assert_eq!(events[1].offset_ms, Some(65_000));
+        assert_eq!(
+            events[1].corrected_ms,
+            placed[1].map(|p| 65_000 - p),
+            "how far from where the video put it"
+        );
+        assert_eq!((at(0), at(2)), (placed[0], placed[2]));
+        assert!(events[0].anchored && events[0].corrected_ms.is_none());
+        // at the moment of the video
+        review.correct_here(2, 80_000).unwrap();
+        assert_eq!(at(2), Some(80_000));
+        // shifted: the ones corrected with the others
+        review.shift(500).unwrap();
+        assert_eq!((at(0), at(1)), (Some(60_500), Some(65_500)));
+        // back where the video puts it
+        review.uncorrect(1).unwrap();
+        assert_eq!(at(1), placed[1].map(|p| p + 500));
+        assert_eq!(review.events()[1].corrected_ms, None);
+        // the video tied to a corrected one: its correction gone
+        review.anchor_here(2, 90_000).unwrap();
+        assert_eq!(at(2), Some(90_000));
+        assert!(review.events()[2].anchored && review.events()[2].corrected_ms.is_none());
+        review.correct_here(3, 100_000).unwrap();
+        review.automatic().unwrap();
+        assert!(review.events().iter().all(|e| e.corrected_ms.is_none()));
     }
 
     /// The actions of a statistic: only them, the next clip not at the

@@ -371,7 +371,7 @@
     <string name="video_sync">同期</string>
     <string name="video_files">ファイル</string>
     <string name="video_anchor_here">ここで同期</string>
-    <string name="video_anchor_here_explained">選んだイベントを、いまのビデオの位置に合わせます</string>
+    <string name="video_anchor_here_explained">選んだイベントを、いまのビデオの位置に合わせます。すべてのイベントが一緒に動きます</string>
     <string name="video_anchor_time">イベントの時間</string>
     <string name="video_shift">同期をずらす</string>
     <string name="video_earlier_half">イベントを0.5秒前へ</string>
@@ -383,6 +383,14 @@
     <string name="video_overlay_explained">セット、スコア、フェーズ、ローテーションを映像に重ねて表示します</string>
     <string name="video_invalid_time">時間が正しくありません。m:ss または m:ss.s で入力してください</string>
     <string name="video_anchored">ビデオの同期の基準になっているイベント</string>
+    <string name="video_correct_here">このイベントだけここに</string>
+    <string name="video_correct_here_explained">選んだイベントだけを、いまのビデオの位置に置きます。ほかのイベントは動きません</string>
+    <string name="video_time_aligns_all">このイベントでビデオを同期し、すべてのイベントが動きます</string>
+    <string name="video_time_only_this">このイベントだけ。ほかのイベントは動きません</string>
+    <string name="video_corrected_by">手動で修正した時間: %1$s</string>
+    <string name="video_uncorrect">修正を取り消す</string>
+    <string name="video_corrections">手動で修正した時間: %1$d</string>
+    <string name="video_corrected">手動で修正した時間</string>
     <string name="video_add_files">ファイルを追加</string>
     <string name="video_move_earlier">前へ</string>
     <string name="video_move_later">後へ</string>

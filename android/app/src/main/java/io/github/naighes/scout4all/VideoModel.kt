@@ -404,6 +404,17 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         return done
     }
 
+    /** The event chosen alone where the video is, the others where they
+     * are. */
+    fun correctHere() = change { it.correctHere(selected.toUInt(), position.toULong()) }
+
+    /** The event chosen back where the sync puts it. */
+    fun uncorrect() = change { it.uncorrect(selected.toUInt()) }
+
+    /** Whether a time for the event chosen moves it alone (the video tied
+     * to another event) rather than all of them. */
+    fun timeOnlyThis(): Boolean = events.getOrNull(selected) != null && review?.timeOnlyThis(selected.toUInt()) == true
+
     fun writtenTime(): String = review?.writtenTime(selected.toUInt(), position.toULong()).orEmpty()
 
     fun shift(ms: Long) = change { it.shift(ms) }

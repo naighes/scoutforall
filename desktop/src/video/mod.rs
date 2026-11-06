@@ -7,7 +7,9 @@
 //! choose one, Enter (or a click) goes a little before it. By hand (when
 //! the clocks differ): `a` ties the event chosen to the moment of the
 //! video, `t` to a time written, `[` `]` shift all by half a second, `r`
-//! goes back to the sync found by itself. Only the desktop app has it: the
+//! goes back to the sync found by itself. Once tied to an event, another
+//! one can be put alone at its time (`t`, or `e` at the moment of the
+//! video), the others where they are; Backspace puts it back. Only the desktop app has it: the
 //! profile (`video.json`) is saved next to the match.
 
 mod files;
@@ -33,14 +35,17 @@ use {
     player::{Player, Status},
     scout4all_core::{
         shapes::{enums::PhaseEnum, r#match::MatchEntry},
-        video::{self, Anchor, AnchorSource, EventRef, StoredProfile, VideoFile, VideoProfile},
+        video::{
+            self, Anchor, AnchorSource, EventRef, StoredProfile, TimeEffect, VideoFile,
+            VideoProfile,
+        },
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         MatchClips, MobileError, Scout4All, VideoEvent,
         video::{
             VideoStanding as Standing, current, event_ref, inside, parse_time, standing, target,
-            written,
+            uncorrected, written,
         },
     },
     std::{
@@ -100,6 +105,10 @@ pub enum Message {
     Event(usize),
     /// the event chosen tied to the moment of the video
     AnchorHere,
+    /// the event chosen alone at the moment of the video
+    CorrectHere,
+    /// the event chosen back where the sync puts it
+    Uncorrect,
     /// the sync shifted, the events later in the video when positive
     Shift(i64),
     /// back to the sync found by itself
@@ -655,16 +664,12 @@ impl VideoScreen {
             .and_then(|a| a.event)
     }
 
-    /// The anchor saved in place of the one there: the events lined up
-    /// again.
-    fn save_anchor(&mut self, anchor: Option<Anchor>) {
+    /// The profile changed saved: the events lined up again.
+    fn save_profile(&mut self, change: impl FnOnce(&VideoProfile) -> VideoProfile) {
         let Some(profile) = &self.profile else {
             return;
         };
-        let profile = VideoProfile {
-            anchor,
-            ..profile.clone()
-        };
+        let profile = change(profile);
         match self.core.save_video(&self.the_match, &profile) {
             Ok(()) => {
                 self.profile = Some(profile);
@@ -676,14 +681,48 @@ impl VideoScreen {
         }
     }
 
-    /// The event chosen happens at `ms` in the video.
+    /// The profile changed for the event chosen, saved.
+    fn save_for_event(&mut self, change: impl FnOnce(&VideoProfile, &VideoEvent) -> VideoProfile) {
+        if let Some(e) = self.events.get(self.selected).cloned() {
+            self.save_profile(|profile| change(profile, &e));
+        }
+    }
+
+    /// The video tied to the event chosen at `ms`: all of them move.
     fn anchor_event(&mut self, ms: u64) {
-        let Some(e) = self.events.get(self.selected) else {
-            return;
-        };
-        let at = i64::try_from(ms).unwrap_or(i64::MAX);
-        self.save_anchor(Some(video::anchor_on(event_ref(e), e.timestamp, at)));
+        self.save_for_event(|profile, e| profile.tied_to(event_ref(e), e.timestamp, millis(ms)));
         self.whole = false;
+    }
+
+    /// The event chosen alone at `ms`, the others where they are.
+    fn correct_event(&mut self, ms: u64) {
+        self.save_for_event(|profile, e| match uncorrected(e) {
+            Some(placed) => profile.corrected(event_ref(e), millis(ms) - placed),
+            None => profile.clone(),
+        });
+    }
+
+    /// The event chosen back where the sync puts it.
+    fn uncorrect_event(&mut self) {
+        self.save_for_event(|profile, e| profile.corrected(event_ref(e), 0));
+    }
+
+    /// What a time for the event chosen does: none without events.
+    fn time_effect(&self) -> Option<TimeEffect> {
+        let e = self.events.get(self.selected)?;
+        let profile = self.profile.as_ref()?;
+        Some(profile.time_effect(event_ref(e)))
+    }
+
+    /// How far the event chosen was put from where the sync puts it.
+    fn chosen_correction(&self) -> Option<i64> {
+        self.events.get(self.selected).and_then(|e| e.corrected_ms)
+    }
+
+    /// Back to the sync found by itself: no anchor, no correction.
+    fn automatic(&mut self) {
+        self.save_profile(VideoProfile::automatic);
+        self.after_start();
     }
 
     /// All the events shifted by `ms` in the video: the sync found by
@@ -694,10 +733,13 @@ impl VideoScreen {
             .as_ref()
             .and_then(|p| video::anchor(p, &self.the_match));
         if let Some(anchor) = current {
-            self.save_anchor(Some(Anchor {
-                offset_ms: anchor.offset_ms + ms,
-                ..anchor
-            }));
+            self.save_profile(|profile| VideoProfile {
+                anchor: Some(Anchor {
+                    offset_ms: anchor.offset_ms + ms,
+                    ..anchor
+                }),
+                ..profile.clone()
+            });
         }
     }
 
@@ -721,7 +763,10 @@ impl VideoScreen {
             Some(Some(ms)) => {
                 self.editing = None;
                 self.invalid_time = false;
-                self.anchor_event(ms);
+                self.save_for_event(|profile, e| {
+                    profile.with_time(event_ref(e), e.timestamp, uncorrected(e), millis(ms))
+                });
+                self.whole = false;
                 self.go_to_event(self.selected);
             }
             Some(None) => self.invalid_time = true,
@@ -1079,11 +1124,10 @@ impl VideoScreen {
             }
             Message::Event(i) => self.go_to_event(i),
             Message::AnchorHere => self.anchor_event(self.position()),
+            Message::CorrectHere => self.correct_event(self.position()),
+            Message::Uncorrect => self.uncorrect_event(),
             Message::Shift(ms) => self.shift(ms),
-            Message::Automatic => {
-                self.save_anchor(None);
-                self.after_start();
-            }
+            Message::Automatic => self.automatic(),
             Message::WholeVideo => {
                 self.whole = !self.whole;
                 self.after_start();
@@ -1161,7 +1205,15 @@ impl VideoScreen {
             k if k == key!(t) => self.edit_time(),
             k if k == key!('[') => self.shift(-SHIFT_MS),
             k if k == key!(']') => self.shift(SHIFT_MS),
-            k if k == key!(r) => self.save_anchor(None),
+            k if k == key!(r) => self.automatic(),
+            k if k == key!(e) && self.time_effect() == Some(TimeEffect::OnlyThis) => {
+                self.correct_event(self.position());
+            }
+            k if (k == key!(backspace) || k == key!(delete))
+                && self.chosen_correction().is_some() =>
+            {
+                self.uncorrect_event();
+            }
             k if k == key!(k) => self.toggle_clip(),
             k if k == key!(i) => self.toggle_overlay(),
             k if k == key!(w) => self.detached = !self.detached,
@@ -1178,7 +1230,8 @@ impl VideoScreen {
     }
 
     /// The keys, the short way: the ones with a button of their own on
-    /// screen (the speed `-` `+`, the file `c` once chosen, `r`) left out,
+    /// screen (the speed `-` `+`, the file `c` once chosen, `r`, `e` and
+    /// Backspace, said in the tips of their buttons) left out,
     /// for the bar to fit.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         if self.margin_text.is_some() {
@@ -1416,6 +1469,13 @@ impl VideoScreen {
             .iter()
             .filter(|e| e.offset_ms.is_some() && !inside(e.offset_ms, duration))
             .count();
+        let said = match profile.corrections.len() {
+            0 => said,
+            n => format!(
+                "{said} · {}",
+                ui::fill(s.corrections_count, &[n.to_string()])
+            ),
+        };
         match (source, outside) {
             (None, _) => (said, false),
             (Some(_), 0) => (said, true),
@@ -1508,9 +1568,12 @@ impl VideoScreen {
                             ..c.accent
                         },
                     }),
-                match self.invalid_time {
-                    true => text(s.invalid_time).size(SIZE_SMALL).color(c.danger),
-                    false => text(s.anchor_time).size(SIZE_SMALL).color(c.muted),
+                match (self.invalid_time, self.time_effect()) {
+                    (true, _) => text(s.invalid_time).size(SIZE_SMALL).color(c.danger),
+                    (false, Some(TimeEffect::OnlyThis)) => {
+                        text(s.time_only_this).size(SIZE_SMALL).color(c.muted)
+                    }
+                    (false, _) => text(s.time_aligns_all).size(SIZE_SMALL).color(c.muted),
                 },
             ]
             .spacing(4)
@@ -1536,7 +1599,11 @@ impl VideoScreen {
         .spacing(8)
         .align_y(Alignment::Center);
         let automatic: Element<'a, Message> = match self.anchored_by_hand() {
-            true => ui::pill(s.automatic_sync, false, Some(Message::Automatic), c),
+            true => ui::tip(
+                ui::pill(s.automatic_sync, false, Some(Message::Automatic), c),
+                s.automatic_sync_explained,
+                c,
+            ),
             false => space::horizontal().width(0).into(),
         };
         let redo: Element<'a, Message> = match (self.player.is_some(), self.first_ms) {
@@ -1548,11 +1615,44 @@ impl VideoScreen {
             _ => space::horizontal().width(0).into(),
         };
         let here: Element<'a, Message> = match self.player {
-            Some(_) => ui::pill(s.anchor_here, true, Some(Message::AnchorHere), c),
+            Some(_) => ui::tip(
+                ui::pill(s.anchor_here, true, Some(Message::AnchorHere), c),
+                s.anchor_here_explained,
+                c,
+            ),
+            None => space::horizontal().width(0).into(),
+        };
+        // once tied to another event: the one chosen alone; put there, how
+        // far, and back
+        let only: Element<'a, Message> = match (&self.player, self.time_effect()) {
+            (Some(_), Some(TimeEffect::OnlyThis)) => ui::tip(
+                ui::pill(s.correct_here, false, Some(Message::CorrectHere), c),
+                &format!("{} (e)", s.correct_here_explained),
+                c,
+            ),
+            _ => space::horizontal().width(0).into(),
+        };
+        let corrected: Element<'a, Message> = match self.chosen_correction() {
+            Some(by) => row![
+                text(ui::fill(s.corrected_by, &[list::seconds(by)]))
+                    .size(SIZE_SMALL)
+                    .color(c.muted),
+                ui::tip(
+                    ui::pill(s.uncorrect, false, Some(Message::Uncorrect), c),
+                    "⌫",
+                    c,
+                ),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .wrap()
+            .into(),
             None => space::horizontal().width(0).into(),
         };
         column![
             row![here, time].spacing(8).align_y(Alignment::Center),
+            only,
+            corrected,
             shift,
             row![redo, automatic].spacing(8).align_y(Alignment::Center),
         ]
@@ -2019,6 +2119,10 @@ fn overlay_name(name: &str) -> String {
 
 pub use scout4all_mobile::video::video_clock as clock;
 
+fn millis(ms: u64) -> i64 {
+    i64::try_from(ms).unwrap_or(i64::MAX)
+}
+
 #[cfg(test)]
 pub(crate) mod screen_tests {
     use {
@@ -2058,6 +2162,66 @@ pub(crate) mod screen_tests {
         };
         core.save_video(&the_match, &profile).unwrap();
         VideoScreen::new(core, dir.path().to_path_buf(), team, m).unwrap()
+    }
+
+    /// The time written for the event chosen, as with the field.
+    fn write_time(screen: &mut VideoScreen, written: &str) {
+        screen.update(Message::EditTime);
+        screen.update(Message::TimeInput(written.into()));
+        screen.update(Message::TimeSubmit);
+    }
+
+    /// The case of the user: the serve at 0:00 ties the video; the block
+    /// written at 0:06 moves alone, the serve stays at 0:00 (it went to
+    /// before the video, the block tied in its place); `e` at the moment of
+    /// the video, Backspace back, automatic without corrections.
+    #[test]
+    fn the_first_time_ties_the_video_then_each_event_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "match.mp4");
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        assert!(screen.events.iter().all(|e| e.offset_ms.is_none()));
+        write_time(&mut screen, "0:00.0");
+        assert_eq!(screen.events[0].offset_ms, Some(0));
+        let block = screen
+            .events
+            .iter()
+            .position(|e| e.offset_ms > Some(6_000))
+            .unwrap();
+        let placed: Vec<Option<i64>> = screen.events.iter().map(|e| e.offset_ms).collect();
+        screen.go_to_event(block);
+        assert_eq!(screen.time_effect(), Some(TimeEffect::OnlyThis));
+        write_time(&mut screen, "0:6.0");
+        assert_eq!(screen.events[block].offset_ms, Some(6_000));
+        assert_eq!(screen.events[0].offset_ms, Some(0), "the serve stays");
+        assert_eq!(screen.anchored(), Some(event_ref(&screen.events[0])));
+        assert_eq!(screen.events[block + 1].offset_ms, placed[block + 1]);
+        assert_eq!(screen.chosen_correction(), placed[block].map(|p| 6_000 - p));
+        let (said, _) = screen.alignment(s);
+        assert!(
+            said.contains(&ui::fill(s.corrections_count, &["1".into()])),
+            "{said}"
+        );
+        // back where the video puts it
+        screen.key(key!(backspace));
+        assert_eq!(screen.events[block].offset_ms, placed[block]);
+        assert_eq!(screen.chosen_correction(), None);
+        // `e`: at the moment of the video (no file here: its start)
+        screen.key(key!(e));
+        assert_eq!(screen.events[block].offset_ms, Some(0));
+        // the serve chosen: its time moves all, the correction with them
+        screen.key(key!(up));
+        while screen.selected > 0 {
+            screen.key(key!(up));
+        }
+        assert_eq!(screen.time_effect(), Some(TimeEffect::AlignAll));
+        write_time(&mut screen, "0:01.0");
+        assert_eq!(screen.events[0].offset_ms, Some(1_000));
+        assert_eq!(screen.events[block].offset_ms, Some(1_000));
+        // back to automatic: no correction (and here not lined up)
+        screen.key(key!(r));
+        assert!(screen.profile.as_ref().unwrap().corrections.is_empty());
+        assert!(screen.events.iter().all(|e| e.corrected_ms.is_none()));
     }
 
     /// The file starting at midnight of the match: each event at its time

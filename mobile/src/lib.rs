@@ -2521,6 +2521,9 @@ pub struct VideoEvent {
     pub timestamp: DateTime<Utc>,
     /// where it is in the video, from the start of the first file
     pub offset_ms: Option<i64>,
+    /// put at its own time by the user: how far from where the anchor puts
+    /// it (`VideoProfile::correction`)
+    pub corrected_ms: Option<i64>,
     /// after it, for the rally to come: our rotation ("-" without the
     /// setter on the court) and the phase, to show over the video (the
     /// score is the event's)
@@ -2613,15 +2616,23 @@ impl Scout4All {
                     .iter()
                     .zip(rows)
                     .zip(states)
-                    .map(|((e, row), state)| VideoEvent {
-                        set_number: set.set_number,
-                        event: row,
-                        timestamp: e.timestamp,
-                        offset_ms: place(profile, m, durations_ms, e.timestamp),
-                        rotation: state
-                            .rotation
-                            .map_or_else(|| "-".to_string(), |r| rotation_name(r, labels)),
-                        phase: state.phase,
+                    .map(|((e, row), state)| {
+                        let corrected_ms = profile.correction(EventRef {
+                            set_number: set.set_number,
+                            index: row.index as usize,
+                        });
+                        VideoEvent {
+                            set_number: set.set_number,
+                            event: row,
+                            timestamp: e.timestamp,
+                            offset_ms: place(profile, m, durations_ms, e.timestamp)
+                                .map(|ms| ms + corrected_ms.unwrap_or(0)),
+                            corrected_ms,
+                            rotation: state
+                                .rotation
+                                .map_or_else(|| "-".to_string(), |r| rotation_name(r, labels)),
+                            phase: state.phase,
+                        }
                     }),
             );
         }

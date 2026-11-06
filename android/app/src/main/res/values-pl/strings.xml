@@ -374,7 +374,7 @@
     <string name="video_sync">Synchronizacja</string>
     <string name="video_files">Pliki</string>
     <string name="video_anchor_here">Synchronizuj tutaj</string>
-    <string name="video_anchor_here_explained">Wybrane zdarzenie dzieje się w miejscu, w którym jest teraz wideo</string>
+    <string name="video_anchor_here_explained">Wybrane zdarzenie dzieje się w miejscu, w którym jest teraz wideo: wszystkie zdarzenia przesuwają się razem z nim</string>
     <string name="video_anchor_time">Czas zdarzenia</string>
     <string name="video_shift">Przesuń synchronizację</string>
     <string name="video_earlier_half">Zdarzenia pół sekundy wcześniej</string>
@@ -386,6 +386,14 @@
     <string name="video_overlay_explained">Set, wynik, faza i rotacja na wideo</string>
     <string name="video_invalid_time">Nieprawidłowy czas: wpisz jako m:ss lub m:ss.s</string>
     <string name="video_anchored">zdarzenie, z którym zsynchronizowano wideo</string>
+    <string name="video_correct_here">Tylko to zdarzenie tutaj</string>
+    <string name="video_correct_here_explained">Tylko wybrane zdarzenie w miejscu, w którym jest teraz wideo: pozostałe zostają na swoich miejscach</string>
+    <string name="video_time_aligns_all">Wideo zsynchronizowane z tym zdarzeniem: przesuwają się wszystkie</string>
+    <string name="video_time_only_this">Tylko to zdarzenie: pozostałe zostają na swoich miejscach</string>
+    <string name="video_corrected_by">Czas poprawiony ręcznie: %1$s</string>
+    <string name="video_uncorrect">Usuń korektę</string>
+    <string name="video_corrections">Czasy poprawione ręcznie: %1$d</string>
+    <string name="video_corrected">czas poprawiony ręcznie</string>
     <string name="video_add_files">Dodaj pliki</string>
     <string name="video_move_earlier">Wcześniej</string>
     <string name="video_move_later">Później</string>

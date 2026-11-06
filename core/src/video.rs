@@ -14,6 +14,12 @@
 //! - otherwise, the start of the first file, from its name (e.g.
 //!   `20261101 175252.mp4`): the events scouted here have the time of the
 //!   clock.
+//!
+//! An event can then be put at its own time, the others where they are: a
+//! correction, saved as how far from where the anchor puts it, so that it
+//! moves with the anchor. The first time written ties the video (an anchor);
+//! once the video is tied to an event, a time written for another one is a
+//! correction (`with_time`).
 
 use crate::{
     errors::{AppError, IOError},
@@ -43,6 +49,9 @@ pub struct VideoProfile {
     /// Chosen by the user; none: found by itself (`anchor`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<Anchor>,
+    /// The events put at their own time by the user.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corrections: Vec<Correction>,
 }
 
 impl Default for VideoProfile {
@@ -51,6 +60,91 @@ impl Default for VideoProfile {
             version: VIDEO_PROFILE_VERSION,
             files: vec![],
             anchor: None,
+            corrections: vec![],
+        }
+    }
+}
+
+/// An event put at its own time: `by_ms` later than where the anchor puts it
+/// (earlier when negative).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Correction {
+    pub event: EventRef,
+    pub by_ms: i64,
+}
+
+/// What a time written for an event does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeEffect {
+    /// all the events move with it: the video tied to it
+    AlignAll,
+    /// it alone, the others where they are
+    OnlyThis,
+}
+
+impl VideoProfile {
+    /// How far the event was put from where the anchor puts it, if at all.
+    pub fn correction(&self, event: EventRef) -> Option<i64> {
+        self.corrections
+            .iter()
+            .find(|c| c.event == event)
+            .map(|c| c.by_ms)
+    }
+
+    /// What a time written for the event does: once the video is tied to
+    /// another event, it alone moves.
+    pub fn time_effect(&self, event: EventRef) -> TimeEffect {
+        match self.anchor.as_ref().and_then(|a| a.event) {
+            Some(tied) if tied != event => TimeEffect::OnlyThis,
+            _ => TimeEffect::AlignAll,
+        }
+    }
+
+    /// The event at `at_ms` in the video (`time_effect`): the video tied to
+    /// it, or it alone put there; `placed_ms` is where the anchor puts it
+    /// (none: not lined up, the video tied to it).
+    pub fn with_time(
+        &self,
+        event: EventRef,
+        timestamp: DateTime<Utc>,
+        placed_ms: Option<i64>,
+        at_ms: i64,
+    ) -> VideoProfile {
+        match (self.time_effect(event), placed_ms) {
+            (TimeEffect::OnlyThis, Some(placed)) => self.corrected(event, at_ms - placed),
+            _ => self.tied_to(event, timestamp, at_ms),
+        }
+    }
+
+    /// The video tied to the event at `at_ms`: the others move with it, its
+    /// own correction gone.
+    pub fn tied_to(&self, event: EventRef, timestamp: DateTime<Utc>, at_ms: i64) -> VideoProfile {
+        VideoProfile {
+            anchor: Some(anchor_on(event, timestamp, at_ms)),
+            ..self.corrected(event, 0)
+        }
+    }
+
+    /// The event `by_ms` from where the anchor puts it; 0: back there.
+    pub fn corrected(&self, event: EventRef, by_ms: i64) -> VideoProfile {
+        let others = self
+            .corrections
+            .iter()
+            .filter(|c| c.event != event)
+            .copied();
+        let this = (by_ms != 0).then_some(Correction { event, by_ms });
+        VideoProfile {
+            corrections: others.chain(this).collect(),
+            ..self.clone()
+        }
+    }
+
+    /// Back to the sync found by itself: no anchor, no correction.
+    pub fn automatic(&self) -> VideoProfile {
+        VideoProfile {
+            anchor: None,
+            corrections: vec![],
+            ..self.clone()
         }
     }
 }

@@ -30,6 +30,16 @@ fn time(offset_ms: Option<i64>, duration_ms: Option<u64>) -> String {
     }
 }
 
+/// How far an event was moved, signed: `+3.0 s`, `−9.0 s`.
+pub fn seconds(ms: i64) -> String {
+    let sign = match ms < 0 {
+        true => "−",
+        false => "+",
+    };
+    let tenths = (ms.unsigned_abs() + 50) / 100;
+    format!("{sign}{}.{} s", tenths / 10, tenths % 10)
+}
+
 fn row_of<'a>(
     e: &VideoEvent,
     i: usize,
@@ -56,9 +66,19 @@ fn row_of<'a>(
             .into(),
         None => column![].into(),
     };
-    // the event the video is tied to: its time lit, a pin
-    let at: Element<'a, Message> = match anchored {
-        true => ui::tip(
+    // the event the video is tied to: its time lit, an anchor; one put at
+    // its own time: a pencil, how far in the tip
+    let at: Element<'a, Message> = match (anchored, e.corrected_ms) {
+        (false, Some(by)) => ui::tip(
+            text(format!("✎ {}", time(e.offset_ms, duration_ms)))
+                .size(SIZE_SMALL)
+                .font(bold)
+                .color(c.text)
+                .shaping(text::Shaping::Advanced),
+            &ui::fill(s.corrected_by, &[seconds(by)]),
+            c,
+        ),
+        (true, _) => ui::tip(
             text(format!("⚓ {}", time(e.offset_ms, duration_ms)))
                 .size(SIZE_SMALL)
                 .font(bold)
@@ -67,7 +87,7 @@ fn row_of<'a>(
             s.anchored_event,
             c,
         ),
-        false => text(time(e.offset_ms, duration_ms))
+        (false, None) => text(time(e.offset_ms, duration_ms))
             .size(SIZE_SMALL)
             .color(c.muted)
             .into(),
@@ -128,6 +148,10 @@ mod tests {
         assert_eq!(time(Some(5_686_000), Some(3_708_650)), ">1:01:48");
         assert!(inside(Some(0), Some(10)));
         assert!(!inside(Some(11), Some(10)));
+        assert_eq!(seconds(3000), "+3.0 s");
+        assert_eq!(seconds(-9040), "−9.0 s");
+        assert_eq!(seconds(9582), "+9.6 s");
+        assert_eq!(seconds(-500), "−0.5 s");
         assert!(!inside(Some(-1), None));
         assert!(!inside(None, None));
     }
