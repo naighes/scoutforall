@@ -361,15 +361,13 @@ impl EventsScreen {
             (_, Some(error), _) => ui::body(error.clone()).color(c.danger).into(),
             (true, None, _) => ui::body(s.corrected).color(c.accent).into(),
             (false, None, false) => ui::body(s.lineup_fixed).color(c.muted).into(),
-            (false, None, true) => container(ui::pill(
-                &format!("Enter  {}", s.correct),
-                true,
+            (false, None, true) => ui::answers(
+                None,
+                theme::icons::EDIT,
+                s.correct,
                 Some(Message::Event(self.selected)),
                 c,
-            ))
-            .width(Length::Fill)
-            .align_x(Alignment::End)
-            .into(),
+            ),
         };
         ui::panel(
             Some(&ui::fill(s.event_n, &[(e.index + 1).to_string()])),
@@ -491,20 +489,13 @@ impl EventsScreen {
                 )
                 .height(Length::Fill),
                 error,
-                container(
-                    row![
-                        ui::pill(
-                            &format!("Esc  {}", s.cancel),
-                            false,
-                            Some(Message::Cancel),
-                            c
-                        ),
-                        ui::pill(&format!("Enter  {}", s.save), true, Some(Message::Save), c),
-                    ]
-                    .spacing(10)
-                )
-                .width(Length::Fill)
-                .align_x(Alignment::End),
+                ui::answers(
+                    Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
+                    theme::icons::CHECK,
+                    s.save,
+                    Some(Message::Save),
+                    c
+                ),
             ]
             .spacing(12)
             .width(Length::Fill)

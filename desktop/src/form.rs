@@ -280,6 +280,9 @@ pub enum Outcome {
     Cancel,
 }
 
+/// A button of a form: its icon and its name.
+pub type Answer = (&'static [u8], String);
+
 #[derive(Debug, Clone)]
 pub struct Form {
     pub title: String,
@@ -289,8 +292,9 @@ pub struct Form {
     pub error: Option<String>,
     /// a title before the field, for a group of them
     pub sections: Vec<(usize, String)>,
-    /// the buttons, when not to cancel and to save: Esc's, then Enter's
-    pub actions: Option<(String, String)>,
+    /// the buttons, when not to cancel and to save: Esc's, then Enter's,
+    /// each with its icon
+    pub actions: Option<(Answer, Answer)>,
     /// no buttons: each change is saved as it's made
     pub plain: bool,
     /// the fields shown, and the keys move among: all, if none
@@ -750,15 +754,19 @@ impl Form {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => iced::widget::space::vertical().height(0).into(),
         };
-        let (no, yes) = self
-            .actions
-            .clone()
-            .unwrap_or_else(|| (s.cancel.to_string(), s.save.to_string()));
-        let buttons = row![
-            ui::pill(&no, false, Some(on(Message::Cancel)), c),
-            ui::pill(&yes, true, Some(on(Message::Save)), c),
-        ]
-        .spacing(10);
+        let ((no_icon, no), (yes_icon, yes)) = self.actions.clone().unwrap_or_else(|| {
+            (
+                (theme::icons::CLOSE, s.cancel.to_string()),
+                (theme::icons::CHECK, s.save.to_string()),
+            )
+        });
+        let buttons = ui::answers(
+            Some((no_icon, &no, on(Message::Cancel))),
+            yes_icon,
+            &yes,
+            Some(on(Message::Save)),
+            c,
+        );
         let form = ui::panel(
             Some(&self.title),
             column![
@@ -766,10 +774,7 @@ impl Form {
                 error,
                 match self.plain {
                     true => Element::from(iced::widget::space::vertical().height(0)),
-                    false => container(buttons)
-                        .width(Length::Fill)
-                        .align_x(Alignment::End)
-                        .into(),
+                    false => buttons,
                 },
             ]
             .spacing(16),

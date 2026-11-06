@@ -335,10 +335,26 @@ pub fn action<'a, M: Clone + 'a>(
     filled: bool,
     c: Colors,
 ) -> iced::widget::Button<'a, M> {
-    let color = match filled {
+    action_maybe(icon_bytes, label, Some(message), filled, c)
+}
+
+/// An `action` that can't be done yet without its message, faded.
+pub fn action_maybe<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    message: Option<M>,
+    filled: bool,
+    c: Colors,
+) -> iced::widget::Button<'a, M> {
+    let faded = |color: Color| match message.is_some() {
+        true => color,
+        false => Color { a: 0.45, ..color },
+    };
+    let color = faded(match filled {
         true => c.on_accent,
         false => c.text,
-    };
+    });
+    let accent = faded(c.accent);
     button(
         container(
             row![
@@ -352,26 +368,20 @@ pub fn action<'a, M: Clone + 'a>(
     )
     .height(Length::Fixed(42.0))
     .padding(Padding::from([0, 16]))
-    .on_press(message)
+    .on_press_maybe(message)
     .style(move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
             background: match (filled, hovered) {
-                (true, false) => Some(c.accent.into()),
-                (true, true) => Some(
-                    Color {
-                        a: 0.85,
-                        ..c.accent
-                    }
-                    .into(),
-                ),
+                (true, false) => Some(accent.into()),
+                (true, true) => Some(Color { a: 0.85, ..accent }.into()),
                 (false, true) => Some(Color { a: 0.7, ..c.button }.into()),
                 (false, false) => None,
             },
             text_color: color,
             border: border(
                 match (filled, hovered) {
-                    (true, _) | (false, true) => c.accent,
+                    (true, _) | (false, true) => accent,
                     (false, false) => c.border,
                 },
                 BORDER,
@@ -617,9 +627,32 @@ pub fn capitalized(word: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The answers of a dialog, on the right, the same everywhere: the way
+/// out (if any: a cross to cancel, an arrow to go back), then what it
+/// does, amber, with its icon; no keys written on them, the bar under the
+/// page has them.
+pub fn answers<'a, M: Clone + 'a>(
+    no: Option<(&'static [u8], &str, M)>,
+    icon: &'static [u8],
+    yes: &str,
+    on_yes: Option<M>,
+    c: Colors,
+) -> Element<'a, M> {
+    let no = no.map(|(icon, label, message)| action(icon, &capitalized(label), message, false, c));
+    let yes = action_maybe(icon, &capitalized(yes), on_yes, true, c);
+    container(
+        iced::widget::Row::with_children(no.into_iter().chain([yes]).map(Element::from))
+            .spacing(10),
+    )
+    .width(Length::Fill)
+    .align_x(Alignment::End)
+    .into()
+}
+
 /// A question to confirm, in the middle: Enter does it, Esc doesn't.
 pub fn confirm<'a, M: Clone + 'a>(
     question: &str,
+    icon: &'static [u8],
     yes: &str,
     on_yes: M,
     no: &str,
@@ -630,11 +663,13 @@ pub fn confirm<'a, M: Clone + 'a>(
         None,
         column![
             body(question.to_string()),
-            row![
-                pill(&format!("Esc  {no}"), false, Some(on_no), c),
-                pill(&format!("Enter  {yes}"), true, Some(on_yes), c),
-            ]
-            .spacing(10)
+            answers(
+                Some((theme::icons::CLOSE, no, on_no)),
+                icon,
+                yes,
+                Some(on_yes),
+                c
+            )
         ]
         .spacing(18)
         .align_x(Alignment::Center),

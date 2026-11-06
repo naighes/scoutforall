@@ -444,8 +444,13 @@ impl StartScreen {
                             ui::body(s.no_fallback_libero)
                                 .color(c.muted)
                                 .width(Length::Fill),
-                            ui::keycap("Tab", c),
-                            ui::pill(s.go_on, true, Some(Message::Skip), c),
+                            ui::action(
+                                theme::icons::FORWARD_ARROW,
+                                s.go_on,
+                                Message::Skip,
+                                true,
+                                c
+                            ),
                         ]
                         .spacing(10)
                         .align_y(Alignment::Center),

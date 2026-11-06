@@ -4,5 +4,5 @@ uses them: `home`, `directions_bus` (away), `arrow_back`, `add`, `settings`, `sh
 under their own names (outlined): `analytics`, `edit`, `file_upload`,
 `file_download`, `insert_chart`, `picture_as_pdf`, `videocam`,
 `radio_button_checked`, `emoji_events`, `cancel`, `toll`,
-`event`, `sports_volleyball`.
+`event`, `sports_volleyball`, `close`, `check`, `delete`, `arrow_forward`.
 `theme.svg` is drawn here: a circle half filled.

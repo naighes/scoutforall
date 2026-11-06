@@ -15,7 +15,7 @@ use {
     crate::{
         form::{self, Field, Form},
         strings::Strings,
-        theme::{Colors, SIZE_BODY, SIZE_SMALL},
+        theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
         video::Picture,
     },
@@ -219,7 +219,10 @@ impl LiveScreen {
                 Field::secret(s.password, password).hint(s.password_kept),
             ],
         );
-        form.actions = Some((s.back.to_string(), s.try_source.to_string()));
+        form.actions = Some((
+            (theme::icons::BACK, s.back.to_string()),
+            (theme::icons::PLAY, s.try_source.to_string()),
+        ));
         form.shown = Some(Self::network_fields(&form));
         form
     }
@@ -253,7 +256,10 @@ impl LiveScreen {
                 Field::text(s.receiver_key, saved.key).hint(s.receiver_key_hint),
             ],
         );
-        form.actions = Some((s.back.to_string(), s.receiver_listen.to_string()));
+        form.actions = Some((
+            (theme::icons::BACK, s.back.to_string()),
+            (theme::icons::PLAY, s.receiver_listen.to_string()),
+        ));
         form
     }
 
@@ -682,9 +688,10 @@ impl LiveScreen {
                 Some(Message::ChangeFolder),
                 c
             ),
-            ui::pill(
+            ui::answers(
+                None,
+                theme::icons::RECORD,
                 s.start_recording,
-                true,
                 (self.tried() && self.can_start()).then_some(Message::Start),
                 c
             ),
@@ -764,9 +771,10 @@ impl LiveScreen {
                 Some(Message::ChangeFolder),
                 c
             ),
-            ui::pill(
+            ui::answers(
+                None,
+                theme::icons::RECORD,
                 s.start_recording,
-                true,
                 (self.tried() && self.can_start()).then_some(Message::Start),
                 c
             ),
@@ -866,9 +874,10 @@ impl LiveScreen {
                 c
             ),
             space::vertical(),
-            ui::pill(
+            ui::answers(
+                None,
+                theme::icons::RECORD,
                 s.start_recording,
-                true,
                 self.can_start().then_some(Message::Start),
                 c
             ),

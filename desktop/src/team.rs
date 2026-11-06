@@ -347,6 +347,7 @@ impl TeamScreen {
             Mode::Edit(editor) => editor.view(s, c, Message::Form),
             Mode::Remove(_, name) => ui::confirm(
                 &s.remove_confirm.replace("{}", name),
+                theme::icons::DELETE,
                 s.remove,
                 Message::Confirm,
                 s.cancel,

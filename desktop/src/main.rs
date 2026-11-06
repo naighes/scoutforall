@@ -1174,14 +1174,13 @@ impl App {
                 Some(Message::ToggleStatistics),
                 c,
             ),
-            container(ui::pill(
-                &format!("Enter  {}", s.accept_terms),
-                true,
+            ui::answers(
+                None,
+                theme::icons::CHECK,
+                s.accept_terms,
                 Some(Message::AcceptTerms),
                 c,
-            ))
-            .width(Length::Fill)
-            .align_x(iced::Alignment::End),
+            ),
         ]
         .spacing(14);
         general::terms_view(terms, Some(below.into()), c)

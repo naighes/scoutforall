@@ -233,4 +233,8 @@ pub mod icons {
     pub const COIN: &[u8] = include_bytes!("../assets/icons/toll.svg");
     pub const CALENDAR: &[u8] = include_bytes!("../assets/icons/event.svg");
     pub const VOLLEYBALL: &[u8] = include_bytes!("../assets/icons/sports_volleyball.svg");
+    pub const CLOSE: &[u8] = include_bytes!("../assets/icons/close.svg");
+    pub const CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
+    pub const FORWARD_ARROW: &[u8] = include_bytes!("../assets/icons/arrow_forward.svg");
+    pub const DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
 }

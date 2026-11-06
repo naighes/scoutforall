@@ -12,7 +12,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, column, container, row, text},
+        widget::{Column, column, container, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{ArchivePreview, MobileError, Scout4All},
@@ -275,25 +275,13 @@ impl Importing {
                 ]
                 .spacing(4),
                 teams,
-                container(
-                    row![
-                        ui::pill(
-                            &format!("Esc  {}", s.cancel),
-                            false,
-                            Some(Message::Cancel),
-                            c
-                        ),
-                        ui::pill(
-                            &format!("Enter  {}", s.import_archive),
-                            true,
-                            Some(Message::Import),
-                            c
-                        ),
-                    ]
-                    .spacing(10)
-                )
-                .width(Length::Fill)
-                .align_x(Alignment::End),
+                ui::answers(
+                    Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
+                    theme::icons::IMPORT,
+                    s.import_archive,
+                    Some(Message::Import),
+                    c
+                ),
             ]
             .spacing(18),
             c,

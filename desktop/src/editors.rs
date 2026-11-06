@@ -253,7 +253,10 @@ impl Editor {
         };
         let mut form = Form::new(title, fields);
         form.shown = Some(0..MATCH_ROSTER);
-        form.actions = Some((s.cancel.to_string(), s.go_on.to_string()));
+        form.actions = Some((
+            (theme::icons::CLOSE, s.cancel.to_string()),
+            (theme::icons::FORWARD_ARROW, s.go_on.to_string()),
+        ));
         let opponents = core.opponents(team_id.clone()).unwrap_or_default();
         let mut editor = Editor {
             form,
@@ -655,11 +658,13 @@ impl Editor {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => space::vertical().height(0).into(),
         };
-        let buttons = row![
-            ui::pill(s.back, false, Some(on(form::Message::Cancel)), c),
-            ui::pill(s.save, true, Some(on(form::Message::Save)), c),
-        ]
-        .spacing(10);
+        let buttons = ui::answers(
+            Some((theme::icons::CLOSE, s.cancel, on(form::Message::Cancel))),
+            theme::icons::CHECK,
+            s.save,
+            Some(on(form::Message::Save)),
+            c,
+        );
         let panel = ui::panel(
             Some(s.roster),
             column![
