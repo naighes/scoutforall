@@ -13,6 +13,7 @@ mod tests {
     use crate::shapes::enums::{EvalEnum, EventTypeEnum};
     use crate::shapes::refusal::Refusal;
     use crate::shapes::snapshot::EventEntry;
+    use crate::shapes::technique::{SetTypeEnum, TechniqueEnum};
     use EventTypeEnum::*;
     use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, Utc};
     use std::collections::HashMap;
@@ -194,11 +195,33 @@ mod tests {
                 ),
                 format!("[3PLAYERS-H]\n{}", players(0, 1)),
                 format!("[3PLAYERS-V]\n{}", players(1, 11)),
+                COMBINATIONS.to_string(),
                 format!("[3SCOUT]\n{}", self.lines.join("\n")),
             ]
             .join("\n")
         }
     }
+
+    /// The attack combinations of the files, as DataVolley comes with them
+    /// (code, zone, side, tempo, description).
+    const COMBINATIONS: &str = "[3ATTACKCOMBINATION]
+X1;3;R;Q;Veloce davanti;;;;;
+X2;2;L;Q;Veloce dietro;;;;;
+X7;4;R;Q;Sette davanti;;;;;
+XC;3;R;Q;Veloce spostata;;;;;
+XD;3;R;Q;Doppia C;;;;;
+XM;3;C;Q;Veloce in punto 3;;;;;
+CF;2;L;Q;Fast lontano dal palleggiatore;;;;;
+X5;4;R;T;Spinta in posto 4;;;;;
+X6;2;L;T;Spinta in posto 2;;;;;
+X8;9;C;T;Spinta in posto 1;;;;;
+X0;7;C;T;Spinta in posto 5;;;;;
+XP;8;C;M;Pipe;;;;;
+XT;3;R;M;Mezza da posto 4;;;;;
+C5;4;R;U;Super in posto 4;;;;;
+V5;4;R;H;Alta in posto 4;;;;;
+VP;8;C;H;Pipe alta;;;;;
+PP;3;L;O;Pallonetto alzatore;;;;;";
 
     /// The set translated for the home team: the events, and the number of
     /// each player.
@@ -739,6 +762,49 @@ mod tests {
                 None,
             ]
         );
+    }
+
+    /// The set of each attack of ours, from its combination as the file
+    /// defines it (the quick of the middle blockers by its code), or from
+    /// the tempo and zone of the attack when the file doesn't define it;
+    /// none for the setter tipping, a quick of another code, an attack
+    /// telling nothing.
+    #[test]
+    fn the_set_of_our_attacks() {
+        use SetTypeEnum::*;
+        let attacks = [
+            ("*03AQ#X1~35", Some(One)),
+            ("*03AQ#X2~25", Some(Two)),
+            ("*03AQ#X7~45", Some(Seven)),
+            ("*03AQ#XC~35", Some(C)),
+            ("*03AQ#XD~35", Some(DoubleC)),
+            ("*03AQ#XM~35", None),
+            ("*03AQ#CF~25", Some(Fast)),
+            ("*02AT#X5~45", Some(Five)),
+            ("*04AT#X6~25", Some(Six)),
+            ("*04AT#X8~95", Some(Eight)),
+            ("*02AT#X0~75", None),
+            ("*02AM#XP~85", Some(Pipe)),
+            ("*02AM#XT~35", Some(Quick)),
+            ("*02AU#C5~45", Some(Super)),
+            ("*02AH#V5~45", Some(High)),
+            ("*02AH#VP~85", Some(High)),
+            ("*01AO#PP~35", None),
+            // not defined: the tempo and zone of the attack
+            ("*02AT#ZZ~45", Some(Five)),
+            ("*02AH#~~~45", Some(High)),
+            ("*02AT#", None),
+        ];
+        for (attack, expected) in attacks {
+            let mut file = File::new();
+            file.rally(&["a11SM+", "*07RM+", attack], true);
+            let (events, _) = translated_events(&file.finished()).expect("expected the set");
+            let technique = events
+                .iter()
+                .find(|e| e.event_type == A)
+                .and_then(|e| e.technique);
+            assert_eq!(technique, expected.map(TechniqueEnum::Set), "{attack}");
+        }
     }
 
     /// Our digs with where we dug their attack: the cell (from 4 to 1C),

@@ -22,7 +22,8 @@ mod tests {
     use ServeTypeEnum::*;
     // B is the block: the set is SetTypeEnum::B
     use SetTypeEnum::{
-        C, Eight, Fast, Five, Four, High, Nine, One, Pipe, Quick, Seven, Six, Super, Three, Two,
+        C, DoubleC, Eight, Fast, Five, Four, High, Nine, One, Pipe, Quick, Seven, Six, Super,
+        Three, Two,
     };
     use chrono::{TimeZone, Utc};
     use csv::{ReaderBuilder, WriterBuilder};
@@ -38,12 +39,32 @@ mod tests {
             (
                 MiddleBlocker,
                 false,
-                vec![One, Two, Three, Four, C, SetTypeEnum::B, Seven, Fast],
+                vec![
+                    One,
+                    Two,
+                    Three,
+                    Four,
+                    C,
+                    DoubleC,
+                    SetTypeEnum::B,
+                    Seven,
+                    Fast,
+                ],
             ),
             (
                 MiddleBlocker,
                 true,
-                vec![One, Two, Three, Four, C, SetTypeEnum::B, Seven, Fast],
+                vec![
+                    One,
+                    Two,
+                    Three,
+                    Four,
+                    C,
+                    DoubleC,
+                    SetTypeEnum::B,
+                    Seven,
+                    Fast,
+                ],
             ),
             (OutsideHitter, false, vec![High, Five, Super, Nine, Quick]),
             (OppositeHitter, false, vec![High, Six, Super, Quick]),
@@ -285,7 +306,8 @@ mod tests {
         assert_eq!(
             codes,
             [
-                "1", "2", "3", "4", "C", "B", "7", "F", "A", "5", "6", "S", "9", "Q", "0", "8"
+                "1", "2", "3", "4", "C", "CC", "B", "7", "F", "A", "5", "6", "S", "9", "Q", "0",
+                "8"
             ]
         );
         for set in SetTypeEnum::ALL {
@@ -295,7 +317,7 @@ mod tests {
                 set
             );
         }
-        for code in ["", "X", "10", "AA", "#"] {
+        for code in ["", "X", "10", "AA", "CCC", "#"] {
             assert!(SetTypeEnum::from_str(code).is_err(), "{code}");
         }
     }

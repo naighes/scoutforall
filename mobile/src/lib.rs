@@ -174,6 +174,7 @@ pub enum SetTypeEnum {
     Three,
     Four,
     C,
+    DoubleC,
     B,
     Seven,
     Fast,

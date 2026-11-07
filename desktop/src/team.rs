@@ -798,13 +798,11 @@ mod tests {
             role: Some(RoleEnum::Setter),
             ..PlayerForm::default()
         };
-        core.save_player(team_id.clone(), None, anna, false).unwrap();
+        core.save_player(team_id.clone(), None, anna, false)
+            .unwrap();
         let mut team = TeamScreen::new(core.clone(), team_id).unwrap();
-        let asking = |team: &TeamScreen| {
-            team.hints(s)
-                .iter()
-                .any(|(_, what)| what == s.save_anyway)
-        };
+        let asking =
+            |team: &TeamScreen| team.hints(s).iter().any(|(_, what)| what == s.save_anyway);
         team.update(s, Message::NewPlayer);
         for m in [
             Input(0, "anna rossi".into()),

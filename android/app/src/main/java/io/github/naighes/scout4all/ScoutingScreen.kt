@@ -35,6 +35,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.TeamSideEnum
@@ -1089,7 +1090,19 @@ private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewMod
         val padding = PaddingValues(0.dp)
         val content = @Composable {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(t.code, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                // on one line, smaller only where it doesn't fit (CC, on a
+                // narrow phone, among the nine sets of a middle blocker)
+                Text(
+                    t.code,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(
+                        minFontSize = 12.sp,
+                        maxFontSize = MaterialTheme.typography.titleLarge.fontSize,
+                    ),
+                )
                 t.shortName?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Clip)
                 }

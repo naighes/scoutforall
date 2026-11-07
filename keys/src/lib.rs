@@ -582,8 +582,11 @@ where
     bindings
 }
 impl Default for KeyBindings<SetTypeEnum> {
+    /// the double C (CC) on "d", as its first letter is the C's
     fn default() -> Self {
-        bound_to_codes(&SetTypeEnum::ALL)
+        let mut bindings = bound_to_codes(&SetTypeEnum::ALL);
+        bindings.assign(SetTypeEnum::DoubleC, key!(d));
+        bindings
     }
 }
 impl Default for KeyBindings<ServeTypeEnum> {
@@ -666,6 +669,18 @@ fn test_assign_replaces_the_key() {
         kb.keybindings_for(&EvalEnum::Perfect),
         HashSet::from([key!(z)])
     );
+}
+
+#[test]
+fn test_sets_on_keys_of_their_own() {
+    let kb = KeyBindings::<SetTypeEnum>::default();
+    assert_eq!(kb.key_for(&SetTypeEnum::C), Some(key!(c)));
+    assert_eq!(kb.key_for(&SetTypeEnum::DoubleC), Some(key!(d)));
+    let keys: HashSet<_> = SetTypeEnum::ALL
+        .iter()
+        .filter_map(|set| kb.key_for(set))
+        .collect();
+    assert_eq!(keys.len(), SetTypeEnum::ALL.len());
 }
 
 #[test]
