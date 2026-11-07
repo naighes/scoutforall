@@ -11,7 +11,10 @@
 #                                          each (default 1x300) kept in DIR,
 #                                          e.g. to try the apps on it
 #     scripts/bench.sh measure DIR         the reads on DIR, e.g.
-#                                          ~/.scout4all: nothing is written
+#                                          ~/.scout4all: only the index of
+#                                          the matches is written (and
+#                                          removed, to time the lists
+#                                          without it)
 #     scripts/bench.sh scouting DIR        the scouting of the match in
 #                                          progress of an archive made by
 #                                          `generate` (it changes its last
@@ -21,7 +24,10 @@
 #                                          before and after a change, then
 #                                          `diff -r` (e.g. on an archive of
 #                                          every real match, `generate DIR
-#                                          162x1`, and on ~/.scout4all)
+#                                          162x1`, and on ~/.scout4all); the
+#                                          lists too, from the index of the
+#                                          matches (removing DIR/.index.json
+#                                          compares them without it)
 #
 # The table is Markdown, to paste where the times are compared. Built in
 # release, as the apps; run it with the machine otherwise idle, and compare

@@ -12,6 +12,18 @@ use crate::errors::AppError;
 use async_trait::async_trait;
 use std::fmt::Debug;
 
+/// When a blob last changed, to know if what was computed from it still
+/// holds: its size, and when it was modified (nanoseconds since 1970 on the
+/// file system, a count of the writes in memory).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Stamp {
+    pub size: u64,
+    pub modified: u64,
+}
+
+/// The blobs of a folder with their stamps (see `Store::stamps`).
+pub type Stamps = Vec<(String, Option<Stamp>)>;
+
 /// What a folder holds: a blob or another folder, by name.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StoreEntry {
@@ -39,4 +51,13 @@ pub trait Store: Debug + Send + Sync {
 
     /// Removes the blob under the key, if any.
     async fn remove(&self, key: &str) -> Result<(), AppError>;
+
+    /// The blobs right in the folder, by name, with their stamps: `None`
+    /// for a blob that may still change without its stamp telling (just
+    /// written, when the clock of the files is coarse). Hidden as `list`.
+    async fn stamps(&self, folder: &str) -> Result<Vec<(String, Option<Stamp>)>, AppError>;
+
+    /// The stamps (see `stamps`) of each folder right in the folder, by
+    /// name: at once, for a team and all its matches.
+    async fn folder_stamps(&self, folder: &str) -> Result<Vec<(String, Stamps)>, AppError>;
 }

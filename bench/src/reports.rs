@@ -2,8 +2,10 @@
 //! text files: taken before and after a change, `diff -r` tells whether a
 //! number changed. For each team, a folder with each match's report (the
 //! model of the PDF, as JSON) and live statistics (with the trend), the
-//! analysis of all its matches for each fundamental, and why a match can't
-//! be read.
+//! analysis of all its matches for each fundamental, why a match can't be
+//! read, and its matches as listed; and the home. The lists come from the
+//! index of the matches, written in the folder if missing: run twice, with
+//! and without it, they must be the same.
 
 use crate::R;
 use scout4all_core::{
@@ -86,6 +88,8 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                 )?,
             }
         }
+        let listed = app.matches(id.clone()).map_err(|e| e.to_string())?;
+        write(&folder.join("matches.txt"), &format!("{listed:#?}"))?;
         for event in FUNDAMENTALS {
             let analysis = app
                 .team_analysis(id.clone(), all.clone(), event, DetailFilter::default())
@@ -96,6 +100,8 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
             )?;
         }
     }
+    let home = app.home().map_err(|e| e.to_string())?;
+    write(&out.join("home.txt"), &format!("{home:#?}"))?;
     eprintln!("{}: the statistics of {written} matches", out.display());
     Ok(())
 }

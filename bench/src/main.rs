@@ -55,6 +55,9 @@ const READS: usize = 3;
 /// Each action of the scouting, quicker.
 const ACTIONS: usize = 20;
 
+/// How long a file written must wait to be indexed, and a little more.
+const SETTLED: std::time::Duration = std::time::Duration::from_millis(3500);
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let run = match args
@@ -91,11 +94,14 @@ fn default_run(dvw: &Path) -> R<()> {
     let tmp = tempfile::tempdir().map_err(|e| format!("temporary folder: {e}"))?;
     let seeds = seed(dvw, &tmp.path().join("seed"))?;
     let sizes = ["1x300", "10x100"];
+    for size in sizes {
+        generate(&seeds, &tmp.path().join(size), size)?;
+    }
+    // files just written aren't indexed (see `Store::stamps`)
+    std::thread::sleep(SETTLED);
     let mut columns = vec![];
     for size in sizes {
-        let dir = tmp.path().join(size);
-        generate(&seeds, &dir, size)?;
-        columns.push(measure_reads(&dir)?);
+        columns.push(measure_reads(&tmp.path().join(size))?);
     }
     let rows = merge(&columns);
     print_table(&["read", "1x300", "10x100"], &rows);
@@ -297,7 +303,23 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
     Ok(vec![
         ("matches of the largest team".to_string(), count as f64),
         time("teams()", READS, || app.teams().map(|_| ()))?,
+        // the first time, or after an update of the app: no index
+        time("home(), no index", READS, || {
+            without_index(dir)?;
+            open(dir)?.home().map_err(|e| e.to_string()).map(|_| ())
+        })?,
+        // the app just opened: the index read from its file
+        time("home(), index on disk", READS, || {
+            open(dir)?.home().map_err(|e| e.to_string()).map(|_| ())
+        })?,
         time("home()", READS, || app.home().map(|_| ()))?,
+        time("matches(team), no index", READS, || {
+            without_index(dir)?;
+            open(dir)?
+                .matches(team.clone())
+                .map_err(|e| e.to_string())
+                .map(|_| ())
+        })?,
         time("matches(team)", READS, || {
             app.matches(team.clone()).map(|_| ())
         })?,
@@ -379,6 +401,17 @@ fn largest_team(app: &Arc<Scout4All>, dir: &Path) -> R<String> {
 fn open(dir: &Path) -> R<Arc<Scout4All>> {
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     Scout4All::new(dir.to_string_lossy().into_owned(), "en".to_string()).map_err(|e| e.to_string())
+}
+
+/// Removes the index of the matches of the data folder, if any.
+fn without_index(dir: &Path) -> R<()> {
+    let index = dir.join(".index.json");
+    match fs::remove_file(&index) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(format!("{}: {e}", index.display()))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The median of `times` runs, in milliseconds.

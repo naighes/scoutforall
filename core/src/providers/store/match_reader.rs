@@ -1,12 +1,17 @@
 use crate::{
+    constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError, MatchError},
     localization::Language,
     logging::logger::log_error,
-    providers::{match_reader::MatchReader, set_reader::SetReader},
+    providers::{
+        match_reader::MatchReader,
+        set_reader::SetReader,
+        store::match_index::{Indexed, MatchIndex, TeamIndex, fingerprint},
+    },
     shapes::{
         enums::LineupRulesEnum,
         listed::{Listed, Unreadable},
-        r#match::{MatchEntry, MatchStatus},
+        r#match::{MatchEntry, MatchStatus, MatchSummary},
         set::SetEntry,
         team::TeamEntry,
     },
@@ -21,6 +26,7 @@ pub struct StoreMatchReader {
     store: Arc<dyn Store>,
     set_reader: Arc<dyn SetReader + Send + Sync>,
     language: Language,
+    index: MatchIndex,
 }
 
 #[async_trait]
@@ -38,32 +44,9 @@ impl MatchReader for StoreMatchReader {
         &self,
         team: &TeamEntry,
     ) -> Result<Vec<Listed<(MatchEntry, MatchStatus)>>, AppError> {
-        let folders = self
-            .store
-            .list(&layout::team_folder(&team.id))
-            .await?
-            .into_iter()
-            .filter_map(|entry| match entry {
-                StoreEntry::Folder(name) => Some(name),
-                StoreEntry::Blob(_) => None,
-            });
+        let folders = self.match_folders(team).await?;
         let mut entries: Vec<Listed<(MatchEntry, MatchStatus)>> =
-            join_all(folders.map(|match_id| async move {
-                self.map_entry(&match_id, team).await.map_err(|e| {
-                    log_error(&format!(
-                        "match {:?} of team {} is unreadable: {}",
-                        match_id, team.id, e
-                    ));
-                    Unreadable {
-                        id: match_id,
-                        reason: match e {
-                            AppError::Match(MatchError::SetNotValid(reason)) => Some(reason),
-                            _ => None,
-                        },
-                    }
-                })
-            }))
-            .await;
+            join_all(folders.iter().map(|match_id| self.listed(match_id, team))).await;
         // the most recent first, then the unreadable ones by name
         entries.sort_by(|a, b| match (a, b) {
             (Ok((a, _)), Ok((b, _))) => b.date.cmp(&a.date),
@@ -72,6 +55,62 @@ impl MatchReader for StoreMatchReader {
             (Err(a), Err(b)) => a.id.cmp(&b.id),
         });
         Ok(entries)
+    }
+
+    async fn read_summaries(
+        &self,
+        team: &TeamEntry,
+    ) -> Result<Vec<Listed<MatchSummary>>, AppError> {
+        let folder = layout::team_folder(&team.id);
+        let team_stamp = self
+            .store
+            .stamps(&folder)
+            .await?
+            .into_iter()
+            .find(|(name, _)| name == TEAM_DESCRIPTOR_FILE_NAME)
+            .and_then(|(_, stamp)| stamp);
+        let indexed = self.index.team(&*self.store, &team.id).await;
+        // before the files are read: see `match_index`
+        let folders = self.store.folder_stamps(&folder).await?;
+        let read: Vec<(Listed<MatchSummary>, Option<Indexed>)> =
+            join_all(folders.iter().map(|(match_id, files)| {
+                let indexed = &indexed;
+                async move {
+                    let stamp = fingerprint(team_stamp, files);
+                    match (stamp, indexed.get(match_id)) {
+                        (Some(stamp), Some(hit)) if hit.stamp == stamp => {
+                            (Ok(hit.summary.clone()), Some(hit.clone()))
+                        }
+                        _ => match self.listed(match_id, team).await {
+                            Ok((m, status)) => {
+                                let summary = MatchSummary::of(&m, &status);
+                                let entry = stamp.map(|stamp| Indexed {
+                                    stamp,
+                                    summary: summary.clone(),
+                                });
+                                (Ok(summary), entry)
+                            }
+                            Err(unreadable) => (Err(unreadable), None),
+                        },
+                    }
+                }
+            }))
+            .await;
+        let now: TeamIndex = read
+            .iter()
+            .filter_map(|(_, entry)| entry.clone())
+            .map(|entry| (entry.summary.id.clone(), entry))
+            .collect();
+        self.index.update(&*self.store, &team.id, now).await;
+        let mut summaries: Vec<Listed<MatchSummary>> =
+            read.into_iter().map(|(listed, _)| listed).collect();
+        summaries.sort_by(|a, b| match (a, b) {
+            (Ok(a), Ok(b)) => b.date.cmp(&a.date),
+            (Ok(_), Err(_)) => Ordering::Less,
+            (Err(_), Ok(_)) => Ordering::Greater,
+            (Err(a), Err(b)) => a.id.cmp(&b.id),
+        });
+        Ok(summaries)
     }
 
     async fn read_single(&self, team: &TeamEntry, match_id: &str) -> Result<MatchEntry, AppError> {
@@ -95,7 +134,39 @@ impl StoreMatchReader {
             store,
             set_reader,
             language,
+            index: MatchIndex::default(),
         }
+    }
+
+    /// The folders of the matches of the team.
+    async fn match_folders(&self, team: &TeamEntry) -> Result<Vec<String>, AppError> {
+        Ok(self
+            .store
+            .list(&layout::team_folder(&team.id))
+            .await?
+            .into_iter()
+            .filter_map(|entry| match entry {
+                StoreEntry::Folder(name) => Some(name),
+                StoreEntry::Blob(_) => None,
+            })
+            .collect())
+    }
+
+    /// The match of the folder, or why it can't be read (logged).
+    async fn listed(&self, match_id: &str, team: &TeamEntry) -> Listed<(MatchEntry, MatchStatus)> {
+        self.map_entry(match_id, team).await.map_err(|e| {
+            log_error(&format!(
+                "match {:?} of team {} is unreadable: {}",
+                match_id, team.id, e
+            ));
+            Unreadable {
+                id: match_id.to_string(),
+                reason: match e {
+                    AppError::Match(MatchError::SetNotValid(reason)) => Some(reason),
+                    _ => None,
+                },
+            }
+        })
     }
 
     /// The match, with the status its sets replay to.

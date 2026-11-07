@@ -57,7 +57,7 @@ use scout4all_core::{
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
         flags::{BlockersEnum, ReceptionSchemeEnum},
-        r#match::MatchEntry,
+        r#match::{MatchEntry, MatchSummary},
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
@@ -554,6 +554,16 @@ fn next_kind(
             set_number: set.set_number,
         },
         NextSet::Over => NextSetKind::Over,
+    }
+}
+
+/// What scouting goes on with, as `next_kind` tells it from the status:
+/// from the summary of the match.
+fn next_of(m: &MatchSummary) -> NextSetKind {
+    match (m.finished, m.resume, m.next_set_number) {
+        (false, Some(set_number), _) => NextSetKind::Resume { set_number },
+        (false, None, Some(set_number)) => NextSetKind::Start { set_number },
+        _ => NextSetKind::Over,
     }
 }
 
@@ -2880,17 +2890,17 @@ impl Scout4All {
         let team = self.read_team(&team_id)?;
         Ok(self
             .runtime
-            .block_on(self.match_reader.read_all_with_status(&team))?
+            .block_on(self.match_reader.read_summaries(&team))?
             .into_iter()
             .map(|listed| match listed {
-                Ok((m, status)) => MatchListing::Match {
+                Ok(m) => MatchListing::Match {
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
                     home: m.home,
-                    won: status.us_wins,
-                    lost: status.them_wins,
-                    finished: status.match_finished,
+                    won: m.us_wins,
+                    lost: m.them_wins,
+                    finished: m.finished,
                 },
                 Err(unreadable) => MatchListing::Unreadable {
                     folder: unreadable.id,
@@ -2906,7 +2916,9 @@ impl Scout4All {
     pub fn opponents(&self, team_id: String) -> Result<Vec<String>, MobileError> {
         let team = self.read_team(&team_id)?;
         let teams = self.runtime.block_on(self.team_reader.read_all())?;
-        let met = self.runtime.block_on(self.match_reader.read_all(&team))?;
+        let met = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(&team))?;
         let ours = team.name.to_lowercase();
         let mut names: Vec<String> = teams
             .into_iter()
@@ -2935,8 +2947,9 @@ impl Scout4All {
         {
             let read = self
                 .runtime
-                .block_on(self.match_reader.read_all_with_status(&team))?;
-            matches.extend(read.into_iter().flatten().map(|(m, status)| {
+                .block_on(self.match_reader.read_summaries(&team))?;
+            matches.extend(read.into_iter().flatten().map(|m| {
+                let next = next_of(&m);
                 (
                     m.date,
                     HomeMatch {
@@ -2946,9 +2959,9 @@ impl Scout4All {
                         id: m.id,
                         opponent: m.opponent,
                         home: m.home,
-                        won: status.us_wins,
-                        lost: status.them_wins,
-                        next: next_kind(&status, &team),
+                        won: m.us_wins,
+                        lost: m.them_wins,
+                        next,
                     },
                 )
             }));

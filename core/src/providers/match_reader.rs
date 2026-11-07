@@ -2,7 +2,7 @@ use crate::{
     errors::AppError,
     shapes::{
         listed::Listed,
-        r#match::{MatchEntry, MatchStatus},
+        r#match::{MatchEntry, MatchStatus, MatchSummary},
         team::TeamEntry,
     },
 };
@@ -19,6 +19,11 @@ pub trait MatchReader {
         &self,
         team: &TeamEntry,
     ) -> Result<Vec<Listed<(MatchEntry, MatchStatus)>>, AppError>;
+    /// What the lists show of each match, the most recent first, then the
+    /// unreadable ones: from the index of the matches when their files
+    /// didn't change (see `store::match_index`).
+    async fn read_summaries(&self, team: &TeamEntry)
+    -> Result<Vec<Listed<MatchSummary>>, AppError>;
     #[allow(dead_code)]
     async fn read_single(&self, team: &TeamEntry, match_id: &str) -> Result<MatchEntry, AppError>;
     async fn exists(&self, team: &TeamEntry, match_id: &str) -> Result<bool, AppError>;

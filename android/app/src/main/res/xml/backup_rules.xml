@@ -3,4 +3,5 @@
 <full-backup-content>
     <include domain="file" path="scout4all/" />
     <exclude domain="file" path="scout4all/scout4all.log" />
+    <exclude domain="file" path="scout4all/.index.json" />
 </full-backup-content>

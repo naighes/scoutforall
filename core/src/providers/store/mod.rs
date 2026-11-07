@@ -1,6 +1,7 @@
 //! The providers over a `Store`, wherever it keeps the data: they read and
 //! write its format, JSON and CSV, as the older versions expect it.
 
+pub mod match_index;
 pub mod match_reader;
 pub mod match_writer;
 pub mod queue_reader;
