@@ -19,7 +19,9 @@ mod tests {
         },
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
-            court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, SubzoneEnum},
+            court_zone::{
+                CourtCell, CourtSide, CourtTarget, CourtZoneEnum, ServeStartEnum, SubzoneEnum,
+            },
             enums::{EvalEnum, EventTypeEnum, RoleEnum, TeamSideEnum},
             flags::ReceptionSchemeEnum,
             player::PlayerEntry,
@@ -218,6 +220,78 @@ mod tests {
         assert_eq!(
             saved.iter().map(|e| e.flags.target()).collect::<Vec<_>>(),
             vec![Some(z43()), None, None, None]
+        );
+    }
+
+    /// Where our serve starts from is told along with its evaluation, or
+    /// not: at first where the server served from last in the match, none
+    /// before they served or for another server; touched again, taken back;
+    /// only for our serve.
+    #[tokio::test]
+    async fn the_serve_start_is_remembered_for_the_server() {
+        use ServeStartEnum::*;
+        let mut s = scouting().await;
+        assert!(!s.session.serve_start_applies());
+        assert_eq!(
+            s.session.choose_serve_start(Some(Z1)),
+            Err(ScoutingError::InvalidSelection)
+        );
+        s.session.choose_event(S).await.unwrap();
+        let server = s.session.player();
+        assert!(s.session.serve_start_applies());
+        assert_eq!(s.session.serve_start(), None);
+        s.session.touch_serve_start(Z1).unwrap();
+        assert_eq!(s.session.serve_start(), Some(Z1));
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(OE).await.unwrap();
+        // the same server again: from 1, as before
+        s.session.choose_event(S).await.unwrap();
+        assert_eq!(s.session.serve_start(), Some(Z1));
+        s.session.touch_serve_start(Z1).unwrap();
+        assert_eq!(s.session.serve_start(), None);
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(OE).await.unwrap();
+        // the last one not told: the one told before
+        s.session.choose_event(S).await.unwrap();
+        assert_eq!(s.session.serve_start(), Some(Z1));
+        s.session.touch_serve_start(Z7).unwrap();
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        // the undo gives it back, as it was saved
+        s.session.undo().await.unwrap();
+        assert_eq!(
+            (s.session.event(), s.session.serve_start()),
+            (Some(S), Some(Z7))
+        );
+        s.session.choose_eval(EvalEnum::Error).await.unwrap();
+        // their serve: no start for our reception
+        s.session.choose_event(P).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert!(!s.session.serve_start_applies());
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(A).await.unwrap();
+        s.session.choose_player(s.players[1]).await.unwrap();
+        s.session.choose_eval(EvalEnum::Perfect).await.unwrap();
+        // another server: never served, nothing told
+        s.session.choose_event(S).await.unwrap();
+        assert_ne!(s.session.player(), server);
+        assert_eq!(s.session.serve_start(), None);
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        assert_eq!(
+            saved
+                .iter()
+                .map(|e| (e.event_type, e.flags.serve_start()))
+                .collect::<Vec<_>>(),
+            vec![
+                (S, Some(Z1)),
+                (OE, None),
+                (S, None),
+                (OE, None),
+                (S, Some(Z7)),
+                (P, None),
+                (A, None),
+                (S, None),
+            ]
         );
     }
 

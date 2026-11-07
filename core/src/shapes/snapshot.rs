@@ -617,6 +617,11 @@ impl Snapshot {
                 .flags
                 .blockers()
                 .filter(|b| BlockersEnum::of(event.event_type).contains(b)),
+            // where our serve started from, if told
+            serve_start: event
+                .flags
+                .serve_start()
+                .filter(|_| event.event_type == EventTypeEnum::S),
             eval: event.eval,
             situation,
             touch: event.event_type.asks_player().then(|| Touch {

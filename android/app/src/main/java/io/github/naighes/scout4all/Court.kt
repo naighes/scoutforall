@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.abbreviatedName
 import io.github.naighes.scout4all.core.CourtCellChoice
+import io.github.naighes.scout4all.core.ServeStartChoice
 import androidx.compose.ui.semantics.contentDescription
 
 /** What a position of the court shows. */
@@ -132,12 +133,17 @@ fun Court(
     /** what the cells are, read by TalkBack: the serve, attack or reception zone */
     targetsName: Int = R.string.serve_zone,
     onTarget: (CourtCellChoice) -> Unit = {},
+    /** for our serve, the zones of our end line it starts from, under
+     * their court: 5 7 6 9 1 from the left, as our server sees them */
+    starts: List<ServeStartChoice> = emptyList(),
+    onStart: (ServeStartChoice) -> Unit = {},
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
     // the zones where the ball went (our serve on theirs, our reception on
     // ours) on a square court (its true proportions), to leave them room to
     // touch; the player is told above
     val aiming = targets.isNotEmpty()
     val zone = when {
+        aiming && starts.isNotEmpty() -> StartZones
         aiming -> 0.dp
         serveZone -> ServeZone
         else -> 0.dp
@@ -147,7 +153,7 @@ fun Court(
         constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * aspect)
         else -> maxWidth
     }
-    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, Modifier.width(width))
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, starts, onStart, Modifier.width(width))
 }
 
 @Composable
@@ -161,6 +167,8 @@ private fun CourtColumn(
     targetsOurs: Boolean,
     targetsName: Int,
     onTarget: (CourtCellChoice) -> Unit,
+    starts: List<ServeStartChoice>,
+    onStart: (ServeStartChoice) -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
@@ -251,6 +259,10 @@ private fun CourtColumn(
             }
         }
     }
+    if (aiming && starts.isNotEmpty()) {
+        Spacer(Modifier.height(StartGap))
+        ServeStarts(starts, onStart, Modifier.height(StartZones - StartGap))
+    }
     if (serveZone && !aiming) {
         // behind the end line, under position 1
         Row(Modifier.fillMaxWidth().height(ServeZone)) {
@@ -264,6 +276,53 @@ private fun CourtColumn(
 }
 
 private val ServeZone = 72.dp
+
+/** Under their court, the zones our serve starts from: as high as a cell
+ * to touch, apart from the net. */
+private val StartGap = 8.dp
+private val StartZones = 48.dp + StartGap
+
+/** How much higher the court is with the zones our serve starts from. */
+val StartZonesHeight = StartZones
+
+/** The zones of our end line our serve starts from, as our server sees
+ * them (5 on the left, 1 on the right): under the net of their court, or
+ * beside it in landscape; touched to tell it, again to take it back; the
+ * one remembered for the server filled already. */
+@Composable
+fun ServeStarts(starts: List<ServeStartChoice>, onStart: (ServeStartChoice) -> Unit, modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.serve_start)
+    val chosenState = stringResource(R.string.zone_chosen)
+    val colors = MaterialTheme.colorScheme
+    Row(modifier.fillMaxWidth()) {
+        starts.forEach { start ->
+            val (background, content) = when {
+                start.chosen -> colors.primary to colors.onPrimary
+                else -> colors.surfaceVariant to colors.onSurface
+            }
+            Box(
+                Modifier.weight(1f).fillMaxHeight().padding(2.dp)
+                    .tutorial("start:${start.label}")
+                    .clickable(role = Role.Button) { onStart(start) }
+                    .semantics {
+                        contentDescription = "$description ${start.label}"
+                        if (start.chosen) stateDescription = chosenState
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Surface(Modifier.fillMaxSize(), shape = MaterialTheme.shapes.small, color = background) {}
+                Text(
+                    start.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (start.chosen) FontWeight.Bold else FontWeight.Normal,
+                    color = content,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+    }
+}
 
 /** The court of the opponent as our server sees it (their end line at the
  * top, 1 on the left, the net at the bottom), or ours (`ours`: seen from

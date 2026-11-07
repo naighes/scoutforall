@@ -10,7 +10,7 @@ use crate::{
         AttackCombination, Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols,
     },
     shapes::{
-        court_zone::{CourtTarget, SubzoneEnum, TargetKind},
+        court_zone::{CourtTarget, ServeStartEnum, SubzoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
         flags::{BlockersEnum, EventFlags},
         lineup::Lineup,
@@ -1312,6 +1312,11 @@ impl SetTranslator<'_> {
                     .num_players
                     .and_then(BlockersEnum::of_datavolley)
                     .filter(|b| BlockersEnum::of(event_type).contains(b));
+                // where our serve started from, behind our end line
+                let serve_start = match event_type {
+                    S => skill.start_zone.and_then(ServeStartEnum::numbered),
+                    _ => None,
+                };
                 self.apply_flagged(
                     event_type,
                     Some(player),
@@ -1320,7 +1325,8 @@ impl SetTranslator<'_> {
                     technique,
                     EventFlags::default()
                         .with_target(target)
-                        .with_blockers(blockers),
+                        .with_blockers(blockers)
+                        .with_serve_start(serve_start),
                 )
             }
             None => Ok(()),

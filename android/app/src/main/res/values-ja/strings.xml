@@ -141,6 +141,10 @@
     <string name="zone_chosen">選択済み</string>
     <string name="serves_by_zone">ゾーン別サーブ</string>
     <string name="zones_told">ゾーン指定 %1$d/%2$d本</string>
+    <string name="serve_start">サーブ開始ゾーン</string>
+    <string name="serves_by_start">サーブ開始ゾーン別</string>
+    <string name="serve_starts_told">開始ゾーン指定 %1$d/%2$d本</string>
+    <string name="serve_from">%1$sから</string>
     <string name="reception_zone">レセプションのゾーン</string>
     <string name="receptions_by_zone">ゾーン別レセプション</string>
     <string name="reception_zones_told">ゾーン指定 %1$d/%2$d本</string>

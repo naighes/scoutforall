@@ -920,6 +920,7 @@ mod tests {
             evals: None,
             zone: None,
             target: None,
+            serve_start: None,
             filter: StatsFilter::default(),
         };
         assert_eq!(picked(attacks), vec![1, 2]);

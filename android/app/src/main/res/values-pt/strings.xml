@@ -142,6 +142,10 @@
     <string name="zone_chosen">escolhida</string>
     <string name="serves_by_zone">Saques por zona</string>
     <string name="zones_told">zona indicada em %1$d de %2$d saques</string>
+    <string name="serve_start">Zona de partida do saque</string>
+    <string name="serves_by_start">Saques por zona de partida</string>
+    <string name="serve_starts_told">partida indicada em %1$d de %2$d saques</string>
+    <string name="serve_from">de %1$s</string>
     <string name="reception_zone">Zona da recepção</string>
     <string name="receptions_by_zone">Recepções por zona</string>
     <string name="reception_zones_told">zona indicada em %1$d de %2$d recepções</string>

@@ -700,6 +700,44 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         );
     }
 
+    /// Where our serves started from: the first zone of the serve, behind
+    /// our end line (1, 9, 6, 7, 5); none when the file doesn't tell it or
+    /// tells a zone the serve can't start from.
+    #[test]
+    fn where_our_serves_started_from() {
+        use crate::shapes::court_zone::ServeStartEnum::*;
+        let mut file = File::new();
+        file.their_serve_error();
+        let from = |start: &str| format!("{}SM#~~~{start}", file.server());
+        let serves = [from("74C"), from("5"), from("9"), from("8"), from("~6")];
+        for serve in &serves {
+            file.rally(&[serve], true);
+        }
+        let file = file.finished();
+        let (events, _) = translated_events(&file).expect("expected the set");
+        let starts: Vec<_> = events
+            .iter()
+            .take(6)
+            .map(|e| (e.event_type, e.flags.serve_start()))
+            .collect();
+        assert_eq!(
+            starts,
+            vec![
+                (OE, None),
+                (S, Some(Z7)),
+                (S, Some(Z5)),
+                (S, Some(Z9)),
+                (S, None),
+                (S, None),
+            ]
+        );
+        // where it went, as before
+        assert_eq!(
+            events.get(1).and_then(|e| e.flags.target()),
+            CourtTarget::of_zone(4, Some(SubzoneEnum::C))
+        );
+    }
+
     /// Our receptions with where we received: the cell of the zone and its
     /// subzone (from 5 to 1D), the whole zone without the subzone; none
     /// when the file doesn't tell it.

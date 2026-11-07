@@ -296,19 +296,26 @@ mod tests {
         );
     }
 
-    /// Where a serve went stays while it's a serve, and goes with another
-    /// type.
+    /// Where a serve went and started from stay while it's a serve, and go
+    /// with another type.
     #[test]
     fn the_target_stays_with_the_serve_only() {
+        use crate::shapes::court_zone::ServeStartEnum;
         let team = Team::new();
         let mut set = side_out(&team);
         let zone = CourtTarget::of_zone(5, Some(SubzoneEnum::D));
-        set.events[2].flags = set.events[2].flags.with_target(zone);
+        let start = Some(ServeStartEnum::Z9);
+        set.events[2].flags = set.events[2]
+            .flags
+            .with_target(zone)
+            .with_serve_start(start);
         let mut serve = edit(&set, 2);
         serve.choose_event_type(S);
         assert_eq!(serve.event().flags.target(), zone);
+        assert_eq!(serve.event().flags.serve_start(), start);
         serve.choose_event_type(F);
         assert_eq!(serve.event().flags.target(), None);
+        assert_eq!(serve.event().flags.serve_start(), None);
     }
 
     /// Changing the type keeps what the new one allows; what isn't among

@@ -641,3 +641,125 @@ impl fmt::Display for CourtTarget {
         }
     }
 }
+
+/// Where our server stands behind our end line, as DataVolley tells it: the
+/// zone of the back row the serve starts from, 1 (on the right of our
+/// server, facing the net), 9, 6, 7 or 5 (on the left).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ServeStartEnum {
+    Z1,
+    Z9,
+    Z6,
+    Z7,
+    Z5,
+}
+
+impl ServeStartEnum {
+    /// From the right of our server to the left: as DataVolley numbers
+    /// them.
+    pub const ALL: [ServeStartEnum; 5] = [
+        ServeStartEnum::Z1,
+        ServeStartEnum::Z9,
+        ServeStartEnum::Z6,
+        ServeStartEnum::Z7,
+        ServeStartEnum::Z5,
+    ];
+
+    /// As shown below their court (`CourtSide::Theirs`), from the left:
+    /// as our server sees our end line, facing the net.
+    pub const SHOWN: [ServeStartEnum; 5] = [
+        ServeStartEnum::Z5,
+        ServeStartEnum::Z7,
+        ServeStartEnum::Z6,
+        ServeStartEnum::Z9,
+        ServeStartEnum::Z1,
+    ];
+
+    /// The number of the zone: 1, 9, 6, 7 or 5.
+    pub fn number(&self) -> u8 {
+        match self {
+            ServeStartEnum::Z1 => 1,
+            ServeStartEnum::Z9 => 9,
+            ServeStartEnum::Z6 => 6,
+            ServeStartEnum::Z7 => 7,
+            ServeStartEnum::Z5 => 5,
+        }
+    }
+
+    /// The zone of a number, none for a zone the serve doesn't start from.
+    pub fn numbered(number: u8) -> Option<Self> {
+        Self::ALL.into_iter().find(|z| z.number() == number)
+    }
+
+    /// The one next to it as shown (see `SHOWN`), this one at the end.
+    pub fn moved(&self, direction: Direction) -> Self {
+        let at = Self::SHOWN.iter().position(|z| z == self);
+        let to = match (at, direction) {
+            (Some(i), Direction::Left) => i.checked_sub(1),
+            (Some(i), Direction::Right) => Some(i + 1),
+            (Some(i), Direction::Up | Direction::Down) => Some(i),
+            (None, _) => None,
+        };
+        to.and_then(|i| Self::SHOWN.get(i)).copied().unwrap_or(*self)
+    }
+
+    /// The one below a cell of their court as shown, the column of the
+    /// cell (0 to 5) across the five: the middle one under the two middle
+    /// columns.
+    pub fn below(column: usize) -> Self {
+        let at = match column {
+            0 => 0,
+            1 | 2 => column,
+            3 => 2,
+            _ => column.saturating_sub(1),
+        };
+        Self::SHOWN.get(at).copied().unwrap_or(ServeStartEnum::Z6)
+    }
+
+    /// The column of their court as shown (0 to 5) above it: the way back
+    /// of `below`.
+    pub fn column(&self) -> usize {
+        match self {
+            ServeStartEnum::Z5 => 0,
+            ServeStartEnum::Z7 => 1,
+            ServeStartEnum::Z6 => 2,
+            ServeStartEnum::Z9 => 4,
+            ServeStartEnum::Z1 => 5,
+        }
+    }
+
+    /// Its code in the flags of an event: 0 is not told. Never to be
+    /// reordered.
+    pub(crate) fn code(&self) -> u16 {
+        match self {
+            ServeStartEnum::Z1 => 1,
+            ServeStartEnum::Z9 => 2,
+            ServeStartEnum::Z6 => 3,
+            ServeStartEnum::Z7 => 4,
+            ServeStartEnum::Z5 => 5,
+        }
+    }
+
+    pub(crate) fn from_code(code: u16) -> Option<Self> {
+        Self::ALL.into_iter().find(|z| z.code() == code)
+    }
+
+    /// The serve to start from where the server served last among the
+    /// events, if they told it: none if they didn't serve yet.
+    pub fn preselected<'a>(
+        server: &uuid::Uuid,
+        events: impl DoubleEndedIterator<Item = &'a crate::shapes::snapshot::EventEntry>,
+    ) -> Option<Self> {
+        events.rev().find_map(|e| match (e.event_type, e.player) {
+            (EventTypeEnum::S, Some(player)) if player == *server => e.flags.serve_start(),
+            _ => None,
+        })
+    }
+}
+
+/// As the scout reads it: "1".
+impl fmt::Display for ServeStartEnum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.number())
+    }
+}

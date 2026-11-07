@@ -68,6 +68,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import io.github.naighes.scout4all.core.TargetStats
+import io.github.naighes.scout4all.core.ServeStartEnum
 import io.github.naighes.scout4all.core.CourtZoneEnum
 import androidx.compose.foundation.border
 import kotlin.math.roundToInt
@@ -413,7 +414,11 @@ private fun FundamentalContent(
             }
         }
     }
-    if (f.targets.isNotEmpty()) TargetZones(f, query.event, choice, onChoice)
+    if (f.serveStarts.isNotEmpty()) ServeStarts(f, query.filter.serveStart) { start ->
+        val toggled = if (query.filter.serveStart == start) null else start
+        onQuery(query.copy(filter = query.filter.copy(serveStart = toggled)))
+    }
+    if (f.targets.isNotEmpty()) TargetZones(f, query.event, query.filter.serveStart, choice, onChoice)
     if (f.blockers.isNotEmpty()) Blockers(f, query.event)
     if (f.players.isNotEmpty()) {
         Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
@@ -578,7 +583,13 @@ private fun FreeballContent(f: FreeballStats) = TileRow {
  * of two zones count half in each. On our court also the conflict zones,
  * between the zones, and all of them under the court. */
 @Composable
-private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum, choice: ClipChoice?, onChoice: (ClipChoice) -> Unit) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun TargetZones(
+    f: FundamentalDetail,
+    event: EventTypeEnum,
+    from: ServeStartEnum?,
+    choice: ClipChoice?,
+    onChoice: (ClipChoice) -> Unit,
+) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     var efficiency by rememberSaveable { mutableStateOf(false) }
     val (title, told) = when (event) {
         EventTypeEnum.P -> R.string.receptions_by_zone to R.string.reception_zones_told
@@ -587,7 +598,10 @@ private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum, choice: Clip
         EventTypeEnum.B -> R.string.blocks_by_zone to R.string.block_zones_told
         else -> R.string.serves_by_zone to R.string.zones_told
     }
-    Text(stringResource(title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
+    // only the serves from the zone picked above
+    val start = f.serveStarts.firstOrNull { it.value == from }?.takeIf { event == EventTypeEnum.S }
+    val named = listOfNotNull(stringResource(title), start?.let { stringResource(R.string.serve_from, it.label) })
+    Text(named.joinToString(" · "), Modifier.title(), style = MaterialTheme.typography.titleMedium)
     Text(
         stringResource(told, f.targetsTold.toInt(), f.total.toInt()),
         style = MaterialTheme.typography.labelMedium,
@@ -630,6 +644,38 @@ private fun TargetZones(f: FundamentalDetail, event: EventTypeEnum, choice: Clip
         )
     }
 }
+
+/** Our serves by the zone they started from, as our server sees our end
+ * line (5 on the left, 1 on the right): how many, the more the brighter
+ * amber, their share and, from a few on, their efficiency. Touched, where
+ * they went only from there (their actions to watch too); again, all. */
+@Composable
+private fun ServeStarts(f: FundamentalDetail, picked: ServeStartEnum?, onPick: (ServeStartEnum) -> Unit) =
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.serves_by_start), Modifier.title(), style = MaterialTheme.typography.titleMedium)
+        Text(
+            stringResource(R.string.serve_starts_told, f.serveStartsTold.toInt(), f.total.toInt()),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        val most = f.serveStarts.maxOfOrNull { it.count.toDouble() }?.coerceAtLeast(1.0) ?: 1.0
+        val description = stringResource(R.string.serve_start)
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = 72.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            f.serveStarts.forEach { z ->
+                val some = z.count > 0u
+                val value = if (some) "${z.share.roundToInt()}%" else ""
+                val detail = z.efficiency?.let { "%+d%%".format(it.roundToInt()) } ?: if (some) "(${z.count})" else ""
+                val background = densityColor(z.count.toDouble() / most).takeIf { some }
+                val pickable = some || picked == z.value
+                Box(
+                    Modifier.weight(1f).fillMaxHeight()
+                        .picked((picked == z.value).takeIf { pickable }) { onPick(z.value) },
+                ) {
+                    ZoneCell("$description ${z.label}", z.label, true, background, value, detail)
+                }
+            }
+        }
+    }
 
 /** Our attacks by how many of theirs blocked, or our blocks by how many of
  * ours, of the ones told: a row each, how many, their share and, from a
@@ -701,23 +747,27 @@ internal fun contrast(a: Color, b: Color): Double {
  * has one; a conflict zone, narrow, its name and value only. TalkBack reads
  * them all. */
 @Composable
-private fun ZoneCell(t: TargetStats, background: Color?, value: String, detail: String) {
+private fun ZoneCell(t: TargetStats, background: Color?, value: String, detail: String) =
+    ZoneCell(t.label, t.label, t.zone, background, value, detail)
+
+@Composable
+private fun ZoneCell(spoken: String, label: String, zone: Boolean, background: Color?, value: String, detail: String) {
     val text = background?.let { readableOn(it) } ?: MaterialTheme.colorScheme.onSurfaceVariant
     val lines = when {
-        !t.zone -> listOf(t.label to MaterialTheme.typography.labelSmall, value to MaterialTheme.typography.labelMedium)
+        !zone -> listOf(label to MaterialTheme.typography.labelSmall, value to MaterialTheme.typography.labelMedium)
             .filter { it.first.isNotEmpty() }
         else -> listOf(
-            t.label to MaterialTheme.typography.labelSmall,
+            label to MaterialTheme.typography.labelSmall,
             value to MaterialTheme.typography.labelLarge,
             detail to MaterialTheme.typography.labelSmall,
         ).filter { it.first.isNotEmpty() }
     }
     Surface(
         Modifier.fillMaxSize().padding(1.dp).clearAndSetSemantics {
-            contentDescription = listOf(t.label, value, detail).filter { it.isNotEmpty() }.joinToString(" ")
+            contentDescription = listOf(spoken, value, detail).filter { it.isNotEmpty() }.joinToString(" ")
         },
         shape = MaterialTheme.shapes.small,
-        color = background ?: MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (t.zone) 1f else 0.5f),
+        color = background ?: MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (zone) 1f else 0.5f),
     ) {
         Column(verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             lines.forEach { (line, style) ->

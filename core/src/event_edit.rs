@@ -165,7 +165,7 @@ impl EventEdit {
 
     /// Another type, among `event_types`: it keeps the evaluation and the
     /// technique when it allows them, else the first evaluation and no
-    /// technique; where a serve went, if it stays a serve.
+    /// technique; where a serve went and started from, if it stays a serve.
     pub fn choose_event_type(&mut self, event_type: EventTypeEnum) {
         if !self.event_types().contains(&event_type) {
             return;
@@ -189,6 +189,12 @@ impl EventEdit {
             event
                 .flags
                 .target()
+                .filter(|_| event_type == EventTypeEnum::S),
+        );
+        event.flags = event.flags.with_serve_start(
+            event
+                .flags
+                .serve_start()
                 .filter(|_| event_type == EventTypeEnum::S),
         );
     }

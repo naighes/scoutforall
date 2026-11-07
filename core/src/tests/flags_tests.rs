@@ -249,6 +249,48 @@ mod tests {
         assert_eq!(BlockersEnum::of_datavolley('~'), None);
     }
 
+    /// Where our serve started from: in bits 13 to 15, the rest kept; the
+    /// five zones of DataVolley, from the left as our server sees them 5 7
+    /// 6 9 1; codes this version doesn't know are none and kept.
+    #[test]
+    fn where_the_serve_started_from() {
+        use crate::shapes::court_zone::ServeStartEnum::{self, *};
+        let flags = EventFlags::default()
+            .with_inverted_p1(true)
+            .with_target(Some(CourtTarget::Zone(5)));
+        for (i, z) in ServeStartEnum::ALL.into_iter().enumerate() {
+            let told = flags.with_serve_start(Some(z));
+            assert_eq!(told.serve_start(), Some(z));
+            assert_eq!(told.target(), Some(CourtTarget::Zone(5)));
+            assert!(told.inverted_p1());
+            assert_eq!(told.with_serve_start(None), flags);
+            assert_eq!(EventFlags::parse(&told.to_string()).ok(), Some(told));
+            assert_eq!(
+                told.to_string(),
+                (flags.to_string().parse::<u32>().unwrap() + ((i as u32 + 1) << 13)).to_string()
+            );
+            assert_eq!(ServeStartEnum::numbered(z.number()), Some(z));
+        }
+        assert_eq!(flags.serve_start(), None);
+        // 6 and 7 after 13: not known, kept
+        let later = EventFlags::parse(&(7u32 << 13).to_string()).unwrap();
+        assert_eq!(later.serve_start(), None);
+        assert_eq!(later.with_inverted_p1(true).to_string(), ((7u32 << 13) + 1).to_string());
+        assert_eq!(ServeStartEnum::SHOWN, [Z5, Z7, Z6, Z9, Z1]);
+        assert_eq!(ServeStartEnum::numbered(8), None);
+        // the cursor across them, staying at the ends; under the columns
+        // of their court and back
+        assert_eq!(Z5.moved(Direction::Left), Z5);
+        assert_eq!(Z5.moved(Direction::Right), Z7);
+        assert_eq!(Z1.moved(Direction::Right), Z1);
+        assert_eq!(Z9.moved(Direction::Up), Z9);
+        let below: Vec<_> = (0..6).map(ServeStartEnum::below).collect();
+        assert_eq!(below, vec![Z5, Z7, Z6, Z6, Z9, Z1]);
+        for z in ServeStartEnum::ALL {
+            assert_eq!(ServeStartEnum::below(z.column()), z);
+        }
+    }
+
     /// The zones at the net on our court, 4 3 2 from the left: the cursor
     /// across them, staying at the ends; only a zone there fits the block.
     #[test]

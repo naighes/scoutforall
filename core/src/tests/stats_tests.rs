@@ -158,6 +158,7 @@ mod tests {
                 zone: None,
                 target: None,
                 blockers: None,
+                serve_start: None,
                 eval: *eval,
                 situation: Default::default(),
                 touch: None,
@@ -1342,6 +1343,8 @@ mod tests {
                 on_conflicts: None,
                 blockers_told: 0,
                 blockers: vec![],
+                serve_starts_told: 0,
+                serve_starts: vec![],
                 zones: vec![
                     ZoneDetail {
                         zone: ZoneEnum::Four,
@@ -1385,6 +1388,8 @@ mod tests {
                 on_conflicts: None,
                 blockers_told: 0,
                 blockers: vec![],
+                serve_starts_told: 0,
+                serve_starts: vec![],
                 zones: vec![ZoneDetail {
                     zone: ZoneEnum::Two,
                     share: 100.0,
@@ -1431,6 +1436,8 @@ mod tests {
                 on_conflicts: None,
                 blockers_told: 0,
                 blockers: vec![],
+                serve_starts_told: 0,
+                serve_starts: vec![],
                 zones: vec![],
             }
         );
@@ -1501,6 +1508,64 @@ mod tests {
         assert!(detail(&stats, A, &all()).targets.is_empty());
         let none = t.serving(vec![serve(Perfect, None)]).stats;
         assert!(detail(&none, S, &all()).targets.is_empty());
+    }
+
+    /// Our serves by where they started from: how many from each of the
+    /// five zones (the ones never told too), the share of the ones told,
+    /// the efficiency only from three serves on; with a zone asked, where
+    /// they went only from there, the rest of the detail for all of them.
+    /// None for the other fundamentals, or with none told.
+    #[test]
+    fn detail_of_the_serve_starts() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z5};
+        use crate::shapes::court_zone::{CourtTarget, ServeStartEnum};
+        use ServeStartEnum::{Z1 as From1, Z5 as From5, Z6 as From6};
+        let t = Team::new();
+        let serve = |eval, start, zone| {
+            let mut e = act(S, t.setter, eval);
+            e.flags = e
+                .flags
+                .with_serve_start(start)
+                .with_target(Some(CourtTarget::Zone(zone)));
+            e
+        };
+        let stats = t
+            .serving(vec![
+                serve(Perfect, Some(From1), 1),
+                serve(Perfect, Some(From1), 1),
+                serve(Perfect, Some(From5), 5),
+                serve(Perfect, None, 5),
+                serve(Error, Some(From1), 5),
+            ])
+            .stats;
+        let serves = detail(&stats, S, &all());
+        assert_eq!((serves.total, serves.serve_starts_told), (5, 4));
+        let starts: Vec<_> = serves.serve_starts.iter().map(|z| z.start).collect();
+        assert_eq!(starts, ServeStartEnum::ALL.to_vec());
+        let of = |start| serves.serve_starts.iter().find(|z| z.start == start).copied();
+        let from_1 = of(From1).unwrap();
+        assert_eq!((from_1.count, from_1.share), (3, 75.0));
+        assert!((from_1.efficiency.unwrap() - 100.0 / 3.0).abs() < 1e-9);
+        let from_5 = of(From5).unwrap();
+        assert_eq!((from_5.count, from_5.share, from_5.efficiency), (1, 25.0, None));
+        assert_eq!(of(From6).map(|z| z.count), Some(0));
+        // where they went from 1: two to 1, one to 5; the rest as before
+        let from = |start| match Breakdown::from_start(&stats, S, &all(), Some(start)) {
+            Breakdown::Fundamental(d) => d,
+            Breakdown::Freeballs(f) => panic!("expected a fundamental, got {f:?}"),
+        };
+        let only_1 = from(From1);
+        assert_eq!((only_1.total, only_1.targets_told), (5, 3));
+        let to = |d: &Detail, zone| d.targets.iter().find(|t| t.zone == zone).map(|t| t.count);
+        assert_eq!((to(&only_1, Z1), to(&only_1, Z5)), (Some(2.0), Some(1.0)));
+        assert_eq!(only_1.serve_starts, serves.serve_starts);
+        // from 6 none: no court
+        assert!(from(From6).targets.is_empty());
+        // not for the other fundamentals, nor with none told
+        assert!(detail(&stats, A, &all()).serve_starts.is_empty());
+        let none = t.serving(vec![serve(Perfect, None, 1)]).stats;
+        assert_eq!(detail(&none, S, &all()).serve_starts_told, 0);
+        assert!(detail(&none, S, &all()).serve_starts.is_empty());
     }
 
     /// Our attacks by the zone of their court they went to: as the serves.
@@ -1687,6 +1752,7 @@ mod tests {
                     zone: None,
                     target: None,
                     blockers: *blockers,
+                    serve_start: None,
                     eval: Some(*eval),
                     situation: Default::default(),
                     touch: None,

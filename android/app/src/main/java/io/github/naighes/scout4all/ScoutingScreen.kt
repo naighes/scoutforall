@@ -119,6 +119,7 @@ import io.github.naighes.scout4all.core.Scouting
 import io.github.naighes.scout4all.core.ScoutedEvent
 import io.github.naighes.scout4all.core.ScoutingPlayer
 import io.github.naighes.scout4all.core.ScoutingState
+import io.github.naighes.scout4all.core.ServeStartChoice
 import io.github.naighes.scout4all.core.ScoutingStep
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.ServeTypeEnum
@@ -153,6 +154,9 @@ data class ScoutingView(
     val targetTold: String? = null,
     /** the court is ours (our reception, the net at the top), not theirs */
     val targetOurs: Boolean = false,
+    /** for our serve, the zones of our end line it starts from, 5 7 6 9 1
+     * from the left: the one remembered for the server chosen */
+    val starts: List<ServeStartChoice> = emptyList(),
 )
 
 sealed interface ScoutingUi {
@@ -227,6 +231,12 @@ class ScoutingViewModel(
      * it; touched again, taken back. */
     fun target(cell: CourtCellChoice) = choose("target ${cell.label}") {
         it.touchTarget(cell.zone, cell.subzone)
+        Progress.CHOOSING
+    }
+
+    /** Where our serve starts from; touched again, taken back. */
+    fun start(start: ServeStartChoice) = choose("serve start ${start.label}") {
+        it.touchServeStart(start.value)
         Progress.CHOOSING
     }
 
@@ -323,6 +333,7 @@ class ScoutingViewModel(
             targets = s.targetCourt(),
             targetTold = s.targetTold(),
             targetOurs = s.targetOurs(),
+            starts = s.serveStarts(),
         )
     }
 }
@@ -490,6 +501,9 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
         // too, back as soon as the serve is evaluated
         val aiming = view.targets.isNotEmpty()
         val low = aiming && maxWidth > maxHeight
+        // in landscape the zones our serve starts from go with the choices,
+        // where there's room: under the court they'd make it too low
+        val landscape = maxWidth > maxHeight
         val court = @Composable { m: Modifier ->
             Column(m.padding(vertical = if (aiming) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (aiming) 4.dp else 16.dp)) {
                 if (!low) Score(view.state, server = aiming, phase = !aiming, told = view.targetTold)
@@ -540,6 +554,8 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                         else -> R.string.serve_zone
                     },
                     onTarget = model::target,
+                    starts = view.starts.takeIf { !landscape }.orEmpty(),
+                    onStart = model::start,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
                         position = players.indexOfFirst { it.id == touched }.takeIf { it >= 0 }?.plus(1),
@@ -552,14 +568,14 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
         // a longer list (the replacements) scrolls
         val choices = @Composable { m: Modifier ->
             Column(m.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Choices(view, model)
+                Choices(view, model, startsHere = landscape)
             }
         }
         val panel = @Composable { m: Modifier, fixed: Boolean ->
             Column(m) {
                 HorizontalDivider()
                 when {
-                    fixed -> AsHighAs({ ServeChoices(model) }) { choices(Modifier) }
+                    fixed -> AsHighAs({ ServeChoices(model, compact = view.starts.isNotEmpty()) }) { choices(Modifier) }
                     else -> choices(Modifier.weight(1f))
                 }
                 // always in the same place, where the thumb is: the undo on
@@ -595,7 +611,11 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                 Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     CourtAbove(
                         height,
-                        min = if (aiming) MinAimingCourt else MinCourt,
+                        min = when {
+                            view.starts.isNotEmpty() -> MinAimingCourt + StartZonesHeight
+                            aiming -> MinAimingCourt
+                            else -> MinCourt
+                        },
                         court = { court(Modifier) },
                         panel = { panel(Modifier.fillMaxWidth(), true) },
                     )
@@ -629,18 +649,36 @@ private fun CourtAbove(height: Dp, min: Dp, court: @Composable () -> Unit, panel
     }
 
 /** The choices of the serve, the most a step has, only to be measured: not
- * there for TalkBack either. */
+ * there for TalkBack either. `compact`, while our serve tells where it
+ * starts from under the court: the serves and the events of the rally in
+ * one row, to leave the court that room. */
 @Composable
-private fun ServeChoices(model: ScoutingViewModel) =
+private fun ServeChoices(model: ScoutingViewModel, compact: Boolean = false) =
     Column(Modifier.clearAndSetSemantics {}.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Techniques(
-            listOf(ServeTypeEnum.FLOAT to "F", ServeTypeEnum.SPIN to "S").map { (type, code) ->
-                TechniqueChoice(TechniqueEnum.Serve(type), code, code, code, false)
-            },
-            model,
-        )
-        Evals(EvalEnum.entries.take(5).map { EvalChoice(it, "#", "#", null) }, model)
-        RallyEvents(listOf(EventTypeEnum.OE, EventTypeEnum.F).map { EventChoice(it, "") }, model)
+        val serves = listOf(ServeTypeEnum.FLOAT to "F", ServeTypeEnum.SPIN to "S").map { (type, code) ->
+            TechniqueChoice(TechniqueEnum.Serve(type), code, code, code, false)
+        }
+        val events = listOf(EventTypeEnum.OE, EventTypeEnum.F).map { EventChoice(it, "") }
+        when (compact) {
+            true -> {
+                ServesAndRally(serves, events, model)
+                Evals(EvalEnum.entries.take(5).map { EvalChoice(it, "#", "#", null) }, model)
+            }
+            false -> {
+                Techniques(serves, model)
+                Evals(EvalEnum.entries.take(5).map { EvalChoice(it, "#", "#", null) }, model)
+                RallyEvents(events, model)
+            }
+        }
+    }
+
+/** The serves and the events of the rally side by side, half the row
+ * each. */
+@Composable
+private fun ServesAndRally(serves: List<TechniqueChoice>, events: List<EventChoice>, model: ScoutingViewModel) =
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Techniques(serves, model, Modifier.weight(1f).fillMaxHeight())
+        RallyEvents(events, model, Modifier.weight(1f))
     }
 
 /** `content` as high as `reference`, which is measured but never shown. */
@@ -872,7 +910,7 @@ private fun TeamName(side: Side, align: TextAlign, modifier: Modifier) = Row(
 /** What the scout chooses now: the player on the court (with the other
  * events), the event of the player, the evaluation, the replacement. */
 @Composable
-private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
+private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Boolean = false) {
     val state = view.state
     val player = state.player?.let { "${it.number} · ${it.name}" }
     when (state.step) {
@@ -894,12 +932,18 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel) {
                 if (state.event?.value != EventTypeEnum.S) {
                     Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
                 }
-                if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
+                // our serve telling where it starts from: the serves and
+                // the events of the rally in one row, the court the higher
+                if (view.starts.isNotEmpty()) ServesAndRally(view.techniques, view.otherEvents, model)
+                else if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
+                if (startsHere && view.starts.isNotEmpty()) {
+                    ServeStarts(view.starts, model::start, Modifier.heightIn(min = 48.dp).height(IntrinsicSize.Min))
+                }
                 if (view.blockers.isNotEmpty()) Blockers(view.blockers, model)
             }
             Evals(view.evals, model)
             // the serve waits for its evaluation, or gives way
-            RallyEvents(view.otherEvents, model)
+            if (view.starts.isEmpty()) RallyEvents(view.otherEvents, model)
         }
         ScoutingStep.PLAYER -> {
             Title(state.event?.name.orEmpty())
@@ -1030,8 +1074,8 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
 /** The other events of the rally in a row, never to scroll for: an icon
  * and a short name, the whole name for TalkBack. */
 @Composable
-private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel) = Row(
-    Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel, modifier: Modifier = Modifier) = Row(
+    modifier.fillMaxWidth().height(IntrinsicSize.Min),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
 ) {
     // the lines of the longest name, for all: laid out, a name may take one
@@ -1082,7 +1126,8 @@ private fun Evals(evals: List<EvalChoice>, model: ScoutingViewModel) = Row(
 /** The set or serve the evaluation saves, in a row, never to scroll for:
  * the code and the word for it, if any; the chosen one is filled. */
 @Composable
-private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewModel) = Row(
+private fun Techniques(techniques: List<TechniqueChoice>, model: ScoutingViewModel, modifier: Modifier = Modifier) = Row(
+    modifier,
     horizontalArrangement = Arrangement.spacedBy(4.dp),
 ) {
     techniques.forEach { t ->

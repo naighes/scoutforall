@@ -51,7 +51,10 @@ use scout4all_core::{
     settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
-        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, SubzoneEnum, TargetKind},
+        court_zone::{
+            CourtCell, CourtSide, CourtTarget, CourtZoneEnum, ServeStartEnum, SubzoneEnum,
+            TargetKind,
+        },
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
@@ -106,6 +109,15 @@ pub enum TeamClassificationEnum {
     NationalLowLevel,
     Regional,
     LocalDivision,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ServeStartEnum {
+    Z1,
+    Z9,
+    Z6,
+    Z7,
+    Z5,
 }
 
 #[uniffi::remote(Enum)]
@@ -1078,6 +1090,17 @@ pub struct BlockersChoice {
     pub chosen: bool,
 }
 
+/// A zone our serve starts from, behind our end line, to tell along with
+/// its evaluation.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ServeStartChoice {
+    pub value: ServeStartEnum,
+    /// 1, 9, 6, 7 or 5
+    pub label: String,
+    /// what the evaluation saves now, told or remembered for the server
+    pub chosen: bool,
+}
+
 /// A cell of the court (a subzone of DataVolley), or a whole zone at the
 /// net for our block, to tell where the ball went.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -1107,6 +1130,8 @@ pub struct ScoutedEvent {
     pub target: Option<String>,
     /// how many blocked, if told: e.g. "2 blockers"
     pub blockers: Option<String>,
+    /// where our serve started from, if told: e.g. "1"
+    pub serve_start: Option<String>,
 }
 
 /// An event of a set, in the list to correct it.
@@ -1400,6 +1425,10 @@ pub struct DetailFilter {
     /// a close score (two points apart at most) or not
     #[uniffi(default)]
     pub close: Option<bool>,
+    /// for our serve, where it went only from this zone; the clips only
+    /// from there
+    #[uniffi(default)]
+    pub serve_start: Option<ServeStartEnum>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -1487,6 +1516,11 @@ pub struct FundamentalDetail {
     /// each of the ones it can tell; empty with none told
     pub blockers_told: u32,
     pub blockers: Vec<BlockersStats>,
+    /// for a serve: how many had where it started from told, and the five
+    /// zones it starts from as shown below their court (5, 7, 6, 9, 1 from
+    /// the left, see `ServeStartEnum::SHOWN`); empty with none told
+    pub serve_starts_told: u32,
+    pub serve_starts: Vec<ServeStartStats>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
     pub players: Vec<PlayerStats>,
@@ -1499,6 +1533,20 @@ pub struct BlockersStats {
     pub value: BlockersEnum,
     /// e.g. "2 blockers"
     pub name: String,
+    pub count: u32,
+    /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
+}
+
+/// Our serves started from a zone, of the ones with where they started
+/// from told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ServeStartStats {
+    pub value: ServeStartEnum,
+    /// 1, 9, 6, 7 or 5
+    pub label: String,
     pub count: u32,
     /// 0 to 100
     pub share: f64,
@@ -1789,6 +1837,32 @@ impl Scouting {
                 chosen: session.blockers() == Some(*b),
             })
             .collect()
+    }
+
+    /// The zones our serve starts from, as shown below their court (5, 7,
+    /// 6, 9, 1 from the left): along with the evaluation of our serve,
+    /// where the server served from last chosen; empty for the other
+    /// events.
+    pub fn serve_starts(&self) -> Vec<ServeStartChoice> {
+        let session = self.session();
+        match session.serve_start_applies() {
+            true => ServeStartEnum::SHOWN
+                .iter()
+                .map(|z| ServeStartChoice {
+                    value: *z,
+                    label: z.to_string(),
+                    chosen: session.serve_start() == Some(*z),
+                })
+                .collect(),
+            false => vec![],
+        }
+    }
+
+    /// The scout touches a zone our serve starts from: told, or taken back
+    /// when it was. Saved with the evaluation, never required.
+    pub fn touch_serve_start(&self, start: ServeStartEnum) -> Result<(), MobileError> {
+        let touched = self.session().touch_serve_start(start);
+        self.scouted(touched)
     }
 
     /// The scout tells how many blocked, or takes it back (`None`). Saved
@@ -2152,7 +2226,12 @@ fn detail_of(
             .find_map(|t| t.find_player(id))
             .map(|p| scouting_player(p, labels))
     };
-    let (fundamental, freeballs) = match Breakdown::of(stats, event, &narrowed) {
+    let (fundamental, freeballs) = match Breakdown::from_start(
+        stats,
+        event,
+        &narrowed,
+        filter.serve_start,
+    ) {
         Breakdown::Fundamental(d) => (
             Some(FundamentalDetail {
                 total: d.total,
@@ -2238,6 +2317,18 @@ fn detail_of(
                         count: b.count,
                         share: b.share,
                         efficiency: b.efficiency,
+                    })
+                    .collect(),
+                serve_starts_told: d.serve_starts_told,
+                serve_starts: ServeStartEnum::SHOWN
+                    .iter()
+                    .filter_map(|z| d.serve_starts.iter().find(|s| s.start == *z))
+                    .map(|s| ServeStartStats {
+                        value: s.start,
+                        label: s.start.to_string(),
+                        count: s.count,
+                        share: s.share,
+                        efficiency: s.efficiency,
                     })
                     .collect(),
                 players: by_player(stats, event, &narrowed)
@@ -2382,6 +2473,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         technique: e.technique.map(|t| t.to_string()),
         target: e.flags.target().map(|t| t.described()),
         blockers: e.flags.blockers().map(|b| b.name(labels).to_string()),
+        serve_start: e.flags.serve_start().map(|z| z.to_string()),
     }
 }
 
@@ -4149,6 +4241,7 @@ fn clips_of(m: &MatchEntry, pick: &ClipPick) -> Result<Vec<EventRef>, MobileErro
         evals: (!pick.evals.is_empty()).then(|| EvalSet::of(&pick.evals)),
         zone: pick.zone.and_then(|z| ZoneEnum::try_from(z).ok()),
         target: pick.target,
+        serve_start: pick.filter.serve_start.filter(|_| pick.event == EventTypeEnum::S),
         filter,
     };
     let mut sets: Vec<&SetEntry> = in_scope(&m.sets.iter().collect::<Vec<_>>(), pick.scope);
@@ -6101,6 +6194,103 @@ mod tests {
                 efficiency: None
             })
         );
+    }
+
+    /// Where our serve starts from: the five zones from the left as our
+    /// server sees them, along with the evaluation of our serve only;
+    /// remembered for the server; the serves by zone they started from,
+    /// where they went only from the zone asked, and their clips.
+    #[test]
+    fn the_serves_by_where_they_started_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let labels = |s: &Scouting| {
+            s.serve_starts()
+                .iter()
+                .map(|c| (c.label.clone(), c.chosen))
+                .collect::<Vec<_>>()
+        };
+        let none: Vec<(String, bool)> = ["5", "7", "6", "9", "1"]
+            .iter()
+            .map(|l| (l.to_string(), false))
+            .collect();
+        assert_eq!(labels(&scouting), none);
+        // from 1 to 1, from 1 to 5, then from 5 without a target
+        scouting.touch_serve_start(ServeStartEnum::Z1).unwrap();
+        scouting.touch_target(1, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        // remembered for the same server
+        assert_eq!(
+            scouting.serve_starts().iter().find(|c| c.chosen).map(|c| c.value),
+            Some(ServeStartEnum::Z1)
+        );
+        scouting.touch_target(5, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        scouting.touch_serve_start(ServeStartEnum::Z5).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        let detail = |serve_start| {
+            scouting
+                .detail(
+                    StatsScope::Match,
+                    EventTypeEnum::S,
+                    DetailFilter {
+                        serve_start,
+                        ..DetailFilter::default()
+                    },
+                )
+                .unwrap()
+                .fundamental
+                .unwrap()
+        };
+        let all = detail(None);
+        assert_eq!(all.serve_starts_told, 3);
+        let shares: Vec<(&str, u32)> = all
+            .serve_starts
+            .iter()
+            .map(|z| (z.label.as_str(), z.count))
+            .collect();
+        assert_eq!(
+            shares,
+            vec![("5", 1), ("7", 0), ("6", 0), ("9", 0), ("1", 2)]
+        );
+        assert_eq!(all.targets_told, 2);
+        let from_1 = detail(Some(ServeStartEnum::Z1));
+        assert_eq!((from_1.total, from_1.targets_told), (3, 2));
+        assert_eq!(from_1.serve_starts, all.serve_starts);
+        let from_5 = detail(Some(ServeStartEnum::Z5));
+        assert!(from_5.targets.is_empty());
+        // the event tells it, the last first
+        let state = scouting.state();
+        assert_eq!(
+            state.events.iter().map(|e| e.serve_start.as_deref()).collect::<Vec<_>>(),
+            vec![Some("5"), Some("1"), Some("1")]
+        );
+        // not for their serve: our reception
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        let receiver = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(receiver).unwrap();
+        assert!(scouting.serve_starts().is_empty());
+        assert!(scouting.touch_serve_start(ServeStartEnum::Z1).is_err());
+        // the clips from 1, to 1 from 1
+        let pick = |serve_start, target| ClipPick {
+            scope: StatsScope::Match,
+            event: EventTypeEnum::S,
+            filter: DetailFilter {
+                serve_start,
+                ..DetailFilter::default()
+            },
+            evals: vec![],
+            zone: None,
+            target,
+        };
+        let clips = |p| app.match_clips(&team, &m, &p).unwrap().len();
+        assert_eq!(clips(pick(None, None)), 4);
+        assert_eq!(clips(pick(Some(ServeStartEnum::Z1), None)), 2);
+        assert_eq!(clips(pick(Some(ServeStartEnum::Z1), Some(CourtZoneEnum::Z5))), 1);
+        assert_eq!(clips(pick(Some(ServeStartEnum::Z5), Some(CourtZoneEnum::Z5))), 0);
     }
 
     #[test]

@@ -19,7 +19,10 @@ use {
     scout4all_core::{
         scouting::{PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
         shapes::{
-            court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, Direction, TargetKind},
+            court_zone::{
+                CELLS, CourtCell, CourtSide, CourtTarget, CourtZoneEnum, Direction, ServeStartEnum,
+                TargetKind,
+            },
             enums::{EvalEnum, EventTypeEnum, TeamSideEnum},
             flags::BlockersEnum,
             technique::TechniqueEnum,
@@ -31,7 +34,7 @@ use {
     },
     scout4all_mobile::{
         BlockersChoice, EvalChoice, EventChoice, LiveStats, MobileError, Scouting, ScoutingState,
-        StatsScope, TechniqueChoice,
+        ServeStartChoice, StatsScope, TechniqueChoice,
     },
     std::sync::Arc,
     tokio::runtime::Runtime,
@@ -78,6 +81,8 @@ struct Snapshot {
     target: Vec<Vec<scout4all_mobile::CourtCellChoice>>,
     target_ours: bool,
     target_told: Option<String>,
+    /// for our serve, the zones it starts from, below their court
+    starts: Vec<ServeStartChoice>,
     stats: Option<LiveStats>,
 }
 
@@ -91,6 +96,9 @@ pub struct ScoutingScreen {
     /// the cursor of the arrows on the court where the ball went
     target_cursor: Option<CourtCell>,
     net_cursor: Option<CourtZoneEnum>,
+    /// the cursor of the arrows on the zones our serve starts from, below
+    /// the net: there instead of on the court
+    start_cursor: Option<ServeStartEnum>,
     /// an error, or that the set is over: any key closes it
     notice: Option<(String, bool)>,
     set_over: bool,
@@ -121,6 +129,7 @@ impl ScoutingScreen {
             snapshot,
             target_cursor: None,
             net_cursor: None,
+            start_cursor: None,
             notice: None,
             set_over: false,
             show_stats: true,
@@ -194,6 +203,10 @@ impl ScoutingScreen {
                 Outcome::Stay
             }
             Message::Eval(e) => {
+                // as the key of the evaluation: the next event from scratch
+                self.target_cursor = None;
+                self.net_cursor = None;
+                self.start_cursor = None;
                 let r = mobile(self.scouting.choose_eval(e));
                 self.show(r);
                 Outcome::Stay
@@ -217,6 +230,15 @@ impl ScoutingScreen {
                 self.show(r);
                 Outcome::Stay
             }
+            Message::Court(Touch::Start(start)) => {
+                let r = mobile(
+                    self.scouting
+                        .touch_serve_start(start)
+                        .map(|_| Progress::Choosing),
+                );
+                self.show(r);
+                Outcome::Stay
+            }
             Message::Court(Touch::Cell(zone, subzone)) => {
                 let r = mobile(
                     self.scouting
@@ -230,6 +252,7 @@ impl ScoutingScreen {
                 let r = mobile(self.scouting.undo().map(|_| Progress::Choosing));
                 self.target_cursor = None;
                 self.net_cursor = None;
+                self.start_cursor = None;
                 self.show(r);
                 Outcome::Stay
             }
@@ -386,6 +409,11 @@ impl ScoutingScreen {
             .copied()
             .filter(|e| self.snapshot.evals.iter().any(|c| c.value == *e));
         let technique = self.technique_for(&ck);
+        if let Some(r) = self.start_key(ck, direction, chosen) {
+            let r = self.core(r);
+            self.show(r);
+            return;
+        }
         let r = match (
             ck == BLOCKERS_KEY && has_blockers,
             direction,
@@ -416,6 +444,7 @@ impl ScoutingScreen {
                 (Some(eval), _) => {
                     self.target_cursor = None;
                     self.net_cursor = None;
+                    self.start_cursor = None;
                     self.with(|s, rt| rt.block_on(s.choose_eval(eval)))
                 }
                 (None, Some(t)) => {
@@ -426,6 +455,44 @@ impl ScoutingScreen {
         };
         let r = self.core(r);
         self.show(r);
+    }
+
+    /// The arrows and the space bar on the zones our serve starts from,
+    /// below the net: down from the row at the net there, up back to it,
+    /// across them, the space bar tells the one of the cursor. None when
+    /// the key is for the court or isn't one of these.
+    fn start_key(
+        &mut self,
+        ck: KeyCombination,
+        direction: Option<Direction>,
+        chosen: Option<CourtTarget>,
+    ) -> Option<Result<Progress, ScoutingError>> {
+        let applies = self.with(|s, _| s.serve_start_applies());
+        let at_net = self.cursor(chosen);
+        let bottom = at_net.place().0 + 1 == CELLS;
+        match (applies, self.start_cursor, direction, ck == ZONE_KEY) {
+            (false, ..) => {
+                self.start_cursor = None;
+                None
+            }
+            (true, Some(at), Some(Direction::Up), _) => {
+                self.start_cursor = None;
+                self.target_cursor = CourtCell::at(CELLS - 1, at.column());
+                Some(Ok(Progress::Choosing))
+            }
+            (true, Some(at), Some(d), _) => {
+                self.start_cursor = Some(at.moved(d));
+                Some(Ok(Progress::Choosing))
+            }
+            (true, Some(at), None, true) => {
+                Some(self.with(|s, _| s.touch_serve_start(at).map(|_| Progress::Choosing)))
+            }
+            (true, None, Some(Direction::Down), _) if bottom => {
+                self.start_cursor = Some(ServeStartEnum::below(at_net.place().1));
+                Some(Ok(Progress::Choosing))
+            }
+            _ => None,
+        }
     }
 
     /// The set or serve bound to the key, among the available ones.
@@ -489,6 +556,7 @@ fn read(scouting: &Scouting, match_scope: bool) -> Snapshot {
         target: scouting.target_court(),
         target_ours: scouting.target_ours(),
         target_told: scouting.target_told(),
+        starts: scouting.serve_starts(),
         stats: scouting.stats(scope).ok(),
         state,
     }
@@ -855,7 +923,7 @@ impl ScoutingScreen {
                         row![
                             ui::keycap("← ↑ ↓ →", c),
                             ui::keycap(&keymap::label(&ZONE_KEY), c),
-                            ui::body(snap.target_told.clone().unwrap_or_default()).color(c.accent),
+                            ui::body(self.told(s)).color(c.accent),
                         ]
                         .spacing(6)
                         .align_y(Alignment::Center),
@@ -932,6 +1000,22 @@ impl ScoutingScreen {
     }
 
     /// Ours about to serve: in position 1, before the serve is made.
+    /// What's told of our serve or of where the ball went: "from 1 → 5A",
+    /// "5A", "from 1"; empty when nothing is.
+    fn told(&self, s: &'static Strings) -> String {
+        let start = self
+            .snapshot
+            .starts
+            .iter()
+            .find(|z| z.chosen)
+            .map(|z| ui::fill(s.serve_from, std::slice::from_ref(&z.label)));
+        match (start, self.snapshot.target_told.clone()) {
+            (Some(start), Some(target)) => format!("{start} → {target}"),
+            (Some(told), None) | (None, Some(told)) => told,
+            (None, None) => String::new(),
+        }
+    }
+
     fn server(&self) -> Option<&scout4all_mobile::CourtPlayer> {
         let st = &self.snapshot.state;
         match (st.serving_team, &st.last_touch, &st.event) {
@@ -1021,6 +1105,7 @@ impl ScoutingScreen {
                 // no zone shown until the arrows move or one is chosen: the
                 // choice is never made for the scout
                 let cursor = match (at_net, self.net_cursor, self.target_cursor, chosen) {
+                    _ if self.start_cursor.is_some() => None,
                     (_, None, None, None) => None,
                     (true, ..) => self.net_at(chosen).number().map(|z| (z, String::new())),
                     (false, ..) => {
@@ -1032,6 +1117,8 @@ impl ScoutingScreen {
                     rows: snap.target.clone(),
                     ours: snap.target_ours,
                     cursor,
+                    starts: snap.starts.clone(),
+                    start_cursor: self.start_cursor,
                 }
             }
             _ => Content::Players {
@@ -1064,7 +1151,13 @@ impl ScoutingScreen {
                     )
                 })
                 .unwrap_or_default();
-            let extra = [e.technique.clone(), e.target.clone(), e.blockers.clone()]
+            // our serve from where it started to where it went: "1→5A"
+            let target = match (&e.serve_start, &e.target) {
+                (Some(start), Some(target)) => Some(format!("{start}→{target}")),
+                (Some(start), None) => Some(format!("{start}→")),
+                (None, target) => target.clone(),
+            };
+            let extra = [e.technique.clone(), target, e.blockers.clone()]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
@@ -1278,3 +1371,90 @@ fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
 /// Keeps the width of the statistics: wide enough for the table and the
 /// chart, the court takes the rest.
 pub const STATS_WIDTH: f32 = 400.0;
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::{
+            stats::tests::{match_against, team_with_two_matches},
+            strings::strings,
+        },
+        scout4all_core::{scouting::ChoiceOrder, shapes::enums::LanguageEnum},
+        scout4all_mobile::Scout4All,
+    };
+
+    /// Where our serve starts from, from the keyboard: down from the row
+    /// at the net onto the zones below it, across them, the space bar
+    /// tells one, up back to the court; saved with the serve, then
+    /// remembered for the server.
+    #[test]
+    fn the_arrows_reach_where_the_serve_starts_from() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        // three aces: we still serve
+        let arezzo = match_against(&core, &team, "Arezzo");
+        let scouting = core
+            .scouting_in_order(&team, &arezzo, ChoiceOrder::EventFirst)
+            .unwrap();
+        let mut screen = ScoutingScreen::new(scouting, ScoutingKeys::default(), team, arezzo);
+        let chosen = |screen: &ScoutingScreen| {
+            screen
+                .snapshot
+                .starts
+                .iter()
+                .find(|z| z.chosen)
+                .map(|z| z.value)
+        };
+        screen.key(key!(s));
+        let labels: Vec<&str> = screen.snapshot.starts.iter().map(|z| z.label.as_str()).collect();
+        assert_eq!(labels, vec!["5", "7", "6", "9", "1"]);
+        // remembered from the aces before: none told
+        assert_eq!(chosen(&screen), None);
+        // from the middle of the court down to the net, then below it
+        for _ in 0..3 {
+            screen.key(key!(down));
+        }
+        assert_eq!(screen.start_cursor, None);
+        screen.key(key!(down));
+        assert_eq!(screen.start_cursor, Some(ServeStartEnum::Z6));
+        screen.key(key!(right));
+        screen.key(ZONE_KEY);
+        assert_eq!(chosen(&screen), Some(ServeStartEnum::Z9));
+        assert_eq!(screen.told(s), "da 9");
+        // up: back on the court, above it; down again: on it
+        screen.key(key!(up));
+        assert_eq!(screen.start_cursor, None);
+        assert_eq!(screen.target_cursor.map(|c| c.to_string()), Some("4B".into()));
+        screen.key(key!(down));
+        assert_eq!(screen.start_cursor, Some(ServeStartEnum::Z9));
+        for _ in 0..5 {
+            screen.key(key!(left));
+        }
+        assert_eq!(screen.start_cursor, Some(ServeStartEnum::Z5));
+        // the space bar tells 5 instead of 9; again on it, takes it back
+        screen.key(ZONE_KEY);
+        assert_eq!(chosen(&screen), Some(ServeStartEnum::Z5));
+        screen.key(ZONE_KEY);
+        assert_eq!(chosen(&screen), None);
+        screen.key(ZONE_KEY);
+        assert_eq!(chosen(&screen), Some(ServeStartEnum::Z5));
+        screen.update(Message::Eval(EvalEnum::Positive));
+        screen.refresh();
+        assert_eq!(screen.start_cursor, None);
+        assert_eq!(
+            screen.snapshot.state.events.first().and_then(|e| e.serve_start.clone()),
+            Some("5".into())
+        );
+        // their error: the same server again, from 5
+        screen.key(key!(shift - e));
+        screen.key(key!(s));
+        assert_eq!(chosen(&screen), Some(ServeStartEnum::Z5));
+        // a click on the zones below the court
+        screen.update(Message::Court(Touch::Start(ServeStartEnum::Z1)));
+        screen.refresh();
+        assert_eq!(chosen(&screen), Some(ServeStartEnum::Z1));
+    }
+}
