@@ -587,7 +587,7 @@ impl AttackSummary {
     }
 }
 
-fn percentage(count: i32, total: u32) -> f64 {
+pub(crate) fn percentage(count: i32, total: u32) -> f64 {
     count as f64 / total as f64 * 100.0
 }
 
@@ -684,13 +684,23 @@ impl Stats {
         metric: Metric,
         filter: &StatsFilter,
     ) -> Option<f64> {
-        let (score, total) = self
-            .events(event_type, filter)
+        let (score, total) = self.metric_score(event_type, metric, filter);
+        (total > 0).then(|| percentage(score, total))
+    }
+
+    /// What the metric is made of: the score of the events of this type
+    /// with an evaluation, and how many they are.
+    pub fn metric_score(
+        &self,
+        event_type: EventTypeEnum,
+        metric: Metric,
+        filter: &StatsFilter,
+    ) -> (i32, u32) {
+        self.events(event_type, filter)
             .filter_map(|(k, v)| k.eval.map(|eval| (metric.score(event_type, eval), v)))
             .fold((0, 0), |(score, total), (s, v)| {
                 (score + s * v as i32, total + v)
-            });
-        (total > 0).then(|| percentage(score, total))
+            })
     }
 
     /// Our serves or attacks sent to one of the nine zones, or our

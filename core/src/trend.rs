@@ -7,7 +7,7 @@ use crate::errors::AppError;
 use crate::shapes::enums::{EventTypeEnum, PhaseEnum};
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::Snapshot;
-use crate::shapes::stats::{Metric, Stats, StatsFilter};
+use crate::shapes::stats::{Metric, Stats, StatsFilter, percentage};
 
 /// The touches the recent trend looks at: the last 10 of each fundamental.
 pub const RECENT_TOUCHES: u32 = 10;
@@ -35,6 +35,18 @@ impl Series {
         Series::BreakPoint,
     ];
 
+    /// Its place in `ALL`.
+    fn index(&self) -> usize {
+        match self {
+            Series::Reception => 0,
+            Series::Attack => 1,
+            Series::CounterAttack => 2,
+            Series::Serve => 3,
+            Series::SideOut => 4,
+            Series::BreakPoint => 5,
+        }
+    }
+
     /// The figure, `None` with no touches.
     pub fn value(&self, stats: &Stats) -> Option<f64> {
         self.value_in(stats, &StatsFilter::default())
@@ -49,30 +61,45 @@ impl Series {
     /// The figure narrowed by the filter, `None` with no touches (also
     /// with the filter on the other phase, for side out and break point).
     pub fn value_in(&self, stats: &Stats, filter: &StatsFilter) -> Option<f64> {
-        let efficiency = |e| stats.metric_percentage(e, Metric::Efficiency, filter);
-        match self {
-            Series::Reception => efficiency(EventTypeEnum::P),
-            Series::Attack => efficiency(EventTypeEnum::A),
-            Series::CounterAttack => stats.attack_summary(true, filter).map(|a| a.efficiency()),
-            Series::Serve => efficiency(EventTypeEnum::S),
-            Series::SideOut | Series::BreakPoint => self
-                .phase_filter(filter)
-                .and_then(|f| stats.rallies_won(&f))
-                .map(|(v, _, _)| v),
-        }
+        self.tally_in(stats, filter).value()
     }
 
     /// The touches of the figure narrowed by the filter.
     pub fn touches_in(&self, stats: &Stats, filter: &StatsFilter) -> u32 {
+        self.tally_in(stats, filter).touches
+    }
+
+    /// What the figure narrowed by the filter is made of.
+    pub fn tally_in(&self, stats: &Stats, filter: &StatsFilter) -> Tally {
+        let efficiency = |e| {
+            let (score, total) = stats.metric_score(e, Metric::Efficiency, filter);
+            Tally {
+                score,
+                total,
+                touches: stats.event_count(e, None, filter),
+            }
+        };
         match self {
-            Series::Reception => stats.event_count(EventTypeEnum::P, None, filter),
-            Series::Attack => stats.event_count(EventTypeEnum::A, None, filter),
-            Series::CounterAttack => stats.attack_summary(true, filter).map_or(0, |a| a.total),
-            Series::Serve => stats.event_count(EventTypeEnum::S, None, filter),
+            Series::Reception => efficiency(EventTypeEnum::P),
+            Series::Attack => efficiency(EventTypeEnum::A),
+            Series::CounterAttack => {
+                stats
+                    .attack_summary(true, filter)
+                    .map_or(Tally::default(), |a| Tally {
+                        score: a.kills as i32 - a.errors as i32 - a.blocked as i32,
+                        total: a.total,
+                        touches: a.total,
+                    })
+            }
+            Series::Serve => efficiency(EventTypeEnum::S),
             Series::SideOut | Series::BreakPoint => self
                 .phase_filter(filter)
                 .and_then(|f| stats.rallies_won(&f))
-                .map_or(0, |(_, _, rallies)| rallies),
+                .map_or(Tally::default(), |(_, won, rallies)| Tally {
+                    score: won as i32,
+                    total: rallies,
+                    touches: rallies,
+                }),
         }
     }
 
@@ -108,6 +135,63 @@ pub struct TrendPoint<T> {
     pub value: T,
 }
 
+/// What a figure is made of: the figure and its touches come from it, and
+/// it adds up, so the figure of the last touches is a difference (the
+/// counters only grow while the sets are replayed).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// the score of the efficiency, or the rallies won
+    pub score: i32,
+    /// what the score is over: the touches evaluated, or the rallies
+    pub total: u32,
+    pub touches: u32,
+}
+
+impl Tally {
+    /// The figure, `None` with nothing to score.
+    pub fn value(&self) -> Option<f64> {
+        (self.total > 0).then(|| percentage(self.score, self.total))
+    }
+
+    fn plus(self, other: Tally) -> Tally {
+        Tally {
+            score: self.score + other.score,
+            total: self.total + other.total,
+            touches: self.touches + other.touches,
+        }
+    }
+
+    /// Since `earlier`, a tally of the same sets taken before.
+    fn minus(self, earlier: Tally) -> Tally {
+        Tally {
+            score: self.score - earlier.score,
+            total: self.total.saturating_sub(earlier.total),
+            touches: self.touches.saturating_sub(earlier.touches),
+        }
+    }
+}
+
+/// The tally of each figure, in the order of `Series::ALL`.
+type Tallies = [Tally; 6];
+
+fn tallies(stats: &Stats) -> Tallies {
+    Series::ALL.map(|s| s.tally_in(stats, &StatsFilter::default()))
+}
+
+fn plus(a: &Tallies, b: &Tallies) -> Tallies {
+    std::array::from_fn(|i| match (a.get(i), b.get(i)) {
+        (Some(a), Some(b)) => a.plus(*b),
+        _ => Tally::default(),
+    })
+}
+
+fn minus(a: &Tallies, b: &Tallies) -> Tallies {
+    std::array::from_fn(|i| match (a.get(i), b.get(i)) {
+        (Some(a), Some(b)) => a.minus(*b),
+        _ => Tally::default(),
+    })
+}
+
 /// The end of a rally: the event ending it, and the score it reached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RallyEnd {
@@ -117,85 +201,144 @@ struct RallyEnd {
     score_them: u8,
 }
 
-/// The sets replayed in order, with the statistics after every event: of
-/// the sets before and of the set so far, so the trend of a match goes on
-/// across its sets.
+/// Replays the sets in order, calling `each` after every event with the set
+/// number, the snapshot of the set so far, the statistics of the sets
+/// before, and whether the event ended a rally.
+fn replay(
+    sets: &[&SetEntry],
+    max_substitutions: u8,
+    mut each: impl FnMut(u8, &Snapshot, &Stats, bool),
+) -> Result<(), AppError> {
+    let mut before = Stats::new();
+    for set in sets {
+        let rules = set.find_lineup_rules(max_substitutions)?;
+        let mut snapshot = Snapshot::with_rules(set, max_substitutions, rules)?;
+        for event in &set.events {
+            let rallies = snapshot.points.len();
+            snapshot.add_event(event)?;
+            each(
+                set.set_number,
+                &snapshot,
+                &before,
+                snapshot.points.len() > rallies,
+            );
+        }
+        before.merge(&snapshot.stats);
+    }
+    Ok(())
+}
+
+/// The sets replayed in order, with the figures after every event: of the
+/// sets before and of the set so far, so the trend of a match goes on
+/// across its sets. It keeps the tallies, not the statistics: the figure of
+/// the last touches is then a difference, not a count of every key.
 #[derive(Debug, Clone)]
 pub struct Replay {
-    /// after each event
-    stats: Vec<Stats>,
+    /// after each event: its set and the tallies
+    events: Vec<(u8, Tallies)>,
     rallies: Vec<RallyEnd>,
 }
 
 impl Replay {
     /// A set that doesn't replay stops the replay with its error.
     pub fn new(sets: &[&SetEntry], max_substitutions: u8) -> Result<Self, AppError> {
-        let mut replay = Replay {
-            stats: vec![],
-            rallies: vec![],
-        };
-        let mut before = Stats::new();
-        for set in sets {
-            let rules = set.find_lineup_rules(max_substitutions)?;
-            let mut snapshot = Snapshot::with_rules(set, max_substitutions, rules)?;
-            for event in &set.events {
-                let rallies = snapshot.points.len();
-                snapshot.add_event(event)?;
-                let mut stats = before.clone();
-                stats.merge(&snapshot.stats);
-                replay.stats.push(stats);
-                if snapshot.points.len() > rallies {
-                    replay.rallies.push(RallyEnd {
-                        event: replay.stats.len() - 1,
-                        set_number: set.set_number,
-                        score_us: snapshot.score_us,
-                        score_them: snapshot.score_them,
-                    });
-                }
+        let mut events: Vec<(u8, Tallies)> = vec![];
+        let mut rallies = vec![];
+        // the tallies of the sets before, as they were when the set began
+        let mut before = (0, [Tally::default(); 6]);
+        replay(sets, max_substitutions, |set_number, snapshot, _, ended| {
+            if before.0 != set_number {
+                before = (
+                    set_number,
+                    events.last().map_or([Tally::default(); 6], |(_, t)| *t),
+                );
             }
-            before.merge(&snapshot.stats);
+            events.push((set_number, plus(&before.1, &tallies(&snapshot.stats))));
+            if ended {
+                rallies.push(RallyEnd {
+                    event: events.len() - 1,
+                    set_number,
+                    score_us: snapshot.score_us,
+                    score_them: snapshot.score_them,
+                });
+            }
+        })?;
+        Ok(Replay { events, rallies })
+    }
+
+    /// One set of the replay, as if replayed alone: its figures from 0.
+    pub fn set(&self, set_number: u8) -> Replay {
+        let first = self.events.iter().position(|(n, _)| *n == set_number);
+        let start = first
+            .and_then(|f| f.checked_sub(1))
+            .and_then(|i| self.events.get(i))
+            .map_or([Tally::default(); 6], |(_, t)| *t);
+        let offset = first.unwrap_or(0);
+        Replay {
+            events: self
+                .events
+                .iter()
+                .filter(|(n, _)| *n == set_number)
+                .map(|(n, t)| (*n, minus(t, &start)))
+                .collect(),
+            rallies: self
+                .rallies
+                .iter()
+                .filter(|end| end.set_number == set_number)
+                .filter_map(|end| {
+                    end.event
+                        .checked_sub(offset)
+                        .map(|event| RallyEnd { event, ..*end })
+                })
+                .collect(),
         }
-        Ok(replay)
     }
 
-    /// The statistics so far, after every rally.
-    pub fn cumulative<T>(&self, sample: impl Fn(&Stats) -> T) -> Vec<TrendPoint<T>> {
-        self.points(|end| self.stats.get(end.event).map(&sample))
+    /// The tally of the figure so far, after every rally.
+    pub fn cumulative(&self, series: Series) -> Vec<TrendPoint<Tally>> {
+        self.points(|end| self.tally(end.event, series))
     }
 
-    /// The statistics of the last `size` touches, after every rally: the
-    /// touches are what `count` counts (e.g. the receptions), and each
-    /// event adds one at most. Before `size` touches, all of them.
-    pub fn window<T>(
-        &self,
-        size: u32,
-        count: impl Fn(&Stats) -> u32,
-        sample: impl Fn(&Stats) -> T,
-    ) -> Vec<TrendPoint<T>> {
-        let counts: Vec<u32> = self.stats.iter().map(&count).collect();
+    /// The tally of the last `size` touches of the figure, after every
+    /// rally: each event adds one touch at most. Before `size` touches,
+    /// all of them.
+    pub fn window(&self, series: Series, size: u32) -> Vec<TrendPoint<Tally>> {
         self.points(|end| {
-            let now = self.stats.get(end.event)?;
-            let touches = counts.get(end.event).copied().unwrap_or(0);
-            // the statistics after the touch before the window
-            let before = touches
+            let now = self.tally(end.event, series)?;
+            // the tally after the touch before the window: the touches
+            // only grow, the first event reaching them
+            let before = now
+                .touches
                 .checked_sub(size)
                 .filter(|t| *t > 0)
-                .and_then(|t| counts.iter().position(|c| *c == t))
-                .and_then(|i| self.stats.get(i));
-            Some(match before {
-                Some(before) => sample(&now.since(before)),
-                None => sample(now),
-            })
+                .and_then(|t| {
+                    let i = self.events.partition_point(|(_, tallies)| {
+                        tallies
+                            .get(series.index())
+                            .is_some_and(|tally| tally.touches < t)
+                    });
+                    self.tally(i, series).filter(|tally| tally.touches == t)
+                });
+            Some(before.map_or(now, |before| now.minus(before)))
         })
     }
 
     /// The figure after every rally: so far, or of its last
     /// `RECENT_TOUCHES` touches.
     pub fn series(&self, series: Series, recent: bool) -> Vec<TrendPoint<Option<f64>>> {
-        match recent {
-            true => self.window(RECENT_TOUCHES, |s| series.touches(s), |s| series.value(s)),
-            false => self.cumulative(|s| series.value(s)),
-        }
+        let points = match recent {
+            true => self.window(series, RECENT_TOUCHES),
+            false => self.cumulative(series),
+        };
+        points
+            .into_iter()
+            .map(|p| TrendPoint {
+                set_number: p.set_number,
+                score_us: p.score_us,
+                score_them: p.score_them,
+                value: p.value.value(),
+            })
+            .collect()
     }
 
     /// How far the set had gone after every rally, to draw the sets side
@@ -220,6 +363,13 @@ impl Replay {
             .collect()
     }
 
+    fn tally(&self, event: usize, series: Series) -> Option<Tally> {
+        self.events
+            .get(event)
+            .and_then(|(_, tallies)| tallies.get(series.index()))
+            .copied()
+    }
+
     fn points<T>(&self, value: impl Fn(&RallyEnd) -> Option<T>) -> Vec<TrendPoint<T>> {
         self.rallies
             .iter()
@@ -235,11 +385,28 @@ impl Replay {
     }
 }
 
-/// The statistics so far after every rally (see `Replay::cumulative`).
+/// Any sample of the statistics so far, after every rally.
 pub fn trend<T>(
     sets: &[&SetEntry],
     max_substitutions: u8,
     sample: impl Fn(&Stats) -> T,
 ) -> Result<Vec<TrendPoint<T>>, AppError> {
-    Ok(Replay::new(sets, max_substitutions)?.cumulative(sample))
+    let mut points = vec![];
+    replay(
+        sets,
+        max_substitutions,
+        |set_number, snapshot, before, ended| {
+            if ended {
+                let mut stats = before.clone();
+                stats.merge(&snapshot.stats);
+                points.push(TrendPoint {
+                    set_number,
+                    score_us: snapshot.score_us,
+                    score_them: snapshot.score_them,
+                    value: sample(&stats),
+                });
+            }
+        },
+    )?;
+    Ok(points)
 }

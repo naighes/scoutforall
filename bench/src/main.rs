@@ -69,6 +69,9 @@ fn main() -> ExitCode {
         ["measure", dir] => {
             measure_reads(Path::new(dir)).map(|rows| print_table(&["read", dir], &rows))
         }
+        ["scouting", dir] => {
+            measure_scouting(Path::new(dir)).map(|rows| print_table(&["scouting", "time"], &rows))
+        }
         ["reports", dir, out] => reports::write_reports(Path::new(dir), Path::new(out)),
         _ => Err(USAGE.to_string()),
     };
@@ -81,8 +84,7 @@ fn main() -> ExitCode {
     }
 }
 
-const USAGE: &str =
-    "usage: scout4all-bench DVW | generate DVW DIR [TEAMSxMATCHES] | measure DIR | reports DIR OUT";
+const USAGE: &str = "usage: scout4all-bench DVW | generate DVW DIR [TEAMSxMATCHES] | measure DIR | scouting DIR | reports DIR OUT";
 
 /// The two archives and the match in progress, in a temporary folder.
 fn default_run(dvw: &Path) -> R<()> {

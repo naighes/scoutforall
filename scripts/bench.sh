@@ -12,6 +12,10 @@
 #                                          e.g. to try the apps on it
 #     scripts/bench.sh measure DIR         the reads on DIR, e.g.
 #                                          ~/.scout4all: nothing is written
+#     scripts/bench.sh scouting DIR        the scouting of the match in
+#                                          progress of an archive made by
+#                                          `generate` (it changes its last
+#                                          event back and forth)
 #     scripts/bench.sh reports DIR OUT     the statistics of every match and
 #                                          team of DIR, as files in OUT: run
 #                                          before and after a change, then
@@ -51,7 +55,7 @@ download() {
 
 case "${1:-}" in
   "" | generate) [ -n "$(ls "$dvw"/*.dvw 2>/dev/null)" ] || download ;;
-  measure | reports) ;;
+  measure | scouting | reports) ;;
   *) sed -n '2,/^set /p' "$0" | sed '$d' | cut -c 3-; exit 2 ;;
 esac
 
@@ -60,5 +64,5 @@ bench=target/release/scout4all-bench
 case "${1:-}" in
   "") "$bench" "$dvw" ;;
   generate) shift; "$bench" generate "$dvw" "$@" ;;
-  measure | reports) "$bench" "$@" ;;
+  measure | scouting | reports) "$bench" "$@" ;;
 esac

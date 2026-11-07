@@ -2065,10 +2065,6 @@ mod tests {
         stats.metric_percentage(P, Metric::Efficiency, &all())
     }
 
-    fn receptions(stats: &Stats) -> u32 {
-        stats.event_count(P, None, &all())
-    }
-
     /// The last 2 receptions after each rally: # = + + - in the set.
     #[test]
     fn trend_of_the_last_touches() {
@@ -2077,9 +2073,9 @@ mod tests {
         let replay =
             Replay::new(&[&set], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
         let last_two: Vec<Option<f64>> = replay
-            .window(2, receptions, reception)
+            .window(Series::Reception, 2)
             .into_iter()
-            .map(|p| p.value)
+            .map(|p| p.value.value())
             .collect();
         assert_eq!(
             last_two,
@@ -2101,10 +2097,10 @@ mod tests {
             ]
         );
         // a window larger than the touches: all of them
-        let all_of_them = replay.window(10, receptions, reception);
-        assert_eq!(all_of_them, replay.cumulative(reception));
+        let all_of_them = replay.window(Series::Reception, 10);
+        assert_eq!(all_of_them, replay.cumulative(Series::Reception));
         assert_eq!(
-            replay.cumulative(reception),
+            replay.series(Series::Reception, false),
             trend(&[&set], DEFAULT_MAX_SUBSTITUTIONS, reception)
                 .expect("expected the set to replay")
         );
@@ -2119,19 +2115,18 @@ mod tests {
         let second = side_out_entry(&t, 2);
         let replay = Replay::new(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS)
             .expect("expected the sets to replay");
-        let points = replay.window(2, receptions, reception);
+        let points = replay.window(Series::Reception, 2);
         assert_eq!(points.len(), 18);
         // the first rally of set 2: - (set 1) and # (set 2)
-        let first_of_second = points.iter().find(|p| p.set_number == 2).map(|p| p.value);
+        let first_of_second = points
+            .iter()
+            .find(|p| p.set_number == 2)
+            .map(|p| p.value.value());
         assert_eq!(first_of_second, Some(Some(50.0)));
         // the last: as in set 1
-        assert_eq!(points.last().map(|p| p.value), Some(Some(50.0)));
+        assert_eq!(points.last().map(|p| p.value.value()), Some(Some(50.0)));
         // the window is always 2 receptions, once there are 2
-        let sizes: Vec<u32> = replay
-            .window(2, receptions, receptions)
-            .into_iter()
-            .map(|p| p.value)
-            .collect();
+        let sizes: Vec<u32> = points.into_iter().map(|p| p.value.touches).collect();
         assert_eq!(&sizes[..2], &[1, 1]);
         assert!(sizes[2..].iter().all(|n| *n == 2));
     }
@@ -2188,12 +2183,19 @@ mod tests {
         let replay =
             Replay::new(&refs, DEFAULT_MAX_SUBSTITUTIONS).expect("expected the sets to replay");
         let so_far = replay.series(Series::Reception, false);
-        assert_eq!(so_far, replay.cumulative(|s| Series::Reception.value(s)));
-        let recent = replay.series(Series::Reception, true);
         assert_eq!(
-            recent,
-            replay.window(RECENT_TOUCHES, receptions, |s| Series::Reception.value(s))
+            so_far,
+            trend(&refs, DEFAULT_MAX_SUBSTITUTIONS, |s| Series::Reception
+                .value(s))
+            .expect("expected the sets to replay")
         );
+        let recent = replay.series(Series::Reception, true);
+        let window: Vec<Option<f64>> = replay
+            .window(Series::Reception, RECENT_TOUCHES)
+            .into_iter()
+            .map(|p| p.value.value())
+            .collect();
+        assert_eq!(recent.iter().map(|p| p.value).collect::<Vec<_>>(), window);
         // 15 receptions in three sets: the last 10 are the last two sets,
         // as the whole match, the same
         assert_eq!(
@@ -2211,6 +2213,76 @@ mod tests {
             .collect();
         // 1st rally: = + + - (set 1) # = + + - (set 2) # (set 3): 40%
         assert_eq!(third.first(), Some(&Some(40.0)));
+    }
+
+    /// The figure of the last touches as it was first computed: the
+    /// statistics after every event kept, the ones after the touch before
+    /// the window taken off key by key.
+    fn window_by_keys(sets: &[&SetEntry], series: Series, size: u32) -> Vec<Option<f64>> {
+        use crate::shapes::snapshot::Snapshot;
+        let (mut after, mut ends, mut before) = (Vec::<Stats>::new(), vec![], Stats::new());
+        for set in sets {
+            let rules = set
+                .find_lineup_rules(DEFAULT_MAX_SUBSTITUTIONS)
+                .expect("expected rules");
+            let mut snapshot = Snapshot::with_rules(set, DEFAULT_MAX_SUBSTITUTIONS, rules)
+                .expect("expected a snapshot");
+            for event in &set.events {
+                let rallies = snapshot.points.len();
+                snapshot
+                    .add_event(event)
+                    .expect("expected the event to replay");
+                let mut stats = before.clone();
+                stats.merge(&snapshot.stats);
+                after.push(stats);
+                if snapshot.points.len() > rallies {
+                    ends.push(after.len() - 1);
+                }
+            }
+            before.merge(&snapshot.stats);
+        }
+        let touches: Vec<u32> = after.iter().map(|s| series.touches(s)).collect();
+        ends.iter()
+            .map(|end| {
+                let now = &after[*end];
+                let window = touches[*end]
+                    .checked_sub(size)
+                    .filter(|t| *t > 0)
+                    .and_then(|t| touches.iter().position(|c| *c == t));
+                match window {
+                    Some(i) => series.value(&now.since(&after[i])),
+                    None => series.value(now),
+                }
+            })
+            .collect()
+    }
+
+    /// The last touches from the tallies, as from the statistics key by
+    /// key: every figure, every window, a set alone and the sets together.
+    #[test]
+    fn the_last_touches_as_by_keys() {
+        let t = Team::new();
+        let sets: Vec<SetEntry> = (1..=3).map(|n| side_out_entry(&t, n)).collect();
+        let refs: Vec<&SetEntry> = sets.iter().collect();
+        let replay =
+            Replay::new(&refs, DEFAULT_MAX_SUBSTITUTIONS).expect("expected the sets to replay");
+        for series in Series::ALL {
+            for size in 1..=12 {
+                let values = |replay: &Replay| -> Vec<Option<f64>> {
+                    replay
+                        .window(series, size)
+                        .into_iter()
+                        .map(|p| p.value.value())
+                        .collect()
+                };
+                assert_eq!(values(&replay), window_by_keys(&refs, series, size));
+                // a set of the match, as replayed alone
+                let alone = Replay::new(&[&sets[1]], DEFAULT_MAX_SUBSTITUTIONS)
+                    .expect("expected the set to replay");
+                assert_eq!(values(&replay.set(2)), values(&alone));
+                assert_eq!(replay.set(2).progress(), alone.progress());
+            }
+        }
     }
 
     /// How far the set had gone after each rally: the points of the team

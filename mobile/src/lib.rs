@@ -2404,11 +2404,12 @@ fn trend_lines(
     team: &TeamEntry,
     labels: &Labels,
 ) -> Result<Vec<TrendLine>, MobileError> {
+    // replayed once: each set is a part of the match
     let match_replay = Replay::new(sets, max_substitutions)?;
-    let set_replays = sets
+    let set_replays: Vec<(u8, Replay)> = sets
         .iter()
-        .map(|set| Replay::new(&[set], max_substitutions).map(|r| (set.set_number, r)))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|set| (set.set_number, match_replay.set(set.set_number)))
+        .collect();
     let values = |points: Vec<TrendPoint<Option<f64>>>| {
         points.into_iter().map(|p| p.value).collect::<Vec<_>>()
     };
