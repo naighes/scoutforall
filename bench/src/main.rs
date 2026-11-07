@@ -182,15 +182,24 @@ fn seed(dvw: &Path, dir: &Path) -> R<Vec<Seed>> {
     }
 }
 
-/// `T` teams of `M` matches each, the seeds in turn; the first team has
-/// also a match in progress, its last set cut halfway.
+/// `T` teams of `M` matches each, the seeds in turn from the one with the
+/// most sets (the longest match to scout): the first team, its team, has
+/// also a match in progress, that match with its last set cut halfway.
 fn generate(seeds: &[Seed], dir: &Path, size: &str) -> R<()> {
     let (teams, matches) = parse_size(size)?;
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let last = NaiveDate::from_ymd_opt(LAST_DAY.0, LAST_DAY.1, LAST_DAY.2)
         .ok_or("the last day of the matches")?;
+    let longest = seeds
+        .iter()
+        .enumerate()
+        .max_by_key(|(i, s)| (s.sets, std::cmp::Reverse(*i)))
+        .map(|(i, _)| i)
+        .ok_or("no seed for the match in progress")?;
     for t in 0..teams {
-        let seed = seeds.get(t % seeds.len()).ok_or("no seed for the team")?;
+        let seed = seeds
+            .get((longest + t) % seeds.len())
+            .ok_or("no seed for the team")?;
         let team = dir.join(uuid::Uuid::new_v4().to_string());
         fs::create_dir_all(&team).map_err(|e| format!("{}: {e}", team.display()))?;
         copy(&seed.team.join("team.json"), &team.join("team.json"))?;
@@ -200,13 +209,8 @@ fn generate(seeds: &[Seed], dir: &Path, size: &str) -> R<()> {
             copy_match(&seed.matches, &folder, &day)?;
         }
         if t == 0 {
-            // the seed with the most sets: the longest match to scout
-            let longest = seeds
-                .iter()
-                .max_by_key(|s| s.sets)
-                .ok_or("no seed for the match in progress")?;
             let folder = team.join(LIVE_MATCH);
-            copy_match(&longest.matches, &folder, &(last + Duration::days(6)))?;
+            copy_match(&seed.matches, &folder, &(last + Duration::days(6)))?;
             cut_last_set(&folder)?;
         }
     }
