@@ -12,8 +12,8 @@ use std::{
 };
 use tokio::{
     fs::{
-        File, OpenOptions, create_dir_all, metadata, read, read_dir, remove_file, rename,
-        try_exists,
+        File, OpenOptions, create_dir_all, metadata, read, read_dir, remove_dir_all, remove_file,
+        rename, try_exists,
     },
     io::AsyncWriteExt,
 };
@@ -123,6 +123,19 @@ impl FsStore {
             }
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "no file name: {:?}",
+                path
+            )))),
+        }
+    }
+
+    /// Beside the folder, hidden: where it goes while it's removed.
+    fn removed_path(path: &Path) -> Result<PathBuf, AppError> {
+        match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => {
+                Ok(parent.join(format!(".{}.removed", name.to_string_lossy())))
+            }
+            _ => Err(AppError::IO(IOError::Msg(format!(
+                "no folder name: {:?}",
                 path
             )))),
         }
@@ -262,6 +275,33 @@ impl Store for FsStore {
         let path = self.path(key)?;
         match remove_file(&path).await {
             Ok(()) => Self::sync_folder(&path).await,
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(AppError::IO(IOError::from(e))),
+        }
+    }
+
+    async fn remove_folder(&self, folder: &str) -> Result<(), AppError> {
+        let path = match folder {
+            "" => Err(AppError::IO(IOError::Msg(
+                "the root can't be removed".into(),
+            ))),
+            _ => self.path(folder),
+        }?;
+        // hidden first, at once: the readers never see half of it, and what
+        // a removal stopped halfway leaves is never data; then away
+        let hidden = Self::removed_path(&path)?;
+        match remove_dir_all(&hidden).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(AppError::IO(IOError::from(e))),
+        }?;
+        match rename(&path, &hidden).await {
+            Ok(()) => {
+                Self::sync_folder(&path).await?;
+                remove_dir_all(&hidden)
+                    .await
+                    .map_err(|e| AppError::IO(IOError::from(e)))
+            }
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
             Err(e) => Err(AppError::IO(IOError::from(e))),
         }

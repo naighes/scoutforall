@@ -86,6 +86,56 @@ mod tests {
         store.remove("nowhere/x.json").await.unwrap();
     }
 
+    /// A folder removed: gone with all it holds, the folders beside it
+    /// kept; one that isn't there removed without an error, the root never.
+    async fn removing_folders(store: &dyn Store) {
+        store.write("a/b/c.json", b"{}").await.unwrap();
+        store.append("a/b/d/e.csv", b"1").await.unwrap();
+        store.write("a/f.json", b"{}").await.unwrap();
+        store.write("ab/g.json", b"{}").await.unwrap();
+        store.remove_folder("a/b").await.unwrap();
+        assert!(!store.exists("a/b").await.unwrap());
+        assert_eq!(store.read("a/b/c.json").await.unwrap(), None);
+        assert_eq!(store.read("a/b/d/e.csv").await.unwrap(), None);
+        assert_eq!(
+            store.list("a").await.unwrap(),
+            vec![StoreEntry::Blob("f.json".into())]
+        );
+        store.remove_folder("a").await.unwrap();
+        assert_eq!(
+            store.list(layout::ROOT).await.unwrap(),
+            vec![StoreEntry::Folder("ab".into())]
+        );
+        store.remove_folder("a").await.unwrap();
+        store.remove_folder("nowhere/x").await.unwrap();
+        assert!(store.remove_folder(layout::ROOT).await.is_err());
+        assert!(store.exists("ab/g.json").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn the_stores_remove_folders_alike() {
+        let dir = TempDir::new().unwrap();
+        removing_folders(&FsStore::new(dir.path())).await;
+        removing_folders(&MemoryStore::new()).await;
+    }
+
+    /// What a removal stopped halfway leaves, hidden, is never data, and
+    /// goes with the next removal of the folder.
+    #[tokio::test]
+    async fn a_folder_removal_stopped_halfway_leaves_no_data() {
+        let dir = TempDir::new().unwrap();
+        let store = FsStore::new(dir.path());
+        store.write("a/b.json", b"{}").await.unwrap();
+        std::fs::create_dir_all(dir.path().join(".a.removed/c")).unwrap();
+        std::fs::write(dir.path().join(".a.removed/c/d.json"), b"{}").unwrap();
+        assert_eq!(
+            store.list(layout::ROOT).await.unwrap(),
+            vec![StoreEntry::Folder("a".into())]
+        );
+        store.remove_folder("a").await.unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
     #[tokio::test]
     async fn the_stores_remove_blobs_alike() {
         let dir = TempDir::new().unwrap();

@@ -2,7 +2,7 @@
 //! keeps nothing.
 
 use crate::{
-    errors::AppError,
+    errors::{AppError, IOError},
     storage::{Stamp, Stamps, Store, StoreEntry},
 };
 use async_trait::async_trait;
@@ -90,6 +90,18 @@ impl Store for MemoryStore {
     async fn remove(&self, key: &str) -> Result<(), AppError> {
         let mut blobs = self.0.write().unwrap_or_else(PoisonError::into_inner);
         blobs.by_key.remove(key);
+        Ok(())
+    }
+
+    async fn remove_folder(&self, folder: &str) -> Result<(), AppError> {
+        if folder.is_empty() {
+            return Err(AppError::IO(IOError::Msg(
+                "the root can't be removed".into(),
+            )));
+        }
+        let mut blobs = self.0.write().unwrap_or_else(PoisonError::into_inner);
+        let prefix = Self::prefix(folder);
+        blobs.by_key.retain(|k, _| !k.starts_with(&prefix));
         Ok(())
     }
 

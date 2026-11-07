@@ -52,6 +52,10 @@ pub trait Store: Debug + Send + Sync {
     /// Removes the blob under the key, if any.
     async fn remove(&self, key: &str) -> Result<(), AppError>;
 
+    /// Removes the folder under the key with all it holds, if any: gone at
+    /// once for the readers, never half of it. Not the root.
+    async fn remove_folder(&self, folder: &str) -> Result<(), AppError>;
+
     /// The blobs right in the folder, by name, with their stamps: `None`
     /// for a blob that may still change without its stamp telling (just
     /// written, when the clock of the files is coarse). Hidden as `list`.
