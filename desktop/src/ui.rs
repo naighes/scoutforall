@@ -720,6 +720,45 @@ pub fn confirm_deletion<'a, M: Clone + 'a>(
         .into()
 }
 
+/// A question before going on, in the middle: what to know under the
+/// title, then the way back and the answer that goes on. Enter goes on,
+/// Esc doesn't.
+pub fn confirm<'a, M: Clone + 'a>(
+    s: &Strings,
+    title: &str,
+    what: &str,
+    (yes_icon, yes): (&'static [u8], &str),
+    on_yes: M,
+    on_no: M,
+    c: Colors,
+) -> Element<'a, M> {
+    let question = panel(
+        None,
+        column![
+            text(title.to_string())
+                .size(22)
+                .font(theme::fonts().bold)
+                .color(c.text),
+            body(what.to_string()),
+            answers(
+                Some((theme::icons::CLOSE, s.cancel, on_no)),
+                yes_icon,
+                yes,
+                Some(on_yes),
+                c
+            )
+        ]
+        .spacing(18),
+        c,
+    );
+    container(container(question).max_width(560))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .into()
+}
+
 /// The template with `{1}`, `{2}`… replaced by the values, in the order
 /// the language puts them.
 pub fn fill(template: &str, values: &[String]) -> String {

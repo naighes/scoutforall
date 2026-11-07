@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        player_form::{PlayerForm, PlayerFormError, removed},
+        player_form::{PlayerForm, PlayerFormError, namesake, namesake_message, removed},
         providers::team_writer::{PlayerDetails, PlayerInput},
         shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
         tests::EN,
@@ -293,5 +293,58 @@ mod tests {
         assert_eq!(written["birth_date"], "2001-12-03");
         assert_eq!(written["height_cm"], 182);
         assert_eq!(written["notes"], "captain");
+    }
+
+    fn named(name: &str) -> PlayerForm {
+        PlayerForm {
+            name: name.into(),
+            ..form("12")
+        }
+    }
+
+    #[test]
+    fn an_active_player_with_the_same_name_is_a_namesake() {
+        let team = team();
+        // letter case, accents, punctuation and spaces aside
+        for name in ["Anna", " anna ", "ANNA", "Ànna", "anna."] {
+            assert_eq!(
+                namesake(&named(name), &team, None).map(|p| p.id),
+                Some(team.players[0].id),
+                "{name}"
+            );
+        }
+        assert!(namesake(&named("Anna Maria"), &team, None).is_none());
+        assert!(namesake(&named(" "), &team, None).is_none());
+    }
+
+    #[test]
+    fn a_removed_player_is_no_namesake() {
+        assert!(namesake(&named("Bea"), &team(), None).is_none());
+    }
+
+    #[test]
+    fn a_player_edited_is_asked_only_when_the_name_changes_to_another() {
+        let mut team = team();
+        team.players.push(player("anna", 11, false));
+        let anna = team.players[0].clone();
+        // the name kept: asked when added, not every time, though another
+        // anna is there
+        assert!(namesake(&named("Anna"), &team, Some(&anna)).is_none());
+        // never their own namesake
+        assert!(namesake(&named("Carla"), &team, Some(&anna)).is_none());
+        let carla = player("Carla", 12, false);
+        team.players.push(carla.clone());
+        assert_eq!(
+            namesake(&named("ANNA"), &team, Some(&carla)).map(|p| p.id),
+            Some(anna.id)
+        );
+    }
+
+    #[test]
+    fn the_namesake_is_told_with_the_number() {
+        assert_eq!(
+            namesake_message(&team().players[0], EN),
+            "Anna, number 7, is already in the team."
+        );
     }
 }

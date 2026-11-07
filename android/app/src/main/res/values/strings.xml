@@ -19,6 +19,8 @@
     <string name="default_country">Country of new teams</string>
     <string name="default_country_none">Not set</string>
     <string name="save">Save</string>
+    <string name="same_name">Same name</string>
+    <string name="save_anyway">Save anyway</string>
     <string name="new_player">New player</string>
     <string name="edit_player">Edit player</string>
     <string name="no_players">No players yet</string>

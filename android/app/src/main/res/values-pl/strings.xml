@@ -18,6 +18,8 @@
     <string name="default_country">Kraj nowych drużyn</string>
     <string name="default_country_none">Nie ustawiono</string>
     <string name="save">Zapisz</string>
+    <string name="same_name">To samo imię i nazwisko</string>
+    <string name="save_anyway">Zapisz mimo to</string>
     <string name="new_player">Nowy zawodnik</string>
     <string name="edit_player">Edytuj zawodnika</string>
     <string name="no_players">Brak zawodników</string>

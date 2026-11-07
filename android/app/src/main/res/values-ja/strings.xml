@@ -18,6 +18,8 @@
     <string name="default_country">新しいチームの国</string>
     <string name="default_country_none">未設定</string>
     <string name="save">保存</string>
+    <string name="same_name">同じ名前</string>
+    <string name="save_anyway">このまま保存</string>
     <string name="new_player">新しい選手</string>
     <string name="edit_player">選手を編集</string>
     <string name="no_players">選手はまだいません</string>

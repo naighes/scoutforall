@@ -16,7 +16,7 @@ use {
         widget::{Column, Id, Row, button, column, container, row, scrollable, space, text},
     },
     scout4all_core::{match_form::MatchForm, player_form::PlayerForm, team_form::TeamForm},
-    scout4all_keys::{KeyCombination, key},
+    scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         ClassificationChoice, GenderChoice, MatchField, MobileError, PlayerField, RoleChoice,
         RosterPlayer, Scout4All, TeamField,
@@ -98,6 +98,9 @@ pub enum Kind {
 pub struct Editor {
     pub form: Form,
     kind: Kind,
+    /// another player of the team with the name of the one being saved,
+    /// as the core tells: saved only once confirmed
+    namesake: Option<String>,
 }
 
 /// The option of `value` among `values`, after the empty one.
@@ -170,6 +173,7 @@ impl Editor {
         };
         Editor {
             form: Form::new(title, fields),
+            namesake: None,
             kind: Kind::Team(TeamEditor {
                 id,
                 classifications,
@@ -209,6 +213,7 @@ impl Editor {
         };
         Editor {
             form: Form::new(title, fields),
+            namesake: None,
             kind: Kind::Player(PlayerEditor { team_id, id, roles }),
         }
     }
@@ -260,6 +265,7 @@ impl Editor {
         let opponents = core.opponents(team_id.clone()).unwrap_or_default();
         let mut editor = Editor {
             form,
+            namesake: None,
             kind: Kind::Match(MatchEditor {
                 team_id,
                 id,
@@ -338,7 +344,14 @@ impl Editor {
         }
     }
 
-    fn save(&mut self, core: &Scout4All, s: &Strings) -> Result<String, MobileError> {
+    /// Saves the form; a player with the name of another one of the team
+    /// only when `namesake_confirmed`.
+    fn save(
+        &mut self,
+        core: &Scout4All,
+        s: &Strings,
+        namesake_confirmed: bool,
+    ) -> Result<String, MobileError> {
         let f = &self.form;
         match &self.kind {
             Kind::Team(t) => {
@@ -378,7 +391,7 @@ impl Editor {
                     height_cm: f.text(PLAYER_HEIGHT),
                     notes: f.text(PLAYER_NOTES),
                 };
-                core.save_player(p.team_id.clone(), p.id.clone(), form)
+                core.save_player(p.team_id.clone(), p.id.clone(), form, namesake_confirmed)
             }
             Kind::Match(m) => core.save_match(m.team_id.clone(), m.id.clone(), self.match_data(m)),
         }
@@ -426,21 +439,32 @@ impl Editor {
                 self.form.error = None;
                 Edited::Stay
             }
-            Outcome::Save => match self.save(core, s) {
-                Ok(id) => Edited::Saved(id),
-                Err(e) => {
-                    if let Some(field) = self.field_of(&e) {
-                        let field = field.min(self.form.fields.len().saturating_sub(1));
-                        // the details, if the error is about them
-                        if field < MATCH_ROSTER {
-                            self.step(true);
-                        }
-                        self.form.focused = field;
+            Outcome::Save => self.saved(core, s, false),
+        }
+    }
+
+    /// The form saved, or the error shown next to its field; the namesake
+    /// of a player asked about first.
+    fn saved(&mut self, core: &Scout4All, s: &Strings, namesake_confirmed: bool) -> Edited {
+        self.namesake = None;
+        match self.save(core, s, namesake_confirmed) {
+            Ok(id) => Edited::Saved(id),
+            Err(MobileError::Namesake { reason }) => {
+                self.namesake = Some(reason);
+                Edited::Stay
+            }
+            Err(e) => {
+                if let Some(field) = self.field_of(&e) {
+                    let field = field.min(self.form.fields.len().saturating_sub(1));
+                    // the details, if the error is about them
+                    if field < MATCH_ROSTER {
+                        self.step(true);
                     }
-                    self.form.error = Some(e.to_string());
-                    Edited::Stay
+                    self.form.focused = field;
                 }
-            },
+                self.form.error = Some(e.to_string());
+                Edited::Stay
+            }
         }
     }
 
@@ -472,11 +496,35 @@ impl Editor {
     }
 
     pub fn update(&mut self, core: &Scout4All, s: &Strings, message: form::Message) -> Edited {
-        let outcome = self.form.update(message);
-        self.outcome(core, s, outcome)
+        match (&self.namesake, message) {
+            (Some(_), form::Message::Save) => self.saved(core, s, true),
+            (Some(_), form::Message::Cancel) => {
+                self.namesake = None;
+                Edited::Stay
+            }
+            (Some(_), _) => Edited::Stay,
+            (None, message) => {
+                let outcome = self.form.update(message);
+                self.outcome(core, s, outcome)
+            }
+        }
     }
 
     pub fn key(&mut self, core: &Scout4All, s: &Strings, ck: KeyCombination) -> Edited {
+        // the namesake asked about: Enter saves all the same, Esc goes back
+        // to the form
+        match (&self.namesake, ck) {
+            (None, _) => self.form_key(core, s, ck),
+            (Some(_), k) if k == key!(enter) => self.saved(core, s, true),
+            (Some(_), k) if k == BACK_KEY => {
+                self.namesake = None;
+                Edited::Stay
+            }
+            (Some(_), _) => Edited::Stay,
+        }
+    }
+
+    fn form_key(&mut self, core: &Scout4All, s: &Strings, ck: KeyCombination) -> Edited {
         // the score sheet is a grid: the arrows move in it
         let players = self.form.fields.len().saturating_sub(MATCH_ROSTER);
         let at = self.form.focused.saturating_sub(MATCH_ROSTER);
@@ -504,15 +552,19 @@ impl Editor {
 
     /// The keys, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        match self.on_roster() {
-            true => vec![
+        match (self.namesake.is_some(), self.on_roster()) {
+            (true, _) => vec![
+                ("Enter".to_string(), s.save_anyway.to_string()),
+                ("Esc".to_string(), s.back.to_string()),
+            ],
+            (false, true) => vec![
                 ("← → ↑ ↓".to_string(), String::new()),
                 (s.space.to_string(), s.roster_toggle.to_string()),
                 ("Enter".to_string(), s.save.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ],
             // the details of a match: Enter goes on to the score sheet
-            false => Form::hints(s)
+            (false, false) => Form::hints(s)
                 .into_iter()
                 .map(|(k, what)| match (k.as_str(), &self.kind) {
                     ("Enter", Kind::Match(_)) => (k, s.go_on.to_string()),
@@ -537,9 +589,18 @@ impl Editor {
         c: Colors,
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
-        match &self.kind {
-            Kind::Match(m) if m.on_roster => self.roster_view(m, s, c, on),
-            _ => self.form.view(s, c, on, None),
+        match (&self.namesake, &self.kind) {
+            (Some(namesake), _) => ui::confirm(
+                s,
+                s.same_name,
+                namesake,
+                (theme::icons::SAVE, s.save_anyway),
+                on(form::Message::Save),
+                on(form::Message::Cancel),
+                c,
+            ),
+            (None, Kind::Match(m)) if m.on_roster => self.roster_view(m, s, c, on),
+            (None, _) => self.form.view(s, c, on, None),
         }
     }
 

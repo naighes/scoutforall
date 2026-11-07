@@ -32,7 +32,7 @@ use scout4all_core::{
     logging::logger::{init_logger, log_error},
     match_form::{MatchForm, MatchFormError},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
-    player_form::{PlayerForm, PlayerFormError},
+    player_form::{self, PlayerForm, PlayerFormError},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -348,6 +348,10 @@ pub enum MobileError {
     /// a choice of the scout that doesn't apply, or an event not saved
     #[error("{reason}")]
     Scouting { reason: String },
+    /// another player of the team with the same name: saved once the user
+    /// confirms it
+    #[error("{reason}")]
+    Namesake { reason: String },
 }
 
 impl From<AppError> for MobileError {
@@ -3356,20 +3360,30 @@ impl Scout4All {
 
     /// Adds a player to the team (no `player_id`) or updates the one with
     /// `player_id`; returns its id.
+    #[uniffi::method(default(namesake_confirmed = false))]
     pub fn save_player(
         &self,
         team_id: String,
         player_id: Option<String>,
         form: PlayerForm,
+        namesake_confirmed: bool,
     ) -> Result<String, MobileError> {
         let mut team = self.read_team(&team_id)?;
         let existing = player_id.map(|id| find_player(&team, &id)).transpose()?;
+        let labels = self.language.labels();
+        let namesake = player_form::namesake(&form, &team, existing.as_ref())
+            .filter(|_| !namesake_confirmed)
+            .map(|p| player_form::namesake_message(p, labels));
         let input = form
             .validate(&team, existing.as_ref(), Local::now().date_naive())
             .map_err(|e| MobileError::InvalidPlayer {
                 field: e.into(),
-                reason: e.message(self.language.labels()),
+                reason: e.message(labels),
             })?;
+        // the form valid first: then the namesake, to confirm
+        if let Some(reason) = namesake {
+            return Err(MobileError::Namesake { reason });
+        }
         let player = self
             .runtime
             .block_on(self.team_writer.save_player(input, &mut team))?;
@@ -4607,12 +4621,17 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let anna = app
-            .save_player(team.clone(), None, player("Anna", "9"))
+            .save_player(team.clone(), None, player("Anna", "9"), false)
             .unwrap();
-        app.save_player(team.clone(), None, player("Bea", "3"))
+        app.save_player(team.clone(), None, player("Bea", "3"), false)
             .unwrap();
-        app.save_player(team.clone(), Some(anna.clone()), player("Anna", "12"))
-            .unwrap();
+        app.save_player(
+            team.clone(),
+            Some(anna.clone()),
+            player("Anna", "12"),
+            false,
+        )
+        .unwrap();
 
         let players = app.team(team.clone()).unwrap().players;
         let listed: Vec<(&str, u8)> = players
@@ -4628,7 +4647,8 @@ mod tests {
         let players = app.team(team.clone()).unwrap().players;
         assert_eq!(players.len(), 1);
         // the number of a removed player is free again
-        app.save_player(team, None, player("Carla", "12")).unwrap();
+        app.save_player(team, None, player("Carla", "12"), false)
+            .unwrap();
     }
 
     #[test]
@@ -4745,8 +4765,13 @@ mod tests {
         let team = app.save_team(None, form("Cortona")).unwrap();
         app.save_team(None, form("Livorno")).unwrap();
         for n in 1..=7 {
-            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                .unwrap();
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
         }
         let date = "2026-10-24T18:00:00+02:00";
         for opponent in ["Arezzo", "livorno"] {
@@ -4764,9 +4789,14 @@ mod tests {
         let team = app.save_team(None, form("Cortona")).unwrap();
         let players: Vec<Uuid> = (1..=7)
             .map(|n| {
-                app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                    .and_then(|id| parse_id(&id))
-                    .unwrap()
+                app.save_player(
+                    team.clone(),
+                    None,
+                    player(&format!("P{n}"), &n.to_string()),
+                    false,
+                )
+                .and_then(|id| parse_id(&id))
+                .unwrap()
             })
             .collect();
         let date = "2026-10-24T18:00:00+02:00";
@@ -4820,7 +4850,7 @@ mod tests {
                 role,
                 ..player(&format!("P{n}"), &n.to_string())
             };
-            app.save_player(team.clone(), None, player).unwrap();
+            app.save_player(team.clone(), None, player, false).unwrap();
         }
         let date = "2026-10-24T18:00:00+02:00";
         let new = app
@@ -4882,8 +4912,13 @@ mod tests {
         let team = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<String> = (1..=7)
             .map(|n| {
-                app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                    .unwrap()
+                app.save_player(
+                    team.clone(),
+                    None,
+                    player(&format!("P{n}"), &n.to_string()),
+                    false,
+                )
+                .unwrap()
             })
             .collect();
         let date = "2026-10-24T18:00:00+02:00";
@@ -4936,8 +4971,13 @@ mod tests {
     fn match_with_a_set(app: &Scout4All) -> (String, String) {
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=7 {
-            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                .unwrap();
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
         }
         let m = app
             .save_match(
@@ -5707,6 +5747,7 @@ mod tests {
                 siena.clone(),
                 None,
                 player(&format!("S{n}"), &n.to_string()),
+                false,
             )
             .unwrap();
         }
@@ -6379,15 +6420,39 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
-        app.save_player(team.clone(), None, player("Anna", "9"))
+        app.save_player(team.clone(), None, player("Anna", "9"), false)
             .unwrap();
-        match app.save_player(team, None, player("Bea", "9")) {
+        match app.save_player(team, None, player("Bea", "9"), false) {
             Err(MobileError::InvalidPlayer { field, reason }) => {
                 assert_eq!(field, PlayerField::Number);
                 assert_eq!(reason, "number already in use");
             }
             other => unreachable!("expected a number in use, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_namesake_is_saved_once_confirmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        app.save_player(team.clone(), None, player("Anna Rossi", "9"), false)
+            .unwrap();
+        match app.save_player(team.clone(), None, player("anna rossi", "10"), false) {
+            Err(MobileError::Namesake { reason }) => {
+                assert_eq!(reason, "Anna Rossi, number 9, is already in the team.");
+            }
+            other => unreachable!("expected a namesake, got {other:?}"),
+        }
+        assert_eq!(app.team(team.clone()).unwrap().players.len(), 1);
+        // an error of the form comes first: the namesake once it's valid
+        assert!(matches!(
+            app.save_player(team.clone(), None, player("Anna Rossi", "9"), false),
+            Err(MobileError::InvalidPlayer { .. })
+        ));
+        app.save_player(team.clone(), None, player("anna rossi", "10"), true)
+            .unwrap();
+        assert_eq!(app.team(team).unwrap().players.len(), 2);
     }
 
     /// The fixtures of the core: archives as exported up to v0.9.0.

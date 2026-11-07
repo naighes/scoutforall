@@ -683,7 +683,8 @@ mod tests {
                 role: Some(scout4all_core::shapes::enums::RoleEnum::OutsideHitter),
                 ..PlayerForm::default()
             };
-            core.save_player(team_id.clone(), None, player).unwrap();
+            core.save_player(team_id.clone(), None, player, false)
+                .unwrap();
         }
         team.key(s, key!(right));
         team.key(s, key!(n));
@@ -770,5 +771,64 @@ mod tests {
         assert!(matches!(team.update(s, Message::Confirm), Outcome::Back));
         assert!(!dir.path().join(&team_id).exists());
         assert!(core.home().unwrap().teams.is_empty());
+    }
+
+    /// A player with the name of another one is asked about first: Esc
+    /// goes back to the form, Enter saves all the same, as the button does.
+    #[test]
+    fn a_namesake_is_saved_once_confirmed() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        use scout4all_core::shapes::{
+            country::CountryCode,
+            enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
+        };
+        let form = scout4all_core::team_form::TeamForm {
+            name: "Cortona".into(),
+            classification: Some(TeamClassificationEnum::Regional),
+            gender: Some(GenderEnum::Women),
+            country: CountryCode::known("IT"),
+            year: "2026".into(),
+        };
+        let team_id = core.save_team(None, form).unwrap();
+        let anna = PlayerForm {
+            name: "Anna Rossi".into(),
+            number: "9".into(),
+            role: Some(RoleEnum::Setter),
+            ..PlayerForm::default()
+        };
+        core.save_player(team_id.clone(), None, anna, false).unwrap();
+        let mut team = TeamScreen::new(core.clone(), team_id).unwrap();
+        let asking = |team: &TeamScreen| {
+            team.hints(s)
+                .iter()
+                .any(|(_, what)| what == s.save_anyway)
+        };
+        team.update(s, Message::NewPlayer);
+        for m in [
+            Input(0, "anna rossi".into()),
+            Input(1, "10".into()),
+            Choose(2, 1),
+        ] {
+            team.update(s, Message::Form(m));
+        }
+        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        assert!(asking(&team));
+        assert_eq!(team.details.players.len(), 1);
+        // the other keys stay on the question
+        team.key(s, key!(a));
+        assert!(asking(&team));
+        team.key(s, BACK_KEY);
+        assert!(!asking(&team));
+        assert!(matches!(team.mode, Mode::Edit(_)));
+        team.update(s, Message::Form(Save));
+        assert!(asking(&team));
+        team.update(s, Message::Form(form::Message::Cancel));
+        assert!(!asking(&team));
+        team.key(s, key!(enter));
+        team.key(s, key!(enter));
+        assert!(matches!(team.mode, Mode::Browse));
+        assert_eq!(team.details.players.len(), 2);
     }
 }

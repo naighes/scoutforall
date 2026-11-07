@@ -2630,6 +2630,7 @@ pub(crate) mod tests {
                     height_cm: String::new(),
                     notes: String::new(),
                 },
+                false,
             )
             .unwrap();
         }

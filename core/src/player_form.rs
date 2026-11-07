@@ -3,6 +3,7 @@
 //! the `TeamWriter` once it's valid.
 
 use crate::{
+    dvw::import::normalized,
     localization::Labels,
     providers::team_writer::{PlayerDetails, PlayerInput},
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
@@ -119,6 +120,35 @@ impl PlayerForm {
             }
         }
     }
+}
+
+/// Another active player of `team` with the name of `form`, letter case,
+/// accents and punctuation aside: not an error, two players may share a
+/// name, but likely the same one added twice, so the user is asked first.
+/// None for a player edited without changing the name.
+pub fn namesake<'a>(
+    form: &PlayerForm,
+    team: &'a TeamEntry,
+    existing: Option<&PlayerEntry>,
+) -> Option<&'a PlayerEntry> {
+    let name = normalized(&form.name);
+    let existing_id = existing.map(|p| p.id);
+    let unchanged = existing.is_some_and(|p| normalized(&p.name) == name);
+    match (name.is_empty(), unchanged) {
+        (false, false) => team
+            .active_players()
+            .into_iter()
+            .find(|p| Some(p.id) != existing_id && normalized(&p.name) == name),
+        _ => None,
+    }
+}
+
+/// What the user is told of the `namesake` before saving.
+pub fn namesake_message(namesake: &PlayerEntry, labels: &Labels) -> String {
+    labels
+        .player_namesake
+        .replace("{name}", &namesake.name)
+        .replace("{number}", &namesake.number.to_string())
 }
 
 /// How a birth date is typed and shown: 2005-03-14.

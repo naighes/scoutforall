@@ -650,7 +650,7 @@ mod tests {
                 height_cm: String::new(),
                 notes: String::new(),
             };
-            app.save_player(team.clone(), None, player).unwrap();
+            app.save_player(team.clone(), None, player, false).unwrap();
         }
         let form = MatchForm {
             opponent: "Arezzo".into(),
