@@ -163,6 +163,25 @@ pub struct Detail {
     /// none for the other fundamentals, or with none told
     pub serve_starts_told: u32,
     pub serve_starts: Vec<ServeStartDetail>,
+    /// for a serve, where they went from where they started (both told),
+    /// by start and zone of their court, the most first: none with none
+    /// told. Only from the zone asked, as `targets`
+    pub serve_paths: Vec<ServePath>,
+}
+
+/// Our serves from a zone of our end line to a zone of their court, among
+/// the ones with both told.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServePath {
+    pub start: ServeStartEnum,
+    pub zone: CourtZoneEnum,
+    /// two cells of different zones count half in each
+    pub count: f64,
+    /// of the ones with both told, 0 to 100
+    pub share: f64,
+    /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
+    /// `MIN_SERVES_FOR_EFFICIENCY`
+    pub efficiency: Option<f64>,
 }
 
 /// Our serves started from a zone, among the ones with where it started
@@ -176,6 +195,8 @@ pub struct ServeStartDetail {
     /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
     /// `MIN_SERVES_FOR_EFFICIENCY`
     pub efficiency: Option<f64>,
+    /// the errors among them: they went nowhere on their court
+    pub errors: u32,
 }
 
 /// Our attacks against so many of theirs at the block, or our blocks with
@@ -359,10 +380,28 @@ impl Detail {
                         count,
                         share: f64::from(count) / f64::from(told) * 100.0,
                         efficiency: (count >= MIN_SERVES_FOR_EFFICIENCY).then_some(efficiency),
+                        errors: stats.serve_errors_from(*z, filter),
                     }
                 })
                 .collect(),
         };
+        let paths = match event_type {
+            EventTypeEnum::S => stats.serve_paths(start, filter),
+            _ => Vec::new(),
+        };
+        let both: f64 = paths.iter().map(|(_, _, count, _)| count).sum();
+        let mut serve_paths: Vec<ServePath> = paths
+            .into_iter()
+            .map(|(start, zone, count, efficiency)| ServePath {
+                start,
+                zone,
+                count,
+                share: count / both * 100.0,
+                efficiency: (count >= f64::from(MIN_SERVES_FOR_EFFICIENCY)).then_some(efficiency),
+            })
+            .collect();
+        // the most first; in halves: an integer to sort by
+        serve_paths.sort_by_key(|p| std::cmp::Reverse((p.count * 2.0).round() as i64));
         Detail {
             total,
             evals,
@@ -384,6 +423,7 @@ impl Detail {
             blockers,
             serve_starts_told,
             serve_starts,
+            serve_paths,
         }
     }
 }

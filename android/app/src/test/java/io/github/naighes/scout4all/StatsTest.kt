@@ -102,6 +102,11 @@ class StatsLayoutTest(private val screen: Size) {
         rule.onNode(fromOne).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText("${string(R.string.serves_by_zone)} · ${string(R.string.serve_from, "1")}")
         rule.shot("stats-serve-starts-$screen")
+        // where they went from there, on the whole court: to 1, half to 3
+        // and to 4 (3D and 4A), read by TalkBack
+        rule.waitForText(string(R.string.serve_paths))
+        rule.onNode(hasContentDescription("1 → 1 · 1 (50%)", substring = true)).assertExists()
+        rule.onNode(hasContentDescription("1 → 3 · 0.5 (25%)", substring = true)).assertExists()
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         // the reception and the defense, with the conflict zones; the
         // block, at the net; the attack, by zone

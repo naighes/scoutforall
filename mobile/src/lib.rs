@@ -15,7 +15,7 @@ use scout4all_core::{
     },
     archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
-    detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation_in},
+    detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
     dvw::{
         self,
         import::{
@@ -1521,6 +1521,10 @@ pub struct FundamentalDetail {
     /// the left, see `ServeStartEnum::SHOWN`); empty with none told
     pub serve_starts_told: u32,
     pub serve_starts: Vec<ServeStartStats>,
+    /// for a serve: where they went from where they started, both told, the
+    /// most first (to draw them the fewest first); only from the zone of
+    /// the filter; empty with none
+    pub serve_paths: Vec<ServePathStats>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
     pub players: Vec<PlayerStats>,
@@ -1549,6 +1553,31 @@ pub struct ServeStartStats {
     pub label: String,
     pub count: u32,
     /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
+    /// the errors among them: they went nowhere on their court
+    pub errors: u32,
+}
+
+/// Our serves from a zone of our end line to a zone of their court, of
+/// the ones with both told. Where on the whole court, in meters, as our
+/// server sees it: `x` from 0 to 9 from the left, `y` from 0 at their end
+/// line to 9 at the net and 18 at ours (where the serve starts, the zone
+/// under its fifth of the end line).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ServePathStats {
+    pub start: ServeStartEnum,
+    pub zone: CourtZoneEnum,
+    /// "1 → 5"
+    pub label: String,
+    pub from_x: f64,
+    pub from_y: f64,
+    pub to_x: f64,
+    pub to_y: f64,
+    /// two cells of different zones count half in each
+    pub count: f64,
+    /// of the serves with both told, 0 to 100
     pub share: f64,
     /// -100 to 100: none on too few to tell
     pub efficiency: Option<f64>,
@@ -2329,8 +2358,10 @@ fn detail_of(
                         count: s.count,
                         share: s.share,
                         efficiency: s.efficiency,
+                        errors: s.errors,
                     })
                     .collect(),
+                serve_paths: d.serve_paths.iter().filter_map(serve_path).collect(),
                 players: by_player(stats, event, &narrowed)
                     .into_iter()
                     .filter_map(|line| {
@@ -2486,6 +2517,34 @@ fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
             .role
             .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
     }
+}
+
+/// A serve path drawn on the whole court (see `ServePathStats`): from the
+/// fifth of our end line of its start to its zone of their court, both
+/// ends moved off the middle so that the arrows don't lie on each other:
+/// the start towards the column it goes to, the end towards the fifth it
+/// came from and, for the zones of a column not to be on one line, to the
+/// left at their end line, to the right at the net (within the zone). None for a zone not one of the nine.
+fn serve_path(p: &ServePath) -> Option<ServePathStats> {
+    let (row, column) = CourtZoneEnum::zones_shown(CourtSide::Theirs)
+        .iter()
+        .enumerate()
+        .find_map(|(r, row)| row.iter().position(|z| *z == p.zone).map(|c| (r, c)))?;
+    let fifth = ServeStartEnum::SHOWN.iter().position(|s| *s == p.start)?;
+    let middle = |i: usize, of: f64| (i as f64 + 0.5) * of;
+    Some(ServePathStats {
+        start: p.start,
+        zone: p.zone,
+        label: format!("{} → {}", p.start, p.zone),
+        from_x: middle(fifth, 9.0 / 5.0) + (column as f64 - 1.0) * 0.5,
+        from_y: 18.0,
+        to_x: (middle(column, 3.0) + (fifth as f64 - 2.0) * 0.45 + (row as f64 - 1.0) * 0.4)
+            .clamp(column as f64 * 3.0 + 0.3, column as f64 * 3.0 + 2.7),
+        to_y: middle(row, 3.0),
+        count: p.count,
+        share: p.share,
+        efficiency: p.efficiency,
+    })
 }
 
 /// The number scouts call a zone by.
@@ -6256,11 +6315,32 @@ mod tests {
             vec![("5", 1), ("7", 0), ("6", 0), ("9", 0), ("1", 2)]
         );
         assert_eq!(all.targets_told, 2);
+        // the paths on the whole court: from the right fifth of our end
+        // line to 1 (their end line, on the left) and to 5 (on the right)
+        // each end moved towards the other: off the middle
+        let cm = |m: f64| (m * 100.0).round() as i64;
+        let paths: Vec<(String, i64, i64, i64, i64)> = all
+            .serve_paths
+            .iter()
+            .map(|p| (p.label.clone(), cm(p.from_x), cm(p.from_y), cm(p.to_x), cm(p.to_y)))
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            sorted,
+            vec![
+                ("1 → 1".to_string(), 760, 1800, 200, 150),
+                ("1 → 5".to_string(), 860, 1800, 800, 150),
+            ]
+        );
+        // no errors yet
+        assert_eq!(all.serve_starts.iter().map(|z| z.errors).sum::<u32>(), 0);
         let from_1 = detail(Some(ServeStartEnum::Z1));
         assert_eq!((from_1.total, from_1.targets_told), (3, 2));
         assert_eq!(from_1.serve_starts, all.serve_starts);
         let from_5 = detail(Some(ServeStartEnum::Z5));
-        assert!(from_5.targets.is_empty());
+        assert!(from_5.targets.is_empty() && from_5.serve_paths.is_empty());
+        assert_eq!(from_1.serve_paths.len(), 2);
         // the event tells it, the last first
         let state = scouting.state();
         assert_eq!(

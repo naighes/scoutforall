@@ -777,6 +777,44 @@ impl Stats {
         }
     }
 
+    /// Our serves with where they started from and where they went told,
+    /// by start and zone of their court (two cells of different zones half
+    /// in each, see `CourtTarget::zones`): how many, and their efficiency;
+    /// only from `start`, when given. The zones in the order of
+    /// `CourtZoneEnum::ZONES`, the starts of `ServeStartEnum::ALL`.
+    pub fn serve_paths(
+        &self,
+        start: Option<ServeStartEnum>,
+        filter: &StatsFilter,
+    ) -> Vec<(ServeStartEnum, CourtZoneEnum, f64, f64)> {
+        ServeStartEnum::ALL
+            .iter()
+            .filter(|s| start.is_none_or(|wanted| wanted == **s))
+            .flat_map(|s| CourtZoneEnum::ZONES.iter().map(move |z| (*s, *z)))
+            .filter_map(|(s, zone)| {
+                let (count, efficiency) =
+                    self.weighted(EventTypeEnum::S, Some(s), filter, |target| {
+                        target
+                            .zones()
+                            .iter()
+                            .filter(|(z, _)| *z == zone)
+                            .map(|(_, weight)| weight)
+                            .sum()
+                    });
+                (count > 0.0).then_some((s, zone, count, efficiency))
+            })
+            .collect()
+    }
+
+    /// Our serve errors started from the zone: they went nowhere on their
+    /// court.
+    pub fn serve_errors_from(&self, start: ServeStartEnum, filter: &StatsFilter) -> u32 {
+        self.events(EventTypeEnum::S, filter)
+            .filter(|(k, _)| k.serve_start == Some(start) && k.eval == Some(EvalEnum::Error))
+            .map(|(_, v)| v)
+            .sum()
+    }
+
     /// Our serves started from the zone, or from any told with `None`: how
     /// many, and their efficiency (0 with none).
     pub fn serves_from(&self, start: Option<ServeStartEnum>, filter: &StatsFilter) -> (u32, f64) {

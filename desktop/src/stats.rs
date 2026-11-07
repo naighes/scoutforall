@@ -147,6 +147,9 @@ pub enum Message {
     /// a zone our serve starts from: where the serves went only from
     /// there, and their actions (or all again)
     ServeStart(ServeStartEnum),
+    /// the serves from a zone of our end line to one of their court: only
+    /// from there, and their actions (or all again)
+    ServePath(ServeStartEnum, CourtZoneEnum),
     /// all the actions of the detail again
     ClearPick,
     /// the actions of the detail in the video
@@ -983,6 +986,16 @@ impl StatsScreen {
             Message::ClipTarget(target) => {
                 self.clip_target = (self.clip_target != Some(target)).then_some(target);
                 self.recount();
+            }
+            Message::ServePath(start, zone) => {
+                let picked = self.filter.serve_start == Some(start) && self.clip_target == Some(zone);
+                self.clip_target = (!picked).then_some(zone);
+                match picked {
+                    // the arrow again: all of them, from every zone
+                    true => self.filter.serve_start = None,
+                    false => self.filter.serve_start = Some(start),
+                }
+                self.load();
             }
             Message::ServeStart(start) => {
                 self.filter.serve_start = (self.filter.serve_start != Some(start)).then_some(start);
@@ -1864,6 +1877,7 @@ impl StatsScreen {
         let zones: Vec<Element<'a, Message>> = [
             (!f.zones.is_empty()).then(|| self.attack_zones(f, s, c)),
             (!f.serve_starts.is_empty()).then(|| self.serve_starts(f, s, c)),
+            (!f.serve_starts.is_empty()).then(|| self.serve_paths(f, s, c)),
             (!f.targets.is_empty()).then(|| self.targets(f, s, c)),
             (!f.blockers.is_empty()).then(|| self.blockers(f, s, c)),
         ]
@@ -2009,6 +2023,49 @@ impl StatsScreen {
                     c
                 ),
                 Row::with_children(cells).spacing(4),
+            ]
+            .spacing(8),
+            c,
+        )
+    }
+
+    /// Where our serves went from where they started, on the whole court
+    /// (see `paths`): a click on a zone of our end line or on an arrow
+    /// narrows to its serves, again to all.
+    fn serve_paths<'a>(
+        &'a self,
+        f: &'a FundamentalDetail,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let both: f64 = f.serve_paths.iter().map(|p| p.count).sum();
+        let chart = crate::paths::PathsChart {
+            paths: &f.serve_paths,
+            starts: &f.serve_starts,
+            targets: &f.targets,
+            start: self.filter.serve_start,
+            path: self.filter.serve_start.zip(self.clip_target),
+            colors: c,
+        };
+        let canvas: Element<'a, crate::paths::Pick> = iced::widget::canvas(chart)
+            .width(Length::Fill)
+            .height(Length::Fixed(PATHS_HEIGHT))
+            .into();
+        ui::panel(
+            Some(s.serve_paths),
+            column![
+                small(
+                    ui::fill(
+                        s.serve_paths_told,
+                        &[crate::paths::count(both), f.total.to_string()]
+                    ),
+                    c
+                ),
+                canvas.map(|pick| match pick {
+                    crate::paths::Pick::Start(start) => Message::ServeStart(start),
+                    crate::paths::Pick::Path(start, zone) => Message::ServePath(start, zone),
+                }),
+                small(s.serve_paths_legend, c),
             ]
             .spacing(8),
             c,
@@ -2209,6 +2266,10 @@ impl StatsScreen {
 
 /// A cell of the detail to click, to watch only its actions: lit when
 /// picked.
+/// How high the chart of the serve paths is: the whole court, 9 by 18
+/// meters with our end line under it, readable in a column.
+const PATHS_HEIGHT: f32 = 520.0;
+
 fn pickable<'a>(
     content: impl Into<Element<'a, Message>>,
     picked: bool,
@@ -2902,6 +2963,42 @@ pub(crate) mod tests {
         assert_eq!(screen.clips, Some(6));
     }
 
+    /// An arrow of the serve paths: the serves from its start to its zone,
+    /// their actions only; again, all of them.
+    #[test]
+    fn the_serves_along_an_arrow() {
+        use scout4all_core::shapes::court_zone::ServeStartEnum::{Z1, Z5};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let arezzo = match_against(&core, &team, "Arezzo");
+        let scouting = core.scouting(team.clone(), arezzo.clone()).unwrap();
+        // from 1 to 1 and to 5, from 5 to 5
+        for (start, zone) in [(Some(Z1), 1), (None, 5), (Some(Z5), 5)] {
+            if let Some(start) = start {
+                scouting.touch_serve_start(start).unwrap();
+            }
+            scouting.touch_target(zone, "A".into()).unwrap();
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let mut screen = StatsScreen::new(core.clone(), team, arezzo).unwrap();
+        screen.update(Message::Page(2));
+        let paths = |screen: &StatsScreen| -> Vec<String> {
+            let f = screen.detail.as_ref().and_then(|d| d.fundamental.clone()).unwrap();
+            let mut labels: Vec<String> = f.serve_paths.iter().map(|p| p.label.clone()).collect();
+            labels.sort();
+            labels
+        };
+        assert_eq!(paths(&screen), vec!["1 → 1", "1 → 5", "5 → 5"]);
+        screen.update(Message::ServePath(Z1, CourtZoneEnum::Z5));
+        assert_eq!(paths(&screen), vec!["1 → 1", "1 → 5"]);
+        assert_eq!(screen.clips, Some(1));
+        screen.update(Message::ServePath(Z1, CourtZoneEnum::Z5));
+        assert_eq!(paths(&screen), vec!["1 → 1", "1 → 5", "5 → 5"]);
+        assert_eq!(screen.clips, Some(6));
+    }
+
     /// The match of the team against `opponent`.
     pub(crate) fn match_against(core: &Scout4All, team: &str, opponent: &str) -> String {
         core.matches(team.to_string())
@@ -3147,3 +3244,4 @@ pub(crate) mod tests {
         assert_eq!(screen.take_scroll(), None, "once");
     }
 }
+

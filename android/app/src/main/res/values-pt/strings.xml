@@ -145,6 +145,9 @@
     <string name="serve_start">Zona de partida do saque</string>
     <string name="serves_by_start">Saques por zona de partida</string>
     <string name="serve_starts_told">partida indicada em %1$d de %2$d saques</string>
+    <string name="serve_paths">Trajetórias do saque</string>
+    <string name="serve_paths_told">partida e destino indicados em %1$s de %2$d saques</string>
+    <string name="serve_paths_legend">mais grossa: mais saques · cor: eficiência · = erros · toque numa seta</string>
     <string name="serve_from">de %1$s</string>
     <string name="reception_zone">Zona da recepção</string>
     <string name="receptions_by_zone">Recepções por zona</string>

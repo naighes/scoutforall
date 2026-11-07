@@ -145,6 +145,9 @@
     <string name="serve_start">Zona di partenza della battuta</string>
     <string name="serves_by_start">Battute per zona di partenza</string>
     <string name="serve_starts_told">partenza indicata in %1$d battute su %2$d</string>
+    <string name="serve_paths">Traiettorie della battuta</string>
+    <string name="serve_paths_told">partenza e destinazione indicate in %1$s battute su %2$d</string>
+    <string name="serve_paths_legend">più spessa: più battute · colore: efficienza · = errori · tocca una freccia</string>
     <string name="serve_from">da %1$s</string>
     <string name="reception_zone">Zona di ricezione</string>
     <string name="receptions_by_zone">Ricezioni per zona</string>

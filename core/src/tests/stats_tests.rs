@@ -1345,6 +1345,7 @@ mod tests {
                 blockers: vec![],
                 serve_starts_told: 0,
                 serve_starts: vec![],
+                serve_paths: vec![],
                 zones: vec![
                     ZoneDetail {
                         zone: ZoneEnum::Four,
@@ -1390,6 +1391,7 @@ mod tests {
                 blockers: vec![],
                 serve_starts_told: 0,
                 serve_starts: vec![],
+                serve_paths: vec![],
                 zones: vec![ZoneDetail {
                     zone: ZoneEnum::Two,
                     share: 100.0,
@@ -1438,6 +1440,7 @@ mod tests {
                 blockers: vec![],
                 serve_starts_told: 0,
                 serve_starts: vec![],
+                serve_paths: vec![],
                 zones: vec![],
             }
         );
@@ -1566,6 +1569,70 @@ mod tests {
         let none = t.serving(vec![serve(Perfect, None, 1)]).stats;
         assert_eq!(detail(&none, S, &all()).serve_starts_told, 0);
         assert!(detail(&none, S, &all()).serve_starts.is_empty());
+    }
+
+    /// Where our serves went from where they started, both told: by start
+    /// and zone, the most first, two cells of two zones half in each; the
+    /// share of the ones with both told, the efficiency from three on; only
+    /// from the zone asked; the errors of each start apart.
+    #[test]
+    fn detail_of_the_serve_paths() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z5, Z6};
+        use crate::shapes::court_zone::{CourtCell, CourtTarget, ServeStartEnum, SubzoneEnum};
+        use ServeStartEnum::{Z1 as From1, Z5 as From5};
+        let t = Team::new();
+        let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
+        let serve = |eval, start, target: Option<CourtTarget>| {
+            let mut e = act(S, t.setter, eval);
+            e.flags = e.flags.with_serve_start(start).with_target(target);
+            e
+        };
+        // 1D and 6A: half in 1, half in 6
+        let z16 = CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A));
+        let stats = t
+            .serving(vec![
+                serve(Perfect, Some(From1), Some(CourtTarget::Zone(1))),
+                serve(Perfect, Some(From1), Some(CourtTarget::Zone(1))),
+                serve(Positive, Some(From1), Some(CourtTarget::Zone(1))),
+                opp(OE),
+                serve(Perfect, Some(From1), z16),
+                serve(Perfect, Some(From5), Some(CourtTarget::Zone(5))),
+                // no start, no target: left out
+                serve(Perfect, None, Some(CourtTarget::Zone(5))),
+                serve(Perfect, Some(From5), None),
+                serve(Error, Some(From5), None),
+            ])
+            .stats;
+        let serves = detail(&stats, S, &all());
+        let paths: Vec<_> = serves
+            .serve_paths
+            .iter()
+            .map(|p| (p.start, p.zone, p.count, p.share))
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                (From1, Z1, 3.5, 70.0),
+                (From5, Z5, 1.0, 20.0),
+                (From1, Z6, 0.5, 10.0),
+            ]
+        );
+        // every serve to 1 started from 1: as the zone of their court
+        let to_1 = serves.targets.iter().find(|t| t.zone == Z1).and_then(|t| t.efficiency);
+        assert_eq!(serves.serve_paths[0].efficiency, to_1);
+        assert!(to_1.is_some());
+        assert_eq!(serves.serve_paths[1].efficiency, None);
+        let errors: Vec<_> = serves.serve_starts.iter().map(|z| (z.start, z.errors)).collect();
+        assert!(errors.contains(&(From5, 1)) && errors.contains(&(From1, 0)));
+        // only from 5
+        let only_5 = match Breakdown::from_start(&stats, S, &all(), Some(From5)) {
+            Breakdown::Fundamental(d) => d,
+            Breakdown::Freeballs(f) => panic!("expected a fundamental, got {f:?}"),
+        };
+        let paths: Vec<_> = only_5.serve_paths.iter().map(|p| (p.zone, p.share)).collect();
+        assert_eq!(paths, vec![(Z5, 100.0)]);
+        // none for the other fundamentals
+        assert!(detail(&stats, A, &all()).serve_paths.is_empty());
     }
 
     /// Our attacks by the zone of their court they went to: as the serves.

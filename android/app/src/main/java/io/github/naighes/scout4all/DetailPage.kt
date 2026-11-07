@@ -418,6 +418,20 @@ private fun FundamentalContent(
         val toggled = if (query.filter.serveStart == start) null else start
         onQuery(query.copy(filter = query.filter.copy(serveStart = toggled)))
     }
+    if (f.serveStarts.isNotEmpty()) ServePaths(
+        f,
+        query.filter.serveStart,
+        query.filter.serveStart?.let { s -> choice?.target?.let { s to it } },
+        onStart = { start ->
+            val toggled = if (query.filter.serveStart == start) null else start
+            onQuery(query.copy(filter = query.filter.copy(serveStart = toggled)))
+        },
+        onPath = { start, zone, again ->
+            // the arrow again: all of them, from every zone
+            choice?.let { onChoice(it.copy(target = zone.takeIf { !again })) }
+            onQuery(query.copy(filter = query.filter.copy(serveStart = start.takeIf { !again })))
+        },
+    )
     if (f.targets.isNotEmpty()) TargetZones(f, query.event, query.filter.serveStart, choice, onChoice)
     if (f.blockers.isNotEmpty()) Blockers(f, query.event)
     if (f.players.isNotEmpty()) {
