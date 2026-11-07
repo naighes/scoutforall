@@ -266,18 +266,10 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
     }
 
 @Composable
-private fun RemovalDialog(name: String, model: PlayerFormViewModel) = AlertDialog(
-    onDismissRequest = { model.confirmRemoval(false) },
-    title = { Text(stringResource(R.string.remove_player_title, name)) },
-    text = { Text(stringResource(R.string.remove_player_text)) },
-    confirmButton = {
-        TextButton(onClick = { model.remove() }) {
-            Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error)
-        }
-    },
-    dismissButton = {
-        TextButton(onClick = { model.confirmRemoval(false) }) { Text(stringResource(R.string.cancel)) }
-    },
+private fun RemovalDialog(name: String, model: PlayerFormViewModel) = DeletionDialog(
+    stringResource(R.string.delete_player_text, name),
+    onConfirm = { model.remove() },
+    onDismiss = { model.confirmRemoval(false) },
 )
 
 /** The birth date, in the language of the phone, or nothing; a tap opens

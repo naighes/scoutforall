@@ -234,6 +234,7 @@ private fun Navigation(
                 onMatch = { m -> nav.navigate("team/$id/match/${Uri.encode(m)}") },
                 onDvw = { nav.navigate("dvw") },
                 onAnalysis = { nav.navigate("team/$id/analysis") },
+                onDeleted = { nav.back(entry) },
             )
         }
         composable("team/{id}/analysis") { entry ->
@@ -277,6 +278,7 @@ private fun Navigation(
                 onSet = { set -> nav.navigate("$match/set/$set") },
                 onStats = { nav.navigate("$match/stats?set=0") },
                 onVideo = { nav.navigate("$match/video") },
+                onDeleted = { nav.back(entry) },
             )
         }
         composable("team/{id}/match/{match}/set/{set}") { entry ->
