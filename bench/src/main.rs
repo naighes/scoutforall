@@ -329,6 +329,13 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
         time("team_analysis(last 10)", READS, || {
             analysis(AnalysisPeriod::LastMatches { count: 10 })
         })?,
+        // a month of the generated matches (they end on 2026-11-01)
+        time("team_analysis(October)", READS, || {
+            analysis(AnalysisPeriod::Between {
+                from: "2026-10-01".to_string(),
+                to: "2026-10-31".to_string(),
+            })
+        })?,
         time("team_analysis(all)", READS, || analysis(period.clone()))?,
     ])
 }
