@@ -101,6 +101,11 @@ jobs:
           # the desktop app, which the releases publish
           args: "--locked --package scout4all-desktop"
           strip: true
+      # every DLL it loads must come with Windows (see the script)
+      - name: check the DLLs of the windows executable
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python .github/scripts/check-windows-dlls.py "target/${{ matrix.platforms.target }}/debug/scout4all-desktop.exe"
 
   lockfile:
     name: lockfile

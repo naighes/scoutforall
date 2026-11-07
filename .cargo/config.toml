@@ -1,0 +1,23 @@
+# Windows: the runtimes linked into the executable, so that it runs on a
+# Windows without them: the self update and the downloads ship the bare
+# executable. `.github/scripts/check-windows-dlls.py` checks what the
+# executables still load.
+#
+# MinGW: the C++ runtime (libstdc++-6.dll, with libgcc_s_seh-1.dll and
+# libwinpthread-1.dll) of the code in C++ of openh264-sys2. Its build asks
+# the `cc` crate to link libstdc++ as a DLL, which `-static` can't undo:
+# `cc` links nothing (CXXSTDLIB empty), and libstdc++ is linked statically
+# at the end, with what it needs of the C runtime and of libgcc.
+[target.x86_64-pc-windows-gnu]
+rustflags = [
+    "-C",
+    "link-args=-static -static-libgcc -Wl,--start-group -Wl,-Bstatic -lstdc++ -lgcc -lgcc_eh -lwinpthread -lmingwex -Wl,-Bdynamic -lmsvcrt -lkernel32 -Wl,--end-group",
+]
+
+# MSVC: the C runtime (VCRUNTIME140.dll, from the Visual C++
+# Redistributable).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+CXXSTDLIB_x86_64_pc_windows_gnu = ""

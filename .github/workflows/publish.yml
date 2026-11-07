@@ -130,6 +130,13 @@ jobs:
             echo "binaryName=${name}${exe}"
             echo "binaryAsset=scout4all-${{ matrix.platforms.target }}${exe}"
           } >> "$GITHUB_OUTPUT"
+      # every DLL it loads must come with Windows (see the script)
+      - name: check the DLLs of the windows executable
+        if: matrix.platforms.os == 'windows-latest'
+        shell: bash
+        run: python .github/scripts/check-windows-dlls.py "${SOURCE}"
+        env:
+          SOURCE: ${{ steps.variables.outputs.source }}
       - name: attest
         uses: actions/attest-build-provenance@v2
         with:

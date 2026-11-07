@@ -1,0 +1,77 @@
+name: windows assets
+
+# rebuilds the Windows assets of a published release from master and replaces
+# them, as the release builds them (publish.yml): for a fix of the build of
+# Windows alone (e.g. a DLL it lacks), without a new version. master must
+# carry the version of the release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the release whose Windows assets are replaced, e.g. v0.15.0"
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  id-token: write
+  contents: write
+  attestations: write
+
+jobs:
+  windows:
+    name: rebuild and replace ${{ matrix.target }}
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x86_64-pc-windows-gnu, x86_64-pc-windows-msvc]
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+      SOURCE: target/${{ matrix.target }}/release/scout4all-desktop.exe
+      ARCHIVE: scout4all-${{ matrix.target }}
+      BINARY_ASSET: scout4all-${{ matrix.target }}.exe
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: check the version and the release
+        shell: bash
+        run: |
+          version="$(cargo pkgid --package scout4all-desktop | cut -d '@' -f2)"
+          [ "v${version}" = "${TAG}" ] || { echo "master is ${version}, not ${TAG}"; exit 1; }
+          [ "$(gh release view "${TAG}" --json isDraft --jq .isDraft)" = "false" ] || { echo "${TAG} is not published"; exit 1; }
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+      - uses: houseabsolute/actions-rust-cross@v1
+        with:
+          target: ${{ matrix.target }}
+          args: "--verbose --locked --release --package scout4all-desktop --features self-update"
+          strip: true
+        env:
+          ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
+      - name: check the DLLs of the windows executable
+        shell: bash
+        run: python .github/scripts/check-windows-dlls.py "${SOURCE}"
+      - name: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ env.SOURCE }}
+          subject-name: "${{ env.ARCHIVE }}-${{ env.VERSION }}"
+      - name: cargo install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx
+      - name: generate SBOM
+        run: cargo cyclonedx --manifest-path desktop/Cargo.toml --describe binaries --format json --features self-update --target ${{ matrix.target }}
+      - name: stage the assets
+        shell: bash
+        run: |
+          mkdir -p package dist
+          cp "${SOURCE}" package/scout4all.exe
+          mv desktop/scout4all-desktop_bin.cdx.json package/scout4all.cdx.json
+          cp "${SOURCE}" "dist/${BINARY_ASSET}"
+          (cd package && 7z a "../dist/${ARCHIVE}.zip" scout4all.exe scout4all.cdx.json)
+          "./dist/${BINARY_ASSET}" --version | grep -q "^scout4all ${VERSION}$" || { echo "the bare binary does not report scout4all ${VERSION}"; exit 1; }
+      - name: replace the assets
+        shell: bash
+        run: bash .github/scripts/release-assets.sh upload "${TAG}" "dist/${BINARY_ASSET}" "dist/${ARCHIVE}.zip"
