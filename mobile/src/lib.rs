@@ -2880,10 +2880,10 @@ impl Scout4All {
         let team = self.read_team(&team_id)?;
         Ok(self
             .runtime
-            .block_on(self.match_reader.read_all(&team))?
+            .block_on(self.match_reader.read_all_with_status(&team))?
             .into_iter()
-            .map(|listed| match listed.map(|m| (m.get_status(), m)) {
-                Ok((Ok(status), m)) => MatchListing::Match {
+            .map(|listed| match listed {
+                Ok((m, status)) => MatchListing::Match {
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
@@ -2891,12 +2891,6 @@ impl Scout4All {
                     won: status.us_wins,
                     lost: status.them_wins,
                     finished: status.match_finished,
-                },
-                Ok((Err(_), m)) => MatchListing::Unreadable {
-                    reason: m
-                        .replay_issue()
-                        .map(|issue| issue.describe(self.language.labels())),
-                    folder: m.id,
                 },
                 Err(unreadable) => MatchListing::Unreadable {
                     folder: unreadable.id,
@@ -2939,10 +2933,11 @@ impl Scout4All {
             .into_iter()
             .flatten()
         {
-            let read = self.runtime.block_on(self.match_reader.read_all(&team))?;
-            matches.extend(read.into_iter().flatten().filter_map(|m| {
-                let status = m.get_status().ok()?;
-                Some((
+            let read = self
+                .runtime
+                .block_on(self.match_reader.read_all_with_status(&team))?;
+            matches.extend(read.into_iter().flatten().map(|(m, status)| {
+                (
                     m.date,
                     HomeMatch {
                         team_id: team.id.to_string(),
@@ -2955,7 +2950,7 @@ impl Scout4All {
                         lost: status.them_wins,
                         next: next_kind(&status, &team),
                     },
-                ))
+                )
             }));
         }
         matches.sort_by(|(a, _), (b, _)| b.cmp(a));

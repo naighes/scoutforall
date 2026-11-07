@@ -6,7 +6,7 @@ use crate::{
     shapes::{
         enums::LineupRulesEnum,
         listed::{Listed, Unreadable},
-        r#match::MatchEntry,
+        r#match::{MatchEntry, MatchStatus},
         set::SetEntry,
         team::TeamEntry,
     },
@@ -26,6 +26,18 @@ pub struct StoreMatchReader {
 #[async_trait]
 impl MatchReader for StoreMatchReader {
     async fn read_all(&self, team: &TeamEntry) -> Result<Vec<Listed<MatchEntry>>, AppError> {
+        Ok(self
+            .read_all_with_status(team)
+            .await?
+            .into_iter()
+            .map(|listed| listed.map(|(entry, _)| entry))
+            .collect())
+    }
+
+    async fn read_all_with_status(
+        &self,
+        team: &TeamEntry,
+    ) -> Result<Vec<Listed<(MatchEntry, MatchStatus)>>, AppError> {
         let folders = self
             .store
             .list(&layout::team_folder(&team.id))
@@ -35,25 +47,26 @@ impl MatchReader for StoreMatchReader {
                 StoreEntry::Folder(name) => Some(name),
                 StoreEntry::Blob(_) => None,
             });
-        let mut entries: Vec<Listed<MatchEntry>> = join_all(folders.map(|match_id| async move {
-            self.map_entry(&match_id, team).await.map_err(|e| {
-                log_error(&format!(
-                    "match {:?} of team {} is unreadable: {}",
-                    match_id, team.id, e
-                ));
-                Unreadable {
-                    id: match_id,
-                    reason: match e {
-                        AppError::Match(MatchError::SetNotValid(reason)) => Some(reason),
-                        _ => None,
-                    },
-                }
-            })
-        }))
-        .await;
+        let mut entries: Vec<Listed<(MatchEntry, MatchStatus)>> =
+            join_all(folders.map(|match_id| async move {
+                self.map_entry(&match_id, team).await.map_err(|e| {
+                    log_error(&format!(
+                        "match {:?} of team {} is unreadable: {}",
+                        match_id, team.id, e
+                    ));
+                    Unreadable {
+                        id: match_id,
+                        reason: match e {
+                            AppError::Match(MatchError::SetNotValid(reason)) => Some(reason),
+                            _ => None,
+                        },
+                    }
+                })
+            }))
+            .await;
         // the most recent first, then the unreadable ones by name
         entries.sort_by(|a, b| match (a, b) {
-            (Ok(a), Ok(b)) => b.date.cmp(&a.date),
+            (Ok((a, _)), Ok((b, _))) => b.date.cmp(&a.date),
             (Ok(_), Err(_)) => Ordering::Less,
             (Err(_), Ok(_)) => Ordering::Greater,
             (Err(a), Err(b)) => a.id.cmp(&b.id),
@@ -62,7 +75,7 @@ impl MatchReader for StoreMatchReader {
     }
 
     async fn read_single(&self, team: &TeamEntry, match_id: &str) -> Result<MatchEntry, AppError> {
-        self.map_entry(match_id, team).await
+        self.map_entry(match_id, team).await.map(|(entry, _)| entry)
     }
 
     async fn exists(&self, team: &TeamEntry, match_id: &str) -> Result<bool, AppError> {
@@ -85,7 +98,12 @@ impl StoreMatchReader {
         }
     }
 
-    async fn map_entry(&self, match_id: &str, team: &TeamEntry) -> Result<MatchEntry, AppError> {
+    /// The match, with the status its sets replay to.
+    async fn map_entry(
+        &self,
+        match_id: &str,
+        team: &TeamEntry,
+    ) -> Result<(MatchEntry, MatchStatus), AppError> {
         let content = self
             .store
             .read(&layout::match_descriptor(&team.id, match_id))
@@ -105,13 +123,13 @@ impl StoreMatchReader {
         fill_lineup_rules(&mut entry.sets, rules);
         // a match whose sets don't replay can't be shown nor scouted: the
         // first event that doesn't tells why
-        entry.get_status().map_err(|e| match entry.replay_issue() {
+        let status = entry.get_status().map_err(|e| match entry.replay_issue() {
             Some(issue) => AppError::Match(MatchError::SetNotValid(
                 issue.describe(self.language.labels()),
             )),
             None => e,
         })?;
-        Ok(entry)
+        Ok((entry, status))
     }
 }
 

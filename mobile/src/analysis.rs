@@ -14,7 +14,7 @@ use scout4all_core::{
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         flags::ReceptionSchemeEnum,
-        r#match::MatchEntry,
+        r#match::{MatchEntry, MatchStatus},
         stats::EvalSet,
         team::TeamEntry,
         technique::{SetTypeEnum, TechniqueEnum},
@@ -22,6 +22,7 @@ use scout4all_core::{
     trend::Series,
     video::{EventRef, StoredProfile, read_profile},
 };
+use std::collections::HashMap;
 
 /// The matches to analyse: only the ones with a set scouted, up to today.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
@@ -163,16 +164,23 @@ impl Scout4All {
         filter: DetailFilter,
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
-        let all: Vec<MatchEntry> = self
+        let (all, statuses): (Vec<MatchEntry>, Vec<MatchStatus>) = self
             .runtime
-            .block_on(self.match_reader.read_all(&team))?
+            .block_on(self.match_reader.read_all_with_status(&team))?
             .into_iter()
             .filter_map(Result::ok)
+            .unzip();
+        // the score of each match, as it was read
+        let scores: HashMap<String, (u8, u8)> = all
+            .iter()
+            .zip(&statuses)
+            .map(|(m, s)| (m.id.clone(), (s.us_wins, s.them_wins)))
             .collect();
         let today = Local::now().date_naive();
         team_analysis(
             &team,
             &all,
+            &scores,
             period,
             today,
             event,
@@ -249,6 +257,7 @@ impl Scout4All {
 pub(crate) fn team_analysis(
     team: &TeamEntry,
     all: &[MatchEntry],
+    scores: &HashMap<String, (u8, u8)>,
     period: AnalysisPeriod,
     today: NaiveDate,
     event: EventTypeEnum,
@@ -307,15 +316,15 @@ pub(crate) fn team_analysis(
             .matches
             .iter()
             .map(|m| {
-                let status = m.entry.get_status().ok();
+                let (won, lost) = scores.get(&m.entry.id).copied().unwrap_or_default();
                 AnalysedMatch {
                     id: m.entry.id.clone(),
                     opponent: m.entry.opponent.clone(),
                     date: m.entry.date.to_rfc3339(),
                     day: day(m.entry).format(DAY).to_string(),
                     home: m.entry.home,
-                    won: status.as_ref().map_or(0, |s| s.us_wins),
-                    lost: status.as_ref().map_or(0, |s| s.them_wins),
+                    won,
+                    lost,
                 }
             })
             .collect(),
