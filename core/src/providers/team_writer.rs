@@ -51,4 +51,12 @@ pub trait TeamWriter {
         player: PlayerInput,
         team: &mut TeamEntry,
     ) -> Result<PlayerEntry, AppError>;
+
+    /// Removes the player from the team: out of its file when no match
+    /// tells of them, otherwise kept for those matches as
+    /// `player_form::removed` leaves them.
+    async fn remove_player(&self, player_id: Uuid, team: &mut TeamEntry) -> Result<(), AppError>;
+
+    /// Removes the team with its matches, for good.
+    async fn remove(&self, team_id: &Uuid) -> Result<(), AppError>;
 }

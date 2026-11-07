@@ -32,7 +32,7 @@ use scout4all_core::{
     logging::logger::{init_logger, log_error},
     match_form::{MatchForm, MatchFormError},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
-    player_form::{PlayerForm, PlayerFormError, removal},
+    player_form::{PlayerForm, PlayerFormError},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -3381,7 +3381,28 @@ impl Scout4All {
         let mut team = self.read_team(&team_id)?;
         let player = find_player(&team, &player_id)?;
         self.runtime
-            .block_on(self.team_writer.save_player(removal(&player), &mut team))?;
+            .block_on(self.team_writer.remove_player(player.id, &mut team))?;
+        Ok(())
+    }
+
+    /// Removes the team with its matches, for good; unpinned. The folder
+    /// of a team that can't be read is its id all the same.
+    pub fn delete_team(&self, team_id: String) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.runtime.block_on(self.team_writer.remove(&id))?;
+        // the team is gone all the same when the settings can't be written
+        if let Err(e) = self.set_pinned(team_id, false) {
+            log_error(&format!("could not unpin the removed team: {e:?}"));
+        }
+        Ok(())
+    }
+
+    /// Removes the match with its sets, for good; `match_id` may be the
+    /// folder of a match that can't be read.
+    pub fn delete_match(&self, team_id: String, match_id: String) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.runtime
+            .block_on(self.match_writer.remove(&id, &match_id))?;
         Ok(())
     }
 
@@ -4665,6 +4686,45 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// A match removed, readable or not, leaves the list; a team removed
+    /// leaves the list and the pins, the matches with it.
+    #[test]
+    fn teams_and_matches_are_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team_id = app.save_team(None, form("Cortona")).unwrap();
+        let other = app.save_team(None, form("Arezzo")).unwrap();
+        let team = app.read_team(&team_id).unwrap();
+        let writer = StoreMatchWriter::new(Arc::new(FsStore::new(dir.path())));
+        let date = DateTime::parse_from_rfc3339("2026-10-04T18:00:00+02:00").unwrap();
+        let m = app
+            .runtime
+            .block_on(writer.create(&team, "Siena".into(), date, true, 6, String::new(), vec![]))
+            .unwrap();
+        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        assert_eq!(app.matches(team_id.clone()).unwrap().len(), 2);
+
+        app.delete_match(team_id.clone(), m.id).unwrap();
+        app.delete_match(team_id.clone(), "not-a-match".into())
+            .unwrap();
+        assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
+
+        app.delete_team(team_id.clone()).unwrap();
+        let ids: Vec<String> = app
+            .teams()
+            .unwrap()
+            .into_iter()
+            .filter_map(|t| match t {
+                TeamListing::Team { id, .. } => Some(id),
+                TeamListing::Unreadable { .. } => None,
+            })
+            .collect();
+        assert_eq!(ids, vec![other.clone()]);
+        assert!(!dir.path().join(&team_id).exists());
+        let pins = config(&dir)["pinned_teams"].to_string();
+        assert!(pins.contains(&other) && !pins.contains(&team_id), "{pins}");
     }
 
     fn match_form(opponent: &str, date: &str, max_substitutions: &str) -> MatchForm {

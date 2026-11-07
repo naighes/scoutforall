@@ -156,11 +156,15 @@ fn parse_number(number: &str) -> Option<u8> {
     }
 }
 
-/// The input that removes a player: it stays in the team, for the matches
-/// already played, but no longer among the active players.
-pub fn removal(player: &PlayerEntry) -> PlayerInput {
-    PlayerInput::Existing(PlayerEntry {
+/// A player removed but kept for the matches that tell of them: no longer
+/// among the active players, with only what the matches show (name, number,
+/// role); the personal details gone.
+pub fn removed(player: &PlayerEntry) -> PlayerEntry {
+    PlayerEntry {
         deleted: true,
+        birth_date: None,
+        height_cm: None,
+        notes: String::new(),
         ..player.clone()
-    })
+    }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    errors::{AppError, MatchError},
+    errors::{AppError, IOError, MatchError},
     providers::{match_writer::MatchWriter, store::write_json},
     shapes::{
         r#match::{MatchEntry, MatchSource},
@@ -117,5 +117,20 @@ impl MatchWriter for StoreMatchWriter {
         )
         .await?;
         Ok(saved)
+    }
+
+    async fn remove(&self, team_id: &Uuid, match_id: &str) -> Result<(), AppError> {
+        // a folder right in the one of the team, never the team itself
+        match match_id.is_empty() || match_id.contains('/') {
+            true => Err(AppError::IO(IOError::Msg(format!(
+                "invalid match: {:?}",
+                match_id
+            )))),
+            false => {
+                self.0
+                    .remove_folder(&layout::match_folder(team_id, match_id))
+                    .await
+            }
+        }
     }
 }

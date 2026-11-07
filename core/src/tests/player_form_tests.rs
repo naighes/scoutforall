@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        player_form::{PlayerForm, PlayerFormError, removal},
+        player_form::{PlayerForm, PlayerFormError, removed},
         providers::team_writer::{PlayerDetails, PlayerInput},
         shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
         tests::EN,
@@ -137,16 +137,24 @@ mod tests {
         );
     }
 
+    /// Kept for the matches: what they show, not the personal details.
     #[test]
-    fn a_removed_player_is_kept_but_deleted() {
-        let anna = player("Anna", 7, false);
-        match removal(&anna) {
-            PlayerInput::Existing(removed) => {
-                assert_eq!(removed.id, anna.id);
-                assert!(removed.deleted);
-            }
-            PlayerInput::New { .. } => unreachable!("expected the existing player"),
-        }
+    fn a_removed_player_keeps_only_what_the_matches_show() {
+        let anna = PlayerEntry {
+            birth_date: NaiveDate::from_ymd_opt(2010, 1, 2),
+            height_cm: Some(180),
+            notes: "notes".into(),
+            ..player("Anna", 7, false)
+        };
+        let gone = removed(&anna);
+        assert_eq!(
+            (gone.id, gone.name.as_str(), gone.number),
+            (anna.id, "Anna", 7)
+        );
+        assert_eq!(gone.role, anna.role);
+        assert!(gone.deleted);
+        assert_eq!((gone.birth_date, gone.height_cm), (None, None));
+        assert!(gone.notes.is_empty());
     }
 
     #[test]
