@@ -15,6 +15,9 @@
 //!                                      progress, kept in DIR
 //! scout4all-bench measure DIR          the times of the reads on DIR (e.g.
 //!                                      ~/.scout4all): nothing is written
+//! scout4all-bench reports DIR OUT      the statistics of every match and
+//!                                      team of DIR, as files in OUT, to
+//!                                      compare before and after a change
 //! ```
 
 use chrono::{Duration, NaiveDate};
@@ -36,6 +39,8 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+
+mod reports;
 
 type R<T> = Result<T, String>;
 
@@ -64,6 +69,7 @@ fn main() -> ExitCode {
         ["measure", dir] => {
             measure_reads(Path::new(dir)).map(|rows| print_table(&["read", dir], &rows))
         }
+        ["reports", dir, out] => reports::write_reports(Path::new(dir), Path::new(out)),
         _ => Err(USAGE.to_string()),
     };
     match run {
@@ -75,7 +81,8 @@ fn main() -> ExitCode {
     }
 }
 
-const USAGE: &str = "usage: scout4all-bench DVW | generate DVW DIR [TEAMSxMATCHES] | measure DIR";
+const USAGE: &str =
+    "usage: scout4all-bench DVW | generate DVW DIR [TEAMSxMATCHES] | measure DIR | reports DIR OUT";
 
 /// The two archives and the match in progress, in a temporary folder.
 fn default_run(dvw: &Path) -> R<()> {

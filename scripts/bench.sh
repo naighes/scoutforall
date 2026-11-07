@@ -12,6 +12,12 @@
 #                                          e.g. to try the apps on it
 #     scripts/bench.sh measure DIR         the reads on DIR, e.g.
 #                                          ~/.scout4all: nothing is written
+#     scripts/bench.sh reports DIR OUT     the statistics of every match and
+#                                          team of DIR, as files in OUT: run
+#                                          before and after a change, then
+#                                          `diff -r` (e.g. on an archive of
+#                                          every real match, `generate DIR
+#                                          162x1`, and on ~/.scout4all)
 #
 # The table is Markdown, to paste where the times are compared. Built in
 # release, as the apps; run it with the machine otherwise idle, and compare
@@ -45,7 +51,7 @@ download() {
 
 case "${1:-}" in
   "" | generate) [ -n "$(ls "$dvw"/*.dvw 2>/dev/null)" ] || download ;;
-  measure) ;;
+  measure | reports) ;;
   *) sed -n '2,/^set /p' "$0" | sed '$d' | cut -c 3-; exit 2 ;;
 esac
 
@@ -54,5 +60,5 @@ bench=target/release/scout4all-bench
 case "${1:-}" in
   "") "$bench" "$dvw" ;;
   generate) shift; "$bench" generate "$dvw" "$@" ;;
-  measure) shift; "$bench" measure "$@" ;;
+  measure | reports) "$bench" "$@" ;;
 esac

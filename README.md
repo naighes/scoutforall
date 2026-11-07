@@ -69,7 +69,7 @@ Each one says at its top what it does, its options and what it needs.
 | script | what it does |
 | --- | --- |
 | `scripts/test.sh` | the tests as the CI runs them, in several time zones (UTC, Rome, Tokyo, Los Angeles); arguments go to `cargo nextest` |
-| `scripts/bench.sh` | the times of the reads, of the statistics and of the scouting on large archives made of real DataVolley matches (downloaded once into a cache); `generate DIR [TxM]` keeps such an archive to try the apps on it, `measure DIR` times the reads on a data folder |
+| `scripts/bench.sh` | the times of the reads, of the statistics and of the scouting on large archives made of real DataVolley matches (downloaded once into a cache); `generate DIR [TxM]` keeps such an archive to try the apps on it, `measure DIR` times the reads on a data folder, `reports DIR OUT` writes the statistics of every match to compare them (`diff -r`) before and after a change |
 | `scripts/release.sh` | releases the next version (`major`, `minor` or `patch`) from master: bump, commit, tag, push |
 | `scripts/generate_screenshots.py` | the screenshots (and the video) of the desktop app for the site, in every language |
 | `scripts/generate_phone_screenshots.py` | the screenshots of the Play listing, in every language, from the phone connected with USB debugging |
