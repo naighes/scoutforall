@@ -19,6 +19,9 @@ encoding_rs.workspace = true
 futures.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+# the counters of the statistics: a quick hash of small keys, not SipHash,
+# which doesn't need to resist attacks there (already built for typst)
+rustc-hash = "2"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

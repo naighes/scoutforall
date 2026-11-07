@@ -17,7 +17,7 @@ use crate::shapes::enums::{
 };
 use crate::shapes::flags::{BlockersEnum, ReceptionSchemeEnum};
 use crate::shapes::technique::SetTypeEnum;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::hash::Hash;
 use uuid::Uuid;
 
@@ -339,13 +339,15 @@ pub struct Touch {
     pub set_type: Option<SetTypeEnum>,
 }
 
-/// How many times each key occurred.
+/// How many times each key occurred. Hashed with Fx: the counters are
+/// updated for every event replayed and read for every figure shown, and
+/// SipHash took most of the time of the statistics.
 #[derive(Debug, Clone)]
-pub struct Counter<K>(HashMap<K, u32>);
+pub struct Counter<K>(FxHashMap<K, u32>);
 
 impl<K> Default for Counter<K> {
     fn default() -> Self {
-        Counter(HashMap::new())
+        Counter(FxHashMap::default())
     }
 }
 
