@@ -3,8 +3,11 @@
 //! amber marks what acts and what's chosen, as a line marks the court.
 
 use {
-    crate::theme::{
-        self, BORDER, Colors, RADIUS_PANEL, RADIUS_PILL, SIZE_BODY, SIZE_SMALL, SIZE_TITLE,
+    crate::{
+        strings::Strings,
+        theme::{
+            self, BORDER, Colors, RADIUS_PANEL, RADIUS_PILL, SIZE_BODY, SIZE_SMALL, SIZE_TITLE,
+        },
     },
     iced::{
         Alignment, Background, Border, Color, Element, Length, Padding,
@@ -667,30 +670,46 @@ pub fn answers_with<'a, M: Clone + 'a>(
     .into()
 }
 
-/// A question to confirm, in the middle: Enter does it, Esc doesn't.
-pub fn confirm<'a, M: Clone + 'a>(
-    question: &str,
-    icon: &'static [u8],
-    yes: &str,
+/// A deletion to confirm, in the middle, as loud as it is for good: the
+/// warning in red over what goes, the answer red too. Enter does it, Esc
+/// doesn't.
+pub fn confirm_deletion<'a, M: Clone + 'a>(
+    s: &Strings,
+    what: &str,
     on_yes: M,
-    no: &str,
     on_no: M,
     c: Colors,
 ) -> Element<'a, M> {
+    let danger = Colors {
+        accent: c.danger,
+        on_accent: Color::WHITE,
+        ..c
+    };
     let question = panel(
         None,
         column![
-            body(question.to_string()),
+            row![
+                icon(theme::icons::DELETE, 30.0, c.danger),
+                text(s.permanent_deletion.to_string())
+                    .size(22)
+                    .font(theme::fonts().bold)
+                    .color(c.danger),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+            body(what.to_string()),
+            body(s.irreversible.to_string())
+                .font(theme::fonts().bold)
+                .color(c.danger),
             answers(
-                Some((theme::icons::CLOSE, no, on_no)),
-                icon,
-                yes,
+                Some((theme::icons::CLOSE, s.cancel, on_no)),
+                theme::icons::DELETE,
+                s.delete_forever,
                 Some(on_yes),
-                c
+                danger
             )
         ]
-        .spacing(18)
-        .align_x(Alignment::Center),
+        .spacing(18),
         c,
     );
     container(container(question).max_width(560))
