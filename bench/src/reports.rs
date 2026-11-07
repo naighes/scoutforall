@@ -2,8 +2,9 @@
 //! text files: taken before and after a change, `diff -r` tells whether a
 //! number changed. For each team, a folder with each match's report (the
 //! model of the PDF, as JSON) and live statistics (with the trend), the
-//! analysis of all its matches for each fundamental, why a match can't be
-//! read, and its matches as listed; and the home. The lists come from the
+//! analysis of all its matches for each fundamental and of some of them
+//! (the last 3, the last 10, October 2026), why a match can't be read, and
+//! its matches as listed; and the home. The lists come from the
 //! index of the matches, written in the folder if missing: run twice, with
 //! and without it, they must be the same.
 
@@ -96,6 +97,31 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                 .map_err(|e| e.to_string())?;
             write(
                 &folder.join(format!("analysis_{event}.txt")),
+                &format!("{analysis:#?}"),
+            )?;
+        }
+        // the periods choosing some matches: the last ones, a month
+        for (name, period) in [
+            ("last_10", AnalysisPeriod::LastMatches { count: 10 }),
+            ("last_3", AnalysisPeriod::LastMatches { count: 3 }),
+            (
+                "october",
+                AnalysisPeriod::Between {
+                    from: "2026-10-01".to_string(),
+                    to: "2026-10-31".to_string(),
+                },
+            ),
+        ] {
+            let analysis = app
+                .team_analysis(
+                    id.clone(),
+                    period,
+                    EventTypeEnum::A,
+                    DetailFilter::default(),
+                )
+                .map_err(|e| e.to_string())?;
+            write(
+                &folder.join(format!("analysis_{name}.txt")),
                 &format!("{analysis:#?}"),
             )?;
         }

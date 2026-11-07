@@ -19,6 +19,8 @@ pub trait MatchReader {
         &self,
         team: &TeamEntry,
     ) -> Result<Vec<Listed<(MatchEntry, MatchStatus)>>, AppError>;
+    /// These matches of the team, in the order given, read together.
+    async fn read_some(&self, team: &TeamEntry, ids: &[String]) -> Vec<Listed<MatchEntry>>;
     /// What the lists show of each match, the most recent first, then the
     /// unreadable ones: from the index of the matches when their files
     /// didn't change (see `store::match_index`).

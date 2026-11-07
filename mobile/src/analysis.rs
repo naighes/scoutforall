@@ -9,12 +9,12 @@ use super::{
 use chrono::{Local, NaiveDate};
 use scout4all_core::providers::match_reader::MatchReader;
 use scout4all_core::{
-    analysis::{Analysis, MOVING_WINDOW, Period, day},
+    analysis::{Analysis, MOVING_WINDOW, Period, Played, day},
     benchmark::{band, grade},
     shapes::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         flags::ReceptionSchemeEnum,
-        r#match::{MatchEntry, MatchStatus},
+        r#match::{MatchEntry, MatchSummary},
         stats::EvalSet,
         team::TeamEntry,
         technique::{SetTypeEnum, TechniqueEnum},
@@ -164,23 +164,12 @@ impl Scout4All {
         filter: DetailFilter,
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
-        let (all, statuses): (Vec<MatchEntry>, Vec<MatchStatus>) = self
-            .runtime
-            .block_on(self.match_reader.read_all_with_status(&team))?
-            .into_iter()
-            .filter_map(Result::ok)
-            .unzip();
-        // the score of each match, as it was read
-        let scores: HashMap<String, (u8, u8)> = all
-            .iter()
-            .zip(&statuses)
-            .map(|(m, s)| (m.id.clone(), (s.us_wins, s.them_wins)))
-            .collect();
         let today = Local::now().date_naive();
+        let (all, chosen) = self.chosen_matches(&team, &period, today)?;
         team_analysis(
             &team,
             &all,
-            &scores,
+            &chosen,
             period,
             today,
             event,
@@ -220,13 +209,8 @@ impl Scout4All {
         pick: &ClipPick,
     ) -> Result<Vec<MatchClips>, MobileError> {
         let team = self.read_team(team_id)?;
-        let all: Vec<MatchEntry> = self
-            .runtime
-            .block_on(self.match_reader.read_all(&team))?
-            .into_iter()
-            .filter_map(Result::ok)
-            .collect();
-        let matches = period.period()?.select(&all, Local::now().date_naive());
+        let (_, chosen) = self.chosen_matches(&team, period, Local::now().date_naive())?;
+        let matches: Vec<&MatchEntry> = chosen.iter().collect();
         let analysis = Analysis::of(&matches);
         let pick = ClipPick {
             scope: StatsScope::Match,
@@ -251,22 +235,57 @@ impl Scout4All {
         }
         Ok(found)
     }
+
+    /// The matches of the team as the index lists them (the readable
+    /// ones), and the ones of the period read in full, in its order: only
+    /// those are read and replayed. One changed meanwhile so that it can't
+    /// be read is left out.
+    fn chosen_matches(
+        &self,
+        team: &TeamEntry,
+        period: &AnalysisPeriod,
+        today: NaiveDate,
+    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+        let all: Vec<MatchSummary> = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(team))?
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect();
+        let ids: Vec<String> = period
+            .period()?
+            .select(&all, today)
+            .into_iter()
+            .map(|m| m.id.clone())
+            .collect();
+        let chosen = self
+            .runtime
+            .block_on(self.match_reader.read_some(team, &ids))
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect();
+        Ok((all, chosen))
+    }
 }
 
 /// The analysis of the matches of the team (see `Scout4All::team_analysis`).
 pub(crate) fn team_analysis(
     team: &TeamEntry,
-    all: &[MatchEntry],
-    scores: &HashMap<String, (u8, u8)>,
+    all: &[MatchSummary],
+    chosen: &[MatchEntry],
     period: AnalysisPeriod,
     today: NaiveDate,
     event: EventTypeEnum,
     filter: DetailFilter,
     labels: &scout4all_core::localization::Labels,
 ) -> Result<TeamAnalysis, MobileError> {
-    let chosen = period.period()?;
-    let matches = chosen.select(all, today);
-    let days = chosen.days(&matches, today);
+    let matches: Vec<&MatchEntry> = chosen.iter().collect();
+    let days = period.period()?.days(&matches, today);
+    // the score of each match, as the index tells it
+    let scores: HashMap<&str, (u8, u8)> = all
+        .iter()
+        .map(|m| (m.id.as_str(), (m.us_wins, m.them_wins)))
+        .collect();
     let analysis = Analysis::of(&matches);
     let narrowed = narrowed(&filter)?;
     let total = analysis.total();
@@ -303,7 +322,7 @@ pub(crate) fn team_analysis(
         .collect();
     let mut played_days: Vec<String> = all
         .iter()
-        .filter(|m| !m.sets.is_empty())
+        .filter(|m| m.scouted())
         .map(|m| day(m).format(DAY).to_string())
         .collect();
     played_days.sort();
@@ -316,7 +335,7 @@ pub(crate) fn team_analysis(
             .matches
             .iter()
             .map(|m| {
-                let (won, lost) = scores.get(&m.entry.id).copied().unwrap_or_default();
+                let (won, lost) = scores.get(m.entry.id.as_str()).copied().unwrap_or_default();
                 AnalysedMatch {
                     id: m.entry.id.clone(),
                     opponent: m.entry.opponent.clone(),

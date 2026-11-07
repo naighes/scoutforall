@@ -57,6 +57,14 @@ impl MatchReader for StoreMatchReader {
         Ok(entries)
     }
 
+    async fn read_some(&self, team: &TeamEntry, ids: &[String]) -> Vec<Listed<MatchEntry>> {
+        join_all(ids.iter().map(|id| self.listed(id, team)))
+            .await
+            .into_iter()
+            .map(|listed| listed.map(|(entry, _)| entry))
+            .collect()
+    }
+
     async fn read_summaries(
         &self,
         team: &TeamEntry,

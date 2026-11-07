@@ -130,7 +130,7 @@ mod tests {
         );
         // a shorter month before: its last day
         assert_eq!(
-            Period::LastMonth.days(&[], date(2026, 3, 31)),
+            Period::LastMonth.days::<MatchEntry>(&[], date(2026, 3, 31)),
             Some((date(2026, 2, 28), date(2026, 3, 31)))
         );
     }
@@ -153,7 +153,7 @@ mod tests {
             Some((date(2026, 10, 1), date(2026, 11, 1)))
         );
         assert_eq!(Period::LastMatches(10).select(&matches, today).len(), 4);
-        assert_eq!(Period::LastMatches(2).days(&[], today), None);
+        assert_eq!(Period::LastMatches(2).days::<MatchEntry>(&[], today), None);
     }
 
     #[test]

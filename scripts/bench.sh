@@ -27,7 +27,9 @@
 #                                          162x1`, and on ~/.scout4all); the
 #                                          lists too, from the index of the
 #                                          matches (removing DIR/.index.json
-#                                          compares them without it)
+#                                          compares them without it), and the
+#                                          analysis of the last 3 and 10
+#                                          matches and of October 2026
 #
 # The table is Markdown, to paste where the times are compared. Built in
 # release, as the apps; run it with the machine otherwise idle, and compare

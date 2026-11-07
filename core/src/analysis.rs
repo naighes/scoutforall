@@ -3,11 +3,11 @@
 //! together, and each figure match by match with its moving average, to
 //! see how the team goes.
 use crate::errors::AppError;
-use crate::shapes::r#match::MatchEntry;
+use crate::shapes::r#match::{MatchEntry, MatchSummary};
 use crate::shapes::set::SetEntry;
 use crate::shapes::stats::{Stats, StatsFilter};
 use crate::trend::Series;
-use chrono::{Months, NaiveDate};
+use chrono::{DateTime, FixedOffset, Months, NaiveDate};
 
 /// The matches the moving average looks at: the match and the two before.
 pub const MOVING_WINDOW: usize = 3;
@@ -27,9 +27,9 @@ pub enum Period {
 impl Period {
     /// The days of the period, first and last: for the last matches, of
     /// the ones chosen; `None` with no matches.
-    pub fn days(
+    pub fn days<M: Played>(
         &self,
-        matches: &[&MatchEntry],
+        matches: &[&M],
         today: NaiveDate,
     ) -> Option<(NaiveDate, NaiveDate)> {
         match self {
@@ -43,12 +43,12 @@ impl Period {
     }
 
     /// The matches of the period, from the first played.
-    pub fn select<'a>(&self, matches: &'a [MatchEntry], today: NaiveDate) -> Vec<&'a MatchEntry> {
-        let mut played: Vec<&MatchEntry> = matches
+    pub fn select<'a, M: Played>(&self, matches: &'a [M], today: NaiveDate) -> Vec<&'a M> {
+        let mut played: Vec<&M> = matches
             .iter()
-            .filter(|m| !m.sets.is_empty() && day(m) <= today)
+            .filter(|m| m.scouted() && day(*m) <= today)
             .collect();
-        played.sort_by_key(|m| m.date);
+        played.sort_by_key(|m| m.date());
         match self {
             Period::LastMonth => {
                 let from = month_before(today);
@@ -67,9 +67,47 @@ impl Period {
     }
 }
 
+/// A match as a period chooses it: the whole match, or its summary in the
+/// index of the matches (the analysis then reads only the ones chosen).
+pub trait Played {
+    fn date(&self) -> DateTime<FixedOffset>;
+    /// with a set scouted
+    fn scouted(&self) -> bool;
+}
+
+impl Played for MatchEntry {
+    fn date(&self) -> DateTime<FixedOffset> {
+        self.date
+    }
+
+    fn scouted(&self) -> bool {
+        !self.sets.is_empty()
+    }
+}
+
+impl Played for MatchSummary {
+    fn date(&self) -> DateTime<FixedOffset> {
+        self.date
+    }
+
+    fn scouted(&self) -> bool {
+        self.sets > 0
+    }
+}
+
+impl<M: Played> Played for &M {
+    fn date(&self) -> DateTime<FixedOffset> {
+        (*self).date()
+    }
+
+    fn scouted(&self) -> bool {
+        (*self).scouted()
+    }
+}
+
 /// The day of the match, where it was played.
-pub fn day(m: &MatchEntry) -> NaiveDate {
-    m.date.date_naive()
+pub fn day(m: &impl Played) -> NaiveDate {
+    m.date().date_naive()
 }
 
 /// The same day of the month before (the last day of that month when
