@@ -74,7 +74,6 @@ Each one says at its top what it does, its options and what it needs.
 | `scripts/generate_screenshots.py` | the screenshots (and the video) of the desktop app for the site, in every language |
 | `scripts/generate_phone_screenshots.py` | the screenshots of the Play listing, in every language, from the phone connected with USB debugging |
 | `scripts/country_names.py` | writes `core/src/shapes/country_names.rs`, the names of the countries in the languages of the app, from the CLDR data |
-| `scripts/run_website.sh` | the site in a Docker container, on port 1313 |
 
 ## contributing
 
