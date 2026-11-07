@@ -5,7 +5,8 @@
 //! one was modified, of the match folder and of `team.json`), and when they
 //! don't match any more the match is read again. Kept in
 //! `layout::MATCH_INDEX`, read once, then up to date in memory; a missing
-//! or unreadable index, or one of another version, starts empty.
+//! or unreadable index, or one of another version, starts empty, and the
+//! teams whose folder is gone are left out.
 //!
 //! Never stale: a file changed without its stamp telling isn't indexed
 //! (see `Store::stamps`), a match that can't be read neither (its reason is
@@ -23,7 +24,10 @@ use serde_json::{from_slice, to_vec};
 use std::{
     collections::BTreeMap,
     hash::{Hash, Hasher},
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{
+        Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use uuid::Uuid;
 
@@ -58,13 +62,16 @@ pub(crate) struct MatchIndex {
     loaded: Mutex<Option<IndexFile>>,
     /// one write at a time: they go through the same temporary file
     writing: futures::lock::Mutex<()>,
+    /// teams left out when read, still in the file
+    pruned: AtomicBool,
 }
 
 impl MatchIndex {
     /// The matches of the team as indexed.
     pub(crate) async fn team(&self, store: &dyn Store, team: &Uuid) -> TeamIndex {
         if self.lock().is_none() {
-            let read = read_index(store).await;
+            let (read, pruned) = read_index(store).await;
+            self.pruned.store(pruned, Ordering::Relaxed);
             self.lock().get_or_insert(read);
         }
         self.lock()
@@ -81,7 +88,8 @@ impl MatchIndex {
             let mut loaded = self.lock();
             let index = loaded.get_or_insert_with(empty);
             let key = team.to_string();
-            match index.teams.get(&key) == Some(&matches) {
+            let same = index.teams.get(&key) == Some(&matches);
+            match same && !self.pruned.swap(false, Ordering::Relaxed) {
                 true => None,
                 false => {
                     index.teams.insert(key, matches);
@@ -108,15 +116,36 @@ fn empty() -> IndexFile {
     }
 }
 
-async fn read_index(store: &dyn Store) -> IndexFile {
-    store
+/// The index on disk, without the teams whose folder is gone (removed by
+/// hand, or by a restore), and whether there were: they leave the file
+/// with the next update.
+async fn read_index(store: &dyn Store) -> (IndexFile, bool) {
+    let mut index = store
         .read(layout::MATCH_INDEX)
         .await
         .ok()
         .flatten()
         .and_then(|json| from_slice::<IndexFile>(&json).ok())
         .filter(|index| index.version == version())
-        .unwrap_or_else(empty)
+        .unwrap_or_else(empty);
+    let mut gone = vec![];
+    for team in index.teams.keys() {
+        let exists = match Uuid::parse_str(team) {
+            Ok(id) => store
+                .exists(&layout::team_folder(&id))
+                .await
+                .unwrap_or(true),
+            Err(_) => false,
+        };
+        if !exists {
+            gone.push(team.clone());
+        }
+    }
+    let pruned = !gone.is_empty();
+    for team in gone {
+        index.teams.remove(&team);
+    }
+    (index, pruned)
 }
 
 /// The stamp of a match: of `team.json` and of the files of its folder;

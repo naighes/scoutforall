@@ -266,6 +266,41 @@ mod tests {
         }
     }
 
+    /// A team whose folder is gone (removed by hand, or by a restore)
+    /// leaves the index with the next listing, even when it changes
+    /// nothing else; an entry that isn't a team neither stays.
+    #[tokio::test]
+    async fn the_teams_gone_leave_the_index() {
+        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
+        let team = team_with_matches(&store).await;
+        summaries(&reader(&store), &team).await;
+        let mut indexed = index(&*store).await;
+        let ours = indexed["teams"][TEAM_ID].clone();
+        for gone in ["2c1e0d3a-5b7f-4e7a-9d6c-0f8e1a2b3c4d", "not a team"] {
+            indexed["teams"][gone] = ours.clone();
+        }
+        store
+            .write(layout::MATCH_INDEX, indexed.to_string().as_bytes())
+            .await
+            .unwrap();
+        let reader = reader(&store);
+        summaries(&reader, &team).await;
+        let teams: Vec<String> = index(&*store).await["teams"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(teams, vec![TEAM_ID.to_string()]);
+        // written once: the next listing finds it as it is
+        store.write(layout::MATCH_INDEX, b"{}").await.unwrap();
+        summaries(&reader, &team).await;
+        assert_eq!(
+            &*store.read(layout::MATCH_INDEX).await.unwrap().unwrap(),
+            b"{}"
+        );
+    }
+
     /// On the file system, a file just written isn't indexed (its time may
     /// be the one of the write before); once settled, it is.
     #[tokio::test]
