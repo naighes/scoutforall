@@ -98,7 +98,11 @@ impl Place {
 impl PathsChart<'_> {
     /// The most of an arrow, to size the others by.
     fn most(&self) -> f64 {
-        self.paths.iter().map(|p| p.count).fold(0.0, f64::max).max(1.0)
+        self.paths
+            .iter()
+            .map(|p| p.count)
+            .fold(0.0, f64::max)
+            .max(1.0)
     }
 
     /// The ends of an arrow: from the top of its zone of our end line to
@@ -124,7 +128,8 @@ impl PathsChart<'_> {
 
     fn hovered(&self, bounds: Size, at: Point) -> Hover {
         let place = Place::of(bounds);
-        let start = (0..self.starts.len()).find(|i| place.start(*i, self.starts.len()).contains(at));
+        let start =
+            (0..self.starts.len()).find(|i| place.start(*i, self.starts.len()).contains(at));
         // the nearest arrow within reach, the thinnest drawn last on top
         let path = self
             .paths
@@ -258,7 +263,14 @@ impl PathsChart<'_> {
                 let zone = place.rect(col as f32 * 3.0, r as f32 * 3.0, 3.0, 3.0);
                 if t.count > 0.0 {
                     let alpha = 0.08 + 0.32 * (t.count / most) as f32;
-                    frame.fill_rectangle(zone.position(), zone.size(), Color { a: alpha, ..c.accent });
+                    frame.fill_rectangle(
+                        zone.position(),
+                        zone.size(),
+                        Color {
+                            a: alpha,
+                            ..c.accent
+                        },
+                    );
                 }
                 frame.fill_text(Text {
                     font: crate::theme::fonts().regular,
@@ -271,7 +283,10 @@ impl PathsChart<'_> {
             }
         }
         let thin = Stroke::default()
-            .with_color(Color { a: 0.35, ..c.court_lines })
+            .with_color(Color {
+                a: 0.35,
+                ..c.court_lines
+            })
             .with_width(1.0);
         for i in 1..3 {
             let x = i as f32 * 3.0;
@@ -285,7 +300,10 @@ impl PathsChart<'_> {
             frame.stroke(&Path::line(place.at(0.0, y), place.at(WIDTH, y)), lines);
         }
         frame.stroke(
-            &Path::line(place.at(-MARGIN / 2.0, 9.0), place.at(WIDTH + MARGIN / 2.0, 9.0)),
+            &Path::line(
+                place.at(-MARGIN / 2.0, 9.0),
+                place.at(WIDTH + MARGIN / 2.0, 9.0),
+            ),
             lines.with_width(4.0),
         );
     }
@@ -297,7 +315,10 @@ impl PathsChart<'_> {
             let r = place.start(i, self.starts.len());
             let picked = self.start == Some(s.value);
             let fill = match (picked, hover == Hover::Start(i)) {
-                (true, _) => Color { a: 0.55, ..c.accent },
+                (true, _) => Color {
+                    a: 0.55,
+                    ..c.accent
+                },
                 (false, true) => c.button,
                 (false, false) => c.court,
             };
@@ -316,8 +337,10 @@ impl PathsChart<'_> {
             let lines = [
                 Some((s.label.clone(), c.text, size, true)),
                 (s.count > 0).then(|| (s.count.to_string(), c.text, small, false)),
-                s.efficiency.map(|e| (format!("{e:+.0}%"), efficiency_color(e, c), small, true)),
-                (s.errors > 0).then(|| (format!("= {}", s.errors), grade_color(0.0, c), small, false)),
+                s.efficiency
+                    .map(|e| (format!("{e:+.0}%"), efficiency_color(e, c), small, true)),
+                (s.errors > 0)
+                    .then(|| (format!("= {}", s.errors), grade_color(0.0, c), small, false)),
             ];
             for (n, (content, color, size, bold)) in lines.into_iter().flatten().enumerate() {
                 frame.fill_text(Text {
@@ -347,12 +370,17 @@ impl PathsChart<'_> {
             for (col, t) in row.iter().enumerate().filter(|(_, t)| t.count > 0.0) {
                 let lines: Vec<(String, Color)> = [
                     Some((count(t.count), c.text)),
-                    t.efficiency.map(|e| (format!("{e:+.0}%"), efficiency_color(e, c))),
+                    t.efficiency
+                        .map(|e| (format!("{e:+.0}%"), efficiency_color(e, c))),
                 ]
                 .into_iter()
                 .flatten()
                 .collect();
-                let widest = lines.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(0);
+                let widest = lines
+                    .iter()
+                    .map(|(l, _)| l.chars().count())
+                    .max()
+                    .unwrap_or(0);
                 let width = widest as f32 * size * 0.62 + 8.0;
                 let height = lines.len() as f32 * size * 1.2 + 4.0;
                 let corner = place.at(col as f32 * 3.0 + 3.0, r as f32 * 3.0);
@@ -394,9 +422,7 @@ impl PathsChart<'_> {
             if lit {
                 frame.stroke(
                     &Path::line(from, to),
-                    Stroke::default()
-                        .with_color(c.text)
-                        .with_width(width + 4.0),
+                    Stroke::default().with_color(c.text).with_width(width + 4.0),
                 );
             }
             let color = self.color(p);
@@ -432,7 +458,12 @@ impl PathsChart<'_> {
             let efficiency = p
                 .efficiency
                 .map_or(String::new(), |e| format!(" · {e:+.0}%"));
-            let text = format!("{} · {} ({:.0}%){efficiency}", p.label, count(p.count), p.share);
+            let text = format!(
+                "{} · {} ({:.0}%){efficiency}",
+                p.label,
+                count(p.count),
+                p.share
+            );
             let size = (place.meter * 0.42).clamp(11.0, 15.0);
             let at = place.at(0.0, 0.0);
             let box_ = Rectangle::new(

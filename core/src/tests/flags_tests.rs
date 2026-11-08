@@ -275,7 +275,10 @@ mod tests {
         // 6 and 7 after 13: not known, kept
         let later = EventFlags::parse(&(7u32 << 13).to_string()).unwrap();
         assert_eq!(later.serve_start(), None);
-        assert_eq!(later.with_inverted_p1(true).to_string(), ((7u32 << 13) + 1).to_string());
+        assert_eq!(
+            later.with_inverted_p1(true).to_string(),
+            ((7u32 << 13) + 1).to_string()
+        );
         assert_eq!(ServeStartEnum::SHOWN, [Z5, Z7, Z6, Z9, Z1]);
         assert_eq!(ServeStartEnum::numbered(8), None);
         // the cursor across them, staying at the ends; under the columns

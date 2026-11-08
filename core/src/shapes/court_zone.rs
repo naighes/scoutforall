@@ -700,7 +700,9 @@ impl ServeStartEnum {
             (Some(i), Direction::Up | Direction::Down) => Some(i),
             (None, _) => None,
         };
-        to.and_then(|i| Self::SHOWN.get(i)).copied().unwrap_or(*self)
+        to.and_then(|i| Self::SHOWN.get(i))
+            .copied()
+            .unwrap_or(*self)
     }
 
     /// The one below a cell of their court as shown, the column of the

@@ -10,7 +10,9 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
-        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, ServeStartEnum, TargetKind},
+        court_zone::{
+            CourtCell, CourtSide, CourtTarget, CourtZoneEnum, ServeStartEnum, TargetKind,
+        },
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
         flags::{BlockersEnum, EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
@@ -849,9 +851,7 @@ impl ScoutingSession {
                             self.blockers
                                 .filter(|b| self.available_blockers().contains(b)),
                         )
-                        .with_serve_start(
-                            self.serve_start.filter(|_| self.serve_start_applies()),
-                        ),
+                        .with_serve_start(self.serve_start.filter(|_| self.serve_start_applies())),
                 })
                 .await
             }

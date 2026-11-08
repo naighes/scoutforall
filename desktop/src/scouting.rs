@@ -1409,7 +1409,12 @@ mod tests {
                 .map(|z| z.value)
         };
         screen.key(key!(s));
-        let labels: Vec<&str> = screen.snapshot.starts.iter().map(|z| z.label.as_str()).collect();
+        let labels: Vec<&str> = screen
+            .snapshot
+            .starts
+            .iter()
+            .map(|z| z.label.as_str())
+            .collect();
         assert_eq!(labels, vec!["5", "7", "6", "9", "1"]);
         // remembered from the aces before: none told
         assert_eq!(chosen(&screen), None);
@@ -1427,7 +1432,10 @@ mod tests {
         // up: back on the court, above it; down again: on it
         screen.key(key!(up));
         assert_eq!(screen.start_cursor, None);
-        assert_eq!(screen.target_cursor.map(|c| c.to_string()), Some("4B".into()));
+        assert_eq!(
+            screen.target_cursor.map(|c| c.to_string()),
+            Some("4B".into())
+        );
         screen.key(key!(down));
         assert_eq!(screen.start_cursor, Some(ServeStartEnum::Z9));
         for _ in 0..5 {
@@ -1445,7 +1453,12 @@ mod tests {
         screen.refresh();
         assert_eq!(screen.start_cursor, None);
         assert_eq!(
-            screen.snapshot.state.events.first().and_then(|e| e.serve_start.clone()),
+            screen
+                .snapshot
+                .state
+                .events
+                .first()
+                .and_then(|e| e.serve_start.clone()),
             Some("5".into())
         );
         // their error: the same server again, from 5

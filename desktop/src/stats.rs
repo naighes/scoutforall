@@ -988,7 +988,8 @@ impl StatsScreen {
                 self.recount();
             }
             Message::ServePath(start, zone) => {
-                let picked = self.filter.serve_start == Some(start) && self.clip_target == Some(zone);
+                let picked =
+                    self.filter.serve_start == Some(start) && self.clip_target == Some(zone);
                 self.clip_target = (!picked).then_some(zone);
                 match picked {
                     // the arrow again: all of them, from every zone
@@ -2985,7 +2986,11 @@ pub(crate) mod tests {
         let mut screen = StatsScreen::new(core.clone(), team, arezzo).unwrap();
         screen.update(Message::Page(2));
         let paths = |screen: &StatsScreen| -> Vec<String> {
-            let f = screen.detail.as_ref().and_then(|d| d.fundamental.clone()).unwrap();
+            let f = screen
+                .detail
+                .as_ref()
+                .and_then(|d| d.fundamental.clone())
+                .unwrap();
             let mut labels: Vec<String> = f.serve_paths.iter().map(|p| p.label.clone()).collect();
             labels.sort();
             labels
@@ -3244,4 +3249,3 @@ pub(crate) mod tests {
         assert_eq!(screen.take_scroll(), None, "once");
     }
 }
-

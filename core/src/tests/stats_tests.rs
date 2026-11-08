@@ -1545,12 +1545,21 @@ mod tests {
         assert_eq!((serves.total, serves.serve_starts_told), (5, 4));
         let starts: Vec<_> = serves.serve_starts.iter().map(|z| z.start).collect();
         assert_eq!(starts, ServeStartEnum::ALL.to_vec());
-        let of = |start| serves.serve_starts.iter().find(|z| z.start == start).copied();
+        let of = |start| {
+            serves
+                .serve_starts
+                .iter()
+                .find(|z| z.start == start)
+                .copied()
+        };
         let from_1 = of(From1).unwrap();
         assert_eq!((from_1.count, from_1.share), (3, 75.0));
         assert!((from_1.efficiency.unwrap() - 100.0 / 3.0).abs() < 1e-9);
         let from_5 = of(From5).unwrap();
-        assert_eq!((from_5.count, from_5.share, from_5.efficiency), (1, 25.0, None));
+        assert_eq!(
+            (from_5.count, from_5.share, from_5.efficiency),
+            (1, 25.0, None)
+        );
         assert_eq!(of(From6).map(|z| z.count), Some(0));
         // where they went from 1: two to 1, one to 5; the rest as before
         let from = |start| match Breakdown::from_start(&stats, S, &all(), Some(start)) {
@@ -1618,18 +1627,30 @@ mod tests {
             ]
         );
         // every serve to 1 started from 1: as the zone of their court
-        let to_1 = serves.targets.iter().find(|t| t.zone == Z1).and_then(|t| t.efficiency);
+        let to_1 = serves
+            .targets
+            .iter()
+            .find(|t| t.zone == Z1)
+            .and_then(|t| t.efficiency);
         assert_eq!(serves.serve_paths[0].efficiency, to_1);
         assert!(to_1.is_some());
         assert_eq!(serves.serve_paths[1].efficiency, None);
-        let errors: Vec<_> = serves.serve_starts.iter().map(|z| (z.start, z.errors)).collect();
+        let errors: Vec<_> = serves
+            .serve_starts
+            .iter()
+            .map(|z| (z.start, z.errors))
+            .collect();
         assert!(errors.contains(&(From5, 1)) && errors.contains(&(From1, 0)));
         // only from 5
         let only_5 = match Breakdown::from_start(&stats, S, &all(), Some(From5)) {
             Breakdown::Fundamental(d) => d,
             Breakdown::Freeballs(f) => panic!("expected a fundamental, got {f:?}"),
         };
-        let paths: Vec<_> = only_5.serve_paths.iter().map(|p| (p.zone, p.share)).collect();
+        let paths: Vec<_> = only_5
+            .serve_paths
+            .iter()
+            .map(|p| (p.zone, p.share))
+            .collect();
         assert_eq!(paths, vec![(Z5, 100.0)]);
         // none for the other fundamentals
         assert!(detail(&stats, A, &all()).serve_paths.is_empty());

@@ -2255,143 +2255,139 @@ fn detail_of(
             .find_map(|t| t.find_player(id))
             .map(|p| scouting_player(p, labels))
     };
-    let (fundamental, freeballs) = match Breakdown::from_start(
-        stats,
-        event,
-        &narrowed,
-        filter.serve_start,
-    ) {
-        Breakdown::Fundamental(d) => (
-            Some(FundamentalDetail {
-                total: d.total,
-                evals: d
-                    .evals
-                    .iter()
-                    .map(|e| EvalStats {
-                        eval: e.eval,
-                        symbol: e.eval.to_string(),
-                        name: e.eval.friendly_name(event, labels).to_string(),
-                        tone: e.tone,
-                        count: e.count,
-                        share: e.share,
-                    })
-                    .collect(),
-                efficiency: d.efficiency,
-                grade: level(d.efficiency),
-                positiveness: d.positiveness,
-                errors: d.errors,
-                unforced_errors: d.unforced_errors,
-                phases_per_point: d.phases_per_point.map(|(per_point, won, rallies)| {
-                    RalliesPerPoint {
-                        per_point,
-                        won,
-                        rallies,
-                    }
-                }),
-                faults: d.faults,
-                points: d.points,
-                zones: d
-                    .zones
-                    .iter()
-                    .map(|z| DetailZone {
-                        zone: zone_number(z.zone),
-                        share: z.share,
-                        conversion: z.conversion,
-                    })
-                    .collect(),
-                targets_told: d.targets_told,
-                targets: match (d.targets.is_empty(), d.conflicts.is_empty()) {
-                    (true, _) => vec![],
-                    (false, conflicts) => {
-                        let side = CourtSide::of(event).unwrap_or(CourtSide::Theirs);
-                        let rows = match (TargetKind::of(event), conflicts) {
-                            (Some(TargetKind::Net), _) => vec![CourtZoneEnum::net_shown(side)],
-                            (_, true) => CourtZoneEnum::zones_shown(side),
-                            (_, false) => CourtZoneEnum::shown(side),
-                        };
-                        rows.iter()
-                            .map(|row| {
-                                row.iter()
-                                    .filter_map(|zone| {
-                                        d.targets
-                                            .iter()
-                                            .chain(d.conflicts.iter())
-                                            .find(|t| t.zone == *zone)
-                                    })
-                                    .map(|t| TargetStats {
-                                        value: t.zone,
-                                        label: t.zone.to_string(),
-                                        zone: t.zone.is_zone(),
-                                        count: t.count,
-                                        share: t.share,
-                                        efficiency: t.efficiency,
-                                    })
-                                    .collect()
-                            })
-                            .collect()
-                    }
-                },
-                on_conflicts: d.on_conflicts.map(|on| ConflictStats {
-                    count: on.count,
-                    share: on.share,
-                    efficiency: on.efficiency,
-                }),
-                blockers_told: d.blockers_told,
-                blockers: d
-                    .blockers
-                    .iter()
-                    .map(|b| BlockersStats {
-                        value: b.blockers,
-                        name: b.blockers.name(labels).to_string(),
-                        count: b.count,
-                        share: b.share,
-                        efficiency: b.efficiency,
-                    })
-                    .collect(),
-                serve_starts_told: d.serve_starts_told,
-                serve_starts: ServeStartEnum::SHOWN
-                    .iter()
-                    .filter_map(|z| d.serve_starts.iter().find(|s| s.start == *z))
-                    .map(|s| ServeStartStats {
-                        value: s.start,
-                        label: s.start.to_string(),
-                        count: s.count,
-                        share: s.share,
-                        efficiency: s.efficiency,
-                        errors: s.errors,
-                    })
-                    .collect(),
-                serve_paths: d.serve_paths.iter().filter_map(serve_path).collect(),
-                players: by_player(stats, event, &narrowed)
-                    .into_iter()
-                    .filter_map(|line| {
-                        player_of(line.player).map(|player| PlayerStats {
-                            player,
-                            total: line.total,
-                            efficiency: line.efficiency,
-                            positiveness: line.positiveness,
-                            points: line.points,
-                            errors: line.errors,
-                            grade: level(line.efficiency),
+    let (fundamental, freeballs) =
+        match Breakdown::from_start(stats, event, &narrowed, filter.serve_start) {
+            Breakdown::Fundamental(d) => (
+                Some(FundamentalDetail {
+                    total: d.total,
+                    evals: d
+                        .evals
+                        .iter()
+                        .map(|e| EvalStats {
+                            eval: e.eval,
+                            symbol: e.eval.to_string(),
+                            name: e.eval.friendly_name(event, labels).to_string(),
+                            tone: e.tone,
+                            count: e.count,
+                            share: e.share,
                         })
-                    })
-                    .collect(),
-            }),
-            None,
-        ),
-        Breakdown::Freeballs(f) => (
-            None,
-            Some(FreeballStats {
-                given: f.given,
-                received: f.received,
-                exploited: f.exploited.map(|(percentage, total, exploited)| Exploited {
-                    percentage,
-                    exploited,
-                    total,
+                        .collect(),
+                    efficiency: d.efficiency,
+                    grade: level(d.efficiency),
+                    positiveness: d.positiveness,
+                    errors: d.errors,
+                    unforced_errors: d.unforced_errors,
+                    phases_per_point: d.phases_per_point.map(|(per_point, won, rallies)| {
+                        RalliesPerPoint {
+                            per_point,
+                            won,
+                            rallies,
+                        }
+                    }),
+                    faults: d.faults,
+                    points: d.points,
+                    zones: d
+                        .zones
+                        .iter()
+                        .map(|z| DetailZone {
+                            zone: zone_number(z.zone),
+                            share: z.share,
+                            conversion: z.conversion,
+                        })
+                        .collect(),
+                    targets_told: d.targets_told,
+                    targets: match (d.targets.is_empty(), d.conflicts.is_empty()) {
+                        (true, _) => vec![],
+                        (false, conflicts) => {
+                            let side = CourtSide::of(event).unwrap_or(CourtSide::Theirs);
+                            let rows = match (TargetKind::of(event), conflicts) {
+                                (Some(TargetKind::Net), _) => vec![CourtZoneEnum::net_shown(side)],
+                                (_, true) => CourtZoneEnum::zones_shown(side),
+                                (_, false) => CourtZoneEnum::shown(side),
+                            };
+                            rows.iter()
+                                .map(|row| {
+                                    row.iter()
+                                        .filter_map(|zone| {
+                                            d.targets
+                                                .iter()
+                                                .chain(d.conflicts.iter())
+                                                .find(|t| t.zone == *zone)
+                                        })
+                                        .map(|t| TargetStats {
+                                            value: t.zone,
+                                            label: t.zone.to_string(),
+                                            zone: t.zone.is_zone(),
+                                            count: t.count,
+                                            share: t.share,
+                                            efficiency: t.efficiency,
+                                        })
+                                        .collect()
+                                })
+                                .collect()
+                        }
+                    },
+                    on_conflicts: d.on_conflicts.map(|on| ConflictStats {
+                        count: on.count,
+                        share: on.share,
+                        efficiency: on.efficiency,
+                    }),
+                    blockers_told: d.blockers_told,
+                    blockers: d
+                        .blockers
+                        .iter()
+                        .map(|b| BlockersStats {
+                            value: b.blockers,
+                            name: b.blockers.name(labels).to_string(),
+                            count: b.count,
+                            share: b.share,
+                            efficiency: b.efficiency,
+                        })
+                        .collect(),
+                    serve_starts_told: d.serve_starts_told,
+                    serve_starts: ServeStartEnum::SHOWN
+                        .iter()
+                        .filter_map(|z| d.serve_starts.iter().find(|s| s.start == *z))
+                        .map(|s| ServeStartStats {
+                            value: s.start,
+                            label: s.start.to_string(),
+                            count: s.count,
+                            share: s.share,
+                            efficiency: s.efficiency,
+                            errors: s.errors,
+                        })
+                        .collect(),
+                    serve_paths: d.serve_paths.iter().filter_map(serve_path).collect(),
+                    players: by_player(stats, event, &narrowed)
+                        .into_iter()
+                        .filter_map(|line| {
+                            player_of(line.player).map(|player| PlayerStats {
+                                player,
+                                total: line.total,
+                                efficiency: line.efficiency,
+                                positiveness: line.positiveness,
+                                points: line.points,
+                                errors: line.errors,
+                                grade: level(line.efficiency),
+                            })
+                        })
+                        .collect(),
                 }),
-            }),
-        ),
-    };
+                None,
+            ),
+            Breakdown::Freeballs(f) => (
+                None,
+                Some(FreeballStats {
+                    given: f.given,
+                    received: f.received,
+                    exploited: f.exploited.map(|(percentage, total, exploited)| Exploited {
+                        percentage,
+                        exploited,
+                        total,
+                    }),
+                }),
+            ),
+        };
     let mut players: Vec<ScoutingPlayer> = involved(everyone)
         .into_iter()
         .filter_map(player_of)
@@ -4300,7 +4296,10 @@ fn clips_of(m: &MatchEntry, pick: &ClipPick) -> Result<Vec<EventRef>, MobileErro
         evals: (!pick.evals.is_empty()).then(|| EvalSet::of(&pick.evals)),
         zone: pick.zone.and_then(|z| ZoneEnum::try_from(z).ok()),
         target: pick.target,
-        serve_start: pick.filter.serve_start.filter(|_| pick.event == EventTypeEnum::S),
+        serve_start: pick
+            .filter
+            .serve_start
+            .filter(|_| pick.event == EventTypeEnum::S),
         filter,
     };
     let mut sets: Vec<&SetEntry> = in_scope(&m.sets.iter().collect::<Vec<_>>(), pick.scope);
@@ -6282,7 +6281,11 @@ mod tests {
         scouting.choose_eval(EvalEnum::Perfect).unwrap();
         // remembered for the same server
         assert_eq!(
-            scouting.serve_starts().iter().find(|c| c.chosen).map(|c| c.value),
+            scouting
+                .serve_starts()
+                .iter()
+                .find(|c| c.chosen)
+                .map(|c| c.value),
             Some(ServeStartEnum::Z1)
         );
         scouting.touch_target(5, "A".into()).unwrap();
@@ -6322,7 +6325,15 @@ mod tests {
         let paths: Vec<(String, i64, i64, i64, i64)> = all
             .serve_paths
             .iter()
-            .map(|p| (p.label.clone(), cm(p.from_x), cm(p.from_y), cm(p.to_x), cm(p.to_y)))
+            .map(|p| {
+                (
+                    p.label.clone(),
+                    cm(p.from_x),
+                    cm(p.from_y),
+                    cm(p.to_x),
+                    cm(p.to_y),
+                )
+            })
             .collect();
         let mut sorted = paths.clone();
         sorted.sort_by(|a, b| a.0.cmp(&b.0));
@@ -6344,7 +6355,11 @@ mod tests {
         // the event tells it, the last first
         let state = scouting.state();
         assert_eq!(
-            state.events.iter().map(|e| e.serve_start.as_deref()).collect::<Vec<_>>(),
+            state
+                .events
+                .iter()
+                .map(|e| e.serve_start.as_deref())
+                .collect::<Vec<_>>(),
             vec![Some("5"), Some("1"), Some("1")]
         );
         // not for their serve: our reception
@@ -6369,8 +6384,14 @@ mod tests {
         let clips = |p| app.match_clips(&team, &m, &p).unwrap().len();
         assert_eq!(clips(pick(None, None)), 4);
         assert_eq!(clips(pick(Some(ServeStartEnum::Z1), None)), 2);
-        assert_eq!(clips(pick(Some(ServeStartEnum::Z1), Some(CourtZoneEnum::Z5))), 1);
-        assert_eq!(clips(pick(Some(ServeStartEnum::Z5), Some(CourtZoneEnum::Z5))), 0);
+        assert_eq!(
+            clips(pick(Some(ServeStartEnum::Z1), Some(CourtZoneEnum::Z5))),
+            1
+        );
+        assert_eq!(
+            clips(pick(Some(ServeStartEnum::Z5), Some(CourtZoneEnum::Z5))),
+            0
+        );
     }
 
     #[test]
