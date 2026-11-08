@@ -23,7 +23,7 @@ const WIDTH: f32 = 9.0;
 const LENGTH: f32 = 18.0;
 const MARGIN: f32 = 0.5;
 const GAP: f32 = 0.4;
-const STRIP: f32 = 1.6;
+const STRIP: f32 = 2.6;
 
 #[derive(Debug, Clone)]
 pub enum Pick {
@@ -117,7 +117,7 @@ impl PathsChart<'_> {
 
     fn color(&self, p: &ServePathStats) -> Color {
         match p.efficiency {
-            Some(e) => grade_color((e + 100.0) / 200.0, self.colors),
+            Some(e) => efficiency_color(e, self.colors),
             None => self.colors.muted,
         }
     }
@@ -143,6 +143,11 @@ impl PathsChart<'_> {
             (None, None) => Hover::None,
         }
     }
+}
+
+/// The color of an efficiency, -100 to 100: red to green.
+fn efficiency_color(efficiency: f64, c: Colors) -> Color {
+    grade_color((efficiency + 100.0) / 200.0, c)
 }
 
 /// How far `at` is from the segment from `a` to `b`.
@@ -229,6 +234,8 @@ impl canvas::Program<Pick> for PathsChart<'_> {
         self.draw_court(&mut frame, place);
         self.draw_starts(&mut frame, place, *state);
         self.draw_paths(&mut frame, place, *state);
+        self.draw_numbers(&mut frame, place);
+        self.draw_told(&mut frame, place, *state);
         vec![frame.into_geometry()]
     }
 }
@@ -303,28 +310,75 @@ impl PathsChart<'_> {
                 &Path::rectangle(inner.position(), inner.size()),
                 Stroke::default().with_color(c.border).with_width(1.0),
             );
-            frame.fill_text(Text {
-                font: crate::theme::fonts().bold,
-                content: s.label.clone(),
-                position: Point::new(r.center_x(), r.y + r.height * 0.36),
-                color: c.text,
-                size: size.into(),
-                align_x: iced::widget::text::Alignment::Center,
-                align_y: iced::alignment::Vertical::Center,
-                ..Text::default()
-            });
-            // the errors, which went nowhere on their court
-            if s.errors > 0 {
+            // its name; how many, their efficiency, the errors (which went
+            // nowhere on their court), when there are
+            let small = size * 0.75;
+            let lines = [
+                Some((s.label.clone(), c.text, size, true)),
+                (s.count > 0).then(|| (s.count.to_string(), c.text, small, false)),
+                s.efficiency.map(|e| (format!("{e:+.0}%"), efficiency_color(e, c), small, true)),
+                (s.errors > 0).then(|| (format!("= {}", s.errors), grade_color(0.0, c), small, false)),
+            ];
+            for (n, (content, color, size, bold)) in lines.into_iter().flatten().enumerate() {
                 frame.fill_text(Text {
-                    font: crate::theme::fonts().regular,
-                    content: format!("= {}", s.errors),
-                    position: Point::new(r.center_x(), r.y + r.height * 0.76),
-                    color: grade_color(0.0, c),
-                    size: (size * 0.75).into(),
+                    font: match bold {
+                        true => crate::theme::fonts().bold,
+                        false => crate::theme::fonts().regular,
+                    },
+                    content,
+                    position: Point::new(r.center_x(), r.y + r.height * (0.17 + 0.22 * n as f32)),
+                    color,
+                    size: size.into(),
                     align_x: iced::widget::text::Alignment::Center,
                     align_y: iced::alignment::Vertical::Center,
                     ..Text::default()
                 });
+            }
+        }
+    }
+
+    /// In each zone of their court served to, at its top right corner over
+    /// the arrows: how many went there and, from a few on, their
+    /// efficiency.
+    fn draw_numbers(&self, frame: &mut Frame, place: Place) {
+        let c = self.colors;
+        let size = (place.meter * 0.4).clamp(10.0, 15.0);
+        for (r, row) in self.targets.iter().enumerate() {
+            for (col, t) in row.iter().enumerate().filter(|(_, t)| t.count > 0.0) {
+                let lines: Vec<(String, Color)> = [
+                    Some((count(t.count), c.text)),
+                    t.efficiency.map(|e| (format!("{e:+.0}%"), efficiency_color(e, c))),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                let widest = lines.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(0);
+                let width = widest as f32 * size * 0.62 + 8.0;
+                let height = lines.len() as f32 * size * 1.2 + 4.0;
+                let corner = place.at(col as f32 * 3.0 + 3.0, r as f32 * 3.0);
+                let pill = Rectangle::new(
+                    Point::new(corner.x - width - 3.0, corner.y + 3.0),
+                    Size::new(width, height),
+                );
+                frame.fill(
+                    &Path::rounded_rectangle(pill.position(), pill.size(), 4.0.into()),
+                    Color { a: 0.85, ..c.panel },
+                );
+                for (n, (content, color)) in lines.into_iter().enumerate() {
+                    frame.fill_text(Text {
+                        font: crate::theme::fonts().bold,
+                        content,
+                        position: Point::new(
+                            pill.x + pill.width - 4.0,
+                            pill.y + 2.0 + size * (0.6 + 1.2 * n as f32),
+                        ),
+                        color,
+                        size: size.into(),
+                        align_x: iced::widget::text::Alignment::Right,
+                        align_y: iced::alignment::Vertical::Center,
+                        ..Text::default()
+                    });
+                }
             }
         }
     }
@@ -365,7 +419,11 @@ impl PathsChart<'_> {
             });
             frame.fill(&arrow, color);
         }
-        // what the arrow under the mouse tells, at the top
+    }
+
+    /// What the arrow under the mouse tells, at the top, over everything.
+    fn draw_told(&self, frame: &mut Frame, place: Place, hover: Hover) {
+        let c = self.colors;
         let told = match hover {
             Hover::Path(i) => self.paths.get(i),
             Hover::None | Hover::Start(_) => None,

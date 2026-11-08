@@ -2268,7 +2268,7 @@ impl StatsScreen {
 /// picked.
 /// How high the chart of the serve paths is: the whole court, 9 by 18
 /// meters with our end line under it, readable in a column.
-const PATHS_HEIGHT: f32 = 520.0;
+const PATHS_HEIGHT: f32 = 600.0;
 
 fn pickable<'a>(
     content: impl Into<Element<'a, Message>>,

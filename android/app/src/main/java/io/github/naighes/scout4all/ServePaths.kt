@@ -29,7 +29,10 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -49,7 +52,7 @@ private const val Width = 9f
 private const val Length = 18f
 private const val Margin = 0.5f
 private const val Gap = 0.4f
-private const val Strip = 1.8f
+private const val Strip = 2.6f
 private const val Across = Width + 2 * Margin
 private const val Down = Length + Gap + Strip + 2 * Margin
 
@@ -134,6 +137,7 @@ internal fun ServePaths(
                 val lit = told?.let { it.start == p.start && it.zone == p.zone } == true
                 drawArrow(place, p, most, lit, colors.onSurfaceVariant, colors.onSurface)
             }
+            drawNumbers(place, f, colors.surface, colors.onSurface, measurer)
         }
     }
     Text(
@@ -195,24 +199,60 @@ private fun DrawScope.drawStarts(
     floor: Color,
     text: Color,
     accent: Color,
-    measurer: androidx.compose.ui.text.TextMeasurer,
+    measurer: TextMeasurer,
 ) {
     f.serveStarts.forEachIndexed { i, s ->
         val r = place.start(i, f.serveStarts.size).deflate(1.5.dp.toPx())
         drawRect(if (picked == s.value) accent.copy(alpha = 0.6f) else floor, r.topLeft, r.size)
         drawRect(text.copy(alpha = 0.3f), r.topLeft, r.size, style = Stroke(1.dp.toPx()))
-        val lines = listOfNotNull(s.label, "= ${s.errors}".takeIf { s.errors > 0u })
-        val style = TextStyle(
-            color = text,
-            fontSize = (place.meter * 0.5f).coerceAtMost(16.sp.toPx()).toSp(),
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
+        // its name; how many, their efficiency, the errors (which went
+        // nowhere on their court), when there are; sized by the court, not
+        // by the font of the phone, to stay in their zones
+        val size = (place.meter * 0.5f).coerceAtMost(16.sp.toPx()).toSp()
+        val small = (place.meter * 0.39f).coerceAtMost(12.5f.sp.toPx()).toSp()
+        val lines = listOfNotNull(
+            line(s.label, text, size, true),
+            line(s.count.toString(), text, small, false).takeIf { s.count > 0u },
+            s.efficiency?.let { line("%+d%%".format(it.roundToInt()), efficiencyColor(it), small, true) },
+            line("= ${s.errors}", gradeColor(0.0), small, false).takeIf { s.errors > 0u },
         )
-        lines.forEachIndexed { n, line ->
-            val color = if (n == 0) text else gradeColor(0.0)
-            val measured = measurer.measure(line, style.copy(color = color, fontWeight = if (n == 0) FontWeight.Bold else null))
-            val y = r.top + r.height * (if (lines.size == 1) 0.5f else 0.3f + 0.42f * n) - measured.size.height / 2
+        lines.forEachIndexed { n, (content, style) ->
+            val measured = measurer.measure(content, style)
+            val y = r.top + r.height * (0.15f + 0.23f * n) - measured.size.height / 2
             drawText(measured, topLeft = Offset(r.center.x - measured.size.width / 2, y))
+        }
+    }
+}
+
+/** A line of text drawn on the court and its style. */
+private fun line(text: String, color: Color, size: TextUnit, bold: Boolean) =
+    text to TextStyle(color = color, fontSize = size, fontWeight = if (bold) FontWeight.Bold else null, textAlign = TextAlign.Center)
+
+private fun efficiencyColor(efficiency: Double) = gradeColor((efficiency + 100.0) / 200.0)
+
+/** In each zone of their court served to, at its top right corner over the
+ * arrows: how many went there and, from a few on, their efficiency. */
+private fun DrawScope.drawNumbers(place: Place, f: FundamentalDetail, panel: Color, text: Color, measurer: TextMeasurer) {
+    val size = (place.meter * 0.42f).coerceAtMost(15.sp.toPx()).toSp()
+    val pad = 3.dp.toPx()
+    f.targets.forEachIndexed { r, row ->
+        row.forEachIndexed { c, t ->
+            if (t.count > 0.0) {
+                val lines = listOfNotNull(
+                    line(count(t.count), text, size, true),
+                    t.efficiency?.let { line("%+d%%".format(it.roundToInt()), efficiencyColor(it), size, true) },
+                ).map { (content, style) -> measurer.measure(content, style) }
+                val width = lines.maxOf { it.size.width } + 2 * pad
+                val height = lines.sumOf { it.size.height } + 2 * pad
+                val corner = place.at(c * 3f + 3f, r * 3f)
+                val topLeft = Offset(corner.x - width - pad, corner.y + pad)
+                drawRoundRect(panel.copy(alpha = 0.85f), topLeft, Size(width, height), CornerRadius(pad))
+                var y = topLeft.y + pad
+                lines.forEach {
+                    drawText(it, topLeft = Offset(topLeft.x + width - pad - it.size.width, y))
+                    y += it.size.height
+                }
+            }
         }
     }
 }
@@ -221,7 +261,7 @@ private fun DrawScope.drawArrow(place: Place, p: ServePathStats, most: Double, l
     val from = place.from(p)
     val to = place.to(p)
     val width = (0.06f + 0.26f * (p.count / most).toFloat()) * place.meter
-    val color = p.efficiency?.let { gradeColor((it + 100.0) / 200.0) } ?: grey
+    val color = p.efficiency?.let { efficiencyColor(it) } ?: grey
     val d = to - from
     val length = hypot(d.x, d.y).coerceAtLeast(1f)
     val u = Offset(d.x / length, d.y / length)
