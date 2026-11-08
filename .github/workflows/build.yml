@@ -53,10 +53,12 @@ jobs:
   build-for-targets:
     name: build for targets
     runs-on: ${{ matrix.platforms.os }}
-    continue-on-error: true
     permissions:
       contents: read
     strategy:
+      # a target broken fails the run, the others built all the same, to
+      # tell every target broken at once
+      fail-fast: false
       matrix:
         platforms:
           - os: macos-15
