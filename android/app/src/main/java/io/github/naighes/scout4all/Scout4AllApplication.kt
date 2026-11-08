@@ -144,4 +144,5 @@ val MobileException.reason: String
         is MobileException.InvalidPlayer -> reason
         is MobileException.InvalidMatch -> reason
         is MobileException.Scouting -> reason
+        is MobileException.Namesake -> reason
     }.replaceFirstChar { it.titlecase(Locale.getDefault()) }

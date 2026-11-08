@@ -2,16 +2,19 @@
 <!-- Android 12+: what the backup of Android (on the Google Drive of the user)
      and the transfer to a new phone take. The data of the app, in the layout
      of ~/.scout4all, settings and upload queue included: a new phone finds
-     the teams and the matches again. Not the log, nor the cache (the
-     archives shared), which are never taken. Keep in sync with
+     the teams and the matches again. Not the log, nor the index of the
+     matches (derived, rebuilt from them), nor the cache (the archives
+     shared), which are never taken. Keep in sync with
      backup_rules.xml. -->
 <data-extraction-rules>
     <cloud-backup>
         <include domain="file" path="scout4all/" />
         <exclude domain="file" path="scout4all/scout4all.log" />
+        <exclude domain="file" path="scout4all/.index.json" />
     </cloud-backup>
     <device-transfer>
         <include domain="file" path="scout4all/" />
         <exclude domain="file" path="scout4all/scout4all.log" />
+        <exclude domain="file" path="scout4all/.index.json" />
     </device-transfer>
 </data-extraction-rules>

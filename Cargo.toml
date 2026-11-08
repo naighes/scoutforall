@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "desktop", "keys", "mobile"]
+members = ["bench", "core", "desktop", "keys", "mobile"]
 resolver = "3"
 
 # the version of the release: shared by all the crates

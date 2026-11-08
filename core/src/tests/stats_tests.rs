@@ -158,6 +158,7 @@ mod tests {
                 zone: None,
                 target: None,
                 blockers: None,
+                serve_start: None,
                 eval: *eval,
                 situation: Default::default(),
                 touch: None,
@@ -1342,6 +1343,9 @@ mod tests {
                 on_conflicts: None,
                 blockers_told: 0,
                 blockers: vec![],
+                serve_starts_told: 0,
+                serve_starts: vec![],
+                serve_paths: vec![],
                 zones: vec![
                     ZoneDetail {
                         zone: ZoneEnum::Four,
@@ -1385,6 +1389,9 @@ mod tests {
                 on_conflicts: None,
                 blockers_told: 0,
                 blockers: vec![],
+                serve_starts_told: 0,
+                serve_starts: vec![],
+                serve_paths: vec![],
                 zones: vec![ZoneDetail {
                     zone: ZoneEnum::Two,
                     share: 100.0,
@@ -1431,6 +1438,9 @@ mod tests {
                 on_conflicts: None,
                 blockers_told: 0,
                 blockers: vec![],
+                serve_starts_told: 0,
+                serve_starts: vec![],
+                serve_paths: vec![],
                 zones: vec![],
             }
         );
@@ -1501,6 +1511,149 @@ mod tests {
         assert!(detail(&stats, A, &all()).targets.is_empty());
         let none = t.serving(vec![serve(Perfect, None)]).stats;
         assert!(detail(&none, S, &all()).targets.is_empty());
+    }
+
+    /// Our serves by where they started from: how many from each of the
+    /// five zones (the ones never told too), the share of the ones told,
+    /// the efficiency only from three serves on; with a zone asked, where
+    /// they went only from there, the rest of the detail for all of them.
+    /// None for the other fundamentals, or with none told.
+    #[test]
+    fn detail_of_the_serve_starts() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z5};
+        use crate::shapes::court_zone::{CourtTarget, ServeStartEnum};
+        use ServeStartEnum::{Z1 as From1, Z5 as From5, Z6 as From6};
+        let t = Team::new();
+        let serve = |eval, start, zone| {
+            let mut e = act(S, t.setter, eval);
+            e.flags = e
+                .flags
+                .with_serve_start(start)
+                .with_target(Some(CourtTarget::Zone(zone)));
+            e
+        };
+        let stats = t
+            .serving(vec![
+                serve(Perfect, Some(From1), 1),
+                serve(Perfect, Some(From1), 1),
+                serve(Perfect, Some(From5), 5),
+                serve(Perfect, None, 5),
+                serve(Error, Some(From1), 5),
+            ])
+            .stats;
+        let serves = detail(&stats, S, &all());
+        assert_eq!((serves.total, serves.serve_starts_told), (5, 4));
+        let starts: Vec<_> = serves.serve_starts.iter().map(|z| z.start).collect();
+        assert_eq!(starts, ServeStartEnum::ALL.to_vec());
+        let of = |start| {
+            serves
+                .serve_starts
+                .iter()
+                .find(|z| z.start == start)
+                .copied()
+        };
+        let from_1 = of(From1).unwrap();
+        assert_eq!((from_1.count, from_1.share), (3, 75.0));
+        assert!((from_1.efficiency.unwrap() - 100.0 / 3.0).abs() < 1e-9);
+        let from_5 = of(From5).unwrap();
+        assert_eq!(
+            (from_5.count, from_5.share, from_5.efficiency),
+            (1, 25.0, None)
+        );
+        assert_eq!(of(From6).map(|z| z.count), Some(0));
+        // where they went from 1: two to 1, one to 5; the rest as before
+        let from = |start| match Breakdown::from_start(&stats, S, &all(), Some(start)) {
+            Breakdown::Fundamental(d) => d,
+            Breakdown::Freeballs(f) => panic!("expected a fundamental, got {f:?}"),
+        };
+        let only_1 = from(From1);
+        assert_eq!((only_1.total, only_1.targets_told), (5, 3));
+        let to = |d: &Detail, zone| d.targets.iter().find(|t| t.zone == zone).map(|t| t.count);
+        assert_eq!((to(&only_1, Z1), to(&only_1, Z5)), (Some(2.0), Some(1.0)));
+        assert_eq!(only_1.serve_starts, serves.serve_starts);
+        // from 6 none: no court
+        assert!(from(From6).targets.is_empty());
+        // not for the other fundamentals, nor with none told
+        assert!(detail(&stats, A, &all()).serve_starts.is_empty());
+        let none = t.serving(vec![serve(Perfect, None, 1)]).stats;
+        assert_eq!(detail(&none, S, &all()).serve_starts_told, 0);
+        assert!(detail(&none, S, &all()).serve_starts.is_empty());
+    }
+
+    /// Where our serves went from where they started, both told: by start
+    /// and zone, the most first, two cells of two zones half in each; the
+    /// share of the ones with both told, the efficiency from three on; only
+    /// from the zone asked; the errors of each start apart.
+    #[test]
+    fn detail_of_the_serve_paths() {
+        use crate::shapes::court_zone::CourtZoneEnum::{Z1, Z5, Z6};
+        use crate::shapes::court_zone::{CourtCell, CourtTarget, ServeStartEnum, SubzoneEnum};
+        use ServeStartEnum::{Z1 as From1, Z5 as From5};
+        let t = Team::new();
+        let cell = |zone, s| CourtCell::new(zone, s).expect("a cell");
+        let serve = |eval, start, target: Option<CourtTarget>| {
+            let mut e = act(S, t.setter, eval);
+            e.flags = e.flags.with_serve_start(start).with_target(target);
+            e
+        };
+        // 1D and 6A: half in 1, half in 6
+        let z16 = CourtTarget::pair(cell(1, SubzoneEnum::D), cell(6, SubzoneEnum::A));
+        let stats = t
+            .serving(vec![
+                serve(Perfect, Some(From1), Some(CourtTarget::Zone(1))),
+                serve(Perfect, Some(From1), Some(CourtTarget::Zone(1))),
+                serve(Positive, Some(From1), Some(CourtTarget::Zone(1))),
+                opp(OE),
+                serve(Perfect, Some(From1), z16),
+                serve(Perfect, Some(From5), Some(CourtTarget::Zone(5))),
+                // no start, no target: left out
+                serve(Perfect, None, Some(CourtTarget::Zone(5))),
+                serve(Perfect, Some(From5), None),
+                serve(Error, Some(From5), None),
+            ])
+            .stats;
+        let serves = detail(&stats, S, &all());
+        let paths: Vec<_> = serves
+            .serve_paths
+            .iter()
+            .map(|p| (p.start, p.zone, p.count, p.share))
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                (From1, Z1, 3.5, 70.0),
+                (From5, Z5, 1.0, 20.0),
+                (From1, Z6, 0.5, 10.0),
+            ]
+        );
+        // every serve to 1 started from 1: as the zone of their court
+        let to_1 = serves
+            .targets
+            .iter()
+            .find(|t| t.zone == Z1)
+            .and_then(|t| t.efficiency);
+        assert_eq!(serves.serve_paths[0].efficiency, to_1);
+        assert!(to_1.is_some());
+        assert_eq!(serves.serve_paths[1].efficiency, None);
+        let errors: Vec<_> = serves
+            .serve_starts
+            .iter()
+            .map(|z| (z.start, z.errors))
+            .collect();
+        assert!(errors.contains(&(From5, 1)) && errors.contains(&(From1, 0)));
+        // only from 5
+        let only_5 = match Breakdown::from_start(&stats, S, &all(), Some(From5)) {
+            Breakdown::Fundamental(d) => d,
+            Breakdown::Freeballs(f) => panic!("expected a fundamental, got {f:?}"),
+        };
+        let paths: Vec<_> = only_5
+            .serve_paths
+            .iter()
+            .map(|p| (p.zone, p.share))
+            .collect();
+        assert_eq!(paths, vec![(Z5, 100.0)]);
+        // none for the other fundamentals
+        assert!(detail(&stats, A, &all()).serve_paths.is_empty());
     }
 
     /// Our attacks by the zone of their court they went to: as the serves.
@@ -1687,6 +1840,7 @@ mod tests {
                     zone: None,
                     target: None,
                     blockers: *blockers,
+                    serve_start: None,
                     eval: Some(*eval),
                     situation: Default::default(),
                     touch: None,
@@ -2065,10 +2219,6 @@ mod tests {
         stats.metric_percentage(P, Metric::Efficiency, &all())
     }
 
-    fn receptions(stats: &Stats) -> u32 {
-        stats.event_count(P, None, &all())
-    }
-
     /// The last 2 receptions after each rally: # = + + - in the set.
     #[test]
     fn trend_of_the_last_touches() {
@@ -2077,9 +2227,9 @@ mod tests {
         let replay =
             Replay::new(&[&set], DEFAULT_MAX_SUBSTITUTIONS).expect("expected the set to replay");
         let last_two: Vec<Option<f64>> = replay
-            .window(2, receptions, reception)
+            .window(Series::Reception, 2)
             .into_iter()
-            .map(|p| p.value)
+            .map(|p| p.value.value())
             .collect();
         assert_eq!(
             last_two,
@@ -2101,10 +2251,10 @@ mod tests {
             ]
         );
         // a window larger than the touches: all of them
-        let all_of_them = replay.window(10, receptions, reception);
-        assert_eq!(all_of_them, replay.cumulative(reception));
+        let all_of_them = replay.window(Series::Reception, 10);
+        assert_eq!(all_of_them, replay.cumulative(Series::Reception));
         assert_eq!(
-            replay.cumulative(reception),
+            replay.series(Series::Reception, false),
             trend(&[&set], DEFAULT_MAX_SUBSTITUTIONS, reception)
                 .expect("expected the set to replay")
         );
@@ -2119,19 +2269,18 @@ mod tests {
         let second = side_out_entry(&t, 2);
         let replay = Replay::new(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS)
             .expect("expected the sets to replay");
-        let points = replay.window(2, receptions, reception);
+        let points = replay.window(Series::Reception, 2);
         assert_eq!(points.len(), 18);
         // the first rally of set 2: - (set 1) and # (set 2)
-        let first_of_second = points.iter().find(|p| p.set_number == 2).map(|p| p.value);
+        let first_of_second = points
+            .iter()
+            .find(|p| p.set_number == 2)
+            .map(|p| p.value.value());
         assert_eq!(first_of_second, Some(Some(50.0)));
         // the last: as in set 1
-        assert_eq!(points.last().map(|p| p.value), Some(Some(50.0)));
+        assert_eq!(points.last().map(|p| p.value.value()), Some(Some(50.0)));
         // the window is always 2 receptions, once there are 2
-        let sizes: Vec<u32> = replay
-            .window(2, receptions, receptions)
-            .into_iter()
-            .map(|p| p.value)
-            .collect();
+        let sizes: Vec<u32> = points.into_iter().map(|p| p.value.touches).collect();
         assert_eq!(&sizes[..2], &[1, 1]);
         assert!(sizes[2..].iter().all(|n| *n == 2));
     }
@@ -2188,12 +2337,19 @@ mod tests {
         let replay =
             Replay::new(&refs, DEFAULT_MAX_SUBSTITUTIONS).expect("expected the sets to replay");
         let so_far = replay.series(Series::Reception, false);
-        assert_eq!(so_far, replay.cumulative(|s| Series::Reception.value(s)));
-        let recent = replay.series(Series::Reception, true);
         assert_eq!(
-            recent,
-            replay.window(RECENT_TOUCHES, receptions, |s| Series::Reception.value(s))
+            so_far,
+            trend(&refs, DEFAULT_MAX_SUBSTITUTIONS, |s| Series::Reception
+                .value(s))
+            .expect("expected the sets to replay")
         );
+        let recent = replay.series(Series::Reception, true);
+        let window: Vec<Option<f64>> = replay
+            .window(Series::Reception, RECENT_TOUCHES)
+            .into_iter()
+            .map(|p| p.value.value())
+            .collect();
+        assert_eq!(recent.iter().map(|p| p.value).collect::<Vec<_>>(), window);
         // 15 receptions in three sets: the last 10 are the last two sets,
         // as the whole match, the same
         assert_eq!(
@@ -2211,6 +2367,76 @@ mod tests {
             .collect();
         // 1st rally: = + + - (set 1) # = + + - (set 2) # (set 3): 40%
         assert_eq!(third.first(), Some(&Some(40.0)));
+    }
+
+    /// The figure of the last touches as it was first computed: the
+    /// statistics after every event kept, the ones after the touch before
+    /// the window taken off key by key.
+    fn window_by_keys(sets: &[&SetEntry], series: Series, size: u32) -> Vec<Option<f64>> {
+        use crate::shapes::snapshot::Snapshot;
+        let (mut after, mut ends, mut before) = (Vec::<Stats>::new(), vec![], Stats::new());
+        for set in sets {
+            let rules = set
+                .find_lineup_rules(DEFAULT_MAX_SUBSTITUTIONS)
+                .expect("expected rules");
+            let mut snapshot = Snapshot::with_rules(set, DEFAULT_MAX_SUBSTITUTIONS, rules)
+                .expect("expected a snapshot");
+            for event in &set.events {
+                let rallies = snapshot.points.len();
+                snapshot
+                    .add_event(event)
+                    .expect("expected the event to replay");
+                let mut stats = before.clone();
+                stats.merge(&snapshot.stats);
+                after.push(stats);
+                if snapshot.points.len() > rallies {
+                    ends.push(after.len() - 1);
+                }
+            }
+            before.merge(&snapshot.stats);
+        }
+        let touches: Vec<u32> = after.iter().map(|s| series.touches(s)).collect();
+        ends.iter()
+            .map(|end| {
+                let now = &after[*end];
+                let window = touches[*end]
+                    .checked_sub(size)
+                    .filter(|t| *t > 0)
+                    .and_then(|t| touches.iter().position(|c| *c == t));
+                match window {
+                    Some(i) => series.value(&now.since(&after[i])),
+                    None => series.value(now),
+                }
+            })
+            .collect()
+    }
+
+    /// The last touches from the tallies, as from the statistics key by
+    /// key: every figure, every window, a set alone and the sets together.
+    #[test]
+    fn the_last_touches_as_by_keys() {
+        let t = Team::new();
+        let sets: Vec<SetEntry> = (1..=3).map(|n| side_out_entry(&t, n)).collect();
+        let refs: Vec<&SetEntry> = sets.iter().collect();
+        let replay =
+            Replay::new(&refs, DEFAULT_MAX_SUBSTITUTIONS).expect("expected the sets to replay");
+        for series in Series::ALL {
+            for size in 1..=12 {
+                let values = |replay: &Replay| -> Vec<Option<f64>> {
+                    replay
+                        .window(series, size)
+                        .into_iter()
+                        .map(|p| p.value.value())
+                        .collect()
+                };
+                assert_eq!(values(&replay), window_by_keys(&refs, series, size));
+                // a set of the match, as replayed alone
+                let alone = Replay::new(&[&sets[1]], DEFAULT_MAX_SUBSTITUTIONS)
+                    .expect("expected the set to replay");
+                assert_eq!(values(&replay.set(2)), values(&alone));
+                assert_eq!(replay.set(2).progress(), alone.progress());
+            }
+        }
     }
 
     /// How far the set had gone after each rally: the points of the team

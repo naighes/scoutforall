@@ -42,4 +42,8 @@ pub trait MatchWriter {
         source: MatchSource,
         video_clock: bool,
     ) -> Result<MatchEntry, AppError>;
+
+    /// Removes the match with its sets, for good: by its folder, so that
+    /// a match that can't be read goes too.
+    async fn remove(&self, team_id: &Uuid, match_id: &str) -> Result<(), AppError>;
 }

@@ -3,12 +3,13 @@
 //! bit 0 the inverted P1, bits 1 and 2 the reception formation, bits 3 to 9
 //! where the ball went (the code of a `CourtTarget`, 0 when not told), bits
 //! 10 to 12 how many blocked (the code of a `BlockersEnum`, 0 when not
-//! told).
+//! told), bits 13 to 15 where our serve started from (the code of a
+//! `ServeStartEnum`, 0 when not told).
 //! Empty or missing (the sets scouted up to v0.10.1) is 0: the canonical
 //! P1, the reception with three players, no zone.
 
 use crate::errors::{AppError, IOError};
-use crate::shapes::court_zone::CourtTarget;
+use crate::shapes::court_zone::{CourtTarget, ServeStartEnum};
 use crate::shapes::enums::EventTypeEnum;
 use std::fmt;
 
@@ -133,6 +134,8 @@ const TARGET_SHIFT: u16 = 3;
 const TARGET: u16 = 0b111_1111 << TARGET_SHIFT;
 const BLOCKERS_SHIFT: u16 = 10;
 const BLOCKERS: u16 = 0b111 << BLOCKERS_SHIFT;
+const SERVE_START_SHIFT: u16 = 13;
+const SERVE_START: u16 = 0b111 << SERVE_START_SHIFT;
 
 impl EventFlags {
     /// In P1 in side out, the outside hitter attacks from 4 and the
@@ -188,6 +191,17 @@ impl EventFlags {
     pub fn with_blockers(self, blockers: Option<BlockersEnum>) -> Self {
         let bits = blockers.map_or(0, |b| b.code() << BLOCKERS_SHIFT);
         Self(self.0 & !BLOCKERS | bits)
+    }
+
+    /// Where our serve started from, if the scout told it (in a way this
+    /// version knows).
+    pub fn serve_start(&self) -> Option<ServeStartEnum> {
+        ServeStartEnum::from_code((self.0 & SERVE_START) >> SERVE_START_SHIFT)
+    }
+
+    pub fn with_serve_start(self, start: Option<ServeStartEnum>) -> Self {
+        let bits = start.map_or(0, |z| z.code() << SERVE_START_SHIFT);
+        Self(self.0 & !SERVE_START | bits)
     }
 
     /// The flags of the column: empty is none.

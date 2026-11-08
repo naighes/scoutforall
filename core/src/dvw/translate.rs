@@ -6,16 +6,18 @@
 //! different from the file's stop the set.
 
 use crate::{
-    dvw::model::{Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols},
+    dvw::model::{
+        AttackCombination, Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols,
+    },
     shapes::{
-        court_zone::{CourtTarget, SubzoneEnum, TargetKind},
+        court_zone::{CourtTarget, ServeStartEnum, SubzoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
         flags::{BlockersEnum, EventFlags},
         lineup::Lineup,
         refusal::Refusal,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        technique::{ServeTypeEnum, TechniqueEnum},
+        technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
 };
 use chrono::{DateTime, FixedOffset, NaiveTime, TimeDelta, Utc};
@@ -125,6 +127,7 @@ pub fn translate_set(
     let mut set = SetTranslator {
         us,
         symbols: file.winning_symbols.clone().unwrap_or_else(default_symbols),
+        combinations: &file.attack_combinations,
         snapshot,
         events: vec![],
         rally_start: 0,
@@ -423,6 +426,8 @@ fn freeballs_sent<'a>(touches: &[(&'a ScoutLine, Touch<'a>)]) -> Vec<(&'a ScoutL
 struct SetTranslator<'a> {
     us: &'a Us<'a>,
     symbols: WinningSymbols,
+    // the attack combinations of the file, for the set of each attack
+    combinations: &'a [AttackCombination],
     snapshot: Snapshot,
     events: Vec<EventEntry>,
     // where the rally being translated starts in `events`
@@ -1285,6 +1290,7 @@ impl SetTranslator<'_> {
             Some((event_type, eval)) => {
                 let technique = match event_type {
                     S => serve_type(skill.skill_type).map(TechniqueEnum::Serve),
+                    A => set_type(skill, self.combinations).map(TechniqueEnum::Set),
                     _ => None,
                 };
                 // where our serve or attack went, or where we received or
@@ -1306,6 +1312,11 @@ impl SetTranslator<'_> {
                     .num_players
                     .and_then(BlockersEnum::of_datavolley)
                     .filter(|b| BlockersEnum::of(event_type).contains(b));
+                // where our serve started from, behind our end line
+                let serve_start = match event_type {
+                    S => skill.start_zone.and_then(ServeStartEnum::numbered),
+                    _ => None,
+                };
                 self.apply_flagged(
                     event_type,
                     Some(player),
@@ -1314,7 +1325,8 @@ impl SetTranslator<'_> {
                     technique,
                     EventFlags::default()
                         .with_target(target)
-                        .with_blockers(blockers),
+                        .with_blockers(blockers)
+                        .with_serve_start(serve_start),
                 )
             }
             None => Ok(()),
@@ -1414,6 +1426,41 @@ fn eval(code: char) -> Result<EvalEnum, Issue> {
         other => Err(Issue::Untranslatable(Untranslatable::UnknownEvaluation(
             other,
         ))),
+    }
+}
+
+/// The set of an attack, told by its combination (`X5`): its tempo and the
+/// zone it starts from, as `[3ATTACKCOMBINATION]` defines it, or those of
+/// the attack when the file doesn't define it. Every quick is in zone 3 or
+/// 4: the quick of the middle blockers is told by its code, the one
+/// DataVolley comes with. None when the attack doesn't tell it (the setter
+/// tipping, `O`; a quick of another code).
+pub(crate) fn set_type(
+    attack: &SkillCode,
+    combinations: &[AttackCombination],
+) -> Option<SetTypeEnum> {
+    use SetTypeEnum::*;
+    let code = attack.combination.as_deref();
+    let defined = code.and_then(|code| combinations.iter().find(|c| c.code == code));
+    let tempo = defined.and_then(|c| c.tempo).unwrap_or(attack.skill_type);
+    let zone = defined.and_then(|c| c.start_zone).or(attack.start_zone);
+    match (attack.skill, tempo, zone, code) {
+        (Skill::Attack, 'Q', _, Some("X1")) => Some(One),
+        (Skill::Attack, 'Q', _, Some("X2")) => Some(Two),
+        (Skill::Attack, 'Q', _, Some("X7")) => Some(Seven),
+        (Skill::Attack, 'Q', _, Some("XC")) => Some(C),
+        (Skill::Attack, 'Q', _, Some("XD")) => Some(DoubleC),
+        (Skill::Attack, 'Q', _, Some("XF" | "CB" | "CD" | "CF")) | (Skill::Attack, 'N', _, _) => {
+            Some(Fast)
+        }
+        (Skill::Attack, 'H', _, _) => Some(High),
+        (Skill::Attack, 'U', _, _) => Some(Super),
+        (Skill::Attack, 'T' | 'M', Some(8), _) => Some(Pipe),
+        (Skill::Attack, 'T', Some(4), _) => Some(Five),
+        (Skill::Attack, 'T', Some(2), _) => Some(Six),
+        (Skill::Attack, 'T', Some(9), _) => Some(Eight),
+        (Skill::Attack, 'M', _, _) => Some(Quick),
+        _ => None,
     }
 }
 

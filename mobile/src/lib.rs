@@ -15,7 +15,7 @@ use scout4all_core::{
     },
     archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
-    detail::{Breakdown, FUNDAMENTALS, Tone, by_player, by_rotation_in},
+    detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
     dvw::{
         self,
         import::{
@@ -32,7 +32,7 @@ use scout4all_core::{
     logging::logger::{init_logger, log_error},
     match_form::{MatchForm, MatchFormError},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
-    player_form::{PlayerForm, PlayerFormError, removal},
+    player_form::{self, PlayerForm, PlayerFormError},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -51,13 +51,16 @@ use scout4all_core::{
     settings::{Consent, PinnedTeams, TeamDefaults},
     shapes::{
         country::CountryCode,
-        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, SubzoneEnum, TargetKind},
+        court_zone::{
+            CourtCell, CourtSide, CourtTarget, CourtZoneEnum, ServeStartEnum, SubzoneEnum,
+            TargetKind,
+        },
         enums::{
             EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, LanguageEnum, PhaseEnum, RoleEnum,
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
         flags::{BlockersEnum, ReceptionSchemeEnum},
-        r#match::MatchEntry,
+        r#match::{MatchEntry, MatchSummary},
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
@@ -106,6 +109,15 @@ pub enum TeamClassificationEnum {
     NationalLowLevel,
     Regional,
     LocalDivision,
+}
+
+#[uniffi::remote(Enum)]
+pub enum ServeStartEnum {
+    Z1,
+    Z9,
+    Z6,
+    Z7,
+    Z5,
 }
 
 #[uniffi::remote(Enum)]
@@ -174,6 +186,7 @@ pub enum SetTypeEnum {
     Three,
     Four,
     C,
+    DoubleC,
     B,
     Seven,
     Fast,
@@ -348,6 +361,10 @@ pub enum MobileError {
     /// a choice of the scout that doesn't apply, or an event not saved
     #[error("{reason}")]
     Scouting { reason: String },
+    /// another player of the team with the same name: saved once the user
+    /// confirms it
+    #[error("{reason}")]
+    Namesake { reason: String },
 }
 
 impl From<AppError> for MobileError {
@@ -554,6 +571,16 @@ fn next_kind(
             set_number: set.set_number,
         },
         NextSet::Over => NextSetKind::Over,
+    }
+}
+
+/// What scouting goes on with, as `next_kind` tells it from the status:
+/// from the summary of the match.
+fn next_of(m: &MatchSummary) -> NextSetKind {
+    match (m.finished, m.resume, m.next_set_number) {
+        (false, Some(set_number), _) => NextSetKind::Resume { set_number },
+        (false, None, Some(set_number)) => NextSetKind::Start { set_number },
+        _ => NextSetKind::Over,
     }
 }
 
@@ -1063,6 +1090,17 @@ pub struct BlockersChoice {
     pub chosen: bool,
 }
 
+/// A zone our serve starts from, behind our end line, to tell along with
+/// its evaluation.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ServeStartChoice {
+    pub value: ServeStartEnum,
+    /// 1, 9, 6, 7 or 5
+    pub label: String,
+    /// what the evaluation saves now, told or remembered for the server
+    pub chosen: bool,
+}
+
 /// A cell of the court (a subzone of DataVolley), or a whole zone at the
 /// net for our block, to tell where the ball went.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -1092,6 +1130,8 @@ pub struct ScoutedEvent {
     pub target: Option<String>,
     /// how many blocked, if told: e.g. "2 blockers"
     pub blockers: Option<String>,
+    /// where our serve started from, if told: e.g. "1"
+    pub serve_start: Option<String>,
 }
 
 /// An event of a set, in the list to correct it.
@@ -1385,6 +1425,10 @@ pub struct DetailFilter {
     /// a close score (two points apart at most) or not
     #[uniffi(default)]
     pub close: Option<bool>,
+    /// for our serve, where it went only from this zone; the clips only
+    /// from there
+    #[uniffi(default)]
+    pub serve_start: Option<ServeStartEnum>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -1472,6 +1516,15 @@ pub struct FundamentalDetail {
     /// each of the ones it can tell; empty with none told
     pub blockers_told: u32,
     pub blockers: Vec<BlockersStats>,
+    /// for a serve: how many had where it started from told, and the five
+    /// zones it starts from as shown below their court (5, 7, 6, 9, 1 from
+    /// the left, see `ServeStartEnum::SHOWN`); empty with none told
+    pub serve_starts_told: u32,
+    pub serve_starts: Vec<ServeStartStats>,
+    /// for a serve: where they went from where they started, both told, the
+    /// most first (to draw them the fewest first); only from the zone of
+    /// the filter; empty with none
+    pub serve_paths: Vec<ServePathStats>,
     /// the players who played it, the most involved first; with the
     /// filter but its player
     pub players: Vec<PlayerStats>,
@@ -1486,6 +1539,45 @@ pub struct BlockersStats {
     pub name: String,
     pub count: u32,
     /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
+}
+
+/// Our serves started from a zone, of the ones with where they started
+/// from told.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ServeStartStats {
+    pub value: ServeStartEnum,
+    /// 1, 9, 6, 7 or 5
+    pub label: String,
+    pub count: u32,
+    /// 0 to 100
+    pub share: f64,
+    /// -100 to 100: none on too few to tell
+    pub efficiency: Option<f64>,
+    /// the errors among them: they went nowhere on their court
+    pub errors: u32,
+}
+
+/// Our serves from a zone of our end line to a zone of their court, of
+/// the ones with both told. Where on the whole court, in meters, as our
+/// server sees it: `x` from 0 to 9 from the left, `y` from 0 at their end
+/// line to 9 at the net and 18 at ours (where the serve starts, the zone
+/// under its fifth of the end line).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ServePathStats {
+    pub start: ServeStartEnum,
+    pub zone: CourtZoneEnum,
+    /// "1 → 5"
+    pub label: String,
+    pub from_x: f64,
+    pub from_y: f64,
+    pub to_x: f64,
+    pub to_y: f64,
+    /// two cells of different zones count half in each
+    pub count: f64,
+    /// of the serves with both told, 0 to 100
     pub share: f64,
     /// -100 to 100: none on too few to tell
     pub efficiency: Option<f64>,
@@ -1774,6 +1866,32 @@ impl Scouting {
                 chosen: session.blockers() == Some(*b),
             })
             .collect()
+    }
+
+    /// The zones our serve starts from, as shown below their court (5, 7,
+    /// 6, 9, 1 from the left): along with the evaluation of our serve,
+    /// where the server served from last chosen; empty for the other
+    /// events.
+    pub fn serve_starts(&self) -> Vec<ServeStartChoice> {
+        let session = self.session();
+        match session.serve_start_applies() {
+            true => ServeStartEnum::SHOWN
+                .iter()
+                .map(|z| ServeStartChoice {
+                    value: *z,
+                    label: z.to_string(),
+                    chosen: session.serve_start() == Some(*z),
+                })
+                .collect(),
+            false => vec![],
+        }
+    }
+
+    /// The scout touches a zone our serve starts from: told, or taken back
+    /// when it was. Saved with the evaluation, never required.
+    pub fn touch_serve_start(&self, start: ServeStartEnum) -> Result<(), MobileError> {
+        let touched = self.session().touch_serve_start(start);
+        self.scouted(touched)
     }
 
     /// The scout tells how many blocked, or takes it back (`None`). Saved
@@ -2137,124 +2255,139 @@ fn detail_of(
             .find_map(|t| t.find_player(id))
             .map(|p| scouting_player(p, labels))
     };
-    let (fundamental, freeballs) = match Breakdown::of(stats, event, &narrowed) {
-        Breakdown::Fundamental(d) => (
-            Some(FundamentalDetail {
-                total: d.total,
-                evals: d
-                    .evals
-                    .iter()
-                    .map(|e| EvalStats {
-                        eval: e.eval,
-                        symbol: e.eval.to_string(),
-                        name: e.eval.friendly_name(event, labels).to_string(),
-                        tone: e.tone,
-                        count: e.count,
-                        share: e.share,
-                    })
-                    .collect(),
-                efficiency: d.efficiency,
-                grade: level(d.efficiency),
-                positiveness: d.positiveness,
-                errors: d.errors,
-                unforced_errors: d.unforced_errors,
-                phases_per_point: d.phases_per_point.map(|(per_point, won, rallies)| {
-                    RalliesPerPoint {
-                        per_point,
-                        won,
-                        rallies,
-                    }
-                }),
-                faults: d.faults,
-                points: d.points,
-                zones: d
-                    .zones
-                    .iter()
-                    .map(|z| DetailZone {
-                        zone: zone_number(z.zone),
-                        share: z.share,
-                        conversion: z.conversion,
-                    })
-                    .collect(),
-                targets_told: d.targets_told,
-                targets: match (d.targets.is_empty(), d.conflicts.is_empty()) {
-                    (true, _) => vec![],
-                    (false, conflicts) => {
-                        let side = CourtSide::of(event).unwrap_or(CourtSide::Theirs);
-                        let rows = match (TargetKind::of(event), conflicts) {
-                            (Some(TargetKind::Net), _) => vec![CourtZoneEnum::net_shown(side)],
-                            (_, true) => CourtZoneEnum::zones_shown(side),
-                            (_, false) => CourtZoneEnum::shown(side),
-                        };
-                        rows.iter()
-                            .map(|row| {
-                                row.iter()
-                                    .filter_map(|zone| {
-                                        d.targets
-                                            .iter()
-                                            .chain(d.conflicts.iter())
-                                            .find(|t| t.zone == *zone)
-                                    })
-                                    .map(|t| TargetStats {
-                                        value: t.zone,
-                                        label: t.zone.to_string(),
-                                        zone: t.zone.is_zone(),
-                                        count: t.count,
-                                        share: t.share,
-                                        efficiency: t.efficiency,
-                                    })
-                                    .collect()
-                            })
-                            .collect()
-                    }
-                },
-                on_conflicts: d.on_conflicts.map(|on| ConflictStats {
-                    count: on.count,
-                    share: on.share,
-                    efficiency: on.efficiency,
-                }),
-                blockers_told: d.blockers_told,
-                blockers: d
-                    .blockers
-                    .iter()
-                    .map(|b| BlockersStats {
-                        value: b.blockers,
-                        name: b.blockers.name(labels).to_string(),
-                        count: b.count,
-                        share: b.share,
-                        efficiency: b.efficiency,
-                    })
-                    .collect(),
-                players: by_player(stats, event, &narrowed)
-                    .into_iter()
-                    .filter_map(|line| {
-                        player_of(line.player).map(|player| PlayerStats {
-                            player,
-                            total: line.total,
-                            efficiency: line.efficiency,
-                            positiveness: line.positiveness,
-                            points: line.points,
-                            errors: line.errors,
-                            grade: level(line.efficiency),
+    let (fundamental, freeballs) =
+        match Breakdown::from_start(stats, event, &narrowed, filter.serve_start) {
+            Breakdown::Fundamental(d) => (
+                Some(FundamentalDetail {
+                    total: d.total,
+                    evals: d
+                        .evals
+                        .iter()
+                        .map(|e| EvalStats {
+                            eval: e.eval,
+                            symbol: e.eval.to_string(),
+                            name: e.eval.friendly_name(event, labels).to_string(),
+                            tone: e.tone,
+                            count: e.count,
+                            share: e.share,
                         })
-                    })
-                    .collect(),
-            }),
-            None,
-        ),
-        Breakdown::Freeballs(f) => (
-            None,
-            Some(FreeballStats {
-                given: f.given,
-                received: f.received,
-                exploited: f.exploited.map(|(percentage, total, exploited)| Exploited {
-                    percentage,
-                    exploited,
-                    total,
+                        .collect(),
+                    efficiency: d.efficiency,
+                    grade: level(d.efficiency),
+                    positiveness: d.positiveness,
+                    errors: d.errors,
+                    unforced_errors: d.unforced_errors,
+                    phases_per_point: d.phases_per_point.map(|(per_point, won, rallies)| {
+                        RalliesPerPoint {
+                            per_point,
+                            won,
+                            rallies,
+                        }
+                    }),
+                    faults: d.faults,
+                    points: d.points,
+                    zones: d
+                        .zones
+                        .iter()
+                        .map(|z| DetailZone {
+                            zone: zone_number(z.zone),
+                            share: z.share,
+                            conversion: z.conversion,
+                        })
+                        .collect(),
+                    targets_told: d.targets_told,
+                    targets: match (d.targets.is_empty(), d.conflicts.is_empty()) {
+                        (true, _) => vec![],
+                        (false, conflicts) => {
+                            let side = CourtSide::of(event).unwrap_or(CourtSide::Theirs);
+                            let rows = match (TargetKind::of(event), conflicts) {
+                                (Some(TargetKind::Net), _) => vec![CourtZoneEnum::net_shown(side)],
+                                (_, true) => CourtZoneEnum::zones_shown(side),
+                                (_, false) => CourtZoneEnum::shown(side),
+                            };
+                            rows.iter()
+                                .map(|row| {
+                                    row.iter()
+                                        .filter_map(|zone| {
+                                            d.targets
+                                                .iter()
+                                                .chain(d.conflicts.iter())
+                                                .find(|t| t.zone == *zone)
+                                        })
+                                        .map(|t| TargetStats {
+                                            value: t.zone,
+                                            label: t.zone.to_string(),
+                                            zone: t.zone.is_zone(),
+                                            count: t.count,
+                                            share: t.share,
+                                            efficiency: t.efficiency,
+                                        })
+                                        .collect()
+                                })
+                                .collect()
+                        }
+                    },
+                    on_conflicts: d.on_conflicts.map(|on| ConflictStats {
+                        count: on.count,
+                        share: on.share,
+                        efficiency: on.efficiency,
+                    }),
+                    blockers_told: d.blockers_told,
+                    blockers: d
+                        .blockers
+                        .iter()
+                        .map(|b| BlockersStats {
+                            value: b.blockers,
+                            name: b.blockers.name(labels).to_string(),
+                            count: b.count,
+                            share: b.share,
+                            efficiency: b.efficiency,
+                        })
+                        .collect(),
+                    serve_starts_told: d.serve_starts_told,
+                    serve_starts: ServeStartEnum::SHOWN
+                        .iter()
+                        .filter_map(|z| d.serve_starts.iter().find(|s| s.start == *z))
+                        .map(|s| ServeStartStats {
+                            value: s.start,
+                            label: s.start.to_string(),
+                            count: s.count,
+                            share: s.share,
+                            efficiency: s.efficiency,
+                            errors: s.errors,
+                        })
+                        .collect(),
+                    serve_paths: d.serve_paths.iter().filter_map(serve_path).collect(),
+                    players: by_player(stats, event, &narrowed)
+                        .into_iter()
+                        .filter_map(|line| {
+                            player_of(line.player).map(|player| PlayerStats {
+                                player,
+                                total: line.total,
+                                efficiency: line.efficiency,
+                                positiveness: line.positiveness,
+                                points: line.points,
+                                errors: line.errors,
+                                grade: level(line.efficiency),
+                            })
+                        })
+                        .collect(),
                 }),
-            }),
-        ),
-    };
+                None,
+            ),
+            Breakdown::Freeballs(f) => (
+                None,
+                Some(FreeballStats {
+                    given: f.given,
+                    received: f.received,
+                    exploited: f.exploited.map(|(percentage, total, exploited)| Exploited {
+                        percentage,
+                        exploited,
+                        total,
+                    }),
+                }),
+            ),
+        };
     let mut players: Vec<ScoutingPlayer> = involved(everyone)
         .into_iter()
         .filter_map(player_of)
@@ -2367,6 +2500,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         technique: e.technique.map(|t| t.to_string()),
         target: e.flags.target().map(|t| t.described()),
         blockers: e.flags.blockers().map(|b| b.name(labels).to_string()),
+        serve_start: e.flags.serve_start().map(|z| z.to_string()),
     }
 }
 
@@ -2379,6 +2513,34 @@ fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
             .role
             .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
     }
+}
+
+/// A serve path drawn on the whole court (see `ServePathStats`): from the
+/// fifth of our end line of its start to its zone of their court, both
+/// ends moved off the middle so that the arrows don't lie on each other:
+/// the start towards the column it goes to, the end towards the fifth it
+/// came from and, for the zones of a column not to be on one line, to the
+/// left at their end line, to the right at the net (within the zone). None for a zone not one of the nine.
+fn serve_path(p: &ServePath) -> Option<ServePathStats> {
+    let (row, column) = CourtZoneEnum::zones_shown(CourtSide::Theirs)
+        .iter()
+        .enumerate()
+        .find_map(|(r, row)| row.iter().position(|z| *z == p.zone).map(|c| (r, c)))?;
+    let fifth = ServeStartEnum::SHOWN.iter().position(|s| *s == p.start)?;
+    let middle = |i: usize, of: f64| (i as f64 + 0.5) * of;
+    Some(ServePathStats {
+        start: p.start,
+        zone: p.zone,
+        label: format!("{} → {}", p.start, p.zone),
+        from_x: middle(fifth, 9.0 / 5.0) + (column as f64 - 1.0) * 0.5,
+        from_y: 18.0,
+        to_x: (middle(column, 3.0) + (fifth as f64 - 2.0) * 0.45 + (row as f64 - 1.0) * 0.4)
+            .clamp(column as f64 * 3.0 + 0.3, column as f64 * 3.0 + 2.7),
+        to_y: middle(row, 3.0),
+        count: p.count,
+        share: p.share,
+        efficiency: p.efficiency,
+    })
 }
 
 /// The number scouts call a zone by.
@@ -2404,11 +2566,12 @@ fn trend_lines(
     team: &TeamEntry,
     labels: &Labels,
 ) -> Result<Vec<TrendLine>, MobileError> {
+    // replayed once: each set is a part of the match
     let match_replay = Replay::new(sets, max_substitutions)?;
-    let set_replays = sets
+    let set_replays: Vec<(u8, Replay)> = sets
         .iter()
-        .map(|set| Replay::new(&[set], max_substitutions).map(|r| (set.set_number, r)))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|set| (set.set_number, match_replay.set(set.set_number)))
+        .collect();
     let values = |points: Vec<TrendPoint<Option<f64>>>| {
         points.into_iter().map(|p| p.value).collect::<Vec<_>>()
     };
@@ -2879,23 +3042,17 @@ impl Scout4All {
         let team = self.read_team(&team_id)?;
         Ok(self
             .runtime
-            .block_on(self.match_reader.read_all(&team))?
+            .block_on(self.match_reader.read_summaries(&team))?
             .into_iter()
-            .map(|listed| match listed.map(|m| (m.get_status(), m)) {
-                Ok((Ok(status), m)) => MatchListing::Match {
+            .map(|listed| match listed {
+                Ok(m) => MatchListing::Match {
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
                     home: m.home,
-                    won: status.us_wins,
-                    lost: status.them_wins,
-                    finished: status.match_finished,
-                },
-                Ok((Err(_), m)) => MatchListing::Unreadable {
-                    reason: m
-                        .replay_issue()
-                        .map(|issue| issue.describe(self.language.labels())),
-                    folder: m.id,
+                    won: m.us_wins,
+                    lost: m.them_wins,
+                    finished: m.finished,
                 },
                 Err(unreadable) => MatchListing::Unreadable {
                     folder: unreadable.id,
@@ -2911,7 +3068,9 @@ impl Scout4All {
     pub fn opponents(&self, team_id: String) -> Result<Vec<String>, MobileError> {
         let team = self.read_team(&team_id)?;
         let teams = self.runtime.block_on(self.team_reader.read_all())?;
-        let met = self.runtime.block_on(self.match_reader.read_all(&team))?;
+        let met = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(&team))?;
         let ours = team.name.to_lowercase();
         let mut names: Vec<String> = teams
             .into_iter()
@@ -2938,10 +3097,12 @@ impl Scout4All {
             .into_iter()
             .flatten()
         {
-            let read = self.runtime.block_on(self.match_reader.read_all(&team))?;
-            matches.extend(read.into_iter().flatten().filter_map(|m| {
-                let status = m.get_status().ok()?;
-                Some((
+            let read = self
+                .runtime
+                .block_on(self.match_reader.read_summaries(&team))?;
+            matches.extend(read.into_iter().flatten().map(|m| {
+                let next = next_of(&m);
+                (
                     m.date,
                     HomeMatch {
                         team_id: team.id.to_string(),
@@ -2950,11 +3111,11 @@ impl Scout4All {
                         id: m.id,
                         opponent: m.opponent,
                         home: m.home,
-                        won: status.us_wins,
-                        lost: status.them_wins,
-                        next: next_kind(&status, &team),
+                        won: m.us_wins,
+                        lost: m.them_wins,
+                        next,
                     },
-                ))
+                )
             }));
         }
         matches.sort_by(|(a, _), (b, _)| b.cmp(a));
@@ -3347,20 +3508,30 @@ impl Scout4All {
 
     /// Adds a player to the team (no `player_id`) or updates the one with
     /// `player_id`; returns its id.
+    #[uniffi::method(default(namesake_confirmed = false))]
     pub fn save_player(
         &self,
         team_id: String,
         player_id: Option<String>,
         form: PlayerForm,
+        namesake_confirmed: bool,
     ) -> Result<String, MobileError> {
         let mut team = self.read_team(&team_id)?;
         let existing = player_id.map(|id| find_player(&team, &id)).transpose()?;
+        let labels = self.language.labels();
+        let namesake = player_form::namesake(&form, &team, existing.as_ref())
+            .filter(|_| !namesake_confirmed)
+            .map(|p| player_form::namesake_message(p, labels));
         let input = form
             .validate(&team, existing.as_ref(), Local::now().date_naive())
             .map_err(|e| MobileError::InvalidPlayer {
                 field: e.into(),
-                reason: e.message(self.language.labels()),
+                reason: e.message(labels),
             })?;
+        // the form valid first: then the namesake, to confirm
+        if let Some(reason) = namesake {
+            return Err(MobileError::Namesake { reason });
+        }
         let player = self
             .runtime
             .block_on(self.team_writer.save_player(input, &mut team))?;
@@ -3372,7 +3543,28 @@ impl Scout4All {
         let mut team = self.read_team(&team_id)?;
         let player = find_player(&team, &player_id)?;
         self.runtime
-            .block_on(self.team_writer.save_player(removal(&player), &mut team))?;
+            .block_on(self.team_writer.remove_player(player.id, &mut team))?;
+        Ok(())
+    }
+
+    /// Removes the team with its matches, for good; unpinned. The folder
+    /// of a team that can't be read is its id all the same.
+    pub fn delete_team(&self, team_id: String) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.runtime.block_on(self.team_writer.remove(&id))?;
+        // the team is gone all the same when the settings can't be written
+        if let Err(e) = self.set_pinned(team_id, false) {
+            log_error(&format!("could not unpin the removed team: {e:?}"));
+        }
+        Ok(())
+    }
+
+    /// Removes the match with its sets, for good; `match_id` may be the
+    /// folder of a match that can't be read.
+    pub fn delete_match(&self, team_id: String, match_id: String) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.runtime
+            .block_on(self.match_writer.remove(&id, &match_id))?;
         Ok(())
     }
 
@@ -4104,6 +4296,10 @@ fn clips_of(m: &MatchEntry, pick: &ClipPick) -> Result<Vec<EventRef>, MobileErro
         evals: (!pick.evals.is_empty()).then(|| EvalSet::of(&pick.evals)),
         zone: pick.zone.and_then(|z| ZoneEnum::try_from(z).ok()),
         target: pick.target,
+        serve_start: pick
+            .filter
+            .serve_start
+            .filter(|_| pick.event == EventTypeEnum::S),
         filter,
     };
     let mut sets: Vec<&SetEntry> = in_scope(&m.sets.iter().collect::<Vec<_>>(), pick.scope);
@@ -4577,12 +4773,17 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let anna = app
-            .save_player(team.clone(), None, player("Anna", "9"))
+            .save_player(team.clone(), None, player("Anna", "9"), false)
             .unwrap();
-        app.save_player(team.clone(), None, player("Bea", "3"))
+        app.save_player(team.clone(), None, player("Bea", "3"), false)
             .unwrap();
-        app.save_player(team.clone(), Some(anna.clone()), player("Anna", "12"))
-            .unwrap();
+        app.save_player(
+            team.clone(),
+            Some(anna.clone()),
+            player("Anna", "12"),
+            false,
+        )
+        .unwrap();
 
         let players = app.team(team.clone()).unwrap().players;
         let listed: Vec<(&str, u8)> = players
@@ -4598,7 +4799,8 @@ mod tests {
         let players = app.team(team.clone()).unwrap().players;
         assert_eq!(players.len(), 1);
         // the number of a removed player is free again
-        app.save_player(team, None, player("Carla", "12")).unwrap();
+        app.save_player(team, None, player("Carla", "12"), false)
+            .unwrap();
     }
 
     #[test]
@@ -4658,6 +4860,45 @@ mod tests {
         );
     }
 
+    /// A match removed, readable or not, leaves the list; a team removed
+    /// leaves the list and the pins, the matches with it.
+    #[test]
+    fn teams_and_matches_are_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team_id = app.save_team(None, form("Cortona")).unwrap();
+        let other = app.save_team(None, form("Arezzo")).unwrap();
+        let team = app.read_team(&team_id).unwrap();
+        let writer = StoreMatchWriter::new(Arc::new(FsStore::new(dir.path())));
+        let date = DateTime::parse_from_rfc3339("2026-10-04T18:00:00+02:00").unwrap();
+        let m = app
+            .runtime
+            .block_on(writer.create(&team, "Siena".into(), date, true, 6, String::new(), vec![]))
+            .unwrap();
+        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        assert_eq!(app.matches(team_id.clone()).unwrap().len(), 2);
+
+        app.delete_match(team_id.clone(), m.id).unwrap();
+        app.delete_match(team_id.clone(), "not-a-match".into())
+            .unwrap();
+        assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
+
+        app.delete_team(team_id.clone()).unwrap();
+        let ids: Vec<String> = app
+            .teams()
+            .unwrap()
+            .into_iter()
+            .filter_map(|t| match t {
+                TeamListing::Team { id, .. } => Some(id),
+                TeamListing::Unreadable { .. } => None,
+            })
+            .collect();
+        assert_eq!(ids, vec![other.clone()]);
+        assert!(!dir.path().join(&team_id).exists());
+        let pins = config(&dir)["pinned_teams"].to_string();
+        assert!(pins.contains(&other) && !pins.contains(&team_id), "{pins}");
+    }
+
     fn match_form(opponent: &str, date: &str, max_substitutions: &str) -> MatchForm {
         MatchForm {
             opponent: opponent.into(),
@@ -4676,8 +4917,13 @@ mod tests {
         let team = app.save_team(None, form("Cortona")).unwrap();
         app.save_team(None, form("Livorno")).unwrap();
         for n in 1..=7 {
-            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                .unwrap();
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
         }
         let date = "2026-10-24T18:00:00+02:00";
         for opponent in ["Arezzo", "livorno"] {
@@ -4695,9 +4941,14 @@ mod tests {
         let team = app.save_team(None, form("Cortona")).unwrap();
         let players: Vec<Uuid> = (1..=7)
             .map(|n| {
-                app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                    .and_then(|id| parse_id(&id))
-                    .unwrap()
+                app.save_player(
+                    team.clone(),
+                    None,
+                    player(&format!("P{n}"), &n.to_string()),
+                    false,
+                )
+                .and_then(|id| parse_id(&id))
+                .unwrap()
             })
             .collect();
         let date = "2026-10-24T18:00:00+02:00";
@@ -4751,7 +5002,7 @@ mod tests {
                 role,
                 ..player(&format!("P{n}"), &n.to_string())
             };
-            app.save_player(team.clone(), None, player).unwrap();
+            app.save_player(team.clone(), None, player, false).unwrap();
         }
         let date = "2026-10-24T18:00:00+02:00";
         let new = app
@@ -4813,8 +5064,13 @@ mod tests {
         let team = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<String> = (1..=7)
             .map(|n| {
-                app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                    .unwrap()
+                app.save_player(
+                    team.clone(),
+                    None,
+                    player(&format!("P{n}"), &n.to_string()),
+                    false,
+                )
+                .unwrap()
             })
             .collect();
         let date = "2026-10-24T18:00:00+02:00";
@@ -4867,8 +5123,13 @@ mod tests {
     fn match_with_a_set(app: &Scout4All) -> (String, String) {
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=7 {
-            app.save_player(team.clone(), None, player(&format!("P{n}"), &n.to_string()))
-                .unwrap();
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
         }
         let m = app
             .save_match(
@@ -5638,6 +5899,7 @@ mod tests {
                 siena.clone(),
                 None,
                 player(&format!("S{n}"), &n.to_string()),
+                false,
             )
             .unwrap();
         }
@@ -5992,6 +6254,146 @@ mod tests {
         );
     }
 
+    /// Where our serve starts from: the five zones from the left as our
+    /// server sees them, along with the evaluation of our serve only;
+    /// remembered for the server; the serves by zone they started from,
+    /// where they went only from the zone asked, and their clips.
+    #[test]
+    fn the_serves_by_where_they_started_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let labels = |s: &Scouting| {
+            s.serve_starts()
+                .iter()
+                .map(|c| (c.label.clone(), c.chosen))
+                .collect::<Vec<_>>()
+        };
+        let none: Vec<(String, bool)> = ["5", "7", "6", "9", "1"]
+            .iter()
+            .map(|l| (l.to_string(), false))
+            .collect();
+        assert_eq!(labels(&scouting), none);
+        // from 1 to 1, from 1 to 5, then from 5 without a target
+        scouting.touch_serve_start(ServeStartEnum::Z1).unwrap();
+        scouting.touch_target(1, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        // remembered for the same server
+        assert_eq!(
+            scouting
+                .serve_starts()
+                .iter()
+                .find(|c| c.chosen)
+                .map(|c| c.value),
+            Some(ServeStartEnum::Z1)
+        );
+        scouting.touch_target(5, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        scouting.touch_serve_start(ServeStartEnum::Z5).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        let detail = |serve_start| {
+            scouting
+                .detail(
+                    StatsScope::Match,
+                    EventTypeEnum::S,
+                    DetailFilter {
+                        serve_start,
+                        ..DetailFilter::default()
+                    },
+                )
+                .unwrap()
+                .fundamental
+                .unwrap()
+        };
+        let all = detail(None);
+        assert_eq!(all.serve_starts_told, 3);
+        let shares: Vec<(&str, u32)> = all
+            .serve_starts
+            .iter()
+            .map(|z| (z.label.as_str(), z.count))
+            .collect();
+        assert_eq!(
+            shares,
+            vec![("5", 1), ("7", 0), ("6", 0), ("9", 0), ("1", 2)]
+        );
+        assert_eq!(all.targets_told, 2);
+        // the paths on the whole court: from the right fifth of our end
+        // line to 1 (their end line, on the left) and to 5 (on the right)
+        // each end moved towards the other: off the middle
+        let cm = |m: f64| (m * 100.0).round() as i64;
+        let paths: Vec<(String, i64, i64, i64, i64)> = all
+            .serve_paths
+            .iter()
+            .map(|p| {
+                (
+                    p.label.clone(),
+                    cm(p.from_x),
+                    cm(p.from_y),
+                    cm(p.to_x),
+                    cm(p.to_y),
+                )
+            })
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            sorted,
+            vec![
+                ("1 → 1".to_string(), 760, 1800, 200, 150),
+                ("1 → 5".to_string(), 860, 1800, 800, 150),
+            ]
+        );
+        // no errors yet
+        assert_eq!(all.serve_starts.iter().map(|z| z.errors).sum::<u32>(), 0);
+        let from_1 = detail(Some(ServeStartEnum::Z1));
+        assert_eq!((from_1.total, from_1.targets_told), (3, 2));
+        assert_eq!(from_1.serve_starts, all.serve_starts);
+        let from_5 = detail(Some(ServeStartEnum::Z5));
+        assert!(from_5.targets.is_empty() && from_5.serve_paths.is_empty());
+        assert_eq!(from_1.serve_paths.len(), 2);
+        // the event tells it, the last first
+        let state = scouting.state();
+        assert_eq!(
+            state
+                .events
+                .iter()
+                .map(|e| e.serve_start.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("5"), Some("1"), Some("1")]
+        );
+        // not for their serve: our reception
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        let receiver = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(receiver).unwrap();
+        assert!(scouting.serve_starts().is_empty());
+        assert!(scouting.touch_serve_start(ServeStartEnum::Z1).is_err());
+        // the clips from 1, to 1 from 1
+        let pick = |serve_start, target| ClipPick {
+            scope: StatsScope::Match,
+            event: EventTypeEnum::S,
+            filter: DetailFilter {
+                serve_start,
+                ..DetailFilter::default()
+            },
+            evals: vec![],
+            zone: None,
+            target,
+        };
+        let clips = |p| app.match_clips(&team, &m, &p).unwrap().len();
+        assert_eq!(clips(pick(None, None)), 4);
+        assert_eq!(clips(pick(Some(ServeStartEnum::Z1), None)), 2);
+        assert_eq!(
+            clips(pick(Some(ServeStartEnum::Z1), Some(CourtZoneEnum::Z5))),
+            1
+        );
+        assert_eq!(
+            clips(pick(Some(ServeStartEnum::Z5), Some(CourtZoneEnum::Z5))),
+            0
+        );
+    }
+
     #[test]
     fn the_detail_of_a_fundamental() {
         let dir = tempfile::tempdir().unwrap();
@@ -6310,15 +6712,39 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
-        app.save_player(team.clone(), None, player("Anna", "9"))
+        app.save_player(team.clone(), None, player("Anna", "9"), false)
             .unwrap();
-        match app.save_player(team, None, player("Bea", "9")) {
+        match app.save_player(team, None, player("Bea", "9"), false) {
             Err(MobileError::InvalidPlayer { field, reason }) => {
                 assert_eq!(field, PlayerField::Number);
                 assert_eq!(reason, "number already in use");
             }
             other => unreachable!("expected a number in use, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_namesake_is_saved_once_confirmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        app.save_player(team.clone(), None, player("Anna Rossi", "9"), false)
+            .unwrap();
+        match app.save_player(team.clone(), None, player("anna rossi", "10"), false) {
+            Err(MobileError::Namesake { reason }) => {
+                assert_eq!(reason, "Anna Rossi, number 9, is already in the team.");
+            }
+            other => unreachable!("expected a namesake, got {other:?}"),
+        }
+        assert_eq!(app.team(team.clone()).unwrap().players.len(), 1);
+        // an error of the form comes first: the namesake once it's valid
+        assert!(matches!(
+            app.save_player(team.clone(), None, player("Anna Rossi", "9"), false),
+            Err(MobileError::InvalidPlayer { .. })
+        ));
+        app.save_player(team.clone(), None, player("anna rossi", "10"), true)
+            .unwrap();
+        assert_eq!(app.team(team).unwrap().players.len(), 2);
     }
 
     /// The fixtures of the core: archives as exported up to v0.9.0.

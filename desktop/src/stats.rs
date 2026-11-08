@@ -28,7 +28,7 @@ use {
     scout4all_core::{
         analysis::MOVING_WINDOW,
         detail::Tone,
-        shapes::court_zone::CourtZoneEnum,
+        shapes::court_zone::{CourtZoneEnum, ServeStartEnum},
         shapes::{
             enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum},
             flags::ReceptionSchemeEnum,
@@ -144,6 +144,12 @@ pub enum Message {
     ClipZone(u8),
     /// a zone of the court, to watch only those
     ClipTarget(CourtZoneEnum),
+    /// a zone our serve starts from: where the serves went only from
+    /// there, and their actions (or all again)
+    ServeStart(ServeStartEnum),
+    /// the serves from a zone of our end line to one of their court: only
+    /// from there, and their actions (or all again)
+    ServePath(ServeStartEnum, CourtZoneEnum),
     /// all the actions of the detail again
     ClearPick,
     /// the actions of the detail in the video
@@ -651,11 +657,19 @@ impl StatsScreen {
                 .and_then(|f| f.targets.iter().flatten().find(|x| x.value == t))
                 .map(|x| ui::fill(s.zone_n, std::slice::from_ref(&x.label)))
         });
+        let start = match self.event {
+            EventTypeEnum::S => self
+                .filter
+                .serve_start
+                .map(|z| ui::fill(s.serve_from, &[z.to_string()])),
+            _ => None,
+        };
         [
             fundamental,
             evals,
             player,
             zone,
+            start,
             target,
             sets,
             rotation,
@@ -972,6 +986,21 @@ impl StatsScreen {
             Message::ClipTarget(target) => {
                 self.clip_target = (self.clip_target != Some(target)).then_some(target);
                 self.recount();
+            }
+            Message::ServePath(start, zone) => {
+                let picked =
+                    self.filter.serve_start == Some(start) && self.clip_target == Some(zone);
+                self.clip_target = (!picked).then_some(zone);
+                match picked {
+                    // the arrow again: all of them, from every zone
+                    true => self.filter.serve_start = None,
+                    false => self.filter.serve_start = Some(start),
+                }
+                self.load();
+            }
+            Message::ServeStart(start) => {
+                self.filter.serve_start = (self.filter.serve_start != Some(start)).then_some(start);
+                self.load();
             }
             Message::ClearPick => {
                 self.clear_pick();
@@ -1848,6 +1877,8 @@ impl StatsScreen {
         );
         let zones: Vec<Element<'a, Message>> = [
             (!f.zones.is_empty()).then(|| self.attack_zones(f, s, c)),
+            (!f.serve_starts.is_empty()).then(|| self.serve_starts(f, s, c)),
+            (!f.serve_starts.is_empty()).then(|| self.serve_paths(f, s, c)),
             (!f.targets.is_empty()).then(|| self.targets(f, s, c)),
             (!f.blockers.is_empty()).then(|| self.blockers(f, s, c)),
         ]
@@ -1883,6 +1914,13 @@ impl StatsScreen {
             EventTypeEnum::B => (s.blocks_by_zone, s.block_zones_told),
             _ => (s.serves_by_zone, s.serve_zones_told),
         };
+        // only the serves from the zone picked
+        let title = match (self.event, self.filter.serve_start) {
+            (EventTypeEnum::S, Some(start)) => {
+                format!("{title} · {}", ui::fill(s.serve_from, &[start.to_string()]))
+            }
+            _ => title.to_string(),
+        };
         let most = f
             .targets
             .iter()
@@ -1910,7 +1948,7 @@ impl StatsScreen {
             None => space::vertical().height(0).into(),
         };
         ui::panel(
-            Some(title),
+            Some(&title),
             column![
                 small(
                     ui::fill(told, &[f.targets_told.to_string(), f.total.to_string()]),
@@ -1927,32 +1965,152 @@ impl StatsScreen {
     /// A zone of the court: how many went there, or how well.
     fn target<'a>(&self, t: &TargetStats, most: f64, c: Colors) -> Element<'a, Message> {
         let some = t.count > 0.0;
-        let count = match t.count.fract() == 0.0 {
-            true => format!("{:.0}", t.count),
-            false => format!("{:.1}", t.count),
+        let cell = self.zone_tile(t.label.clone(), t.count, t.share, t.efficiency, most, c);
+        // picked to watch only its actions, of a match
+        let message = self
+            .clips
+            .filter(|_| some)
+            .map(|_| Message::ClipTarget(t.value));
+        container(pickable(
+            cell,
+            self.clip_target == Some(t.value),
+            message,
+            c,
+        ))
+        .width(match t.zone {
+            true => Length::FillPortion(3),
+            false => Length::FillPortion(1),
+        })
+        .into()
+    }
+
+    /// Our serves by the zone they started from, below the court as our
+    /// server sees our end line: a click shows where they went only from
+    /// there (their actions only too), again from all.
+    fn serve_starts<'a>(
+        &'a self,
+        f: &'a FundamentalDetail,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let most = f
+            .serve_starts
+            .iter()
+            .map(|z| f64::from(z.count))
+            .fold(1.0, f64::max);
+        let cells = f.serve_starts.iter().map(|z| {
+            let tile = self.zone_tile(
+                z.label.clone(),
+                f64::from(z.count),
+                z.share,
+                z.efficiency,
+                most,
+                c,
+            );
+            let picked = self.filter.serve_start == Some(z.value);
+            let message = (z.count > 0 || picked).then_some(Message::ServeStart(z.value));
+            container(pickable(tile, picked, message, c))
+                .width(Length::Fill)
+                .into()
+        });
+        ui::panel(
+            Some(s.serves_by_start),
+            column![
+                small(
+                    ui::fill(
+                        s.serve_starts_told,
+                        &[f.serve_starts_told.to_string(), f.total.to_string()]
+                    ),
+                    c
+                ),
+                Row::with_children(cells).spacing(4),
+            ]
+            .spacing(8),
+            c,
+        )
+    }
+
+    /// Where our serves went from where they started, on the whole court
+    /// (see `paths`): a click on a zone of our end line or on an arrow
+    /// narrows to its serves, again to all.
+    fn serve_paths<'a>(
+        &'a self,
+        f: &'a FundamentalDetail,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let both: f64 = f.serve_paths.iter().map(|p| p.count).sum();
+        let chart = crate::paths::PathsChart {
+            paths: &f.serve_paths,
+            starts: &f.serve_starts,
+            targets: &f.targets,
+            start: self.filter.serve_start,
+            path: self.filter.serve_start.zip(self.clip_target),
+            colors: c,
         };
-        let (background, value, detail) = match (self.efficiency, t.efficiency) {
+        let canvas: Element<'a, crate::paths::Pick> = iced::widget::canvas(chart)
+            .width(Length::Fill)
+            .height(Length::Fixed(PATHS_HEIGHT))
+            .into();
+        ui::panel(
+            Some(s.serve_paths),
+            column![
+                small(
+                    ui::fill(
+                        s.serve_paths_told,
+                        &[crate::paths::count(both), f.total.to_string()]
+                    ),
+                    c
+                ),
+                canvas.map(|pick| match pick {
+                    crate::paths::Pick::Start(start) => Message::ServeStart(start),
+                    crate::paths::Pick::Path(start, zone) => Message::ServePath(start, zone),
+                }),
+                small(s.serve_paths_legend, c),
+            ]
+            .spacing(8),
+            c,
+        )
+    }
+
+    /// A zone: its label, how many (two cells of different zones count
+    /// half in each) and of how many, or how well.
+    fn zone_tile<'a>(
+        &self,
+        label: String,
+        count: f64,
+        share: f64,
+        efficiency: Option<f64>,
+        most: f64,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let some = count > 0.0;
+        let shown = match count.fract() == 0.0 {
+            true => format!("{count:.0}"),
+            false => format!("{count:.1}"),
+        };
+        let (background, value, detail) = match (self.efficiency, efficiency) {
             (false, _) => (
-                some.then(|| theme::mix(c.panel, c.accent, (t.count / most) as f32)),
+                some.then(|| theme::mix(c.panel, c.accent, (count / most) as f32)),
                 match some {
-                    true => format!("{:.0}%", t.share),
+                    true => format!("{share:.0}%"),
                     false => String::new(),
                 },
                 match some {
-                    true => format!("({count})"),
+                    true => format!("({shown})"),
                     false => String::new(),
                 },
             ),
             (true, Some(e)) => (
                 Some(grade_color((e + 100.0) / 200.0, c)),
                 format!("{e:+.0}%"),
-                format!("n={count}"),
+                format!("n={shown}"),
             ),
             // too few to tell
             (true, None) => (
                 None,
                 match some {
-                    true => format!("({count})"),
+                    true => format!("({shown})"),
                     false => String::new(),
                 },
                 String::new(),
@@ -1962,9 +2120,9 @@ impl StatsScreen {
             Some(b) if b.r * 0.299 + b.g * 0.587 + b.b * 0.114 > 0.55 => theme::DARK.background,
             _ => c.text,
         };
-        let cell = container(
+        container(
             column![
-                text(t.label.clone()).size(SIZE_SMALL).color(ink),
+                text(label).size(SIZE_SMALL).color(ink),
                 text(value)
                     .size(SIZE_BODY)
                     .font(theme::fonts().bold)
@@ -1981,21 +2139,6 @@ impl StatsScreen {
             background: background.map(Into::into),
             border: iced::border::rounded(6).color(c.border).width(1),
             ..container::Style::default()
-        });
-        // picked to watch only its actions, of a match
-        let message = self
-            .clips
-            .filter(|_| some)
-            .map(|_| Message::ClipTarget(t.value));
-        container(pickable(
-            cell,
-            self.clip_target == Some(t.value),
-            message,
-            c,
-        ))
-        .width(match t.zone {
-            true => Length::FillPortion(3),
-            false => Length::FillPortion(1),
         })
         .into()
     }
@@ -2124,6 +2267,10 @@ impl StatsScreen {
 
 /// A cell of the detail to click, to watch only its actions: lit when
 /// picked.
+/// How high the chart of the serve paths is: the whole court, 9 by 18
+/// meters with our end line under it, readable in a column.
+const PATHS_HEIGHT: f32 = 600.0;
+
 fn pickable<'a>(
     content: impl Into<Element<'a, Message>>,
     picked: bool,
@@ -2630,6 +2777,7 @@ pub(crate) mod tests {
                     height_cm: String::new(),
                     notes: String::new(),
                 },
+                false,
             )
             .unwrap();
         }
@@ -2754,6 +2902,106 @@ pub(crate) mod tests {
         // a team: its matches (see `the_actions_of_the_team_to_watch`)
         let analysis = StatsScreen::team(core.clone(), team.clone(), s).unwrap();
         assert!(analysis.clips.is_some());
+    }
+
+    /// Our serves by where they started from: a click on a zone shows
+    /// where they went only from there, and picks only their actions;
+    /// again, all of them.
+    #[test]
+    fn the_serves_from_a_zone() {
+        use scout4all_core::shapes::court_zone::ServeStartEnum::{Z1, Z5};
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let arezzo = match_against(&core, &team, "Arezzo");
+        let scouting = core.scouting(team.clone(), arezzo.clone()).unwrap();
+        // from 1 to 1 twice (from 1 remembered the second time), from 5
+        // to 5
+        for (start, zone) in [(Some(Z1), 1), (None, 1), (Some(Z5), 5)] {
+            if let Some(start) = start {
+                scouting.touch_serve_start(start).unwrap();
+            }
+            scouting.touch_target(zone, "A".into()).unwrap();
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let mut screen = StatsScreen::new(core.clone(), team, arezzo).unwrap();
+        screen.update(Message::Page(2));
+        assert_eq!(screen.event, EventTypeEnum::S);
+        let serves = |screen: &StatsScreen| {
+            screen
+                .detail
+                .as_ref()
+                .and_then(|d| d.fundamental.clone())
+                .unwrap()
+        };
+        let f = serves(&screen);
+        assert_eq!(f.serve_starts_told, 3);
+        let counts: Vec<(String, u32)> = f
+            .serve_starts
+            .iter()
+            .map(|z| (z.label.clone(), z.count))
+            .collect();
+        assert_eq!(
+            counts,
+            vec![
+                ("5".into(), 1),
+                ("7".into(), 0),
+                ("6".into(), 0),
+                ("9".into(), 0),
+                ("1".into(), 2)
+            ]
+        );
+        assert_eq!((f.targets_told, screen.clips), (3, Some(6)));
+        screen.update(Message::ServeStart(Z1));
+        let f = serves(&screen);
+        assert_eq!((f.targets_told, screen.clips), (2, Some(2)));
+        assert_eq!(f.serve_starts_told, 3);
+        assert_eq!(screen.clips_title(s), "Battuta · da 1");
+        screen.update(Message::ServeStart(Z1));
+        assert_eq!(serves(&screen).targets_told, 3);
+        assert_eq!(screen.clips, Some(6));
+    }
+
+    /// An arrow of the serve paths: the serves from its start to its zone,
+    /// their actions only; again, all of them.
+    #[test]
+    fn the_serves_along_an_arrow() {
+        use scout4all_core::shapes::court_zone::ServeStartEnum::{Z1, Z5};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let arezzo = match_against(&core, &team, "Arezzo");
+        let scouting = core.scouting(team.clone(), arezzo.clone()).unwrap();
+        // from 1 to 1 and to 5, from 5 to 5
+        for (start, zone) in [(Some(Z1), 1), (None, 5), (Some(Z5), 5)] {
+            if let Some(start) = start {
+                scouting.touch_serve_start(start).unwrap();
+            }
+            scouting.touch_target(zone, "A".into()).unwrap();
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let mut screen = StatsScreen::new(core.clone(), team, arezzo).unwrap();
+        screen.update(Message::Page(2));
+        let paths = |screen: &StatsScreen| -> Vec<String> {
+            let f = screen
+                .detail
+                .as_ref()
+                .and_then(|d| d.fundamental.clone())
+                .unwrap();
+            let mut labels: Vec<String> = f.serve_paths.iter().map(|p| p.label.clone()).collect();
+            labels.sort();
+            labels
+        };
+        assert_eq!(paths(&screen), vec!["1 → 1", "1 → 5", "5 → 5"]);
+        screen.update(Message::ServePath(Z1, CourtZoneEnum::Z5));
+        assert_eq!(paths(&screen), vec!["1 → 1", "1 → 5"]);
+        assert_eq!(screen.clips, Some(1));
+        screen.update(Message::ServePath(Z1, CourtZoneEnum::Z5));
+        assert_eq!(paths(&screen), vec!["1 → 1", "1 → 5", "5 → 5"]);
+        assert_eq!(screen.clips, Some(6));
     }
 
     /// The match of the team against `opponent`.

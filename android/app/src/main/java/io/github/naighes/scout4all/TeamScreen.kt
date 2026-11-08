@@ -85,6 +85,7 @@ fun TeamScreen(
     onMatch: (String) -> Unit,
     onDvw: () -> Unit = {},
     onAnalysis: () -> Unit = {},
+    onDeleted: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<TeamState>(TeamState.Loading, id) {
@@ -94,8 +95,12 @@ fun TeamScreen(
             TeamState.Failed(e.reason)
         }
     }
+    // the folder of an unreadable match, to delete once confirmed; then
+    // the matches read again
+    var unreadable by rememberSaveable { mutableStateOf<String?>(null) }
+    var deletedMatches by rememberSaveable { mutableIntStateOf(0) }
     // apart from the team: replaying the sets doesn't hold up the players
-    val matches by produceState<MatchesState>(MatchesState.Loading, id) {
+    val matches by produceState<MatchesState>(MatchesState.Loading, id, deletedMatches) {
         value = try {
             MatchesState.Loaded(app.core { it.matches(id) })
         } catch (e: MobileException) {
@@ -104,6 +109,15 @@ fun TeamScreen(
     }
     var tab by rememberSaveable { mutableIntStateOf(PLAYERS_TAB) }
     val loaded = state is TeamState.Loaded
+    unreadable?.let { folder ->
+        Deletion(
+            stringResource(R.string.delete_match_text, folder),
+            asking = true,
+            onAsking = { if (!it) unreadable = null },
+            delete = { it.deleteMatch(id, folder) },
+            onDeleted = { deletedMatches++ },
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -132,6 +146,13 @@ fun TeamScreen(
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_team))
                         }
+                        val name = (state as? TeamState.Loaded)?.team?.name.orEmpty()
+                        DeleteButton(
+                            stringResource(R.string.delete_team),
+                            stringResource(R.string.delete_team_text, name),
+                            delete = { it.deleteTeam(id) },
+                            onDeleted = onDeleted,
+                        )
                     }
                 },
             )
@@ -177,7 +198,7 @@ fun TeamScreen(
                 val content = Modifier.fillMaxSize()
                 when (tab) {
                     PLAYERS_TAB -> Players(s.team, onPlayer, content)
-                    else -> Matches(matches, onMatch, onAnalysis, content)
+                    else -> Matches(matches, onMatch, onAnalysis, content, onUnreadable = { unreadable = it })
                 }
             }
         }
@@ -194,7 +215,13 @@ private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, modifier: Mod
 }
 
 @Composable
-private fun Matches(state: MatchesState, onMatch: (String) -> Unit, onAnalysis: () -> Unit, modifier: Modifier) = when (state) {
+private fun Matches(
+    state: MatchesState,
+    onMatch: (String) -> Unit,
+    onAnalysis: () -> Unit,
+    modifier: Modifier,
+    onUnreadable: (String) -> Unit,
+) = when (state) {
     MatchesState.Loading -> Centered(modifier) { CircularProgressIndicator() }
     is MatchesState.Failed -> Centered(modifier) { Text(state.message) }
     is MatchesState.Loaded -> when {
@@ -208,13 +235,13 @@ private fun Matches(state: MatchesState, onMatch: (String) -> Unit, onAnalysis: 
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 ) { Text(stringResource(R.string.analysis)) }
             }
-            items(state.matches) { MatchRow(it, onMatch) }
+            items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
         }
     }
 }
 
 @Composable
-private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
+private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (String) -> Unit) = when (m) {
     is MatchListing.Match -> ListItem(
         modifier = Modifier.clickable { onMatch(m.id) },
         // home or away at a glance, in the grey of the secondary text
@@ -252,9 +279,13 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit) = when (m) {
         },
     )
     // why, when it's known: e.g. a set this version doesn't replay
+    // a touch deletes it, once confirmed
     is MatchListing.Unreadable -> ListItem(
+        modifier = Modifier.clickable { onUnreadable(m.folder) },
         headlineContent = { Text(stringResource(R.string.unreadable_match)) },
-        supportingContent = { Text(m.reason?.let { "${m.folder}\n$it" } ?: m.folder) },
+        supportingContent = {
+            Text(listOfNotNull(m.folder, m.reason, stringResource(R.string.unreadable_match_delete)).joinToString("\n"))
+        },
     )
 }
 

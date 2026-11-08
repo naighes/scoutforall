@@ -57,6 +57,23 @@ class PlayerFormTest {
     }
 
     @Test
+    fun aNamesakeIsSavedAfterAsking() {
+        core { it.savePlayer(team, null, PlayerForm("Paola Egonu", RoleEnum.OPPOSITE_HITTER, "18")) }
+        show()
+        rule.type(string(R.string.name), "paola egonu")
+        rule.type(string(R.string.number), "81")
+        rule.onNodeWithText(role(RoleEnum.OPPOSITE_HITTER)).performScrollTo().performClick()
+        rule.save()
+        rule.waitForText("Paola Egonu, number 18, is already in the team.")
+        rule.onNodeWithText(string(R.string.cancel)).performClick()
+        assertEquals(1, players().size)
+        rule.save()
+        rule.onNodeWithText(string(R.string.save_anyway)).performClick()
+        rule.waitFor { done == 1 }
+        assertEquals(listOf(18, 81), players().map { it.number.toInt() }.sorted())
+    }
+
+    @Test
     fun aNewPlayer() {
         show()
         rule.type(string(R.string.name), "Paola Egonu")
@@ -87,7 +104,7 @@ class PlayerFormTest {
         rule.onNodeWithText(string(R.string.cancel)).performClick()
         assertEquals(1, players().size)
         rule.onNodeWithContentDescription(string(R.string.remove_player)).performClick()
-        rule.onNodeWithText(string(R.string.remove)).performClick()
+        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
         rule.waitFor { done == 1 }
         assertEquals(0, players().size)
     }

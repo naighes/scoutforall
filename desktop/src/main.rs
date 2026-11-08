@@ -21,6 +21,7 @@ mod general;
 mod home;
 mod keymap;
 mod live;
+mod paths;
 mod scouting;
 mod settings;
 mod share;

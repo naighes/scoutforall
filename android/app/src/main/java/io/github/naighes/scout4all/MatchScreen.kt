@@ -60,6 +60,7 @@ fun MatchScreen(
     onSet: (set: Int) -> Unit,
     onStats: () -> Unit,
     onVideo: () -> Unit = {},
+    onDeleted: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<MatchState>(MatchState.Loading, teamId, matchId) {
@@ -80,6 +81,14 @@ fun MatchScreen(
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_match))
                         }
+                        val m = (state as? MatchState.Loaded)?.match
+                        val name = m?.let { "${it.opponent} · ${matchDate(it.date)}" }.orEmpty()
+                        DeleteButton(
+                            stringResource(R.string.delete_match),
+                            stringResource(R.string.delete_match_text, name),
+                            delete = { it.deleteMatch(teamId, matchId) },
+                            onDeleted = onDeleted,
+                        )
                     }
                 },
             )

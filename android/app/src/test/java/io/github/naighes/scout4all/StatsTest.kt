@@ -7,6 +7,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
 import io.github.naighes.scout4all.core.BlockersEnum
 import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.ServeStartEnum
+import androidx.compose.ui.test.hasContentDescription
 import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -32,9 +34,10 @@ class StatsLayoutTest(private val screen: Size) {
         val team = saveNationalTeam()
         val match = startFirstSet(team)
         // the serves by zone in the detail: to 4/3 (3D and 4A), to 1, then
-        // without one
+        // without one; from 1 (remembered for the second)
         core { c ->
             c.scouting(team, match).use { s ->
+                s.touchServeStart(ServeStartEnum.Z1)
                 s.touchTarget(3u, "D")
                 s.touchTarget(4u, "A")
                 s.chooseEval(EvalEnum.PERFECT)
@@ -92,6 +95,18 @@ class StatsLayoutTest(private val screen: Size) {
         rule.onNode(hasText(efficiency) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         rule.shot("stats-zone-efficiency-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        // by where they started from: from 1, where they went only from there
+        rule.waitForText(string(R.string.serves_by_start))
+        val fromOne = hasContentDescription("${string(R.string.serve_start)} 1", substring = true) and hasClickAction()
+        rule.onNode(fromOne).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText("${string(R.string.serves_by_zone)} · ${string(R.string.serve_from, "1")}")
+        rule.shot("stats-serve-starts-$screen")
+        // where they went from there, on the whole court: to 1, half to 3
+        // and to 4 (3D and 4A), read by TalkBack
+        rule.waitForText(string(R.string.serve_paths))
+        rule.onNode(hasContentDescription("1 → 1 · 1 (50%)", substring = true)).assertExists()
+        rule.onNode(hasContentDescription("1 → 3 · 0.5 (25%)", substring = true)).assertExists()
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         // the reception and the defense, with the conflict zones; the
         // block, at the net; the attack, by zone

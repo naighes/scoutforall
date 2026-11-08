@@ -1,6 +1,7 @@
 //! A team: what it is, its players and its matches side by side. The
-//! players are added, edited and removed here, the matches created and
-//! opened. ← → (or ⇧Tab Tab) between players and matches, ↑ ↓ in the list.
+//! players are added, edited and removed here, the matches created, opened
+//! and deleted, the team deleted. ← → (or ⇧Tab Tab) between players and
+//! matches, ↑ ↓ in the list, ⌫ deletes the one chosen, ⇧⌫ the team.
 
 use {
     crate::{
@@ -28,8 +29,17 @@ pub enum Panel {
 enum Mode {
     Browse,
     Edit(Box<Editor>),
-    /// the player to remove, once confirmed: id and name
-    Remove(String, String),
+    /// what to delete, once confirmed
+    Delete(Deletion),
+}
+
+/// What goes, for good, with what the question says of it.
+enum Deletion {
+    /// id and name
+    Player(String, String),
+    /// id (or the folder of an unreadable one) and what it is
+    Match(String, String),
+    Team,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +52,7 @@ pub enum Message {
     Import,
     Export,
     Analysis,
+    DeleteTeam,
     Form(form::Message),
     Confirm,
     Cancel,
@@ -120,7 +131,7 @@ impl TeamScreen {
     pub fn focus_id(&self) -> Option<Id> {
         match &self.mode {
             Mode::Edit(editor) => Some(editor.focus_id()),
-            Mode::Browse | Mode::Remove(..) => None,
+            Mode::Browse | Mode::Delete(_) => None,
         }
     }
 
@@ -165,20 +176,58 @@ impl TeamScreen {
         }
     }
 
-    fn ask_removal(&mut self, index: usize) {
-        if let Some(p) = self.details.players.get(index) {
-            self.player = index;
-            self.mode = Mode::Remove(p.id.clone(), format!("{} {}", p.number, p.name));
+    /// The deletion of the player or the match chosen, to confirm.
+    fn ask_deletion(&mut self) {
+        let deletion = match self.panel {
+            Panel::Players => self
+                .details
+                .players
+                .get(self.player)
+                .map(|p| Deletion::Player(p.id.clone(), format!("{} {}", p.number, p.name))),
+            Panel::Matches => self.matches.get(self.game).map(|m| match m {
+                MatchListing::Match {
+                    id, opponent, date, ..
+                } => Deletion::Match(id.clone(), format!("{opponent} · {}", day(date))),
+                MatchListing::Unreadable { folder, .. } => {
+                    Deletion::Match(folder.clone(), folder.clone())
+                }
+            }),
+        };
+        if let Some(deletion) = deletion {
+            self.mode = Mode::Delete(deletion);
         }
     }
 
-    fn remove(&mut self) {
-        if let Mode::Remove(id, _) = &self.mode {
-            let removed = self.core.remove_player(self.team_id.clone(), id.clone());
-            self.error = removed.err().map(|e| e.to_string());
+    /// Deleted as confirmed: the team gone, back to the home.
+    fn delete(&mut self) -> Outcome {
+        let mode = std::mem::replace(&mut self.mode, Mode::Browse);
+        let team = self.team_id.clone();
+        let deleted = match &mode {
+            Mode::Delete(Deletion::Player(id, _)) => self.core.remove_player(team, id.clone()),
+            Mode::Delete(Deletion::Match(id, _)) => self.core.delete_match(team, id.clone()),
+            Mode::Delete(Deletion::Team) => self.core.delete_team(team),
+            Mode::Browse | Mode::Edit(_) => Ok(()),
+        };
+        match (deleted, mode) {
+            (Ok(()), Mode::Delete(Deletion::Team)) => Outcome::Back,
+            (deleted, _) => {
+                self.error = deleted.err().map(|e| e.to_string());
+                self.reload();
+                Outcome::Stay
+            }
         }
-        self.mode = Mode::Browse;
-        self.reload();
+    }
+
+    /// What the question of the deletion says.
+    fn deletion_text(&self, s: &Strings, deletion: &Deletion) -> String {
+        match deletion {
+            Deletion::Player(_, name) => ui::fill(s.delete_player_text, std::slice::from_ref(name)),
+            Deletion::Match(_, name) => ui::fill(s.delete_match_text, std::slice::from_ref(name)),
+            Deletion::Team => ui::fill(
+                s.delete_team_text,
+                &[self.details.name.clone(), self.matches.len().to_string()],
+            ),
+        }
     }
 
     /// After the form: saved, the team is read again; a new match opens.
@@ -207,15 +256,12 @@ impl TeamScreen {
                 let edited = editor.update(&self.core, s, m);
                 self.edited(edited)
             }
-            (Message::Confirm, Mode::Remove(..)) => {
-                self.remove();
-                Outcome::Stay
-            }
+            (Message::Confirm, Mode::Delete(_)) => self.delete(),
             (Message::Cancel, _) => {
                 self.mode = Mode::Browse;
                 Outcome::Stay
             }
-            (_, Mode::Edit(_) | Mode::Remove(..)) => Outcome::Stay,
+            (_, Mode::Edit(_) | Mode::Delete(_)) => Outcome::Stay,
             (Message::EditTeam, Mode::Browse) => {
                 self.edit_team(s);
                 Outcome::Stay
@@ -242,6 +288,10 @@ impl TeamScreen {
             (Message::Import, Mode::Browse) => Outcome::Import,
             (Message::Export, Mode::Browse) => Outcome::Export,
             (Message::Analysis, Mode::Browse) => Outcome::Analysis,
+            (Message::DeleteTeam, Mode::Browse) => {
+                self.mode = Mode::Delete(Deletion::Team);
+                Outcome::Stay
+            }
             (Message::Form(_) | Message::Confirm, Mode::Browse) => Outcome::Stay,
         }
     }
@@ -251,13 +301,15 @@ impl TeamScreen {
             let edited = editor.key(&self.core, s, ck);
             return self.edited(edited);
         }
-        if let Mode::Remove(..) = self.mode {
-            match ck {
-                k if k == key!(enter) => self.remove(),
-                k if k == BACK_KEY => self.mode = Mode::Browse,
-                _ => {}
-            }
-            return Outcome::Stay;
+        if let Mode::Delete(_) = self.mode {
+            return match ck {
+                k if k == key!(enter) => self.delete(),
+                k if k == BACK_KEY => {
+                    self.mode = Mode::Browse;
+                    Outcome::Stay
+                }
+                _ => Outcome::Stay,
+            };
         }
         let count = match self.panel {
             Panel::Players => self.details.players.len(),
@@ -295,8 +347,11 @@ impl TeamScreen {
                 self.edit_player(s, Some(self.player))
             }
             (Panel::Matches, k) if k == key!(enter) => return self.open_match(self.game),
-            (Panel::Players, k) if (k == key!(backspace) || k == key!(delete)) && count > 0 => {
-                self.ask_removal(self.player)
+            (_, k) if k == key!(shift - backspace) || k == key!(shift - delete) => {
+                self.mode = Mode::Delete(Deletion::Team)
+            }
+            (_, k) if (k == key!(backspace) || k == key!(delete)) && count > 0 => {
+                self.ask_deletion()
             }
             _ => {}
         }
@@ -306,8 +361,8 @@ impl TeamScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match (&self.mode, self.panel) {
             (Mode::Edit(editor), _) => editor.hints(s),
-            (Mode::Remove(..), _) => vec![
-                ("Enter".to_string(), s.remove.to_string()),
+            (Mode::Delete(_), _) => vec![
+                ("Enter".to_string(), s.delete_forever.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             (Mode::Browse, panel) => {
@@ -320,8 +375,8 @@ impl TeamScreen {
                     Panel::Matches => s.new_match,
                 };
                 let remove = match panel {
-                    Panel::Players => vec![("⌫".to_string(), s.remove_player.to_string())],
-                    Panel::Matches => vec![],
+                    Panel::Players => s.remove_player,
+                    Panel::Matches => s.delete_match,
                 };
                 [
                     vec![
@@ -334,8 +389,11 @@ impl TeamScreen {
                         ("x".to_string(), s.export_team.to_string()),
                         ("s".to_string(), s.analysis.to_string()),
                     ],
-                    remove,
-                    vec![("Esc".to_string(), s.back.to_string())],
+                    vec![
+                        ("⌫".to_string(), remove.to_string()),
+                        ("⇧⌫".to_string(), s.delete_team.to_string()),
+                        ("Esc".to_string(), s.back.to_string()),
+                    ],
                 ]
                 .concat()
             }
@@ -345,12 +403,10 @@ impl TeamScreen {
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let body: Element<'a, Message> = match &self.mode {
             Mode::Edit(editor) => editor.view(s, c, Message::Form),
-            Mode::Remove(_, name) => ui::confirm(
-                &s.remove_confirm.replace("{}", name),
-                theme::icons::DELETE,
-                s.remove,
+            Mode::Delete(deletion) => ui::confirm_deletion(
+                s,
+                &self.deletion_text(s, deletion),
                 Message::Confirm,
-                s.cancel,
                 Message::Cancel,
                 c,
             ),
@@ -411,6 +467,14 @@ impl TeamScreen {
                     theme::icons::IMPORT,
                     s.import_match,
                     Message::Import,
+                    false,
+                    c
+                )
+                .width(Length::Fill),
+                ui::action(
+                    theme::icons::DELETE,
+                    s.delete_team,
+                    Message::DeleteTeam,
                     false,
                     c
                 )
@@ -604,7 +668,7 @@ mod tests {
         assert_eq!(team.details.players.len(), 1);
         assert!(team.focus_id().is_none());
         team.key(s, key!(backspace));
-        assert!(matches!(team.mode, Mode::Remove(..)));
+        assert!(matches!(team.mode, Mode::Delete(Deletion::Player(..))));
         team.key(s, key!(enter));
         assert!(team.details.players.is_empty());
         // its archive to save, a match to import into it
@@ -619,7 +683,8 @@ mod tests {
                 role: Some(scout4all_core::shapes::enums::RoleEnum::OutsideHitter),
                 ..PlayerForm::default()
             };
-            core.save_player(team_id.clone(), None, player).unwrap();
+            core.save_player(team_id.clone(), None, player, false)
+                .unwrap();
         }
         team.key(s, key!(right));
         team.key(s, key!(n));
@@ -655,5 +720,113 @@ mod tests {
             assert!(matches!(stats.key(k), crate::stats::Outcome::Stay));
         }
         assert!(matches!(stats.key(BACK_KEY), crate::stats::Outcome::Back));
+    }
+
+    /// ⌫ asks to delete the match chosen, Esc doesn't, Enter does; ⇧⌫
+    /// asks for the team, and the team deleted goes back to the home.
+    #[test]
+    fn a_match_and_the_team_are_deleted_once_confirmed() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        use scout4all_core::shapes::{
+            country::CountryCode,
+            enums::{GenderEnum, TeamClassificationEnum},
+        };
+        let form = scout4all_core::team_form::TeamForm {
+            name: "Cortona".into(),
+            classification: Some(TeamClassificationEnum::Regional),
+            gender: Some(GenderEnum::Women),
+            country: CountryCode::known("IT"),
+            year: "2026".into(),
+        };
+        let team_id = core.save_team(None, form).unwrap();
+        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
+        assert_eq!(team.matches.len(), 1);
+        team.key(s, key!(right));
+        team.key(s, key!(backspace));
+        assert!(matches!(team.mode, Mode::Delete(Deletion::Match(..))));
+        assert!(
+            team.hints(s)
+                .iter()
+                .any(|(_, what)| what == s.delete_forever)
+        );
+        team.key(s, BACK_KEY);
+        assert!(matches!(team.mode, Mode::Browse));
+        assert_eq!(team.matches.len(), 1);
+        team.key(s, key!(delete));
+        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        assert!(team.matches.is_empty());
+        assert!(team.error.is_none());
+
+        team.key(s, key!(shift - backspace));
+        let Mode::Delete(deletion) = &team.mode else {
+            unreachable!("the team to delete")
+        };
+        assert!(team.deletion_text(s, deletion).contains("Cortona"));
+        team.update(s, Message::Cancel);
+        assert!(matches!(team.mode, Mode::Browse));
+        team.update(s, Message::DeleteTeam);
+        assert!(matches!(team.update(s, Message::Confirm), Outcome::Back));
+        assert!(!dir.path().join(&team_id).exists());
+        assert!(core.home().unwrap().teams.is_empty());
+    }
+
+    /// A player with the name of another one is asked about first: Esc
+    /// goes back to the form, Enter saves all the same, as the button does.
+    #[test]
+    fn a_namesake_is_saved_once_confirmed() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        use scout4all_core::shapes::{
+            country::CountryCode,
+            enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
+        };
+        let form = scout4all_core::team_form::TeamForm {
+            name: "Cortona".into(),
+            classification: Some(TeamClassificationEnum::Regional),
+            gender: Some(GenderEnum::Women),
+            country: CountryCode::known("IT"),
+            year: "2026".into(),
+        };
+        let team_id = core.save_team(None, form).unwrap();
+        let anna = PlayerForm {
+            name: "Anna Rossi".into(),
+            number: "9".into(),
+            role: Some(RoleEnum::Setter),
+            ..PlayerForm::default()
+        };
+        core.save_player(team_id.clone(), None, anna, false)
+            .unwrap();
+        let mut team = TeamScreen::new(core.clone(), team_id).unwrap();
+        let asking =
+            |team: &TeamScreen| team.hints(s).iter().any(|(_, what)| what == s.save_anyway);
+        team.update(s, Message::NewPlayer);
+        for m in [
+            Input(0, "anna rossi".into()),
+            Input(1, "10".into()),
+            Choose(2, 1),
+        ] {
+            team.update(s, Message::Form(m));
+        }
+        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        assert!(asking(&team));
+        assert_eq!(team.details.players.len(), 1);
+        // the other keys stay on the question
+        team.key(s, key!(a));
+        assert!(asking(&team));
+        team.key(s, BACK_KEY);
+        assert!(!asking(&team));
+        assert!(matches!(team.mode, Mode::Edit(_)));
+        team.update(s, Message::Form(Save));
+        assert!(asking(&team));
+        team.update(s, Message::Form(form::Message::Cancel));
+        assert!(!asking(&team));
+        team.key(s, key!(enter));
+        team.key(s, key!(enter));
+        assert!(matches!(team.mode, Mode::Browse));
+        assert_eq!(team.details.players.len(), 2);
     }
 }

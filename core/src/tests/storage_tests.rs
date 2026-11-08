@@ -7,7 +7,6 @@ mod tests {
         archive::{export_match, export_team, import_match, import_team},
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         localization::Language,
-        player_form::removal,
         providers::{
             match_reader::MatchReader,
             match_writer::MatchWriter,
@@ -84,6 +83,56 @@ mod tests {
         );
         store.remove("a/b.json").await.unwrap();
         store.remove("nowhere/x.json").await.unwrap();
+    }
+
+    /// A folder removed: gone with all it holds, the folders beside it
+    /// kept; one that isn't there removed without an error, the root never.
+    async fn removing_folders(store: &dyn Store) {
+        store.write("a/b/c.json", b"{}").await.unwrap();
+        store.append("a/b/d/e.csv", b"1").await.unwrap();
+        store.write("a/f.json", b"{}").await.unwrap();
+        store.write("ab/g.json", b"{}").await.unwrap();
+        store.remove_folder("a/b").await.unwrap();
+        assert!(!store.exists("a/b").await.unwrap());
+        assert_eq!(store.read("a/b/c.json").await.unwrap(), None);
+        assert_eq!(store.read("a/b/d/e.csv").await.unwrap(), None);
+        assert_eq!(
+            store.list("a").await.unwrap(),
+            vec![StoreEntry::Blob("f.json".into())]
+        );
+        store.remove_folder("a").await.unwrap();
+        assert_eq!(
+            store.list(layout::ROOT).await.unwrap(),
+            vec![StoreEntry::Folder("ab".into())]
+        );
+        store.remove_folder("a").await.unwrap();
+        store.remove_folder("nowhere/x").await.unwrap();
+        assert!(store.remove_folder(layout::ROOT).await.is_err());
+        assert!(store.exists("ab/g.json").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn the_stores_remove_folders_alike() {
+        let dir = TempDir::new().unwrap();
+        removing_folders(&FsStore::new(dir.path())).await;
+        removing_folders(&MemoryStore::new()).await;
+    }
+
+    /// What a removal stopped halfway leaves, hidden, is never data, and
+    /// goes with the next removal of the folder.
+    #[tokio::test]
+    async fn a_folder_removal_stopped_halfway_leaves_no_data() {
+        let dir = TempDir::new().unwrap();
+        let store = FsStore::new(dir.path());
+        store.write("a/b.json", b"{}").await.unwrap();
+        std::fs::create_dir_all(dir.path().join(".a.removed/c")).unwrap();
+        std::fs::write(dir.path().join(".a.removed/c/d.json"), b"{}").unwrap();
+        assert_eq!(
+            store.list(layout::ROOT).await.unwrap(),
+            vec![StoreEntry::Folder("a".into())]
+        );
+        store.remove_folder("a").await.unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[tokio::test]
@@ -318,7 +367,7 @@ mod tests {
             .unwrap();
         let first = team.players[0].clone();
         p.team_writer
-            .save_player(removal(&first), &mut team)
+            .remove_player(first.id, &mut team)
             .await
             .unwrap();
         let added = p
@@ -373,6 +422,110 @@ mod tests {
         assert_eq!(loaded.roster, roster);
         assert_eq!(active(&loaded), roster);
         assert_eq!(active(&m).len(), 7);
+    }
+
+    /// A player no match tells of leaves the team file; one a match tells
+    /// of (in a lineup, in an event) stays for it, without the personal
+    /// details, out of the active players. The team file says so, read
+    /// again.
+    #[tokio::test]
+    async fn a_removed_player_leaves_the_team_unless_a_match_tells_of_them() {
+        let p = Providers::new(Arc::new(MemoryStore::new()));
+        let (mut team, m) = scouted_match(&p).await;
+        let bench = p
+            .team_writer
+            .save_player(
+                PlayerInput::New {
+                    name: "bench".into(),
+                    role: RoleEnum::Setter,
+                    number: 10,
+                    details: Default::default(),
+                },
+                &mut team,
+            )
+            .await
+            .unwrap();
+        let mut server = team.players[0].clone();
+        server.birth_date = chrono::NaiveDate::from_ymd_opt(2010, 1, 2);
+        server.height_cm = Some(180);
+        server.notes = "notes".into();
+        p.team_writer
+            .save_player(PlayerInput::Existing(server.clone()), &mut team)
+            .await
+            .unwrap();
+        // in the lineup only
+        let libero = team.players[6].clone();
+        for id in [bench.id, server.id, libero.id] {
+            p.team_writer.remove_player(id, &mut team).await.unwrap();
+        }
+        let team = p.team_reader.read_single(&team.id).await.unwrap();
+        assert!(team.find_player(bench.id).is_none());
+        let kept = team.find_player(server.id).unwrap();
+        assert!(kept.deleted);
+        assert_eq!((kept.name.as_str(), kept.number), ("player 1", 1));
+        assert_eq!(kept.role, server.role);
+        assert_eq!((kept.birth_date, kept.height_cm), (None, None));
+        assert!(kept.notes.is_empty());
+        assert!(team.find_player(libero.id).unwrap().deleted);
+        assert_eq!(team.active_players().len(), 5);
+        let loaded = p.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!(summary(&loaded), summary(&m));
+        assert_eq!(loaded.team.find_player(server.id).unwrap().name, "player 1");
+    }
+
+    /// A match that can't be read still tells of its players: they stay.
+    #[tokio::test]
+    async fn an_unreadable_match_keeps_its_players() {
+        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
+        let p = Providers::new(Arc::clone(&store));
+        let (mut team, m) = scouted_match(&p).await;
+        let key = layout::match_descriptor(&team.id, &m.id);
+        store.write(&key, b"{ not json").await.unwrap();
+        let first = team.players[0].id;
+        p.team_writer.remove_player(first, &mut team).await.unwrap();
+        assert!(team.find_player(first).unwrap().deleted);
+    }
+
+    /// A match removed: gone with its sets, the other matches kept; a match
+    /// that can't be read removed all the same. A team removed: gone with
+    /// its matches, the other teams kept.
+    #[tokio::test]
+    async fn teams_and_matches_are_removed_for_good() {
+        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
+        let p = Providers::new(Arc::clone(&store));
+        let (team, m) = scouted_match(&p).await;
+        let (other_team, other_match) = scouted_match(&p).await;
+        let unreadable = layout::match_descriptor(&team.id, "2020-01-01_broken");
+        store.write(&unreadable, b"{ not json").await.unwrap();
+        p.match_writer.remove(&team.id, &m.id).await.unwrap();
+        p.match_writer
+            .remove(&team.id, "2020-01-01_broken")
+            .await
+            .unwrap();
+        assert!(p.match_reader.read_all(&team).await.unwrap().is_empty());
+        for id in ["", "x/..", "a/b"] {
+            assert!(p.match_writer.remove(&team.id, id).await.is_err(), "{id}");
+        }
+        assert!(
+            store
+                .exists(&layout::team_descriptor(&team.id))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .exists(&layout::match_folder(&team.id, &m.id))
+                .await
+                .unwrap()
+        );
+        p.team_writer.remove(&team.id).await.unwrap();
+        let teams = p.team_reader.read_all().await.unwrap();
+        let ids: Vec<Uuid> = teams.iter().flatten().map(|t| t.id).collect();
+        assert_eq!(ids, vec![other_team.id]);
+        assert!(!store.exists(&layout::team_folder(&team.id)).await.unwrap());
+        let left = p.match_reader.read_all(&other_team).await.unwrap();
+        assert_eq!(left.len(), 1);
+        assert!(left.iter().flatten().all(|m| m.id == other_match.id));
     }
 
     /// On the file system the data keeps the folders of the older versions.

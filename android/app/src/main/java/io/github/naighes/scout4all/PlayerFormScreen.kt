@@ -81,6 +81,9 @@ sealed interface PlayerFormState {
         val error: String? = null,
         val busy: Boolean = false,
         val confirmingRemoval: Boolean = false,
+        /** another player of the team with the same name, as the core tells:
+         * saved only once confirmed */
+        val namesake: String? = null,
         /** the form as it was read: changed, going back asks first */
         val loaded: PlayerForm = form,
     ) : PlayerFormState {
@@ -133,21 +136,25 @@ class PlayerFormViewModel(
 
     fun confirmRemoval(confirming: Boolean) = update { it.copy(confirmingRemoval = confirming) }
 
-    fun save() = submit { core ->
-        core.savePlayer(teamId, playerId, (mutableState.value as PlayerFormState.Editing).form)
+    fun save(namesakeConfirmed: Boolean = false) = submit { core ->
+        core.savePlayer(teamId, playerId, (mutableState.value as PlayerFormState.Editing).form, namesakeConfirmed)
     }
+
+    fun dismissNamesake() = update { it.copy(namesake = null) }
 
     fun remove() = playerId?.let { id -> submit { core -> core.removePlayer(teamId, id) } }
 
     /** Saves or removes, once at a time. */
     private fun submit(call: (Scout4All) -> Unit) {
-        val editing = mutableState.value as? PlayerFormState.Editing ?: return
+        val editing = (mutableState.value as? PlayerFormState.Editing)?.copy(namesake = null) ?: return
         if (editing.busy) return
-        mutableState.value = editing.copy(busy = true, confirmingRemoval = false)
+        mutableState.value = editing.copy(busy = true, confirmingRemoval = false, namesake = null)
         viewModelScope.launch {
             mutableState.value = try {
                 app.core(call)
                 PlayerFormState.Done
+            } catch (e: MobileException.Namesake) {
+                editing.copy(namesake = e.reason, invalid = null, error = null, confirmingRemoval = false)
             } catch (e: MobileException.InvalidPlayer) {
                 editing.copy(invalid = e.field to e.reason, error = null, confirmingRemoval = false)
             } catch (e: MobileException) {
@@ -189,6 +196,7 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
             is PlayerFormState.Editing -> {
                 PlayerFormContent(s, model, modifier)
                 if (s.confirmingRemoval) RemovalDialog(s.savedName, model)
+                s.namesake?.let { NamesakeDialog(it, model) }
             }
         }
     }
@@ -259,24 +267,31 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
         }
         // big and at the bottom, where the thumb is
         Button(
-            onClick = model::save,
+            onClick = { model.save() },
             enabled = !state.busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.save)) }
     }
 
 @Composable
-private fun RemovalDialog(name: String, model: PlayerFormViewModel) = AlertDialog(
-    onDismissRequest = { model.confirmRemoval(false) },
-    title = { Text(stringResource(R.string.remove_player_title, name)) },
-    text = { Text(stringResource(R.string.remove_player_text)) },
+private fun RemovalDialog(name: String, model: PlayerFormViewModel) = DeletionDialog(
+    stringResource(R.string.delete_player_text, name),
+    onConfirm = { model.remove() },
+    onDismiss = { model.confirmRemoval(false) },
+)
+
+/** Another player of the team with the same name: saved all the same, or
+ * back to the form. */
+@Composable
+private fun NamesakeDialog(namesake: String, model: PlayerFormViewModel) = AlertDialog(
+    onDismissRequest = model::dismissNamesake,
+    title = { Text(stringResource(R.string.same_name)) },
+    text = { Text(namesake) },
     confirmButton = {
-        TextButton(onClick = { model.remove() }) {
-            Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error)
-        }
+        Button(onClick = { model.save(namesakeConfirmed = true) }) { Text(stringResource(R.string.save_anyway)) }
     },
     dismissButton = {
-        TextButton(onClick = { model.confirmRemoval(false) }) { Text(stringResource(R.string.cancel)) }
+        TextButton(onClick = model::dismissNamesake) { Text(stringResource(R.string.cancel)) }
     },
 )
 

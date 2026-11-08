@@ -3,6 +3,7 @@
 //! the `TeamWriter` once it's valid.
 
 use crate::{
+    dvw::import::normalized,
     localization::Labels,
     providers::team_writer::{PlayerDetails, PlayerInput},
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
@@ -121,6 +122,35 @@ impl PlayerForm {
     }
 }
 
+/// Another active player of `team` with the name of `form`, letter case,
+/// accents and punctuation aside: not an error, two players may share a
+/// name, but likely the same one added twice, so the user is asked first.
+/// None for a player edited without changing the name.
+pub fn namesake<'a>(
+    form: &PlayerForm,
+    team: &'a TeamEntry,
+    existing: Option<&PlayerEntry>,
+) -> Option<&'a PlayerEntry> {
+    let name = normalized(&form.name);
+    let existing_id = existing.map(|p| p.id);
+    let unchanged = existing.is_some_and(|p| normalized(&p.name) == name);
+    match (name.is_empty(), unchanged) {
+        (false, false) => team
+            .active_players()
+            .into_iter()
+            .find(|p| Some(p.id) != existing_id && normalized(&p.name) == name),
+        _ => None,
+    }
+}
+
+/// What the user is told of the `namesake` before saving.
+pub fn namesake_message(namesake: &PlayerEntry, labels: &Labels) -> String {
+    labels
+        .player_namesake
+        .replace("{name}", &namesake.name)
+        .replace("{number}", &namesake.number.to_string())
+}
+
 /// How a birth date is typed and shown: 2005-03-14.
 pub const BIRTH_DATE: &str = "%Y-%m-%d";
 
@@ -156,11 +186,15 @@ fn parse_number(number: &str) -> Option<u8> {
     }
 }
 
-/// The input that removes a player: it stays in the team, for the matches
-/// already played, but no longer among the active players.
-pub fn removal(player: &PlayerEntry) -> PlayerInput {
-    PlayerInput::Existing(PlayerEntry {
+/// A player removed but kept for the matches that tell of them: no longer
+/// among the active players, with only what the matches show (name, number,
+/// role); the personal details gone.
+pub fn removed(player: &PlayerEntry) -> PlayerEntry {
+    PlayerEntry {
         deleted: true,
+        birth_date: None,
+        height_cm: None,
+        notes: String::new(),
         ..player.clone()
-    })
+    }
 }

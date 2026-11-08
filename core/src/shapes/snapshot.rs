@@ -25,10 +25,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fmt::{self, Display, Formatter},
-};
+use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -620,6 +617,11 @@ impl Snapshot {
                 .flags
                 .blockers()
                 .filter(|b| BlockersEnum::of(event.event_type).contains(b)),
+            // where our serve started from, if told
+            serve_start: event
+                .flags
+                .serve_start()
+                .filter(|_| event.event_type == EventTypeEnum::S),
             eval: event.eval,
             situation,
             touch: event.event_type.asks_player().then(|| Touch {
@@ -865,75 +867,54 @@ impl Snapshot {
     fn get_next_options(&self, event: &EventEntry) -> Vec<EventTypeEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        let serve_them = self.get_rally_start_options(PhaseEnum::SideOut);
-        let serve_us = self.get_rally_start_options(PhaseEnum::Break);
-        let options_map: HashMap<_, _> = [
-            // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS, LF
-            //
-            // the ball on our side, to play on our second or third touch:
-            // our attack or our freeball (`FB`). Never a freeball on a first
-            // touch: our reception or dig going straight over is `/`.
-            //
-            // on their side, they attack (our dig or block comes next) or
-            // they don't: after our attack or block `+` we play the ball
-            // again, their freeball (`OF`) optional; after our serve `/`
-            // their reception came back, not a freeball; after our serve
-            // `+`, `!` or `-`, our attack or block `-` they attack or send
-            // a freeball (`OF`): the evaluation tells their reception or
-            // dig, the freeball what they made of it, as our reception or
-            // dig and our freeball (`FB`) do: a perfect reception the setter
-            // sends over is `#`, then the freeball. A ball sent over on
-            // purpose to score (the setter's dump) is an attack; one sent
-            // out is an error. Our attack or our freeball
-            // can still come when their attack and our dig or block weren't
-            // scouted: the dig is optional.
-            ((OS, None), serve_them.clone()),
-            ((OE, None), serve_us.clone()),
-            ((B, Some(Error)), serve_them.clone()),
-            ((B, Some(Over)), serve_them.clone()),
-            ((B, Some(Perfect)), serve_us.clone()),
-            ((B, Some(Positive)), vec![OE, F, A, FB, OF]),
-            ((B, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
-            ((A, Some(Error)), serve_them.clone()),
-            ((A, Some(Over)), serve_them.clone()),
-            ((A, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
-            ((A, Some(Perfect)), serve_us.clone()),
-            ((A, Some(Positive)), vec![OE, F, A, FB, OF]),
-            ((A, Some(Exclamative)), vec![OE, F, A, FB]),
-            ((D, Some(Error)), serve_them.clone()),
-            ((D, Some(Over)), vec![OS, OE, F, A, D, B, FB, OF]),
-            ((D, Some(Exclamative)), vec![OE, F, A, FB]),
-            ((D, Some(Negative)), vec![OE, F, A, FB]),
-            ((D, Some(Positive)), vec![OE, F, A, FB]),
-            ((D, Some(Perfect)), vec![OE, F, A, FB]),
-            ((F, None), serve_them.clone()),
-            ((P, Some(Error)), serve_them.clone()),
-            ((P, Some(Over)), vec![OS, OE, F, A, D, B, FB, OF]),
-            ((P, Some(Exclamative)), vec![OE, F, A, FB]),
-            ((P, Some(Negative)), vec![OE, F, A, FB]),
-            ((P, Some(Positive)), vec![OE, F, A, FB]),
-            ((P, Some(Perfect)), vec![OE, F, A, FB]),
-            ((S, Some(Error)), serve_them.clone()),
-            ((S, Some(Perfect)), serve_us.clone()),
-            ((S, Some(Positive)), vec![OS, OE, F, A, D, B, FB, OF]),
-            ((S, Some(Exclamative)), vec![OS, OE, F, A, D, B, FB, OF]),
-            ((S, Some(Over)), vec![OE, A, F, B, FB]),
-            ((S, Some(Negative)), vec![OS, OE, F, A, D, B, FB, OF]),
-            // our freeball, our reception or dig going straight over: they
-            // attack, or mess it up and send a freeball back
-            ((FB, None), vec![OS, OE, F, A, D, B, FB, OF]),
-            // their freeball isn't a dig of ours, but what comes next is the
-            // same as after one keeping the ball, and their point when it
-            // falls on our court untouched; our block too, a ball crossing
-            // the net close to it, as after their reception straight over
-            // (our serve `/`): the scout tells a block from an attack
-            ((OF, None), vec![OS, OE, F, A, B, FB]),
-        ]
-        .into_iter()
-        .collect();
+        let serve_them = || self.get_rally_start_options(PhaseEnum::SideOut);
+        let serve_us = || self.get_rally_start_options(PhaseEnum::Break);
+        // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS, LF
+        //
+        // the ball on our side, to play on our second or third touch: our
+        // attack or our freeball (`FB`). Never a freeball on a first touch:
+        // our reception or dig going straight over is `/`.
+        //
+        // on their side, they attack (our dig or block comes next) or they
+        // don't: after our attack or block `+` we play the ball again, their
+        // freeball (`OF`) optional; after our serve `/` their reception came
+        // back, not a freeball; after our serve `+`, `!` or `-`, our attack
+        // or block `-` they attack or send a freeball (`OF`): the evaluation
+        // tells their reception or dig, the freeball what they made of it,
+        // as our reception or dig and our freeball (`FB`) do: a perfect
+        // reception the setter sends over is `#`, then the freeball. A ball
+        // sent over on purpose to score (the setter's dump) is an attack;
+        // one sent out is an error. Our attack or our freeball can still
+        // come when their attack and our dig or block weren't scouted: the
+        // dig is optional.
+        //
+        // our freeball, our reception or dig going straight over: they
+        // attack, or mess it up and send a freeball back.
+        //
+        // their freeball isn't a dig of ours, but what comes next is the
+        // same as after one keeping the ball, and their point when it falls
+        // on our court untouched; our block too, a ball crossing the net
+        // close to it, as after their reception straight over (our serve
+        // `/`): the scout tells a block from an attack.
+        //
+        // a match, not a map: it runs for every event replayed.
         match (event.event_type, event.eval) {
             (R | CL | LR | LF | CS, _) => self.available_options.clone(),
-            key => options_map.get(&key).cloned().unwrap_or_default(),
+            // their point
+            (OS | F, None) | (A | B | D | P | S, Some(Error)) | (A | B, Some(Over)) => serve_them(),
+            // ours
+            (OE, None) | (A | B | S, Some(Perfect)) => serve_us(),
+            (A | B, Some(Positive)) => vec![OE, F, A, FB, OF],
+            (A, Some(Exclamative)) | (D | P, Some(Exclamative | Negative | Positive | Perfect)) => {
+                vec![OE, F, A, FB]
+            }
+            (A | B, Some(Negative))
+            | (D | P, Some(Over))
+            | (S, Some(Positive | Exclamative | Negative))
+            | (FB, None) => vec![OS, OE, F, A, D, B, FB, OF],
+            (S, Some(Over)) => vec![OE, A, F, B, FB],
+            (OF, None) => vec![OS, OE, F, A, B, FB],
+            _ => vec![],
         }
     }
 

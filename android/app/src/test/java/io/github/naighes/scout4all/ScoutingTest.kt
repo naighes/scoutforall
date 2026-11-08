@@ -107,6 +107,39 @@ class ScoutingTest {
         rule.waitFor { rule.onAllNodes(zone("8A")).fetchSemanticsNodes().isEmpty() }
     }
 
+    /** Where our serve starts from, under their court while it waits for
+     * its evaluation: 5 7 6 9 1 from the left, below the net; saved with
+     * it, remembered for the server at their next serve; touched again,
+     * taken back; not for their serve. */
+    @Test
+    fun theServeStartIsTouchedUnderTheCourt() {
+        show()
+        val start = { label: String -> hasContentDescription("${string(R.string.serve_start)} $label") and hasClickAction() }
+        val chosen = { label: String -> start(label) and hasStateDescription(string(R.string.zone_chosen)) }
+        val zone = { label: String -> hasContentDescription("${string(R.string.serve_zone)} $label") and hasClickAction() }
+        rule.waitFor { rule.onAllNodes(start("1")).fetchSemanticsNodes().size == 1 }
+        val at = { node: androidx.compose.ui.test.SemanticsMatcher -> rule.onNode(node).fetchSemanticsNode().positionInRoot }
+        val xs = listOf("5", "7", "6", "9", "1").map { at(start(it)).x }
+        assertEquals(xs.sorted(), xs)
+        // under the net: under the cells at the net of their court
+        assertTrue(at(start("6")).y > at(zone("3B")).y)
+        assertTrue(rule.onAllNodes(hasStateDescription(string(R.string.zone_chosen))).fetchSemanticsNodes().isEmpty())
+        rule.onNode(start("1")).performClick()
+        rule.waitFor { rule.onAllNodes(chosen("1")).fetchSemanticsNodes().size == 1 }
+        touch("#")
+        rule.waitFor { saved().events.size == 1 }
+        assertEquals("1", saved().events[0].serveStart)
+        // the same server: from 1 again, taken back
+        rule.waitFor { rule.onAllNodes(chosen("1")).fetchSemanticsNodes().size == 1 }
+        rule.onNode(start("1")).performClick()
+        rule.waitFor { rule.onAllNodes(chosen("1")).fetchSemanticsNodes().isEmpty() }
+        touch("=")
+        rule.waitFor { saved().events.size == 2 }
+        assertEquals(listOf(null, "1"), saved().events.map { it.serveStart })
+        // their serve: no zones to start from
+        rule.waitFor { rule.onAllNodes(start("1")).fetchSemanticsNodes().isEmpty() }
+    }
+
     /** Their serve: once the receiver is touched, our court with its
      * cells while the reception waits for its evaluation, the net at the
      * top; where we received saved with it. */

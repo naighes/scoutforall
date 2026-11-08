@@ -7,6 +7,7 @@
 //! <team id>/<match id>/set_<n>.csv    the events
 //! config.json
 //! upload_queue.json
+//! .index.json                         derived, see `MATCH_INDEX`
 //! ```
 
 use crate::constants::{
@@ -23,6 +24,12 @@ pub const CONFIG: &str = "config.json";
 
 /// The settings that couldn't be read, set aside as they were.
 pub const UNREADABLE_CONFIG: &str = "config.json.unreadable";
+
+/// What the lists show of each match, with the stamps of the files it
+/// comes from (see `providers::store::match_index`): derived from the
+/// matches, rebuilt when missing, never backed up nor exported. Hidden, as
+/// what `Store::list` leaves out: not a team, nor data.
+pub const MATCH_INDEX: &str = ".index.json";
 
 /// The matches waiting to be uploaded.
 pub const UPLOAD_QUEUE: &str = UPLOAD_QUEUE_FILE_NAME;

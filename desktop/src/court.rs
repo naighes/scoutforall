@@ -1,7 +1,8 @@
 //! The court of the scouting, drawn with the canvas of iced: our half seen
 //! from the bench (the net at the top) with the players where they stand,
 //! or the court where the ball went while evaluating, with the cursor of
-//! the arrows.
+//! the arrows; for our serve, below the net, the zones of our end line it
+//! starts from.
 
 use {
     crate::theme::{self, Colors, grade_color},
@@ -9,7 +10,8 @@ use {
         Color, Point, Rectangle, Renderer, Size, Theme, mouse,
         widget::canvas::{self, Action, Event, Frame, Geometry, Path, Stroke, Text},
     },
-    scout4all_mobile::{CourtCellChoice, CourtPlayer},
+    scout4all_core::shapes::court_zone::ServeStartEnum,
+    scout4all_mobile::{CourtCellChoice, CourtPlayer, ServeStartChoice},
 };
 
 /// What the court shows.
@@ -23,11 +25,14 @@ pub enum Content {
         server: Option<(String, Color)>,
     },
     /// rows of cells (one row at the net for our block), the net at the
-    /// top when the court is ours; the cell of the cursor
+    /// top when the court is ours; the cell of the cursor; for our serve
+    /// the zones it starts from, below the net, and the one of the cursor
     Target {
         rows: Vec<Vec<CourtCellChoice>>,
         ours: bool,
         cursor: Option<(u8, String)>,
+        starts: Vec<ServeStartChoice>,
+        start_cursor: Option<ServeStartEnum>,
     },
 }
 
@@ -40,26 +45,67 @@ pub struct Court {
 pub enum Touch {
     Player(String),
     Cell(u8, String),
+    Start(ServeStartEnum),
 }
 
 /// Half a court is 9 by 9 meters; a margin around it for the players
 /// standing outside to serve or receive.
 const METERS: f32 = 9.0;
 const MARGIN: f32 = 0.6;
+/// Below the net, the zones our serve starts from: as deep, and so far
+/// from the net.
+const START_DEPTH: f32 = 1.4;
+const START_GAP: f32 = 0.5;
 
 impl Court {
-    /// The square of the court in the bounds, and the size of a meter.
-    fn square(bounds: Size) -> (Rectangle, f32) {
-        let side = bounds.width.min(bounds.height);
-        let meter = side / (METERS + 2.0 * MARGIN);
+    /// The meters below the court: the zones our serve starts from, if
+    /// shown.
+    fn below(&self) -> f32 {
+        match &self.content {
+            Content::Target { starts, .. } if !starts.is_empty() => START_GAP + START_DEPTH,
+            _ => 0.0,
+        }
+    }
+
+    /// The square of the court in the bounds, with `below` meters under
+    /// it, and the size of a meter.
+    fn square(bounds: Size, below: f32) -> (Rectangle, f32) {
+        let across = METERS + 2.0 * MARGIN;
+        let down = across + below;
+        let meter = (bounds.width / across).min(bounds.height / down);
         let origin = Point::new(
-            (bounds.width - side) / 2.0 + MARGIN * meter,
-            (bounds.height - side) / 2.0 + MARGIN * meter,
+            (bounds.width - across * meter) / 2.0 + MARGIN * meter,
+            (bounds.height - down * meter) / 2.0 + MARGIN * meter,
         );
         (
             Rectangle::new(origin, Size::new(METERS * meter, METERS * meter)),
             meter,
         )
+    }
+
+    /// Each zone our serve starts from with where it's drawn: a row below
+    /// the net, as wide as the court.
+    fn starts(&self, court: Rectangle, meter: f32) -> Vec<(Rectangle, &ServeStartChoice)> {
+        match &self.content {
+            Content::Target { starts, .. } => {
+                let width = court.width / starts.len().max(1) as f32;
+                let y = court.y + court.height + START_GAP * meter;
+                starts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, start)| {
+                        (
+                            Rectangle::new(
+                                Point::new(court.x + i as f32 * width, y),
+                                Size::new(width, START_DEPTH * meter),
+                            ),
+                            start,
+                        )
+                    })
+                    .collect()
+            }
+            Content::Players { .. } => vec![],
+        }
     }
 
     /// Each cell with where it's drawn.
@@ -112,7 +158,7 @@ impl Court {
     }
 
     fn touched(&self, bounds: Size, at: Point) -> Option<Touch> {
-        let (court, meter) = Self::square(bounds);
+        let (court, meter) = Self::square(bounds, self.below());
         let pickable = matches!(self.content, Content::Players { pickable: true, .. });
         let player = self
             .spots(court, meter)
@@ -126,7 +172,13 @@ impl Court {
                 .find(|(r, _)| r.contains(at))
                 .map(|(_, c)| Touch::Cell(c.zone, c.subzone.clone()))
         };
-        player.or_else(cell)
+        let start = || {
+            self.starts(court, meter)
+                .into_iter()
+                .find(|(r, _)| r.contains(at))
+                .map(|(_, z)| Touch::Start(z.value))
+        };
+        player.or_else(cell).or_else(start)
     }
 }
 
@@ -173,14 +225,20 @@ impl canvas::Program<Touch> for Court {
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let c = self.colors;
-        let (court, meter) = Self::square(bounds.size());
+        let (court, meter) = Self::square(bounds.size(), self.below());
         frame.fill_rectangle(court.position(), court.size(), c.court);
         let lines = Stroke::default().with_color(c.court_lines).with_width(2.0);
         frame.stroke(&Path::rectangle(court.position(), court.size()), lines);
         match &self.content {
             Content::Players { .. } => self.draw_players(&mut frame, court, meter),
-            Content::Target { ours, cursor, .. } => {
-                self.draw_target(&mut frame, court, meter, *ours, cursor.as_ref())
+            Content::Target {
+                ours,
+                cursor,
+                start_cursor,
+                ..
+            } => {
+                self.draw_target(&mut frame, court, meter, *ours, cursor.as_ref());
+                self.draw_starts(&mut frame, court, meter, *start_cursor);
             }
         }
         vec![frame.into_geometry()]
@@ -346,6 +404,67 @@ impl Court {
                     false => c.muted,
                 },
                 size: (meter * 0.35).max(11.0).into(),
+                align_x: iced::widget::text::Alignment::Center,
+                align_y: iced::alignment::Vertical::Center,
+                ..Text::default()
+            });
+        }
+    }
+
+    /// The zones our serve starts from, below the net: the end line of
+    /// ours, as our server sees it.
+    fn draw_starts(
+        &self,
+        frame: &mut Frame,
+        court: Rectangle,
+        meter: f32,
+        cursor: Option<ServeStartEnum>,
+    ) {
+        let c = self.colors;
+        let starts = self.starts(court, meter);
+        if let (Some((first, _)), Some((last, _))) = (starts.first(), starts.last()) {
+            frame.fill_rectangle(
+                first.position(),
+                Size::new(last.x + last.width - first.x, first.height),
+                c.court,
+            );
+        }
+        let thin = Stroke::default()
+            .with_color(Color {
+                a: 0.35,
+                ..c.court_lines
+            })
+            .with_width(1.0);
+        for (r, start) in starts {
+            if start.chosen {
+                frame.fill_rectangle(
+                    r.position(),
+                    r.size(),
+                    Color {
+                        a: 0.55,
+                        ..c.accent
+                    },
+                );
+            }
+            frame.stroke(&Path::rectangle(r.position(), r.size()), thin);
+            if cursor == Some(start.value) {
+                frame.stroke(
+                    &Path::rectangle(
+                        Point::new(r.x + 2.0, r.y + 2.0),
+                        Size::new(r.width - 4.0, r.height - 4.0),
+                    ),
+                    Stroke::default().with_color(c.accent).with_width(3.0),
+                );
+            }
+            frame.fill_text(Text {
+                font: crate::theme::fonts().bold,
+                content: start.label.clone(),
+                position: r.center(),
+                color: match start.chosen {
+                    true => c.text,
+                    false => c.muted,
+                },
+                size: (meter * 0.45).max(12.0).into(),
                 align_x: iced::widget::text::Alignment::Center,
                 align_y: iced::alignment::Vertical::Center,
                 ..Text::default()

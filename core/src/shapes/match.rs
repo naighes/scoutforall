@@ -25,6 +25,43 @@ pub struct MatchStatus {
     pub last_set: Option<SetEntry>,
 }
 
+/// What a list shows of a match: kept in the index of the matches (see
+/// `providers::store::match_index`), so a list doesn't read nor replay its
+/// sets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MatchSummary {
+    pub id: String,
+    pub opponent: String,
+    pub date: DateTime<FixedOffset>,
+    pub home: bool,
+    /// the sets scouted, also the one going on
+    pub sets: u8,
+    pub us_wins: u8,
+    pub them_wins: u8,
+    pub finished: bool,
+    /// the set not over, to go on with
+    pub resume: Option<u8>,
+    /// the set to start, when none is going on and the match isn't over
+    pub next_set_number: Option<u8>,
+}
+
+impl MatchSummary {
+    pub fn of(m: &MatchEntry, status: &MatchStatus) -> Self {
+        MatchSummary {
+            id: m.id.clone(),
+            opponent: m.opponent.clone(),
+            date: m.date,
+            home: m.home,
+            sets: u8::try_from(m.sets.len()).unwrap_or(u8::MAX),
+            us_wins: status.us_wins,
+            them_wins: status.them_wins,
+            finished: status.match_finished,
+            resume: status.last_incomplete_set.as_ref().map(|s| s.set_number),
+            next_set_number: status.next_set_number,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MatchEntry {
     pub opponent: String,

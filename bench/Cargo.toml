@@ -1,0 +1,23 @@
+[package]
+name = "scout4all-bench"
+description = "How long the app takes to read the archive, show the statistics and scout, on large archives made from the DataVolley files of the tests: run by hand, not by the CI."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+chrono.workspace = true
+scout4all-core.workspace = true
+scout4all-mobile = { path = "../mobile" }
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

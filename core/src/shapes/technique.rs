@@ -13,7 +13,8 @@ use uuid::Uuid;
 
 /// The set an attacker receives, in the scouting notation:
 ///
-/// - middle blockers: 1, 2, 3, 4, C, B, 7 and the fast (F);
+/// - middle blockers: 1, 2, 3, 4, C, the double C (CC), B, 7 and the fast
+///   (F);
 /// - outside hitters in the front row: high (A), 5, super (S), 9, quick (Q);
 /// - the opposite in the front row: high (A), 6, super (S), quick (Q);
 /// - outside hitters in the back row: high (A), pipe (0);
@@ -26,6 +27,7 @@ pub enum SetTypeEnum {
     Three,
     Four,
     C,
+    DoubleC,
     B,
     Seven,
     Fast,
@@ -57,12 +59,13 @@ pub enum TechniqueEnum {
 }
 
 impl SetTypeEnum {
-    pub const ALL: [SetTypeEnum; 16] = [
+    pub const ALL: [SetTypeEnum; 17] = [
         SetTypeEnum::One,
         SetTypeEnum::Two,
         SetTypeEnum::Three,
         SetTypeEnum::Four,
         SetTypeEnum::C,
+        SetTypeEnum::DoubleC,
         SetTypeEnum::B,
         SetTypeEnum::Seven,
         SetTypeEnum::Fast,
@@ -82,7 +85,7 @@ impl SetTypeEnum {
         use RoleEnum::*;
         use SetTypeEnum::*;
         match (role, back_row) {
-            (MiddleBlocker, _) => vec![One, Two, Three, Four, C, B, Seven, Fast],
+            (MiddleBlocker, _) => vec![One, Two, Three, Four, C, DoubleC, B, Seven, Fast],
             (OutsideHitter, false) => vec![High, Five, Super, Nine, Quick],
             (OppositeHitter, false) => vec![High, Six, Super, Quick],
             (OutsideHitter, true) => vec![High, Pipe],
@@ -142,7 +145,7 @@ impl SetTypeEnum {
             Super => Some(labels.super_set),
             Quick => Some(labels.quick_set),
             Pipe => Some(labels.pipe_set),
-            One | Two | Three | Four | C | B | Seven | Five | Six | Nine | Eight => None,
+            One | Two | Three | Four | C | DoubleC | B | Seven | Five | Six | Nine | Eight => None,
         }
     }
 }
@@ -156,6 +159,7 @@ impl fmt::Display for SetTypeEnum {
             Three => "3",
             Four => "4",
             C => "C",
+            DoubleC => "CC",
             B => "B",
             Seven => "7",
             Fast => "F",

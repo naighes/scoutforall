@@ -10,7 +10,9 @@ use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
     shapes::{
-        court_zone::{CourtCell, CourtSide, CourtTarget, CourtZoneEnum, TargetKind},
+        court_zone::{
+            CourtCell, CourtSide, CourtTarget, CourtZoneEnum, ServeStartEnum, TargetKind,
+        },
         enums::{EvalEnum, EventTypeEnum, PhaseEnum},
         flags::{BlockersEnum, EventFlags, ReceptionSchemeEnum},
         r#match::MatchEntry,
@@ -130,6 +132,9 @@ pub struct ScoutingSession {
     target: Option<CourtTarget>,
     /// how many blocked, if the scout tells it along with the evaluation
     blockers: Option<BlockersEnum>,
+    /// where our serve starts from, if the scout tells it along with the
+    /// evaluation: at first where the server served from last in the match
+    serve_start: Option<ServeStartEnum>,
     /// the inverted P1, written on every event saved
     inverted_p1: bool,
     /// how many receive their next serve, written on the reception or on
@@ -151,6 +156,7 @@ impl fmt::Debug for ScoutingSession {
             .field("technique", &self.technique)
             .field("target", &self.target)
             .field("blockers", &self.blockers)
+            .field("serve_start", &self.serve_start)
             .field("order", &self.order)
             .finish_non_exhaustive()
     }
@@ -184,6 +190,7 @@ impl ScoutingSession {
             technique: None,
             target: None,
             blockers: None,
+            serve_start: None,
             inverted_p1,
             reception: ReceptionSchemeEnum::default(),
             order: ChoiceOrder::EventFirst,
@@ -354,6 +361,42 @@ impl ScoutingSession {
             .event
             .and_then(|event| BlockersEnum::next(event, self.blockers));
         self.choose_blockers(next).map(|_| next)
+    }
+
+    /// Where our serve starts from, if told.
+    pub fn serve_start(&self) -> Option<ServeStartEnum> {
+        self.serve_start
+    }
+
+    /// Whether the scout can tell where our serve starts from, along with
+    /// the evaluation.
+    pub fn serve_start_applies(&self) -> bool {
+        matches!(
+            (self.step, self.event),
+            (ScoutingStep::Eval, Some(EventTypeEnum::S))
+        )
+    }
+
+    /// The scout tells where our serve starts from, or takes it back
+    /// (`None`): the evaluation saves it with the serve. Never required.
+    pub fn choose_serve_start(
+        &mut self,
+        start: Option<ServeStartEnum>,
+    ) -> Result<(), ScoutingError> {
+        match self.serve_start_applies() {
+            true => {
+                self.serve_start = start;
+                Ok(())
+            }
+            false => Err(ScoutingError::InvalidSelection),
+        }
+    }
+
+    /// The scout touches a zone our serve starts from: told, or taken back
+    /// when it was.
+    pub fn touch_serve_start(&mut self, start: ServeStartEnum) -> Result<(), ScoutingError> {
+        let touched = (self.serve_start != Some(start)).then_some(start);
+        self.choose_serve_start(touched)
     }
 
     /// Whether the scout can tell where the ball went, along with the
@@ -572,6 +615,17 @@ impl ScoutingSession {
         }
     }
 
+    /// Where the server starts from before the scout tells it: where they
+    /// served from last in the match, if told.
+    fn preselected_serve_start(&self) -> Option<ServeStartEnum> {
+        match (self.event, self.player) {
+            (Some(EventTypeEnum::S), Some(server)) => {
+                ServeStartEnum::preselected(&server, self.match_events())
+            }
+            _ => None,
+        }
+    }
+
     /// The scout chooses the event: the server is known, the events of the
     /// opponent and the change of libero are saved at once, the others need
     /// the player.
@@ -644,6 +698,7 @@ impl ScoutingSession {
                 self.player = self.snapshot.current_lineup.get_serving_player();
                 self.step = ScoutingStep::Eval;
                 self.technique = self.preselected_technique();
+                self.serve_start = self.preselected_serve_start();
                 Ok(Progress::Choosing)
             }
             (ScoutingStep::Event, true, e) if e.asks_player() => {
@@ -680,6 +735,7 @@ impl ScoutingSession {
                 self.player = Some(player);
                 self.step = ScoutingStep::Eval;
                 self.technique = self.preselected_technique();
+                self.serve_start = self.preselected_serve_start();
                 Ok(Progress::Choosing)
             }
             (ScoutingStep::Player, true, Some(EventTypeEnum::R)) => {
@@ -794,7 +850,8 @@ impl ScoutingSession {
                         .with_blockers(
                             self.blockers
                                 .filter(|b| self.available_blockers().contains(b)),
-                        ),
+                        )
+                        .with_serve_start(self.serve_start.filter(|_| self.serve_start_applies())),
                 })
                 .await
             }
@@ -844,6 +901,7 @@ impl ScoutingSession {
                 self.technique = None;
                 self.target = None;
                 self.blockers = None;
+                self.serve_start = None;
                 self.step = Player;
                 Ok(())
             }
@@ -862,6 +920,7 @@ impl ScoutingSession {
         self.technique = None;
         self.target = None;
         self.blockers = None;
+        self.serve_start = None;
         self.step = ScoutingStep::Event;
     }
 
@@ -875,6 +934,7 @@ impl ScoutingSession {
             self.player = self.snapshot.current_lineup.get_serving_player();
             self.step = ScoutingStep::Eval;
             self.technique = self.preselected_technique();
+            self.serve_start = self.preselected_serve_start();
         }
     }
 
@@ -941,6 +1001,11 @@ impl ScoutingSession {
                     .flags
                     .blockers()
                     .filter(|b| self.available_blockers().contains(b));
+                // and where our serve started from
+                self.serve_start = removed
+                    .flags
+                    .serve_start()
+                    .filter(|_| self.serve_start_applies());
             }
             (_, R, Some(player)) => {
                 self.event = Some(R);

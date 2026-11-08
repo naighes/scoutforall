@@ -3,7 +3,7 @@
 //! points, where the attacks were set; the freeballs given and received;
 //! the players compared in a fundamental; the phases won in each rotation.
 use crate::overview::{DISTRIBUTION_ZONES, RalliesWon};
-use crate::shapes::court_zone::{CourtSide, CourtZoneEnum, TargetKind};
+use crate::shapes::court_zone::{CourtSide, CourtZoneEnum, ServeStartEnum, TargetKind};
 use crate::shapes::enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, ZoneEnum};
 use crate::shapes::flags::BlockersEnum;
 use crate::shapes::stats::{Metric, Stats, StatsFilter};
@@ -143,7 +143,8 @@ pub struct Detail {
     /// for a serve, an attack, a reception, a dig or a block, how many had
     /// their zone told, and each of the zones (`TargetKind::zones`: the nine,
     /// the three at the net for the block; the ones never told too); none
-    /// for the other fundamentals
+    /// for the other fundamentals. For a serve, only the ones from the zone
+    /// asked (see `Breakdown::of`)
     pub targets_told: u32,
     pub targets: Vec<TargetDetail>,
     /// for a reception or a dig (on our court), each conflict zone
@@ -157,6 +158,45 @@ pub struct Detail {
     /// told too; none for the other fundamentals, or with none told
     pub blockers_told: u32,
     pub blockers: Vec<BlockersDetail>,
+    /// for a serve, how many had where it started from told, and each zone
+    /// it starts from (`ServeStartEnum::ALL`), the ones never told too;
+    /// none for the other fundamentals, or with none told
+    pub serve_starts_told: u32,
+    pub serve_starts: Vec<ServeStartDetail>,
+    /// for a serve, where they went from where they started (both told),
+    /// by start and zone of their court, the most first: none with none
+    /// told. Only from the zone asked, as `targets`
+    pub serve_paths: Vec<ServePath>,
+}
+
+/// Our serves from a zone of our end line to a zone of their court, among
+/// the ones with both told.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServePath {
+    pub start: ServeStartEnum,
+    pub zone: CourtZoneEnum,
+    /// two cells of different zones count half in each
+    pub count: f64,
+    /// of the ones with both told, 0 to 100
+    pub share: f64,
+    /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
+    /// `MIN_SERVES_FOR_EFFICIENCY`
+    pub efficiency: Option<f64>,
+}
+
+/// Our serves started from a zone, among the ones with where it started
+/// from told.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServeStartDetail {
+    pub start: ServeStartEnum,
+    pub count: u32,
+    /// of the ones told, 0 to 100
+    pub share: f64,
+    /// as `Metric::Efficiency`, -100 to 100: `None` on fewer than
+    /// `MIN_SERVES_FOR_EFFICIENCY`
+    pub efficiency: Option<f64>,
+    /// the errors among them: they went nowhere on their court
+    pub errors: u32,
 }
 
 /// Our attacks against so many of theirs at the block, or our blocks with
@@ -196,8 +236,10 @@ pub struct Freeballs {
     pub exploited: Option<(f64, u32, u32)>,
 }
 
-/// A fundamental in detail, or the freeballs.
+/// A fundamental in detail, or the freeballs. One at a time, for a page:
+/// the larger variant isn't worth a box.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Breakdown {
     Fundamental(Detail),
     Freeballs(Freeballs),
@@ -206,15 +248,33 @@ pub enum Breakdown {
 impl Breakdown {
     /// One of `FUNDAMENTALS` in the statistics, narrowed by the filter.
     pub fn of(stats: &Stats, event_type: EventTypeEnum, filter: &StatsFilter) -> Self {
+        Self::from_start(stats, event_type, filter, None)
+    }
+
+    /// As `of`, where our serves went only from `start`, when given: the
+    /// rest of the detail as for all the serves.
+    pub fn from_start(
+        stats: &Stats,
+        event_type: EventTypeEnum,
+        filter: &StatsFilter,
+        start: Option<ServeStartEnum>,
+    ) -> Self {
         match event_type {
             EventTypeEnum::FB => Breakdown::Freeballs(Freeballs::of(stats, filter)),
-            _ => Breakdown::Fundamental(Detail::of(stats, event_type, filter)),
+            _ => Breakdown::Fundamental(Detail::of(stats, event_type, filter, start)),
         }
     }
 }
 
 impl Detail {
-    fn of(stats: &Stats, event_type: EventTypeEnum, filter: &StatsFilter) -> Self {
+    fn of(
+        stats: &Stats,
+        event_type: EventTypeEnum,
+        filter: &StatsFilter,
+        start: Option<ServeStartEnum>,
+    ) -> Self {
+        // where the serve started from: only for a serve
+        let start = start.filter(|_| event_type == EventTypeEnum::S);
         let total = stats.event_count(event_type, None, filter);
         let evals = evaluations(event_type)
             .iter()
@@ -248,7 +308,7 @@ impl Detail {
         };
         let side = CourtSide::of(event_type);
         let targets_told = match side {
-            Some(_) => stats.events_with_target(event_type, filter),
+            Some(_) => stats.events_with_target(event_type, start, filter),
             None => 0,
         };
         let detail = |zone: CourtZoneEnum, (count, efficiency): (f64, f64)| TargetDetail {
@@ -262,7 +322,7 @@ impl Detail {
             (Some(kind), 1..) => kind
                 .zones()
                 .iter()
-                .map(|zone| detail(*zone, stats.events_to(event_type, *zone, filter)))
+                .map(|zone| detail(*zone, stats.events_to(event_type, *zone, start, filter)))
                 .collect(),
             _ => Vec::new(),
         };
@@ -305,6 +365,43 @@ impl Detail {
                 })
                 .collect(),
         };
+        let (serve_starts_told, _) = match event_type {
+            EventTypeEnum::S => stats.serves_from(None, filter),
+            _ => (0, 0.0),
+        };
+        let serve_starts = match serve_starts_told {
+            0 => Vec::new(),
+            told => ServeStartEnum::ALL
+                .iter()
+                .map(|z| {
+                    let (count, efficiency) = stats.serves_from(Some(*z), filter);
+                    ServeStartDetail {
+                        start: *z,
+                        count,
+                        share: f64::from(count) / f64::from(told) * 100.0,
+                        efficiency: (count >= MIN_SERVES_FOR_EFFICIENCY).then_some(efficiency),
+                        errors: stats.serve_errors_from(*z, filter),
+                    }
+                })
+                .collect(),
+        };
+        let paths = match event_type {
+            EventTypeEnum::S => stats.serve_paths(start, filter),
+            _ => Vec::new(),
+        };
+        let both: f64 = paths.iter().map(|(_, _, count, _)| count).sum();
+        let mut serve_paths: Vec<ServePath> = paths
+            .into_iter()
+            .map(|(start, zone, count, efficiency)| ServePath {
+                start,
+                zone,
+                count,
+                share: count / both * 100.0,
+                efficiency: (count >= f64::from(MIN_SERVES_FOR_EFFICIENCY)).then_some(efficiency),
+            })
+            .collect();
+        // the most first; in halves: an integer to sort by
+        serve_paths.sort_by_key(|p| std::cmp::Reverse((p.count * 2.0).round() as i64));
         Detail {
             total,
             evals,
@@ -324,6 +421,9 @@ impl Detail {
             on_conflicts,
             blockers_told,
             blockers,
+            serve_starts_told,
+            serve_starts,
+            serve_paths,
         }
     }
 }

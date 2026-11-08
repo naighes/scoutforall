@@ -11,13 +11,13 @@
 //! (see [`SituationFilter`]): the role of the player, our reception in the
 //! rally, the touch before, the set of the attack, the reception formation
 //! and the inverted P1.
-use crate::shapes::court_zone::{CourtTarget, CourtZoneEnum};
+use crate::shapes::court_zone::{CourtTarget, CourtZoneEnum, ServeStartEnum};
 use crate::shapes::enums::{
     ErrorTypeEnum, EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum, ZoneEnum,
 };
 use crate::shapes::flags::{BlockersEnum, ReceptionSchemeEnum};
 use crate::shapes::technique::SetTypeEnum;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::hash::Hash;
 use uuid::Uuid;
 
@@ -113,13 +113,15 @@ impl StatsFilter {
 /// video): the ones the filter keeps, with one of the evaluations, set to
 /// the zone of the net (an attack), and sent to or played in the zone of
 /// the court (see `CourtTarget::zones`, a conflict zone by
-/// `CourtTarget::conflict`), when given.
+/// `CourtTarget::conflict`) and, for our serve, started from the zone, when
+/// given.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EventPick {
     pub event_type: EventTypeEnum,
     pub evals: Option<EvalSet>,
     pub zone: Option<ZoneEnum>,
     pub target: Option<CourtZoneEnum>,
+    pub serve_start: Option<ServeStartEnum>,
     pub filter: StatsFilter,
 }
 
@@ -144,6 +146,7 @@ impl EventPick {
                 .is_none_or(|set| k.eval.is_some_and(|e| set.contains(e)))
             && self.zone.is_none_or(|z| k.zone == Some(z))
             && self.target.is_none_or(in_target)
+            && self.serve_start.is_none_or(|z| k.serve_start == Some(z))
     }
 }
 
@@ -339,13 +342,15 @@ pub struct Touch {
     pub set_type: Option<SetTypeEnum>,
 }
 
-/// How many times each key occurred.
+/// How many times each key occurred. Hashed with Fx: the counters are
+/// updated for every event replayed and read for every figure shown, and
+/// SipHash took most of the time of the statistics.
 #[derive(Debug, Clone)]
-pub struct Counter<K>(HashMap<K, u32>);
+pub struct Counter<K>(FxHashMap<K, u32>);
 
 impl<K> Default for Counter<K> {
     fn default() -> Self {
-        Counter(HashMap::new())
+        Counter(FxHashMap::default())
     }
 }
 
@@ -411,6 +416,8 @@ pub struct EventKey {
     /// how many blocked against our attack, or on our block, when the
     /// scout told it
     pub blockers: Option<BlockersEnum>,
+    /// where our serve started from, when the scout told it
+    pub serve_start: Option<ServeStartEnum>,
     /// `None` for the events with no evaluation (`F`, `OS`, `OE`, `FB`,
     /// `OF`)
     pub eval: Option<EvalEnum>,
@@ -585,7 +592,7 @@ impl AttackSummary {
     }
 }
 
-fn percentage(count: i32, total: u32) -> f64 {
+pub(crate) fn percentage(count: i32, total: u32) -> f64 {
     count as f64 / total as f64 * 100.0
 }
 
@@ -682,26 +689,38 @@ impl Stats {
         metric: Metric,
         filter: &StatsFilter,
     ) -> Option<f64> {
-        let (score, total) = self
-            .events(event_type, filter)
+        let (score, total) = self.metric_score(event_type, metric, filter);
+        (total > 0).then(|| percentage(score, total))
+    }
+
+    /// What the metric is made of: the score of the events of this type
+    /// with an evaluation, and how many they are.
+    pub fn metric_score(
+        &self,
+        event_type: EventTypeEnum,
+        metric: Metric,
+        filter: &StatsFilter,
+    ) -> (i32, u32) {
+        self.events(event_type, filter)
             .filter_map(|(k, v)| k.eval.map(|eval| (metric.score(event_type, eval), v)))
             .fold((0, 0), |(score, total), (s, v)| {
                 (score + s * v as i32, total + v)
-            });
-        (total > 0).then(|| percentage(score, total))
+            })
     }
 
     /// Our serves or attacks sent to one of the nine zones, or our
     /// receptions in it (see `CourtSide::of`), among the ones whose zone was
     /// told: how many, two cells of different zones half in each (see
-    /// `CourtTarget::zones`), and their efficiency (as `Metric::Efficiency`).
+    /// `CourtTarget::zones`), and their efficiency (as `Metric::Efficiency`);
+    /// our serves only from `start`, when given.
     pub fn events_to(
         &self,
         event_type: EventTypeEnum,
         zone: CourtZoneEnum,
+        start: Option<ServeStartEnum>,
         filter: &StatsFilter,
     ) -> (f64, f64) {
-        self.weighted(event_type, filter, |target| {
+        self.weighted(event_type, start, filter, |target| {
             target
                 .zones()
                 .iter()
@@ -719,7 +738,7 @@ impl Stats {
         conflict: Option<CourtZoneEnum>,
         filter: &StatsFilter,
     ) -> (u32, f64) {
-        let (count, efficiency) = self.weighted(event_type, filter, |target| {
+        let (count, efficiency) = self.weighted(event_type, None, filter, |target| {
             match (target.conflict(), conflict) {
                 (Some(on), Some(asked)) if on == asked => 1.0,
                 (Some(_), None) => 1.0,
@@ -735,11 +754,13 @@ impl Stats {
     fn weighted(
         &self,
         event_type: EventTypeEnum,
+        start: Option<ServeStartEnum>,
         filter: &StatsFilter,
         weight: impl Fn(&CourtTarget) -> f64,
     ) -> (f64, f64) {
         let (score, total) = self
             .events(event_type, filter)
+            .filter(|(k, _)| start.is_none_or(|z| k.serve_start == Some(z)))
             .filter_map(|(k, v)| {
                 k.target
                     .map(|t| weight(&t) * f64::from(v))
@@ -753,6 +774,66 @@ impl Stats {
         match total > 0.0 {
             true => (total, score / total * 100.0),
             false => (0.0, 0.0),
+        }
+    }
+
+    /// Our serves with where they started from and where they went told,
+    /// by start and zone of their court (two cells of different zones half
+    /// in each, see `CourtTarget::zones`): how many, and their efficiency;
+    /// only from `start`, when given. The zones in the order of
+    /// `CourtZoneEnum::ZONES`, the starts of `ServeStartEnum::ALL`.
+    pub fn serve_paths(
+        &self,
+        start: Option<ServeStartEnum>,
+        filter: &StatsFilter,
+    ) -> Vec<(ServeStartEnum, CourtZoneEnum, f64, f64)> {
+        ServeStartEnum::ALL
+            .iter()
+            .filter(|s| start.is_none_or(|wanted| wanted == **s))
+            .flat_map(|s| CourtZoneEnum::ZONES.iter().map(move |z| (*s, *z)))
+            .filter_map(|(s, zone)| {
+                let (count, efficiency) =
+                    self.weighted(EventTypeEnum::S, Some(s), filter, |target| {
+                        target
+                            .zones()
+                            .iter()
+                            .filter(|(z, _)| *z == zone)
+                            .map(|(_, weight)| weight)
+                            .sum()
+                    });
+                (count > 0.0).then_some((s, zone, count, efficiency))
+            })
+            .collect()
+    }
+
+    /// Our serve errors started from the zone: they went nowhere on their
+    /// court.
+    pub fn serve_errors_from(&self, start: ServeStartEnum, filter: &StatsFilter) -> u32 {
+        self.events(EventTypeEnum::S, filter)
+            .filter(|(k, _)| k.serve_start == Some(start) && k.eval == Some(EvalEnum::Error))
+            .map(|(_, v)| v)
+            .sum()
+    }
+
+    /// Our serves started from the zone, or from any told with `None`: how
+    /// many, and their efficiency (0 with none).
+    pub fn serves_from(&self, start: Option<ServeStartEnum>, filter: &StatsFilter) -> (u32, f64) {
+        let (count, score) = self
+            .events(EventTypeEnum::S, filter)
+            .filter(|(k, _)| match (k.serve_start, start) {
+                (Some(z), Some(wanted)) => z == wanted,
+                (Some(_), None) => true,
+                (None, _) => false,
+            })
+            .fold((0u32, 0i64), |(count, score), (k, v)| {
+                let s = k.eval.map_or(0, |eval| {
+                    i64::from(Metric::Efficiency.score(EventTypeEnum::S, eval))
+                });
+                (count + v, score + s * i64::from(v))
+            });
+        match count {
+            0 => (0, 0.0),
+            n => (n, score as f64 / f64::from(n) * 100.0),
         }
     }
 
@@ -783,10 +864,17 @@ impl Stats {
         }
     }
 
-    /// The events of the type whose zone was told.
-    pub fn events_with_target(&self, event_type: EventTypeEnum, filter: &StatsFilter) -> u32 {
+    /// The events of the type whose zone was told; our serves only from
+    /// `start`, when given.
+    pub fn events_with_target(
+        &self,
+        event_type: EventTypeEnum,
+        start: Option<ServeStartEnum>,
+        filter: &StatsFilter,
+    ) -> u32 {
         self.events(event_type, filter)
             .filter(|(k, _)| k.target.is_some())
+            .filter(|(k, _)| start.is_none_or(|z| k.serve_start == Some(z)))
             .map(|(_, v)| v)
             .sum()
     }
