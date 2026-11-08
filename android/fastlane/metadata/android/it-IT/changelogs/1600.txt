@@ -1,0 +1,6 @@
+- Elenchi, statistiche e analisi molto più veloci con tanti incontri.
+- Zona di partenza della battuta: indica da dove parte, insieme alla valutazione.
+- Statistiche della battuta per zona di partenza e traiettorie su tutto il campo.
+- Elimina per sempre squadre, partite e giocatori, con conferma.
+- Importazione DataVolley: ora si importa anche l'alzata di ogni attacco.
+- Correzioni: giocatori con lo stesso nome in una squadra, partite generate nella squadra giusta.

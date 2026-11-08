@@ -1,0 +1,6 @@
+- Listy, statystyki i analiza znacznie szybsze przy wielu meczach.
+- Strefa początku zagrywki: zaznacz, skąd zagrywamy, razem z oceną.
+- Statystyki zagrywki według strefy początku i trasy naszych zagrywek na całym boisku.
+- Trwałe usuwanie drużyn, meczów i zawodników, z potwierdzeniem.
+- Import z DataVolley: importowane jest też rozegranie każdego ataku.
+- Poprawki: zawodnicy o tym samym imieniu w drużynie, mecze generowane we właściwej drużynie.

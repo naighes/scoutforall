@@ -1,0 +1,6 @@
+- Much faster lists, statistics and analysis with many matches.
+- Serve start zone: tell where our serve starts from, with its evaluation.
+- Serve statistics by start zone and the paths of our serves on the whole court.
+- Delete teams, matches and players for good, with confirmation.
+- DataVolley import: the set of each attack is now imported.
+- Fixes: players with the same name in a team, matches generated in the right team.

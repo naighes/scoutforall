@@ -1,0 +1,6 @@
+- Listas, estatísticas e análises muito mais rápidas com muitas partidas.
+- Zona de início do saque: indique de onde nosso saque parte, junto com a avaliação.
+- Estatísticas do saque por zona de início e trajetórias dos nossos saques em toda a quadra.
+- Exclua equipes, partidas e jogadores de vez, com confirmação.
+- Importação DataVolley: o levantamento de cada ataque agora é importado.
+- Correções: jogadores com o mesmo nome na equipe, partidas geradas na equipe certa.
