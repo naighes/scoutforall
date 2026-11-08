@@ -22,7 +22,8 @@ concurrency:
   # a run of master is let finish, to save its caches
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
-# The jobs all start at once: none waits for another.
+# The jobs all start at once: none waits for another. Each with a time
+# limit, for a step that hangs to fail the run, not hold it for hours.
 jobs:
   # the workspace with beta and nightly, to know early what the next
   # versions of Rust will break: once a month, or when asked
@@ -30,6 +31,7 @@ jobs:
     name: build
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -53,6 +55,7 @@ jobs:
   build-for-targets:
     name: build for targets
     runs-on: ${{ matrix.platforms.os }}
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -91,6 +94,7 @@ jobs:
   lockfile:
     name: lockfile
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -106,6 +110,7 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -125,6 +130,7 @@ jobs:
   format:
     name: format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -141,6 +147,7 @@ jobs:
   unused-dependencies:
     name: unused dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -154,6 +161,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
@@ -164,10 +172,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      # built already, not compiled here
-      - uses: taiki-e/install-action@v2
+      # built already, not compiled here; compiled if it can't be had in
+      # a few minutes
+      - id: nextest
+        uses: taiki-e/install-action@v2
+        timeout-minutes: 3
+        continue-on-error: true
         with:
           tool: nextest
+      - name: compile nextest
+        if: steps.nextest.outcome != 'success'
+        run: cargo install cargo-nextest --locked
       - run: scripts/test.sh
         env:
           RUST_BACKTRACE: full
@@ -184,6 +199,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
         with:
@@ -196,6 +212,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
         with:
