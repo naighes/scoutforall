@@ -183,7 +183,9 @@ mod tests {
     #[test]
     fn the_window_while_recording() {
         let recording = Status {
-            recording: Some(super::super::capture::Recording { elapsed_ms: 1 }),
+            recording: Some(super::super::capture::Recording {
+                since: std::time::Instant::now(),
+            }),
             ..Status::default()
         };
         let saving = Status {
@@ -202,7 +204,9 @@ mod tests {
     fn the_window_from_its_key() {
         use scout4all_keys::key;
         let recording = Status {
-            recording: Some(super::super::capture::Recording { elapsed_ms: 1 }),
+            recording: Some(super::super::capture::Recording {
+                since: std::time::Instant::now(),
+            }),
             ..Status::default()
         };
         let f4 = key!(f4);

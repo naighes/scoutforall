@@ -393,7 +393,12 @@ pub(super) fn look(
             Ok(Command::Record { base, started, .. }) => {
                 finish(take.take(), status);
                 match Take::start(base, started) {
-                    Ok(t) => *take = Some(t),
+                    // recording from now, the first frame still to come
+                    Ok(t) => {
+                        let recording = t.recording();
+                        *take = Some(t);
+                        set(status, |s| s.recording = Some(recording));
+                    }
                     Err(e) => set(status, |s| s.error = Some(e)),
                 }
             }
@@ -726,6 +731,31 @@ mod tests {
             &status,
         );
         assert!(serial(&status) > before);
+    }
+
+    /// A source on the network cut off while recording, or not there yet:
+    /// recording from the start, its time going on with no frames ("● REC"
+    /// counting).
+    #[test]
+    fn the_time_recording_without_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = Mutex::new(Status::default());
+        let (send, commands) = std::sync::mpsc::channel();
+        send.send(Command::Record {
+            base: dir.path().join("20261110 120000"),
+            started: chrono::Local::now(),
+            quality: crate::live::capture::Quality::High,
+        })
+        .unwrap();
+        let mut take = None;
+        assert!(matches!(
+            look(&commands, &mut take, &mut Pace::each_frame(), &status),
+            Asked::Nothing
+        ));
+        let recording = status.lock().unwrap().recording.clone().unwrap();
+        let later = recording.since + Duration::from_secs(3);
+        assert_eq!(recording.elapsed_ms_at(later), 3_000);
+        finish(take.take(), &status);
     }
 
     /// For the window of the recording: each frame decoded, a picture

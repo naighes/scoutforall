@@ -995,7 +995,7 @@ impl App {
         let notice = status.and_then(|st| st.error.clone());
         let elapsed = status
             .and_then(|st| st.recording.as_ref())
-            .map(|r| format!("● REC {}", video::clock(r.elapsed_ms)))
+            .map(|r| format!("● REC {}", video::clock(r.elapsed_ms())))
             .unwrap_or_default();
         let below = container(ui::body(elapsed).color(c.danger))
             .padding(iced::Padding::from([6, 12]))
@@ -1338,7 +1338,7 @@ impl App {
                 ),
                 ui::tip(
                     ui::pill(
-                        &format!("● REC {}", video::clock(r.elapsed_ms)),
+                        &format!("● REC {}", video::clock(r.elapsed_ms())),
                         true,
                         Some(Message::StopRecording),
                         c,

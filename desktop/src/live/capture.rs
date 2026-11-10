@@ -119,10 +119,24 @@ impl Quality {
     }
 }
 
-/// The recording being made.
+/// The recording being made: since when, so that how long it's been going
+/// on is told by the clock, frames or not (a source on the network cut
+/// off: the recording goes on).
 #[derive(Debug, Clone)]
 pub struct Recording {
-    pub elapsed_ms: u64,
+    pub since: Instant,
+}
+
+impl Recording {
+    /// The milliseconds it's been going on.
+    pub fn elapsed_ms(&self) -> u64 {
+        self.elapsed_ms_at(Instant::now())
+    }
+
+    /// The milliseconds it's been going on at `now`.
+    pub fn elapsed_ms_at(&self, now: Instant) -> u64 {
+        u64::try_from(now.saturating_duration_since(self.since).as_millis()).unwrap_or(u64::MAX)
+    }
 }
 
 /// A recording stopped: its MP4 and when it started, or why it couldn't be
@@ -429,9 +443,7 @@ impl Take {
     }
 
     pub(super) fn recording(&self) -> Recording {
-        Recording {
-            elapsed_ms: self.elapsed_ms(),
-        }
+        Recording { since: self.clock }
     }
 
     /// Made an MP4 next to the raw files.
