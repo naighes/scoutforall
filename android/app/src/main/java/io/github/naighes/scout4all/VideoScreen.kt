@@ -84,6 +84,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -892,41 +893,44 @@ private fun Overlay(st: VideoStanding, model: VideoModel, compact: Boolean, modi
     }
 }
 
-/** The video of the actions picked being made, then shared or saved. */
+/** The video of the actions picked being made, then shared or saved. Of
+ * the matches of a team, summed up first: how many actions of how many
+ * matches, the ones left out and why; made once asked. */
 @Composable
 private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val app = context.applicationContext as Scout4AllApplication
     val review = model.review ?: return
+    val request = model.clips ?: return
     val texts = MontageTexts(
-        team = review.team(),
-        opponent = review.opponent(),
         setN = stringResource(R.string.set_n),
         sideOut = stringResource(R.string.side_out_phase),
         breakPoint = stringResource(R.string.break_phase),
     )
-    val title = model.clips?.title.orEmpty()
-    val output = remember { File(File(context.cacheDir, "exports"), montageName(title) + ".mp4") }
+    val titles = TitleTexts(stringResource(R.string.clips_match_of), stringResource(R.string.clips_count))
+    val several = request.matches.size + request.leftOut.size > 1
+    val plan by produceState<MontagePlan?>(null) {
+        value = montagePlan(app, request, model.matchId to review, model.margins.beforeS, model.margins.afterS, titles)
+    }
+    // a single match: made at once
+    var asked by remember { mutableStateOf(!several) }
+    val output = remember { File(File(context.cacheDir, "exports"), montageName(request.title) + ".mp4") }
     var made by remember { mutableStateOf<File?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
     var percent by remember { mutableFloatStateOf(0f) }
-    val montage = remember {
-        Montage(
-            context,
-            review,
-            review.pieces(model.margins.beforeS, model.margins.afterS),
-            texts,
-            model.margins.overlay,
-            output,
-        ) { result ->
-            result.fold({ made = it }, { failed = it.localizedMessage ?: "" })
+    val montage = remember(plan, asked) {
+        plan?.takeIf { asked && it.actions > 0 }?.let { p ->
+            Montage(context, p.matches, texts, model.margins.overlay, output) { result ->
+                result.fold({ made = it }, { failed = it.localizedMessage ?: "" })
+            }
         }
     }
     DisposableEffect(montage) {
-        montage.start()
-        onDispose { if (made == null) montage.cancel() }
+        montage?.start()
+        onDispose { if (made == null) montage?.cancel() }
     }
     LaunchedEffect(montage) {
-        while (made == null && failed == null) {
+        while (montage != null && made == null && failed == null) {
             percent = montage.percent() / 100f
             delay(300)
         }
@@ -947,9 +951,12 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
         title = { Text(stringResource(R.string.share_video)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val summed = plan
                 when {
                     failed != null -> Text(stringResource(R.string.video_not_made) + (failed?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""))
                     made != null -> Text(stringResource(R.string.video_made))
+                    summed != null && !asked -> MontageSummary(summed)
+                    summed == null || montage == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     else -> {
                         Text(stringResource(R.string.making_video, (percent * 100).toInt()))
                         LinearProgressIndicator(progress = { percent }, Modifier.fillMaxWidth())
@@ -958,10 +965,16 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            made?.let { file ->
-                Row {
-                    TextButton(onClick = { save.launch(file.name) }) { Text(stringResource(R.string.save_to_file)) }
-                    TextButton(onClick = { context.shareVideo(file) }) { Text(stringResource(R.string.share)) }
+            val summed = plan
+            when {
+                made != null -> made?.let { file ->
+                    Row {
+                        TextButton(onClick = { save.launch(file.name) }) { Text(stringResource(R.string.save_to_file)) }
+                        TextButton(onClick = { context.shareVideo(file) }) { Text(stringResource(R.string.share)) }
+                    }
+                }
+                summed != null && !asked -> TextButton(onClick = { asked = true }, enabled = summed.actions > 0) {
+                    Text(stringResource(R.string.make_video))
                 }
             }
         },
@@ -971,6 +984,28 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/** What the video of the actions of the team holds: how many actions of
+ * how many matches, the ones left out and why. */
+@Composable
+private fun MontageSummary(plan: MontagePlan) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text(stringResource(R.string.clips_in_matches, plan.actions, plan.matches.size), fontWeight = FontWeight.Bold)
+    if (plan.leftOut.isNotEmpty()) {
+        val said = plan.leftOut.map { (opponent, why) ->
+            val reason = when (why) {
+                LeftOut.NO_VIDEO -> R.string.left_out_no_video
+                LeftOut.UNREADABLE -> R.string.left_out_unreadable
+                LeftOut.NOT_LINED_UP -> R.string.left_out_not_lined_up
+            }
+            "$opponent (${stringResource(reason)})"
+        }
+        Text(
+            stringResource(R.string.montage_left_out, said.joinToString(", ")),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 private fun android.content.Context.shareVideo(file: File) {

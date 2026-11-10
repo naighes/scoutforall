@@ -435,6 +435,11 @@
     <string name="clips_in_matches">Ações: %1$d · partidas: %2$d</string>
     <string name="clips_without_video">Sem vídeo, deixadas de fora: %1$d</string>
     <string name="clips_match_of">Partida %1$d de %2$d</string>
+    <string name="montage_left_out">Deixadas de fora: %1$s</string>
+    <string name="left_out_no_video">sem vídeo</string>
+    <string name="left_out_unreadable">vídeo ilegível</string>
+    <string name="left_out_not_lined_up">não sincronizada com o vídeo</string>
+    <string name="make_video">Criar o vídeo</string>
     <string name="previous_match">Partida anterior</string>
     <string name="next_match">Próxima partida</string>
     <string name="clip_before">Antes</string>

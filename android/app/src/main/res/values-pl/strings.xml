@@ -437,6 +437,11 @@
     <string name="clips_in_matches">Akcje: %1$d · mecze: %2$d</string>
     <string name="clips_without_video">Mecze bez wideo, pominięte: %1$d</string>
     <string name="clips_match_of">Mecz %1$d z %2$d</string>
+    <string name="montage_left_out">Pominięte: %1$s</string>
+    <string name="left_out_no_video">bez wideo</string>
+    <string name="left_out_unreadable">wideo nieczytelne</string>
+    <string name="left_out_not_lined_up">niezsynchronizowany z wideo</string>
+    <string name="make_video">Utwórz wideo</string>
     <string name="previous_match">Poprzedni mecz</string>
     <string name="next_match">Następny mecz</string>
     <string name="clip_before">Przed</string>

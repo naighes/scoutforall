@@ -48,6 +48,8 @@ sealed interface VideoRequest {
         val title: String,
         /** at least one, each with a video */
         val matches: List<TeamClipMatch>,
+        /** the ones without a video: left out of the video made, said */
+        val leftOut: List<TeamClipMatch> = emptyList(),
     ) : VideoRequest
 }
 

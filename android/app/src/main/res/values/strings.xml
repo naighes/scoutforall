@@ -436,6 +436,11 @@
     <string name="clips_in_matches">Actions: %1$d · matches: %2$d</string>
     <string name="clips_without_video">Without a video, left out: %1$d</string>
     <string name="clips_match_of">Match %1$d of %2$d</string>
+    <string name="montage_left_out">Left out: %1$s</string>
+    <string name="left_out_no_video">no video</string>
+    <string name="left_out_unreadable">video not readable</string>
+    <string name="left_out_not_lined_up">not synced with the video</string>
+    <string name="make_video">Make the video</string>
     <string name="previous_match">Previous match</string>
     <string name="next_match">Next match</string>
     <string name="clip_before">Before</string>

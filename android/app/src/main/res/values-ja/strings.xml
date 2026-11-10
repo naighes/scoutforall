@@ -434,6 +434,11 @@
     <string name="clips_in_matches">プレー: %1$d · 試合: %2$d</string>
     <string name="clips_without_video">ビデオなしで除外: %1$d</string>
     <string name="clips_match_of">試合 %1$d / %2$d</string>
+    <string name="montage_left_out">除外: %1$s</string>
+    <string name="left_out_no_video">ビデオなし</string>
+    <string name="left_out_unreadable">ビデオを読み込めません</string>
+    <string name="left_out_not_lined_up">ビデオと未同期</string>
+    <string name="make_video">動画を作成</string>
     <string name="previous_match">前の試合</string>
     <string name="next_match">次の試合</string>
     <string name="clip_before">前</string>

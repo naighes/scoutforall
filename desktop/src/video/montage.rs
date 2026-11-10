@@ -1,7 +1,8 @@
 //! The actions picked made a single video, to share: their pieces of the
 //! video one after the other, each after a card telling the action (who,
 //! the set, the score), and over them how the match stands, as on screen
-//! (`overlay_view`). On a thread: decoded (`player::Frames`), drawn on
+//! (`overlay_view`). The actions of a team, match after match: each match
+//! after a card of its own (the opponent, the day). On a thread: decoded (`player::Frames`), drawn on
 //! (tiny-skia, the fonts and the icons of the app), encoded (openh264) and
 //! made an MP4 as a recording is (`live::raw`). No sound: the player
 //! decodes none.
@@ -66,13 +67,38 @@ pub struct Board {
     pub at: Box<dyn Fn(u64) -> Option<Standing> + Send>,
 }
 
-/// What to make.
+/// What to make: the matches one after the other.
 pub struct Plan {
+    pub matches: Vec<MatchPlan>,
+    pub output: PathBuf,
+}
+
+/// A match of the video made: its files, its pieces, how it stands.
+pub struct MatchPlan {
     pub files: Vec<PathBuf>,
     pub pieces: Vec<Piece>,
     /// none: the video without it
     pub board: Option<Board>,
-    pub output: PathBuf,
+    /// the card before its pieces (against whom, when); none with a single
+    /// match
+    pub title: Option<Card>,
+}
+
+impl Plan {
+    /// How long the video made is.
+    fn total_ms(&self) -> u64 {
+        self.matches
+            .iter()
+            .map(|m| {
+                let title = m.title.as_ref().map_or(0, |_| CARD_MS);
+                title
+                    + m.pieces
+                        .iter()
+                        .map(|p| CARD_MS + p.to_ms.saturating_sub(p.from_ms))
+                        .sum::<u64>()
+            })
+            .sum()
+    }
 }
 
 /// How far it got.
@@ -102,11 +128,7 @@ pub struct Montage {
 
 impl Montage {
     pub fn start(plan: Plan) -> Montage {
-        let total_ms = plan
-            .pieces
-            .iter()
-            .map(|p| CARD_MS + p.to_ms.saturating_sub(p.from_ms))
-            .sum();
+        let total_ms = plan.total_ms();
         let progress = Arc::new(Mutex::new(Progress {
             total_ms,
             ..Progress::default()
@@ -146,21 +168,18 @@ impl Drop for Montage {
 const CANCELLED: &str = "cancelled";
 
 fn make(plan: &Plan, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Result<PathBuf, String> {
-    let mut frames = Frames::open(&plan.files)?;
+    // the size and the pace from the first frame of the first piece
+    let (first_match, first) = plan
+        .matches
+        .iter()
+        .find_map(|m| Some((m, m.pieces.first()?)))
+        .ok_or("no actions")?;
+    let mut frames = Frames::open(&first_match.files)?;
     let frame_ms = frames.frame_ms.max(1);
-    // the size from the first frame of the first piece
-    let first = plan.pieces.first().ok_or("no actions")?;
     frames.seek(first.from_ms)?;
     let (width, height) = match frames.next()? {
         Some((_, f)) => fitted(f.width, f.height),
         None => return Err("no frames".to_string()),
-    };
-    let fonts = Fonts::new()?;
-    let painter = Painter {
-        width,
-        height,
-        fonts,
-        board: plan.board.as_ref(),
     };
     let config = EncoderConfig::new()
         .usage_type(UsageType::CameraVideoRealTime)
@@ -180,12 +199,12 @@ fn make(plan: &Plan, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Result<
     let mut writer = raw::RawWriter::create(&base)?;
     let mut out_ms = 0u64;
     let mut done_ms = 0u64;
-    let mut write = |pixmap: &Pixmap, out_ms: &mut u64| -> Result<(), String> {
+    let mut write = |pixmap: &Pixmap| -> Result<(), String> {
         let rgba = RgbaSliceU8::new(pixmap.data(), (width as usize, height as usize));
         let yuv = YUVBuffer::from_rgb_source(rgba);
         let bits = encoder.encode(&yuv).map_err(|e| e.to_string())?.to_vec();
-        writer.write_shown(*out_ms, 0, &bits)?;
-        *out_ms += frame_ms;
+        writer.write_shown(out_ms, 0, &bits)?;
+        out_ms += frame_ms;
         Ok(())
     };
     let advance = |done: u64| {
@@ -193,27 +212,71 @@ fn make(plan: &Plan, progress: &Mutex<Progress>, cancel: &AtomicBool) -> Result<
             p.done_ms = done;
         }
     };
-    for piece in &plan.pieces {
-        let card = painter.card(&piece.card)?;
-        for _ in 0..CARD_MS / frame_ms {
-            write(&card, &mut out_ms)?;
-        }
-        done_ms += CARD_MS;
-        advance(done_ms);
-        frames.seek(piece.from_ms)?;
-        while let Some((at, frame)) = frames.next()? {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(CANCELLED.to_string());
+    let fonts = Fonts::new()?;
+    let mut opened = Some(frames);
+    for m in &plan.matches {
+        // the frames of the first match already open
+        let mut frames = match opened.take() {
+            Some(frames) => frames,
+            None => Frames::open(&m.files)?,
+        };
+        let painter = Painter {
+            width,
+            height,
+            fonts: Fonts {
+                regular: fonts.regular.clone(),
+                bold: fonts.bold.clone(),
+            },
+            board: m.board.as_ref(),
+        };
+        let cards = m.title.iter().map(|t| (t, None)).chain(
+            m.pieces
+                .iter()
+                .map(|p| (&p.card, Some((p.from_ms, p.to_ms)))),
+        );
+        for (card, piece) in cards {
+            let card = painter.card(card)?;
+            for _ in 0..CARD_MS / frame_ms {
+                write(&card)?;
             }
-            if at >= piece.to_ms {
-                break;
+            done_ms += CARD_MS;
+            advance(done_ms);
+            let Some((from_ms, to_ms)) = piece else {
+                continue;
+            };
+            frames.seek(from_ms)?;
+            // each frame shown until the next one's time: as many frames
+            // as the piece lasts at the pace of the video made, also when
+            // this match was filmed at another one
+            let length = to_ms.saturating_sub(from_ms);
+            let mut shown = 0u64;
+            let mut last: Option<Pixmap> = None;
+            while let Some((at, frame)) = frames.next()? {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(CANCELLED.to_string());
+                }
+                if at >= to_ms {
+                    break;
+                }
+                let into = at.saturating_sub(from_ms);
+                if let Some(pixmap) = &last {
+                    while shown < into {
+                        write(pixmap)?;
+                        shown += frame_ms;
+                    }
+                }
+                last = Some(painter.frame(&frame, at)?);
+                advance(done_ms + into);
             }
-            let pixmap = painter.frame(&frame, at)?;
-            write(&pixmap, &mut out_ms)?;
-            advance(done_ms + at.saturating_sub(piece.from_ms));
+            if let Some(pixmap) = &last {
+                while shown < length {
+                    write(pixmap)?;
+                    shown += frame_ms;
+                }
+            }
+            done_ms += length;
+            advance(done_ms);
         }
-        done_ms += piece.to_ms.saturating_sub(piece.from_ms);
-        advance(done_ms);
     }
     writer.flush()?;
     drop(writer);
@@ -327,15 +390,19 @@ impl Painter<'_> {
         Ok(pixmap)
     }
 
-    /// A frame of the video at its size, how the match stands over it.
+    /// A frame of the video at its size, how the match stands over it. A
+    /// frame of another shape (a match filmed otherwise) whole, on black
+    /// bars.
     fn frame(&self, frame: &Frame, at_ms: u64) -> Result<Pixmap, String> {
         let mut pixmap = self.blank()?;
+        pixmap.fill(Color::BLACK);
         let size = IntSize::from_wh(frame.width, frame.height).ok_or("no frame")?;
         let source = Pixmap::from_vec(frame.rgba.to_vec(), size).ok_or("no frame")?;
-        let transform = Transform::from_scale(
-            self.width as f32 / frame.width.max(1) as f32,
-            self.height as f32 / frame.height.max(1) as f32,
-        );
+        let (w, h) = (self.width as f32, self.height as f32);
+        let (fw, fh) = (frame.width.max(1) as f32, frame.height.max(1) as f32);
+        let scale = (w / fw).min(h / fh);
+        let transform = Transform::from_translate((w - fw * scale) / 2.0, (h - fh * scale) / 2.0)
+            .pre_scale(scale, scale);
         let paint = PixmapPaint {
             quality: FilterQuality::Bilinear,
             ..PixmapPaint::default()
@@ -643,6 +710,11 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/src/video/testdata/two_seconds.mp4"
     );
+    /// 2 s at 15 frames a second, 120 × 96
+    const OTHER_PACE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/video/testdata/two_seconds_15fps.mp4"
+    );
 
     fn standing(set: u8) -> Standing {
         Standing {
@@ -686,21 +758,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("Attacchi.mp4");
         let plan = Plan {
-            files: vec![PathBuf::from(CLIP), PathBuf::from(CLIP)],
-            pieces: vec![
-                Piece {
-                    from_ms: 500,
-                    to_ms: 1500,
-                    card: card("Attacco · F"),
-                },
-                // across the two files
-                Piece {
-                    from_ms: 1500,
-                    to_ms: 3000,
-                    card: card("Battuta"),
-                },
-            ],
-            board: Some(board()),
+            matches: vec![MatchPlan {
+                files: vec![PathBuf::from(CLIP), PathBuf::from(CLIP)],
+                pieces: vec![
+                    Piece {
+                        from_ms: 500,
+                        to_ms: 1500,
+                        card: card("Attacco · F"),
+                    },
+                    // across the two files
+                    Piece {
+                        from_ms: 1500,
+                        to_ms: 3000,
+                        card: card("Battuta"),
+                    },
+                ],
+                board: Some(board()),
+                title: None,
+            }],
             output: output.clone(),
         };
         let progress = Mutex::new(Progress {
@@ -722,18 +797,110 @@ mod tests {
         assert_eq!(left.len(), 1);
     }
 
+    /// The actions of two matches, the second one filmed otherwise (15
+    /// frames a second, 4:3): each match after its card, the pieces as long
+    /// as they are in their match, at the size and the pace of the first.
+    #[test]
+    fn the_actions_of_two_matches_made_a_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("Tour.mp4");
+        let title = |opponent: &str| Card {
+            title: opponent.into(),
+            lines: vec!["2026-10-12".into(), "Partita 1 di 2".into()],
+        };
+        let plan = Plan {
+            matches: vec![
+                MatchPlan {
+                    files: vec![PathBuf::from(CLIP)],
+                    pieces: vec![Piece {
+                        from_ms: 0,
+                        to_ms: 1000,
+                        card: card("Attacco"),
+                    }],
+                    board: Some(board()),
+                    title: Some(title("Siena")),
+                },
+                MatchPlan {
+                    files: vec![PathBuf::from(OTHER_PACE)],
+                    pieces: vec![
+                        Piece {
+                            from_ms: 0,
+                            to_ms: 800,
+                            card: card("Attacco"),
+                        },
+                        Piece {
+                            from_ms: 1000,
+                            to_ms: 2000,
+                            card: card("Attacco"),
+                        },
+                    ],
+                    board: Some(board()),
+                    title: Some(title("Arezzo")),
+                },
+            ],
+            output: output.clone(),
+        };
+        let expected = 5 * CARD_MS + 1000 + 800 + 1000;
+        assert_eq!(plan.total_ms(), expected);
+        let progress = Mutex::new(Progress {
+            total_ms: expected,
+            ..Progress::default()
+        });
+        make(&plan, &progress, &AtomicBool::new(false)).unwrap();
+        assert_eq!(progress.lock().unwrap().percent(), 100);
+        let video = Source::open(&output).unwrap();
+        assert!(
+            video.duration_ms.abs_diff(expected) <= 100,
+            "{} ms, not {expected}",
+            video.duration_ms
+        );
+        // at the pace of the first: 30 frames a second all along
+        let frames = video.samples.len() as u64;
+        assert!(
+            frames.abs_diff(expected * 30 / 1000) <= 3,
+            "{frames} frames"
+        );
+    }
+
+    /// A frame of another shape whole in the video made, on black bars.
+    #[test]
+    fn a_frame_of_another_shape_on_bars() {
+        let painter = Painter {
+            width: 160,
+            height: 96,
+            fonts: Fonts::new().unwrap(),
+            board: None,
+        };
+        let frame = Frame {
+            serial: 0,
+            width: 120,
+            height: 96,
+            rgba: [255, 255, 255, 255].repeat(120 * 96).into(),
+        };
+        let pixmap = painter.frame(&frame, 0).unwrap();
+        let at = |x: u32, y: u32| pixmap.pixel(x, y).unwrap();
+        // black on the sides, the frame in the middle, as tall as the video
+        assert_eq!(at(5, 48).red(), 0);
+        assert_eq!(at(154, 48).red(), 0);
+        assert_eq!(at(80, 1).red(), 255);
+        assert_eq!(at(80, 94).red(), 255);
+    }
+
     /// Stopped: no video.
     #[test]
     fn a_video_stopped() {
         let dir = tempfile::tempdir().unwrap();
         let plan = Plan {
-            files: vec![PathBuf::from(CLIP)],
-            pieces: vec![Piece {
-                from_ms: 0,
-                to_ms: 1000,
-                card: card("Attacco"),
+            matches: vec![MatchPlan {
+                files: vec![PathBuf::from(CLIP)],
+                pieces: vec![Piece {
+                    from_ms: 0,
+                    to_ms: 1000,
+                    card: card("Attacco"),
+                }],
+                board: None,
+                title: None,
             }],
-            board: None,
             output: dir.path().join("x.mp4"),
         };
         let progress = Mutex::new(Progress::default());

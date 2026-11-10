@@ -28,7 +28,6 @@ import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import io.github.naighes.scout4all.core.MontagePiece
 import io.github.naighes.scout4all.core.PhaseEnum
-import io.github.naighes.scout4all.core.VideoReview
 import io.github.naighes.scout4all.core.VideoStanding
 import java.io.File
 
@@ -44,8 +43,6 @@ private const val FRAME_RATE = 30
 /** What the montage writes on its cards and over the video, in the
  * language of the app. */
 data class MontageTexts(
-    val team: String,
-    val opponent: String,
     /** "Set %d" */
     val setN: String,
     val sideOut: String,
@@ -55,13 +52,14 @@ data class MontageTexts(
 /** The actions picked made a single video, to share (as `video::montage`
  * on the desktop): for each piece a card (the action, the player, the set
  * and the score before it, which of how many), then the piece from its
- * files, with how the match stands over it when shown. No sound, as on
- * the desktop. Made by Media3 Transformer, on the encoder of the phone. */
+ * files, with how the match stands over it when shown. The actions of a
+ * team match after match, each match after its own card (the opponent,
+ * the day). No sound, as on the desktop. Made by Media3 Transformer, on
+ * the encoder of the phone. */
 @OptIn(UnstableApi::class)
 class Montage(
     private val context: Context,
-    private val review: VideoReview,
-    private val pieces: List<MontagePiece>,
+    private val matches: List<MontageMatch>,
     private val texts: MontageTexts,
     private val overlay: Boolean,
     private val output: File,
@@ -72,21 +70,27 @@ class Montage(
 
     /** Starts it: on the main thread, where it's asked how far it is. */
     fun start() {
-        val paths = review.files().map { it.path }
         val folder = File(context.cacheDir, "montage").apply {
             deleteRecursively()
             mkdirs()
         }
         output.parentFile?.mkdirs()
         output.delete()
-        val items = pieces.flatMapIndexed { i, piece ->
-            val card = File(folder, "card_$i.png").apply { writeCard(this, piece) }
-            listOf(cardItem(card)) + review.spans(piece.fromMs, piece.toMs).map { span ->
-                // where this stretch starts in the whole video, for the
-                // match over it
-                val startMs = piece.fromMs.toLong() +
-                    review.spans(piece.fromMs, piece.toMs).takeWhile { it != span }.sumOf { (it.toMs - it.fromMs).toLong() }
-                videoItem(paths[span.file.toInt()], span.fromMs.toLong(), span.toMs.toLong(), startMs)
+        val items = matches.flatMapIndexed { m, match ->
+            val paths = match.review.files().map { it.path }
+            val title = match.title?.let { lines ->
+                cardItem(File(folder, "match_$m.png").apply { writeTitle(this, lines) })
+            }
+            listOfNotNull(title) + match.pieces.flatMapIndexed { i, piece ->
+                val card = File(folder, "card_${m}_$i.png").apply { writeCard(this, piece) }
+                val spans = match.review.spans(piece.fromMs, piece.toMs)
+                listOf(cardItem(card)) + spans.map { span ->
+                    // where this stretch starts in the whole video, for the
+                    // match over it
+                    val startMs = piece.fromMs.toLong() +
+                        spans.takeWhile { it != span }.sumOf { (it.toMs - it.fromMs).toLong() }
+                    videoItem(match, paths[span.file.toInt()], span.fromMs.toLong(), span.toMs.toLong(), startMs)
+                }
             }
         }
         val sequence = EditedMediaItemSequence.Builder(items).build()
@@ -127,27 +131,28 @@ class Montage(
         .setEffects(Effects(emptyList(), listOf(sized())))
         .build()
 
-    private fun videoItem(path: String, fromMs: Long, toMs: Long, startMs: Long): EditedMediaItem {
+    private fun videoItem(match: MontageMatch, path: String, fromMs: Long, toMs: Long, startMs: Long): EditedMediaItem {
         val item = MediaItem.Builder()
             .setUri(Uri.parse(path))
             .setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder().setStartPositionMs(fromMs).setEndPositionMs(toMs).build(),
             )
             .build()
-        val effects = listOfNotNull(sized(), if (overlay) OverlayEffect(listOf(Board(startMs))) else null)
+        val effects = listOfNotNull(sized(), if (overlay) OverlayEffect(listOf(Board(match, startMs))) else null)
         return EditedMediaItem.Builder(item)
             .setRemoveAudio(true)
             .setEffects(Effects(emptyList(), effects))
             .build()
     }
 
+    /** The card of a match, on black: the opponent in amber, then the day
+     * and which match of how many. */
+    private fun writeTitle(file: File, lines: List<String>) = writeLines(file, lines.first(), lines.drop(1))
+
     /** The card of a piece, on black: the action, its technique and its
      * symbol in amber, then the player, the set and the score before it,
      * which of how many. */
     private fun writeCard(file: File, piece: MontagePiece) {
-        val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(android.graphics.Color.BLACK)
         val e = piece.event.event.event
         val title = listOfNotNull(e.name.replaceFirstChar { it.uppercase() }, e.technique).joinToString(" · ") +
             (e.symbol?.let { "  $it" } ?: "")
@@ -157,6 +162,14 @@ class Montage(
             "${texts.setN.format(piece.event.setNumber.toInt())} · ${piece.beforeUs}–${piece.beforeThem}",
             which,
         )
+        writeLines(file, title, lines)
+    }
+
+    /** A card: the title in amber, the lines under it, in the middle. */
+    private fun writeLines(file: File, title: String, lines: List<String>) {
+        val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.BLACK)
         val big = paint(64f, AMBER, bold = true)
         val small = paint(40f, android.graphics.Color.WHITE, bold = false)
         val height = 64f + 28f + lines.size * 56f
@@ -175,7 +188,7 @@ class Montage(
      * team (the ball by the one to serve, its name, its sets and points),
      * then the set, the phase in its color, the rotation. The same bitmap
      * while the match stands the same. */
-    private inner class Board(private val startMs: Long) : BitmapOverlay() {
+    private inner class Board(private val match: MontageMatch, private val startMs: Long) : BitmapOverlay() {
         private var firstUs: Long? = null
         private var shown: VideoStanding? = null
         private var bitmap: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
@@ -188,10 +201,10 @@ class Montage(
             // the first frame of the item is the start of its stretch
             val first = firstUs ?: presentationTimeUs.also { firstUs = it }
             val ms = startMs + (presentationTimeUs - first) / 1000
-            val st = review.standing(ms.coerceAtLeast(0).toULong())
+            val st = match.review.standing(ms.coerceAtLeast(0).toULong())
             if (st != shown || shown == null) {
                 shown = st
-                bitmap = st?.let { board(it) } ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                bitmap = st?.let { board(match, it) } ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
             }
             return bitmap
         }
@@ -199,7 +212,7 @@ class Montage(
         override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings = settings
     }
 
-    private fun board(st: VideoStanding): Bitmap {
+    private fun board(match: MontageMatch, st: VideoStanding): Bitmap {
         val name = paint(30f, android.graphics.Color.WHITE, bold = true, center = false)
         val sets = paint(30f, 0xCCFFFFFF.toInt(), bold = false, center = false)
         val points = paint(40f, android.graphics.Color.WHITE, bold = true, center = false)
@@ -209,7 +222,7 @@ class Montage(
             true -> BREAK to texts.breakPoint
             false -> SIDE_OUT to texts.sideOut
         }
-        val names = listOf(texts.team, texts.opponent).map { overlayName(it) }
+        val names = listOf(match.team, match.opponent).map { overlayName(it) }
         val nameWidth = names.maxOf { name.measureText(it) }
         val right = listOf(texts.setN.format(st.setNumber.toInt()), "$phase  ${st.rotation}").maxOf { soft.measureText(it) }
         val ball = 30f

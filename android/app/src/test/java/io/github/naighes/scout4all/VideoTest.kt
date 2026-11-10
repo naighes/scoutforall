@@ -25,6 +25,7 @@ import io.github.naighes.scout4all.core.NewVideoFile
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.VideoSeconds
 import io.github.naighes.scout4all.core.stripBars
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -68,6 +69,46 @@ private fun aceClips(team: String, match: String): VideoRequest.Clips {
     }
     val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches)
+}
+
+/** A file of the video linked to the match (`name` tells when it starts,
+ * or not), read as ten minutes long by the phone when `readable`. */
+private fun videoOf(team: String, match: String, name: String, readable: Boolean) {
+    val path = "content://nowhere/$match/$name"
+    core { c -> c.videoReview(team, match, null).addFiles(listOf(NewVideoFile(path, name)), 7200) }
+    if (readable) {
+        ShadowMediaMetadataRetriever.addMetadata(
+            DataSource.toDataSource(app, Uri.parse(path)),
+            MediaMetadataRetriever.METADATA_KEY_DURATION,
+            "600000",
+        )
+    }
+}
+
+/** The aces of a team in five matches: two in the video, tied a minute
+ * apart; one with its file not readable, one not lined up (the name of
+ * its file doesn't say when it starts), one without a video. */
+private fun acesOfFiveMatches(): VideoRequest.Clips {
+    val team = saveNationalTeam()
+    val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, listOf(EvalEnum.PERFECT), null, null)
+    listOf("Siena" to 3, "Arezzo" to 2, "Perugia" to 1, "Pisa" to 1, "Lucca" to 1).forEach { (opponent, aces) ->
+        val match = startFirstSet(team, opponent)
+        serve(team, match, *Array(aces) { EvalEnum.PERFECT })
+        when (opponent) {
+            "Siena", "Arezzo" -> {
+                videoOf(team, match, "20261025 175500.mp4", readable = true)
+                core { c ->
+                    val review = c.videoReview(team, match, pick)
+                    review.anchorHere(0u, 60_000u)
+                    (1 until aces).forEach { review.correctHere(it.toUInt(), (60_000 * (it + 1)).toULong()) }
+                }
+            }
+            "Perugia" -> videoOf(team, match, "20261025 175500.mp4", readable = false)
+            "Pisa" -> videoOf(team, match, "pisa.mp4", readable = true)
+        }
+    }
+    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(10u), pick) }
+    return VideoRequest.Clips(team, pick, "Serve · #", matches.filter { it.hasVideo }, matches.filter { !it.hasVideo })
 }
 
 /** The video of a match and the actions of its statistics in it (001). */
@@ -231,6 +272,36 @@ class VideoTest {
         }
         rule.waitForIdle()
         assertTrue("${shown.position}", shown.position in 70_000L..110_000L)
+    }
+
+    /** The video of the aces of the team: summed up before making it, the
+     * matches in the video each after its card, the aces counted across
+     * them; the others left out, said why. */
+    @Test
+    fun theVideoOfTheActionsOfATeam() {
+        val request = acesOfFiveMatches()
+        val titles = TitleTexts(app.getString(R.string.clips_match_of), app.getString(R.string.clips_count))
+        val plan = runBlocking { montagePlan(app, request, null, 5u, 5u, titles) }
+        assertEquals(5, plan.actions)
+        assertEquals(listOf("Arezzo", "Siena"), plan.matches.map { it.opponent }.sorted())
+        // one piece an ace (a minute apart), counted across the matches
+        assertEquals((1..5).map { it.toUInt() to 5u }, plan.matches.flatMap { m -> m.pieces.map { it.number to it.count } })
+        plan.matches.forEachIndexed { i, m ->
+            assertEquals(m.opponent, m.title?.first())
+            assertEquals(string(R.string.clips_match_of, i + 1, 2) + " · " + string(R.string.clips_count, m.pieces.size), m.title?.last())
+        }
+        assertEquals(
+            setOf("Lucca" to LeftOut.NO_VIDEO, "Perugia" to LeftOut.UNREADABLE, "Pisa" to LeftOut.NOT_LINED_UP),
+            plan.leftOut.toSet(),
+        )
+        // in the screen: summed up, made once asked
+        rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
+        rule.waitForText(string(R.string.clip_before))
+        rule.onNodeWithContentDescription(string(R.string.share_video)).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.clips_in_matches, 5, 2))
+        rule.waitForText(string(R.string.left_out_not_lined_up), substring = true)
+        rule.onNodeWithText(string(R.string.montage_left_out, ""), substring = true).assertExists()
+        rule.onNodeWithText(string(R.string.make_video)).assertIsEnabled()
     }
 }
 
