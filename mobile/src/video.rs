@@ -6,6 +6,7 @@
 
 use crate::{
     AnalysisPeriod, ClipPick, MobileError, Scout4All, SetEvent, VideoEvent, clips_of, count_of,
+    strip::{ClipSpan, clip_spans},
 };
 use chrono::{FixedOffset, Local, Offset};
 use scout4all_core::{
@@ -160,7 +161,7 @@ pub struct FileSpan {
 
 /// A match of the period with actions picked in the statistics of its
 /// team.
-#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
 pub struct TeamClipMatch {
     pub match_id: String,
     pub opponent: String,
@@ -553,6 +554,20 @@ impl VideoReview {
             .map(count_of)
     }
 
+    /// With the actions picked, where their clips are in the video, from
+    /// `lead_ms` before each to `after_ms` after it, for the strip under
+    /// the bar (`strip`): the one of the action `selected` playing.
+    pub fn clip_spans(&self, lead_ms: i64, after_ms: u64, selected: u32) -> Vec<ClipSpan> {
+        let st = self.state();
+        match st.picked {
+            Some(_) => {
+                let shown: Vec<&VideoEvent> = st.shown().collect();
+                clip_spans(&shown, lead_ms, after_ms, selected as usize)
+            }
+            None => vec![],
+        }
+    }
+
     /// How the match stands at `position_ms`: from all its events, also
     /// with the actions picked.
     pub fn standing(&self, position_ms: u64) -> Option<VideoStanding> {
@@ -906,6 +921,35 @@ pub fn spans(durations_ms: &[u64], from_ms: u64, to_ms: u64) -> Vec<FileSpan> {
     found
 }
 
+/// The video of the actions picked in the statistics, as asked: Android
+/// saves it with the screen, to open it again after the system closed the
+/// app in the background.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
+pub struct SavedClips {
+    pub team_id: String,
+    pub pick: ClipPick,
+    /// what they are, over the video
+    pub title: String,
+    /// with a video
+    pub matches: Vec<TeamClipMatch>,
+    /// without a video: left out, said
+    pub left_out: Vec<TeamClipMatch>,
+}
+
+/// The actions picked written to be saved (empty if they can't be: then
+/// nothing is restored).
+#[uniffi::export]
+pub fn save_clips(clips: SavedClips) -> String {
+    serde_json::to_string(&clips).unwrap_or_default()
+}
+
+/// The actions picked as `save_clips` wrote them; none when they can't be
+/// read (written empty, by another version).
+#[uniffi::export]
+pub fn restore_clips(saved: &str) -> Option<SavedClips> {
+    serde_json::from_str(saved).ok()
+}
+
 /// The name of the video of the actions picked, from what they are: the
 /// letters, the digits and the dashes, the rest a space ("scout4all" when
 /// nothing's left).
@@ -989,6 +1033,62 @@ mod tests {
         country::CountryCode,
         enums::{EventTypeEnum, GenderEnum, TeamClassificationEnum},
     };
+
+    /// The actions picked, saved by Android with the screen, come back as
+    /// they were: every filter, the matches with and without a video;
+    /// something else, none.
+    #[test]
+    fn the_clips_saved_come_back() {
+        use scout4all_core::shapes::{
+            court_zone::{CourtZoneEnum, ServeStartEnum},
+            enums::{EvalEnum, RoleEnum},
+            flags::ReceptionSchemeEnum,
+            technique::SetTypeEnum,
+        };
+        let filter = DetailFilter {
+            phase: Some(PhaseEnum::SideOut),
+            rotation: Some(3),
+            player: Some("p-18".to_string()),
+            role: Some(RoleEnum::OppositeHitter),
+            reception: vec![EvalEnum::Perfect, EvalEnum::Positive],
+            previous: vec![EvalEnum::Exclamative],
+            set_types: vec![SetTypeEnum::Quick],
+            scheme: Some(ReceptionSchemeEnum::Four),
+            inverted_p1: Some(true),
+            late: Some(false),
+            close: Some(true),
+            serve_start: Some(ServeStartEnum::Z6),
+        };
+        let clips = SavedClips {
+            team_id: "t".to_string(),
+            pick: ClipPick {
+                scope: StatsScope::Set { number: 2 },
+                event: EventTypeEnum::A,
+                filter,
+                evals: vec![EvalEnum::Perfect],
+                zone: Some(4),
+                target: Some(CourtZoneEnum::Z43),
+            },
+            title: "Attack · #".to_string(),
+            matches: vec![TeamClipMatch {
+                match_id: "m1".to_string(),
+                opponent: "Brasile".to_string(),
+                day: "2026-11-01".to_string(),
+                actions: 7,
+                has_video: true,
+            }],
+            left_out: vec![TeamClipMatch {
+                match_id: "m2".to_string(),
+                opponent: "Japan".to_string(),
+                day: "2026-11-02".to_string(),
+                actions: 2,
+                has_video: false,
+            }],
+        };
+        assert_eq!(restore_clips(&save_clips(clips.clone())), Some(clips));
+        assert_eq!(restore_clips(""), None);
+        assert_eq!(restore_clips("{\"team_id\": 3}"), None);
+    }
 
     const THREE_SETS: &[u8] = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw");
 
@@ -1235,6 +1335,20 @@ mod tests {
         );
         assert!(events.len() > 10);
         let next = review.next_clip(0, 5000).unwrap();
+        // their clips on the strip: in order, apart, the one chosen playing
+        let spans = review.clip_spans(5000, 5000, next);
+        assert!(spans.len() > 5);
+        assert!(spans.windows(2).all(|w| w[0].to_ms < w[1].from_ms));
+        assert_eq!(spans.iter().filter(|sp| sp.playing).count(), 1, "{spans:?}");
+        let playing = spans.iter().find(|sp| sp.playing).unwrap();
+        assert_eq!(Some(playing.from_ms), review.target(playing.event, 5000));
+        assert!(playing.event <= next);
+        // margins wider than the gaps: one clip
+        assert_eq!(review.clip_spans(600_000, 600_000, 0).len(), 1);
+        assert!(
+            whole.clip_spans(5000, 5000, 0).is_empty(),
+            "the whole match: no strip"
+        );
         assert!(next > 0);
         assert_ne!(review.target(next, 5000), review.target(0, 5000));
         let pieces = review.pieces(5, 5);

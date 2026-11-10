@@ -7,7 +7,9 @@
 //! choose one, Enter (or a click) goes a little before it. By hand (when
 //! the clocks differ): `a` ties the event chosen to the moment of the
 //! video, `t` to a time written, `[` `]` shift all by half a second, `r`
-//! goes back to the sync found by itself. Once tied to an event, another
+//! goes back to the sync found by itself. With the actions picked, their
+//! clips on a strip under the bar: a click on one plays it (`strip`).
+//! Once tied to an event, another
 //! one can be put alone at its time (`t`, or `e` at the moment of the
 //! video), the others where they are; Backspace puts it back. Only the desktop app has it: the
 //! profile (`video.json`) is saved next to the match.
@@ -19,6 +21,7 @@ mod montage;
 mod player;
 pub use player::Frame as Picture;
 pub mod source;
+mod strip;
 
 use {
     crate::{
@@ -34,6 +37,7 @@ use {
     margins::{Margin, Margins},
     player::{Player, Status},
     scout4all_core::{
+        settings::VideoSeconds,
         shapes::{enums::PhaseEnum, r#match::MatchEntry},
         video::{
             self, Anchor, AnchorSource, EventRef, StoredProfile, TimeEffect, VideoFile,
@@ -43,9 +47,10 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         MatchClips, MobileError, Scout4All, VideoEvent,
+        strip::{ClipSpan, StripClick, clip_spans},
         video::{
-            VideoStanding as Standing, current, event_ref, inside, parse_time, standing, target,
-            uncorrected, written,
+            Piece, VideoStanding as Standing, current, event_ref, inside, parse_time, pieces,
+            standing, target, uncorrected, written,
         },
     },
     std::{
@@ -54,13 +59,6 @@ use {
         time::{Duration, Instant},
     },
 };
-
-/// How far ← and → go.
-const STEP_SECONDS: u64 = 5;
-
-/// How long before an event the video goes to it: the serve is seen
-/// coming.
-const LEAD_MS: i64 = 2000;
 
 /// The fields of the seconds of a clip before and after its action.
 const BEFORE_FIELD: &str = "video-clip-before";
@@ -123,6 +121,9 @@ pub enum Message {
     Sequence,
     /// the actions picked made a video, to share
     Montage,
+    /// the video of the actions of the team made, as summed up
+    MakeMontage,
+    /// the video not made, or no longer
     StopMontage,
     /// with the actions of a team, the match after (`true`) or before
     OtherMatch(bool),
@@ -133,6 +134,8 @@ pub enum Message {
     MarginInput(Margin, String),
     /// the seconds written, done
     MarginSubmit,
+    /// the strip of the clips clicked
+    Strip(StripClick),
 }
 
 pub enum Outcome {
@@ -148,6 +151,63 @@ pub enum Outcome {
     Montage,
     /// the video of the actions picked made: to share, what it shows
     Share(PathBuf, String),
+}
+
+/// The matches left out of the video of the actions of the team, and why;
+/// none when none is.
+fn left_out_said(left_out: &[(String, LeftOut)], s: &Strings) -> Option<String> {
+    let said: Vec<String> = left_out
+        .iter()
+        .map(|(opponent, why)| {
+            let why = match why {
+                LeftOut::NoVideo => s.left_out_no_video,
+                LeftOut::Unreadable => s.left_out_unreadable,
+                LeftOut::NotLinedUp => s.left_out_not_lined_up,
+            };
+            format!("{opponent} ({why})")
+        })
+        .collect();
+    (!said.is_empty()).then(|| ui::fill(s.montage_left_out, &[said.join(", ")]))
+}
+
+/// The piece of the video of an action, after its card: what it is, who,
+/// the set and the score before it, which (`n`) of how many.
+fn piece(p: &Piece, n: usize, count: usize, s: &Strings) -> montage::Piece {
+    let e = p.event;
+    let name = ui::capitalized(&e.event.event.name);
+    let title = [Some(name), e.event.event.technique.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let title = match &e.event.event.symbol {
+        Some(symbol) => format!("{title}  {symbol}"),
+        None => title,
+    };
+    let which = match p.actions {
+        0 | 1 => format!("{n} / {count}"),
+        more => format!("{n} / {count}  (+{})", more - 1),
+    };
+    let lines = e
+        .event
+        .event
+        .player
+        .as_ref()
+        .map(|p| format!("{} {}", p.number, p.name))
+        .into_iter()
+        .chain([
+            format!(
+                "{} {} · {}–{}",
+                s.set_n, e.set_number, p.before.0, p.before.1
+            ),
+            which,
+        ])
+        .collect();
+    montage::Piece {
+        from_ms: p.from_ms,
+        to_ms: p.to_ms,
+        card: montage::Card { title, lines },
+    }
 }
 
 /// A frame of the video and its handle, to allocate.
@@ -218,6 +278,9 @@ pub struct VideoScreen {
     tour: Option<Tour>,
     /// the seconds of a clip before and after its action, as chosen
     margins: Margins,
+    /// how far ← and → go, and how long before an event the video goes to
+    /// it out of clip mode (the serve seen coming): from the settings
+    seconds: VideoSeconds,
     /// the seconds of one of them being written
     margin_text: Option<(Margin, String)>,
     /// where the first event of the match is in the video, when lined up:
@@ -227,6 +290,8 @@ pub struct VideoScreen {
     whole: bool,
     /// the video of the actions picked being made
     montage: Option<montage::Montage>,
+    /// the video of the actions of the team, before making it
+    summary: Option<Summary>,
     /// why the video of the actions picked wasn't made
     montage_error: Option<String>,
 }
@@ -236,6 +301,36 @@ pub struct VideoScreen {
 struct Tour {
     matches: Vec<MatchClips>,
     at: usize,
+    /// the ones without a video, left out
+    without_video: Vec<MatchClips>,
+}
+
+/// Why a match of the team is left out of the video of its actions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LeftOut {
+    NoVideo,
+    /// a file of its video not there, or not one to read
+    Unreadable,
+    /// the events not lined up with the video: no action in it
+    NotLinedUp,
+}
+
+/// A match of the team in the video of its actions.
+struct TourMatch {
+    the_match: MatchEntry,
+    day: String,
+    files: Vec<PathBuf>,
+    /// all its events in its video, for the score
+    all: Vec<VideoEvent>,
+    picked: Vec<VideoEvent>,
+}
+
+/// The video of the actions of a team, made once seen what's in it: the
+/// actions and the matches, the ones left out and why.
+struct Summary {
+    plan: montage::Plan,
+    actions: usize,
+    left_out: Vec<(String, LeftOut)>,
 }
 
 /// The actions of the match picked in its statistics, to watch one after
@@ -259,6 +354,7 @@ impl VideoScreen {
             StoredProfile::Profile(p) => Some(p),
             StoredProfile::Newer(_) => None,
         };
+        let seconds = core.video_seconds();
         let mut screen = VideoScreen {
             core,
             dir,
@@ -287,10 +383,12 @@ impl VideoScreen {
             sequence: true,
             tour: None,
             margins: Margins::default(),
+            seconds,
             margin_text: None,
             first_ms: None,
             whole: false,
             montage: None,
+            summary: None,
             montage_error: None,
         };
         screen.margins = Margins::read(&screen.dir);
@@ -323,7 +421,8 @@ impl VideoScreen {
     }
 
     /// The actions picked in the statistics of a team, match after match
-    /// (`matches`, each with a video): the first one played at once.
+    /// (`matches`, the ones with a video watched): the first one played at
+    /// once.
     pub fn with_tour(
         core: Arc<Scout4All>,
         dir: PathBuf,
@@ -331,6 +430,8 @@ impl VideoScreen {
         matches: Vec<MatchClips>,
         title: String,
     ) -> Result<VideoScreen, MobileError> {
+        let (matches, without_video): (Vec<MatchClips>, Vec<MatchClips>) =
+            matches.into_iter().partition(|m| m.has_video);
         let first = matches
             .first()
             .cloned()
@@ -339,7 +440,11 @@ impl VideoScreen {
             })?;
         let mut screen =
             VideoScreen::with_clips(core, dir, team_id, first.match_id, first.events, title)?;
-        screen.tour = Some(Tour { matches, at: 0 });
+        screen.tour = Some(Tour {
+            matches,
+            at: 0,
+            without_video,
+        });
         Ok(screen)
     }
 
@@ -363,10 +468,7 @@ impl VideoScreen {
         );
         match opened {
             Ok(mut next) => {
-                next.tour = Some(Tour {
-                    matches: tour.matches,
-                    at,
-                });
+                next.tour = Some(Tour { at, ..tour });
                 next.sequence = self.sequence;
                 next.detached = self.detached;
                 next.speed(self.current_speed());
@@ -418,133 +520,210 @@ impl VideoScreen {
             .unwrap_or_default()
     }
 
-    /// The pieces of the video of the actions picked: each from its margin
-    /// before to its margin after, the ones overlapping as one (the card of
-    /// the first, the others counted).
-    fn pieces(&self, s: &Strings) -> Vec<montage::Piece> {
-        let (before, after) = (self.lead_ms(), self.after_ms());
-        let picked: Vec<(u64, u64, &VideoEvent)> = self
-            .events
-            .iter()
-            .filter_map(|e| {
-                Some((
-                    target(e, before)?,
-                    e.offset_ms?.max(0).unsigned_abs() + after,
-                    e,
-                ))
-            })
-            .collect();
-        let mut merged: Vec<(u64, u64, &VideoEvent, usize)> = vec![];
-        let mut sorted = picked;
-        sorted.sort_by_key(|(from, _, _)| *from);
-        for (from, to, e) in sorted {
-            match merged.last_mut() {
-                Some(last) if from <= last.1 => {
-                    last.1 = last.1.max(to);
-                    last.3 += 1;
-                }
-                _ => merged.push((from, to, e, 1)),
-            }
-        }
-        let count = merged.len();
-        merged
-            .into_iter()
-            .enumerate()
-            .map(|(i, (from, to, e, actions))| montage::Piece {
-                from_ms: from,
-                to_ms: to,
-                card: self.card(e, i + 1, count, actions, s),
-            })
-            .collect()
-    }
-
-    /// The card of an action: what it is, who, the set and the score before
-    /// it, which of how many.
-    fn card(
-        &self,
-        e: &VideoEvent,
-        n: usize,
-        count: usize,
-        actions: usize,
-        s: &Strings,
-    ) -> montage::Card {
-        let name = ui::capitalized(&e.event.event.name);
-        let title = [Some(name), e.event.event.technique.clone()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ");
-        let title = match &e.event.event.symbol {
-            Some(symbol) => format!("{title}  {symbol}"),
-            None => title,
-        };
-        // the score before it: after the event before it in its set
-        let before = self
-            .all_events
-            .iter()
-            .take_while(|other| !std::ptr::eq(*other, e) && event_ref(other) != event_ref(e))
-            .filter(|other| other.set_number == e.set_number)
-            .last()
-            .map_or((0, 0), |other| {
-                (other.event.score_us, other.event.score_them)
-            });
-        let which = match actions {
-            1 => format!("{n} / {count}"),
-            more => format!("{n} / {count}  (+{})", more - 1),
-        };
-        montage::Card {
-            title,
-            lines: e
-                .event
-                .event
-                .player
-                .as_ref()
-                .map(|p| format!("{} {}", p.number, p.name))
-                .into_iter()
-                .chain([
-                    format!("{} {} · {}–{}", s.set_n, e.set_number, before.0, before.1),
-                    which,
-                ])
+    /// The video of the actions picked of this match: their pieces, each
+    /// from its margin before to its margin after, the ones overlapping as
+    /// one (the card of the first, the others counted), as on Android.
+    fn match_plan(&self, s: &Strings) -> montage::MatchPlan {
+        let picked: Vec<&VideoEvent> = self.events.iter().collect();
+        let pieces = pieces(
+            &picked,
+            &self.all_events,
+            self.margins.before_s,
+            self.margins.after_s,
+        );
+        let count = pieces.len();
+        montage::MatchPlan {
+            files: self.paths(),
+            pieces: pieces
+                .iter()
+                .enumerate()
+                .map(|(i, p)| piece(p, i + 1, count, s))
                 .collect(),
+            board: self.board(&self.the_match, self.all_events.clone(), s),
+            title: None,
         }
     }
 
-    /// The video of the actions picked to make, when some are and it isn't
-    /// being made.
-    fn montage_asked(&self) -> Outcome {
-        match (&self.clips, &self.montage) {
-            (Some(_), None) => Outcome::Montage,
-            _ => Outcome::Stay,
-        }
-    }
-
-    /// The video of the actions picked, made on its thread.
-    pub fn start_montage(&mut self, s: &'static Strings) {
-        let pieces = self.pieces(s);
-        self.montage_error = None;
-        if pieces.is_empty() {
-            return;
-        }
-        let output = montage::output(&self.clips_title());
-        if let Err(e) = montage::prepare(&output) {
-            self.montage_error = Some(e);
-            return;
-        }
-        let events = self.all_events.clone();
-        let board = self.margins.overlay.then(|| montage::Board {
-            team: self.the_match.team.name.clone(),
-            opponent: self.the_match.opponent.clone(),
+    /// How the match stands over the video made, if shown.
+    fn board(
+        &self,
+        the_match: &MatchEntry,
+        events: Vec<VideoEvent>,
+        s: &Strings,
+    ) -> Option<montage::Board> {
+        self.margins.overlay.then(|| montage::Board {
+            team: the_match.team.name.clone(),
+            opponent: the_match.opponent.clone(),
             set_n: s.set_n,
             side_out: s.side_out_phase,
             break_point: s.break_phase,
             at: Box::new(move |ms| standing(&events, ms)),
-        });
-        self.montage = Some(montage::Montage::start(montage::Plan {
-            files: self.paths(),
-            pieces,
-            board,
-            output,
-        }));
+        })
+    }
+
+    /// The video of the actions of each match of the team, one after the
+    /// other, each after its card, the actions counted across all; the
+    /// matches without a video, with its files gone or not lined up left
+    /// out.
+    fn tour_summary(&self, tour: &Tour, s: &Strings) -> Summary {
+        let mut left_out: Vec<(String, LeftOut)> = tour
+            .without_video
+            .iter()
+            .map(|m| (m.opponent.clone(), LeftOut::NoVideo))
+            .collect();
+        let mut kept = vec![];
+        for m in &tour.matches {
+            match self.tour_match(m) {
+                Ok(t) if self.tour_pieces(&t).is_empty() => {
+                    left_out.push((m.opponent.clone(), LeftOut::NotLinedUp));
+                }
+                Ok(t) => kept.push(t),
+                Err(why) => left_out.push((m.opponent.clone(), why)),
+            }
+        }
+        let count: usize = kept.iter().map(|t| self.tour_pieces(t).len()).sum();
+        let mut n = 0;
+        let mut actions = 0;
+        let matches = kept
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let pieces = self.tour_pieces(t);
+                let of_match: usize = pieces.iter().map(|p| p.actions as usize).sum();
+                actions += of_match;
+                montage::MatchPlan {
+                    files: t.files.clone(),
+                    title: Some(montage::Card {
+                        title: t.the_match.opponent.clone(),
+                        lines: vec![
+                            t.day.clone(),
+                            format!(
+                                "{} · {}",
+                                ui::fill(
+                                    s.clips_match_of,
+                                    &[(i + 1).to_string(), kept.len().to_string()]
+                                ),
+                                ui::fill(s.clips_count, &[of_match.to_string()]),
+                            ),
+                        ],
+                    }),
+                    pieces: pieces
+                        .iter()
+                        .map(|p| {
+                            n += 1;
+                            piece(p, n, count, s)
+                        })
+                        .collect(),
+                    board: self.board(&t.the_match, t.all.clone(), s),
+                }
+            })
+            .collect();
+        Summary {
+            plan: montage::Plan {
+                matches,
+                output: montage::output(&self.clips_title()),
+            },
+            actions,
+            left_out,
+        }
+    }
+
+    /// The pieces of the actions picked of a match of the team.
+    fn tour_pieces<'a>(&self, t: &'a TourMatch) -> Vec<Piece<'a>> {
+        let picked: Vec<&VideoEvent> = t.picked.iter().collect();
+        pieces(&picked, &t.all, self.margins.before_s, self.margins.after_s)
+    }
+
+    /// A match of the team: its files, all its events in its video and the
+    /// ones picked; or why it's left out.
+    fn tour_match(&self, m: &MatchClips) -> Result<TourMatch, LeftOut> {
+        let (the_match, stored) = self
+            .core
+            .video(&self.team_id, &m.match_id)
+            .map_err(|_| LeftOut::Unreadable)?;
+        let profile = match stored {
+            StoredProfile::Profile(p) if !p.files.is_empty() => p,
+            StoredProfile::Missing | StoredProfile::Profile(_) => return Err(LeftOut::NoVideo),
+            StoredProfile::Newer(_) => return Err(LeftOut::Unreadable),
+        };
+        let files: Vec<PathBuf> = profile
+            .files
+            .iter()
+            .map(|f| video::resolved_path(&self.dir, &f.path))
+            .collect();
+        let durations = files
+            .iter()
+            .map(|f| source::Source::open(f).map(|s| s.duration_ms))
+            .collect::<Result<Vec<u64>, String>>()
+            .map_err(|_| LeftOut::Unreadable)?;
+        let all = self
+            .core
+            .video_events(&the_match, &profile, &durations)
+            .map_err(|_| LeftOut::Unreadable)?;
+        let picked = all
+            .iter()
+            .filter(|e| m.events.contains(&event_ref(e)))
+            .cloned()
+            .collect();
+        Ok(TourMatch {
+            the_match,
+            day: m.day.clone(),
+            files,
+            all,
+            picked,
+        })
+    }
+
+    /// The video of the actions picked to make, when some are and it isn't
+    /// being made; once summed up, made.
+    fn montage_asked(&mut self) -> Outcome {
+        match (&self.clips, &self.montage, &self.summary) {
+            (Some(_), None, None) => Outcome::Montage,
+            (Some(_), None, Some(_)) => {
+                self.make_montage();
+                Outcome::Stay
+            }
+            _ => Outcome::Stay,
+        }
+    }
+
+    /// The video of the actions picked: of this match made at once on its
+    /// thread; of the matches of a team summed up first (what's in, what's
+    /// left out), made once asked (`make_montage`).
+    pub fn start_montage(&mut self, s: &'static Strings) {
+        self.montage_error = None;
+        let several = self
+            .tour
+            .as_ref()
+            .filter(|t| t.matches.len() + t.without_video.len() > 1);
+        match several {
+            Some(tour) => self.summary = Some(self.tour_summary(tour, s)),
+            None => {
+                let plan = montage::Plan {
+                    matches: vec![self.match_plan(s)],
+                    output: montage::output(&self.clips_title()),
+                };
+                self.make(plan);
+            }
+        }
+    }
+
+    /// The video of the actions of the team made, as summed up.
+    fn make_montage(&mut self) {
+        if let Some(summary) = self.summary.take() {
+            self.make(summary.plan);
+        }
+    }
+
+    fn make(&mut self, plan: montage::Plan) {
+        if plan.matches.iter().all(|m| m.pieces.is_empty()) {
+            return;
+        }
+        if let Err(e) = montage::prepare(&plan.output) {
+            self.montage_error = Some(e);
+            return;
+        }
+        self.montage = Some(montage::Montage::start(plan));
     }
 
     /// How the match stands at the moment of the video: from all its
@@ -581,7 +760,7 @@ impl VideoScreen {
     fn lead_ms(&self) -> i64 {
         match self.clip || self.clips.is_some() {
             true => i64::from(self.margins.before_s) * 1000,
-            false => LEAD_MS,
+            false => self.seconds.lead_ms(),
         }
     }
 
@@ -992,7 +1171,7 @@ impl VideoScreen {
     }
 
     fn step(&mut self, forward: bool) {
-        let step = STEP_SECONDS * 1000;
+        let step = self.seconds.step_ms();
         let to = match forward {
             true => self.position() + step,
             false => self.position().saturating_sub(step),
@@ -1143,7 +1322,11 @@ impl VideoScreen {
             Message::TimeSubmit => self.submit_time(),
             Message::Sequence => self.sequence = !self.sequence,
             Message::Montage => return self.montage_asked(),
-            Message::StopMontage => self.montage = None,
+            Message::MakeMontage => self.make_montage(),
+            Message::StopMontage => {
+                self.montage = None;
+                self.summary = None;
+            }
             Message::OtherMatch(after) => {
                 if let Some(at) = self.other_match(after) {
                     self.open_match(at);
@@ -1152,6 +1335,8 @@ impl VideoScreen {
             Message::MarginStep(margin, by) => self.step_margin(margin, by),
             Message::MarginInput(margin, text) => self.write_margin(margin, text),
             Message::MarginSubmit => self.margin_text = None,
+            Message::Strip(StripClick::Clip { event }) => self.go_to_event(event as usize),
+            Message::Strip(StripClick::At { ms }) => self.seek(ms),
         }
         Outcome::Stay
     }
@@ -1253,7 +1438,7 @@ impl VideoScreen {
         let playing = match self.player {
             Some(_) => vec![
                 hint(s.space, format!("{} / {}", s.play, s.pause)),
-                hint("← →", format!("±{STEP_SECONDS} s")),
+                hint("← →", format!("±{} s", self.seconds.step_s)),
             ],
             None => vec![hint("c", s.choose_video.to_string())],
         };
@@ -1673,7 +1858,7 @@ impl VideoScreen {
             true => (theme::icons::PAUSE, s.pause),
             false => (theme::icons::PLAY, s.play),
         };
-        let step = STEP_SECONDS.to_string();
+        let step = self.seconds.step_s.to_string();
         let duration = status.duration_ms as f64;
         let bar = slider(
             0.0..=duration.max(1.0),
@@ -1761,9 +1946,50 @@ impl VideoScreen {
         .into()
     }
 
+    /// What the video of the actions of the team holds before making it:
+    /// how many actions of how many matches, the ones left out and why.
+    fn summary_view<'a>(
+        &'a self,
+        summary: &'a Summary,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let held = ui::fill(
+            s.clips_in_matches,
+            &[
+                summary.actions.to_string(),
+                summary.plan.matches.len().to_string(),
+            ],
+        );
+        let make = ui::pill(
+            s.make_video,
+            true,
+            (summary.actions > 0).then_some(Message::MakeMontage),
+            c,
+        );
+        let line = row![
+            text(held)
+                .size(SIZE_SMALL)
+                .font(theme::fonts().bold)
+                .color(c.accent),
+            make,
+            ui::pill(s.cancel, false, Some(Message::StopMontage), c),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+        let left_out: Element<'a, Message> = match left_out_said(&summary.left_out, s) {
+            Some(said) => text(said).size(SIZE_SMALL).color(c.muted).into(),
+            None => space::vertical().height(0).into(),
+        };
+        column![line, left_out].spacing(4).into()
+    }
+
     /// With the actions picked: their video to share, or how far it got
     /// being made, or why it wasn't.
     fn montage_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        if let (Some(_), None, Some(summary)) = (&self.clips, &self.montage, &self.summary) {
+            return self.summary_view(summary, s, c);
+        }
         let line: Element<'a, Message> = match (&self.clips, &self.montage) {
             (None, _) => return space::vertical().height(0).into(),
             (Some(_), Some(montage)) => row![
@@ -1803,69 +2029,30 @@ impl VideoScreen {
 
     /// With the actions picked, where their clips are in the video, from
     /// its start: the ones overlapping as one, in order. The one playing
-    /// told apart.
-    fn spans(&self) -> Vec<Span> {
-        let (before, after) = (self.lead_ms(), self.after_ms());
-        let chosen = self.event_target(self.selected);
-        let mut spans: Vec<Span> = match &self.clips {
-            Some(_) => self
-                .events
-                .iter()
-                .filter_map(|e| target(e, before).map(|t| (t, e)))
-                .filter_map(|(t, e)| {
-                    let end = e.offset_ms?.max(0).unsigned_abs() + after;
-                    Some(Span {
-                        from: t,
-                        to: end,
-                        playing: Some(t) == chosen,
-                    })
-                })
-                .collect(),
+    /// told apart (`clip_spans`, the same on Android).
+    fn spans(&self) -> Vec<ClipSpan> {
+        match &self.clips {
+            Some(_) => clip_spans(&self.events, self.lead_ms(), self.after_ms(), self.selected),
             None => vec![],
-        };
-        spans.sort_by_key(|sp| sp.from);
-        spans.into_iter().fold(vec![], |mut merged: Vec<Span>, sp| {
-            match merged.last_mut() {
-                Some(last) if sp.from <= last.to => {
-                    last.to = last.to.max(sp.to);
-                    last.playing |= sp.playing;
-                }
-                _ => merged.push(sp),
-            }
-            merged
-        })
+        }
     }
 
-    /// The clips of the actions picked, under the bar of the video: red,
-    /// the one playing in the accent.
+    /// The clips of the actions picked, under the bar of the video, to
+    /// click (`strip`).
     fn spans_view<'a>(&self, duration_ms: u64, c: Colors) -> Element<'a, Message> {
         let spans = self.spans();
         if spans.is_empty() || duration_ms == 0 {
             return space::vertical().height(0).into();
         }
-        let parts = portions(&spans, duration_ms)
-            .into_iter()
-            .map(|(portion, mark)| {
-                let color = match mark {
-                    Mark::Gap => iced::Color::TRANSPARENT,
-                    Mark::Clip => c.danger,
-                    Mark::Playing => c.accent,
-                };
-                container(space::horizontal())
-                    .width(Length::FillPortion(portion))
-                    .height(Length::Fixed(6.0))
-                    .style(move |_| container::Style {
-                        background: Some(color.into()),
-                        border: iced::Border {
-                            radius: 2.0.into(),
-                            ..iced::Border::default()
-                        },
-                        ..container::Style::default()
-                    })
-                    .into()
-            });
+        let strip = iced::widget::canvas(strip::Strip {
+            spans,
+            duration_ms,
+            colors: c,
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(strip::HEIGHT));
         // the handle of the bar goes from half its width to the other end
-        container(iced::widget::Row::with_children(parts))
+        container(Element::from(strip).map(Message::Strip))
             .padding(iced::Padding::from([0.0, HANDLE_HALF]))
             .width(Length::Fill)
             .into()
@@ -1944,48 +2131,6 @@ pub async fn pick(filter: &'static str) -> Vec<PathBuf> {
 /// Half the width of the handle of the bar of the video (iced's default):
 /// where its start and its end are.
 const HANDLE_HALF: f32 = 7.0;
-
-/// A clip of the actions picked, in the video.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Span {
-    from: u64,
-    to: u64,
-    playing: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mark {
-    Gap,
-    Clip,
-    Playing,
-}
-
-/// How much of the strip each stretch takes: the video as `UNITS`, a clip
-/// at least one so that none goes missing.
-fn portions(spans: &[Span], duration_ms: u64) -> Vec<(u16, Mark)> {
-    const UNITS: u64 = 10_000;
-    let unit = |ms: u64| ms.min(duration_ms) * UNITS / duration_ms.max(1);
-    let portion = |n: u64| u16::try_from(n).unwrap_or(u16::MAX);
-    let mut parts = vec![];
-    let mut at = 0;
-    for sp in spans {
-        let (from, to) = (unit(sp.from).max(at), unit(sp.to));
-        if from > at {
-            parts.push((portion(from - at), Mark::Gap));
-        }
-        let width = to.saturating_sub(from).max(1);
-        let mark = match sp.playing {
-            true => Mark::Playing,
-            false => Mark::Clip,
-        };
-        parts.push((portion(width), mark));
-        at = from + width;
-    }
-    if UNITS > at {
-        parts.push((portion(UNITS - at), Mark::Gap));
-    }
-    parts
-}
 
 /// The video on black, filling its place.
 fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message> {
@@ -2133,6 +2278,9 @@ pub(crate) mod screen_tests {
         scout4all_core::video::{offset_ms, start_from_name},
         scout4all_mobile::{DvwChoice, DvwSide},
     };
+
+    /// How long before an event the video goes to it, by default.
+    const LEAD_MS: i64 = 2000;
 
     /// The match of the tests of the TUI, three sets, imported: the file
     /// has no video column, the events are on the clock.
@@ -2529,7 +2677,7 @@ pub(crate) mod screen_tests {
         let spans = screen.spans();
         assert!(!spans.is_empty());
         // in order, apart, each from its margin before to its margin after
-        assert!(spans.windows(2).all(|w| w[0].to < w[1].from));
+        assert!(spans.windows(2).all(|w| w[0].to_ms < w[1].from_ms));
         let first = screen
             .events
             .iter()
@@ -2537,12 +2685,13 @@ pub(crate) mod screen_tests {
             .min()
             .unwrap();
         // from the margin before, not before the start of the video
-        assert_eq!(spans[0].from, first.unsigned_abs().saturating_sub(5000));
-        assert!(spans[0].to >= first.unsigned_abs() + 5000);
+        assert_eq!(spans[0].from_ms, first.unsigned_abs().saturating_sub(5000));
+        assert!(spans[0].to_ms >= first.unsigned_abs() + 5000);
         // the clips playing: the one with the action chosen in it
         let playing = |screen: &VideoScreen, at: u64| {
-            let playing: Vec<Span> = screen.spans().into_iter().filter(|sp| sp.playing).collect();
-            playing.len() == 1 && playing[0].from <= at && at <= playing[0].to
+            let playing: Vec<ClipSpan> =
+                screen.spans().into_iter().filter(|sp| sp.playing).collect();
+            playing.len() == 1 && playing[0].from_ms <= at && at <= playing[0].to_ms
         };
         let chosen = screen.event_target(screen.selected).unwrap();
         assert!(playing(&screen, chosen), "the one chosen playing");
@@ -2555,33 +2704,108 @@ pub(crate) mod screen_tests {
         screen.update(Message::MarginInput(Margin::Before, "30".into()));
         screen.update(Message::MarginInput(Margin::After, "20".into()));
         let wider = screen.spans();
-        assert_eq!(wider[0].from, first.unsigned_abs().saturating_sub(30_000));
-        assert!(wider[0].to >= first.unsigned_abs() + 20_000);
+        assert_eq!(
+            wider[0].from_ms,
+            first.unsigned_abs().saturating_sub(30_000)
+        );
+        assert!(wider[0].to_ms >= first.unsigned_abs() + 20_000);
     }
 
-    /// The strip: the clips where they are in the video, a short one still
-    /// seen, the whole video in its units.
+    /// With the actions picked, a click on the strip: on a clip, it goes
+    /// to its start and plays it, the one playing on the strip; between
+    /// them, to that point of the video, no clip to stop at. On wide and
+    /// narrow windows.
     #[test]
-    fn the_strip_of_the_clips() {
-        let span = |from, to, playing| Span { from, to, playing };
-        let parts = portions(&[span(1000, 2000, false), span(5000, 5001, true)], 10_000);
-        assert_eq!(
-            parts,
-            [
-                (1000, Mark::Gap),
-                (1000, Mark::Clip),
-                (3000, Mark::Gap),
-                (1, Mark::Playing),
-                (4999, Mark::Gap),
-            ]
+    fn the_strip_clicked() {
+        use scout4all_mobile::strip::{MOUSE_REACH, strip_bars, strip_clicked};
+        let dir = tempfile::tempdir().unwrap();
+        let screen = with_file(&dir, "20150125 000000.mp4");
+        let (core, team, m) = (
+            screen.core.clone(),
+            screen.team_id.clone(),
+            screen.match_id.clone(),
         );
-        let total: u32 = parts.iter().map(|(p, _)| u32::from(*p)).sum();
-        assert_eq!(total, 10_000);
-        // past the end: up to it
-        assert_eq!(
-            portions(&[span(9000, 99_000, false)], 10_000),
-            [(9000, Mark::Gap), (1000, Mark::Clip)]
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let refs = core.match_clips(&team, &m, &pick).unwrap();
+        let mut screen = VideoScreen::with_clips(
+            core,
+            dir.path().to_path_buf(),
+            team,
+            m,
+            refs,
+            "Serve".into(),
+        )
+        .unwrap();
+        // the actions 2 s apart: clips of 1 s, apart
+        screen.update(Message::MarginInput(Margin::Before, "0".into()));
+        screen.update(Message::MarginInput(Margin::After, "1".into()));
+        let spans = screen.spans();
+        assert!(spans.len() > 2);
+        let duration = spans.iter().map(|sp| sp.to_ms).max().unwrap() + 60_000;
+        screen.status = Some(Status {
+            frame: None,
+            position_ms: 0,
+            duration_ms: duration,
+            playing: false,
+            speed: 1.0,
+            error: None,
+        });
+        assert_eq!(screen.selected, 0);
+        for width in [1600.0_f32, 700.0, 240.0] {
+            let bars = strip_bars(&spans, duration, width);
+            // the middle of each clip: the clip there
+            for (sp, bar) in spans.iter().zip(&bars) {
+                let middle = (bar.from + bar.to) / 2.0;
+                let click = strip_clicked(&spans, duration, width, middle, MOUSE_REACH);
+                let StripClick::Clip { event } = click else {
+                    panic!("{width}: {click:?} on the clip of {}", sp.event)
+                };
+                let near = bars[spans.iter().position(|s| s.event == event).unwrap()];
+                assert!(near.from <= middle + 4.0 && middle - 4.0 <= near.to);
+            }
+        }
+        // the third clip clicked: chosen, from its start, played to its end
+        let third = spans[2];
+        let bar = strip_bars(&spans, duration, 1600.0)[2];
+        let click = strip_clicked(
+            &spans,
+            duration,
+            1600.0,
+            (bar.from + bar.to) / 2.0,
+            MOUSE_REACH,
         );
+        assert_eq!(click, StripClick::Clip { event: third.event });
+        screen.update(Message::Strip(click));
+        assert_eq!(screen.selected, third.event as usize);
+        assert_eq!(screen.position(), third.from_ms);
+        assert!(screen.clip_end.is_some(), "played to its end");
+        let now = screen.spans();
+        assert_eq!(
+            now.iter()
+                .filter(|sp| sp.playing)
+                .map(|sp| sp.event)
+                .collect::<Vec<_>>(),
+            [third.event],
+            "the one playing on the strip"
+        );
+        // between the first two: the video there, no clip to stop at
+        let bars = strip_bars(&spans, duration, 1600.0);
+        let x = (bars[0].to + bars[1].from) / 2.0;
+        assert!(bars[1].from - bars[0].to > 10.0, "room between them");
+        let StripClick::At { ms } = strip_clicked(&spans, duration, 1600.0, x, MOUSE_REACH) else {
+            panic!("between the clips")
+        };
+        assert!(spans[0].to_ms < ms && ms < spans[1].from_ms);
+        screen.update(Message::Strip(StripClick::At { ms }));
+        assert_eq!(screen.position(), ms);
+        assert!(screen.clip_end.is_none());
     }
 
     /// the list, the first one played at once in clip mode, then the next
@@ -2838,6 +3062,193 @@ pub(crate) mod screen_tests {
         assert!(!screen.sequence, "the mode kept");
     }
 
+    /// The video of the serves of a team in its matches: summed up before
+    /// making it, each match after its card, the serves counted across the
+    /// matches; a match without a video, with its file gone or not lined up
+    /// left out and said why.
+    #[test]
+    fn the_video_of_the_actions_of_a_team() {
+        use crate::stats::tests::{match_against, team_with_two_matches};
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let (arezzo, siena) = (
+            match_against(&core, &team, "Arezzo"),
+            match_against(&core, &team, "Siena"),
+        );
+        // a file of the video starting just before the first event, or not
+        // lined up (no start); the file there or not
+        let video = |m: &str, lined_up: bool, there: bool| {
+            let (the_match, _) = core.video(&team, m).unwrap();
+            let first = the_match
+                .sets
+                .iter()
+                .flat_map(|set| set.events.iter().map(|e| e.timestamp))
+                .min()
+                .unwrap();
+            let path = dir.path().join(format!("{m}.mp4"));
+            let _ = std::fs::remove_file(&path);
+            if there {
+                std::fs::copy(
+                    concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/src/video/testdata/two_seconds.mp4"
+                    ),
+                    &path,
+                )
+                .unwrap();
+            }
+            let start =
+                lined_up.then(|| (first - chrono::TimeDelta::milliseconds(500)).fixed_offset());
+            let profile = VideoProfile {
+                files: vec![VideoFile {
+                    path: video::stored_path(dir.path(), &path),
+                    start,
+                }],
+                ..Default::default()
+            };
+            core.save_video(&the_match, &profile).unwrap();
+        };
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
+        let summed = |core: &Arc<Scout4All>| {
+            let matches = core.team_clips(&team, &period, &pick).unwrap();
+            let mut screen = VideoScreen::with_tour(
+                core.clone(),
+                dir.path().to_path_buf(),
+                team.clone(),
+                matches,
+                "Battute".into(),
+            )
+            .unwrap();
+            assert!(matches!(screen.key(key!(x)), Outcome::Montage));
+            screen.start_montage(s);
+            assert!(screen.montage.is_none(), "summed up first");
+            screen
+        };
+        // both lined up: Arezzo then Siena, each after its card; its serves
+        // a second apart at most, one piece a match, counted across
+        video(&arezzo, true, true);
+        video(&siena, true, true);
+        let screen = summed(&core);
+        let summary = screen.summary.as_ref().unwrap();
+        assert_eq!(summary.actions, 5);
+        assert!(summary.left_out.is_empty());
+        let cards: Vec<(String, Vec<String>)> = summary
+            .plan
+            .matches
+            .iter()
+            .map(|m| {
+                let title = m.title.clone().unwrap();
+                let pieces = m
+                    .pieces
+                    .iter()
+                    .map(|p| p.card.lines.last().unwrap().clone());
+                (
+                    title.title,
+                    title.lines.into_iter().skip(1).chain(pieces).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            cards,
+            [
+                (
+                    "Arezzo".to_string(),
+                    vec![
+                        "Partita 1 di 2 · Azioni: 3".to_string(),
+                        "1 / 2  (+2)".into()
+                    ]
+                ),
+                (
+                    "Siena".to_string(),
+                    vec![
+                        "Partita 2 di 2 · Azioni: 2".to_string(),
+                        "2 / 2  (+1)".into()
+                    ]
+                ),
+            ]
+        );
+        assert_eq!(
+            left_out_said(&summary.left_out, s),
+            None,
+            "nothing left out, nothing said"
+        );
+        // the file of Siena gone, then Siena not lined up
+        for (lined_up, there, why) in [
+            (true, false, LeftOut::Unreadable),
+            (false, true, LeftOut::NotLinedUp),
+        ] {
+            video(&siena, lined_up, there);
+            let mut screen = summed(&core);
+            let summary = screen.summary.as_ref().unwrap();
+            assert_eq!(summary.actions, 3);
+            assert_eq!(summary.plan.matches.len(), 1);
+            assert_eq!(summary.left_out, [("Siena".to_string(), why)]);
+            // cancelled: nothing made
+            screen.update(Message::StopMontage);
+            assert!(screen.summary.is_none() && screen.montage.is_none());
+        }
+        // Siena without a video: left out, said; Arezzo made, `x` again
+        core.save_video(
+            &core.video(&team, &siena).unwrap().0,
+            &VideoProfile::default(),
+        )
+        .unwrap();
+        let mut screen = summed(&core);
+        let summary = screen.summary.as_ref().unwrap();
+        assert_eq!(
+            left_out_said(&summary.left_out, s).unwrap(),
+            "Escluse: Siena (senza video)"
+        );
+        assert!(matches!(screen.key(key!(x)), Outcome::Stay));
+        assert!(screen.summary.is_none() && screen.montage.is_some());
+    }
+
+    /// The seconds chosen in the settings: ← → (and the hints, the
+    /// buttons) jump by them; out of clip mode the video goes that long
+    /// before an event, in clip mode the margin before still counts.
+    #[test]
+    fn the_seconds_chosen_in_the_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+            .unwrap()
+            .set_video_seconds(VideoSeconds {
+                step_s: 12,
+                lead_s: 0,
+            })
+            .unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        screen.status = Some(Status {
+            frame: None,
+            position_ms: 0,
+            duration_ms: u64::MAX / 2,
+            playing: false,
+            speed: 1.0,
+            error: None,
+        });
+        let i = 3;
+        let at = screen.events[i].offset_ms.unwrap();
+        assert_eq!(screen.event_target(i), Some(at.unsigned_abs()));
+        screen.update(Message::WholeVideo);
+        screen.seek(30_000);
+        screen.key(key!(right));
+        assert_eq!(screen.position(), 42_000);
+        screen.key(key!(left));
+        screen.key(key!(left));
+        assert_eq!(screen.position(), 18_000);
+        screen.key(key!(k));
+        assert_eq!(screen.event_target(i), Some((at - 5000).unsigned_abs()));
+    }
+
     /// Once lined up, the video before the first event (the warm-up) is
     /// left out: going back stops a little before it. "Redo the sync"
     /// shows it, to tie the events again; tying them leaves it out again.
@@ -2911,14 +3322,17 @@ pub(crate) mod screen_tests {
         .unwrap();
         assert!(matches!(screen.key(key!(x)), Outcome::Montage));
         assert!(matches!(screen.update(Message::Montage), Outcome::Montage));
-        let pieces = screen.pieces(s);
+        let pieces = screen.match_plan(s).pieces;
         let spans = screen.spans();
         assert_eq!(
             pieces
                 .iter()
                 .map(|p| (p.from_ms, p.to_ms))
                 .collect::<Vec<_>>(),
-            spans.iter().map(|sp| (sp.from, sp.to)).collect::<Vec<_>>()
+            spans
+                .iter()
+                .map(|sp| (sp.from_ms, sp.to_ms))
+                .collect::<Vec<_>>()
         );
         let first = &pieces[0].card;
         assert!(first.title.starts_with("Battuta"), "{}", first.title);

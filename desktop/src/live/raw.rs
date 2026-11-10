@@ -158,6 +158,56 @@ fn entries(index: &str, stream_len: usize) -> Vec<Entry> {
     out
 }
 
+/// The frames of a stream that tells only when each is shown (RTSP) put on
+/// a clock of their decoding: with B-frames they come in decoding order,
+/// shown out of it, and their times taken as decoding times made each one
+/// last wrongly (the video longer than the match). The decoding times are
+/// then the times shown, sorted between two keyframes; each frame shown as
+/// long after as the most a frame would otherwise be shown before its
+/// decoding (`delay`, a frame or two), returned. In order already (no
+/// B-frames, or the decoding times given, as RTMP), left as they are.
+fn in_decoding_order(mut entries: Vec<Entry>) -> (Vec<Entry>, u64) {
+    let ordered = entries.windows(2).all(|w| match w {
+        [a, b] => b.key || a.pts_ms <= b.pts_ms,
+        _ => true,
+    });
+    if ordered {
+        return (entries, 0);
+    }
+    // from a keyframe to the next: a stream joined later, or taken again,
+    // can go back in time there, not in between
+    let mut decoded: Vec<u64> = Vec::with_capacity(entries.len());
+    let mut from = 0;
+    for i in 1..=entries.len() {
+        let ends = entries.get(i).is_none_or(|e| e.key);
+        if ends {
+            let mut part: Vec<u64> = entries
+                .get(from..i)
+                .unwrap_or_default()
+                .iter()
+                .map(|e| e.pts_ms)
+                .collect();
+            part.sort_unstable();
+            decoded.extend(part);
+            from = i;
+        }
+    }
+    let delay = entries
+        .iter()
+        .zip(&decoded)
+        .map(|(e, d)| d.saturating_sub(e.pts_ms))
+        .max()
+        .unwrap_or(0);
+    for (e, d) in entries.iter_mut().zip(decoded) {
+        let after = (e.pts_ms + delay).saturating_sub(d);
+        e.shown_after_ms = e
+            .shown_after_ms
+            .saturating_add(i32::try_from(after).unwrap_or(i32::MAX));
+        e.pts_ms = d;
+    }
+    (entries, delay)
+}
+
 /// An MP4 made of a raw recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Remuxed {
@@ -178,7 +228,10 @@ pub fn remux(base: &Path, mp4: &Path) -> Result<Remuxed, String> {
         .len();
     let index =
         fs::read_to_string(&index_path).map_err(|e| format!("{}: {e}", index_path.display()))?;
-    let entries = entries(&index, usize::try_from(stream_len).unwrap_or(usize::MAX));
+    let (entries, delay) = in_decoding_order(entries(
+        &index,
+        usize::try_from(stream_len).unwrap_or(usize::MAX),
+    ));
     let mut stream = std::io::BufReader::new(open(&stream_path)?);
     let mut read = |len: usize| -> Result<Vec<u8>, String> {
         let mut data = vec![0; len];
@@ -233,7 +286,9 @@ pub fn remux(base: &Path, mp4: &Path) -> Result<Remuxed, String> {
         })
         .map_err(|e| e.to_string())?;
     let start = first.pts_ms;
-    let skipped_ms = start;
+    // the first frame shown `delay` after its decoding: the video starts
+    // as much before
+    let skipped_ms = start.saturating_sub(delay);
     let mut end = 0;
     let mut current = Some((first, data));
     while let Some((e, data)) = current.take() {
@@ -512,6 +567,50 @@ mod tests {
         assert_eq!(samples.len(), 30);
         assert_eq!(samples[1].pts_ms, 33 + 66);
         assert_eq!(samples[2].pts_ms, 66);
+    }
+
+    /// A stream with B-frames telling only when each frame is shown
+    /// (RTSP): in decoding order, the times go back and forth. The MP4 as
+    /// long as the recording, each frame shown when the stream said, a
+    /// frame later; the frames in order without B-frames left as they are.
+    #[test]
+    fn a_recording_told_only_when_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("rtsp");
+        record(&base, 90);
+        let (_, index) = raw_paths(&base);
+        let text = fs::read_to_string(&index).unwrap();
+        // I P B B as they come of an encoder with B-frames: frame 0, then
+        // 3, 1, 2, 6, 4, 5…; the keyframes (every 30) where they are
+        let shown = |i: usize| match (i % 30, i % 30 % 3) {
+            (k, 1) if (1..=27).contains(&k) => i + 2,
+            (k, 2 | 0) if (1..=27).contains(&k) => i - 1,
+            _ => i,
+        };
+        let lines: Vec<String> = text
+            .lines()
+            .enumerate()
+            .map(|(i, l)| {
+                let rest: Vec<&str> = l.split(' ').skip(1).collect();
+                format!("{} {}", shown(i) as u64 * 1000 / 30, rest.join(" "))
+            })
+            .collect();
+        fs::write(&index, lines.join("\n") + "\n").unwrap();
+        let mp4 = base.with_extension("mp4");
+        let made = remux(&base, &mp4).unwrap();
+        assert!((2990..=3010).contains(&made.length_ms), "{made:?}");
+        assert_eq!(made.skipped_ms, 0);
+        let samples = Source::open(&mp4).unwrap().samples;
+        assert_eq!(samples.len(), 90);
+        // shown a frame (33 ms) later than the stream said, each
+        for (i, s) in samples.iter().enumerate() {
+            let expected = shown(i) as u64 * 1000 / 30 + 33;
+            assert!(
+                s.pts_ms.abs_diff(expected) <= 1,
+                "{i}: {} {expected}",
+                s.pts_ms
+            );
+        }
     }
 
     #[test]

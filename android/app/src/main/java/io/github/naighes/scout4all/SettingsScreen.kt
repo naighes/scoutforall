@@ -14,7 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -27,13 +33,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import io.github.naighes.scout4all.core.CountryChoice
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.SecondsRange
+import io.github.naighes.scout4all.core.VideoSeconds
 import io.github.naighes.scout4all.core.version
+import io.github.naighes.scout4all.core.videoLeadRange
+import io.github.naighes.scout4all.core.videoStepRange
 import kotlinx.coroutines.launch
 
 private const val REPOSITORY = "https://github.com/naighes/scoutforall"
@@ -43,8 +55,8 @@ private const val PRIVACY = "https://naighes.github.io/scoutforall/privacy/"
 private const val REPORTS = "scout4all-0fd59357fbe3@intake.linear.app"
 
 /** The settings: the language of the app (the system chooses it), the
- * country of a new team, the statistics sent, the terms of use, the
- * information on the app. */
+ * country of a new team, the statistics sent, the seconds of the video, the
+ * terms of use, the information on the app. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit, onTutorial: () -> Unit = {}) {
@@ -76,6 +88,7 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit,
             }
             DefaultCountry()
             StatisticsSwitch()
+            VideoSecondsRows()
             Row(stringResource(R.string.tutorial), stringResource(R.string.tutorial_detail), onTutorial)
             Row(stringResource(R.string.terms_of_use), null, onTerms)
             Row(stringResource(R.string.about), null, onAbout)
@@ -119,6 +132,53 @@ private fun DefaultCountry() {
         chosen?.let { "${flag(it.value)}  ${it.name}" } ?: stringResource(R.string.default_country_none),
     ) { choosing = true }
 }
+
+/** How far the buttons of the video jump and how long before an event the
+ * video goes to it, out of clip mode: one second more or less, in their
+ * bounds, saved at once. */
+@Composable
+private fun VideoSecondsRows() {
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val scope = rememberCoroutineScope()
+    // null while reading
+    var seconds by remember { mutableStateOf<VideoSeconds?>(null) }
+    LaunchedEffect(Unit) { seconds = app.core { it.videoSeconds() } }
+    val current = seconds ?: return
+    val save = { chosen: VideoSeconds ->
+        scope.launch {
+            try {
+                seconds = app.core { it.setVideoSeconds(chosen) }
+            } catch (_: MobileException) {
+                // not saved: it stays as it was
+            }
+        }
+        Unit
+    }
+    SecondsRow(stringResource(R.string.video_step), stringResource(R.string.video_step_detail), current.stepS, videoStepRange()) {
+        save(current.copy(stepS = it))
+    }
+    SecondsRow(stringResource(R.string.video_lead), stringResource(R.string.video_lead_detail), current.leadS, videoLeadRange()) {
+        save(current.copy(leadS = it))
+    }
+}
+
+/** A number of seconds, one more or less with its buttons, in `range`. */
+@Composable
+private fun SecondsRow(headline: String, supporting: String, seconds: UInt, range: SecondsRange, onChange: (UInt) -> Unit) = ListItem(
+    headlineContent = { Text(headline) },
+    supportingContent = { Text(supporting) },
+    trailingContent = {
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { onChange(seconds - 1u) }, enabled = seconds > range.min) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.video_less) + " " + headline)
+            }
+            Text("$seconds s", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            IconButton(onClick = { onChange(seconds + 1u) }, enabled = seconds < range.max) {
+                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.video_more) + " " + headline)
+            }
+        }
+    },
+)
 
 /** The version, the license, the data, the code, and how to report a
  * problem: an e-mail that opens an issue on Linear, with the version and

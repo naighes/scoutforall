@@ -209,6 +209,10 @@
     <string name="accept_terms">Continuar</string>
     <string name="send_statistics">Enviar as estatísticas das partidas</string>
     <string name="send_statistics_detail">Sem nomes: equipes e atletas são identificadores aleatórios</string>
+    <string name="video_step">Salto do vídeo</string>
+    <string name="video_step_detail">Quanto os botões fazem o vídeo voltar e avançar</string>
+    <string name="video_lead">Antecedência do vídeo</string>
+    <string name="video_lead_detail">Quanto antes de um evento o vídeo começa, fora do modo clipe</string>
     <string name="about">Sobre</string>
     <string name="version">Versão</string>
     <string name="license">Licença</string>
@@ -431,6 +435,11 @@
     <string name="clips_in_matches">Ações: %1$d · partidas: %2$d</string>
     <string name="clips_without_video">Sem vídeo, deixadas de fora: %1$d</string>
     <string name="clips_match_of">Partida %1$d de %2$d</string>
+    <string name="montage_left_out">Deixadas de fora: %1$s</string>
+    <string name="left_out_no_video">sem vídeo</string>
+    <string name="left_out_unreadable">vídeo ilegível</string>
+    <string name="left_out_not_lined_up">não sincronizada com o vídeo</string>
+    <string name="make_video">Criar o vídeo</string>
     <string name="previous_match">Partida anterior</string>
     <string name="next_match">Próxima partida</string>
     <string name="clip_before">Antes</string>

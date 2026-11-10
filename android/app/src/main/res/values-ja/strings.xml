@@ -208,6 +208,10 @@
     <string name="accept_terms">続ける</string>
     <string name="send_statistics">試合の統計を送信</string>
     <string name="send_statistics_detail">名前は含まれません。チームと選手はランダムな識別子です</string>
+    <string name="video_step">ビデオのスキップ</string>
+    <string name="video_step_detail">ボタンでビデオを戻す・進める秒数</string>
+    <string name="video_lead">ビデオの先行時間</string>
+    <string name="video_lead_detail">クリップモード以外で、イベントの何秒前からビデオを再生するか</string>
     <string name="about">アプリについて</string>
     <string name="version">バージョン</string>
     <string name="license">ライセンス</string>
@@ -430,6 +434,11 @@
     <string name="clips_in_matches">プレー: %1$d · 試合: %2$d</string>
     <string name="clips_without_video">ビデオなしで除外: %1$d</string>
     <string name="clips_match_of">試合 %1$d / %2$d</string>
+    <string name="montage_left_out">除外: %1$s</string>
+    <string name="left_out_no_video">ビデオなし</string>
+    <string name="left_out_unreadable">ビデオを読み込めません</string>
+    <string name="left_out_not_lined_up">ビデオと未同期</string>
+    <string name="make_video">動画を作成</string>
     <string name="previous_match">前の試合</string>
     <string name="next_match">次の試合</string>
     <string name="clip_before">前</string>

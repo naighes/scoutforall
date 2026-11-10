@@ -20,8 +20,8 @@ import sys
 WINDOWS = {
     "advapi32.dll", "bcrypt.dll", "bcryptprimitives.dll", "combase.dll",
     "comctl32.dll", "comdlg32.dll", "crypt32.dll", "d3d11.dll", "d3d12.dll",
-    "dwmapi.dll", "dxgi.dll", "gdi32.dll", "imm32.dll", "kernel32.dll",
-    "ktmw32.dll", "mf.dll", "mfplat.dll", "mfreadwrite.dll", "ntdll.dll",
+    "dwmapi.dll", "dxgi.dll", "gdi32.dll", "imm32.dll", "iphlpapi.dll",
+    "kernel32.dll", "ktmw32.dll", "mf.dll", "mfplat.dll", "mfreadwrite.dll", "ntdll.dll",
     "ole32.dll", "oleaut32.dll", "opengl32.dll", "propsys.dll", "rpcrt4.dll",
     "secur32.dll", "setupapi.dll", "shell32.dll", "shlwapi.dll", "user32.dll",
     "userenv.dll", "uxtheme.dll", "version.dll", "winmm.dll", "ws2_32.dll",

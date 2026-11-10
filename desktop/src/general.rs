@@ -1,5 +1,6 @@
 //! The settings of the app, beside its keys (F2): the language, the
-//! country a new team starts with, the statistics sent; the terms of use
+//! country a new team starts with, the statistics sent, the seconds of the
+//! video; the terms of use
 //! and what the app is, with how to report a problem. Each change is saved
 //! as it's made: the language in `config.json` as the TUI keeps it, the
 //! rest as the app saves it (`mobile`).
@@ -16,7 +17,10 @@ use {
         Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
     },
-    scout4all_core::shapes::enums::LanguageEnum,
+    scout4all_core::{
+        settings::{LEAD_SECONDS, STEP_SECONDS, VideoSeconds},
+        shapes::enums::LanguageEnum,
+    },
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{Scout4All, Terms},
     std::{path::Path, sync::Arc},
@@ -32,6 +36,26 @@ const REPORTS: &str = "scout4all-0fd59357fbe3@intake.linear.app";
 const LANGUAGE: usize = 0;
 const COUNTRY: usize = 1;
 const STATISTICS: usize = 2;
+const STEP: usize = 3;
+const LEAD: usize = 4;
+
+/// The seconds a field of the video offers, as its menu shows them.
+fn seconds_options(bounds: &std::ops::RangeInclusive<u32>) -> Vec<String> {
+    bounds.clone().map(|s| format!("{s} s")).collect()
+}
+
+/// The seconds chosen in a field offering `bounds`.
+fn chosen_seconds(bounds: &std::ops::RangeInclusive<u32>, index: usize) -> u32 {
+    bounds
+        .start()
+        .saturating_add(u32::try_from(index).unwrap_or(u32::MAX))
+        .min(*bounds.end())
+}
+
+/// Where `seconds` is in the menu of a field offering `bounds`.
+fn seconds_index(bounds: &std::ops::RangeInclusive<u32>, seconds: u32) -> usize {
+    usize::try_from(seconds.saturating_sub(*bounds.start())).unwrap_or(0)
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Link {
@@ -133,6 +157,7 @@ impl General {
             .default_country()
             .map(|c| c.name)
             .unwrap_or_default();
+        let seconds = self.core.video_seconds();
         let focused = self.form.focused;
         let mut form = Form::new(
             s.general,
@@ -151,6 +176,18 @@ impl General {
                 Field::search(s.default_country, country).hint(s.search_country),
                 Field::check(s.send_statistics, self.core.analytics_enabled(), false)
                     .hint(s.send_statistics_detail),
+                Field::choice(
+                    s.video_step,
+                    seconds_options(&STEP_SECONDS),
+                    seconds_index(&STEP_SECONDS, seconds.step_s),
+                )
+                .hint(s.video_step_detail),
+                Field::choice(
+                    s.video_lead,
+                    seconds_options(&LEAD_SECONDS),
+                    seconds_index(&LEAD_SECONDS, seconds.lead_s),
+                )
+                .hint(s.video_lead_detail),
             ],
         );
         form.plain = true;
@@ -205,6 +242,16 @@ impl General {
                             send_statistics(self.core.clone());
                         }
                     })
+                    .map_err(|e| e.to_string())
+            }
+            STEP | LEAD => {
+                let seconds = VideoSeconds {
+                    step_s: chosen_seconds(&STEP_SECONDS, self.form.index(STEP)),
+                    lead_s: chosen_seconds(&LEAD_SECONDS, self.form.index(LEAD)),
+                };
+                self.core
+                    .set_video_seconds(seconds)
+                    .map(|_| ())
                     .map_err(|e| e.to_string())
             }
             _ => Ok(()),
@@ -472,6 +519,28 @@ mod tests {
         assert!(!core.analytics_enabled());
         settings.key(key!(space), s);
         assert!(core.analytics_enabled());
+        // the seconds of the video: the jump, then the lead
+        assert_eq!(core.video_seconds(), VideoSeconds::default());
+        settings.key(key!(down), s);
+        settings.key(key!(right), s);
+        settings.key(key!(down), s);
+        settings.key(key!(left), s);
+        assert_eq!(
+            core.video_seconds(),
+            VideoSeconds {
+                step_s: 6,
+                lead_s: 1
+            }
+        );
+        assert_eq!(
+            (config()["step_s"].clone(), config()["lead_s"].clone()),
+            (6.into(), 1.into())
+        );
+        // past the start, the end, as every menu
+        settings.key(key!(left), s);
+        assert_eq!(core.video_seconds().lead_s, 0);
+        settings.key(key!(left), s);
+        assert_eq!(core.video_seconds().lead_s, *LEAD_SECONDS.end());
         // the terms, read and left with Esc; Esc again leaves the settings
         settings.key(key!(t), s);
         assert!(settings.general.terms.is_some());

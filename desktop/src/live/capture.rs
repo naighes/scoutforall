@@ -7,6 +7,7 @@ use {
     super::{
         picture::{self, I420},
         raw::{self, RawWriter},
+        space,
     },
     crate::video::Picture as Frame,
     bytes::Bytes,
@@ -30,7 +31,7 @@ use {
             Arc, Mutex,
             mpsc::{self, Receiver, Sender, TryRecvError},
         },
-        time::Instant,
+        time::{Duration, Instant},
     },
 };
 
@@ -118,10 +119,24 @@ impl Quality {
     }
 }
 
-/// The recording being made.
+/// The recording being made: since when, so that how long it's been going
+/// on is told by the clock, frames or not (a source on the network cut
+/// off: the recording goes on).
 #[derive(Debug, Clone)]
 pub struct Recording {
-    pub elapsed_ms: u64,
+    pub since: Instant,
+}
+
+impl Recording {
+    /// The milliseconds it's been going on.
+    pub fn elapsed_ms(&self) -> u64 {
+        self.elapsed_ms_at(Instant::now())
+    }
+
+    /// The milliseconds it's been going on at `now`.
+    pub fn elapsed_ms_at(&self, now: Instant) -> u64 {
+        u64::try_from(now.saturating_duration_since(self.since).as_millis()).unwrap_or(u64::MAX)
+    }
 }
 
 /// A recording stopped: its MP4 and when it started, or why it couldn't be
@@ -132,6 +147,8 @@ pub struct Done {
     pub base: PathBuf,
     pub started: DateTime<Local>,
     pub result: Result<raw::Remuxed, String>,
+    /// stopped as the disk was almost full
+    pub out_of_space: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -148,6 +165,10 @@ pub struct Status {
     pub problem: Option<super::network::Problem>,
     /// where the app sending the video is (RTMP received), while it sends
     pub sender: Option<String>,
+    /// as it comes from a source on the network, once counted
+    pub bits_per_second: Option<u64>,
+    /// how long before they come its frames were taken (HLS)
+    pub late_ms: Option<u64>,
 }
 
 /// Where the video comes from.
@@ -166,9 +187,9 @@ pub(super) enum Command {
         quality: Quality,
     },
     Stop,
-    /// the preview made (`true`) or not: not while the screen doesn't
-    /// show it, for the recording to keep up
-    Preview(bool),
+    /// the preview made at most this often (zero, each frame), or not
+    /// (`None`): not while nothing shows it, for the recording to keep up
+    Preview(Option<Duration>),
     Quit,
 }
 
@@ -228,9 +249,55 @@ impl Capture {
         let _ = self.commands.send(Command::Stop);
     }
 
-    /// The preview made or not: off once the app keeps the recording.
+    /// The preview of each frame made or not: off once the app keeps the
+    /// recording.
     pub fn preview(&self, on: bool) {
-        let _ = self.commands.send(Command::Preview(on));
+        let _ = self
+            .commands
+            .send(Command::Preview(on.then_some(Duration::ZERO)));
+    }
+
+    /// The preview made at most every `gap`: for a window looking now and
+    /// then, the frames between not made pictures.
+    pub fn preview_every(&self, gap: Duration) {
+        let _ = self.commands.send(Command::Preview(Some(gap)));
+    }
+}
+
+/// How often a picture of the preview is made: never, each frame, or at
+/// most every so often.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Pace {
+    every: Option<Duration>,
+    last: Option<Instant>,
+}
+
+impl Pace {
+    pub(super) fn new(every: Option<Duration>) -> Pace {
+        Pace { every, last: None }
+    }
+
+    /// Each frame: as a source opens, its screen shows it.
+    pub(super) fn each_frame() -> Pace {
+        Pace::new(Some(Duration::ZERO))
+    }
+
+    pub(super) fn is_on(&self) -> bool {
+        self.every.is_some()
+    }
+
+    /// Whether a picture is made `now`: on, and long enough since the
+    /// last one.
+    pub(super) fn due(&mut self, now: Instant) -> bool {
+        let due = match (self.every, self.last) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(every), Some(last)) => now.saturating_duration_since(last) >= every,
+        };
+        if due {
+            self.last = Some(now);
+        }
+        due
     }
 }
 
@@ -285,10 +352,28 @@ pub(super) struct Take {
     started: DateTime<Local>,
     clock: Instant,
     frames: u64,
+    /// the bytes of the frames so far
+    written: u64,
+    /// the space free where it's written
+    free: fn(&Path) -> Option<u64>,
+    /// stopping: the disk almost full
+    pub(super) out_of_space: bool,
+    /// its first frame taken this long before it came (HLS): the
+    /// recording started as much before
+    late_ms: Option<u64>,
 }
 
 impl Take {
     pub(super) fn start(base: PathBuf, started: DateTime<Local>) -> Result<Take, String> {
+        Take::start_on(base, started, space::free)
+    }
+
+    /// As `start`, the free space told by `free`.
+    pub(super) fn start_on(
+        base: PathBuf,
+        started: DateTime<Local>,
+        free: fn(&Path) -> Option<u64>,
+    ) -> Result<Take, String> {
         if let Some(folder) = base.parent() {
             std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
         }
@@ -298,7 +383,16 @@ impl Take {
             started,
             clock: Instant::now(),
             frames: 0,
+            written: 0,
+            free,
+            out_of_space: false,
+            late_ms: None,
         })
+    }
+
+    /// How late its first frame came: `late`, the first time asked.
+    pub(super) fn late_ms(&mut self, late: u64) -> u64 {
+        *self.late_ms.get_or_insert(late)
     }
 
     /// The milliseconds since it started.
@@ -322,16 +416,34 @@ impl Take {
             self.raw.write_shown(pts_ms, shown_after_ms, annex_b)?;
         }
         self.frames += 1;
+        self.written = self
+            .written
+            .saturating_add(u64::try_from(annex_b.len()).unwrap_or(u64::MAX));
         match self.frames % FLUSH_EVERY {
-            0 => self.raw.flush(),
+            0 => {
+                // its MP4 made next to it at the end: room left for that
+                let folder = self.base.parent().unwrap_or(Path::new("."));
+                self.out_of_space = !space::may_go_on((self.free)(folder), self.written);
+                self.raw.flush()
+            }
             _ => Ok(()),
         }
     }
 
-    pub(super) fn recording(&self) -> Recording {
-        Recording {
-            elapsed_ms: self.elapsed_ms(),
+    /// Whether to stop after a frame written: it failed (said in
+    /// `status`) or the disk is almost full.
+    pub(super) fn stops(&self, written: Result<(), String>, status: &Mutex<Status>) -> bool {
+        match written {
+            Err(e) => {
+                set(status, |s| s.error = Some(e));
+                true
+            }
+            Ok(()) => self.out_of_space,
         }
+    }
+
+    pub(super) fn recording(&self) -> Recording {
+        Recording { since: self.clock }
     }
 
     /// Made an MP4 next to the raw files.
@@ -340,14 +452,17 @@ impl Take {
         drop(self.raw);
         let mp4 = self.base.with_extension("mp4");
         let result = flushed.and_then(|()| raw::remux(&self.base, &mp4));
-        // the video starts at its first keyframe: when it was taken
+        // the video starts at its first keyframe: when it was taken,
+        // the frames late as they came (HLS) taken before
         let skipped = result.as_ref().map_or(0, |r| r.skipped_ms);
+        let skipped = i64::try_from(skipped).unwrap_or(0)
+            - i64::try_from(self.late_ms.unwrap_or(0)).unwrap_or(0);
         Done {
             result,
             mp4,
+            out_of_space: self.out_of_space,
             base: self.base,
-            started: self.started
-                + chrono::TimeDelta::milliseconds(i64::try_from(skipped).unwrap_or(0)),
+            started: self.started + chrono::TimeDelta::milliseconds(skipped),
         }
     }
 }
@@ -414,7 +529,7 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
     };
     let mut recorder: Option<Recorder> = None;
     let mut serial = 0u64;
-    let mut preview = true;
+    let mut pace = Pace::each_frame();
     loop {
         match commands.try_recv() {
             Ok(Command::Record {
@@ -429,7 +544,7 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
                 }
             }
             Ok(Command::Stop) => finish(recorder.take().map(|r| r.take), status),
-            Ok(Command::Preview(on)) => preview = on,
+            Ok(Command::Preview(every)) => pace = Pace::new(every),
             Ok(Command::Quit) | Err(TryRecvError::Disconnected) => {
                 finish(recorder.take().map(|r| r.take), status);
                 let _ = camera.stop_stream();
@@ -448,7 +563,7 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
         let Some(picture) = to_i420(&buffer) else {
             continue;
         };
-        let frame = preview.then(|| {
+        let frame = pace.due(Instant::now()).then(|| {
             serial += 1;
             let (w, h, rgba) = picture::preview(&picture, PREVIEW_WIDTH);
             Arc::new(Frame {
@@ -462,9 +577,11 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
             u32::try_from(picture.width).unwrap_or(0),
             u32::try_from(picture.height).unwrap_or(0),
         );
-        let written = recorder.as_mut().map(|r| r.write(picture));
-        if let Some(Err(e)) = written {
-            set(status, |s| s.error = Some(e));
+        let stops = recorder.as_mut().is_some_and(|r| {
+            let written = r.write(picture);
+            r.take.stops(written, status)
+        });
+        if stops {
             finish(recorder.take().map(|r| r.take), status);
         }
         let recording = recorder.as_ref().map(|r| r.take.recording());
@@ -483,4 +600,29 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
 /// name their files, the start read back from it.
 pub fn base_name(folder: &Path, at: DateTime<Local>) -> PathBuf {
     folder.join(at.format("%Y%m%d %H%M%S").to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Off, never; each frame, each; every 100 ms, one in the 100 ms and
+    /// the next once they're past.
+    #[test]
+    fn the_pace_of_the_preview() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut off = Pace::new(None);
+        assert!(!off.is_on());
+        assert!(!off.due(at(0)));
+        let mut each = Pace::each_frame();
+        assert!(each.is_on());
+        assert!(each.due(at(0)) && each.due(at(0)) && each.due(at(33)));
+        let mut window = Pace::new(Some(Duration::from_millis(100)));
+        let made: Vec<u64> = (0..10)
+            .map(|i| i * 33)
+            .filter(|ms| window.due(at(*ms)))
+            .collect();
+        assert_eq!(made, vec![0, 132, 264]);
+    }
 }

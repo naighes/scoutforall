@@ -1023,7 +1023,8 @@ impl StatsScreen {
     fn watch(&self) -> Outcome {
         match (self.watchable(), self.is_team()) {
             (true, false) => Outcome::Watch(self.pick()),
-            (true, true) => Outcome::WatchTour(self.watched().cloned().collect()),
+            // the ones without a video too: said left out of the video made
+            (true, true) => Outcome::WatchTour(self.tour.clone()),
             (false, _) => Outcome::Stay,
         }
     }
@@ -3068,15 +3069,19 @@ pub(crate) mod tests {
         // the errors: only Siena
         screen.update(Message::ClipEval(EvalEnum::Error));
         assert_eq!(actions(&screen), [("Siena".to_string(), 1, false)]);
-        // a video of Siena: its serves to watch, Arezzo left out
+        // a video of Siena: its serves to watch, Arezzo without one (left
+        // out, to say so)
         with_a_video(&core, &team, &match_against(&core, &team, "Siena"));
         let mut screen = open(&core);
         assert!(screen.has_video && screen.watchable());
         assert_eq!(screen.clips, Some(2));
         match screen.key(key!(v)) {
             Outcome::WatchTour(matches) => {
-                assert_eq!(matches.len(), 1);
-                assert_eq!(matches[0].opponent, "Siena");
+                let seen: Vec<_> = matches
+                    .iter()
+                    .map(|m| (m.opponent.as_str(), m.has_video))
+                    .collect();
+                assert_eq!(seen, [("Arezzo", false), ("Siena", true)]);
             }
             _ => unreachable!("the serves of Siena to watch"),
         }

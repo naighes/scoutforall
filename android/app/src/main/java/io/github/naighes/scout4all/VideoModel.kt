@@ -14,9 +14,15 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.naighes.scout4all.core.ClipMargins
+import io.github.naighes.scout4all.core.ClipSpan
+import io.github.naighes.scout4all.core.StripClick
+import io.github.naighes.scout4all.core.VideoSeconds
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.NewVideoFile
+import io.github.naighes.scout4all.core.SavedClips
+import io.github.naighes.scout4all.core.restoreClips
+import io.github.naighes.scout4all.core.saveClips
 import io.github.naighes.scout4all.core.TeamClipMatch
 import io.github.naighes.scout4all.core.VideoAlignment
 import io.github.naighes.scout4all.core.VideoEventRow
@@ -45,21 +51,23 @@ sealed interface VideoRequest {
         val title: String,
         /** at least one, each with a video */
         val matches: List<TeamClipMatch>,
+        /** the ones without a video: left out of the video made, said */
+        val leftOut: List<TeamClipMatch> = emptyList(),
     ) : VideoRequest
 }
 
 /** The actions to watch, from the statistics to the video screen: a pick
- * isn't a route. Lost with the process: the screen goes back then. */
-object ClipRequests {
-    var current: VideoRequest.Clips? = null
-}
+ * isn't a route, it goes saved with the screen under this key, so it's
+ * there again after the system closed the app in the background. */
+const val CLIPS_KEY = "clips"
 
-/** How far the buttons go back and forward. */
-const val STEP_SECONDS = 5
+/** The actions to watch as the screen saves them. */
+fun VideoRequest.Clips.saved(): String = saveClips(SavedClips(teamId, pick, title, matches, leftOut))
 
-/** How long before an event the video goes to it, out of clip mode: the
- * serve is seen coming. */
-private const val LEAD_MS = 2000L
+/** The actions to watch as the screen saved them; none when they can't be
+ * read. */
+fun savedClips(saved: String?): VideoRequest.Clips? =
+    saved?.let(::restoreClips)?.let { VideoRequest.Clips(it.teamId, it.pick, it.title, it.matches, it.leftOut) }
 
 /** How far a touch shifts the sync. */
 const val SHIFT_MS = 500L
@@ -112,6 +120,11 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         private set
     var margins by mutableStateOf(ClipMargins(5u, 5u, true))
         private set
+    /** how far the buttons go back and forward, how long before an event
+     * the video goes to it out of clip mode (the serve seen coming): from
+     * the settings */
+    var seconds by mutableStateOf(VideoSeconds(5u, 2u))
+        private set
     /** with the actions of a team, the match shown */
     var at by mutableIntStateOf(0)
         private set
@@ -143,6 +156,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         })
         viewModelScope.launch {
             margins = app.core { it.clipMargins() }
+            seconds = app.core { it.videoSeconds() }
             open(0)
         }
         viewModelScope.launch {
@@ -270,8 +284,9 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
     private fun nextMatch(): Int? = clips?.takeIf { sequence }?.let { c -> (at + 1).takeIf { it < c.matches.size } }
 
     /** How long before an event the video goes to it: in clip mode, the
-     * seconds chosen. */
-    fun lead(): Long = if (clip || clips != null) margins.beforeS.toLong() * 1000 else LEAD_MS
+     * margin chosen before the action; out of it, the lead of the
+     * settings. */
+    fun lead(): Long = (if (clip || clips != null) margins.beforeS else seconds.leadS).toLong() * 1000
 
     fun target(i: Int): Long? = review?.target(i.toUInt(), lead())?.toLong()
 
@@ -296,7 +311,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         position = to
     }
 
-    fun step(forward: Boolean) = seek(position + (if (forward) 1 else -1) * STEP_SECONDS * 1000L)
+    fun step(forward: Boolean) = seek(position + (if (forward) 1 else -1) * seconds.stepS.toLong() * 1000)
 
     fun playPause() {
         follow = true
@@ -321,6 +336,25 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
             clipEnd = offset.coerceAtLeast(0) + margins.afterS.toLong() * 1000
             player.play()
         }
+    }
+
+    /** With the actions picked, where their clips are in the video, for the
+     * strip under the bar: the ones overlapping as one, the one of the
+     * action chosen playing (`clipSpans` in the core, as on the desktop).
+     * Read again when the events, the one chosen or the margins change. */
+    val spans: List<ClipSpan>
+        get() {
+            val r = review ?: return emptyList()
+            // the events read again after a change of the sync: these read too
+            if (clips == null || events.isEmpty()) return emptyList()
+            return r.clipSpans(lead(), margins.afterS.toULong() * 1000u, selected.toUInt())
+        }
+
+    /** The strip touched: a clip played from its start (the margin before
+     * it), or the video at that point. */
+    fun strip(click: StripClick) = when (click) {
+        is StripClick.Clip -> goToEvent(click.event.toInt())
+        is StripClick.At -> seek(click.ms.toLong())
     }
 
     /** An event chosen by hand, to tie it: the list stops following. */

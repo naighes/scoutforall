@@ -10,7 +10,7 @@ authors = ["Nicola @naighes Baldi <nic.baldi@gmail.com>"]
 homepage = "https://github.com/naighes/scoutforall"
 repository = "https://github.com/naighes/scoutforall"
 license = "AGPL-3.0-only"
-rust-version = "1.92"
+rust-version = "1.99"
 
 [workspace.dependencies]
 scout4all-core = { path = "core" }

@@ -39,6 +39,7 @@
 //! are the same on both: only how they're shown changes.
 
 use crate::shapes::enums::EventTypeEnum;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Which court the ball went to, as it's shown.
@@ -132,7 +133,7 @@ impl TargetKind {
 
 /// One of the nine zones, or a conflict zone: the line between two zones
 /// of a row, from the net to the end line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CourtZoneEnum {
     Z1,
     Z2,
@@ -645,7 +646,7 @@ impl fmt::Display for CourtTarget {
 /// Where our server stands behind our end line, as DataVolley tells it: the
 /// zone of the back row the serve starts from, 1 (on the right of our
 /// server, facing the net), 9, 6, 7 or 5 (on the left).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ServeStartEnum {
     Z1,
     Z9,

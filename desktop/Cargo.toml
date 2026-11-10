@@ -24,7 +24,10 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 retina = "0.4"
+# HLS: its playlists and segments (`live::hls`)
+reqwest.workspace = true
 url = "2"
+if-addrs = "0.15"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 uuid.workspace = true
 chrono.workspace = true
@@ -40,6 +43,10 @@ open = "5.4.5"
 rfd = "0.17.2"
 self_update = { version = "1", optional = true, features = ["checksums"] }
 rml_rtmp = "0.8"
+# rtmps:// (`live::rtmp`): the versions reqwest already brings, the
+# certificates checked by the system's
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"
 qrcode = { version = "0.14", default-features = false }
 # the window of the app, for the share sheet of the system (`share`)
 raw-window-handle = "0.6"
@@ -48,6 +55,7 @@ raw-window-handle = "0.6"
 tiny-skia = "0.11"
 resvg = "0.45"
 ab_glyph = "0.2"
+fs4 = { version = "1", default-features = false, features = ["sync"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

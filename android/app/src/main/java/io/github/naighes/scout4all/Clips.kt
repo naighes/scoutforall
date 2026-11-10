@@ -86,7 +86,7 @@ fun teamWatch(teamId: String, period: AnalysisPeriod, onWatch: (VideoRequest.Cli
             stringResource(R.string.clips_pick_hint),
         ),
     ) {
-        onWatch(VideoRequest.Clips(teamId, pick, title, watched))
+        onWatch(VideoRequest.Clips(teamId, pick, title, watched, matches.orEmpty().filter { !it.hasVideo }))
     }
 }
 

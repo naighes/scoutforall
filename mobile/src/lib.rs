@@ -48,7 +48,7 @@ use scout4all_core::{
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::{Consent, PinnedTeams, TeamDefaults},
+    settings::{Consent, PinnedTeams, TeamDefaults, VideoSeconds},
     shapes::{
         country::CountryCode,
         court_zone::{
@@ -97,9 +97,18 @@ uniffi::setup_scaffolding!();
 
 mod analysis;
 pub use analysis::*;
+pub mod strip;
 pub mod video;
 
 // the types of the core the app sees as they are
+
+/// The seconds of the video, in the settings: how far ← → and the buttons
+/// jump, how long before an event the video goes to it out of clip mode.
+#[uniffi::remote(Record)]
+pub struct VideoSeconds {
+    pub step_s: u32,
+    pub lead_s: u32,
+}
 
 #[uniffi::remote(Enum)]
 pub enum TeamClassificationEnum {
@@ -1230,7 +1239,7 @@ pub struct ScoutingState {
 
 /// The sets the statistics are of: one of the match, or all of them so
 /// far.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 pub enum StatsScope {
     Set { number: u8 },
     Match,
@@ -1392,7 +1401,8 @@ pub struct RotationStats {
 }
 
 /// What the detail of a fundamental is narrowed to: none keeps them all.
-#[derive(Debug, Clone, Default, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, uniffi::Record)]
+#[serde(default)]
 pub struct DetailFilter {
     pub phase: Option<PhaseEnum>,
     /// 0 to 5, the setter in position 1 to 6
@@ -2699,7 +2709,7 @@ pub struct VideoEvent {
 /// filter of the detail, and, when chosen, some evaluations, the zone of
 /// the net of the attacks (2, 3, 4, 8, 9) and a zone of the court
 /// (`TargetStats::value`).
-#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
 pub struct ClipPick {
     pub scope: StatsScope,
     pub event: EventTypeEnum,
@@ -3946,6 +3956,25 @@ impl Scout4All {
         }
     }
 
+    /// The seconds of the video chosen in the settings, the defaults
+    /// without.
+    pub fn video_seconds(&self) -> VideoSeconds {
+        self.read_config()
+            .map(|config| config.video)
+            .unwrap_or_default()
+    }
+
+    /// Saves the seconds of the video, in their bounds, as `accept_terms`
+    /// does: the ones saved.
+    pub fn set_video_seconds(&self, seconds: VideoSeconds) -> Result<VideoSeconds, MobileError> {
+        let bounded = seconds.bounded();
+        self.update_config(|config| AppConfig {
+            video: bounded,
+            ..config
+        })?;
+        Ok(bounded)
+    }
+
     /// Whether the user allows sending the statistics of the matches.
     pub fn analytics_enabled(&self) -> bool {
         self.read_config()
@@ -4005,6 +4034,35 @@ pub fn offered_names(names: Vec<String>, written: String) -> Vec<String> {
     scout4all_core::names::offered(&names, &written)
 }
 
+/// The seconds a setting can take, both ends in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct SecondsRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+impl From<std::ops::RangeInclusive<u32>> for SecondsRange {
+    fn from(range: std::ops::RangeInclusive<u32>) -> Self {
+        SecondsRange {
+            min: *range.start(),
+            max: *range.end(),
+        }
+    }
+}
+
+/// How far the video can jump back and forward (`VideoSeconds::step_s`).
+#[uniffi::export]
+pub fn video_step_range() -> SecondsRange {
+    scout4all_core::settings::STEP_SECONDS.into()
+}
+
+/// How long before an event the video can go to it
+/// (`VideoSeconds::lead_s`).
+#[uniffi::export]
+pub fn video_lead_range() -> SecondsRange {
+    scout4all_core::settings::LEAD_SECONDS.into()
+}
+
 /// The version of the app (the same as the core, the TUI, the CLI).
 #[uniffi::export]
 pub fn version() -> String {
@@ -4033,6 +4091,8 @@ struct AppConfig {
     team_defaults: TeamDefaults,
     #[serde(flatten)]
     pinned: PinnedTeams,
+    #[serde(flatten)]
+    video: VideoSeconds,
     #[serde(flatten)]
     other: Map<String, Value>,
 }
@@ -6960,6 +7020,33 @@ mod tests {
         assert_eq!(config(&dir), expected);
         // read again when the app starts
         assert!(!self::app(&dir, "it").analytics_enabled());
+    }
+
+    #[test]
+    fn the_seconds_of_the_video_keep_the_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let before = serde_json::json!({
+            "language": "en",
+            "scouting_keybindings": { "a": "Attack" },
+            "analytics_enabled": true,
+            "terms_version": TERMS_VERSION,
+        });
+        std::fs::write(dir.path().join(CONFIG), before.to_string()).unwrap();
+        let app = app(&dir, "it");
+        assert_eq!(app.video_seconds(), VideoSeconds::default());
+        let saved = app
+            .set_video_seconds(VideoSeconds {
+                step_s: 10,
+                lead_s: 99,
+            })
+            .unwrap();
+        assert_eq!((saved.step_s, saved.lead_s), (10, 10));
+        let mut expected = before;
+        expected["step_s"] = 10.into();
+        expected["lead_s"] = 10.into();
+        assert_eq!(config(&dir), expected);
+        // read again when the app starts
+        assert_eq!(self::app(&dir, "it").video_seconds(), saved);
     }
 
     #[test]

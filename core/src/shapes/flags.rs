@@ -11,11 +11,12 @@
 use crate::errors::{AppError, IOError};
 use crate::shapes::court_zone::{CourtTarget, ServeStartEnum};
 use crate::shapes::enums::EventTypeEnum;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// How many receive the serve: three by default, four or two when the
 /// scout tells so for a rally.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ReceptionSchemeEnum {
     #[default]
     Three,

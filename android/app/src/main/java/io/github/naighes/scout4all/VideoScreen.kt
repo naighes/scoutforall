@@ -4,8 +4,8 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.pm.ActivityInfo
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
@@ -14,8 +14,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -44,8 +47,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -62,6 +65,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -80,6 +84,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -87,14 +92,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -117,12 +126,14 @@ import io.github.naighes.scout4all.core.VideoAlignment
 import io.github.naighes.scout4all.core.VideoEventRow
 import io.github.naighes.scout4all.core.VideoStanding
 import io.github.naighes.scout4all.core.montageName
+import io.github.naighes.scout4all.core.stripBars
+import io.github.naighes.scout4all.core.stripClicked
 import io.github.naighes.scout4all.core.videoClock
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 private enum class VideoTab(val title: Int) {
     Events(R.string.video_events),
@@ -407,12 +418,13 @@ private fun Controls(model: VideoModel, onTouch: () -> Unit = {}) = Column(Modif
         enabled = model.files.isNotEmpty() && model.missing == null,
         modifier = Modifier.fillMaxWidth().heightIn(max = 36.dp),
     )
+    if (model.clips != null) ClipStrip(model, onTouch)
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = {
             model.step(false)
             onTouch()
         }) {
-            Icon(painterResource(R.drawable.ic_back_seconds), contentDescription = stringResource(R.string.video_back_s, STEP_SECONDS))
+            Icon(painterResource(R.drawable.ic_back_seconds), contentDescription = stringResource(R.string.video_back_s, model.seconds.stepS.toInt()))
         }
         IconButton(onClick = {
             model.playPause()
@@ -427,7 +439,7 @@ private fun Controls(model: VideoModel, onTouch: () -> Unit = {}) = Column(Modif
             model.step(true)
             onTouch()
         }) {
-            Icon(painterResource(R.drawable.ic_forward_seconds), contentDescription = stringResource(R.string.video_forward_s, STEP_SECONDS))
+            Icon(painterResource(R.drawable.ic_forward_seconds), contentDescription = stringResource(R.string.video_forward_s, model.seconds.stepS.toInt()))
         }
         Text(
             "${videoClock(model.position.toULong())} / ${videoClock(model.total.toULong())}",
@@ -444,6 +456,55 @@ private fun Controls(model: VideoModel, onTouch: () -> Unit = {}) = Column(Modif
         ) { Text(speedText(model.speed)) }
     }
 }
+
+/** How far from a clip a touch on the strip still takes it, in dp: the
+ * `TOUCH_REACH` of the core. */
+private const val TOUCH_REACH = 12f
+
+/** The track of the slider starts half its handle (4 dp) from its edges:
+ * the strip under it the same, a clip under its time on the bar. */
+private val TRACK_INSET = 2.dp
+
+/** With the actions picked, their clips under the bar of the video, where
+ * they are in it: red, the one playing taller in the primary colour. A
+ * touch on a clip (or near it) plays it from its start, between them the
+ * video goes there (`stripBars`, `stripClicked` in the core, the same as on
+ * the desktop: widths in dp). TalkBack has the list of the actions. */
+@Composable
+private fun ClipStrip(model: VideoModel, onTouch: () -> Unit) {
+    val spans = model.spans
+    val total = model.total
+    if (spans.isEmpty() || total <= 0) return
+    val clipColor = MaterialTheme.colorScheme.error
+    val playingColor = MaterialTheme.colorScheme.primary
+    val lineColor = LocalContentColor.current.copy(alpha = 0.25f)
+    Canvas(
+        Modifier.fillMaxWidth().height(STRIP_HEIGHT).padding(horizontal = TRACK_INSET).testTag("strip")
+            .pointerInput(spans, total) {
+                detectTapGestures { at ->
+                    onTouch()
+                    model.strip(stripClicked(spans, total.toULong(), size.width.toDp().value, at.x.toDp().value, TOUCH_REACH))
+                }
+            },
+    ) {
+        val line = 2.dp.toPx()
+        drawRect(lineColor, Offset(0f, (size.height - line) / 2), Size(size.width, line))
+        val bars = stripBars(spans, total.toULong(), size.width.toDp().value)
+        // the one playing drawn last, over the others
+        bars.zip(spans).sortedBy { it.second.playing }.forEach { (bar, sp) ->
+            val height = (if (sp.playing) 12.dp else 6.dp).toPx()
+            drawRoundRect(
+                if (sp.playing) playingColor else clipColor,
+                Offset(bar.from.dp.toPx(), (size.height - height) / 2),
+                Size((bar.to - bar.from).dp.toPx(), height),
+                CornerRadius(2.dp.toPx()),
+            )
+        }
+    }
+}
+
+/** Tall enough for a finger, not more: the video above it matters more. */
+private val STRIP_HEIGHT = 24.dp
 
 private fun speedText(speed: Float) = (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "×"
 
@@ -832,41 +893,44 @@ private fun Overlay(st: VideoStanding, model: VideoModel, compact: Boolean, modi
     }
 }
 
-/** The video of the actions picked being made, then shared or saved. */
+/** The video of the actions picked being made, then shared or saved. Of
+ * the matches of a team, summed up first: how many actions of how many
+ * matches, the ones left out and why; made once asked. */
 @Composable
 private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val app = context.applicationContext as Scout4AllApplication
     val review = model.review ?: return
+    val request = model.clips ?: return
     val texts = MontageTexts(
-        team = review.team(),
-        opponent = review.opponent(),
         setN = stringResource(R.string.set_n),
         sideOut = stringResource(R.string.side_out_phase),
         breakPoint = stringResource(R.string.break_phase),
     )
-    val title = model.clips?.title.orEmpty()
-    val output = remember { File(File(context.cacheDir, "exports"), montageName(title) + ".mp4") }
+    val titles = TitleTexts(stringResource(R.string.clips_match_of), stringResource(R.string.clips_count))
+    val several = request.matches.size + request.leftOut.size > 1
+    val plan by produceState<MontagePlan?>(null) {
+        value = montagePlan(app, request, model.matchId to review, model.margins.beforeS, model.margins.afterS, titles)
+    }
+    // a single match: made at once
+    var asked by remember { mutableStateOf(!several) }
+    val output = remember { File(File(context.cacheDir, "exports"), montageName(request.title) + ".mp4") }
     var made by remember { mutableStateOf<File?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
     var percent by remember { mutableFloatStateOf(0f) }
-    val montage = remember {
-        Montage(
-            context,
-            review,
-            review.pieces(model.margins.beforeS, model.margins.afterS),
-            texts,
-            model.margins.overlay,
-            output,
-        ) { result ->
-            result.fold({ made = it }, { failed = it.localizedMessage ?: "" })
+    val montage = remember(plan, asked) {
+        plan?.takeIf { asked && it.actions > 0 }?.let { p ->
+            Montage(context, p.matches, texts, model.margins.overlay, output) { result ->
+                result.fold({ made = it }, { failed = it.localizedMessage ?: "" })
+            }
         }
     }
     DisposableEffect(montage) {
-        montage.start()
-        onDispose { if (made == null) montage.cancel() }
+        montage?.start()
+        onDispose { if (made == null) montage?.cancel() }
     }
     LaunchedEffect(montage) {
-        while (made == null && failed == null) {
+        while (montage != null && made == null && failed == null) {
             percent = montage.percent() / 100f
             delay(300)
         }
@@ -887,9 +951,12 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
         title = { Text(stringResource(R.string.share_video)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val summed = plan
                 when {
                     failed != null -> Text(stringResource(R.string.video_not_made) + (failed?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""))
                     made != null -> Text(stringResource(R.string.video_made))
+                    summed != null && !asked -> MontageSummary(summed)
+                    summed == null || montage == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     else -> {
                         Text(stringResource(R.string.making_video, (percent * 100).toInt()))
                         LinearProgressIndicator(progress = { percent }, Modifier.fillMaxWidth())
@@ -898,10 +965,16 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            made?.let { file ->
-                Row {
-                    TextButton(onClick = { save.launch(file.name) }) { Text(stringResource(R.string.save_to_file)) }
-                    TextButton(onClick = { context.shareVideo(file) }) { Text(stringResource(R.string.share)) }
+            val summed = plan
+            when {
+                made != null -> made?.let { file ->
+                    Row {
+                        TextButton(onClick = { save.launch(file.name) }) { Text(stringResource(R.string.save_to_file)) }
+                        TextButton(onClick = { context.shareVideo(file) }) { Text(stringResource(R.string.share)) }
+                    }
+                }
+                summed != null && !asked -> TextButton(onClick = { asked = true }, enabled = summed.actions > 0) {
+                    Text(stringResource(R.string.make_video))
                 }
             }
         },
@@ -911,6 +984,28 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/** What the video of the actions of the team holds: how many actions of
+ * how many matches, the ones left out and why. */
+@Composable
+private fun MontageSummary(plan: MontagePlan) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text(stringResource(R.string.clips_in_matches, plan.actions, plan.matches.size), fontWeight = FontWeight.Bold)
+    if (plan.leftOut.isNotEmpty()) {
+        val said = plan.leftOut.map { (opponent, why) ->
+            val reason = when (why) {
+                LeftOut.NO_VIDEO -> R.string.left_out_no_video
+                LeftOut.UNREADABLE -> R.string.left_out_unreadable
+                LeftOut.NOT_LINED_UP -> R.string.left_out_not_lined_up
+            }
+            "$opponent (${stringResource(reason)})"
+        }
+        Text(
+            stringResource(R.string.montage_left_out, said.joinToString(", ")),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 private fun android.content.Context.shareVideo(file: File) {

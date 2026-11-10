@@ -20,6 +20,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.DialogProperties
@@ -305,8 +306,9 @@ private fun Navigation(
             VideoScreen(VideoRequest.Match(id, m), onBack = { nav.back(entry) })
         }
         composable("team/{id}/clips") { entry ->
-            // lost with the process: back to the statistics
-            when (val request = ClipRequests.current) {
+            // saved with the screen, there after the system closed the app;
+            // unreadable (another version): back to the statistics
+            when (val request = remember(entry) { savedClips(entry.savedStateHandle[CLIPS_KEY]) }) {
                 null -> LaunchedEffect(Unit) { nav.back(entry) }
                 else -> VideoScreen(request, onBack = { nav.back(entry) })
             }
@@ -400,6 +402,6 @@ private fun NavController.openMatch(teamId: String, matchId: String) {
 
 /** The actions picked in the statistics, in the video. */
 private fun NavController.watch(request: VideoRequest.Clips) {
-    ClipRequests.current = request
     navigate("team/${request.teamId}/clips")
+    currentBackStackEntry?.savedStateHandle?.set(CLIPS_KEY, request.saved())
 }

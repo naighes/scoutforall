@@ -1,19 +1,23 @@
 //! A source of video on the network: RTSP (an IP camera, a phone app, a
 //! streamer), with its user and password; RTMP read from a server, or
-//! received from an app (`rtmp`). The H.264 that comes is recorded as it
-//! is (no encoding again) and decoded only for the preview. Cut off while
-//! recording, it connects again and goes on in the same recording. HLS is
-//! known, not read yet.
+//! received from an app (`rtmp`); HLS from a web server (`hls`). The H.264
+//! that comes is recorded as it is (no encoding again) and decoded only for
+//! the preview. Cut off while recording, it connects again and goes on in
+//! the same recording.
 
 use {
     super::{
-        capture::{Command, Status, Take, finish, set},
+        capture::{Command, Pace, Status, Take, finish, set},
         picture::{self, I420},
     },
     crate::video::Picture as Frame,
     bytes::Bytes,
     iced::futures::StreamExt,
-    openh264::{decoder::Decoder, formats::YUVSource},
+    openh264::{
+        OpenH264API,
+        decoder::{Decoder, DecoderConfig, Flush},
+        formats::YUVSource,
+    },
     retina::{
         client::{
             Credentials, PlayOptions, Session, SessionOptions, SetupOptions, TcpTransportOptions,
@@ -26,7 +30,7 @@ use {
             Arc, Mutex,
             mpsc::{Receiver, TryRecvError},
         },
-        time::Duration,
+        time::{Duration, Instant},
     },
 };
 
@@ -52,23 +56,13 @@ pub enum Protocol {
     Hls,
 }
 
-impl Protocol {
-    pub fn name(self) -> &'static str {
-        match self {
-            Protocol::Rtsp => "RTSP",
-            Protocol::Rtmp => "RTMP",
-            Protocol::Hls => "HLS",
-        }
-    }
-}
-
 /// What went wrong, to say it to the user in their words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Problem {
     /// not an address
     Invalid,
-    /// known, not read yet
-    NotYet(Protocol),
+    /// a stream that's over, or not live (HLS)
+    Ended,
     /// nothing there: the address or the port
     Unreachable,
     /// the user or the password
@@ -83,8 +77,9 @@ pub enum Problem {
     NoVideo(String),
     /// closed by the server before the video: the key, the user
     Closed,
-    /// `rtmps://`: not read yet
-    Encrypted,
+    /// `rtmps://`: the server's certificate not trusted (expired, for
+    /// another name, signed by an authority the system doesn't know)
+    Certificate,
     /// the port to receive on taken by another program
     PortTaken(u16),
     /// an app sent with another key: from where
@@ -228,6 +223,14 @@ fn shown_of(yuv: &openh264::decoder::DecodedYUV) -> Option<(I420, (usize, usize,
     Some((picture, shown))
 }
 
+/// The decoder of the preview. Not flushed after each frame (the default
+/// of the crate): that breaks the B-frames, and the picture stopped from
+/// the first one to the next keyframe.
+pub(super) fn preview_decoder() -> Result<Decoder, openh264::Error> {
+    let config = DecoderConfig::new().flush_after_decode(Flush::NoFlush);
+    Decoder::with_api_config(OpenH264API::from_source(), config)
+}
+
 /// The frames of a source on the network as they come: recorded on the
 /// clock of the recording, decoded for the preview while it's shown. One
 /// for the source, over its connections: the preview counted on.
@@ -238,15 +241,23 @@ pub(super) struct Feed {
     first: Option<(u64, u64)>,
     serial: u64,
     decoding: bool,
+    /// the bytes come since `counting`, for the bitrate of the source
+    counted: u64,
+    counting: Option<Instant>,
+    /// how long before they come the frames were taken (HLS)
+    late_ms: Option<u64>,
 }
 
 impl Feed {
     pub(super) fn new() -> Result<Feed, Problem> {
         Ok(Feed {
-            decoder: Decoder::new().map_err(|e| Problem::Other(e.to_string()))?,
+            decoder: preview_decoder().map_err(|e| Problem::Other(e.to_string()))?,
             first: None,
             serial: 0,
             decoding: false,
+            counted: 0,
+            counting: None,
+            late_ms: None,
         })
     }
 
@@ -254,6 +265,8 @@ impl Feed {
     pub(super) fn connected(&mut self, status: &Mutex<Status>) {
         self.first = None;
         self.decoding = false;
+        self.counted = 0;
+        self.counting = None;
         set(status, |s| {
             s.problem = None;
             s.error = None;
@@ -271,24 +284,39 @@ impl Feed {
         at_ms: u64,
         shown_after_ms: i32,
         take: &mut Option<Take>,
-        preview: bool,
+        preview: &mut Pace,
         status: &Mutex<Status>,
     ) {
-        match take.as_mut() {
+        self.count(annex_b.len(), status);
+        let stops = match take.as_mut() {
             Some(t) => {
-                let (at0, ms0) = *self.first.get_or_insert((at_ms, t.elapsed_ms()));
-                if let Err(e) =
-                    t.write_shown(ms0 + at_ms.saturating_sub(at0), shown_after_ms, annex_b)
-                {
-                    set(status, |s| s.error = Some(e));
-                    finish(take.take(), status);
-                }
+                // the first frame where it was taken: as late as the
+                // first of the recording, at the time it comes
+                let now = match self.first {
+                    Some(_) => 0,
+                    None => {
+                        let late = self.late_ms.unwrap_or(0);
+                        (t.elapsed_ms() + t.late_ms(late)).saturating_sub(late)
+                    }
+                };
+                let (at0, ms0) = *self.first.get_or_insert((at_ms, now));
+                let written =
+                    t.write_shown(ms0 + at_ms.saturating_sub(at0), shown_after_ms, annex_b);
+                t.stops(written, status)
             }
-            None => self.first = None,
+            None => {
+                self.first = None;
+                false
+            }
+        };
+        if stops {
+            finish(take.take(), status);
         }
         // decoded only for the preview: not shown, not decoded, from the
-        // next picture that starts anew when shown again
-        let shown = match (preview, starts, self.decoding) {
+        // next picture that starts anew when shown again; each frame
+        // decoded (the next ones need it), a picture made only as often
+        // as it's looked at
+        let shown = match (preview.is_on(), starts, self.decoding) {
             (false, _, _) => {
                 self.decoding = false;
                 None
@@ -297,7 +325,10 @@ impl Feed {
             (true, _, _) => {
                 self.decoding = true;
                 let decoded = self.decoder.decode(annex_b).ok().flatten();
-                decoded.as_ref().and_then(shown_of)
+                decoded
+                    .as_ref()
+                    .filter(|_| preview.due(Instant::now()))
+                    .and_then(shown_of)
             }
         };
         let recording = take.as_ref().map(Take::recording);
@@ -325,6 +356,26 @@ impl Feed {
     }
 }
 
+impl Feed {
+    /// `bytes` more come: the bitrate of the source said once it's been
+    /// counted long enough, for the space a match needs.
+    fn count(&mut self, bytes: usize, status: &Mutex<Status>) {
+        let since = *self.counting.get_or_insert_with(Instant::now);
+        self.counted = self
+            .counted
+            .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+        let ms = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if ms >= COUNTED_FOR_MS {
+            let bits = self.counted.saturating_mul(8_000) / ms;
+            set(status, |s| s.bits_per_second = Some(bits));
+        }
+    }
+}
+
+/// How long the bytes of a source are counted before its bitrate is said:
+/// a few keyframes in.
+const COUNTED_FOR_MS: u64 = 3_000;
+
 /// What the loop is asked between frames.
 pub(super) enum Asked {
     Nothing,
@@ -334,7 +385,7 @@ pub(super) enum Asked {
 pub(super) fn look(
     commands: &Receiver<Command>,
     take: &mut Option<Take>,
-    preview: &mut bool,
+    preview: &mut Pace,
     status: &Mutex<Status>,
 ) -> Asked {
     loop {
@@ -342,12 +393,17 @@ pub(super) fn look(
             Ok(Command::Record { base, started, .. }) => {
                 finish(take.take(), status);
                 match Take::start(base, started) {
-                    Ok(t) => *take = Some(t),
+                    // recording from now, the first frame still to come
+                    Ok(t) => {
+                        let recording = t.recording();
+                        *take = Some(t);
+                        set(status, |s| s.recording = Some(recording));
+                    }
                     Err(e) => set(status, |s| s.error = Some(e)),
                 }
             }
             Ok(Command::Stop) => finish(take.take(), status),
-            Ok(Command::Preview(on)) => *preview = on,
+            Ok(Command::Preview(every)) => *preview = Pace::new(every),
             Ok(Command::Quit) | Err(TryRecvError::Disconnected) => {
                 finish(take.take(), status);
                 return Asked::Quit;
@@ -376,7 +432,7 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
     };
     runtime.block_on(async {
         let mut take: Option<Take> = None;
-        let mut preview = true;
+        let mut preview = Pace::each_frame();
         let mut feed = match Feed::new() {
             Ok(f) => f,
             Err(problem) => return set(status, |s| s.problem = Some(problem)),
@@ -393,7 +449,9 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
                 Reading::Pull(source) => match parse(&source.url) {
                     Ok((url, Protocol::Rtsp, in_url)) => stream(url, source, in_url, &mut io).await,
                     Ok((url, Protocol::Rtmp, _)) => super::rtmp::pull(url, &mut io).await,
-                    Ok((_, protocol, _)) => Err(Problem::NotYet(protocol)),
+                    Ok((url, Protocol::Hls, in_url)) => {
+                        super::hls::pull(url, source, in_url, &mut io).await
+                    }
                     Err(problem) => Err(problem),
                 },
                 Reading::Receive(receiver) => super::rtmp::receive(receiver, &mut io).await,
@@ -422,7 +480,7 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
 pub(super) struct Io<'a> {
     commands: &'a Receiver<Command>,
     pub(super) take: &'a mut Option<Take>,
-    pub(super) preview: &'a mut bool,
+    pub(super) preview: &'a mut Pace,
     pub(super) status: &'a Mutex<Status>,
     pub(super) feed: &'a mut Feed,
 }
@@ -436,6 +494,13 @@ impl Io<'_> {
         self.feed.connected(self.status);
     }
 
+    /// The next frames taken `ms` before they come (HLS): placed in the
+    /// recording when they were taken.
+    pub(super) fn late(&mut self, ms: u64) {
+        self.feed.late_ms = Some(ms);
+        set(self.status, |s| s.late_ms = Some(ms));
+    }
+
     pub(super) fn frame(&mut self, annex_b: &[u8], starts: bool, at_ms: u64, shown_after_ms: i32) {
         self.feed.frame(
             annex_b,
@@ -443,9 +508,22 @@ impl Io<'_> {
             at_ms,
             shown_after_ms,
             self.take,
-            *self.preview,
+            self.preview,
             self.status,
         );
+    }
+}
+
+/// The user and the password: the ones given apart, else the ones in the
+/// address.
+pub(super) fn credentials(
+    source: &NetworkSource,
+    in_url: Option<(String, String)>,
+) -> Option<(String, String)> {
+    match (&source.username, in_url) {
+        (name, _) if !name.is_empty() => Some((name.clone(), source.password.clone())),
+        (_, Some(user)) if !user.0.is_empty() => Some(user),
+        _ => None,
     }
 }
 
@@ -460,12 +538,8 @@ async fn stream(
     if url.port().is_none() {
         let _ = url.set_port(Some(RTSP_PORT));
     }
-    let (username, password) = match (&source.username, in_url) {
-        (name, _) if !name.is_empty() => (name.clone(), source.password.clone()),
-        (_, Some(user)) => user,
-        _ => (String::new(), String::new()),
-    };
-    let credentials = (!username.is_empty()).then_some(Credentials { username, password });
+    let credentials =
+        credentials(source, in_url).map(|(username, password)| Credentials { username, password });
     let options = SessionOptions::default()
         .creds(credentials)
         .user_agent("scout4all".to_string());
@@ -600,6 +674,27 @@ mod tests {
         assert!(video.samples.len() as u64 >= made.length_ms * 30 / 1000 - 3);
     }
 
+    /// A stream with B-frames: a picture of nearly each frame, not only
+    /// of the first ones after a keyframe.
+    #[test]
+    fn the_preview_of_b_frames() {
+        let frames =
+            crate::live::hls::ts_frames(include_bytes!("testdata/two_seconds.ts")).unwrap();
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        let mut pace = Pace::each_frame();
+        for f in &frames {
+            feed.frame(&f.annex_b, f.key, 0, 0, &mut None, &mut pace, &status);
+        }
+        let shown = status
+            .lock()
+            .unwrap()
+            .frame
+            .as_ref()
+            .map_or(0, |f| f.serial);
+        assert!(shown >= 55, "{shown}");
+    }
+
     /// Connected again: the preview counted on from where it was, for
     /// the screen (which shows only newer ones) to show it.
     #[test]
@@ -615,11 +710,146 @@ mod tests {
         let status = Mutex::new(Status::default());
         let mut feed = Feed::new().unwrap();
         let serial = |status: &Mutex<Status>| status.lock().unwrap().frame.as_ref().unwrap().serial;
-        feed.frame(&keyframe, true, 0, 0, &mut None, true, &status);
+        feed.frame(
+            &keyframe,
+            true,
+            0,
+            0,
+            &mut None,
+            &mut Pace::each_frame(),
+            &status,
+        );
         let before = serial(&status);
         feed.connected(&status);
-        feed.frame(&keyframe, true, 0, 0, &mut None, true, &status);
+        feed.frame(
+            &keyframe,
+            true,
+            0,
+            0,
+            &mut None,
+            &mut Pace::each_frame(),
+            &status,
+        );
         assert!(serial(&status) > before);
+    }
+
+    /// A source on the network cut off while recording, or not there yet:
+    /// recording from the start, its time going on with no frames ("● REC"
+    /// counting).
+    #[test]
+    fn the_time_recording_without_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = Mutex::new(Status::default());
+        let (send, commands) = std::sync::mpsc::channel();
+        send.send(Command::Record {
+            base: dir.path().join("20261110 120000"),
+            started: chrono::Local::now(),
+            quality: crate::live::capture::Quality::High,
+        })
+        .unwrap();
+        let mut take = None;
+        assert!(matches!(
+            look(&commands, &mut take, &mut Pace::each_frame(), &status),
+            Asked::Nothing
+        ));
+        let recording = status.lock().unwrap().recording.clone().unwrap();
+        let later = recording.since + Duration::from_secs(3);
+        assert_eq!(recording.elapsed_ms_at(later), 3_000);
+        finish(take.take(), &status);
+    }
+
+    /// For the window of the recording: each frame decoded, a picture
+    /// only as often as asked; the next one once the time's past.
+    #[test]
+    fn the_preview_at_its_pace() {
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        let frames = encoded(14);
+        let (slow, after) = frames.split_at(10);
+        let mut pace = Pace::new(Some(Duration::from_secs(3600)));
+        for (i, f) in slow.iter().enumerate() {
+            feed.frame(f, i == 0, 0, 0, &mut None, &mut pace, &status);
+        }
+        let serial =
+            |status: &Mutex<Status>| status.lock().unwrap().frame.as_ref().map(|f| f.serial);
+        assert_eq!(serial(&status), Some(1));
+        // each frame a picture again, decoded on from the frames before
+        let mut each = Pace::each_frame();
+        for f in after {
+            feed.frame(f, false, 0, 0, &mut None, &mut each, &status);
+        }
+        assert_eq!(serial(&status), Some(5));
+    }
+
+    /// Frames of an encoder, the first a keyframe with its parameters.
+    fn encoded(count: usize) -> Vec<Vec<u8>> {
+        use openh264::{OpenH264API, encoder::Encoder, formats::YUVBuffer};
+        let mut encoder = Encoder::with_api_config(
+            OpenH264API::from_source(),
+            openh264::encoder::EncoderConfig::new(),
+        )
+        .unwrap();
+        (0..count)
+            .map(|i| {
+                let shade = u8::try_from(i % 200).unwrap();
+                let yuv = YUVBuffer::from_vec(vec![shade; 64 * 48 * 3 / 2], 64, 48);
+                encoder.encode(&yuv).unwrap().to_vec()
+            })
+            .collect()
+    }
+
+    /// The disk almost full: stopped by itself after its frames on disk,
+    /// its MP4 made and readable, said; with room, it goes on.
+    #[test]
+    fn stopped_as_the_disk_fills_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let frames = encoded(100);
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        let base = dir.path().join("20261110 120000");
+        let mut take =
+            Some(Take::start_on(base.clone(), chrono::Local::now(), |_| Some(0)).unwrap());
+        for (i, f) in frames.iter().enumerate() {
+            let at = u64::try_from(i).unwrap() * 33;
+            feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
+        }
+        assert!(take.is_none());
+        let done = std::mem::take(&mut status.lock().unwrap().done);
+        let [done] = done.as_slice() else {
+            panic!("{done:?}");
+        };
+        assert!(done.out_of_space);
+        // at the first look at the space (every 30 frames)
+        let made = done.result.clone().unwrap();
+        assert!((900..1000).contains(&made.length_ms), "{made:?}");
+        let video = crate::video::source::Source::open(&done.mp4).unwrap();
+        assert_eq!(video.samples.len(), 30);
+        // with room for its MP4 and the reserve: on
+        let base = dir.path().join("20261110 130000");
+        let room = |_: &std::path::Path| Some(crate::live::space::RESERVE + 10_000_000);
+        let mut take = Some(Take::start_on(base, chrono::Local::now(), room).unwrap());
+        for (i, f) in frames.iter().enumerate() {
+            let at = u64::try_from(i).unwrap() * 33;
+            feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
+        }
+        assert!(take.is_some_and(|t| !t.out_of_space));
+    }
+
+    /// The bitrate of a source said once counted for a while.
+    #[test]
+    fn the_bitrate_counted() {
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        feed.count(1_000, &status);
+        assert_eq!(status.lock().unwrap().bits_per_second, None);
+        feed.counting = Instant::now().checked_sub(Duration::from_secs(4));
+        feed.count(499_000, &status);
+        // 500 kB in about 4 s: about 1 Mbit/s
+        let bits = status.lock().unwrap().bits_per_second.unwrap();
+        assert!((900_000..=1_000_000).contains(&bits), "{bits}");
+        // connected again: counted anew
+        feed.connected(&status);
+        assert_eq!((feed.counted, feed.counting), (0, None));
     }
 
     #[test]

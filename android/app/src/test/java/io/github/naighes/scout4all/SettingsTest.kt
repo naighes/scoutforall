@@ -2,13 +2,16 @@ package io.github.naighes.scout4all
 
 import android.content.Context
 import android.telephony.TelephonyManager
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
+import io.github.naighes.scout4all.core.VideoSeconds
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +40,31 @@ class SettingsTest {
         rule.onNode(hasText(string(R.string.terms_of_use)) and hasClickAction()).performClick()
         rule.onNode(hasText(string(R.string.about)) and hasClickAction()).performClick()
         assertEquals(listOf("terms", "about"), opened)
+    }
+}
+
+/** The seconds of the video: one more or less, saved at once, in their
+ * bounds. */
+@RunWith(RobolectricTestRunner::class)
+class VideoSecondsTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun oneSecondMoreOrLessInTheirBounds() {
+        rule.setContent { Scout4AllTheme { SettingsScreen(onBack = {}, onTerms = {}, onAbout = {}) } }
+        val step = string(R.string.video_step)
+        val lead = string(R.string.video_lead)
+        rule.waitForText(step)
+        val more = { name: String -> rule.onNodeWithContentDescription(string(R.string.video_more) + " " + name) }
+        val less = { name: String -> rule.onNodeWithContentDescription(string(R.string.video_less) + " " + name) }
+        more(step).performClick()
+        rule.waitFor { core { it.videoSeconds() } == VideoSeconds(6u, 2u) }
+        less(lead).performClick()
+        rule.waitFor { core { it.videoSeconds() } == VideoSeconds(6u, 1u) }
+        less(lead).performClick()
+        rule.waitFor { core { it.videoSeconds() }.leadS == 0u }
+        less(lead).assertIsNotEnabled()
+        rule.waitForText("6 s")
     }
 }
 
