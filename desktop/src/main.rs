@@ -178,6 +178,12 @@ struct App {
     /// MP4 is saved
     recorder: Option<live::capture::Capture>,
     recorder_status: Option<live::capture::Status>,
+    /// the recording's own window, asked for (the button in the bar):
+    /// open while it records
+    preview_asked: bool,
+    preview_window: Option<window::Id>,
+    /// the pictures of the recording in its window
+    recording_preview: live::preview::Preview,
     /// the statistics the actions were picked in, while they're watched
     /// in the video: back to them as they were
     parked: Option<Box<stats::StatsScreen>>,
@@ -235,6 +241,15 @@ enum Message {
     /// a window other than the app's closed (the app's ends it)
     WindowClosed(window::Id),
     Live(live::screen::Message),
+    /// the recording's own window opened or closed
+    TogglePreview,
+    /// a new picture of the recording looked for, for its window
+    PreviewTick,
+    PreviewAllocated(
+        Arc<video::Picture>,
+        iced::widget::image::Handle,
+        Option<iced::advanced::image::Allocation>,
+    ),
     /// the recording looked at: how long, saved
     LiveTick,
     StopRecording,
@@ -313,6 +328,9 @@ impl App {
             focused: None,
             update: Update::None,
             video_window: None,
+            preview_asked: false,
+            preview_window: None,
+            recording_preview: live::preview::Preview::default(),
             recorder: None,
             recorder_status: None,
             parked: None,
@@ -760,9 +778,18 @@ impl App {
                 self.stop_recording();
                 Task::none()
             }
+            Message::TogglePreview => {
+                self.preview_asked = !self.preview_asked;
+                Task::none()
+            }
+            Message::PreviewTick => self.preview_tick(),
+            Message::PreviewAllocated(frame, handle, allocation) => {
+                self.recording_preview.allocated(frame, handle, allocation);
+                Task::none()
+            }
             message => self.handle(message),
         };
-        let handled = Task::batch([handled, self.video_window()]);
+        let handled = Task::batch([handled, self.video_window(), self.preview_window()]);
         // the event chosen kept in sight
         let scroll = match &mut self.screen {
             Screen::Events(screen) => Some(screen.scroll()),
@@ -896,9 +923,95 @@ impl App {
         }
     }
 
+    /// The recording's own window, open while asked for and recording:
+    /// the pictures made only then, for the recording to keep up.
+    fn preview_window(&mut self) -> Task<Message> {
+        let wanted =
+            live::preview::window_wanted(self.preview_asked, self.recorder_status.as_ref());
+        match (wanted, self.preview_window) {
+            (true, None) => {
+                let (id, opened) = window::open(window::Settings {
+                    size: Size::new(960.0, 580.0),
+                    min_size: Some(Size::new(320.0, 200.0)),
+                    ..window::Settings::default()
+                });
+                self.preview_window = Some(id);
+                self.show_preview(true);
+                // the keys stay on the screen being scouted
+                opened.then(|_| window::oldest().and_then(window::gain_focus))
+            }
+            (false, Some(id)) => {
+                self.preview_window = None;
+                self.show_preview(false);
+                window::close(id)
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// The pictures of the recording made as often as the window looks
+    /// for them, or not; the last one gone.
+    fn show_preview(&mut self, on: bool) {
+        match (&self.recorder, on) {
+            (Some(recorder), true) => recorder.preview_every(std::time::Duration::from_millis(
+                live::preview::WINDOW_EVERY_MS,
+            )),
+            (Some(recorder), false) => recorder.preview(false),
+            (None, _) => {}
+        }
+        self.recording_preview.clear();
+    }
+
+    /// A newer picture of the recording, for its window.
+    fn preview_tick(&mut self) -> Task<Message> {
+        let status = self
+            .recorder
+            .as_ref()
+            .and_then(live::capture::Capture::status);
+        match self.recording_preview.wanted(status.as_ref()) {
+            Some((frame, handle)) => {
+                live::preview::allocate(frame, handle, Message::PreviewAllocated)
+            }
+            None => Task::none(),
+        }
+    }
+
+    /// What the recording's own window shows: its pictures, how long.
+    fn preview_window_view(&self) -> Element<'_, Message> {
+        let s = self.strings;
+        let c = self.colors();
+        let status = self.recorder_status.as_ref();
+        let notice = status.and_then(|st| st.error.clone());
+        let elapsed = status
+            .and_then(|st| st.recording.as_ref())
+            .map(|r| format!("● REC {}", video::clock(r.elapsed_ms)))
+            .unwrap_or_default();
+        let below = container(ui::body(elapsed).color(c.danger))
+            .padding(iced::Padding::from([6, 12]))
+            .width(Length::Fill);
+        container(column![
+            self.recording_preview.view(notice, s.preview_waiting, c),
+            below
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(c.background.into()),
+            text_color: Some(c.text),
+            ..container::Style::default()
+        })
+        .into()
+    }
+
     /// The video's window closed by the user: the video back in the
-    /// screen. Closed by the app (`video_window`), already forgotten.
+    /// screen. The recording's: not asked for any more. Closed by the
+    /// app (`video_window`, `preview_window`), already forgotten.
     fn window_closed(&mut self, id: window::Id) -> Task<Message> {
+        if self.preview_window == Some(id) {
+            self.preview_window = None;
+            self.preview_asked = false;
+            self.show_preview(false);
+        }
         if let (true, Screen::Video(screen)) = (self.video_window == Some(id), &mut self.screen) {
             screen.attach();
         }
@@ -1201,16 +1314,28 @@ impl App {
         let recording: Vec<Element<'_, Message>> = match &self.recorder_status {
             Some(live::capture::Status {
                 recording: Some(r), ..
-            }) => vec![ui::tip(
-                ui::pill(
-                    &format!("● REC {}", video::clock(r.elapsed_ms)),
-                    true,
-                    Some(Message::StopRecording),
+            }) => vec![
+                ui::tip(
+                    ui::pill(
+                        s.preview,
+                        self.preview_window.is_some(),
+                        Some(Message::TogglePreview),
+                        c,
+                    ),
+                    s.preview_tip,
                     c,
                 ),
-                s.stop_recording,
-                c,
-            )],
+                ui::tip(
+                    ui::pill(
+                        &format!("● REC {}", video::clock(r.elapsed_ms)),
+                        true,
+                        Some(Message::StopRecording),
+                        c,
+                    ),
+                    s.stop_recording,
+                    c,
+                ),
+            ],
             Some(live::capture::Status { saving: true, .. }) => {
                 vec![ui::pill(s.saving_recording, false, None, c)]
             }
@@ -1341,9 +1466,14 @@ impl App {
             }
             _ => Subscription::none(),
         };
-        // the recording, twice a second, whatever the screen
+        // the recording, twice a second, whatever the screen; its
+        // pictures, while its window is open
         let recording = match self.recorder {
             Some(_) => Subscription::run(live_ticks),
+            None => Subscription::none(),
+        };
+        let preview = match self.preview_window {
+            Some(_) => Subscription::run(preview_ticks),
             None => Subscription::none(),
         };
         let keys = event::listen_with(|event, status, _| match (event, status) {
@@ -1362,7 +1492,7 @@ impl App {
             }
             _ => None,
         });
-        Subscription::batch([keys, video, recording])
+        Subscription::batch([keys, video, recording, preview])
     }
 }
 
@@ -1421,14 +1551,23 @@ async fn pick_folder() -> Option<PathBuf> {
 
 /// A tick every half a second, from a thread: no timer in the executor.
 fn live_ticks() -> impl iced::futures::Stream<Item = Message> {
-    iced::futures::stream::unfold((), |()| async {
+    every(500, Message::LiveTick)
+}
+
+fn preview_ticks() -> impl iced::futures::Stream<Item = Message> {
+    every(live::preview::WINDOW_EVERY_MS, Message::PreviewTick)
+}
+
+/// `message` every `ms` milliseconds.
+fn every(ms: u64, message: Message) -> impl iced::futures::Stream<Item = Message> {
+    iced::futures::stream::unfold(message, move |message| async move {
         let (tx, rx) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(ms));
             let _ = tx.send(());
         });
         let _ = rx.await;
-        Some((Message::LiveTick, ()))
+        Some((message.clone(), message))
     })
 }
 
@@ -1699,6 +1838,13 @@ impl Main {
         if let Some(app) = self.app.as_ref().filter(|app| app.video_window == Some(id)) {
             return app.video_window_view();
         }
+        if let Some(app) = self
+            .app
+            .as_ref()
+            .filter(|app| app.preview_window == Some(id))
+        {
+            return app.preview_window_view();
+        }
         if let (Ok(()), Some(started)) = (self.first_frame.set(()), STARTED.get()) {
             eprintln!("first frame after {} ms", started.elapsed().as_millis());
         }
@@ -1716,9 +1862,12 @@ impl Main {
     }
 
     fn title(&self, id: window::Id) -> String {
-        match self.app.as_ref().filter(|app| app.video_window == Some(id)) {
-            Some(app) => app.title(),
-            None => "scout4all".to_string(),
+        match &self.app {
+            Some(app) if app.video_window == Some(id) => app.title(),
+            Some(app) if app.preview_window == Some(id) => {
+                app.strings.recording_preview.to_string()
+            }
+            _ => "scout4all".to_string(),
         }
     }
 

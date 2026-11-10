@@ -11,6 +11,7 @@ use {
         LiveConfig, SavedNetwork, SavedReceiver,
         capture::{self, CameraEntry, Capture, Quality, Source, Status},
         network::{self, NetworkSource, Problem, Protocol},
+        preview::{self, Preview},
         rtmp::{self, Receiver},
         space::{self as disk, Room},
     },
@@ -22,7 +23,7 @@ use {
         video::Picture,
     },
     iced::{
-        Alignment, ContentFit, Element, Length,
+        Alignment, Element, Length,
         advanced::image::Allocation,
         widget::{Column, column, container, image, row, space, text},
     },
@@ -94,14 +95,7 @@ pub enum Outcome {
 }
 
 pub fn allocate(frame: Arc<Picture>, handle: image::Handle) -> iced::Task<Message> {
-    iced_runtime::image::allocate(handle.clone())
-        .map(move |allocated| Message::Allocated(frame.clone(), handle.clone(), allocated.ok()))
-}
-
-struct Shown {
-    frame: Arc<Picture>,
-    handle: image::Handle,
-    _allocation: Option<Allocation>,
+    preview::allocate(frame, handle, Message::Allocated)
 }
 
 pub struct LiveScreen {
@@ -118,8 +112,7 @@ pub struct LiveScreen {
     selected: usize,
     capture: Option<Capture>,
     status: Option<Status>,
-    shown: Option<Shown>,
-    requested: u64,
+    preview: Preview,
     error: Option<String>,
     /// the address, name, user and password of the source on the
     /// network; the port and the key of the app sending
@@ -194,8 +187,7 @@ impl LiveScreen {
             selected: 0,
             capture: None,
             status: None,
-            shown: None,
-            requested: 0,
+            preview: Preview::default(),
             error: None,
             form: Form::new("", vec![]),
             network_row: 0,
@@ -366,9 +358,8 @@ impl LiveScreen {
         };
         self.form.error = None;
         self.capture = None;
-        self.shown = None;
+        self.preview.clear();
         self.status = None;
-        self.requested = 0;
         match &source {
             Source::Network(network) => self.remember_network(network),
             Source::Receiver(receiver) => {
@@ -507,8 +498,7 @@ impl LiveScreen {
         if !same {
             // the camera before let go first: some can't be opened twice
             self.capture = None;
-            self.shown = None;
-            self.requested = 0;
+            self.preview.clear();
             self.config.camera = Some(camera.name.clone());
             self.save_config();
             self.capture = Some(Capture::open(Source::Camera(camera)));
@@ -518,20 +508,15 @@ impl LiveScreen {
     fn tick(&mut self) -> Outcome {
         self.status = self.capture.as_ref().and_then(Capture::status);
         self.free = disk::free(&self.config.folder(&self.dir));
-        match self.status.as_ref().and_then(|s| s.frame.clone()) {
-            Some(frame) if frame.serial > self.requested => {
-                self.requested = frame.serial;
-                let handle =
-                    image::Handle::from_rgba(frame.width, frame.height, frame.rgba.clone());
-                Outcome::Allocate(frame, handle)
-            }
-            _ => Outcome::Stay,
+        match self.preview.wanted(self.status.as_ref()) {
+            Some((frame, handle)) => Outcome::Allocate(frame, handle),
+            None => Outcome::Stay,
         }
     }
 
     fn back(&mut self) -> Outcome {
         self.capture = None;
-        self.shown = None;
+        self.preview.clear();
         self.status = None;
         match (self.step, self.config.networks.is_empty()) {
             (Step::Network, false) => {
@@ -622,17 +607,7 @@ impl LiveScreen {
             Message::Saved(i) => self.open_network(i, s),
             Message::Forget(i) => self.forget_network(i),
             Message::Allocated(frame, handle, allocation) => {
-                let newer = self
-                    .shown
-                    .as_ref()
-                    .is_none_or(|shown| shown.frame.serial < frame.serial);
-                if newer {
-                    self.shown = Some(Shown {
-                        frame,
-                        handle,
-                        _allocation: allocation,
-                    });
-                }
+                self.preview.allocated(frame, handle, allocation);
             }
         }
         Outcome::Stay
@@ -839,28 +814,7 @@ impl LiveScreen {
         waiting: &'static str,
         c: Colors,
     ) -> Element<'a, Message> {
-        let preview: Element<'a, Message> = match (&self.shown, notice) {
-            (Some(shown), _) => image(shown.handle.clone())
-                .content_fit(ContentFit::Contain)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            (None, Some(n)) => container(ui::body(n).color(c.danger))
-                .padding(24)
-                .center(Length::Fill)
-                .into(),
-            (None, None) => container(ui::body(waiting).color(c.muted))
-                .center(Length::Fill)
-                .into(),
-        };
-        container(preview)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(iced::Color::BLACK.into()),
-                ..container::Style::default()
-            })
-            .into()
+        self.preview.view(notice, waiting, c)
     }
 
     /// What's wrong with the source on the network, if anything.
@@ -883,7 +837,7 @@ impl LiveScreen {
         self.status
             .as_ref()
             .and_then(|st| st.size)
-            .filter(|_| self.shown.is_some())
+            .filter(|_| self.preview.is_shown())
             .map(|(w, h)| format!("H.264 · {w}×{h} · {}", s.as_it_comes))
             .unwrap_or_default()
     }

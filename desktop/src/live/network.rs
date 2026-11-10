@@ -7,7 +7,7 @@
 
 use {
     super::{
-        capture::{Command, Status, Take, finish, set},
+        capture::{Command, Pace, Status, Take, finish, set},
         picture::{self, I420},
     },
     crate::video::Picture as Frame,
@@ -278,7 +278,7 @@ impl Feed {
         at_ms: u64,
         shown_after_ms: i32,
         take: &mut Option<Take>,
-        preview: bool,
+        preview: &mut Pace,
         status: &Mutex<Status>,
     ) {
         self.count(annex_b.len(), status);
@@ -298,8 +298,10 @@ impl Feed {
             finish(take.take(), status);
         }
         // decoded only for the preview: not shown, not decoded, from the
-        // next picture that starts anew when shown again
-        let shown = match (preview, starts, self.decoding) {
+        // next picture that starts anew when shown again; each frame
+        // decoded (the next ones need it), a picture made only as often
+        // as it's looked at
+        let shown = match (preview.is_on(), starts, self.decoding) {
             (false, _, _) => {
                 self.decoding = false;
                 None
@@ -308,7 +310,10 @@ impl Feed {
             (true, _, _) => {
                 self.decoding = true;
                 let decoded = self.decoder.decode(annex_b).ok().flatten();
-                decoded.as_ref().and_then(shown_of)
+                decoded
+                    .as_ref()
+                    .filter(|_| preview.due(Instant::now()))
+                    .and_then(shown_of)
             }
         };
         let recording = take.as_ref().map(Take::recording);
@@ -365,7 +370,7 @@ pub(super) enum Asked {
 pub(super) fn look(
     commands: &Receiver<Command>,
     take: &mut Option<Take>,
-    preview: &mut bool,
+    preview: &mut Pace,
     status: &Mutex<Status>,
 ) -> Asked {
     loop {
@@ -378,7 +383,7 @@ pub(super) fn look(
                 }
             }
             Ok(Command::Stop) => finish(take.take(), status),
-            Ok(Command::Preview(on)) => *preview = on,
+            Ok(Command::Preview(every)) => *preview = Pace::new(every),
             Ok(Command::Quit) | Err(TryRecvError::Disconnected) => {
                 finish(take.take(), status);
                 return Asked::Quit;
@@ -407,7 +412,7 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
     };
     runtime.block_on(async {
         let mut take: Option<Take> = None;
-        let mut preview = true;
+        let mut preview = Pace::each_frame();
         let mut feed = match Feed::new() {
             Ok(f) => f,
             Err(problem) => return set(status, |s| s.problem = Some(problem)),
@@ -453,7 +458,7 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
 pub(super) struct Io<'a> {
     commands: &'a Receiver<Command>,
     pub(super) take: &'a mut Option<Take>,
-    pub(super) preview: &'a mut bool,
+    pub(super) preview: &'a mut Pace,
     pub(super) status: &'a Mutex<Status>,
     pub(super) feed: &'a mut Feed,
 }
@@ -474,7 +479,7 @@ impl Io<'_> {
             at_ms,
             shown_after_ms,
             self.take,
-            *self.preview,
+            self.preview,
             self.status,
         );
     }
@@ -646,11 +651,50 @@ mod tests {
         let status = Mutex::new(Status::default());
         let mut feed = Feed::new().unwrap();
         let serial = |status: &Mutex<Status>| status.lock().unwrap().frame.as_ref().unwrap().serial;
-        feed.frame(&keyframe, true, 0, 0, &mut None, true, &status);
+        feed.frame(
+            &keyframe,
+            true,
+            0,
+            0,
+            &mut None,
+            &mut Pace::each_frame(),
+            &status,
+        );
         let before = serial(&status);
         feed.connected(&status);
-        feed.frame(&keyframe, true, 0, 0, &mut None, true, &status);
+        feed.frame(
+            &keyframe,
+            true,
+            0,
+            0,
+            &mut None,
+            &mut Pace::each_frame(),
+            &status,
+        );
         assert!(serial(&status) > before);
+    }
+
+    /// For the window of the recording: each frame decoded, a picture
+    /// only as often as asked; the next one once the time's past.
+    #[test]
+    fn the_preview_at_its_pace() {
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        let frames = encoded(14);
+        let (slow, after) = frames.split_at(10);
+        let mut pace = Pace::new(Some(Duration::from_secs(3600)));
+        for (i, f) in slow.iter().enumerate() {
+            feed.frame(f, i == 0, 0, 0, &mut None, &mut pace, &status);
+        }
+        let serial =
+            |status: &Mutex<Status>| status.lock().unwrap().frame.as_ref().map(|f| f.serial);
+        assert_eq!(serial(&status), Some(1));
+        // each frame a picture again, decoded on from the frames before
+        let mut each = Pace::each_frame();
+        for f in after {
+            feed.frame(f, false, 0, 0, &mut None, &mut each, &status);
+        }
+        assert_eq!(serial(&status), Some(5));
     }
 
     /// Frames of an encoder, the first a keyframe with its parameters.
@@ -683,7 +727,7 @@ mod tests {
             Some(Take::start_on(base.clone(), chrono::Local::now(), |_| Some(0)).unwrap());
         for (i, f) in frames.iter().enumerate() {
             let at = u64::try_from(i).unwrap() * 33;
-            feed.frame(f, i == 0, at, 0, &mut take, false, &status);
+            feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
         }
         assert!(take.is_none());
         let done = std::mem::take(&mut status.lock().unwrap().done);
@@ -702,7 +746,7 @@ mod tests {
         let mut take = Some(Take::start_on(base, chrono::Local::now(), room).unwrap());
         for (i, f) in frames.iter().enumerate() {
             let at = u64::try_from(i).unwrap() * 33;
-            feed.frame(f, i == 0, at, 0, &mut take, false, &status);
+            feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
         }
         assert!(take.is_some_and(|t| !t.out_of_space));
     }

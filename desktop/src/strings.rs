@@ -448,6 +448,10 @@ pub struct Strings {
     pub new_source: &'static str,
     pub source_name_hint: &'static str,
     pub receiver_also: &'static str,
+    pub preview: &'static str,
+    pub preview_tip: &'static str,
+    pub recording_preview: &'static str,
+    pub preview_waiting: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -902,6 +906,10 @@ What did you expect instead?
     new_source: "New source",
     source_name_hint: "To find it in the list; empty, its address",
     receiver_also: "From the other networks of this computer (Ethernet, Wi-Fi)",
+    preview: "Preview",
+    preview_tip: "The recording in a window of its own",
+    recording_preview: "Recording preview",
+    preview_waiting: "Waiting for the pictures…",
 };
 
 const IT: Strings = Strings {
@@ -1356,6 +1364,10 @@ Cosa ti aspettavi invece?
     new_source: "Nuova sorgente",
     source_name_hint: "Per ritrovarla nell'elenco; vuoto, il suo indirizzo",
     receiver_also: "Dalle altre reti di questo computer (Ethernet, Wi-Fi)",
+    preview: "Anteprima",
+    preview_tip: "La registrazione in una finestra a parte",
+    recording_preview: "Anteprima della registrazione",
+    preview_waiting: "In attesa delle immagini…",
 };
 
 const PT: Strings = Strings {
@@ -1810,6 +1822,10 @@ O que você esperava?
     new_source: "Nova fonte",
     source_name_hint: "Para encontrá-la na lista; vazio, o seu endereço",
     receiver_also: "Das outras redes deste computador (Ethernet, Wi-Fi)",
+    preview: "Pré-visualização",
+    preview_tip: "A gravação numa janela à parte",
+    recording_preview: "Pré-visualização da gravação",
+    preview_waiting: "Aguardando as imagens…",
 };
 
 const PL: Strings = Strings {
@@ -2264,6 +2280,10 @@ Czego się spodziewałeś(-aś)?
     new_source: "Nowe źródło",
     source_name_hint: "Aby znaleźć je na liście; puste: jego adres",
     receiver_also: "Z innych sieci tego komputera (Ethernet, Wi-Fi)",
+    preview: "Podgląd",
+    preview_tip: "Nagranie w osobnym oknie",
+    recording_preview: "Podgląd nagrania",
+    preview_waiting: "Oczekiwanie na obraz…",
 };
 
 const JA: Strings = Strings {
@@ -2707,6 +2727,10 @@ const JA: Strings = Strings {
     new_source: "新しいソース",
     source_name_hint: "一覧で見分けるための名前(空欄ならアドレス)",
     receiver_also: "このコンピューターの他のネットワークから(Ethernet、Wi-Fi)",
+    preview: "プレビュー",
+    preview_tip: "録画を別ウィンドウで表示",
+    recording_preview: "録画のプレビュー",
+    preview_waiting: "映像を待っています…",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {

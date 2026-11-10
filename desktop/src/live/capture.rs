@@ -31,7 +31,7 @@ use {
             Arc, Mutex,
             mpsc::{self, Receiver, Sender, TryRecvError},
         },
-        time::Instant,
+        time::{Duration, Instant},
     },
 };
 
@@ -171,9 +171,9 @@ pub(super) enum Command {
         quality: Quality,
     },
     Stop,
-    /// the preview made (`true`) or not: not while the screen doesn't
-    /// show it, for the recording to keep up
-    Preview(bool),
+    /// the preview made at most this often (zero, each frame), or not
+    /// (`None`): not while nothing shows it, for the recording to keep up
+    Preview(Option<Duration>),
     Quit,
 }
 
@@ -233,9 +233,55 @@ impl Capture {
         let _ = self.commands.send(Command::Stop);
     }
 
-    /// The preview made or not: off once the app keeps the recording.
+    /// The preview of each frame made or not: off once the app keeps the
+    /// recording.
     pub fn preview(&self, on: bool) {
-        let _ = self.commands.send(Command::Preview(on));
+        let _ = self
+            .commands
+            .send(Command::Preview(on.then_some(Duration::ZERO)));
+    }
+
+    /// The preview made at most every `gap`: for a window looking now and
+    /// then, the frames between not made pictures.
+    pub fn preview_every(&self, gap: Duration) {
+        let _ = self.commands.send(Command::Preview(Some(gap)));
+    }
+}
+
+/// How often a picture of the preview is made: never, each frame, or at
+/// most every so often.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Pace {
+    every: Option<Duration>,
+    last: Option<Instant>,
+}
+
+impl Pace {
+    pub(super) fn new(every: Option<Duration>) -> Pace {
+        Pace { every, last: None }
+    }
+
+    /// Each frame: as a source opens, its screen shows it.
+    pub(super) fn each_frame() -> Pace {
+        Pace::new(Some(Duration::ZERO))
+    }
+
+    pub(super) fn is_on(&self) -> bool {
+        self.every.is_some()
+    }
+
+    /// Whether a picture is made `now`: on, and long enough since the
+    /// last one.
+    pub(super) fn due(&mut self, now: Instant) -> bool {
+        let due = match (self.every, self.last) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(every), Some(last)) => now.saturating_duration_since(last) >= every,
+        };
+        if due {
+            self.last = Some(now);
+        }
+        due
     }
 }
 
@@ -458,7 +504,7 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
     };
     let mut recorder: Option<Recorder> = None;
     let mut serial = 0u64;
-    let mut preview = true;
+    let mut pace = Pace::each_frame();
     loop {
         match commands.try_recv() {
             Ok(Command::Record {
@@ -473,7 +519,7 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
                 }
             }
             Ok(Command::Stop) => finish(recorder.take().map(|r| r.take), status),
-            Ok(Command::Preview(on)) => preview = on,
+            Ok(Command::Preview(every)) => pace = Pace::new(every),
             Ok(Command::Quit) | Err(TryRecvError::Disconnected) => {
                 finish(recorder.take().map(|r| r.take), status);
                 let _ = camera.stop_stream();
@@ -492,7 +538,7 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
         let Some(picture) = to_i420(&buffer) else {
             continue;
         };
-        let frame = preview.then(|| {
+        let frame = pace.due(Instant::now()).then(|| {
             serial += 1;
             let (w, h, rgba) = picture::preview(&picture, PREVIEW_WIDTH);
             Arc::new(Frame {
@@ -529,4 +575,29 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
 /// name their files, the start read back from it.
 pub fn base_name(folder: &Path, at: DateTime<Local>) -> PathBuf {
     folder.join(at.format("%Y%m%d %H%M%S").to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Off, never; each frame, each; every 100 ms, one in the 100 ms and
+    /// the next once they're past.
+    #[test]
+    fn the_pace_of_the_preview() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut off = Pace::new(None);
+        assert!(!off.is_on());
+        assert!(!off.due(at(0)));
+        let mut each = Pace::each_frame();
+        assert!(each.is_on());
+        assert!(each.due(at(0)) && each.due(at(0)) && each.due(at(33)));
+        let mut window = Pace::new(Some(Duration::from_millis(100)));
+        let made: Vec<u64> = (0..10)
+            .map(|i| i * 33)
+            .filter(|ms| window.due(at(*ms)))
+            .collect();
+        assert_eq!(made, vec![0, 132, 264]);
+    }
 }

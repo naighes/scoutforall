@@ -6,6 +6,7 @@
 pub mod capture;
 pub mod network;
 pub mod picture;
+pub mod preview;
 pub mod raw;
 pub mod rtmp;
 pub mod screen;
