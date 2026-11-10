@@ -412,7 +412,7 @@ private fun Controls(model: VideoModel, onTouch: () -> Unit = {}) = Column(Modif
             model.step(false)
             onTouch()
         }) {
-            Icon(painterResource(R.drawable.ic_back_seconds), contentDescription = stringResource(R.string.video_back_s, STEP_SECONDS))
+            Icon(painterResource(R.drawable.ic_back_seconds), contentDescription = stringResource(R.string.video_back_s, model.seconds.stepS.toInt()))
         }
         IconButton(onClick = {
             model.playPause()
@@ -427,7 +427,7 @@ private fun Controls(model: VideoModel, onTouch: () -> Unit = {}) = Column(Modif
             model.step(true)
             onTouch()
         }) {
-            Icon(painterResource(R.drawable.ic_forward_seconds), contentDescription = stringResource(R.string.video_forward_s, STEP_SECONDS))
+            Icon(painterResource(R.drawable.ic_forward_seconds), contentDescription = stringResource(R.string.video_forward_s, model.seconds.stepS.toInt()))
         }
         Text(
             "${videoClock(model.position.toULong())} / ${videoClock(model.total.toULong())}",

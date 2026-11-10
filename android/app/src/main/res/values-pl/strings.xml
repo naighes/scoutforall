@@ -211,6 +211,10 @@
     <string name="accept_terms">Dalej</string>
     <string name="send_statistics">Wysyłaj statystyki meczów</string>
     <string name="send_statistics_detail">Bez nazwisk: drużyny i zawodnicy to losowe identyfikatory</string>
+    <string name="video_step">Skok wideo</string>
+    <string name="video_step_detail">O ile przyciski cofają i przewijają wideo do przodu</string>
+    <string name="video_lead">Wyprzedzenie wideo</string>
+    <string name="video_lead_detail">Ile przed zdarzeniem zaczyna się wideo, poza trybem klipu</string>
     <string name="about">O aplikacji</string>
     <string name="version">Wersja</string>
     <string name="license">Licencja</string>

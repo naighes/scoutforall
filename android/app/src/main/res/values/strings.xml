@@ -210,6 +210,10 @@
     <string name="accept_terms">Continue</string>
     <string name="send_statistics">Send match statistics</string>
     <string name="send_statistics_detail">No names: teams and players are random identifiers</string>
+    <string name="video_step">Video jump</string>
+    <string name="video_step_detail">How far the buttons move the video back and forward</string>
+    <string name="video_lead">Video lead</string>
+    <string name="video_lead_detail">How long before an event the video starts, out of clip mode</string>
     <string name="about">About</string>
     <string name="version">Version</string>
     <string name="license">License</string>

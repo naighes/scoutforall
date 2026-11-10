@@ -208,6 +208,10 @@
     <string name="accept_terms">続ける</string>
     <string name="send_statistics">試合の統計を送信</string>
     <string name="send_statistics_detail">名前は含まれません。チームと選手はランダムな識別子です</string>
+    <string name="video_step">ビデオのスキップ</string>
+    <string name="video_step_detail">ボタンでビデオを戻す・進める秒数</string>
+    <string name="video_lead">ビデオの先行時間</string>
+    <string name="video_lead_detail">クリップモード以外で、イベントの何秒前からビデオを再生するか</string>
     <string name="about">アプリについて</string>
     <string name="version">バージョン</string>
     <string name="license">ライセンス</string>

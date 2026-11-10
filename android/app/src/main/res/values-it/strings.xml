@@ -209,6 +209,10 @@
     <string name="accept_terms">Continua</string>
     <string name="send_statistics">Invia le statistiche delle partite</string>
     <string name="send_statistics_detail">Senza nomi: squadre e atleti sono identificativi casuali</string>
+    <string name="video_step">Salto del video</string>
+    <string name="video_step_detail">Di quanto i pulsanti portano il video indietro e avanti</string>
+    <string name="video_lead">Anticipo del video</string>
+    <string name="video_lead_detail">Quanto prima di un evento parte il video, fuori dalla modalità clip</string>
     <string name="about">Informazioni</string>
     <string name="version">Versione</string>
     <string name="license">Licenza</string>

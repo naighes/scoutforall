@@ -14,6 +14,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.naighes.scout4all.core.ClipMargins
+import io.github.naighes.scout4all.core.VideoSeconds
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.NewVideoFile
@@ -53,13 +54,6 @@ sealed interface VideoRequest {
 object ClipRequests {
     var current: VideoRequest.Clips? = null
 }
-
-/** How far the buttons go back and forward. */
-const val STEP_SECONDS = 5
-
-/** How long before an event the video goes to it, out of clip mode: the
- * serve is seen coming. */
-private const val LEAD_MS = 2000L
 
 /** How far a touch shifts the sync. */
 const val SHIFT_MS = 500L
@@ -112,6 +106,11 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         private set
     var margins by mutableStateOf(ClipMargins(5u, 5u, true))
         private set
+    /** how far the buttons go back and forward, how long before an event
+     * the video goes to it out of clip mode (the serve seen coming): from
+     * the settings */
+    var seconds by mutableStateOf(VideoSeconds(5u, 2u))
+        private set
     /** with the actions of a team, the match shown */
     var at by mutableIntStateOf(0)
         private set
@@ -143,6 +142,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         })
         viewModelScope.launch {
             margins = app.core { it.clipMargins() }
+            seconds = app.core { it.videoSeconds() }
             open(0)
         }
         viewModelScope.launch {
@@ -270,8 +270,9 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
     private fun nextMatch(): Int? = clips?.takeIf { sequence }?.let { c -> (at + 1).takeIf { it < c.matches.size } }
 
     /** How long before an event the video goes to it: in clip mode, the
-     * seconds chosen. */
-    fun lead(): Long = if (clip || clips != null) margins.beforeS.toLong() * 1000 else LEAD_MS
+     * margin chosen before the action; out of it, the lead of the
+     * settings. */
+    fun lead(): Long = (if (clip || clips != null) margins.beforeS else seconds.leadS).toLong() * 1000
 
     fun target(i: Int): Long? = review?.target(i.toUInt(), lead())?.toLong()
 
@@ -296,7 +297,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         position = to
     }
 
-    fun step(forward: Boolean) = seek(position + (if (forward) 1 else -1) * STEP_SECONDS * 1000L)
+    fun step(forward: Boolean) = seek(position + (if (forward) 1 else -1) * seconds.stepS.toLong() * 1000)
 
     fun playPause() {
         follow = true

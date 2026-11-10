@@ -1,6 +1,7 @@
 //! The settings every app shares: the terms of use seen, the choice about
-//! the statistics, the country of a new team, the pinned teams. Each app keeps them in its
-//! `config.json`, along with its own settings.
+//! the statistics, the country of a new team, the pinned teams, the seconds
+//! of the video. Each app keeps them in its `config.json`, along with its
+//! own settings.
 
 use crate::shapes::{
     country::{self, CountryCode},
@@ -8,7 +9,7 @@ use crate::shapes::{
     team::TeamEntry,
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, ops::RangeInclusive};
 use uuid::Uuid;
 
 /// The version of the terms of use (license and data collection): raise it
@@ -123,5 +124,108 @@ impl PinnedTeams {
             Err(unreadable) => (true, unreadable.id.to_lowercase()),
         });
         teams
+    }
+}
+
+/// How far the video jumps back and forward (← →, the buttons), in
+/// seconds: at least one, to move at all.
+pub const STEP_SECONDS: RangeInclusive<u32> = 1..=30;
+
+/// How long before an event the video goes to it, out of clip mode (the
+/// serve seen coming), in seconds: in clip mode the margin before the
+/// action takes its place.
+pub const LEAD_SECONDS: RangeInclusive<u32> = 0..=10;
+
+/// The seconds of the video of a match, the same for every match: each in
+/// its bounds, the default when missing or unreadable (a `config.json` from
+/// before them, or written by hand), so the other settings are kept; left
+/// out when the default.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct VideoSeconds {
+    #[serde(
+        default = "default_step_s",
+        deserialize_with = "lenient_step",
+        skip_serializing_if = "is_default_step"
+    )]
+    pub step_s: u32,
+    #[serde(
+        default = "default_lead_s",
+        deserialize_with = "lenient_lead",
+        skip_serializing_if = "is_default_lead"
+    )]
+    pub lead_s: u32,
+}
+
+fn default_step_s() -> u32 {
+    5
+}
+
+fn default_lead_s() -> u32 {
+    2
+}
+
+fn is_default_step(seconds: &u32) -> bool {
+    *seconds == default_step_s()
+}
+
+fn is_default_lead(seconds: &u32) -> bool {
+    *seconds == default_lead_s()
+}
+
+impl Default for VideoSeconds {
+    fn default() -> Self {
+        Self {
+            step_s: default_step_s(),
+            lead_s: default_lead_s(),
+        }
+    }
+}
+
+/// A number of seconds as read: in `bounds`, `default` when not a number.
+fn lenient_seconds<'de, D: Deserializer<'de>>(
+    deserializer: D,
+    bounds: RangeInclusive<u32>,
+    default: u32,
+) -> Result<u32, D::Error> {
+    Ok(Option::<serde_json::Value>::deserialize(deserializer)?
+        .as_ref()
+        .and_then(serde_json::Value::as_u64)
+        .map_or(default, |s| {
+            u32::try_from(s)
+                .unwrap_or(u32::MAX)
+                .clamp(*bounds.start(), *bounds.end())
+        }))
+}
+
+fn lenient_step<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    lenient_seconds(deserializer, STEP_SECONDS, default_step_s())
+}
+
+fn lenient_lead<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    lenient_seconds(deserializer, LEAD_SECONDS, default_lead_s())
+}
+
+impl VideoSeconds {
+    /// In their bounds: the ones an app saves, whatever it was given.
+    pub fn bounded(self) -> Self {
+        Self {
+            step_s: self
+                .step_s
+                .clamp(*STEP_SECONDS.start(), *STEP_SECONDS.end()),
+            lead_s: self
+                .lead_s
+                .clamp(*LEAD_SECONDS.start(), *LEAD_SECONDS.end()),
+        }
+    }
+
+    /// How far the video jumps, in milliseconds.
+    pub fn step_ms(&self) -> u64 {
+        u64::from(self.step_s) * 1000
+    }
+
+    /// How long before an event the video goes to it, out of clip mode, in
+    /// milliseconds.
+    pub fn lead_ms(&self) -> i64 {
+        i64::from(self.lead_s) * 1000
     }
 }

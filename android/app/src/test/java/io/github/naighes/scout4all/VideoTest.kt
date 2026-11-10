@@ -6,15 +6,18 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.NewVideoFile
 import io.github.naighes.scout4all.core.StatsScope
+import io.github.naighes.scout4all.core.VideoSeconds
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -66,6 +69,32 @@ class VideoTest {
         rule.waitForText("17:55:00")
         rule.onNode(hasText(string(R.string.video_sync)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.video_aligned_file, "17:55:00"))
+    }
+
+    /** The seconds of the settings: the buttons jump by them (and say
+     * so), the video goes that long before an event out of clip mode; in
+     * clip mode, the margin before the action. */
+    @Test
+    fun theSecondsOfTheSettings() {
+        val (team, match) = servedMatch()
+        linkVideo(team, match)
+        core { it.setVideoSeconds(VideoSeconds(12u, 0u)) }
+        var model: VideoModel? = null
+        rule.setContent {
+            Scout4AllTheme {
+                VideoScreen(VideoRequest.Match(team, match), onBack = {})
+                // the one of the screen, already made
+                model = viewModel<VideoModel>()
+            }
+        }
+        rule.waitForText(string(R.string.video_missing, "20261025 175500.mp4"))
+        rule.onNodeWithContentDescription(string(R.string.video_back_s, 12)).assertExists()
+        rule.onNodeWithContentDescription(string(R.string.video_forward_s, 12)).assertExists()
+        val shown = model!!
+        assertEquals(0L, shown.lead())
+        rule.runOnUiThread { shown.toggleClip() }
+        assertEquals(shown.margins.beforeS.toLong() * 1000, shown.lead())
+        assertEquals(5_000L, shown.lead())
     }
 
     /** The detail of the serve: all of them, then the aces touching their

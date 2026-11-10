@@ -34,6 +34,7 @@ use {
     margins::{Margin, Margins},
     player::{Player, Status},
     scout4all_core::{
+        settings::VideoSeconds,
         shapes::{enums::PhaseEnum, r#match::MatchEntry},
         video::{
             self, Anchor, AnchorSource, EventRef, StoredProfile, TimeEffect, VideoFile,
@@ -54,13 +55,6 @@ use {
         time::{Duration, Instant},
     },
 };
-
-/// How far ← and → go.
-const STEP_SECONDS: u64 = 5;
-
-/// How long before an event the video goes to it: the serve is seen
-/// coming.
-const LEAD_MS: i64 = 2000;
 
 /// The fields of the seconds of a clip before and after its action.
 const BEFORE_FIELD: &str = "video-clip-before";
@@ -218,6 +212,9 @@ pub struct VideoScreen {
     tour: Option<Tour>,
     /// the seconds of a clip before and after its action, as chosen
     margins: Margins,
+    /// how far ← and → go, and how long before an event the video goes to
+    /// it out of clip mode (the serve seen coming): from the settings
+    seconds: VideoSeconds,
     /// the seconds of one of them being written
     margin_text: Option<(Margin, String)>,
     /// where the first event of the match is in the video, when lined up:
@@ -259,6 +256,7 @@ impl VideoScreen {
             StoredProfile::Profile(p) => Some(p),
             StoredProfile::Newer(_) => None,
         };
+        let seconds = core.video_seconds();
         let mut screen = VideoScreen {
             core,
             dir,
@@ -287,6 +285,7 @@ impl VideoScreen {
             sequence: true,
             tour: None,
             margins: Margins::default(),
+            seconds,
             margin_text: None,
             first_ms: None,
             whole: false,
@@ -581,7 +580,7 @@ impl VideoScreen {
     fn lead_ms(&self) -> i64 {
         match self.clip || self.clips.is_some() {
             true => i64::from(self.margins.before_s) * 1000,
-            false => LEAD_MS,
+            false => self.seconds.lead_ms(),
         }
     }
 
@@ -992,7 +991,7 @@ impl VideoScreen {
     }
 
     fn step(&mut self, forward: bool) {
-        let step = STEP_SECONDS * 1000;
+        let step = self.seconds.step_ms();
         let to = match forward {
             true => self.position() + step,
             false => self.position().saturating_sub(step),
@@ -1253,7 +1252,7 @@ impl VideoScreen {
         let playing = match self.player {
             Some(_) => vec![
                 hint(s.space, format!("{} / {}", s.play, s.pause)),
-                hint("← →", format!("±{STEP_SECONDS} s")),
+                hint("← →", format!("±{} s", self.seconds.step_s)),
             ],
             None => vec![hint("c", s.choose_video.to_string())],
         };
@@ -1673,7 +1672,7 @@ impl VideoScreen {
             true => (theme::icons::PAUSE, s.pause),
             false => (theme::icons::PLAY, s.play),
         };
-        let step = STEP_SECONDS.to_string();
+        let step = self.seconds.step_s.to_string();
         let duration = status.duration_ms as f64;
         let bar = slider(
             0.0..=duration.max(1.0),
@@ -2133,6 +2132,9 @@ pub(crate) mod screen_tests {
         scout4all_core::video::{offset_ms, start_from_name},
         scout4all_mobile::{DvwChoice, DvwSide},
     };
+
+    /// How long before an event the video goes to it, by default.
+    const LEAD_MS: i64 = 2000;
 
     /// The match of the tests of the TUI, three sets, imported: the file
     /// has no video column, the events are on the clock.
@@ -2836,6 +2838,42 @@ pub(crate) mod screen_tests {
         screen.key(key!(pagedown));
         assert_eq!(screen.match_id, siena);
         assert!(!screen.sequence, "the mode kept");
+    }
+
+    /// The seconds chosen in the settings: ← → (and the hints, the
+    /// buttons) jump by them; out of clip mode the video goes that long
+    /// before an event, in clip mode the margin before still counts.
+    #[test]
+    fn the_seconds_chosen_in_the_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+            .unwrap()
+            .set_video_seconds(VideoSeconds {
+                step_s: 12,
+                lead_s: 0,
+            })
+            .unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        screen.status = Some(Status {
+            frame: None,
+            position_ms: 0,
+            duration_ms: u64::MAX / 2,
+            playing: false,
+            speed: 1.0,
+            error: None,
+        });
+        let i = 3;
+        let at = screen.events[i].offset_ms.unwrap();
+        assert_eq!(screen.event_target(i), Some(at.unsigned_abs()));
+        screen.update(Message::WholeVideo);
+        screen.seek(30_000);
+        screen.key(key!(right));
+        assert_eq!(screen.position(), 42_000);
+        screen.key(key!(left));
+        screen.key(key!(left));
+        assert_eq!(screen.position(), 18_000);
+        screen.key(key!(k));
+        assert_eq!(screen.event_target(i), Some((at - 5000).unsigned_abs()));
     }
 
     /// Once lined up, the video before the first event (the warm-up) is
