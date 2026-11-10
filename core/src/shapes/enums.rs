@@ -24,7 +24,7 @@ pub trait FriendlyName {
 ///   The team is *serving*. The main objective is to put pressure
 ///   on the opponent with the serve and subsequent defense in order
 ///   to win consecutive points ("break points").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PhaseEnum {
     Break,
     SideOut,

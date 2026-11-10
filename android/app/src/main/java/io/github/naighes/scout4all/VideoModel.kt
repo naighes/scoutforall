@@ -20,6 +20,9 @@ import io.github.naighes.scout4all.core.VideoSeconds
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.NewVideoFile
+import io.github.naighes.scout4all.core.SavedClips
+import io.github.naighes.scout4all.core.restoreClips
+import io.github.naighes.scout4all.core.saveClips
 import io.github.naighes.scout4all.core.TeamClipMatch
 import io.github.naighes.scout4all.core.VideoAlignment
 import io.github.naighes.scout4all.core.VideoEventRow
@@ -54,10 +57,17 @@ sealed interface VideoRequest {
 }
 
 /** The actions to watch, from the statistics to the video screen: a pick
- * isn't a route. Lost with the process: the screen goes back then. */
-object ClipRequests {
-    var current: VideoRequest.Clips? = null
-}
+ * isn't a route, it goes saved with the screen under this key, so it's
+ * there again after the system closed the app in the background. */
+const val CLIPS_KEY = "clips"
+
+/** The actions to watch as the screen saves them. */
+fun VideoRequest.Clips.saved(): String = saveClips(SavedClips(teamId, pick, title, matches, leftOut))
+
+/** The actions to watch as the screen saved them; none when they can't be
+ * read. */
+fun savedClips(saved: String?): VideoRequest.Clips? =
+    saved?.let(::restoreClips)?.let { VideoRequest.Clips(it.teamId, it.pick, it.title, it.matches, it.leftOut) }
 
 /** How far a touch shifts the sync. */
 const val SHIFT_MS = 500L

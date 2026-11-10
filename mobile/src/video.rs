@@ -161,7 +161,7 @@ pub struct FileSpan {
 
 /// A match of the period with actions picked in the statistics of its
 /// team.
-#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
 pub struct TeamClipMatch {
     pub match_id: String,
     pub opponent: String,
@@ -921,6 +921,35 @@ pub fn spans(durations_ms: &[u64], from_ms: u64, to_ms: u64) -> Vec<FileSpan> {
     found
 }
 
+/// The video of the actions picked in the statistics, as asked: Android
+/// saves it with the screen, to open it again after the system closed the
+/// app in the background.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
+pub struct SavedClips {
+    pub team_id: String,
+    pub pick: ClipPick,
+    /// what they are, over the video
+    pub title: String,
+    /// with a video
+    pub matches: Vec<TeamClipMatch>,
+    /// without a video: left out, said
+    pub left_out: Vec<TeamClipMatch>,
+}
+
+/// The actions picked written to be saved (empty if they can't be: then
+/// nothing is restored).
+#[uniffi::export]
+pub fn save_clips(clips: SavedClips) -> String {
+    serde_json::to_string(&clips).unwrap_or_default()
+}
+
+/// The actions picked as `save_clips` wrote them; none when they can't be
+/// read (written empty, by another version).
+#[uniffi::export]
+pub fn restore_clips(saved: &str) -> Option<SavedClips> {
+    serde_json::from_str(saved).ok()
+}
+
 /// The name of the video of the actions picked, from what they are: the
 /// letters, the digits and the dashes, the rest a space ("scout4all" when
 /// nothing's left).
@@ -1004,6 +1033,62 @@ mod tests {
         country::CountryCode,
         enums::{EventTypeEnum, GenderEnum, TeamClassificationEnum},
     };
+
+    /// The actions picked, saved by Android with the screen, come back as
+    /// they were: every filter, the matches with and without a video;
+    /// something else, none.
+    #[test]
+    fn the_clips_saved_come_back() {
+        use scout4all_core::shapes::{
+            court_zone::{CourtZoneEnum, ServeStartEnum},
+            enums::{EvalEnum, RoleEnum},
+            flags::ReceptionSchemeEnum,
+            technique::SetTypeEnum,
+        };
+        let filter = DetailFilter {
+            phase: Some(PhaseEnum::SideOut),
+            rotation: Some(3),
+            player: Some("p-18".to_string()),
+            role: Some(RoleEnum::OppositeHitter),
+            reception: vec![EvalEnum::Perfect, EvalEnum::Positive],
+            previous: vec![EvalEnum::Exclamative],
+            set_types: vec![SetTypeEnum::Quick],
+            scheme: Some(ReceptionSchemeEnum::Four),
+            inverted_p1: Some(true),
+            late: Some(false),
+            close: Some(true),
+            serve_start: Some(ServeStartEnum::Z6),
+        };
+        let clips = SavedClips {
+            team_id: "t".to_string(),
+            pick: ClipPick {
+                scope: StatsScope::Set { number: 2 },
+                event: EventTypeEnum::A,
+                filter,
+                evals: vec![EvalEnum::Perfect],
+                zone: Some(4),
+                target: Some(CourtZoneEnum::Z43),
+            },
+            title: "Attack · #".to_string(),
+            matches: vec![TeamClipMatch {
+                match_id: "m1".to_string(),
+                opponent: "Brasile".to_string(),
+                day: "2026-11-01".to_string(),
+                actions: 7,
+                has_video: true,
+            }],
+            left_out: vec![TeamClipMatch {
+                match_id: "m2".to_string(),
+                opponent: "Japan".to_string(),
+                day: "2026-11-02".to_string(),
+                actions: 2,
+                has_video: false,
+            }],
+        };
+        assert_eq!(restore_clips(&save_clips(clips.clone())), Some(clips));
+        assert_eq!(restore_clips(""), None);
+        assert_eq!(restore_clips("{\"team_id\": 3}"), None);
+    }
 
     const THREE_SETS: &[u8] = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw");
 

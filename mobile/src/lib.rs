@@ -1239,7 +1239,7 @@ pub struct ScoutingState {
 
 /// The sets the statistics are of: one of the match, or all of them so
 /// far.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
 pub enum StatsScope {
     Set { number: u8 },
     Match,
@@ -1401,7 +1401,8 @@ pub struct RotationStats {
 }
 
 /// What the detail of a fundamental is narrowed to: none keeps them all.
-#[derive(Debug, Clone, Default, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, uniffi::Record)]
+#[serde(default)]
 pub struct DetailFilter {
     pub phase: Option<PhaseEnum>,
     /// 0 to 5, the setter in position 1 to 6
@@ -2708,7 +2709,7 @@ pub struct VideoEvent {
 /// filter of the detail, and, when chosen, some evaluations, the zone of
 /// the net of the attacks (2, 3, 4, 8, 9) and a zone of the court
 /// (`TargetStats::value`).
-#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
 pub struct ClipPick {
     pub scope: StatsScope,
     pub event: EventTypeEnum,
