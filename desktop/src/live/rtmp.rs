@@ -9,24 +9,41 @@ use {
         parameters_annex_b, problem_of,
     },
     rml_rtmp::{
+        chunk_io::{ChunkSerializer, Packet},
         handshake::{Handshake, HandshakeProcessResult, PeerType},
+        messages::RtmpMessage,
+        rml_amf0::Amf0Value,
         sessions::{
             ClientSession, ClientSessionConfig, ClientSessionEvent, ClientSessionResult,
             ServerSession, ServerSessionConfig, ServerSessionEvent, ServerSessionResult,
         },
     },
     std::{
+        collections::HashMap,
         net::{IpAddr, Ipv4Addr, UdpSocket},
+        sync::Arc,
         time::Duration,
     },
     tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
+        io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
         net::{TcpListener, TcpStream},
+    },
+    tokio_rustls::{
+        TlsConnector,
+        rustls::{self, ClientConfig, pki_types::ServerName},
     },
 };
 
 /// The port of RTMP, when not written.
 pub const RTMP_PORT: u16 = 1935;
+
+/// The port of `rtmps://`, when not written.
+pub const RTMPS_PORT: u16 = 443;
+
+/// What RTMP goes over: TCP, or TLS on it (`rtmps://`).
+trait Wire: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Wire for T {}
 
 /// The application the apps send to: `rtmp://computer:port/live/key`.
 pub const APP: &str = "live";
@@ -265,7 +282,7 @@ fn refused(said: &str) -> Problem {
     }
 }
 
-async fn send(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), Problem> {
+async fn send(stream: &mut (impl AsyncWrite + Unpin), bytes: &[u8]) -> Result<(), Problem> {
     stream
         .write_all(bytes)
         .await
@@ -273,7 +290,10 @@ async fn send(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), Problem> {
 }
 
 /// The handshake of RTMP, as the client or the server: what came after it.
-async fn handshake(stream: &mut TcpStream, client: bool) -> Result<Vec<u8>, Problem> {
+async fn handshake(
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    client: bool,
+) -> Result<Vec<u8>, Problem> {
     let mut handshake = Handshake::new(match client {
         true => PeerType::Client,
         false => PeerType::Server,
@@ -319,27 +339,154 @@ pub fn app_and_key(url: &url::Url) -> (String, String) {
     }
 }
 
-/// Read from a server until cut off (`Ok(Nothing)`) or asked to quit.
-pub(super) async fn pull(url: url::Url, io: &mut Io<'_>) -> Result<Asked, Problem> {
-    if url.scheme() == "rtmps" {
-        return Err(Problem::Encrypted);
+/// Whom `rtmps://` trusts: the certificates the system trusts (the
+/// test certificate authority in the tests that set it).
+fn trusted() -> Result<Arc<ClientConfig>, Problem> {
+    #[cfg(test)]
+    if let Some(config) = tests::TRUSTED.get() {
+        return Ok(config.clone());
     }
-    let host = url.host_str().unwrap_or_default().to_string();
-    let port = url.port().unwrap_or(RTMP_PORT);
-    let (app, key) = app_and_key(&url);
-    let mut stream = tokio::time::timeout(ANSWER_WITHIN, TcpStream::connect((host.as_str(), port)))
+    trusted_by_the_system()
+}
+
+fn trusted_by_the_system() -> Result<Arc<ClientConfig>, Problem> {
+    use rustls_platform_verifier::BuilderVerifierExt;
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .and_then(BuilderVerifierExt::with_platform_verifier)
+        .map(|b| Arc::new(b.with_no_client_auth()))
+        .map_err(|e| Problem::Other(e.to_string()))
+}
+
+/// The problem in a TLS connection not made: the certificate, mostly.
+fn tls_problem(error: &std::io::Error) -> Problem {
+    match error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+    {
+        Some(rustls::Error::InvalidCertificate(_)) => Problem::Certificate,
+        _ => problem_of(&error.to_string()),
+    }
+}
+
+/// Connected to `host`: over TLS when `tls` says whom to trust.
+async fn connect(
+    host: &str,
+    port: u16,
+    tls: Option<Arc<ClientConfig>>,
+) -> Result<Box<dyn Wire>, Problem> {
+    let tcp = tokio::time::timeout(ANSWER_WITHIN, TcpStream::connect((host, port)))
         .await
         .map_err(|_| Problem::Silent)?
         .map_err(|e| problem_of(&format!("unable to connect: {e}")))?;
-    let _ = stream.set_nodelay(true);
-    let remaining = handshake(&mut stream, true).await?;
+    let _ = tcp.set_nodelay(true);
+    let Some(config) = tls else {
+        return Ok(Box::new(tcp));
+    };
+    let name = ServerName::try_from(host.to_string()).map_err(|_| Problem::Invalid)?;
+    let encrypted =
+        tokio::time::timeout(ANSWER_WITHIN, TlsConnector::from(config).connect(name, tcp))
+            .await
+            .map_err(|_| Problem::Silent)?
+            .map_err(|e| tls_problem(&e))?;
+    Ok(Box::new(encrypted))
+}
+
+/// The version of Flash said in `connect`, as rml_rtmp says it.
+const FLASH_VERSION: &str = "WIN 23,0,0,207";
+
+/// The codecs said to the server (enhanced RTMP): without them a server
+/// with H.265 (or AV1, VP9) closes without a word; with them it sends it,
+/// and the user is told what the camera sends.
+const FOUR_CCS: [&str; 4] = ["avc1", "hvc1", "av01", "vp09"];
+
+/// What `fourCcList` takes in the object of `connect`: its name, then a
+/// strict array of strings.
+fn four_cc_list_size() -> usize {
+    2 + "fourCcList".len() + 1 + 4 + FOUR_CCS.iter().map(|c| 1 + 2 + c.len()).sum::<usize>()
+}
+
+/// The session, and the `connect` to send: with `fourCcList`, which
+/// rml_rtmp doesn't send. The session asked for one as long (its version
+/// of Flash longer by as much), so the header it remembers holds for
+/// what follows on the same chunk stream; it's taken in its place. If
+/// they come out of different lengths, the session's as it is.
+fn connect_request(
+    tc_url: String,
+    app: &str,
+) -> Result<(ClientSession, Vec<ClientSessionResult>, Vec<u8>), Problem> {
     let other = |e: rml_rtmp::sessions::ClientSessionError| Problem::Other(e.to_string());
     let mut config = ClientSessionConfig::new();
-    config.tc_url = Some(format!("rtmp://{host}:{port}/{app}"));
+    config.flash_version = format!("{FLASH_VERSION}{}", " ".repeat(four_cc_list_size()));
+    config.tc_url = Some(tc_url.clone());
     let (mut session, first) = ClientSession::new(config).map_err(other)?;
+    let theirs = match session.request_connection(app.to_string()).map_err(other)? {
+        ClientSessionResult::OutboundResponse(packet) => packet.bytes,
+        _ => vec![],
+    };
+    let properties = HashMap::from([
+        ("app".to_string(), Amf0Value::Utf8String(app.to_string())),
+        (
+            "flashVer".to_string(),
+            Amf0Value::Utf8String(FLASH_VERSION.into()),
+        ),
+        ("objectEncoding".to_string(), Amf0Value::Number(0.0)),
+        ("tcUrl".to_string(), Amf0Value::Utf8String(tc_url)),
+        (
+            "fourCcList".to_string(),
+            Amf0Value::StrictArray(
+                FOUR_CCS
+                    .iter()
+                    .map(|c| Amf0Value::Utf8String((*c).to_string()))
+                    .collect(),
+            ),
+        ),
+    ]);
+    // the first transaction of the session
+    let ours = RtmpMessage::Amf0Command {
+        command_name: "connect".into(),
+        transaction_id: 1.0,
+        command_object: Amf0Value::Object(properties),
+        additional_arguments: vec![],
+    }
+    .into_message_payload(rml_rtmp::time::RtmpTimestamp::new(0), 0)
+    .ok()
+    .and_then(|payload| {
+        ChunkSerializer::new()
+            .serialize(&payload, false, false)
+            .ok()
+    })
+    .map(|packet| packet.bytes)
+    .filter(|ours| ours.len() == theirs.len());
+    Ok((session, first, ours.unwrap_or(theirs)))
+}
+
+/// Read from a server until cut off (`Ok(Nothing)`) or asked to quit.
+pub(super) async fn pull(url: url::Url, io: &mut Io<'_>) -> Result<Asked, Problem> {
+    let encrypted = url.scheme() == "rtmps";
+    let host = url.host_str().unwrap_or_default().to_string();
+    let port = url.port().unwrap_or(match encrypted {
+        true => RTMPS_PORT,
+        false => RTMP_PORT,
+    });
+    let (app, key) = app_and_key(&url);
+    let tls = match encrypted {
+        true => Some(trusted()?),
+        false => None,
+    };
+    let mut stream = connect(&host, port, tls).await?;
+    let remaining = handshake(&mut stream, true).await?;
+    let other = |e: rml_rtmp::sessions::ClientSessionError| Problem::Other(e.to_string());
+    let tc_url = format!("{}://{host}:{port}/{app}", url.scheme());
+    let (mut session, first, connect) = connect_request(tc_url, &app)?;
+    // in the order the session made them
     let mut results = first;
+    results.push(ClientSessionResult::OutboundResponse(Packet {
+        bytes: connect,
+        can_be_dropped: false,
+    }));
     results.extend(session.handle_input(&remaining).map_err(other)?);
-    results.push(session.request_connection(app).map_err(other)?);
     let mut video = Video::default();
     let mut playing = false;
     let mut silent = Duration::ZERO;
@@ -554,7 +701,125 @@ mod tests {
     use {
         super::*,
         crate::live::capture::{Capture, Source, Status},
+        rml_rtmp::chunk_io::ChunkDeserializer,
+        std::sync::OnceLock,
+        tokio_rustls::{
+            TlsAcceptor,
+            rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+        },
     };
+
+    /// Whom `rtmps://` trusts in the tests that set it, in place of the
+    /// system.
+    pub(super) static TRUSTED: OnceLock<Arc<ClientConfig>> = OnceLock::new();
+
+    /// The test certificate authority (`testdata/rtmps_ca.crt`), which
+    /// signed `rtmps_server.crt` for `localhost` and 127.0.0.1.
+    fn test_authority() -> Arc<ClientConfig> {
+        let mut roots = rustls::RootCertStore::empty();
+        let ca = CertificateDer::from_pem_slice(include_bytes!("testdata/rtmps_ca.crt")).unwrap();
+        roots.add(ca).unwrap();
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        Arc::new(
+            ClientConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_root_certificates(roots)
+                .with_no_client_auth(),
+        )
+    }
+
+    /// A TLS server with the test certificate, saying `hello` to each
+    /// connection: its port.
+    async fn tls_server() -> u16 {
+        let cert =
+            CertificateDer::from_pem_slice(include_bytes!("testdata/rtmps_server.crt")).unwrap();
+        let key =
+            PrivateKeyDer::from_pem_slice(include_bytes!("testdata/rtmps_server.key")).unwrap();
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert], key)
+            .unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    if let Ok(mut tls) = acceptor.accept(tcp).await {
+                        let _ = tls.write_all(b"hello").await;
+                        let _ = tls.shutdown().await;
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    /// `rtmps://`: the bytes read through TLS from a server trusted (by
+    /// its name, by its address); one the system doesn't trust said so.
+    #[test]
+    fn rtmps_over_tls() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let port = tls_server().await;
+            for host in ["localhost", "127.0.0.1"] {
+                let mut wire = connect(host, port, Some(test_authority())).await.unwrap();
+                let mut read = vec![];
+                wire.read_to_end(&mut read).await.unwrap();
+                assert_eq!(read, b"hello", "{host}");
+            }
+            let system = trusted_by_the_system().unwrap();
+            let untrusted = connect("localhost", port, Some(system)).await;
+            assert_eq!(untrusted.err(), Some(Problem::Certificate));
+        });
+    }
+
+    /// `connect` says the codecs (`fourCcList`), as long as the one the
+    /// session made: the rest of what it asked for as it was.
+    #[test]
+    fn the_connect_with_the_codecs() {
+        let (_, first, bytes) = connect_request("rtmp://s:1935/live".into(), "live").unwrap();
+        assert!(first.is_empty());
+        let message = ChunkDeserializer::new()
+            .get_next_message(&bytes)
+            .unwrap()
+            .unwrap()
+            .to_rtmp_message()
+            .unwrap();
+        let RtmpMessage::Amf0Command {
+            command_name,
+            transaction_id,
+            command_object: Amf0Value::Object(properties),
+            ..
+        } = message
+        else {
+            panic!("{message:?}");
+        };
+        assert_eq!((command_name.as_str(), transaction_id), ("connect", 1.0));
+        let text = |name: &str| match properties.get(name) {
+            Some(Amf0Value::Utf8String(s)) => s.clone(),
+            other => panic!("{name}: {other:?}"),
+        };
+        assert_eq!(text("app"), "live");
+        assert_eq!(text("flashVer"), FLASH_VERSION);
+        assert_eq!(text("tcUrl"), "rtmp://s:1935/live");
+        assert_eq!(
+            properties.get("fourCcList"),
+            Some(&Amf0Value::StrictArray(
+                ["avc1", "hvc1", "av01", "vp09"]
+                    .map(|c| Amf0Value::Utf8String(c.into()))
+                    .to_vec()
+            ))
+        );
+    }
 
     /// The way out's address first, the others after, each once: an
     /// app on the Wi-Fi and one on the Ethernet both find this computer.
@@ -610,23 +875,35 @@ mod tests {
     }
 
     /// Read from the test server (mediamtx in Docker, RTMP on 19350,
-    /// `scout`/`segreta` in the query; `S4A_RTMP` for another address).
+    /// RTMPS on 19360 with `testdata/rtmps_server.crt`, `scout`/`segreta`
+    /// in the query; ffmpeg sending H.264 on `/campo` and H.265 on
+    /// `/campo265`; `S4A_RTMP`, `S4A_RTMPS` for other addresses).
     /// `cargo test -p scout4all-desktop -- --ignored rtmp`.
     #[test]
     #[ignore]
     fn rtmp_read_from_the_test_server() {
-        let base = std::env::var("S4A_RTMP").unwrap_or_else(|_| "rtmp://127.0.0.1:19350".into());
-        let source = |path: &str| {
+        let _ = TRUSTED.set(test_authority());
+        let plain = std::env::var("S4A_RTMP").unwrap_or_else(|_| "rtmp://127.0.0.1:19350".into());
+        let encrypted =
+            std::env::var("S4A_RTMPS").unwrap_or_else(|_| "rtmps://localhost:19360".into());
+        let source = |base: &str, path: &str| {
             Capture::open(Source::Network(crate::live::network::NetworkSource {
                 url: format!("{base}/{path}"),
                 ..Default::default()
             }))
         };
-        let closed = source("campo");
-        assert!(wait(&closed, &|s| s.problem == Some(Problem::Closed)));
-        let capture = source("campo?user=scout&pass=segreta");
+        // without the user: refused (mediamtx 1.21 says so)
+        let refused = source(&plain, "campo");
+        assert!(wait(&refused, &|s| s.problem == Some(Problem::Refused)));
+        // H.265, sent once the codecs are said: said to the user
+        let hevc = source(&plain, "campo265?user=scout&pass=segreta");
+        assert!(wait(&hevc, &|s| s.problem == Some(Problem::Hevc)));
+        let capture = source(&plain, "campo?user=scout&pass=segreta");
         assert!(wait(&capture, &|s| s.frame.is_some()));
         assert_eq!(capture.status().unwrap().size, Some((1280, 720)));
+        recorded(&capture);
+        let capture = source(&encrypted, "campo?user=scout&pass=segreta");
+        assert!(wait(&capture, &|s| s.frame.is_some()));
         recorded(&capture);
     }
 

@@ -77,8 +77,9 @@ pub enum Problem {
     NoVideo(String),
     /// closed by the server before the video: the key, the user
     Closed,
-    /// `rtmps://`: not read yet
-    Encrypted,
+    /// `rtmps://`: the server's certificate not trusted (expired, for
+    /// another name, signed by an authority the system doesn't know)
+    Certificate,
     /// the port to receive on taken by another program
     PortTaken(u16),
     /// an app sent with another key: from where

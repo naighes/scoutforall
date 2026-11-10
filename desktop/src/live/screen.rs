@@ -148,7 +148,7 @@ pub fn problem_text(problem: &Problem, s: &Strings) -> String {
         Problem::Hevc => s.problem_hevc.to_string(),
         Problem::NoVideo(what) => ui::fill(s.problem_no_video, std::slice::from_ref(what)),
         Problem::Closed => s.problem_closed.to_string(),
-        Problem::Encrypted => s.problem_encrypted.to_string(),
+        Problem::Certificate => s.problem_certificate.to_string(),
         Problem::PortTaken(port) => ui::fill(s.problem_port_taken, &[port.to_string()]),
         Problem::WrongKey(from) => ui::fill(s.problem_wrong_key, std::slice::from_ref(from)),
         Problem::Other(e) => e.clone(),
