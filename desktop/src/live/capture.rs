@@ -7,6 +7,7 @@ use {
     super::{
         picture::{self, I420},
         raw::{self, RawWriter},
+        space,
     },
     crate::video::Picture as Frame,
     bytes::Bytes,
@@ -132,6 +133,8 @@ pub struct Done {
     pub base: PathBuf,
     pub started: DateTime<Local>,
     pub result: Result<raw::Remuxed, String>,
+    /// stopped as the disk was almost full
+    pub out_of_space: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -148,6 +151,8 @@ pub struct Status {
     pub problem: Option<super::network::Problem>,
     /// where the app sending the video is (RTMP received), while it sends
     pub sender: Option<String>,
+    /// as it comes from a source on the network, once counted
+    pub bits_per_second: Option<u64>,
 }
 
 /// Where the video comes from.
@@ -285,10 +290,25 @@ pub(super) struct Take {
     started: DateTime<Local>,
     clock: Instant,
     frames: u64,
+    /// the bytes of the frames so far
+    written: u64,
+    /// the space free where it's written
+    free: fn(&Path) -> Option<u64>,
+    /// stopping: the disk almost full
+    pub(super) out_of_space: bool,
 }
 
 impl Take {
     pub(super) fn start(base: PathBuf, started: DateTime<Local>) -> Result<Take, String> {
+        Take::start_on(base, started, space::free)
+    }
+
+    /// As `start`, the free space told by `free`.
+    pub(super) fn start_on(
+        base: PathBuf,
+        started: DateTime<Local>,
+        free: fn(&Path) -> Option<u64>,
+    ) -> Result<Take, String> {
         if let Some(folder) = base.parent() {
             std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
         }
@@ -298,6 +318,9 @@ impl Take {
             started,
             clock: Instant::now(),
             frames: 0,
+            written: 0,
+            free,
+            out_of_space: false,
         })
     }
 
@@ -322,9 +345,29 @@ impl Take {
             self.raw.write_shown(pts_ms, shown_after_ms, annex_b)?;
         }
         self.frames += 1;
+        self.written = self
+            .written
+            .saturating_add(u64::try_from(annex_b.len()).unwrap_or(u64::MAX));
         match self.frames % FLUSH_EVERY {
-            0 => self.raw.flush(),
+            0 => {
+                // its MP4 made next to it at the end: room left for that
+                let folder = self.base.parent().unwrap_or(Path::new("."));
+                self.out_of_space = !space::may_go_on((self.free)(folder), self.written);
+                self.raw.flush()
+            }
             _ => Ok(()),
+        }
+    }
+
+    /// Whether to stop after a frame written: it failed (said in
+    /// `status`) or the disk is almost full.
+    pub(super) fn stops(&self, written: Result<(), String>, status: &Mutex<Status>) -> bool {
+        match written {
+            Err(e) => {
+                set(status, |s| s.error = Some(e));
+                true
+            }
+            Ok(()) => self.out_of_space,
         }
     }
 
@@ -345,6 +388,7 @@ impl Take {
         Done {
             result,
             mp4,
+            out_of_space: self.out_of_space,
             base: self.base,
             started: self.started
                 + chrono::TimeDelta::milliseconds(i64::try_from(skipped).unwrap_or(0)),
@@ -462,9 +506,11 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
             u32::try_from(picture.width).unwrap_or(0),
             u32::try_from(picture.height).unwrap_or(0),
         );
-        let written = recorder.as_mut().map(|r| r.write(picture));
-        if let Some(Err(e)) = written {
-            set(status, |s| s.error = Some(e));
+        let stops = recorder.as_mut().is_some_and(|r| {
+            let written = r.write(picture);
+            r.take.stops(written, status)
+        });
+        if stops {
             finish(recorder.take().map(|r| r.take), status);
         }
         let recording = recorder.as_ref().map(|r| r.take.recording());

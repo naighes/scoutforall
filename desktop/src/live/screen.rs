@@ -11,6 +11,7 @@ use {
         capture::{self, CameraEntry, Capture, Quality, Source, Status},
         network::{self, NetworkSource, Problem, Protocol},
         rtmp::{self, Receiver},
+        space::{self as disk, Room},
     },
     crate::{
         form::{self, Field, Form},
@@ -119,6 +120,8 @@ pub struct LiveScreen {
     here: Option<String>,
     /// the QR code that sets Larix to send here, and its link
     qr: Option<(String, image::Handle)>,
+    /// the space free in the folder of the recordings
+    free: Option<u64>,
 }
 
 /// The problem of a source on the network, in the user's words.
@@ -163,6 +166,7 @@ fn given_back(saved: &SavedNetwork, kept: String) -> (String, String) {
 impl LiveScreen {
     pub fn new(team_id: String, match_id: String, opponent: String, dir: PathBuf) -> LiveScreen {
         let config = LiveConfig::read(&dir);
+        let free = disk::free(&config.folder(&dir));
         LiveScreen {
             team_id,
             match_id,
@@ -182,6 +186,7 @@ impl LiveScreen {
             form: Form::new("", vec![]),
             here: None,
             qr: None,
+            free,
         }
     }
 
@@ -438,6 +443,7 @@ impl LiveScreen {
 
     fn tick(&mut self) -> Outcome {
         self.status = self.capture.as_ref().and_then(Capture::status);
+        self.free = disk::free(&self.config.folder(&self.dir));
         match self.status.as_ref().and_then(|s| s.frame.clone()) {
             Some(frame) if frame.serial > self.requested => {
                 self.requested = frame.serial;
@@ -463,7 +469,43 @@ impl LiveScreen {
     }
 
     fn can_start(&self) -> bool {
-        self.status.as_ref().is_some_and(|s| s.frame.is_some())
+        self.status.as_ref().is_some_and(|s| s.frame.is_some()) && self.room().can_record()
+    }
+
+    /// What the free space allows: the camera's bits as chosen, the
+    /// network's as they come.
+    fn room(&self) -> Room {
+        let bits = match self.step {
+            Step::Camera => Some(u64::from(self.config.quality().bits_per_second())),
+            _ => self.status.as_ref().and_then(|st| st.bits_per_second),
+        };
+        Room::of(self.free, bits)
+    }
+
+    /// The free space said, in red when a match doesn't fit.
+    fn room_text(&self, s: &Strings) -> Option<(String, bool)> {
+        match self.room() {
+            Room::Unknown => None,
+            Room::Enough { free } => Some((ui::fill(s.space_free, &[disk::gb(free)]), false)),
+            Room::Short { free, needed } => Some((
+                ui::fill(s.space_short, &[disk::gb(free), disk::gb(needed)]),
+                true,
+            )),
+            Room::Full { free } => Some((ui::fill(s.space_full, &[disk::gb(free)]), true)),
+        }
+    }
+
+    fn room_view<'a>(&self, s: &Strings, c: Colors) -> Element<'a, Message> {
+        match self.room_text(s) {
+            Some((said, short)) => text(said)
+                .size(SIZE_SMALL)
+                .color(match short {
+                    true => c.danger,
+                    false => c.muted,
+                })
+                .into(),
+            None => space::vertical().height(0).into(),
+        }
     }
 
     pub fn update(&mut self, message: Message, s: &Strings) -> Outcome {
@@ -489,6 +531,7 @@ impl LiveScreen {
             }
             Message::ChangeFolder => return Outcome::PickFolder,
             Message::Folder(Some(folder)) => {
+                self.free = disk::free(&folder);
                 self.config.folder = Some(folder);
                 self.save_config();
             }
@@ -682,6 +725,7 @@ impl LiveScreen {
             text(self.seen(s)).size(SIZE_SMALL).color(c.muted),
             ui::section(s.recordings_folder, c),
             text(folder.display().to_string()).size(SIZE_SMALL),
+            self.room_view(s, c),
             ui::pill(
                 &ui::capitalized(s.change),
                 false,
@@ -765,6 +809,7 @@ impl LiveScreen {
             text(self.seen(s)).size(SIZE_SMALL).color(c.muted),
             ui::section(s.recordings_folder, c),
             text(folder.display().to_string()).size(SIZE_SMALL),
+            self.room_view(s, c),
             ui::pill(
                 &ui::capitalized(s.change),
                 false,
@@ -867,6 +912,7 @@ impl LiveScreen {
             text(per_hour).size(SIZE_SMALL).color(c.muted),
             ui::section(s.recordings_folder, c),
             text(folder.display().to_string()).size(SIZE_SMALL),
+            self.room_view(s, c),
             ui::pill(
                 &ui::capitalized(s.change),
                 false,
@@ -1115,6 +1161,58 @@ mod tests {
         let receiver = screen.saved_receiver();
         assert_eq!(receiver.port, rtmp::RTMP_PORT);
         assert_eq!(receiver.key.len(), 8);
+    }
+
+    /// The free space said before recording: what a match needs at the
+    /// quality chosen (the camera) or as the source comes (the network);
+    /// not started without even the reserve.
+    #[test]
+    fn the_space_before_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = screen(&dir);
+        screen.update(Message::Kind(Kind::Camera), s());
+        let seen = Status {
+            frame: Some(Arc::new(Picture {
+                serial: 1,
+                width: 2,
+                height: 2,
+                rgba: bytes::Bytes::from(vec![0; 16]),
+            })),
+            ..Status::default()
+        };
+        screen.status = Some(seen.clone());
+        // 720p: 6.3 GB for a match, with its MP4
+        screen.free = Some(100_000_000_000);
+        assert_eq!(
+            screen.room_text(s()),
+            Some(("100.0 GB liberi".to_string(), false))
+        );
+        screen.free = Some(4_000_000_000);
+        let (said, short) = screen.room_text(s()).unwrap();
+        assert!(
+            short && said.contains("4.0") && said.contains("6.8"),
+            "{said}"
+        );
+        assert!(matches!(
+            screen.update(Message::Start, s()),
+            Outcome::Record
+        ));
+        // lower: fits
+        screen.key(key!(q), s());
+        assert_eq!(screen.room_text(s()).map(|(_, short)| short), Some(false));
+        screen.free = Some(disk::RESERVE - 1);
+        assert_eq!(screen.room_text(s()).map(|(_, short)| short), Some(true));
+        assert!(matches!(screen.update(Message::Start, s()), Outcome::Stay));
+        // on the network: from its bitrate, once counted
+        screen.update(Message::Kind(Kind::Network), s());
+        screen.free = Some(4_000_000_000);
+        screen.status = Some(seen.clone());
+        assert_eq!(screen.room_text(s()).map(|(_, short)| short), Some(false));
+        screen.status = Some(Status {
+            bits_per_second: Some(8_000_000),
+            ..seen
+        });
+        assert_eq!(screen.room_text(s()).map(|(_, short)| short), Some(true));
     }
 
     /// The quality and the folder kept for the next time.

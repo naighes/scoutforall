@@ -851,14 +851,14 @@ impl App {
             let attached = done.result.and_then(|_| {
                 live::attach(&self.core, &self.dir, &done.base, &done.mp4, done.started)
             });
-            match attached {
-                Ok(()) => {
-                    self.notice = Some(ui::fill(
-                        s.recording_saved,
-                        &[done.mp4.display().to_string()],
-                    ));
+            let path = done.mp4.display().to_string();
+            match (attached, done.out_of_space) {
+                (Ok(()), false) => self.notice = Some(ui::fill(s.recording_saved, &[path])),
+                // stopped before the end of the match: in red
+                (Ok(()), true) => {
+                    self.error = Some(ui::fill(s.recording_out_of_space, &[path]));
                 }
-                Err(e) => self.error = Some(ui::fill(s.recording_failed, &[e])),
+                (Err(e), _) => self.error = Some(ui::fill(s.recording_failed, &[e])),
             }
         }
         let idle = status

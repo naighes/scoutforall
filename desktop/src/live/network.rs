@@ -26,7 +26,7 @@ use {
             Arc, Mutex,
             mpsc::{Receiver, TryRecvError},
         },
-        time::Duration,
+        time::{Duration, Instant},
     },
 };
 
@@ -238,6 +238,9 @@ pub(super) struct Feed {
     first: Option<(u64, u64)>,
     serial: u64,
     decoding: bool,
+    /// the bytes come since `counting`, for the bitrate of the source
+    counted: u64,
+    counting: Option<Instant>,
 }
 
 impl Feed {
@@ -247,6 +250,8 @@ impl Feed {
             first: None,
             serial: 0,
             decoding: false,
+            counted: 0,
+            counting: None,
         })
     }
 
@@ -254,6 +259,8 @@ impl Feed {
     pub(super) fn connected(&mut self, status: &Mutex<Status>) {
         self.first = None;
         self.decoding = false;
+        self.counted = 0;
+        self.counting = None;
         set(status, |s| {
             s.problem = None;
             s.error = None;
@@ -274,17 +281,21 @@ impl Feed {
         preview: bool,
         status: &Mutex<Status>,
     ) {
-        match take.as_mut() {
+        self.count(annex_b.len(), status);
+        let stops = match take.as_mut() {
             Some(t) => {
                 let (at0, ms0) = *self.first.get_or_insert((at_ms, t.elapsed_ms()));
-                if let Err(e) =
-                    t.write_shown(ms0 + at_ms.saturating_sub(at0), shown_after_ms, annex_b)
-                {
-                    set(status, |s| s.error = Some(e));
-                    finish(take.take(), status);
-                }
+                let written =
+                    t.write_shown(ms0 + at_ms.saturating_sub(at0), shown_after_ms, annex_b);
+                t.stops(written, status)
             }
-            None => self.first = None,
+            None => {
+                self.first = None;
+                false
+            }
+        };
+        if stops {
+            finish(take.take(), status);
         }
         // decoded only for the preview: not shown, not decoded, from the
         // next picture that starts anew when shown again
@@ -324,6 +335,26 @@ impl Feed {
         }
     }
 }
+
+impl Feed {
+    /// `bytes` more come: the bitrate of the source said once it's been
+    /// counted long enough, for the space a match needs.
+    fn count(&mut self, bytes: usize, status: &Mutex<Status>) {
+        let since = *self.counting.get_or_insert_with(Instant::now);
+        self.counted = self
+            .counted
+            .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+        let ms = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if ms >= COUNTED_FOR_MS {
+            let bits = self.counted.saturating_mul(8_000) / ms;
+            set(status, |s| s.bits_per_second = Some(bits));
+        }
+    }
+}
+
+/// How long the bytes of a source are counted before its bitrate is said:
+/// a few keyframes in.
+const COUNTED_FOR_MS: u64 = 3_000;
 
 /// What the loop is asked between frames.
 pub(super) enum Asked {
@@ -620,6 +651,77 @@ mod tests {
         feed.connected(&status);
         feed.frame(&keyframe, true, 0, 0, &mut None, true, &status);
         assert!(serial(&status) > before);
+    }
+
+    /// Frames of an encoder, the first a keyframe with its parameters.
+    fn encoded(count: usize) -> Vec<Vec<u8>> {
+        use openh264::{OpenH264API, encoder::Encoder, formats::YUVBuffer};
+        let mut encoder = Encoder::with_api_config(
+            OpenH264API::from_source(),
+            openh264::encoder::EncoderConfig::new(),
+        )
+        .unwrap();
+        (0..count)
+            .map(|i| {
+                let shade = u8::try_from(i % 200).unwrap();
+                let yuv = YUVBuffer::from_vec(vec![shade; 64 * 48 * 3 / 2], 64, 48);
+                encoder.encode(&yuv).unwrap().to_vec()
+            })
+            .collect()
+    }
+
+    /// The disk almost full: stopped by itself after its frames on disk,
+    /// its MP4 made and readable, said; with room, it goes on.
+    #[test]
+    fn stopped_as_the_disk_fills_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let frames = encoded(100);
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        let base = dir.path().join("20261110 120000");
+        let mut take =
+            Some(Take::start_on(base.clone(), chrono::Local::now(), |_| Some(0)).unwrap());
+        for (i, f) in frames.iter().enumerate() {
+            let at = u64::try_from(i).unwrap() * 33;
+            feed.frame(f, i == 0, at, 0, &mut take, false, &status);
+        }
+        assert!(take.is_none());
+        let done = std::mem::take(&mut status.lock().unwrap().done);
+        let [done] = done.as_slice() else {
+            panic!("{done:?}");
+        };
+        assert!(done.out_of_space);
+        // at the first look at the space (every 30 frames)
+        let made = done.result.clone().unwrap();
+        assert!((900..1000).contains(&made.length_ms), "{made:?}");
+        let video = crate::video::source::Source::open(&done.mp4).unwrap();
+        assert_eq!(video.samples.len(), 30);
+        // with room for its MP4 and the reserve: on
+        let base = dir.path().join("20261110 130000");
+        let room = |_: &std::path::Path| Some(crate::live::space::RESERVE + 10_000_000);
+        let mut take = Some(Take::start_on(base, chrono::Local::now(), room).unwrap());
+        for (i, f) in frames.iter().enumerate() {
+            let at = u64::try_from(i).unwrap() * 33;
+            feed.frame(f, i == 0, at, 0, &mut take, false, &status);
+        }
+        assert!(take.is_some_and(|t| !t.out_of_space));
+    }
+
+    /// The bitrate of a source said once counted for a while.
+    #[test]
+    fn the_bitrate_counted() {
+        let status = Mutex::new(Status::default());
+        let mut feed = Feed::new().unwrap();
+        feed.count(1_000, &status);
+        assert_eq!(status.lock().unwrap().bits_per_second, None);
+        feed.counting = Instant::now().checked_sub(Duration::from_secs(4));
+        feed.count(499_000, &status);
+        // 500 kB in about 4 s: about 1 Mbit/s
+        let bits = status.lock().unwrap().bits_per_second.unwrap();
+        assert!((900_000..=1_000_000).contains(&bits), "{bits}");
+        // connected again: counted anew
+        feed.connected(&status);
+        assert_eq!((feed.counted, feed.counting), (0, None));
     }
 
     #[test]

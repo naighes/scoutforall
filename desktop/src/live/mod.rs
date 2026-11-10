@@ -9,6 +9,7 @@ pub mod picture;
 pub mod raw;
 pub mod rtmp;
 pub mod screen;
+pub mod space;
 
 use {
     capture::Quality,
