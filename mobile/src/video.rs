@@ -6,6 +6,7 @@
 
 use crate::{
     AnalysisPeriod, ClipPick, MobileError, Scout4All, SetEvent, VideoEvent, clips_of, count_of,
+    strip::{ClipSpan, clip_spans},
 };
 use chrono::{FixedOffset, Local, Offset};
 use scout4all_core::{
@@ -551,6 +552,20 @@ impl VideoReview {
                     .is_some_and(|e| inside(e.offset_ms, total) && target(e, lead_ms) != seen)
             })
             .map(count_of)
+    }
+
+    /// With the actions picked, where their clips are in the video, from
+    /// `lead_ms` before each to `after_ms` after it, for the strip under
+    /// the bar (`strip`): the one of the action `selected` playing.
+    pub fn clip_spans(&self, lead_ms: i64, after_ms: u64, selected: u32) -> Vec<ClipSpan> {
+        let st = self.state();
+        match st.picked {
+            Some(_) => {
+                let shown: Vec<&VideoEvent> = st.shown().collect();
+                clip_spans(&shown, lead_ms, after_ms, selected as usize)
+            }
+            None => vec![],
+        }
     }
 
     /// How the match stands at `position_ms`: from all its events, also
@@ -1235,6 +1250,20 @@ mod tests {
         );
         assert!(events.len() > 10);
         let next = review.next_clip(0, 5000).unwrap();
+        // their clips on the strip: in order, apart, the one chosen playing
+        let spans = review.clip_spans(5000, 5000, next);
+        assert!(spans.len() > 5);
+        assert!(spans.windows(2).all(|w| w[0].to_ms < w[1].from_ms));
+        assert_eq!(spans.iter().filter(|sp| sp.playing).count(), 1, "{spans:?}");
+        let playing = spans.iter().find(|sp| sp.playing).unwrap();
+        assert_eq!(Some(playing.from_ms), review.target(playing.event, 5000));
+        assert!(playing.event <= next);
+        // margins wider than the gaps: one clip
+        assert_eq!(review.clip_spans(600_000, 600_000, 0).len(), 1);
+        assert!(
+            whole.clip_spans(5000, 5000, 0).is_empty(),
+            "the whole match: no strip"
+        );
         assert!(next > 0);
         assert_ne!(review.target(next, 5000), review.target(0, 5000));
         let pieces = review.pieces(5, 5);

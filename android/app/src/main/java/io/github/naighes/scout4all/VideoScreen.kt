@@ -4,8 +4,8 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.pm.ActivityInfo
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
 import android.widget.Toast
@@ -14,8 +14,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -44,8 +47,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -62,6 +65,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -87,14 +91,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -117,12 +125,14 @@ import io.github.naighes.scout4all.core.VideoAlignment
 import io.github.naighes.scout4all.core.VideoEventRow
 import io.github.naighes.scout4all.core.VideoStanding
 import io.github.naighes.scout4all.core.montageName
+import io.github.naighes.scout4all.core.stripBars
+import io.github.naighes.scout4all.core.stripClicked
 import io.github.naighes.scout4all.core.videoClock
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 private enum class VideoTab(val title: Int) {
     Events(R.string.video_events),
@@ -407,6 +417,7 @@ private fun Controls(model: VideoModel, onTouch: () -> Unit = {}) = Column(Modif
         enabled = model.files.isNotEmpty() && model.missing == null,
         modifier = Modifier.fillMaxWidth().heightIn(max = 36.dp),
     )
+    if (model.clips != null) ClipStrip(model, onTouch)
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = {
             model.step(false)
@@ -444,6 +455,55 @@ private fun Controls(model: VideoModel, onTouch: () -> Unit = {}) = Column(Modif
         ) { Text(speedText(model.speed)) }
     }
 }
+
+/** How far from a clip a touch on the strip still takes it, in dp: the
+ * `TOUCH_REACH` of the core. */
+private const val TOUCH_REACH = 12f
+
+/** The track of the slider starts half its handle (4 dp) from its edges:
+ * the strip under it the same, a clip under its time on the bar. */
+private val TRACK_INSET = 2.dp
+
+/** With the actions picked, their clips under the bar of the video, where
+ * they are in it: red, the one playing taller in the primary colour. A
+ * touch on a clip (or near it) plays it from its start, between them the
+ * video goes there (`stripBars`, `stripClicked` in the core, the same as on
+ * the desktop: widths in dp). TalkBack has the list of the actions. */
+@Composable
+private fun ClipStrip(model: VideoModel, onTouch: () -> Unit) {
+    val spans = model.spans
+    val total = model.total
+    if (spans.isEmpty() || total <= 0) return
+    val clipColor = MaterialTheme.colorScheme.error
+    val playingColor = MaterialTheme.colorScheme.primary
+    val lineColor = LocalContentColor.current.copy(alpha = 0.25f)
+    Canvas(
+        Modifier.fillMaxWidth().height(STRIP_HEIGHT).padding(horizontal = TRACK_INSET).testTag("strip")
+            .pointerInput(spans, total) {
+                detectTapGestures { at ->
+                    onTouch()
+                    model.strip(stripClicked(spans, total.toULong(), size.width.toDp().value, at.x.toDp().value, TOUCH_REACH))
+                }
+            },
+    ) {
+        val line = 2.dp.toPx()
+        drawRect(lineColor, Offset(0f, (size.height - line) / 2), Size(size.width, line))
+        val bars = stripBars(spans, total.toULong(), size.width.toDp().value)
+        // the one playing drawn last, over the others
+        bars.zip(spans).sortedBy { it.second.playing }.forEach { (bar, sp) ->
+            val height = (if (sp.playing) 12.dp else 6.dp).toPx()
+            drawRoundRect(
+                if (sp.playing) playingColor else clipColor,
+                Offset(bar.from.dp.toPx(), (size.height - height) / 2),
+                Size((bar.to - bar.from).dp.toPx(), height),
+                CornerRadius(2.dp.toPx()),
+            )
+        }
+    }
+}
+
+/** Tall enough for a finger, not more: the video above it matters more. */
+private val STRIP_HEIGHT = 24.dp
 
 private fun speedText(speed: Float) = (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "×"
 

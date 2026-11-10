@@ -47,6 +47,7 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         MatchClips, MobileError, Scout4All, VideoEvent,
+        strip::{ClipSpan, StripClick, clip_spans},
         video::{
             VideoStanding as Standing, current, event_ref, inside, parse_time, standing, target,
             uncorrected, written,
@@ -57,7 +58,6 @@ use {
         sync::Arc,
         time::{Duration, Instant},
     },
-    strip::{Click, Span},
 };
 
 /// The fields of the seconds of a clip before and after its action.
@@ -132,7 +132,7 @@ pub enum Message {
     /// the seconds written, done
     MarginSubmit,
     /// the strip of the clips clicked
-    Strip(Click),
+    Strip(StripClick),
 }
 
 pub enum Outcome {
@@ -1157,8 +1157,8 @@ impl VideoScreen {
             Message::MarginStep(margin, by) => self.step_margin(margin, by),
             Message::MarginInput(margin, text) => self.write_margin(margin, text),
             Message::MarginSubmit => self.margin_text = None,
-            Message::Strip(Click::Clip(i)) => self.go_to_event(i),
-            Message::Strip(Click::At(ms)) => self.seek(ms),
+            Message::Strip(StripClick::Clip { event }) => self.go_to_event(event as usize),
+            Message::Strip(StripClick::At { ms }) => self.seek(ms),
         }
         Outcome::Stay
     }
@@ -1810,39 +1810,12 @@ impl VideoScreen {
 
     /// With the actions picked, where their clips are in the video, from
     /// its start: the ones overlapping as one, in order. The one playing
-    /// told apart.
-    fn spans(&self) -> Vec<Span> {
-        let (before, after) = (self.lead_ms(), self.after_ms());
-        let chosen = self.event_target(self.selected);
-        let mut spans: Vec<Span> = match &self.clips {
-            Some(_) => self
-                .events
-                .iter()
-                .enumerate()
-                .filter_map(|(i, e)| target(e, before).map(|t| (i, t, e)))
-                .filter_map(|(i, t, e)| {
-                    let end = e.offset_ms?.max(0).unsigned_abs() + after;
-                    Some(Span {
-                        from: t,
-                        to: end,
-                        playing: Some(t) == chosen,
-                        event: i,
-                    })
-                })
-                .collect(),
+    /// told apart (`clip_spans`, the same on Android).
+    fn spans(&self) -> Vec<ClipSpan> {
+        match &self.clips {
+            Some(_) => clip_spans(&self.events, self.lead_ms(), self.after_ms(), self.selected),
             None => vec![],
-        };
-        spans.sort_by_key(|sp| sp.from);
-        spans.into_iter().fold(vec![], |mut merged: Vec<Span>, sp| {
-            match merged.last_mut() {
-                Some(last) if sp.from <= last.to => {
-                    last.to = last.to.max(sp.to);
-                    last.playing |= sp.playing;
-                }
-                _ => merged.push(sp),
-            }
-            merged
-        })
+        }
     }
 
     /// The clips of the actions picked, under the bar of the video, to
@@ -2485,7 +2458,7 @@ pub(crate) mod screen_tests {
         let spans = screen.spans();
         assert!(!spans.is_empty());
         // in order, apart, each from its margin before to its margin after
-        assert!(spans.windows(2).all(|w| w[0].to < w[1].from));
+        assert!(spans.windows(2).all(|w| w[0].to_ms < w[1].from_ms));
         let first = screen
             .events
             .iter()
@@ -2493,12 +2466,13 @@ pub(crate) mod screen_tests {
             .min()
             .unwrap();
         // from the margin before, not before the start of the video
-        assert_eq!(spans[0].from, first.unsigned_abs().saturating_sub(5000));
-        assert!(spans[0].to >= first.unsigned_abs() + 5000);
+        assert_eq!(spans[0].from_ms, first.unsigned_abs().saturating_sub(5000));
+        assert!(spans[0].to_ms >= first.unsigned_abs() + 5000);
         // the clips playing: the one with the action chosen in it
         let playing = |screen: &VideoScreen, at: u64| {
-            let playing: Vec<Span> = screen.spans().into_iter().filter(|sp| sp.playing).collect();
-            playing.len() == 1 && playing[0].from <= at && at <= playing[0].to
+            let playing: Vec<ClipSpan> =
+                screen.spans().into_iter().filter(|sp| sp.playing).collect();
+            playing.len() == 1 && playing[0].from_ms <= at && at <= playing[0].to_ms
         };
         let chosen = screen.event_target(screen.selected).unwrap();
         assert!(playing(&screen, chosen), "the one chosen playing");
@@ -2511,67 +2485,11 @@ pub(crate) mod screen_tests {
         screen.update(Message::MarginInput(Margin::Before, "30".into()));
         screen.update(Message::MarginInput(Margin::After, "20".into()));
         let wider = screen.spans();
-        assert_eq!(wider[0].from, first.unsigned_abs().saturating_sub(30_000));
-        assert!(wider[0].to >= first.unsigned_abs() + 20_000);
-    }
-
-    /// The strip: the clips where they are across it, a short one still
-    /// seen, inside it at the end of the video and past it; a click on a
-    /// clip or near it takes it, between the clips the point of the video.
-    #[test]
-    fn the_strip_of_the_clips() {
-        let span = |from, to, event| Span {
-            from,
-            to,
-            playing: false,
-            event,
-        };
-        let spans = [span(1000, 2000, 3), span(5000, 5001, 7)];
         assert_eq!(
-            strip::bars(&spans, 10_000, 1000.0),
-            [(100.0, 200.0), (500.0, 503.0)]
+            wider[0].from_ms,
+            first.unsigned_abs().saturating_sub(30_000)
         );
-        // narrow: the short one still 3 wide
-        assert_eq!(
-            strip::bars(&spans, 10_000, 100.0),
-            [(10.0, 20.0), (50.0, 53.0)]
-        );
-        // at the end and past it: inside the strip
-        assert_eq!(
-            strip::bars(
-                &[span(10_000, 10_000, 0), span(9000, 99_000, 1)],
-                10_000,
-                100.0
-            ),
-            [(97.0, 100.0), (90.0, 100.0)]
-        );
-        let click = |width, x| strip::clicked(&spans, 10_000, width, x);
-        assert_eq!(click(1000.0, 150.0), Click::Clip(3));
-        // the short one, on it and a little beside it
-        assert_eq!(click(1000.0, 501.0), Click::Clip(7));
-        assert_eq!(click(1000.0, 497.0), Click::Clip(7));
-        assert_eq!(click(1000.0, 506.0), Click::Clip(7));
-        // between the clips, before the first, after the last
-        assert_eq!(click(1000.0, 300.0), Click::At(3000));
-        assert_eq!(click(1000.0, 0.0), Click::At(0));
-        assert_eq!(click(1000.0, 1000.0), Click::At(10_000));
-        assert_eq!(click(1000.0, 1200.0), Click::At(10_000));
-        // narrow: the same points, nearer to each other
-        assert_eq!(click(100.0, 15.0), Click::Clip(3));
-        assert_eq!(click(100.0, 55.0), Click::Clip(7));
-        assert_eq!(click(100.0, 35.0), Click::At(3500));
-        // two clips within reach: the nearer one
-        let close = [span(1000, 1100, 1), span(1300, 1400, 2)];
-        assert_eq!(
-            strip::clicked(&close, 10_000, 1000.0, 112.0),
-            Click::Clip(1)
-        );
-        assert_eq!(
-            strip::clicked(&close, 10_000, 1000.0, 127.0),
-            Click::Clip(2)
-        );
-        // no video yet, no strip wide: no division by zero
-        assert_eq!(strip::clicked(&spans, 0, 0.0, 0.0), Click::Clip(3));
+        assert!(wider[0].to_ms >= first.unsigned_abs() + 20_000);
     }
 
     /// With the actions picked, a click on the strip: on a clip, it goes
@@ -2580,6 +2498,7 @@ pub(crate) mod screen_tests {
     /// narrow windows.
     #[test]
     fn the_strip_clicked() {
+        use scout4all_mobile::strip::{MOUSE_REACH, strip_bars, strip_clicked};
         let dir = tempfile::tempdir().unwrap();
         let screen = with_file(&dir, "20150125 000000.mp4");
         let (core, team, m) = (
@@ -2610,7 +2529,7 @@ pub(crate) mod screen_tests {
         screen.update(Message::MarginInput(Margin::After, "1".into()));
         let spans = screen.spans();
         assert!(spans.len() > 2);
-        let duration = spans.iter().map(|sp| sp.to).max().unwrap() + 60_000;
+        let duration = spans.iter().map(|sp| sp.to_ms).max().unwrap() + 60_000;
         screen.status = Some(Status {
             frame: None,
             position_ms: 0,
@@ -2621,25 +2540,32 @@ pub(crate) mod screen_tests {
         });
         assert_eq!(screen.selected, 0);
         for width in [1600.0_f32, 700.0, 240.0] {
-            let bars = strip::bars(&spans, duration, width);
+            let bars = strip_bars(&spans, duration, width);
             // the middle of each clip: the clip there
-            for (sp, (from, to)) in spans.iter().zip(&bars) {
-                let click = strip::clicked(&spans, duration, width, (from + to) / 2.0);
-                let Click::Clip(i) = click else {
+            for (sp, bar) in spans.iter().zip(&bars) {
+                let middle = (bar.from + bar.to) / 2.0;
+                let click = strip_clicked(&spans, duration, width, middle, MOUSE_REACH);
+                let StripClick::Clip { event } = click else {
                     panic!("{width}: {click:?} on the clip of {}", sp.event)
                 };
-                let (f, t) = bars[spans.iter().position(|s| s.event == i).unwrap()];
-                assert!(f <= (from + to) / 2.0 + 4.0 && (from + to) / 2.0 - 4.0 <= t);
+                let near = bars[spans.iter().position(|s| s.event == event).unwrap()];
+                assert!(near.from <= middle + 4.0 && middle - 4.0 <= near.to);
             }
         }
         // the third clip clicked: chosen, from its start, played to its end
         let third = spans[2];
-        let (from, to) = strip::bars(&spans, duration, 1600.0)[2];
-        let click = strip::clicked(&spans, duration, 1600.0, (from + to) / 2.0);
-        assert_eq!(click, Click::Clip(third.event));
+        let bar = strip_bars(&spans, duration, 1600.0)[2];
+        let click = strip_clicked(
+            &spans,
+            duration,
+            1600.0,
+            (bar.from + bar.to) / 2.0,
+            MOUSE_REACH,
+        );
+        assert_eq!(click, StripClick::Clip { event: third.event });
         screen.update(Message::Strip(click));
-        assert_eq!(screen.selected, third.event);
-        assert_eq!(screen.position(), third.from);
+        assert_eq!(screen.selected, third.event as usize);
+        assert_eq!(screen.position(), third.from_ms);
         assert!(screen.clip_end.is_some(), "played to its end");
         let now = screen.spans();
         assert_eq!(
@@ -2651,14 +2577,14 @@ pub(crate) mod screen_tests {
             "the one playing on the strip"
         );
         // between the first two: the video there, no clip to stop at
-        let bars = strip::bars(&spans, duration, 1600.0);
-        let x = (bars[0].1 + bars[1].0) / 2.0;
-        assert!(bars[1].0 - bars[0].1 > 10.0, "room between them");
-        let Click::At(ms) = strip::clicked(&spans, duration, 1600.0, x) else {
+        let bars = strip_bars(&spans, duration, 1600.0);
+        let x = (bars[0].to + bars[1].from) / 2.0;
+        assert!(bars[1].from - bars[0].to > 10.0, "room between them");
+        let StripClick::At { ms } = strip_clicked(&spans, duration, 1600.0, x, MOUSE_REACH) else {
             panic!("between the clips")
         };
-        assert!(spans[0].to < ms && ms < spans[1].from);
-        screen.update(Message::Strip(Click::At(ms)));
+        assert!(spans[0].to_ms < ms && ms < spans[1].from_ms);
+        screen.update(Message::Strip(StripClick::At { ms }));
         assert_eq!(screen.position(), ms);
         assert!(screen.clip_end.is_none());
     }
@@ -3033,7 +2959,10 @@ pub(crate) mod screen_tests {
                 .iter()
                 .map(|p| (p.from_ms, p.to_ms))
                 .collect::<Vec<_>>(),
-            spans.iter().map(|sp| (sp.from, sp.to)).collect::<Vec<_>>()
+            spans
+                .iter()
+                .map(|sp| (sp.from_ms, sp.to_ms))
+                .collect::<Vec<_>>()
         );
         let first = &pieces[0].card;
         assert!(first.title.starts_with("Battuta"), "{}", first.title);

@@ -14,6 +14,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.naighes.scout4all.core.ClipMargins
+import io.github.naighes.scout4all.core.ClipSpan
+import io.github.naighes.scout4all.core.StripClick
 import io.github.naighes.scout4all.core.VideoSeconds
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.MobileException
@@ -322,6 +324,25 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
             clipEnd = offset.coerceAtLeast(0) + margins.afterS.toLong() * 1000
             player.play()
         }
+    }
+
+    /** With the actions picked, where their clips are in the video, for the
+     * strip under the bar: the ones overlapping as one, the one of the
+     * action chosen playing (`clipSpans` in the core, as on the desktop).
+     * Read again when the events, the one chosen or the margins change. */
+    val spans: List<ClipSpan>
+        get() {
+            val r = review ?: return emptyList()
+            // the events read again after a change of the sync: these read too
+            if (clips == null || events.isEmpty()) return emptyList()
+            return r.clipSpans(lead(), margins.afterS.toULong() * 1000u, selected.toUInt())
+        }
+
+    /** The strip touched: a clip played from its start (the margin before
+     * it), or the video at that point. */
+    fun strip(click: StripClick) = when (click) {
+        is StripClick.Clip -> goToEvent(click.event.toInt())
+        is StripClick.At -> seek(click.ms.toLong())
     }
 
     /** An event chosen by hand, to tie it: the list stops following. */

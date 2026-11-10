@@ -97,6 +97,7 @@ uniffi::setup_scaffolding!();
 
 mod analysis;
 pub use analysis::*;
+pub mod strip;
 pub mod video;
 
 // the types of the core the app sees as they are
