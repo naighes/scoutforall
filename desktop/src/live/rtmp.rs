@@ -110,6 +110,31 @@ pub fn this_computer() -> Option<IpAddr> {
         .filter(|ip| !ip.is_unspecified())
 }
 
+/// The addresses of this computer an app on the network can send to
+/// (Wi-Fi and Ethernet together): the one the way out goes through
+/// first, then the others of the interfaces up; IPv4, no loopback, no
+/// link-local, no point-to-point (VPN tunnels).
+pub fn these_computers() -> Vec<IpAddr> {
+    let interfaces = if_addrs::get_if_addrs().unwrap_or_default();
+    let usable = interfaces
+        .iter()
+        .filter(|i| i.is_oper_up() && !i.is_p2p() && !i.is_loopback() && !i.is_link_local())
+        .map(if_addrs::Interface::ip)
+        .filter(IpAddr::is_ipv4);
+    first_then_others(this_computer(), usable)
+}
+
+/// `first`, then the others, each once.
+fn first_then_others(first: Option<IpAddr>, others: impl Iterator<Item = IpAddr>) -> Vec<IpAddr> {
+    first
+        .into_iter()
+        .chain(others)
+        .fold(vec![], |seen, ip| match seen.contains(&ip) {
+            true => seen,
+            false => [seen, vec![ip]].concat(),
+        })
+}
+
 /// What a video tag of FLV says.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Tag<'a> {
@@ -530,6 +555,28 @@ mod tests {
         super::*,
         crate::live::capture::{Capture, Source, Status},
     };
+
+    /// The way out's address first, the others after, each once: an
+    /// app on the Wi-Fi and one on the Ethernet both find this computer.
+    #[test]
+    fn the_addresses_of_this_computer() {
+        let wifi: IpAddr = [192, 168, 1, 20].into();
+        let ethernet: IpAddr = [10, 0, 0, 5].into();
+        assert_eq!(
+            first_then_others(Some(ethernet), [wifi, ethernet, wifi].into_iter()),
+            vec![ethernet, wifi]
+        );
+        assert_eq!(first_then_others(None, [wifi].into_iter()), vec![wifi]);
+        let here = these_computers();
+        assert!(
+            here.iter().all(|ip| ip.is_ipv4() && !ip.is_loopback()),
+            "{here:?}"
+        );
+        assert_eq!(
+            here.first().copied(),
+            this_computer().or(here.first().copied())
+        );
+    }
 
     fn wait(capture: &Capture, until: &dyn Fn(&Status) -> bool) -> bool {
         for _ in 0..150 {

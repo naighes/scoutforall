@@ -35,9 +35,14 @@ pub struct LiveConfig {
     pub quality: Option<String>,
     #[serde(default)]
     pub folder: Option<PathBuf>,
-    /// the source on the network used last: its password in the keychain
+    /// the sources on the network used, the last first: their passwords
+    /// in the keychain
     #[serde(default)]
-    pub network: Option<SavedNetwork>,
+    pub networks: Vec<SavedNetwork>,
+    /// the one source kept before the list (v0.15): read, moved into
+    /// `networks`
+    #[serde(default, skip_serializing)]
+    network: Option<SavedNetwork>,
     /// the port and the key the apps send to (RTMP received)
     #[serde(default)]
     pub receiver: Option<SavedReceiver>,
@@ -49,11 +54,33 @@ pub struct SavedReceiver {
     pub key: String,
 }
 
+/// The sources on the network remembered: the oldest dropped past these.
+pub const MAX_NETWORKS: usize = 20;
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SavedNetwork {
+    /// what the user calls it; none, its address
+    #[serde(default)]
+    pub name: String,
     pub url: String,
     #[serde(default)]
     pub username: String,
+}
+
+impl SavedNetwork {
+    /// The same source: the same address, the same user (its password in
+    /// the keychain by these).
+    pub fn same(&self, other: &SavedNetwork) -> bool {
+        self.url == other.url && self.username == other.username
+    }
+
+    /// What it's called in the list: its name, or its address.
+    pub fn label(&self) -> &str {
+        match self.name.trim() {
+            "" => &self.url,
+            name => name,
+        }
+    }
 }
 
 /// The name of the app in the keychain of the system.
@@ -88,8 +115,50 @@ impl LiveConfig {
     pub fn read(data_dir: &Path) -> LiveConfig {
         fs::read_to_string(data_dir.join(CONFIG_FILE))
             .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
+            .and_then(|text| serde_json::from_str::<LiveConfig>(&text).ok())
+            .map(LiveConfig::listed)
             .unwrap_or_default()
+    }
+
+    /// The one source of before the list, in the list.
+    fn listed(self) -> LiveConfig {
+        match (self.networks.is_empty(), self.network.clone()) {
+            (true, Some(old)) => LiveConfig {
+                networks: vec![old],
+                network: None,
+                ..self
+            },
+            _ => LiveConfig {
+                network: None,
+                ..self
+            },
+        }
+    }
+
+    /// `used` first in the list, in place of the one it was chosen as
+    /// (`chosen`: maybe renamed, its address changed) and of any other
+    /// with its address and user; the oldest past `MAX_NETWORKS` dropped.
+    /// The ones gone, other than `used`: their passwords to forget.
+    pub fn use_network(&mut self, used: SavedNetwork, chosen: Option<usize>) -> Vec<SavedNetwork> {
+        let (replaced, others): (Vec<_>, Vec<_>) = std::mem::take(&mut self.networks)
+            .into_iter()
+            .enumerate()
+            .partition(|(i, n)| Some(*i) == chosen || n.same(&used));
+        let others: Vec<SavedNetwork> = others.into_iter().map(|(_, n)| n).collect();
+        let kept = others.len().min(MAX_NETWORKS.saturating_sub(1));
+        let (others, old) = others.split_at(kept);
+        self.networks = [vec![used.clone()], others.to_vec()].concat();
+        replaced
+            .into_iter()
+            .map(|(_, n)| n)
+            .chain(old.iter().cloned())
+            .filter(|n| !n.same(&used))
+            .collect()
+    }
+
+    /// The source `i` out of the list: it, its password to forget.
+    pub fn forget_network(&mut self, i: usize) -> Option<SavedNetwork> {
+        (i < self.networks.len()).then(|| self.networks.remove(i))
     }
 
     pub fn write(&self, data_dir: &Path) -> Result<(), String> {
@@ -282,10 +351,12 @@ mod tests {
             camera: Some("FaceTime HD Camera".into()),
             quality: Some("1080p".into()),
             folder: Some(dir.path().join("rec")),
-            network: Some(SavedNetwork {
+            networks: vec![SavedNetwork {
+                name: "Palestra".into(),
                 url: "rtsp://cam.local/live".into(),
                 username: "scout".into(),
-            }),
+            }],
+            network: None,
             receiver: Some(SavedReceiver {
                 port: 1936,
                 key: "abcd1234".into(),
@@ -296,5 +367,83 @@ mod tests {
         assert_eq!(read, config);
         assert_eq!(read.quality(), Quality::Full);
         assert_eq!(read.folder(dir.path()), dir.path().join("rec"));
+    }
+
+    fn source(name: &str, url: &str, username: &str) -> SavedNetwork {
+        SavedNetwork {
+            name: name.into(),
+            url: url.into(),
+            username: username.into(),
+        }
+    }
+
+    /// The one source kept by v0.15 read as the first of the list; not
+    /// written back in the old way.
+    #[test]
+    fn the_source_of_before_in_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = r#"{"network": {"url": "rtsp://cam.local/live", "username": "scout"}}"#;
+        fs::write(dir.path().join(CONFIG_FILE), old).unwrap();
+        let read = LiveConfig::read(dir.path());
+        assert_eq!(
+            read.networks,
+            vec![source("", "rtsp://cam.local/live", "scout")]
+        );
+        assert_eq!(read.networks[0].label(), "rtsp://cam.local/live");
+        read.write(dir.path()).unwrap();
+        let text = fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
+        assert!(!text.contains("\"network\""), "{text}");
+        assert_eq!(LiveConfig::read(dir.path()), read);
+    }
+
+    /// A source used goes first: a new one added, one chosen and renamed
+    /// or changed in its place, the same address and user once; the
+    /// passwords of the ones gone to forget.
+    #[test]
+    fn the_sources_used() {
+        let mut config = LiveConfig::default();
+        let a = source("", "rtsp://a/live", "");
+        let b = source("Tribuna", "rtsp://b/live", "admin");
+        assert!(config.use_network(a.clone(), None).is_empty());
+        assert!(config.use_network(b.clone(), None).is_empty());
+        assert_eq!(config.networks, vec![b.clone(), a.clone()]);
+        // a chosen, renamed: in its place, first, nothing to forget
+        let renamed = source("Campo", "rtsp://a/live", "");
+        assert!(config.use_network(renamed.clone(), Some(1)).is_empty());
+        assert_eq!(config.networks, vec![renamed.clone(), b.clone()]);
+        // b chosen, its user changed: the old user's password to forget
+        let changed = source("Tribuna", "rtsp://b/live", "scout");
+        assert_eq!(
+            config.use_network(changed.clone(), Some(1)),
+            vec![b.clone()]
+        );
+        assert_eq!(config.networks, vec![changed.clone(), renamed.clone()]);
+        // written again as new: the same source, once
+        assert!(
+            config
+                .use_network(source("", "rtsp://a/live", ""), None)
+                .is_empty()
+        );
+        assert_eq!(config.networks.len(), 2);
+        assert_eq!(config.forget_network(1), Some(changed));
+        assert_eq!(config.forget_network(1), None);
+        assert_eq!(config.networks.len(), 1);
+    }
+
+    /// Past the most remembered, the oldest dropped, its password too.
+    #[test]
+    fn the_oldest_source_dropped() {
+        let mut config = LiveConfig::default();
+        let all: Vec<SavedNetwork> = (0..MAX_NETWORKS)
+            .map(|i| source("", &format!("rtsp://cam{i}/live"), ""))
+            .collect();
+        all.iter().for_each(|n| {
+            config.use_network(n.clone(), None);
+        });
+        assert_eq!(config.networks.len(), MAX_NETWORKS);
+        let gone = config.use_network(source("", "rtsp://new/live", ""), None);
+        assert_eq!(gone, vec![all[0].clone()]);
+        assert_eq!(config.networks.len(), MAX_NETWORKS);
+        assert_eq!(config.networks[0].url, "rtsp://new/live");
     }
 }

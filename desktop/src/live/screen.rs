@@ -1,8 +1,9 @@
 //! The video source of a match, step by step: what kind (a camera of the
 //! computer, one on the network, an app sending to this computer), then
 //! which camera, seen at once, at what quality, into which folder; or the
-//! address of the one on the network (its user and password, when it asks
-//! for them), tried and seen; or where the app sends, and its key, the
+//! one on the network, from the ones used before or a new one: its
+//! address and name (its user and password, when it asks for them), tried
+//! and seen; or where the app sends, and its key, the
 //! video seen as it comes; then recording.
 
 use {
@@ -42,6 +43,8 @@ const KINDS: [Kind; 3] = [Kind::Camera, Kind::Network, Kind::Receiver];
 enum Step {
     Source,
     Camera,
+    /// the sources on the network used before, and a new one
+    Networks,
     Network,
     Receiver,
 }
@@ -49,9 +52,10 @@ enum Step {
 /// The fields of the source on the network: the user and the password
 /// shown with the authentication on, and not for RTMP (in its address).
 const ADDRESS: usize = 0;
-const AUTHENTICATION: usize = 1;
-const USERNAME: usize = 2;
-const PASSWORD: usize = 3;
+const NAME: usize = 1;
+const AUTHENTICATION: usize = 2;
+const USERNAME: usize = 3;
+const PASSWORD: usize = 4;
 
 /// The fields of the app sending to this computer.
 const PORT: usize = 0;
@@ -71,6 +75,10 @@ pub enum Message {
     Tick,
     Allocated(Arc<Picture>, image::Handle, Option<Allocation>),
     Form(form::Message),
+    /// a source on the network used before; none, a new one
+    Saved(Option<usize>),
+    /// a source on the network out of the list
+    Forget(usize),
 }
 
 pub enum Outcome {
@@ -113,11 +121,17 @@ pub struct LiveScreen {
     shown: Option<Shown>,
     requested: u64,
     error: Option<String>,
-    /// the address, user and password of the source on the network; the
-    /// port and the key of the app sending
+    /// the address, name, user and password of the source on the
+    /// network; the port and the key of the app sending
     form: Form,
-    /// this computer on its network, for the app to send to
-    here: Option<String>,
+    /// in the list of the sources on the network, the one on (past them,
+    /// a new one)
+    network_row: usize,
+    /// the source of the list in the form; none, a new one
+    chosen: Option<usize>,
+    /// this computer on its networks, for the app to send to: the way
+    /// out first
+    here: Vec<String>,
     /// the QR code that sets Larix to send here, and its link
     qr: Option<(String, image::Handle)>,
     /// the space free in the folder of the recordings
@@ -184,7 +198,9 @@ impl LiveScreen {
             requested: 0,
             error: None,
             form: Form::new("", vec![]),
-            here: None,
+            network_row: 0,
+            chosen: None,
+            here: vec![],
             qr: None,
             free,
         }
@@ -192,7 +208,7 @@ impl LiveScreen {
 
     /// The QR code for the address written, made again when it changes.
     fn refresh_qr(&mut self) {
-        let host = self.here.clone().unwrap_or_else(|| "127.0.0.1".to_string());
+        let host = self.host();
         let link = match self.written() {
             Some(Source::Receiver(r)) => Some(rtmp::larix_link(&r.address(&host))),
             _ => None,
@@ -206,12 +222,19 @@ impl LiveScreen {
         }
     }
 
-    /// The form of the source on the network: as used last time, its
+    /// This computer on the network the apps find first; itself, if none.
+    fn host(&self) -> String {
+        self.here
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "127.0.0.1".to_string())
+    }
+
+    /// The form of the source on the network: as used before, its
     /// password from the keychain; the authentication on if it had a user.
-    fn network_form(&self, s: &Strings) -> Form {
-        let saved = self.config.network.clone().unwrap_or_default();
+    fn network_form(saved: &SavedNetwork, s: &Strings) -> Form {
         let kept = super::kept_password(&saved.url, &saved.username).unwrap_or_default();
-        let (url, password) = given_back(&saved, kept);
+        let (url, password) = given_back(saved, kept);
         let asked = !saved.username.is_empty();
         let mut form = Form::new(
             s.source_network,
@@ -219,8 +242,9 @@ impl LiveScreen {
                 Field::text(s.network_address, url)
                     .placeholder("rtsp://192.168.1.20:554/stream1")
                     .hint(s.network_address_hint),
+                Field::text(s.name, saved.name.clone()).hint(s.source_name_hint),
                 Field::check(s.authentication, asked, false).hint(s.authentication_hint),
-                Field::text(s.username, saved.username),
+                Field::text(s.username, saved.username.clone()),
                 Field::secret(s.password, password).hint(s.password_kept),
             ],
         );
@@ -237,7 +261,7 @@ impl LiveScreen {
     fn network_fields(form: &Form) -> std::ops::Range<usize> {
         let rtmp = network::parse(&form.text(ADDRESS)).is_ok_and(|(_, p, _)| p == Protocol::Rtmp);
         match (rtmp, Self::authenticated(form)) {
-            (true, _) => ADDRESS..AUTHENTICATION,
+            (true, _) => ADDRESS..NAME + 1,
             (false, false) => ADDRESS..USERNAME,
             (false, true) => ADDRESS..PASSWORD + 1,
         }
@@ -301,8 +325,36 @@ impl LiveScreen {
                 let key = self.form.text(KEY).trim().to_string();
                 (port > 0 && !key.is_empty()).then_some(Source::Receiver(Receiver { port, key }))
             }
-            Step::Source | Step::Camera => None,
+            Step::Source | Step::Camera | Step::Networks => None,
         }
+    }
+
+    /// The source on the network written, first in the list for next
+    /// time (in place of the one chosen), its password in the keychain;
+    /// the passwords of the ones gone forgotten.
+    fn remember_network(&mut self, network: &NetworkSource) {
+        let (url, password) = kept_apart(network);
+        let used = SavedNetwork {
+            name: self.form.text(NAME).trim().to_string(),
+            url,
+            username: network.username.clone(),
+        };
+        let gone = self.config.use_network(used.clone(), self.chosen);
+        self.chosen = Some(0);
+        self.network_row = 0;
+        let kept = gone
+            .iter()
+            .map(|n| super::keep_password(&n.url, &n.username, ""))
+            .chain(std::iter::once(super::keep_password(
+                &used.url,
+                &used.username,
+                &password,
+            )))
+            .find_map(Result::err);
+        if let Some(e) = kept {
+            self.error = Some(e);
+        }
+        self.save_config();
     }
 
     /// The source written tried: opened, its preview as it comes. Kept
@@ -318,25 +370,16 @@ impl LiveScreen {
         self.status = None;
         self.requested = 0;
         match &source {
-            Source::Network(network) => {
-                let (url, password) = kept_apart(network);
-                self.config.network = Some(SavedNetwork {
-                    url: url.clone(),
-                    username: network.username.clone(),
-                });
-                if let Err(e) = super::keep_password(&url, &network.username, &password) {
-                    self.error = Some(e);
-                }
-            }
+            Source::Network(network) => self.remember_network(network),
             Source::Receiver(receiver) => {
                 self.config.receiver = Some(SavedReceiver {
                     port: receiver.port,
                     key: receiver.key.clone(),
                 });
+                self.save_config();
             }
             Source::Camera(_) => {}
         }
-        self.save_config();
         self.capture = Some(Capture::open(source));
     }
 
@@ -352,7 +395,7 @@ impl LiveScreen {
     pub fn focus_id(&self) -> Option<iced::widget::Id> {
         match self.step {
             Step::Network | Step::Receiver => Some(self.form.focus_id()),
-            Step::Source | Step::Camera => None,
+            Step::Source | Step::Camera | Step::Networks => None,
         }
     }
 
@@ -386,21 +429,52 @@ impl LiveScreen {
                 self.step = Step::Camera;
                 Outcome::AskPermission
             }
+            // the ones used before to choose from, if any
             Kind::Network => {
-                self.form = self.network_form(s);
-                self.step = Step::Network;
+                match self.config.networks.is_empty() {
+                    true => self.open_network(None, s),
+                    false => {
+                        self.network_row = 0;
+                        self.step = Step::Networks;
+                    }
+                }
                 Outcome::Stay
             }
             // listening at once: the app sends when it likes
             Kind::Receiver => {
                 self.form = self.receiver_form(s);
                 self.step = Step::Receiver;
-                self.here = rtmp::this_computer().map(|ip| ip.to_string());
+                self.here = rtmp::these_computers()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
                 self.try_written(s);
                 self.refresh_qr();
                 Outcome::Stay
             }
         }
+    }
+
+    /// The source `i` of the list in the form; none, a new one.
+    fn open_network(&mut self, i: Option<usize>, s: &Strings) {
+        let saved = i
+            .and_then(|i| self.config.networks.get(i))
+            .cloned()
+            .unwrap_or_default();
+        self.chosen = i.filter(|i| *i < self.config.networks.len());
+        self.form = Self::network_form(&saved, s);
+        self.step = Step::Network;
+    }
+
+    /// The source `i` out of the list, its password out of the keychain.
+    fn forget_network(&mut self, i: usize) {
+        if let Some(gone) = self.config.forget_network(i) {
+            if let Err(e) = super::keep_password(&gone.url, &gone.username, "") {
+                self.error = Some(e);
+            }
+            self.save_config();
+        }
+        self.network_row = self.network_row.min(self.config.networks.len());
     }
 
     fn refresh(&mut self) {
@@ -456,15 +530,19 @@ impl LiveScreen {
     }
 
     fn back(&mut self) -> Outcome {
-        match self.step {
-            Step::Camera | Step::Network | Step::Receiver => {
-                self.capture = None;
-                self.shown = None;
-                self.status = None;
+        self.capture = None;
+        self.shown = None;
+        self.status = None;
+        match (self.step, self.config.networks.is_empty()) {
+            (Step::Network, false) => {
+                self.step = Step::Networks;
+                Outcome::Stay
+            }
+            (Step::Camera | Step::Network | Step::Networks | Step::Receiver, _) => {
                 self.step = Step::Source;
                 Outcome::Stay
             }
-            Step::Source => Outcome::Back,
+            (Step::Source, _) => Outcome::Back,
         }
     }
 
@@ -537,10 +615,12 @@ impl LiveScreen {
             }
             Message::Folder(None) => {}
             Message::Start if self.can_start() && (self.step == Step::Camera || self.tried()) => {
-                return Outcome::Record;
+                return self.record();
             }
             Message::Start => {}
             Message::Tick => return self.tick(),
+            Message::Saved(i) => self.open_network(i, s),
+            Message::Forget(i) => self.forget_network(i),
             Message::Allocated(frame, handle, allocation) => {
                 let newer = self
                     .shown
@@ -558,10 +638,19 @@ impl LiveScreen {
         Outcome::Stay
     }
 
+    /// Recorded: the name of the source on the network, maybe changed
+    /// since it was tried, kept.
+    fn record(&mut self) -> Outcome {
+        if let Some(Source::Network(network)) = self.written() {
+            self.remember_network(&network);
+        }
+        Outcome::Record
+    }
+
     /// Enter on the network or the app: tried, then (seen) recorded.
     fn enter(&mut self, s: &Strings) -> Outcome {
         match (self.tried(), self.can_start()) {
-            (true, true) => Outcome::Record,
+            (true, true) => self.record(),
             (true, false) => Outcome::Stay,
             (false, _) => {
                 self.try_written(s);
@@ -597,6 +686,24 @@ impl LiveScreen {
                 self.form_outcome(outcome, s)
             }
             (_, k) if k == BACK_KEY => self.back(),
+            (Step::Networks, k) if k == key!(up) || k == key!(down) => {
+                let rows: Vec<usize> = (0..=self.config.networks.len()).collect();
+                self.network_row =
+                    ui::cycle(&rows, &self.network_row, k == key!(down)).unwrap_or(0);
+                Outcome::Stay
+            }
+            (Step::Networks, k) if k == key!(enter) => {
+                self.open_network(Some(self.network_row), s);
+                Outcome::Stay
+            }
+            (Step::Networks, k) if k == key!(n) => {
+                self.open_network(None, s);
+                Outcome::Stay
+            }
+            (Step::Networks, k) if k == key!(backspace) || k == key!(delete) => {
+                self.forget_network(self.network_row);
+                Outcome::Stay
+            }
             (Step::Source, k) if k == key!(up) || k == key!(down) => {
                 self.kind = ui::cycle(&KINDS, &self.kind, k == key!(down)).unwrap_or(self.kind);
                 Outcome::Stay
@@ -634,6 +741,12 @@ impl LiveScreen {
                 hint("Enter", s.start_recording),
                 hint("Esc", s.back),
             ],
+            Step::Networks => vec![
+                hint("↑ ↓ Enter", s.choose),
+                hint("n", s.new_source),
+                hint("⌫", &ui::capitalized(s.remove)),
+                hint("Esc", s.back),
+            ],
             Step::Network | Step::Receiver => vec![
                 hint("↑ ↓ ⇥", s.next),
                 hint(
@@ -653,9 +766,70 @@ impl LiveScreen {
         match self.step {
             Step::Source => self.source_view(s, c),
             Step::Camera => self.camera_view(s, c),
+            Step::Networks => self.networks_view(s, c),
             Step::Network => self.network_view(s, c),
             Step::Receiver => self.receiver_view(s, c),
         }
+    }
+
+    /// The sources on the network used before, the last first, each to
+    /// remove; then a new one.
+    fn networks_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let saved = self.config.networks.iter().enumerate().map(|(i, n)| {
+            // its address under its name, unless it's called by it
+            let named = n.label() != n.url;
+            let detail = match (named, n.username.is_empty()) {
+                (true, true) => n.url.clone(),
+                (true, false) => format!("{} · {}", n.url, n.username),
+                (false, _) => n.username.clone(),
+            };
+            let body = column![
+                text(n.label().to_string()).size(SIZE_BODY),
+                text(detail).size(SIZE_SMALL).color(c.muted),
+            ]
+            .spacing(4);
+            row![
+                ui::list_row(
+                    body,
+                    self.network_row == i,
+                    Some(Message::Saved(Some(i))),
+                    c
+                ),
+                ui::pill(
+                    &ui::capitalized(s.remove),
+                    false,
+                    Some(Message::Forget(i)),
+                    c
+                ),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
+        });
+        let new = ui::list_row(
+            text(s.new_source).size(SIZE_BODY),
+            self.network_row == self.config.networks.len(),
+            Some(Message::Saved(None)),
+            c,
+        );
+        let rows = Column::with_children(saved.chain(std::iter::once(new)))
+            .spacing(8)
+            .width(Length::Fixed(620.0));
+        let notice: Element<'a, Message> = match &self.error {
+            Some(e) => text(e.clone()).size(SIZE_SMALL).color(c.danger).into(),
+            None => space::vertical().height(0).into(),
+        };
+        container(ui::panel(
+            Some(s.saved_sources),
+            column![
+                iced::widget::scrollable(rows).height(Length::Shrink),
+                notice
+            ]
+            .spacing(8),
+            c,
+        ))
+        .center(Length::Fill)
+        .into()
     }
 
     /// The preview, black, with what's wrong or what's awaited in it.
@@ -758,7 +932,7 @@ impl LiveScreen {
         let status = self.status.as_ref();
         let sender = status.and_then(|st| st.sender.clone());
         let notice = self.notice(s).filter(|_| sender.is_none());
-        let host = self.here.clone().unwrap_or_else(|| "127.0.0.1".to_string());
+        let host = self.host();
         let written = match self.written() {
             Some(Source::Receiver(r)) => Some(r),
             _ => None,
@@ -774,13 +948,22 @@ impl LiveScreen {
             .spacing(2)
         };
         let address: Element<'a, Message> = match written {
-            Some(r) => column![
-                line(s.receiver_server, r.server(&host)),
-                line(s.receiver_key, r.key.clone()),
-                line(s.receiver_whole, r.address(&host)),
-            ]
-            .spacing(8)
-            .into(),
+            Some(r) => {
+                let others: Vec<String> =
+                    self.here.iter().skip(1).map(|ip| r.address(ip)).collect();
+                let also: Element<'a, Message> = match others.is_empty() {
+                    true => space::vertical().height(0).into(),
+                    false => line(s.receiver_also, others.join("\n")).into(),
+                };
+                column![
+                    line(s.receiver_server, r.server(&host)),
+                    line(s.receiver_key, r.key.clone()),
+                    line(s.receiver_whole, r.address(&host)),
+                    also,
+                ]
+                .spacing(8)
+                .into()
+            }
             None => space::vertical().height(0).into(),
         };
         let state = match (&sender, self.capture.is_some()) {
@@ -981,9 +1164,9 @@ mod tests {
         assert!(matches!(screen.key(BACK_KEY, s()), Outcome::Back));
     }
 
-    /// On the network: the address written, Enter tries it (kept for the
-    /// next time), not recorded until seen; Esc from the form back to
-    /// the kinds.
+    /// On the network, none used before: the form at once; the address
+    /// written, Enter tries it (kept for the next time), not recorded
+    /// until seen; Esc from the form back to the list, then the kinds.
     #[test]
     fn a_source_on_the_network() {
         let dir = tempfile::tempdir().unwrap();
@@ -1010,7 +1193,7 @@ mod tests {
         // nothing seen: Enter again doesn't record
         assert!(matches!(screen.key(key!(enter), s()), Outcome::Stay));
         assert!(matches!(screen.update(Message::Start, s()), Outcome::Stay));
-        let saved = LiveConfig::read(dir.path()).network.unwrap();
+        let saved = LiveConfig::read(dir.path()).networks[0].clone();
         assert_eq!(
             (saved.url.as_str(), saved.username.as_str()),
             ("127.0.0.1:1/none", "scout")
@@ -1021,9 +1204,12 @@ mod tests {
             s(),
         );
         assert!(!screen.tried());
+        // kept: Esc to the list of the sources, then to the kinds
+        assert!(matches!(screen.key(BACK_KEY, s()), Outcome::Stay));
+        assert_eq!(screen.step, Step::Networks);
+        assert!(screen.capture.is_none());
         assert!(matches!(screen.key(BACK_KEY, s()), Outcome::Stay));
         assert_eq!(screen.step, Step::Source);
-        assert!(screen.capture.is_none());
     }
 
     /// The user and the password asked for when the source had them,
@@ -1032,15 +1218,17 @@ mod tests {
     fn the_authentication() {
         let dir = tempfile::tempdir().unwrap();
         let config = LiveConfig {
-            network: Some(SavedNetwork {
+            networks: vec![SavedNetwork {
+                name: String::new(),
                 url: "127.0.0.1:1/cam".into(),
                 username: "admin".into(),
-            }),
+            }],
             ..Default::default()
         };
         config.write(dir.path()).unwrap();
         let mut screen = screen(&dir);
         screen.update(Message::Kind(Kind::Network), s());
+        screen.update(Message::Saved(Some(0)), s());
         assert_eq!(screen.form.shown, Some(ADDRESS..PASSWORD + 1));
         screen.update(
             Message::Form(form::Message::Input(
@@ -1049,7 +1237,7 @@ mod tests {
             )),
             s(),
         );
-        assert_eq!(screen.form.shown, Some(ADDRESS..AUTHENTICATION));
+        assert_eq!(screen.form.shown, Some(ADDRESS..NAME + 1));
         let Some(Source::Network(written)) = screen.written() else {
             panic!("no source");
         };
@@ -1059,6 +1247,7 @@ mod tests {
             Message::Form(form::Message::Input(ADDRESS, "127.0.0.1:1/cam".into())),
             s(),
         );
+        screen.key(key!(tab), s());
         screen.key(key!(tab), s());
         assert_eq!(screen.form.focused, AUTHENTICATION);
         screen.key(key!(space), s());
@@ -1087,7 +1276,7 @@ mod tests {
         screen.key(key!(enter), s());
         let text = std::fs::read_to_string(dir.path().join(super::super::CONFIG_FILE)).unwrap();
         assert!(!text.contains("segreta"), "{text}");
-        let saved = LiveConfig::read(dir.path()).network.unwrap();
+        let saved = LiveConfig::read(dir.path()).networks[0].clone();
         assert_eq!(saved.url, "rtmp://127.0.0.1:1/live/cam");
         // what the keychain keeps (its mock in the tests keeps nothing)
         let Some(Source::Network(written)) = screen.written() else {
@@ -1103,6 +1292,95 @@ mod tests {
             password: "p?w".into(),
         };
         assert_eq!(kept_apart(&rtsp), ("cam.local/live".into(), "p?w".into()));
+    }
+
+    fn kept(url: &str, name: &str) -> SavedNetwork {
+        SavedNetwork {
+            name: name.into(),
+            url: url.into(),
+            username: String::new(),
+        }
+    }
+
+    /// The sources used before listed, the last first: one chosen by the
+    /// keys fills the form, renamed and tried goes first in its place; a
+    /// new one; one removed; none left, the form at once.
+    #[test]
+    fn the_sources_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = LiveConfig {
+            networks: vec![kept("127.0.0.1:1/a", "Palestra"), kept("127.0.0.1:1/b", "")],
+            ..Default::default()
+        };
+        config.write(dir.path()).unwrap();
+        let mut screen = screen(&dir);
+        screen.update(Message::Kind(Kind::Network), s());
+        assert_eq!(screen.step, Step::Networks);
+        assert!(screen.focus_id().is_none());
+        // the second, then round past the new one back to the first
+        screen.key(key!(down), s());
+        assert_eq!(screen.network_row, 1);
+        screen.key(key!(enter), s());
+        assert_eq!(screen.step, Step::Network);
+        assert_eq!(screen.form.text(ADDRESS), "127.0.0.1:1/b");
+        assert_eq!(screen.form.text(NAME), "");
+        screen.update(
+            Message::Form(form::Message::Input(NAME, "Tribuna".into())),
+            s(),
+        );
+        screen.key(key!(enter), s());
+        assert!(screen.tried());
+        let names = |dir: &tempfile::TempDir| -> Vec<String> {
+            LiveConfig::read(dir.path())
+                .networks
+                .iter()
+                .map(|n| n.label().to_string())
+                .collect()
+        };
+        assert_eq!(names(&dir), vec!["Tribuna", "Palestra"]);
+        // renamed once seen, the name kept as it records
+        screen.update(
+            Message::Form(form::Message::Input(NAME, "Tribuna est".into())),
+            s(),
+        );
+        assert!(matches!(screen.record(), Outcome::Record));
+        assert_eq!(names(&dir), vec!["Tribuna est", "Palestra"]);
+        // a new one, by n: the form empty, added first
+        screen.key(BACK_KEY, s());
+        assert_eq!(screen.step, Step::Networks);
+        screen.key(key!(n), s());
+        assert_eq!(screen.form.text(ADDRESS), "");
+        screen.update(
+            Message::Form(form::Message::Input(ADDRESS, "127.0.0.1:1/c".into())),
+            s(),
+        );
+        screen.key(key!(enter), s());
+        assert_eq!(
+            names(&dir),
+            vec!["127.0.0.1:1/c", "Tribuna est", "Palestra"]
+        );
+        // the last row is the new one
+        screen.key(BACK_KEY, s());
+        screen.key(key!(up), s());
+        assert_eq!(screen.network_row, 3);
+        screen.key(key!(enter), s());
+        assert_eq!(screen.form.text(ADDRESS), "");
+        assert_eq!(screen.chosen, None);
+        // removed: by the keys, by the mouse
+        screen.key(BACK_KEY, s());
+        screen.key(key!(down), s());
+        assert_eq!(screen.network_row, 0);
+        screen.key(key!(delete), s());
+        assert_eq!(names(&dir), vec!["Tribuna est", "Palestra"]);
+        screen.update(Message::Forget(1), s());
+        screen.update(Message::Forget(0), s());
+        assert!(names(&dir).is_empty());
+        assert_eq!(screen.network_row, 0);
+        // none left: Esc to the kinds, and the form at once
+        screen.key(BACK_KEY, s());
+        assert_eq!(screen.step, Step::Source);
+        screen.update(Message::Kind(Kind::Network), s());
+        assert_eq!(screen.step, Step::Network);
     }
 
     /// An app sending: listening at once on the port and with the key of

@@ -444,6 +444,10 @@ pub struct Strings {
     pub receiver_whole: &'static str,
     pub receiver_firewall: &'static str,
     pub receiver_qr: &'static str,
+    pub saved_sources: &'static str,
+    pub new_source: &'static str,
+    pub source_name_hint: &'static str,
+    pub receiver_also: &'static str,
 }
 
 const EN: Strings = Strings {
@@ -894,6 +898,10 @@ What did you expect instead?
     receiver_whole: "Whole address",
     receiver_firewall: "The computer may ask whether the app can accept connections: allow it",
     receiver_qr: "Frame it with the phone: Larix opens with the connection ready (other apps: the address below)",
+    saved_sources: "Saved sources",
+    new_source: "New source",
+    source_name_hint: "To find it in the list; empty, its address",
+    receiver_also: "From the other networks of this computer (Ethernet, Wi-Fi)",
 };
 
 const IT: Strings = Strings {
@@ -1344,6 +1352,10 @@ Cosa ti aspettavi invece?
     receiver_whole: "Indirizzo completo",
     receiver_firewall: "Il computer potrebbe chiedere se l'app può accettare connessioni: consentilo",
     receiver_qr: "Inquadralo con il telefono: Larix si apre con la connessione già pronta (altre app: l'indirizzo sotto)",
+    saved_sources: "Sorgenti salvate",
+    new_source: "Nuova sorgente",
+    source_name_hint: "Per ritrovarla nell'elenco; vuoto, il suo indirizzo",
+    receiver_also: "Dalle altre reti di questo computer (Ethernet, Wi-Fi)",
 };
 
 const PT: Strings = Strings {
@@ -1794,6 +1806,10 @@ O que você esperava?
     receiver_whole: "Endereço completo",
     receiver_firewall: "O computador pode perguntar se o app pode aceitar conexões: permita",
     receiver_qr: "Aponte o celular: o Larix abre com a conexão pronta (outros apps: o endereço abaixo)",
+    saved_sources: "Fontes salvas",
+    new_source: "Nova fonte",
+    source_name_hint: "Para encontrá-la na lista; vazio, o seu endereço",
+    receiver_also: "Das outras redes deste computador (Ethernet, Wi-Fi)",
 };
 
 const PL: Strings = Strings {
@@ -2244,6 +2260,10 @@ Czego się spodziewałeś(-aś)?
     receiver_whole: "Pełny adres",
     receiver_firewall: "Komputer może zapytać, czy aplikacja może przyjmować połączenia: zezwól",
     receiver_qr: "Zeskanuj telefonem: Larix otworzy się z gotowym połączeniem (inne aplikacje: adres poniżej)",
+    saved_sources: "Zapisane źródła",
+    new_source: "Nowe źródło",
+    source_name_hint: "Aby znaleźć je na liście; puste: jego adres",
+    receiver_also: "Z innych sieci tego komputera (Ethernet, Wi-Fi)",
 };
 
 const JA: Strings = Strings {
@@ -2683,6 +2703,10 @@ const JA: Strings = Strings {
     receiver_whole: "完全なアドレス",
     receiver_firewall: "コンピューターが接続の受け入れを確認することがあります。許可してください",
     receiver_qr: "スマホで読み取ると、接続設定済みの Larix が開きます(他のアプリは下のアドレス)",
+    saved_sources: "保存したソース",
+    new_source: "新しいソース",
+    source_name_hint: "一覧で見分けるための名前(空欄ならアドレス)",
+    receiver_also: "このコンピューターの他のネットワークから(Ethernet、Wi-Fi)",
 };
 
 pub const fn strings(language: LanguageEnum) -> &'static Strings {
