@@ -1,0 +1,5 @@
+- Montagem da equipe: um vídeo com as ações de um período, partida após partida, com resumo do que ficou de fora.
+- Faixa dos clipes sob a barra do vídeo: toque num clipe para reproduzi-lo, ou num ponto para ir até lá.
+- Salto das setas e margem do modo clipe escolhidos nas configurações.
+- Fontes ao vivo (desktop): HLS, RTMPS, fontes de rede salvas, verificação de espaço livre.
+- Correção: o vídeo da ação volta depois que o app é fechado em segundo plano.

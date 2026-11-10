@@ -1,0 +1,5 @@
+- Team montage: one video with the actions of a team over a period, match after match, with a summary of what is left out.
+- Strip of the clips under the video bar: tap a clip to play it, or anywhere to jump there.
+- Choose the jump of the arrows and the lead out of clip mode in the settings.
+- Live sources (desktop): HLS, RTMPS, saved network sources, free-space check while recording.
+- Fix: the action video comes back after the app is closed in the background.

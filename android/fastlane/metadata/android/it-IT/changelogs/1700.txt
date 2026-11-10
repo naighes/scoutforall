@@ -1,0 +1,5 @@
+- Montaggio della squadra: un video con le azioni di un periodo, partita dopo partita, con il riepilogo di ciò che resta fuori.
+- Striscia delle clip sotto la barra del video: tocca una clip per riprodurla, o un punto per andarci.
+- Salto delle frecce e margine della modalità clip scelti nelle impostazioni.
+- Sorgenti live (desktop): HLS, RTMPS, sorgenti di rete salvate, controllo dello spazio libero.
+- Correzione: il video dell'azione ritorna dopo la chiusura dell'app in background.

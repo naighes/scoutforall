@@ -1,0 +1,5 @@
+- Montaż drużyny: jeden film z akcjami drużyny z wybranego okresu, mecz po meczu, z podsumowaniem tego, co pominięto.
+- Pasek klipów pod paskiem wideo: dotknij klipu, aby go odtworzyć, lub dowolnego miejsca, aby tam przeskoczyć.
+- Skok strzałek i zakończenie trybu klipu wybierane w ustawieniach.
+- Źródła na żywo (komputer): HLS, RTMPS, zapisane źródła sieciowe, kontrola wolnego miejsca podczas nagrywania.
+- Poprawka: wideo akcji wraca po zamknięciu aplikacji w tle.
