@@ -11,6 +11,7 @@ use {
         advanced::image::Allocation,
         widget::{container, image},
     },
+    scout4all_keys::{KeyCombination, PREVIEW_KEY},
     std::sync::Arc,
 };
 
@@ -120,6 +121,18 @@ pub fn window_wanted(asked: bool, status: Option<&Status>) -> bool {
     asked && status.is_some_and(|s| s.recording.is_some())
 }
 
+/// Whether the window of the recording is asked for after a key: the
+/// fixed one (`PREVIEW_KEY`, F4) opens and closes it while recording,
+/// whatever the screen; any other key, or no recording, leaves it to the
+/// screen (`None`).
+pub fn asked_after_key(asked: bool, ck: &KeyCombination, status: Option<&Status>) -> Option<bool> {
+    let recording = status.is_some_and(|s| s.recording.is_some());
+    match (*ck == PREVIEW_KEY, recording) {
+        (true, true) => Some(!asked),
+        _ => None,
+    }
+}
+
 /// The task giving the renderer a frame, then `done` with it.
 pub fn allocate<M: Send + 'static>(
     frame: Arc<Picture>,
@@ -181,5 +194,22 @@ mod tests {
         assert!(!window_wanted(false, Some(&recording)));
         assert!(!window_wanted(true, Some(&saving)));
         assert!(!window_wanted(true, None));
+    }
+
+    /// F4 opens and closes the window while recording; not otherwise, nor
+    /// other keys: they stay with the screen.
+    #[test]
+    fn the_window_from_its_key() {
+        use scout4all_keys::key;
+        let recording = Status {
+            recording: Some(super::super::capture::Recording { elapsed_ms: 1 }),
+            ..Status::default()
+        };
+        let f4 = key!(f4);
+        assert_eq!(asked_after_key(false, &f4, Some(&recording)), Some(true));
+        assert_eq!(asked_after_key(true, &f4, Some(&recording)), Some(false));
+        assert_eq!(asked_after_key(false, &f4, Some(&Status::default())), None);
+        assert_eq!(asked_after_key(false, &f4, None), None);
+        assert_eq!(asked_after_key(false, &key!(f3), Some(&recording)), None);
     }
 }

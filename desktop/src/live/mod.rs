@@ -4,6 +4,7 @@
 //! clock.
 
 pub mod capture;
+pub mod hls;
 pub mod network;
 pub mod picture;
 pub mod preview;

@@ -153,6 +153,8 @@ pub struct Status {
     pub sender: Option<String>,
     /// as it comes from a source on the network, once counted
     pub bits_per_second: Option<u64>,
+    /// how long before they come its frames were taken (HLS)
+    pub late_ms: Option<u64>,
 }
 
 /// Where the video comes from.
@@ -342,6 +344,9 @@ pub(super) struct Take {
     free: fn(&Path) -> Option<u64>,
     /// stopping: the disk almost full
     pub(super) out_of_space: bool,
+    /// its first frame taken this long before it came (HLS): the
+    /// recording started as much before
+    late_ms: Option<u64>,
 }
 
 impl Take {
@@ -367,7 +372,13 @@ impl Take {
             written: 0,
             free,
             out_of_space: false,
+            late_ms: None,
         })
+    }
+
+    /// How late its first frame came: `late`, the first time asked.
+    pub(super) fn late_ms(&mut self, late: u64) -> u64 {
+        *self.late_ms.get_or_insert(late)
     }
 
     /// The milliseconds since it started.
@@ -429,15 +440,17 @@ impl Take {
         drop(self.raw);
         let mp4 = self.base.with_extension("mp4");
         let result = flushed.and_then(|()| raw::remux(&self.base, &mp4));
-        // the video starts at its first keyframe: when it was taken
+        // the video starts at its first keyframe: when it was taken,
+        // the frames late as they came (HLS) taken before
         let skipped = result.as_ref().map_or(0, |r| r.skipped_ms);
+        let skipped = i64::try_from(skipped).unwrap_or(0)
+            - i64::try_from(self.late_ms.unwrap_or(0)).unwrap_or(0);
         Done {
             result,
             mp4,
             out_of_space: self.out_of_space,
             base: self.base,
-            started: self.started
-                + chrono::TimeDelta::milliseconds(i64::try_from(skipped).unwrap_or(0)),
+            started: self.started + chrono::TimeDelta::milliseconds(skipped),
         }
     }
 }

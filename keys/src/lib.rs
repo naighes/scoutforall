@@ -26,6 +26,9 @@ pub const UNDO_KEY: KeyCombination = key!(shift - u);
 pub const BACK_KEY: KeyCombination = key!(esc);
 /// Shows the statistics while scouting, and closes them.
 pub const STATS_KEY: KeyCombination = key!(f3);
+/// Opens the preview of the recording in a window of its own, and closes
+/// it: on every screen of the desktop app, while recording.
+pub const PREVIEW_KEY: KeyCombination = key!(f4);
 
 /// Move the cursor on the court where the ball went, while evaluating.
 pub const ZONE_CURSOR_KEYS: [KeyCombination; 4] = [key!(left), key!(up), key!(down), key!(right)];
@@ -36,7 +39,7 @@ pub const ZONE_KEY: KeyCombination = key!(space);
 pub const BLOCKERS_KEY: KeyCombination = key!(tab);
 
 /// Whether the key is one scouting keeps for itself all along (settings, undo,
-/// back and statistics) or along with the evaluations (the court where the
+/// back, statistics and the preview of the recording) or along with the evaluations (the court where the
 /// ball went, how many blocked): it can't be assigned to anything.
 pub fn is_reserved_key(ck: &KeyCombination) -> bool {
     [
@@ -44,6 +47,7 @@ pub fn is_reserved_key(ck: &KeyCombination) -> bool {
         UNDO_KEY,
         BACK_KEY,
         STATS_KEY,
+        PREVIEW_KEY,
         ZONE_KEY,
         BLOCKERS_KEY,
     ]
@@ -613,12 +617,13 @@ fn test_fixed_keys() {
         key!(esc),
         key!(f2),
         key!(f3),
+        key!(f4),
         key!('0'),
         key!('9'),
     ] {
         assert!(is_fixed_key(&ck), "{ck}");
     }
-    for ck in [key!(a), key!(u), key!(f4), key!('+'), key!(ctrl - '1')] {
+    for ck in [key!(a), key!(u), key!(f5), key!('+'), key!(ctrl - '1')] {
         assert!(!is_fixed_key(&ck), "{ck}");
     }
 }

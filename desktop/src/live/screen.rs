@@ -132,10 +132,15 @@ pub struct LiveScreen {
 }
 
 /// The problem of a source on the network, in the user's words.
+/// How late, in seconds with a tenth: "7.5".
+fn late_seconds(ms: u64) -> String {
+    format!("{}.{}", ms / 1000, ms % 1000 / 100)
+}
+
 pub fn problem_text(problem: &Problem, s: &Strings) -> String {
     match problem {
         Problem::Invalid => s.problem_invalid.to_string(),
-        Problem::NotYet(p) => ui::fill(s.problem_not_yet, &[p.name().to_string()]),
+        Problem::Ended => s.problem_ended.to_string(),
         Problem::Unreachable => s.problem_unreachable.to_string(),
         Problem::Refused => s.problem_refused.to_string(),
         Problem::NotFound => s.problem_not_found.to_string(),
@@ -838,7 +843,15 @@ impl LiveScreen {
             .as_ref()
             .and_then(|st| st.size)
             .filter(|_| self.preview.is_shown())
-            .map(|(w, h)| format!("H.264 · {w}×{h} · {}", s.as_it_comes))
+            .map(|(w, h)| {
+                let late = self
+                    .status
+                    .as_ref()
+                    .and_then(|st| st.late_ms)
+                    .map(|ms| format!(" · {}", ui::fill(s.late_made_up, &[late_seconds(ms)])))
+                    .unwrap_or_default();
+                format!("H.264 · {w}×{h} · {}{late}", s.as_it_comes)
+            })
             .unwrap_or_default()
     }
 

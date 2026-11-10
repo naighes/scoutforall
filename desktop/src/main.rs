@@ -782,6 +782,17 @@ impl App {
                 self.preview_asked = !self.preview_asked;
                 Task::none()
             }
+            Message::Key(ck)
+                if live::preview::asked_after_key(
+                    self.preview_asked,
+                    &ck,
+                    self.recorder_status.as_ref(),
+                )
+                .is_some() =>
+            {
+                self.preview_asked = !self.preview_asked;
+                Task::none()
+            }
             Message::PreviewTick => self.preview_tick(),
             Message::PreviewAllocated(frame, handle, allocation) => {
                 self.recording_preview.allocated(frame, handle, allocation);
@@ -1485,8 +1496,10 @@ impl App {
                 }),
                 status,
             ) if status == event::Status::Ignored
-                // Esc leaves a form also from a text field, which takes it
-                || modified_key == keyboard::Key::Named(keyboard::key::Named::Escape) =>
+                // Esc leaves a form also from a text field, which takes it;
+                // F4 opens the preview of the recording from anywhere
+                || modified_key == keyboard::Key::Named(keyboard::key::Named::Escape)
+                || modified_key == keyboard::Key::Named(keyboard::key::Named::F4) =>
             {
                 keymap::combination(&modified_key, modifiers).map(Message::Key)
             }

@@ -6086,6 +6086,7 @@ dependencies = [
  "openh264",
  "qrcode",
  "raw-window-handle",
+ "reqwest",
  "resvg 0.45.1",
  "retina",
  "rfd",

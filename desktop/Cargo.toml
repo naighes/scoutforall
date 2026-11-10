@@ -24,6 +24,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 retina = "0.4"
+# HLS: its playlists and segments (`live::hls`)
+reqwest.workspace = true
 url = "2"
 if-addrs = "0.15"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
