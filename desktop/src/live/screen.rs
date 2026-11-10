@@ -155,14 +155,41 @@ pub fn problem_text(problem: &Problem, s: &Strings) -> String {
     }
 }
 
-/// The address of a source on the network to keep, and what goes in the
-/// keychain: its password; for RTMP, the query of its address (a user, a
-/// password in it), not kept in a file.
-fn kept_apart(network: &NetworkSource) -> (String, String) {
-    let rtmp = network::parse(&network.url).is_ok_and(|(_, p, _)| p == Protocol::Rtmp);
-    match (rtmp, network.url.split_once('?')) {
-        (true, Some((url, query))) => (url.to_string(), format!("?{query}")),
-        _ => (network.url.clone(), network.password.clone()),
+/// The address of a source on the network to keep, its user, and what
+/// goes in the keychain: its password; for RTMP, the query of its address
+/// (a user, a password in it), not kept in a file. A user and a password
+/// in the address (`rtsp://user:password@…`) taken out of it: the user
+/// and the password, unless written apart (RTMP doesn't use them).
+fn kept_apart(network: &NetworkSource) -> (String, String, String) {
+    let parsed = network::parse(&network.url).ok();
+    let rtmp = matches!(parsed, Some((_, Protocol::Rtmp, _)));
+    let in_url = parsed.and_then(|(_, _, user)| user);
+    let url = without_login(&network.url);
+    match (
+        rtmp,
+        url.split_once('?'),
+        network.username.is_empty(),
+        in_url,
+    ) {
+        (true, Some((url, query)), _, _) => (url.to_string(), String::new(), format!("?{query}")),
+        (false, _, true, Some((username, password))) => (url, username, password),
+        _ => (url, network.username.clone(), network.password.clone()),
+    }
+}
+
+/// The address as written without the user and the password in it.
+fn without_login(written: &str) -> String {
+    let (scheme, rest) = written
+        .split_once("://")
+        .map_or(("", written), |(scheme, rest)| (scheme, rest));
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at_checked(end).unwrap_or((rest, ""));
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    match scheme {
+        "" => format!("{host}{tail}"),
+        scheme => format!("{scheme}://{host}{tail}"),
     }
 }
 
@@ -330,11 +357,11 @@ impl LiveScreen {
     /// time (in place of the one chosen), its password in the keychain;
     /// the passwords of the ones gone forgotten.
     fn remember_network(&mut self, network: &NetworkSource) {
-        let (url, password) = kept_apart(network);
+        let (url, username, password) = kept_apart(network);
         let used = SavedNetwork {
             name: self.form.text(NAME).trim().to_string(),
             url,
-            username: network.username.clone(),
+            username,
         };
         let gone = self.config.use_network(used.clone(), self.chosen);
         self.chosen = Some(0);
@@ -1249,7 +1276,7 @@ mod tests {
         let Some(Source::Network(written)) = screen.written() else {
             panic!("no source");
         };
-        let (_, kept) = kept_apart(&written);
+        let (_, _, kept) = kept_apart(&written);
         assert_eq!(kept, "?user=scout&pass=segreta");
         assert_eq!(given_back(&saved, kept), (url.to_string(), String::new()));
         // RTSP: its own password, the address as it is
@@ -1258,7 +1285,62 @@ mod tests {
             username: "admin".into(),
             password: "p?w".into(),
         };
-        assert_eq!(kept_apart(&rtsp), ("cam.local/live".into(), "p?w".into()));
+        assert_eq!(
+            kept_apart(&rtsp),
+            ("cam.local/live".into(), "admin".into(), "p?w".into())
+        );
+    }
+
+    /// The user and the password written in the address of a source
+    /// saved without a name: out of the address, so out of the file and of
+    /// the list; the user and the password of the source (unless written
+    /// apart, RTMP not using them).
+    #[test]
+    fn the_login_in_the_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = screen(&dir);
+        screen.update(Message::Kind(Kind::Network), s());
+        let url = "rtsp://admin:segreta@127.0.0.1:1/live";
+        screen.update(
+            Message::Form(form::Message::Input(ADDRESS, url.into())),
+            s(),
+        );
+        screen.key(key!(enter), s());
+        let text = std::fs::read_to_string(dir.path().join(super::super::CONFIG_FILE)).unwrap();
+        assert!(!text.contains("segreta"), "{text}");
+        let saved = LiveConfig::read(dir.path()).networks[0].clone();
+        assert_eq!(saved.label(), "rtsp://127.0.0.1:1/live");
+        assert_eq!(saved.username, "admin");
+        let source = |url: &str, username: &str, password: &str| NetworkSource {
+            url: url.into(),
+            username: username.into(),
+            password: password.into(),
+        };
+        let apart = |url: &str, username: &str, password: &str| {
+            (url.to_string(), username.to_string(), password.to_string())
+        };
+        assert_eq!(
+            kept_apart(&source(url, "", "")),
+            apart("rtsp://127.0.0.1:1/live", "admin", "segreta")
+        );
+        // no scheme, a user without a password, an @ in the path
+        assert_eq!(
+            kept_apart(&source("scout@cam.local/a@b", "", "")),
+            apart("cam.local/a@b", "scout", "")
+        );
+        // the ones apart used: the ones in the address only dropped
+        assert_eq!(
+            kept_apart(&source(url, "scout", "altra")),
+            apart("rtsp://127.0.0.1:1/live", "scout", "altra")
+        );
+        assert_eq!(
+            kept_apart(&source("https://u:p@cam.local/live.m3u8?t=1", "", "")),
+            apart("https://cam.local/live.m3u8?t=1", "u", "p")
+        );
+        assert_eq!(
+            kept_apart(&source("rtmp://u:p@cam.local/live?k=1", "", "")),
+            apart("rtmp://cam.local/live", "", "?k=1")
+        );
     }
 
     fn kept(url: &str, name: &str) -> SavedNetwork {
