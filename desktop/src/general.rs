@@ -239,7 +239,7 @@ impl General {
                     .set_analytics_enabled(on)
                     .map(|()| {
                         if on {
-                            send_statistics(self.core.clone());
+                            self.core.send_uploads();
                         }
                     })
                     .map_err(|e| e.to_string())
@@ -445,14 +445,6 @@ pub fn terms_view<'a, M: 'a>(
     ]
     .height(Length::Fill)
     .into()
-}
-
-/// Sends the matches queued, on a thread of its own: it blocks while the
-/// network answers. Nothing to do when the statistics are off.
-pub fn send_statistics(core: Arc<Scout4All>) {
-    std::thread::spawn(move || {
-        let _ = core.upload_pending();
-    });
 }
 
 #[cfg(test)]

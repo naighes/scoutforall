@@ -25,6 +25,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 scout4all-core.workspace = true
 serde.workspace = true

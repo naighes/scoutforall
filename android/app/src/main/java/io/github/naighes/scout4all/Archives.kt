@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.ArchivePreview
 import io.github.naighes.scout4all.core.ExportedArchive
 import io.github.naighes.scout4all.core.MobileException
@@ -168,11 +169,13 @@ fun rememberImport(
                     when (into) {
                         null -> {
                             val id = app.core { it.importTeam(c.bytes, c.fileName) }
+                            app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
                             onTeam(id)
                             R.string.team_imported
                         }
                         else -> {
                             val m = app.core { it.importMatch(c.bytes, into) }
+                            app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
                             onMatch(into, m)
                             R.string.match_imported
                         }

@@ -345,9 +345,10 @@ impl App {
             }
         }
         app.terms = (!quiet && !app.core.terms_seen()).then(|| app.core.terms());
-        // the matches queued while offline, sent now
+        // the matches queued while offline sent now, the next ones as they
+        // are queued, again with a backoff while some are left
         if !quiet {
-            general::send_statistics(app.core.clone());
+            app.core.send_in_background();
         }
         let _ = app.go(Go::Home);
         app
@@ -724,7 +725,7 @@ impl App {
                 // not saved: shown again at the next start, as the TUI
                 let _ = self.core.accept_terms();
                 self.terms = None;
-                general::send_statistics(self.core.clone());
+                self.core.send_uploads();
             }
             (_, true, _) => {
                 let on = self.core.analytics_enabled();

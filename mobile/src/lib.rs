@@ -29,7 +29,7 @@ use scout4all_core::{
     event_edit::{EditField, EventEdit},
     example,
     localization::{Labels, Language},
-    logging::logger::{init_logger, log_error},
+    logging::logger::{init_logger, log_error, log_info},
     match_form::{MatchForm, MatchFormError},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
     player_form::{self, PlayerForm, PlayerFormError},
@@ -80,6 +80,7 @@ use scout4all_core::{
     trend::{Replay, Series, TrendPoint},
     video::{EventRef, StoredProfile, VideoProfile, place, read_profile, write_profile},
 };
+use sender::{FIRST_RETRY, LAST_RETRY, UploadSender};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
 use std::{
@@ -96,6 +97,7 @@ use uuid::Uuid;
 uniffi::setup_scaffolding!();
 
 mod analysis;
+pub mod sender;
 pub use analysis::*;
 pub mod strip;
 pub mod video;
@@ -2946,6 +2948,8 @@ pub struct Scout4All {
     queue: Arc<UploadQueueManager>,
     /// whether the user allows the statistics, as in `config.json`
     uploads_enabled: Arc<AtomicBool>,
+    /// sends the queue in the background, once `send_in_background`
+    sender: Arc<UploadSender>,
 }
 
 type UploadQueueManager = QueueManager<StoreQueueReader, StoreQueueWriter>;
@@ -2972,6 +2976,7 @@ impl Scout4All {
                 Arc::new(StoreQueueWriter::new(store.clone())),
             )),
             uploads_enabled: Arc::new(AtomicBool::new(false)),
+            sender: UploadSender::new(FIRST_RETRY, LAST_RETRY),
             team_reader: StoreTeamReader::new(store.clone(), language.clone()),
             team_writer: StoreTeamWriter::new(store.clone()),
             match_writer: StoreMatchWriter::new(store.clone()),
@@ -3709,6 +3714,7 @@ impl Scout4All {
             &self.team_writer,
             self.language.labels(),
         ))?;
+        self.sender.request();
         Ok(team.id.to_string())
     }
 
@@ -3808,6 +3814,7 @@ impl Scout4All {
             &*self.set_writer,
             &*self.finished_matches(),
         ))?;
+        self.sender.request();
         Ok(DvwImported {
             team_id: team.team.id.to_string(),
             match_id: m.id,
@@ -3825,6 +3832,7 @@ impl Scout4All {
             &*self.set_writer,
             self.language.labels(),
         ))?;
+        self.sender.request();
         Ok(m.id)
     }
 
@@ -3996,10 +4004,57 @@ impl Scout4All {
     /// built without the URL of the API. It blocks for a while: the system
     /// calls it in the background, when there's a network.
     pub fn upload_pending(&self) -> Uploads {
+        let consent = self.read_config().map(|config| config.consent);
         match (self.uploads_enabled.load(Ordering::Relaxed), upload_url()) {
             (true, Some(url)) => self.upload_pending_to(&url),
-            _ => Uploads::Done,
+            (true, None) => {
+                log_info("statistics not sent: the app was built without ANALYTICS_UPLOAD_URL");
+                Uploads::Done
+            }
+            (false, _) => {
+                let why = match consent {
+                    Ok(c) if !c.terms_seen() => "the terms of use are not accepted",
+                    Ok(_) => "the user turned them off",
+                    Err(_) => "the settings can't be read",
+                };
+                log_info(&format!("statistics not sent: {why}"));
+                Uploads::Done
+            }
         }
+    }
+}
+
+impl Scout4All {
+    /// Sends the queue now and whenever a match is queued (finished,
+    /// imported), again with a backoff while some are left, until the app
+    /// closes: the desktop app, which has no WorkManager. Once is enough.
+    pub fn send_in_background(self: &Arc<Self>) {
+        let core = Arc::downgrade(self);
+        self.sender.start(Box::new(move || {
+            core.upgrade()
+                .map_or(Uploads::Done, |core| core.upload_pending())
+        }));
+    }
+
+    /// Sends the queue in the background now, as a match queued does: after
+    /// the terms accepted or the statistics turned on. Nothing before
+    /// `send_in_background`.
+    pub fn send_uploads(&self) {
+        self.sender.request();
+    }
+}
+
+/// The queue of the core, which then asks the sender to send it.
+struct SentFinishedMatches {
+    queued: QueuedFinishedMatches<StoreQueueReader, StoreQueueWriter>,
+    sender: Arc<UploadSender>,
+}
+
+#[async_trait::async_trait]
+impl FinishedMatches for SentFinishedMatches {
+    async fn finished(&self, team_id: Uuid, match_id: String) {
+        self.queued.finished(team_id, match_id).await;
+        self.sender.request();
     }
 }
 
@@ -4119,9 +4174,12 @@ impl Scout4All {
     /// Where the scouting sends a finished match: the queue, if the user
     /// allows the statistics.
     fn finished_matches(&self) -> Arc<dyn FinishedMatches> {
-        Arc::new(QueuedFinishedMatches {
-            queue: self.queue.clone(),
-            enabled: self.uploads_enabled.clone(),
+        Arc::new(SentFinishedMatches {
+            queued: QueuedFinishedMatches {
+                queue: self.queue.clone(),
+                enabled: self.uploads_enabled.clone(),
+            },
+            sender: self.sender.clone(),
         })
     }
 
@@ -7075,6 +7133,157 @@ mod tests {
             Uploads::Retry
         );
         assert_eq!(queued(&dir), vec![(m, 1)]);
+    }
+
+    /// The API of the uploads, on a thread: `POST` answers with the signed
+    /// URL, where `PUT` takes the archive. It fails while `down`.
+    struct FakeApi {
+        url: String,
+        down: Arc<AtomicBool>,
+        /// the archives put
+        puts: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl FakeApi {
+        fn start() -> FakeApi {
+            use std::io::{BufRead, BufReader, Read, Write};
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let down = Arc::new(AtomicBool::new(false));
+            let puts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (is_down, put) = (down.clone(), puts.clone());
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let mut reader = BufReader::new(stream);
+                    let mut head = vec![];
+                    loop {
+                        let mut line = String::new();
+                        match reader.read_line(&mut line) {
+                            Ok(n) if n > 0 && line != "\r\n" => head.push(line),
+                            _ => break,
+                        }
+                    }
+                    let length = head
+                        .iter()
+                        .filter_map(|l| {
+                            l.to_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                        })
+                        .next()
+                        .unwrap_or(0);
+                    let mut body = vec![0; length];
+                    let _ = reader.read_exact(&mut body);
+                    let method = head
+                        .first()
+                        .and_then(|l| l.split(' ').next())
+                        .unwrap_or("")
+                        .to_string();
+                    let status = match (is_down.load(Ordering::SeqCst), method.as_str()) {
+                        (true, _) => "503 Service Unavailable".to_string(),
+                        (false, "POST") => format!("201 Created\r\nLocation: http://{address}/put"),
+                        (false, _) => {
+                            put.fetch_add(1, Ordering::SeqCst);
+                            "200 OK".to_string()
+                        }
+                    };
+                    let _ = reader.get_mut().write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    );
+                }
+            });
+            FakeApi {
+                url: format!("http://{address}/sign"),
+                down,
+                puts,
+            }
+        }
+
+        fn puts(&self) -> usize {
+            self.puts.load(Ordering::SeqCst)
+        }
+    }
+
+    /// The core sending in the background to `url`, not the API of the build.
+    fn sending_to(app: &Arc<Scout4All>, url: String) {
+        let core = Arc::downgrade(app);
+        app.sender.start(Box::new(move || {
+            core.upgrade()
+                .map_or(Uploads::Done, |core| core.upload_pending_to(&url))
+        }));
+    }
+
+    fn eventually(what: impl Fn() -> bool) -> bool {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < end && !what() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        what()
+    }
+
+    /// A match imported from DataVolley is sent right away, without waiting
+    /// for the next start of the app.
+    #[test]
+    fn an_imported_match_is_sent_in_the_background() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let api = FakeApi::start();
+        sending_to(&app, api.url.clone());
+        assert!(eventually(|| !app.sender.running()));
+        app.import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .unwrap();
+        assert!(eventually(|| api.puts() == 1 && queued(&dir).is_empty()));
+    }
+
+    /// A finished match too, as the scouting queues it.
+    #[test]
+    fn a_finished_match_is_sent_in_the_background() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let api = FakeApi::start();
+        sending_to(&app, api.url.clone());
+        let _ = won_match(&app);
+        assert!(eventually(|| api.puts() == 1 && queued(&dir).is_empty()));
+    }
+
+    /// The API down: the match stays queued, sent at the next attempt.
+    #[test]
+    fn an_error_of_the_api_keeps_the_match_for_the_next_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let api = FakeApi::start();
+        api.down.store(true, Ordering::SeqCst);
+        sending_to(&app, api.url.clone());
+        let imported = app
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .unwrap();
+        assert!(eventually(
+            || queued(&dir) == vec![(imported.match_id.clone(), 1)]
+        ));
+        // waiting for the backoff
+        assert!(app.sender.running());
+        api.down.store(false, Ordering::SeqCst);
+        app.send_uploads();
+        assert!(eventually(|| api.puts() == 1 && queued(&dir).is_empty()));
+    }
+
+    /// Before `send_in_background` (Android, with WorkManager) nothing is
+    /// sent by the core.
+    #[test]
+    fn nothing_is_sent_in_the_background_unless_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let (_, m) = won_match(&app);
+        app.send_uploads();
+        assert!(!app.sender.running());
+        assert_eq!(queued(&dir), vec![(m, 0)]);
     }
 
     /// Three sets won by the home team ("Home", players 1 to 7, the libero

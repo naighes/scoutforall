@@ -403,12 +403,21 @@ pub async fn upload_next<QR: QueueReader + Send + Sync, QW: QueueWriter + Send +
     match read.await {
         Ok(m) => match process_single_upload(&m, store, upload_url).await {
             Ok(()) => {
+                log_info(&format!(
+                    "statistics sent: match {} after {} failed attempts",
+                    pending.match_id, pending.retry_count
+                ));
                 queue_manager
                     .dequeue(&pending.team_id, &pending.match_id)
                     .await?;
                 Ok(UploadStep::Uploaded)
             }
-            Err(_) => {
+            Err(e) => {
+                log_error(&format!(
+                    "statistics not sent: match {}, attempt {}: {e}",
+                    pending.match_id,
+                    u16::from(pending.retry_count) + 1
+                ));
                 // kept in the queue indefinitely
                 queue_manager
                     .mark_retry(&pending.team_id, &pending.match_id)
@@ -416,7 +425,11 @@ pub async fn upload_next<QR: QueueReader + Send + Sync, QW: QueueWriter + Send +
                 Ok(UploadStep::Failed)
             }
         },
-        Err(_) => {
+        Err(e) => {
+            log_error(&format!(
+                "statistics dropped: match {} can't be read: {e}",
+                pending.match_id
+            ));
             queue_manager
                 .dequeue(&pending.team_id, &pending.match_id)
                 .await?;

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.ClassificationChoice
 import io.github.naighes.scout4all.core.CountryChoice
 import io.github.naighes.scout4all.core.DvwChoice
@@ -290,6 +291,8 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
         val team = step.ready.team
         val result = try {
             val imported = app.core { it.importDvw(bytes, step.choice, overwrite) }
+            // queued for the statistics: sent now, not at the next start
+            app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
             DvwResult(team, app.getString(R.string.dvw_imported, team), imported.teamId)
         } catch (e: MobileException) {
             DvwResult(team, app.getString(R.string.dvw_not_imported, team, e.reason))
