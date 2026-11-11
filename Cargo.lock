@@ -6123,6 +6123,7 @@ dependencies = [
 name = "scout4all-mobile"
 version = "0.17.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "scout4all-core",
  "serde",

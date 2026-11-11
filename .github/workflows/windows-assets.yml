@@ -44,6 +44,11 @@ jobs:
           [ "v${version}" = "${TAG}" ] || { echo "master is ${version}, not ${TAG}"; exit 1; }
           [ "$(gh release view "${TAG}" --json isDraft --jq .isDraft)" = "false" ] || { echo "${TAG} is not published"; exit 1; }
           echo "VERSION=${version}" >> "$GITHUB_ENV"
+      - name: check the URL of the statistics
+        shell: bash
+        run: '[ -n "${ANALYTICS_UPLOAD_URL}" ] || { echo "no ANALYTICS_UPLOAD_URL: the app would send no statistics"; exit 1; }'
+        env:
+          ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
       - uses: houseabsolute/actions-rust-cross@v1
         with:
           target: ${{ matrix.target }}

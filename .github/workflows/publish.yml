@@ -97,6 +97,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: check the URL of the statistics
+        shell: bash
+        run: '[ -n "${ANALYTICS_UPLOAD_URL}" ] || { echo "no ANALYTICS_UPLOAD_URL: the app would send no statistics"; exit 1; }'
+        env:
+          ANALYTICS_UPLOAD_URL: ${{ vars.ANALYTICS_UPLOAD_URL }}
       - uses: houseabsolute/actions-rust-cross@v1
         with:
           target: ${{ matrix.platforms.target }}
