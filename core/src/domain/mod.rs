@@ -46,12 +46,14 @@ pub struct Team {
     pub deleted: bool,
 }
 
-/// A person in a team, with the team's number and role. Deleted: removed
-/// from the team, the person stays.
+/// A person in a team, with the team's number and role, at its place in
+/// the list of the team's players. Deleted: removed from the team, the
+/// person stays, and its place too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Membership {
     pub team_id: Uuid,
     pub person_id: Uuid,
+    pub position: u16,
     pub number: u8,
     pub role: Option<RoleEnum>,
     pub deleted: bool,

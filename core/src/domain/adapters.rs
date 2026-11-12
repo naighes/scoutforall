@@ -3,7 +3,8 @@
 //! interfaces use (TODO/001, step 6), from A's side.
 //!
 //! - A team is its row, its memberships and their persons: a player
-//!   removed from the team, or a person deleted, is a removed player.
+//!   removed from the team, or a person deleted, is a removed player; the
+//!   players are in the order of the places of their memberships.
 //! - A match from the files gets its id, its team B and where it came
 //!   from (`LegacyId`); its roster copies number and role from the team
 //!   (D9), the whole active team when the match has none (up to v0.10.1).
@@ -26,7 +27,7 @@ fn not_consistent(message: String) -> AppError {
     AppError::IO(IOError::Msg(message))
 }
 
-/// A team with its members, in the order of its players.
+/// A team with its members.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamRows {
     pub row: Team,
@@ -35,8 +36,25 @@ pub struct TeamRows {
 }
 
 impl TeamRows {
-    pub fn of(team: &TeamEntry) -> Self {
-        TeamRows {
+    pub fn of(team: &TeamEntry) -> Result<Self, AppError> {
+        let members = team
+            .players
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                u16::try_from(i)
+                    .map(|position| Membership {
+                        team_id: team.id,
+                        person_id: p.id,
+                        position,
+                        number: p.number,
+                        role: p.role,
+                        deleted: p.deleted,
+                    })
+                    .map_err(|_| not_consistent(format!("player {i} of team {}", team.id)))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(TeamRows {
             row: Team {
                 id: team.id,
                 name: team.name.clone(),
@@ -58,24 +76,15 @@ impl TeamRows {
                     deleted: false,
                 })
                 .collect(),
-            members: team
-                .players
-                .iter()
-                .map(|p| Membership {
-                    team_id: team.id,
-                    person_id: p.id,
-                    number: p.number,
-                    role: p.role,
-                    deleted: p.deleted,
-                })
-                .collect(),
-        }
+            members,
+        })
     }
 
     pub fn entry(&self) -> Result<TeamEntry, AppError> {
-        let players = self
-            .members
-            .iter()
+        let mut members: Vec<&Membership> = self.members.iter().collect();
+        members.sort_by_key(|m| m.position);
+        let players = members
+            .into_iter()
             .map(|m| self.player(m))
             .collect::<Result<_, _>>()?;
         Ok(TeamEntry {

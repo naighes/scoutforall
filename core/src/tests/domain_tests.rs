@@ -552,13 +552,13 @@ mod tests {
         let mut removed = 0;
         for version in LEGACY_VERSIONS {
             for team in legacy_data(version).await.teams {
-                let rows = TeamRows::of(&team);
+                let rows = TeamRows::of(&team).unwrap();
                 assert_eq!(rows.row.id, team.id);
                 assert_eq!(rows.persons.len(), team.players.len());
                 assert!(rows.members.iter().all(|m| m.team_id == team.id));
                 assert!(rows.persons.iter().all(|p| !p.deleted));
                 assert_eq!(rows.entry().unwrap(), team, "{version} {}", team.name);
-                assert_eq!(TeamRows::of(&rows.entry().unwrap()), rows);
+                assert_eq!(TeamRows::of(&rows.entry().unwrap()).unwrap(), rows);
                 players += team.players.len();
                 removed += team.players.iter().filter(|p| p.deleted).count();
             }
@@ -878,6 +878,7 @@ mod tests {
                 .map(|(i, p)| Membership {
                     team_id: team,
                     person_id: p.id,
+                    position: u16::try_from(i).unwrap(),
                     number: 7,
                     role: RoleEnum::ALL.get(i).copied(),
                     deleted: i == 2,
@@ -917,7 +918,7 @@ mod tests {
         }
         // the same number twice in the team: allowed in the database
         assert_eq!(team.players[0].number, team.players[1].number);
-        assert_eq!(TeamRows::of(&team), rows);
+        assert_eq!(TeamRows::of(&team).unwrap(), rows);
     }
 
     #[test]
@@ -948,6 +949,35 @@ mod tests {
         assert!(
             error.contains(&rows.members[1].person_id.to_string()),
             "{error}"
+        );
+    }
+
+    /// The players are in the order of the places of their memberships,
+    /// whatever the order of the rows; a removed player keeps its place.
+    #[test]
+    fn the_players_are_in_the_order_of_their_places() {
+        let mut rows = sample_team();
+        let ids = |rows: &TeamRows| -> Vec<Uuid> {
+            rows.entry().unwrap().players.iter().map(|p| p.id).collect()
+        };
+        let order: Vec<Uuid> = rows.persons.iter().map(|p| p.id).collect();
+        rows.members.reverse();
+        rows.persons.rotate_left(1);
+        assert_eq!(ids(&rows), order);
+        // the first player last
+        rows.members
+            .iter_mut()
+            .for_each(|m| m.position = (m.position + 2) % 3);
+        assert_eq!(ids(&rows), [order[1], order[2], order[0]]);
+        assert!(rows.entry().unwrap().players[1].deleted);
+        // read back, the places start from 0 again in that order
+        let back = TeamRows::of(&rows.entry().unwrap()).unwrap();
+        assert_eq!(
+            back.members
+                .iter()
+                .map(|m| (m.person_id, m.position))
+                .collect::<Vec<_>>(),
+            vec![(order[1], 0), (order[2], 1), (order[0], 2)]
         );
     }
 }

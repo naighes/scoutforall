@@ -64,9 +64,9 @@ mod tests {
                 )
                 .unwrap();
                 db.execute(
-                    "INSERT INTO team_members (team_id, person_id, number, role)
-                     VALUES (?1, ?2, ?3, 'outside_hitter')",
-                    params![team, person(n), n],
+                    "INSERT INTO team_members (team_id, person_id, position, number, role)
+                     VALUES (?1, ?2, ?3, ?4, 'outside_hitter')",
+                    params![team, person(n), n - first, n],
                 )
                 .unwrap();
                 db.execute(
@@ -249,7 +249,14 @@ mod tests {
             ),
             (
                 "team_members",
-                &["team_id", "person_id", "number", "role", "deleted"],
+                &[
+                    "team_id",
+                    "person_id",
+                    "position",
+                    "number",
+                    "role",
+                    "deleted",
+                ],
             ),
             (
                 "teams",
@@ -322,7 +329,7 @@ mod tests {
         fails(
             &file,
             &format!(
-                "INSERT INTO team_members VALUES ('{TEAM_A}', '{}', 1, NULL, 0)",
+                "INSERT INTO team_members VALUES ('{TEAM_A}', '{}', 0, 1, NULL, 0)",
                 person(1)
             ),
         );
@@ -537,7 +544,8 @@ mod tests {
         passes(
             &db,
             &format!(
-                "INSERT INTO team_members (team_id, person_id, number) VALUES ('{TEAM_C}', '{}', 7)",
+                "INSERT INTO team_members (team_id, person_id, position, number)
+                 VALUES ('{TEAM_C}', '{}', 0, 7)",
                 person(1)
             ),
         );
@@ -545,26 +553,64 @@ mod tests {
         fails(
             &db,
             &format!(
-                "INSERT INTO team_members (team_id, person_id, number) VALUES ('{TEAM_A}', '{}', 77)",
+                "INSERT INTO team_members (team_id, person_id, position, number)
+                 VALUES ('{TEAM_A}', '{}', 77, 77)",
                 person(1)
             ),
         );
         fails(
             &db,
             &format!(
-                "INSERT INTO team_members (team_id, person_id, number) VALUES ('{TEAM_A}', '{}', 1)",
+                "INSERT INTO team_members (team_id, person_id, position, number)
+                 VALUES ('{TEAM_A}', '{}', 77, 1)",
                 person(99)
             ),
         );
         fails(
             &db,
             &format!(
-                "INSERT INTO team_members (team_id, person_id, number) VALUES ('{MATCH}', '{}', 1)",
+                "INSERT INTO team_members (team_id, person_id, position, number)
+                 VALUES ('{MATCH}', '{}', 77, 1)",
                 person(1)
             ),
         );
         fails(&db, "UPDATE team_members SET number = 256");
         fails(&db, "UPDATE team_members SET number = -1");
+    }
+
+    /// The players of a team are in the order of their places, one person
+    /// per place.
+    #[test]
+    fn a_member_has_a_place_of_its_own_in_the_team() {
+        let db = database();
+        passes(
+            &db,
+            &format!(
+                "INSERT INTO persons (id, name) VALUES ('{}', 'new')",
+                person(99)
+            ),
+        );
+        let new = |position: i64| {
+            format!(
+                "INSERT INTO team_members (team_id, person_id, position, number)
+                 VALUES ('{TEAM_A}', '{}', {position}, 99)",
+                person(99)
+            )
+        };
+        // the place of another player of the team: no
+        fails(&db, &new(0));
+        fails(&db, &new(-1));
+        fails(&db, &new(65536));
+        // the same place in another team: fine
+        passes(
+            &db,
+            &format!(
+                "INSERT INTO team_members (team_id, person_id, position, number)
+                 VALUES ('{TEAM_C}', '{}', 0, 1)",
+                person(1)
+            ),
+        );
+        passes(&db, &new(65535));
     }
 
     /// D3.

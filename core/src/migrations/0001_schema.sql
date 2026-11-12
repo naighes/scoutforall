@@ -41,16 +41,20 @@ CREATE TABLE teams (
     deleted         INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))
 ) STRICT;
 
--- The membership of a person in a team: the team's number and role.
+-- The membership of a person in a team: the team's number and role, and
+-- its place in the list of the team's players.
 CREATE TABLE team_members (
     team_id     TEXT NOT NULL REFERENCES teams (id),
     person_id   TEXT NOT NULL REFERENCES persons (id),
+    -- the order of the players, a removed one keeps its place
+    position    INTEGER NOT NULL CHECK (position BETWEEN 0 AND 65535),
     number      INTEGER NOT NULL CHECK (number BETWEEN 0 AND 255),
     role        TEXT CHECK (role IN (
                     'libero', 'opposite_hitter', 'setter', 'outside_hitter', 'middle_blocker')),
     -- removed from the team (the person stays)
     deleted     INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
-    PRIMARY KEY (team_id, person_id)
+    PRIMARY KEY (team_id, person_id),
+    UNIQUE (team_id, position)
 ) STRICT;
 CREATE INDEX team_members_by_person ON team_members (person_id);
 
