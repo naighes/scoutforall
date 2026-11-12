@@ -1,0 +1,5 @@
+- Vídeo da rede (desktop): RTSP sobre UDP, rtsps, câmeras ONVIF encontradas na rede, com pedido do endereço.
+- Estatísticas por rodízio: rallies e pontos ganhos menos perdidos, no total e em side out e break point.
+- Estatísticas: o filtro de jogadores oferece só quem tem o fundamento.
+- Funções no feminino para uma equipe feminina.
+- Desktop: jogadores escolhidos pelo número da camisa no scout, tema que segue o sistema, datas em cada idioma.

@@ -1,0 +1,5 @@
+- Wideo z sieci (komputer): RTSP przez UDP, rtsps, kamery ONVIF znalezione w sieci z pytaniem o adres.
+- Statystyki według rotacji: wymiany i punkty zdobyte minus stracone, łącznie oraz w side oucie i break poincie.
+- Statystyki: filtr zawodników pokazuje tylko tych, którzy mają dany element.
+- Nazwy pozycji w rodzaju żeńskim dla drużyny kobiet.
+- Komputer: zawodnicy wybierani numerem koszulki podczas scoutingu, motyw zgodny z systemem, daty w każdym języku.

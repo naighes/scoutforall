@@ -1,0 +1,5 @@
+- Video dalla rete (desktop): RTSP su UDP, rtsps, telecamere ONVIF trovate in rete con richiesta dell'indirizzo.
+- Statistiche per rotazione: scambi e punti vinti meno persi, in totale e in cambio palla e break point.
+- Statistiche: il filtro giocatori propone solo chi ha il fondamentale.
+- Ruoli al femminile per una squadra femminile.
+- Desktop: giocatori scelti dal numero di maglia durante lo scouting, tema che segue il sistema, date nella lingua.

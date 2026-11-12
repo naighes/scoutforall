@@ -1,0 +1,5 @@
+- Video from the network (desktop): RTSP over UDP, rtsps, ONVIF cameras found on the network and asked for their address.
+- Statistics by rotation: rallies and points won minus lost, overall and in side out and break point.
+- Statistics: the player filter offers only who has the fundamental.
+- Roles in the feminine for a women's team.
+- Desktop: players chosen by shirt number while scouting, theme that follows the system, dates in each language.
