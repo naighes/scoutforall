@@ -74,7 +74,9 @@ fn data_dir() -> Option<PathBuf> {
 
 /// What the TUI keeps in `config.json` that the prototype reads: the
 /// language and the keys.
-fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys) {
+/// The language, the keys and the theme chosen (dark or light; none:
+/// the system's).
+fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys, Option<bool>) {
     let json: serde_json::Value = std::fs::read_to_string(dir.join("config.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -84,10 +86,15 @@ fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys) {
         .and_then(|l| l.as_str())
         .and_then(|l| LanguageEnum::from_str(l).ok())
         .unwrap_or(LanguageEnum::En);
+    let theme = match json.get("theme").and_then(|t| t.as_str()) {
+        Some("dark") => Some(true),
+        Some("light") => Some(false),
+        _ => None,
+    };
     let keys = serde_json::from_value::<ScoutingKeys>(json)
         .unwrap_or_default()
         .normalized();
-    (language, keys)
+    (language, keys, theme)
 }
 
 enum Screen {
@@ -156,7 +163,10 @@ struct App {
     /// the settings, over the screen they were opened from (F2)
     settings: Option<SettingsScreen>,
     strings: &'static Strings,
-    dark: bool,
+    /// the theme chosen, saved (dark or light); none: the system's
+    theme: Option<bool>,
+    /// the system's theme is dark (until it's known, and with none)
+    system_dark: bool,
     screen: Screen,
     error: Option<String>,
     /// what went well: a file saved, imported
@@ -202,6 +212,8 @@ enum Update {
 enum Message {
     Key(KeyCombination),
     ToggleTheme,
+    /// the theme of the system, at the start and as it changes
+    SystemTheme(iced::theme::Mode),
     /// the arrow on the bar: as Esc
     Back,
     /// the house on the bar: the home, from wherever
@@ -293,7 +305,7 @@ impl App {
     /// terms over the screens.
     fn load(quiet: bool) -> App {
         let dir = data_dir().unwrap_or_else(|| PathBuf::from(".scout4all"));
-        let (language, keys) = config(&dir);
+        let (language, keys, theme) = config(&dir);
         let strings = strings::strings(language);
         let core = Scout4All::new(dir.to_string_lossy().into_owned(), language.to_string());
         let (core, error) = match core {
@@ -314,7 +326,9 @@ impl App {
             keys,
             settings: None,
             strings,
-            dark: true,
+            // the screenshots always dark, whatever was chosen
+            theme: if quiet { None } else { theme },
+            system_dark: true,
             screen: Screen::Home(Box::new(HomeScreen::new(Home {
                 in_progress: vec![],
                 recent: vec![],
@@ -372,7 +386,23 @@ impl App {
     }
 
     fn colors(&self) -> theme::Colors {
-        theme::colors(self.dark)
+        theme::colors(self.dark())
+    }
+
+    /// Dark: chosen, or else as the system.
+    fn dark(&self) -> bool {
+        self.theme.unwrap_or(self.system_dark)
+    }
+
+    /// The other theme, saved; back as the system's, the system followed
+    /// again (no choice saved).
+    fn toggle_theme(&mut self) {
+        let dark = !self.dark();
+        self.theme = (dark != self.system_dark).then_some(dark);
+        let saved = self.theme.map(|dark| if dark { "dark" } else { "light" });
+        if let Err(e) = settings::merge(&self.dir, serde_json::json!({ "theme": saved })) {
+            self.error = Some(e);
+        }
     }
 
     /// Opens the screen `go` leads to; an error stays on the one shown.
@@ -733,7 +763,7 @@ impl App {
                     self.error = Some(e.to_string());
                 }
             }
-            (_, _, Message::ToggleTheme) => self.dark = !self.dark,
+            (_, _, Message::ToggleTheme) => self.toggle_theme(),
             _ => {}
         }
         true
@@ -1174,7 +1204,7 @@ impl App {
         };
         let go = match (back(message), &mut self.screen) {
             (Message::ToggleTheme, _) => {
-                self.dark = !self.dark;
+                self.toggle_theme();
                 Go::Stay
             }
             (Message::Home(m), Screen::Home(screen)) => home_go(screen.update(&core, s, m)),
@@ -1681,6 +1711,8 @@ struct Main {
     window: window::Id,
     splash: Option<splash::Splash>,
     app: Option<App>,
+    /// the system's theme is dark, given to the app once it's read
+    system_dark: bool,
     first_frame: OnceLock<()>,
     /// the screenshots asked with `--shots`
     shots: Option<shots::Shots>,
@@ -1720,13 +1752,19 @@ impl Main {
             window,
             splash: Some(splash::Splash::new()),
             app: None,
+            system_dark: true,
             first_frame: OnceLock::new(),
             shots,
         };
         let loaded = Task::perform(async move { rx.await.ok() }, |app| {
             Message::Loaded(Loaded(Arc::new(Mutex::new(app))))
         });
-        (main, Task::batch([opened.discard(), loaded]))
+        // the system's theme: not for the screenshots, always dark
+        let theme = match quiet {
+            true => Task::none(),
+            false => iced::system::theme().map(Message::SystemTheme),
+        };
+        (main, Task::batch([opened.discard(), loaded, theme]))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -1738,7 +1776,10 @@ impl Main {
             (Message::Loaded(Loaded(app)), _, _) => {
                 let app = app.lock().ok().and_then(|mut app| app.take());
                 match app {
-                    Some(app) => self.app = Some(app),
+                    Some(mut app) => {
+                        app.system_dark = self.system_dark;
+                        self.app = Some(app);
+                    }
                     // the thread ended without the app: nothing to show
                     None => std::process::exit(1),
                 }
@@ -1751,6 +1792,18 @@ impl Main {
                     Some(_) => Task::none(),
                     None => Task::perform(update::newer(), Message::UpdateFound),
                 }
+            }
+            (Message::SystemTheme(mode), _, app) => {
+                // no tone known: as it was
+                self.system_dark = match mode {
+                    iced::theme::Mode::Light => false,
+                    iced::theme::Mode::Dark => true,
+                    iced::theme::Mode::None => self.system_dark,
+                };
+                if let Some(app) = app {
+                    app.system_dark = self.system_dark;
+                }
+                Task::none()
             }
             (Message::Shot(message), _, Some(_)) => return self.shot(message),
             // the answer can come while the splash is still on
@@ -1872,7 +1925,7 @@ impl Main {
     }
 
     fn theme(&self, _: window::Id) -> Theme {
-        theme::theme(self.app.as_ref().is_none_or(|app| app.dark))
+        theme::theme(self.app.as_ref().is_none_or(App::dark))
     }
 
     fn title(&self, id: window::Id) -> String {
@@ -1891,7 +1944,11 @@ impl Main {
             (None, Some(app)) => app.subscription(),
             _ => window::frames().map(Message::Frame),
         };
-        Subscription::batch([closed, app])
+        let theme = match self.shots {
+            Some(_) => Subscription::none(),
+            None => iced::system::theme_changes().map(Message::SystemTheme),
+        };
+        Subscription::batch([closed, app, theme])
     }
 }
 
