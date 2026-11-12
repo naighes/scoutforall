@@ -378,15 +378,23 @@ pub enum MobileError {
     Namesake { reason: String },
 }
 
+/// The language of the app, for the errors converted with `?` (see
+/// `From<AppError>`): the one of the last `Scout4All` made, which follows
+/// its `set_language`.
+static ERRORS_LANGUAGE: std::sync::RwLock<Option<Language>> = std::sync::RwLock::new(None);
+
 impl From<AppError> for MobileError {
     fn from(e: AppError) -> Self {
         // the messages of the core are in the labels of the domain, for the
-        // user as they are
-        let reason = match e {
-            AppError::IO(IOError::Msg(message)) => message,
-            other => other.to_string(),
-        };
-        MobileError::Failed { reason }
+        // user as they are; the files and the network in the language
+        let labels = ERRORS_LANGUAGE
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map_or_else(|| Language::default().labels(), Language::labels);
+        MobileError::Failed {
+            reason: e.message(labels),
+        }
     }
 }
 
@@ -2984,6 +2992,9 @@ impl Scout4All {
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
         let language = Language::new(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
+        *ERRORS_LANGUAGE
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language.clone());
         let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
         let runtime = Builder::new_current_thread()
             .enable_all()

@@ -133,12 +133,16 @@ pub fn report_url(s: &Strings) -> String {
 /// Writes the language in `config.json`, as the TUI keeps it.
 fn save_language(dir: &Path, language: LanguageEnum) -> Result<(), String> {
     // the code, as serde writes it and the TUI reads it
-    crate::settings::merge(dir, serde_json::json!({ "language": language }))
+    crate::settings::merge(dir, serde_json::json!({ "language": language }), language)
 }
 
 /// Writes how the digits choose a player in `config.json`, with the keys.
-fn save_player_keys(dir: &Path, keys: PlayerKeysEnum) -> Result<(), String> {
-    crate::settings::merge(dir, serde_json::json!({ "player_keys": keys }))
+fn save_player_keys(
+    dir: &Path,
+    keys: PlayerKeysEnum,
+    language: LanguageEnum,
+) -> Result<(), String> {
+    crate::settings::merge(dir, serde_json::json!({ "player_keys": keys }), language)
 }
 
 pub struct General {
@@ -292,7 +296,7 @@ impl General {
                     .get(self.form.index(PLAYER_KEYS))
                     .copied()
                     .unwrap_or_default();
-                save_player_keys(dir, keys).map(|()| self.player_keys = keys)
+                save_player_keys(dir, keys, self.language).map(|()| self.player_keys = keys)
             }
             _ => Ok(()),
         };

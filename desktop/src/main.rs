@@ -400,7 +400,8 @@ impl App {
         let dark = !self.dark();
         self.theme = (dark != self.system_dark).then_some(dark);
         let saved = self.theme.map(|dark| if dark { "dark" } else { "light" });
-        if let Err(e) = settings::merge(&self.dir, serde_json::json!({ "theme": saved })) {
+        let theme = serde_json::json!({ "theme": saved });
+        if let Err(e) = settings::merge(&self.dir, theme, self.language) {
             self.error = Some(e);
         }
     }
@@ -589,7 +590,9 @@ impl App {
             transfer::ShareMessage::Cancel => Task::none(),
             transfer::ShareMessage::Save => save(sharing),
             transfer::ShareMessage::Share => match match &sharing.content {
-                transfer::Content::Bytes(bytes) => share::staged(&sharing.name, bytes),
+                transfer::Content::Bytes(bytes) => {
+                    share::staged(&sharing.name, bytes).map_err(|e| ui::io_error(&e, self.language))
+                }
                 transfer::Content::File(path) => Ok(path.clone()),
             } {
                 Ok(path) => share::share(path, sharing.heading).map(Message::Shared),
@@ -609,7 +612,10 @@ impl App {
             Some(Ok(path)) => {
                 self.notice = Some(format!("{}: {}", s.archive_saved, path.display()));
             }
-            Some(Err(e)) => self.error = Some(format!("{}: {e}", s.archive_not_saved)),
+            Some(Err(e)) => {
+                let why = ui::io_error(&e, self.language);
+                self.error = Some(format!("{}: {why}", s.archive_not_saved));
+            }
         }
     }
 

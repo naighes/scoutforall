@@ -12,6 +12,15 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 pub struct Labels {
     pub error: &'static str,
+    /// the errors of the files and of the network, by their kind (see
+    /// `AppError::message`)
+    pub io_not_found: &'static str,
+    pub io_permission_denied: &'static str,
+    pub io_storage_full: &'static str,
+    pub io_read_only: &'static str,
+    pub io_failed: &'static str,
+    pub io_invalid_file: &'static str,
+    pub io_network: &'static str,
     pub point_sequence: &'static str,
     pub setter_prefix: &'static str,
     pub players: &'static str,
@@ -321,6 +330,13 @@ pub struct Labels {
 
 const EN: Labels = Labels {
     error: "error",
+    io_not_found: "file or folder not found",
+    io_permission_denied: "permission denied",
+    io_storage_full: "the disk is full",
+    io_read_only: "the disk is read-only",
+    io_failed: "could not read or write the file",
+    io_invalid_file: "the file is not valid",
+    io_network: "network error",
     point_sequence: "point sequence",
     setter_prefix: "S",
     players: "players",
@@ -601,6 +617,13 @@ const EN: Labels = Labels {
 
 const IT: Labels = Labels {
     error: "errore",
+    io_not_found: "file o cartella non trovati",
+    io_permission_denied: "permesso negato",
+    io_storage_full: "il disco è pieno",
+    io_read_only: "il disco è in sola lettura",
+    io_failed: "lettura o scrittura del file non riuscita",
+    io_invalid_file: "il file non è valido",
+    io_network: "errore di rete",
     point_sequence: "sequenza punti",
     setter_prefix: "P",
     players: "giocatori",
@@ -881,6 +904,13 @@ const IT: Labels = Labels {
 
 const PT: Labels = Labels {
     error: "erro",
+    io_not_found: "arquivo ou pasta não encontrados",
+    io_permission_denied: "permissão negada",
+    io_storage_full: "o disco está cheio",
+    io_read_only: "o disco é somente leitura",
+    io_failed: "não foi possível ler ou gravar o arquivo",
+    io_invalid_file: "o arquivo não é válido",
+    io_network: "erro de rede",
     point_sequence: "sequência de pontos",
     setter_prefix: "P",
     players: "jogadores",
@@ -1161,6 +1191,13 @@ const PT: Labels = Labels {
 
 const PL: Labels = Labels {
     error: "błąd",
+    io_not_found: "nie znaleziono pliku ani folderu",
+    io_permission_denied: "brak uprawnień",
+    io_storage_full: "dysk jest pełny",
+    io_read_only: "dysk jest tylko do odczytu",
+    io_failed: "nie udało się odczytać ani zapisać pliku",
+    io_invalid_file: "plik jest nieprawidłowy",
+    io_network: "błąd sieci",
     point_sequence: "sekwencja punktów",
     setter_prefix: "R",
     players: "zawodnicy",
@@ -1441,6 +1478,13 @@ const PL: Labels = Labels {
 
 const JA: Labels = Labels {
     error: "エラー",
+    io_not_found: "ファイルまたはフォルダが見つかりません",
+    io_permission_denied: "アクセスが拒否されました",
+    io_storage_full: "ディスクの空き容量がありません",
+    io_read_only: "ディスクが読み取り専用です",
+    io_failed: "ファイルの読み書きに失敗しました",
+    io_invalid_file: "ファイルが正しくありません",
+    io_network: "ネットワークエラー",
     point_sequence: "得点経過",
     setter_prefix: "S",
     players: "選手",

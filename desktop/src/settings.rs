@@ -111,13 +111,17 @@ pub fn assigned(
 
 /// Writes the keys in `config.json`, leaving the rest as it is (the other
 /// apps keep their settings there too): written aside, then renamed.
-pub fn save(dir: &Path, keys: &ScoutingKeys) -> Result<(), String> {
-    merge(dir, serde_json::to_value(keys).map_err(|e| e.to_string())?)
+pub fn save(dir: &Path, keys: &ScoutingKeys, language: LanguageEnum) -> Result<(), String> {
+    merge(
+        dir,
+        serde_json::to_value(keys).map_err(|e| e.to_string())?,
+        language,
+    )
 }
 
 /// Writes `values` (an object) in `config.json`, leaving the rest as it
-/// is: written aside, then renamed.
-pub fn merge(dir: &Path, values: serde_json::Value) -> Result<(), String> {
+/// is: written aside, then renamed. The errors of the disk in `language`.
+pub fn merge(dir: &Path, values: serde_json::Value, language: LanguageEnum) -> Result<(), String> {
     let path = dir.join("config.json");
     let mut json: serde_json::Value = std::fs::read_to_string(&path)
         .ok()
@@ -130,8 +134,9 @@ pub fn merge(dir: &Path, values: serde_json::Value) -> Result<(), String> {
     }
     let content = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
     let aside = dir.join("config.json.tmp");
-    std::fs::write(&aside, content).map_err(|e| e.to_string())?;
-    std::fs::rename(&aside, &path).map_err(|e| e.to_string())
+    let disk = |e: std::io::Error| crate::ui::io_error(&e, language);
+    std::fs::write(&aside, content).map_err(disk)?;
+    std::fs::rename(&aside, &path).map_err(disk)
 }
 
 pub struct SettingsScreen {
@@ -226,7 +231,7 @@ impl SettingsScreen {
     }
 
     fn store(&mut self, keys: ScoutingKeys, s: &Strings) {
-        match save(&self.dir, &keys) {
+        match save(&self.dir, &keys, self.general.language) {
             Ok(()) => {
                 self.keys = keys;
                 self.error = None;
@@ -531,7 +536,7 @@ mod tests {
             .normalized()
             .assigned(EventTypeEnum::A, key!(z))
             .unwrap();
-        save(dir.path(), &keys).unwrap();
+        save(dir.path(), &keys, LanguageEnum::En).unwrap();
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.path().join("config.json")).unwrap())
                 .unwrap();

@@ -26,11 +26,11 @@ pub fn share(path: PathBuf, title: String) -> Task<Result<(), String>> {
 
 /// Where a file to share is written first, under its name: the sheet
 /// takes a file. In the temporary folder of the system, one per name.
-pub fn staged(name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+pub fn staged(name: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
     let dir = std::env::temp_dir().join("scout4all-share");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir)?;
     let path = dir.join(name);
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    std::fs::write(&path, bytes)?;
     Ok(path)
 }
 
