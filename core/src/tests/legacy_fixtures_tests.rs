@@ -20,20 +20,10 @@ mod tests {
         },
         shapes::{r#match::MatchEntry, team::TeamEntry},
         storage::{Store, fs::FsStore, memory::MemoryStore},
-        tests::EN,
+        tests::{EN, LEGACY_VERSIONS as VERSIONS, copy_dir, legacy_fixtures as fixtures},
     };
-    use std::{
-        collections::BTreeMap,
-        path::{Path, PathBuf},
-        sync::Arc,
-    };
+    use std::{collections::BTreeMap, sync::Arc};
     use tempfile::TempDir;
-
-    /// The versions of the fixtures: each one where the saved data changed
-    /// (v0.10.0, v0.14.0 and v0.17.0 save as the one before them).
-    const VERSIONS: [&str; 8] = [
-        "v0.9.0", "v0.10.1", "v0.11.0", "v0.12.0", "v0.13.0", "v0.15.0", "v0.16.0", "v0.18.0",
-    ];
 
     type Scores = BTreeMap<String, Vec<(u8, u8)>>;
 
@@ -96,26 +86,6 @@ mod tests {
 
     /// The match imported from DataVolley (`three_sets.dvw`).
     const DVW: (&str, &[(u8, u8)]) = ("2025-10-25_visiting", &[(25, 0), (25, 0), (25, 0)]);
-
-    fn fixtures(version: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/tests/fixtures/legacy")
-            .join(version)
-    }
-
-    fn copy_dir(from: &Path, to: &Path) {
-        std::fs::create_dir_all(to).unwrap();
-        for entry in std::fs::read_dir(from).unwrap() {
-            let entry = entry.unwrap();
-            let target = to.join(entry.file_name());
-            match entry.file_type().unwrap().is_dir() {
-                true => copy_dir(&entry.path(), &target),
-                false => {
-                    std::fs::copy(entry.path(), target).unwrap();
-                }
-            }
-        }
-    }
 
     struct Providers {
         team_reader: StoreTeamReader,

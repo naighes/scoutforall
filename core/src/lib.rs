@@ -8,6 +8,7 @@ pub mod benchmark;
 pub mod constants;
 pub mod db;
 pub mod detail;
+pub mod domain;
 pub mod dvw;
 pub mod errors;
 pub mod event_edit;

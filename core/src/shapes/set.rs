@@ -10,7 +10,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SetEntry {
     #[serde(skip_serializing, skip_deserializing)]
     pub set_number: u8,

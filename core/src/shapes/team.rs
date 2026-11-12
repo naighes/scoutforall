@@ -6,7 +6,7 @@ use crate::shapes::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct TeamEntry {
     pub name: String,
     pub year: u16,

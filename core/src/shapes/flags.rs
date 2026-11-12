@@ -139,6 +139,16 @@ const SERVE_START_SHIFT: u16 = 13;
 const SERVE_START: u16 = 0b111 << SERVE_START_SHIFT;
 
 impl EventFlags {
+    /// All the bits, as the database keeps them: those this version
+    /// doesn't know too.
+    pub fn bits(&self) -> u16 {
+        self.0
+    }
+
+    pub fn from_bits(bits: u16) -> Self {
+        Self(bits)
+    }
+
     /// In P1 in side out, the outside hitter attacks from 4 and the
     /// opposite from 2, as in break point.
     pub fn inverted_p1(&self) -> bool {

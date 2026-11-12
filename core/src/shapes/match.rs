@@ -62,7 +62,7 @@ impl MatchSummary {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MatchEntry {
     pub opponent: String,
     pub date: DateTime<FixedOffset>,
@@ -108,6 +108,8 @@ pub enum MatchSource {
 }
 
 impl MatchSource {
+    pub const ALL: [MatchSource; 2] = [MatchSource::Scout4all, MatchSource::Dvw];
+
     pub fn is_scouted(&self) -> bool {
         *self == MatchSource::Scout4all
     }

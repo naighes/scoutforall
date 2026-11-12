@@ -99,6 +99,8 @@ pub enum LineupRulesEnum {
 impl LineupRulesEnum {
     /// The rules new sets are scouted with.
     pub const CURRENT: LineupRulesEnum = LineupRulesEnum::V2;
+
+    pub const ALL: [LineupRulesEnum; 2] = [LineupRulesEnum::V1, LineupRulesEnum::V2];
 }
 
 impl fmt::Display for TeamSideEnum {
