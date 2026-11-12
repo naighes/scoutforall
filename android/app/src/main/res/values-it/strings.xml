@@ -70,6 +70,7 @@
     <string name="serving_team">Al servizio</string>
     <string name="position_n">Pos %d</string>
     <string name="setter">Palleggiatore</string>
+    <string name="setter_women">Palleggiatrice</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Secondo libero</string>
     <string name="none">Nessuno</string>
@@ -278,9 +279,9 @@
     <string name="tutorial_match_next">Tocca Continua: poi i giocatori a referto.</string>
     <string name="tutorial_roster">Tutta la squadra è a referto, fino a 14: un tocco toglie o rimette un giocatore.</string>
     <string name="tutorial_save_match">Tocca Salva.</string>
-    <string name="tutorial_lineup">La formazione del primo set è pronta: palleggiatore in 6 (P6), noi in ricezione; Spirito è il libero, Fersino il secondo libero. Toccando una posizione se ne cambia il giocatore.</string>
+    <string name="tutorial_lineup">La formazione del primo set è pronta: palleggiatrice in 6 (P6), noi in ricezione; Spirito è il libero, Fersino il secondo libero. Toccando una posizione se ne cambia il giocatore.</string>
     <string name="tutorial_start_set">Tocca Inizia il set.</string>
-    <string name="tutorial_score">Il punteggio, la fase e la rotazione: cambio palla, P6 (palleggiatore in 6). Battono loro.</string>
+    <string name="tutorial_score">Il punteggio, la fase e la rotazione: cambio palla, P6 (palleggiatrice in 6). Battono loro.</string>
     <string name="tutorial_reception">Riceve Nervini: tocca il suo nome.</string>
     <string name="tutorial_reception_eval">Ricezione perfetta: tocca #.</string>
     <string name="tutorial_attack">L\'alzata è per Nervini, che attacca: tocca di nuovo il suo nome.</string>
@@ -305,13 +306,13 @@
     <string name="tutorial_lineup_menu">Ora un doppio cambio. I cambi di formazione sono nella mezzaluna: tocca la mezzaluna.</string>
     <string name="tutorial_substitution">Tocca Sostituzione.</string>
     <string name="tutorial_out_egonu">Esce Egonu: tocca il suo nome.</string>
-    <string name="tutorial_in_cambi">Entra Cambi, il secondo palleggiatore: tocca il suo nome.</string>
+    <string name="tutorial_in_cambi">Entra Cambi, la seconda palleggiatrice: tocca il suo nome.</string>
     <string name="tutorial_lineup_again">L\'altro: di nuovo la mezzaluna.</string>
     <string name="tutorial_out_orro">Esce Orro: tocca il suo nome.</string>
-    <string name="tutorial_in_antropova">Entra Antropova, il secondo opposto: tocca il suo nome.</string>
+    <string name="tutorial_in_antropova">Entra Antropova, la seconda opposta: tocca il suo nome.</string>
     <string name="tutorial_setter_menu">Ora alza Cambi: di nuovo la mezzaluna.</string>
     <string name="tutorial_setter">Tocca Palleggiatore.</string>
-    <string name="tutorial_setter_cambi">Tocca Cambi: la rotazione segue il nuovo palleggiatore.</string>
+    <string name="tutorial_setter_cambi">Tocca Cambi: la rotazione segue la nuova palleggiatrice.</string>
     <string name="tutorial_libero_menu">Per ultimo, l\'altro libero: la mezzaluna.</string>
     <string name="tutorial_libero">Tocca Libero: Fersino prende il posto di Spirito.</string>
     <string name="tutorial_stats">Le statistiche del set e della partita: tocca qui, oppure scorri verso l\'alto da qui.</string>

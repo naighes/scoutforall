@@ -885,6 +885,23 @@ impl FriendlyName for RoleEnum {
     }
 }
 
+impl RoleEnum {
+    /// The name of the role in a team of `gender`: "palleggiatrice" in a
+    /// women's team, in the languages that tell them apart.
+    /// A team with no gender: as a men's.
+    pub fn name(&self, gender: Option<GenderEnum>, labels: &Labels) -> &'static str {
+        use RoleEnum::*;
+        match (gender.unwrap_or(GenderEnum::Men), self) {
+            (GenderEnum::Men, _) => self.friendly_name(labels),
+            (GenderEnum::Women, Libero) => labels.libero_women,
+            (GenderEnum::Women, MiddleBlocker) => labels.middle_blocker_women,
+            (GenderEnum::Women, OppositeHitter) => labels.opposite_hitter_women,
+            (GenderEnum::Women, OutsideHitter) => labels.outside_hitter_women,
+            (GenderEnum::Women, Setter) => labels.setter_women,
+        }
+    }
+}
+
 impl FromStr for RoleEnum {
     type Err = AppError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

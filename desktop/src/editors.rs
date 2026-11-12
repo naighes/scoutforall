@@ -189,7 +189,7 @@ impl Editor {
         id: Option<String>,
         start: PlayerForm,
     ) -> Editor {
-        let roles = core.roles();
+        let roles = core.roles(team_id.clone());
         let fields = vec![
             Field::text(s.name, start.name.clone()),
             Field::text(s.number, start.number.clone()),

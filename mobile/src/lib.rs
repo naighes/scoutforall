@@ -828,6 +828,9 @@ pub struct Lineup {
     pub allows_fallback_libero: bool,
     /// nothing missing: the set can start
     pub complete: bool,
+    /// a women's team: the setter named in the feminine
+    #[uniffi(default)]
+    pub women: bool,
 }
 
 /// Starting a set of a match: the choices so far, which the core checks.
@@ -847,7 +850,7 @@ impl SetStart {
         let form = self.form();
         let player = |id: Option<Uuid>| {
             id.and_then(|id| self.team.find_player(id))
-                .map(|p| lineup_player(p, self.labels))
+                .map(|p| lineup_player(&self.team, p, self.labels))
         };
         Lineup {
             set_number: form.set_number,
@@ -862,6 +865,7 @@ impl SetStart {
             allows_fallback_libero: self.team.active_players().len()
                 >= MIN_PLAYERS_FOR_FALLBACK_LIBERO,
             complete: form.clone().validate(&self.team).is_ok(),
+            women: self.team.gender == Some(GenderEnum::Women),
         }
     }
 
@@ -927,7 +931,7 @@ impl SetStart {
     fn choices(&self, players: Vec<&PlayerEntry>) -> Vec<LineupPlayer> {
         let mut choices: Vec<LineupPlayer> = players
             .into_iter()
-            .map(|p| lineup_player(p, self.labels))
+            .map(|p| lineup_player(&self.team, p, self.labels))
             .collect();
         choices.sort_by_key(|p| p.number);
         choices
@@ -1191,6 +1195,9 @@ pub struct CorrectionState {
 /// What the scouting screen shows.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ScoutingState {
+    /// a women's team: the setter named in the feminine
+    #[uniffi(default)]
+    pub women: bool,
     pub set_number: u8,
     pub team: String,
     pub opponent: String,
@@ -1750,6 +1757,7 @@ impl Scouting {
         let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
         events.sort_by_key(|e| e.timestamp);
         ScoutingState {
+            women: team.gender == Some(GenderEnum::Women),
             set_number: session.set().set_number,
             team: team.name.clone(),
             opponent: current_match.opponent.clone(),
@@ -1775,7 +1783,7 @@ impl Scouting {
             player: session
                 .player()
                 .and_then(|id| team.find_player(id))
-                .map(|p| self.scouting_player(p)),
+                .map(|p| self.scouting_player(team, p)),
             events: events
                 .into_iter()
                 .rev()
@@ -2272,8 +2280,7 @@ fn detail_of(
     let player_of = |id: Uuid| {
         teams
             .iter()
-            .find_map(|t| t.find_player(id))
-            .map(|p| scouting_player(p, labels))
+            .find_map(|t| t.find_player(id).map(|p| scouting_player(t, p, labels)))
     };
     let (fundamental, freeballs) =
         match Breakdown::from_start(stats, event, &narrowed, filter.serve_start) {
@@ -2520,7 +2527,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         player: e
             .player
             .and_then(|id| team.find_player(id))
-            .map(|p| scouting_player(p, labels)),
+            .map(|p| scouting_player(team, p, labels)),
         eval: e.eval.map(|v| v.friendly_name(e.event_type, labels)),
         symbol: e.eval.map(|v| v.to_string()),
         technique: e.technique.map(|t| t.to_string()),
@@ -2530,14 +2537,15 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
     }
 }
 
-fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
+/// The player of `team`, the role in its gender.
+fn scouting_player(team: &TeamEntry, p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
     ScoutingPlayer {
         id: p.id.to_string(),
         name: p.name.clone(),
         number: p.number,
         role: p
             .role
-            .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
+            .map_or_else(String::new, |r| r.name(team.gender, labels).to_string()),
     }
 }
 
@@ -2675,7 +2683,7 @@ impl Scouting {
         choices
             .into_iter()
             .filter_map(|c| session.current_match().team.find_player(c.id))
-            .map(|p| self.scouting_player(p))
+            .map(|p| self.scouting_player(&session.current_match().team, p))
             .collect()
     }
 
@@ -2695,8 +2703,8 @@ impl Scouting {
         scouted_event(team, e, self.labels)
     }
 
-    fn scouting_player(&self, p: &PlayerEntry) -> ScoutingPlayer {
-        scouting_player(p, self.labels)
+    fn scouting_player(&self, team: &TeamEntry, p: &PlayerEntry) -> ScoutingPlayer {
+        scouting_player(team, p, self.labels)
     }
 }
 
@@ -3408,7 +3416,10 @@ impl Scout4All {
                 id: c.player.id,
                 name: c.player.name,
                 number: c.player.number,
-                role: c.player.role.map(|r| r.friendly_name(labels).to_string()),
+                role: c
+                    .player
+                    .role
+                    .map(|r| r.name(team.gender, labels).to_string()),
                 chosen: c.chosen,
                 played: c.played,
             })
@@ -3524,13 +3535,16 @@ impl Scout4All {
             .collect()
     }
 
-    pub fn roles(&self) -> Vec<RoleChoice> {
+    /// The roles to give a player of the team, in its gender (a team not
+    /// read: as a men's).
+    pub fn roles(&self, team_id: String) -> Vec<RoleChoice> {
         let labels = self.language.labels();
+        let gender = self.read_team(&team_id).ok().and_then(|t| t.gender);
         RoleEnum::ALL
             .iter()
             .map(|r| RoleChoice {
                 value: *r,
-                name: r.friendly_name(labels).to_string(),
+                name: r.name(gender, labels).to_string(),
             })
             .collect()
     }
@@ -4379,13 +4393,13 @@ fn index(position: u8) -> usize {
     usize::from(position).wrapping_sub(1)
 }
 
-fn lineup_player(p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
+fn lineup_player(team: &TeamEntry, p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
     LineupPlayer {
         id: p.id.to_string(),
         name: p.name.clone(),
         number: p.number,
         role: p.role,
-        role_name: p.role.map(|r| r.friendly_name(labels).to_string()),
+        role_name: p.role.map(|r| r.name(team.gender, labels).to_string()),
     }
 }
 
@@ -4500,7 +4514,7 @@ fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
             id: p.id.to_string(),
             name: p.name.clone(),
             number: p.number,
-            role: p.role.map(|r| r.friendly_name(labels).to_string()),
+            role: p.role.map(|r| r.name(team.gender, labels).to_string()),
             form: PlayerForm::of(p),
         })
         .collect();
@@ -4924,8 +4938,25 @@ mod tests {
             .collect();
         assert_eq!(listed, vec![("Bea", 3), ("Anna", 12)]);
         assert_eq!(players[1].id, anna);
-        assert_eq!(players[1].role.as_deref(), Some("palleggiatore"));
+        // a women's team: the roles in the feminine
+        assert_eq!(players[1].role.as_deref(), Some("palleggiatrice"));
         assert_eq!(players[1].form, player("Anna", "12"));
+        let roles = app.roles(team.clone());
+        let setter = roles.iter().find(|r| r.value == RoleEnum::Setter);
+        assert_eq!(setter.map(|r| r.name.as_str()), Some("palleggiatrice"));
+        let men = app
+            .save_team(
+                None,
+                TeamForm {
+                    gender: Some(GenderEnum::Men),
+                    ..form("Arezzo")
+                },
+            )
+            .unwrap();
+        app.save_player(men.clone(), None, player("Ugo", "1"), false)
+            .unwrap();
+        let ugo = &app.team(men.clone()).unwrap().players[0];
+        assert_eq!(ugo.role.as_deref(), Some("palleggiatore"));
 
         app.remove_player(team.clone(), anna).unwrap();
         let players = app.team(team.clone()).unwrap().players;

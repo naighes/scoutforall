@@ -267,6 +267,7 @@ private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewMo
                             number = player?.number?.toInt(),
                             name = player?.name,
                             setter = player != null && player.id == lineup.setter?.id,
+                            women = lineup.women,
                             highlighted = pick == Pick.Position(position),
                         )
                     },
@@ -300,7 +301,7 @@ private fun Choices(state: SetStartState.Choosing, model: SetStartViewModel, mod
     Column(modifier) {
         val lineup = state.lineup
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Choice(R.string.setter, lineup.setter) { model.open(Pick.Setter) }
+            Choice(setterName(lineup.women), lineup.setter) { model.open(Pick.Setter) }
             Choice(R.string.libero, lineup.libero) { model.open(Pick.Libero) }
             if (lineup.allowsFallbackLibero) {
                 Choice(R.string.fallback_libero, lineup.fallbackLibero, optional = true) {
@@ -381,7 +382,7 @@ private fun PlayerPicker(pick: Pick, lineup: Lineup, model: SetStartViewModel, m
             Text(
                 when (pick) {
                     is Pick.Position -> stringResource(R.string.position_n, pick.position)
-                    Pick.Setter -> stringResource(R.string.setter)
+                    Pick.Setter -> stringResource(setterName(lineup.women))
                     Pick.Libero -> stringResource(R.string.libero)
                     Pick.FallbackLibero -> stringResource(R.string.fallback_libero)
                 },

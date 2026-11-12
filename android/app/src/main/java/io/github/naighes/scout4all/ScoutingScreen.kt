@@ -526,6 +526,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                             number = player?.number?.toInt(),
                             name = player?.name,
                             setter = player?.setter == true,
+                            women = view.state.women,
                             libero = player?.libero == true,
                             highlighted = player != null && player.id == view.state.player?.id,
                             enabled = player?.selectable == true || (serving && position == 1),

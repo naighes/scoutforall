@@ -71,6 +71,7 @@
     <string name="serving_team">サーブ権</string>
     <string name="position_n">P%d</string>
     <string name="setter">セッター</string>
+    <string name="setter_women">セッター</string>
     <string name="libero">リベロ</string>
     <string name="fallback_libero">控えのリベロ</string>
     <string name="none">なし</string>
