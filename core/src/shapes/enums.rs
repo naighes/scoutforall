@@ -49,8 +49,8 @@ impl FromStr for PhaseEnum {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use PhaseEnum::*;
         match s.to_uppercase().as_str() {
-            "break" => Ok(Break),
-            "side-out" => Ok(SideOut),
+            "BREAK" => Ok(Break),
+            "SIDE-OUT" => Ok(SideOut),
             _ => Err(AppError::IO(IOError::Msg(format!("invalid phase: {}", s)))),
         }
     }
@@ -119,8 +119,8 @@ impl FromStr for TeamSideEnum {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use TeamSideEnum::*;
         match s.to_uppercase().as_str() {
-            "us" => Ok(Us),
-            "them" => Ok(Them),
+            "US" => Ok(Us),
+            "THEM" => Ok(Them),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid team side: {}",
                 s
@@ -909,11 +909,11 @@ impl FromStr for RoleEnum {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use RoleEnum::*;
         match s.to_uppercase().as_str() {
-            "libero" => Ok(Libero),
-            "middle-blocker" => Ok(MiddleBlocker),
-            "opposite-hitter" => Ok(OppositeHitter),
-            "outside-hitter" => Ok(OutsideHitter),
-            "setter" => Ok(Setter),
+            "LIBERO" => Ok(Libero),
+            "MIDDLE-BLOCKER" => Ok(MiddleBlocker),
+            "OPPOSITE-HITTER" => Ok(OppositeHitter),
+            "OUTSIDE-HITTER" => Ok(OutsideHitter),
+            "SETTER" => Ok(Setter),
             _ => Err(AppError::IO(IOError::Msg(format!("invalid role: {}", s)))),
         }
     }
@@ -1130,4 +1130,36 @@ impl FriendlyName for GenderEnum {
 
 impl GenderEnum {
     pub const ALL: [GenderEnum; 2] = [GenderEnum::Men, GenderEnum::Women];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each value reads back from its own text, whatever the case.
+    fn reads_back<T>(values: &[T])
+    where
+        T: fmt::Display + FromStr + PartialEq + fmt::Debug,
+    {
+        values.iter().for_each(|value| {
+            let text = value.to_string();
+            [text.clone(), text.to_uppercase(), text.to_lowercase()]
+                .iter()
+                .for_each(|t| assert_eq!(t.parse::<T>().ok().as_ref(), Some(value), "{t}"));
+        });
+    }
+
+    #[test]
+    fn phase_side_and_role_read_back_from_their_text() {
+        reads_back(&PhaseEnum::ALL);
+        reads_back(&[TeamSideEnum::Us, TeamSideEnum::Them]);
+        reads_back(&RoleEnum::ALL);
+    }
+
+    #[test]
+    fn phase_side_and_role_refuse_unknown_text() {
+        assert!("sideout".parse::<PhaseEnum>().is_err());
+        assert!("ours".parse::<TeamSideEnum>().is_err());
+        assert!("hitter".parse::<RoleEnum>().is_err());
+    }
 }
