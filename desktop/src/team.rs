@@ -83,11 +83,6 @@ pub struct TeamScreen {
     error: Option<String>,
 }
 
-/// The day of the date, as the home shows it.
-pub fn day(date: &str) -> &str {
-    date.get(..10).unwrap_or(date)
-}
-
 impl TeamScreen {
     pub fn new(core: Arc<Scout4All>, team_id: String) -> Result<TeamScreen, MobileError> {
         let details = core.team(team_id.clone())?;
@@ -177,7 +172,7 @@ impl TeamScreen {
     }
 
     /// The deletion of the player or the match chosen, to confirm.
-    fn ask_deletion(&mut self) {
+    fn ask_deletion(&mut self, s: &Strings) {
         let deletion = match self.panel {
             Panel::Players => self
                 .details
@@ -187,7 +182,7 @@ impl TeamScreen {
             Panel::Matches => self.matches.get(self.game).map(|m| match m {
                 MatchListing::Match {
                     id, opponent, date, ..
-                } => Deletion::Match(id.clone(), format!("{opponent} · {}", day(date))),
+                } => Deletion::Match(id.clone(), format!("{opponent} · {}", s.day(date))),
                 MatchListing::Unreadable { folder, .. } => {
                     Deletion::Match(folder.clone(), folder.clone())
                 }
@@ -351,7 +346,7 @@ impl TeamScreen {
                 self.mode = Mode::Delete(Deletion::Team)
             }
             (_, k) if (k == key!(backspace) || k == key!(delete)) && count > 0 => {
-                self.ask_deletion()
+                self.ask_deletion(s)
             }
             _ => {}
         }
@@ -555,7 +550,7 @@ impl TeamScreen {
                     column![
                         ui::body(opponent.clone()).font(theme::fonts().bold),
                         row![
-                            text(day(date)).size(SIZE_SMALL).color(c.muted),
+                            text(s.day(date)).size(SIZE_SMALL).color(c.muted),
                             text(match finished {
                                 true => String::new(),
                                 false => format!("· {}", s.in_progress),

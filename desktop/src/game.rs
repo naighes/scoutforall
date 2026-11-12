@@ -6,7 +6,6 @@ use {
         editors::{Edited, Editor},
         form,
         strings::Strings,
-        team::day,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
@@ -254,7 +253,7 @@ impl MatchScreen {
             .align_y(Alignment::Center)
         };
         let facts = row![
-            fact(theme::icons::CALENDAR, day(&d.date).to_string()),
+            fact(theme::icons::CALENDAR, s.day(&d.date)),
             fact(place_icon, place.to_string()),
         ]
         .spacing(24);

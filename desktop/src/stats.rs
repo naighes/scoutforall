@@ -294,14 +294,9 @@ const FILTERS: &str = "stats-filters";
 /// Up to how many filters go in a bar over the page, not in a column.
 const FILTERS_ON_TOP: usize = 2;
 
-/// A day as the period shows it: `YYYY-MM-DD` as written.
-fn shown_day(day: &str) -> String {
-    day.to_string()
-}
-
 /// A day under the trend: day and month.
-fn short_day(day: &str) -> String {
-    Days::parse(day).map_or_else(|| day.to_string(), |d| d.format("%d/%m").to_string())
+fn short_day(s: &Strings, day: &str) -> String {
+    Days::parse(day).map_or_else(|| day.to_string(), |d| s.short_date(d))
 }
 
 /// The same evaluations, whatever their order.
@@ -1538,7 +1533,7 @@ impl StatsScreen {
                     .from
                     .as_deref()
                     .zip(a.to.as_deref())
-                    .map(|(from, to)| format!("{} → {}  ·  ", shown_day(from), shown_day(to)))
+                    .map(|(from, to)| format!("{} → {}  ·  ", s.day(from), s.day(to)))
                     .unwrap_or_default();
                 let skipped = match a.skipped.is_empty() {
                     true => String::new(),
@@ -1674,7 +1669,7 @@ impl StatsScreen {
         };
         let trend = MatchesTrend::of(
             line,
-            a.matches.iter().map(|m| short_day(&m.day)).collect(),
+            a.matches.iter().map(|m| short_day(s, &m.day)).collect(),
             a.matches.iter().map(|m| m.opponent.clone()).collect(),
             s.touches,
         );

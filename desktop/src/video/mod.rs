@@ -596,7 +596,7 @@ impl VideoScreen {
                     title: Some(montage::Card {
                         title: t.the_match.opponent.clone(),
                         lines: vec![
-                            t.day.clone(),
+                            s.day(&t.day),
                             format!(
                                 "{} · {}",
                                 ui::fill(
@@ -1604,7 +1604,7 @@ impl VideoScreen {
         let day = tour
             .matches
             .get(tour.at)
-            .map(|m| m.day.clone())
+            .map(|m| s.day(&m.day))
             .unwrap_or_default();
         let which = ui::fill(
             s.clips_match_of,
@@ -1645,10 +1645,9 @@ impl VideoScreen {
         let said = match source {
             Some(AnchorSource::VideoClock) => s.aligned_dvw.to_string(),
             Some(AnchorSource::Chosen) => s.aligned_chosen.to_string(),
-            Some(AnchorSource::FileStart(start)) => ui::fill(
-                s.aligned_file,
-                &[start.format("%Y-%m-%d %H:%M:%S").to_string()],
-            ),
+            Some(AnchorSource::FileStart(start)) => {
+                ui::fill(s.aligned_file, &[s.date_time(&start)])
+            }
             None => s.not_aligned.to_string(),
         };
         let duration = self.status.as_ref().map(|st| st.duration_ms);
@@ -2424,10 +2423,7 @@ pub(crate) mod screen_tests {
         let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
         assert_eq!(
             screen.alignment(s).0,
-            ui::fill(
-                s.aligned_file,
-                &[start.format("%Y-%m-%d %H:%M:%S").to_string()]
-            )
+            ui::fill(s.aligned_file, &[s.date_time(&start)])
         );
     }
 

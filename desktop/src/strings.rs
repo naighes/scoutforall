@@ -308,8 +308,16 @@ pub struct Strings {
     pub calendar_month: &'static str,
     pub from_to: &'static str,
     pub period_hint: &'static str,
-    /// Monday first
     pub months: [&'static str; 12],
+    /// the months short, in a date
+    pub months_short: [&'static str; 12],
+    /// a day as the language writes it (as Android's medium style): `{d}`
+    /// the day, `{dd}` with two digits, `{mm}` the month in two digits,
+    /// `{b}` its short name, `{y}` the year
+    pub date_pattern: &'static str,
+    /// day and month only, in digits (under the trend)
+    pub short_date_pattern: &'static str,
+    /// Monday first
     pub weekdays: [&'static str; 7],
     /// the calendar starts the week on Sunday
     pub week_from_sunday: bool,
@@ -777,6 +785,11 @@ What did you expect instead?
         "November",
         "December",
     ],
+    months_short: [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ],
+    date_pattern: "{b} {d}, {y}",
+    short_date_pattern: "{mm}/{dd}",
     weekdays: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
     week_from_sunday: true,
     video: "Video",
@@ -1240,6 +1253,11 @@ Cosa ti aspettavi invece?
         "Novembre",
         "Dicembre",
     ],
+    months_short: [
+        "gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic",
+    ],
+    date_pattern: "{d} {b} {y}",
+    short_date_pattern: "{dd}/{mm}",
     weekdays: ["Lu", "Ma", "Me", "Gi", "Ve", "Sa", "Do"],
     week_from_sunday: false,
     video: "Video",
@@ -1703,6 +1721,12 @@ O que você esperava?
         "Novembro",
         "Dezembro",
     ],
+    months_short: [
+        "jan.", "fev.", "mar.", "abr.", "mai.", "jun.", "jul.", "ago.", "set.", "out.", "nov.",
+        "dez.",
+    ],
+    date_pattern: "{d} de {b} de {y}",
+    short_date_pattern: "{dd}/{mm}",
     weekdays: ["Se", "Te", "Qa", "Qi", "Sx", "Sá", "Do"],
     week_from_sunday: true,
     video: "Vídeo",
@@ -2166,6 +2190,11 @@ Czego się spodziewałeś(-aś)?
         "Listopad",
         "Grudzień",
     ],
+    months_short: [
+        "sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru",
+    ],
+    date_pattern: "{d} {b} {y}",
+    short_date_pattern: "{dd}.{mm}",
     weekdays: ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"],
     week_from_sunday: false,
     video: "Wideo",
@@ -2618,6 +2647,11 @@ const JA: Strings = Strings {
     months: [
         "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月",
     ],
+    months_short: [
+        "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月",
+    ],
+    date_pattern: "{y}/{mm}/{dd}",
+    short_date_pattern: "{mm}/{dd}",
     weekdays: ["月", "火", "水", "木", "金", "土", "日"],
     week_from_sunday: true,
     video: "ビデオ",
@@ -2774,6 +2808,43 @@ pub const fn strings(language: LanguageEnum) -> &'static Strings {
 }
 
 impl Strings {
+    /// `day` as the language writes it.
+    pub fn date(&self, day: chrono::NaiveDate) -> String {
+        self.dated(self.date_pattern, day)
+    }
+
+    /// Day and month of `day`, in digits.
+    pub fn short_date(&self, day: chrono::NaiveDate) -> String {
+        self.dated(self.short_date_pattern, day)
+    }
+
+    /// The day of a date as saved (`YYYY-MM-DD`, or the whole RFC 3339
+    /// with the time), as the language writes it; one not understood as
+    /// it is.
+    pub fn day(&self, date: &str) -> String {
+        date.get(..10)
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .map_or_else(|| date.to_string(), |d| self.date(d))
+    }
+
+    /// Day and time (seconds too) as the language writes them.
+    pub fn date_time<T: chrono::TimeZone>(&self, at: &chrono::DateTime<T>) -> String
+    where
+        T::Offset: std::fmt::Display,
+    {
+        format!("{} {}", self.date(at.date_naive()), at.format("%H:%M:%S"))
+    }
+
+    fn dated(&self, pattern: &str, day: chrono::NaiveDate) -> String {
+        use chrono::Datelike;
+        pattern
+            .replace("{dd}", &format!("{:02}", day.day()))
+            .replace("{d}", &day.day().to_string())
+            .replace("{mm}", &format!("{:02}", day.month()))
+            .replace("{b}", self.months_short[day.month0() as usize])
+            .replace("{y}", &day.year().to_string())
+    }
+
     /// What the court asks while evaluating `event`, if it asks anything:
     /// the destination of a serve or an attack, the zone of the others.
     pub const fn target(&self, event: EventTypeEnum) -> Option<&'static str> {
@@ -2792,6 +2863,21 @@ impl Strings {
 mod tests {
     /// `ui::fill` puts the values in `{1}`, `{2}`…: a zero would be shown
     /// as it is.
+    #[test]
+    fn dates_as_each_language_writes_them() {
+        use {super::strings, scout4all_core::shapes::enums::LanguageEnum::*};
+        let day = "2026-03-07T18:00:00+01:00";
+        assert_eq!(strings(En).day(day), "Mar 7, 2026");
+        assert_eq!(strings(It).day(day), "7 mar 2026");
+        assert_eq!(strings(Pt).day(day), "7 de mar. de 2026");
+        assert_eq!(strings(Pl).day(day), "7 mar 2026");
+        assert_eq!(strings(Ja).day(day), "2026/03/07");
+        assert_eq!(strings(It).day("not a date"), "not a date");
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
+        assert_eq!(strings(En).short_date(d), "10/24");
+        assert_eq!(strings(Pl).short_date(d), "24.10");
+    }
+
     #[test]
     fn the_places_of_the_values_from_one() {
         let zero = ["{", "0", "}"].concat();
