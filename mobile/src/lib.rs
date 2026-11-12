@@ -378,15 +378,23 @@ pub enum MobileError {
     Namesake { reason: String },
 }
 
+/// The language of the app, for the errors converted with `?` (see
+/// `From<AppError>`): the one of the last `Scout4All` made, which follows
+/// its `set_language`.
+static ERRORS_LANGUAGE: std::sync::RwLock<Option<Language>> = std::sync::RwLock::new(None);
+
 impl From<AppError> for MobileError {
     fn from(e: AppError) -> Self {
         // the messages of the core are in the labels of the domain, for the
-        // user as they are
-        let reason = match e {
-            AppError::IO(IOError::Msg(message)) => message,
-            other => other.to_string(),
-        };
-        MobileError::Failed { reason }
+        // user as they are; the files and the network in the language
+        let labels = ERRORS_LANGUAGE
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map_or_else(|| Language::default().labels(), Language::labels);
+        MobileError::Failed {
+            reason: e.message(labels),
+        }
     }
 }
 
@@ -828,6 +836,9 @@ pub struct Lineup {
     pub allows_fallback_libero: bool,
     /// nothing missing: the set can start
     pub complete: bool,
+    /// a women's team: the setter named in the feminine
+    #[uniffi(default)]
+    pub women: bool,
 }
 
 /// Starting a set of a match: the choices so far, which the core checks.
@@ -847,7 +858,7 @@ impl SetStart {
         let form = self.form();
         let player = |id: Option<Uuid>| {
             id.and_then(|id| self.team.find_player(id))
-                .map(|p| lineup_player(p, self.labels))
+                .map(|p| lineup_player(&self.team, p, self.labels))
         };
         Lineup {
             set_number: form.set_number,
@@ -862,6 +873,7 @@ impl SetStart {
             allows_fallback_libero: self.team.active_players().len()
                 >= MIN_PLAYERS_FOR_FALLBACK_LIBERO,
             complete: form.clone().validate(&self.team).is_ok(),
+            women: self.team.gender == Some(GenderEnum::Women),
         }
     }
 
@@ -927,7 +939,7 @@ impl SetStart {
     fn choices(&self, players: Vec<&PlayerEntry>) -> Vec<LineupPlayer> {
         let mut choices: Vec<LineupPlayer> = players
             .into_iter()
-            .map(|p| lineup_player(p, self.labels))
+            .map(|p| lineup_player(&self.team, p, self.labels))
             .collect();
         choices.sort_by_key(|p| p.number);
         choices
@@ -1191,6 +1203,9 @@ pub struct CorrectionState {
 /// What the scouting screen shows.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ScoutingState {
+    /// a women's team: the setter named in the feminine
+    #[uniffi(default)]
+    pub women: bool,
     pub set_number: u8,
     pub team: String,
     pub opponent: String,
@@ -1269,6 +1284,8 @@ pub struct PhaseStats {
     pub percentage: f64,
     pub won: u32,
     pub rallies: u32,
+    /// the points won minus the ones lost
+    pub balance: i64,
     pub grade: Option<f64>,
 }
 
@@ -1391,13 +1408,16 @@ pub struct LiveStats {
     pub rotations: Vec<RotationStats>,
 }
 
-/// The phases won in a rotation.
+/// The phases won in a rotation, and all its rallies.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RotationStats {
     /// 0 to 5, as `DetailFilter::rotation`
     pub rotation: u8,
     /// P1 to P6 in Italian, S1 to S6 in English
     pub name: String,
+    /// every rally of the rotation, in the phase of the filter if any:
+    /// never graded
+    pub total: Option<PhaseStats>,
     pub side_out: Option<PhaseStats>,
     pub break_points: Option<PhaseStats>,
 }
@@ -1650,7 +1670,8 @@ pub struct DetailStats {
     pub filter: DetailFilter,
     /// serve, reception, dig, block, attack, freeballs
     pub fundamentals: Vec<EventChoice>,
-    /// the players with an event in the match so far, by their number
+    /// the players with an event of the fundamental in the match so far
+    /// (and the one chosen, even with none), by their number
     pub players: Vec<ScoutingPlayer>,
     pub rotations: Vec<RotationChoice>,
     pub phases: Vec<PhaseChoice>,
@@ -1744,6 +1765,7 @@ impl Scouting {
         let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
         events.sort_by_key(|e| e.timestamp);
         ScoutingState {
+            women: team.gender == Some(GenderEnum::Women),
             set_number: session.set().set_number,
             team: team.name.clone(),
             opponent: current_match.opponent.clone(),
@@ -1769,7 +1791,7 @@ impl Scouting {
             player: session
                 .player()
                 .and_then(|id| team.find_player(id))
-                .map(|p| self.scouting_player(p)),
+                .map(|p| self.scouting_player(team, p)),
             events: events
                 .into_iter()
                 .rev()
@@ -2131,12 +2153,13 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
         errors: f.errors,
         grade: Measure::of(event).and_then(|m| level(m, f.efficiency)),
     };
-    let phase = |p: Option<(f64, u32, u32)>, measure| {
+    let phase = |p: Option<(f64, u32, u32)>, measure: Option<Measure>| {
         p.map(|(percentage, won, rallies)| PhaseStats {
             percentage,
             won,
             rallies,
-            grade: level(measure, Some(percentage)),
+            balance: 2 * i64::from(won) - i64::from(rallies),
+            grade: measure.and_then(|m| level(m, Some(percentage))),
         })
     };
     let errors = |e: &Errors| {
@@ -2168,7 +2191,7 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
             fundamental(EventTypeEnum::B, o.block),
             fundamental(EventTypeEnum::D, o.dig),
         ],
-        side_out: phase(o.side_out, Measure::SideOut),
+        side_out: phase(o.side_out, Some(Measure::SideOut)),
         side_out_possessions: o
             .side_out_possessions
             .iter()
@@ -2180,7 +2203,7 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
                 percentage: summary.map(|s| s.finalization()),
             })
             .collect(),
-        break_points: phase(o.break_points, Measure::BreakPoint),
+        break_points: phase(o.break_points, Some(Measure::BreakPoint)),
         first_attack: o.first_attack.map(attack_stats),
         counter_attack: o.counter_attack.map(attack_stats),
         unforced_errors: o.unforced_errors.total,
@@ -2201,8 +2224,9 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
             .map(|r| RotationStats {
                 rotation: r.rotation,
                 name: rotation_name(r.rotation, labels),
-                side_out: phase(r.side_out, Measure::SideOut),
-                break_points: phase(r.break_points, Measure::BreakPoint),
+                total: phase(r.total, None),
+                side_out: phase(r.side_out, Some(Measure::SideOut)),
+                break_points: phase(r.break_points, Some(Measure::BreakPoint)),
             })
             .collect(),
     }
@@ -2241,8 +2265,8 @@ fn detail_stats(
 }
 
 /// A fundamental (one of `detail::FUNDAMENTALS`) of the statistics, narrowed
-/// by the filter: the players to choose are the ones with an event in
-/// `everyone`, found in the first of `teams` having them (the team as each
+/// by the filter: the players to choose are the ones with an event of
+/// the fundamental in `everyone` (and the one chosen), found in the first of `teams` having them (the team as each
 /// match saw it); the grades by the level of the first team. With no sets
 /// to choose (see `detail_stats`).
 fn detail_of(
@@ -2264,8 +2288,7 @@ fn detail_of(
     let player_of = |id: Uuid| {
         teams
             .iter()
-            .find_map(|t| t.find_player(id))
-            .map(|p| scouting_player(p, labels))
+            .find_map(|t| t.find_player(id).map(|p| scouting_player(t, p, labels)))
     };
     let (fundamental, freeballs) =
         match Breakdown::from_start(stats, event, &narrowed, filter.serve_start) {
@@ -2400,10 +2423,15 @@ fn detail_of(
                 }),
             ),
         };
-    let mut players: Vec<ScoutingPlayer> = involved(everyone)
-        .into_iter()
-        .filter_map(player_of)
-        .collect();
+    // who has the fundamental, and the one chosen even with none (the
+    // filter is shown, to take it off)
+    let mut ids = involved(everyone, event);
+    if let Some(chosen) = narrowed.player
+        && !ids.contains(&chosen)
+    {
+        ids.push(chosen);
+    }
+    let mut players: Vec<ScoutingPlayer> = ids.into_iter().filter_map(player_of).collect();
     players.sort_by_key(|p| p.number);
     let fundamental_name = |e: EventTypeEnum| match e {
         EventTypeEnum::FB => labels.freeballs.to_string(),
@@ -2458,11 +2486,12 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
     )
 }
 
-/// The players with an event of ours in the statistics, by their id.
-fn involved(stats: &Stats) -> Vec<Uuid> {
+/// The players with an event of ours of the kind `event` in the
+/// statistics, by their id.
+fn involved(stats: &Stats, event: EventTypeEnum) -> Vec<Uuid> {
     let mut players: Vec<Uuid> = stats
         .events
-        .iter(|k| k.player.is_some())
+        .iter(|k| k.player.is_some() && k.event_type == event)
         .filter_map(|(k, _)| k.player)
         .collect();
     players.sort_unstable();
@@ -2506,7 +2535,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         player: e
             .player
             .and_then(|id| team.find_player(id))
-            .map(|p| scouting_player(p, labels)),
+            .map(|p| scouting_player(team, p, labels)),
         eval: e.eval.map(|v| v.friendly_name(e.event_type, labels)),
         symbol: e.eval.map(|v| v.to_string()),
         technique: e.technique.map(|t| t.to_string()),
@@ -2516,14 +2545,15 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
     }
 }
 
-fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
+/// The player of `team`, the role in its gender.
+fn scouting_player(team: &TeamEntry, p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
     ScoutingPlayer {
         id: p.id.to_string(),
         name: p.name.clone(),
         number: p.number,
         role: p
             .role
-            .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
+            .map_or_else(String::new, |r| r.name(team.gender, labels).to_string()),
     }
 }
 
@@ -2661,7 +2691,7 @@ impl Scouting {
         choices
             .into_iter()
             .filter_map(|c| session.current_match().team.find_player(c.id))
-            .map(|p| self.scouting_player(p))
+            .map(|p| self.scouting_player(&session.current_match().team, p))
             .collect()
     }
 
@@ -2681,8 +2711,8 @@ impl Scouting {
         scouted_event(team, e, self.labels)
     }
 
-    fn scouting_player(&self, p: &PlayerEntry) -> ScoutingPlayer {
-        scouting_player(p, self.labels)
+    fn scouting_player(&self, team: &TeamEntry, p: &PlayerEntry) -> ScoutingPlayer {
+        scouting_player(team, p, self.labels)
     }
 }
 
@@ -2962,6 +2992,9 @@ impl Scout4All {
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
         let language = Language::new(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
+        *ERRORS_LANGUAGE
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language.clone());
         let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
         let runtime = Builder::new_current_thread()
             .enable_all()
@@ -3394,7 +3427,10 @@ impl Scout4All {
                 id: c.player.id,
                 name: c.player.name,
                 number: c.player.number,
-                role: c.player.role.map(|r| r.friendly_name(labels).to_string()),
+                role: c
+                    .player
+                    .role
+                    .map(|r| r.name(team.gender, labels).to_string()),
                 chosen: c.chosen,
                 played: c.played,
             })
@@ -3510,13 +3546,16 @@ impl Scout4All {
             .collect()
     }
 
-    pub fn roles(&self) -> Vec<RoleChoice> {
+    /// The roles to give a player of the team, in its gender (a team not
+    /// read: as a men's).
+    pub fn roles(&self, team_id: String) -> Vec<RoleChoice> {
         let labels = self.language.labels();
+        let gender = self.read_team(&team_id).ok().and_then(|t| t.gender);
         RoleEnum::ALL
             .iter()
             .map(|r| RoleChoice {
                 value: *r,
-                name: r.friendly_name(labels).to_string(),
+                name: r.name(gender, labels).to_string(),
             })
             .collect()
     }
@@ -4365,13 +4404,13 @@ fn index(position: u8) -> usize {
     usize::from(position).wrapping_sub(1)
 }
 
-fn lineup_player(p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
+fn lineup_player(team: &TeamEntry, p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
     LineupPlayer {
         id: p.id.to_string(),
         name: p.name.clone(),
         number: p.number,
         role: p.role,
-        role_name: p.role.map(|r| r.friendly_name(labels).to_string()),
+        role_name: p.role.map(|r| r.name(team.gender, labels).to_string()),
     }
 }
 
@@ -4486,7 +4525,7 @@ fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
             id: p.id.to_string(),
             name: p.name.clone(),
             number: p.number,
-            role: p.role.map(|r| r.friendly_name(labels).to_string()),
+            role: p.role.map(|r| r.name(team.gender, labels).to_string()),
             form: PlayerForm::of(p),
         })
         .collect();
@@ -4910,8 +4949,25 @@ mod tests {
             .collect();
         assert_eq!(listed, vec![("Bea", 3), ("Anna", 12)]);
         assert_eq!(players[1].id, anna);
-        assert_eq!(players[1].role.as_deref(), Some("palleggiatore"));
+        // a women's team: the roles in the feminine
+        assert_eq!(players[1].role.as_deref(), Some("palleggiatrice"));
         assert_eq!(players[1].form, player("Anna", "12"));
+        let roles = app.roles(team.clone());
+        let setter = roles.iter().find(|r| r.value == RoleEnum::Setter);
+        assert_eq!(setter.map(|r| r.name.as_str()), Some("palleggiatrice"));
+        let men = app
+            .save_team(
+                None,
+                TeamForm {
+                    gender: Some(GenderEnum::Men),
+                    ..form("Arezzo")
+                },
+            )
+            .unwrap();
+        app.save_player(men.clone(), None, player("Ugo", "1"), false)
+            .unwrap();
+        let ugo = &app.team(men.clone()).unwrap().players[0];
+        assert_eq!(ugo.role.as_deref(), Some("palleggiatore"));
 
         app.remove_player(team.clone(), anna).unwrap();
         let players = app.team(team.clone()).unwrap().players;
@@ -6594,6 +6650,15 @@ mod tests {
             .fundamental
             .unwrap();
         assert_eq!((theirs.total, theirs.phases_per_point), (1, None));
+        // to choose, only who has the fundamental: no reception, nobody;
+        // the one chosen stays, to take the filter off
+        let reception = detail(StatsScope::Match, EventTypeEnum::P, &all);
+        assert!(reception.players.is_empty());
+        let chosen = detail(StatsScope::Match, EventTypeEnum::P, &second);
+        assert_eq!(
+            chosen.players.iter().map(|p| p.number).collect::<Vec<_>>(),
+            vec![2]
+        );
         // a set
         let set = detail(StatsScope::Set { number: 2 }, EventTypeEnum::S, &all);
         assert_eq!(set.fundamental.unwrap().total, 2);
@@ -6670,6 +6735,32 @@ mod tests {
         assert_eq!(played.len(), 2);
         assert_eq!(played[0], ("S1", Some((1, 1)), Some((25, 26))));
         assert_eq!((played[1].1, played[1].2), (None, Some((0, 1))));
+        // all the rallies of each rotation, and the points won minus lost
+        let balance = |p: &Option<PhaseStats>| p.as_ref().map(|p| p.balance);
+        let totals: Vec<_> = rotations
+            .iter()
+            .filter(|r| r.total.is_some())
+            .map(|r| {
+                (
+                    won(&r.total),
+                    balance(&r.total),
+                    balance(&r.side_out),
+                    balance(&r.break_points),
+                )
+            })
+            .collect();
+        assert_eq!(
+            totals,
+            vec![
+                (Some((26, 27)), Some(25), Some(1), Some(24)),
+                (Some((0, 1)), Some(-1), None, Some(-1)),
+            ]
+        );
+        assert!(
+            rotations
+                .iter()
+                .all(|r| r.total.as_ref().is_none_or(|t| t.grade.is_none()))
+        );
     }
 
     #[test]

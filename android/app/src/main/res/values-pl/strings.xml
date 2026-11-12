@@ -71,6 +71,7 @@
     <string name="serving_team">Zagrywka</string>
     <string name="position_n">Poz %d</string>
     <string name="setter">Rozgrywający</string>
+    <string name="setter_women">Rozgrywająca</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Drugi libero</string>
     <string name="none">Brak</string>
@@ -280,9 +281,9 @@
     <string name="tutorial_match_next">Dotknij Kontynuuj: potem zawodnicy w protokole.</string>
     <string name="tutorial_roster">Cała drużyna jest w protokole, do 14: dotknięcie usuwa zawodnika lub go przywraca.</string>
     <string name="tutorial_save_match">Dotknij Zapisz.</string>
-    <string name="tutorial_lineup">Skład pierwszego seta jest gotowy: rozgrywający na 6 (R6), my przyjmujemy; Spirito jest libero, Fersino drugim libero. Dotknięcie pozycji zmienia na niej zawodnika.</string>
+    <string name="tutorial_lineup">Skład pierwszego seta jest gotowy: rozgrywająca na 6 (R6), my przyjmujemy; Spirito jest libero, Fersino drugim libero. Dotknięcie pozycji zmienia na niej zawodnika.</string>
     <string name="tutorial_start_set">Dotknij Rozpocznij seta.</string>
-    <string name="tutorial_score">Wynik, faza i ustawienie: side-out, R6 (rozgrywający na 6). Zagrywa rywal.</string>
+    <string name="tutorial_score">Wynik, faza i ustawienie: side-out, R6 (rozgrywająca na 6). Zagrywa rywal.</string>
     <string name="tutorial_reception">Przyjmuje Nervini: dotknij nazwiska.</string>
     <string name="tutorial_reception_eval">Idealne przyjęcie: dotknij #.</string>
     <string name="tutorial_attack">Wystawa do Nervini, atak: znowu dotknij nazwiska.</string>
@@ -307,13 +308,13 @@
     <string name="tutorial_lineup_menu">Teraz podwójna zmiana. Zmiany składu są w półksiężycu: dotknij półksiężyca.</string>
     <string name="tutorial_substitution">Dotknij Zmiana.</string>
     <string name="tutorial_out_egonu">Schodzi Egonu: dotknij nazwiska.</string>
-    <string name="tutorial_in_cambi">Wchodzi Cambi, drugi rozgrywający: dotknij nazwiska.</string>
+    <string name="tutorial_in_cambi">Wchodzi Cambi, druga rozgrywająca: dotknij nazwiska.</string>
     <string name="tutorial_lineup_again">Druga: znowu półksiężyc.</string>
     <string name="tutorial_out_orro">Schodzi Orro: dotknij nazwiska.</string>
-    <string name="tutorial_in_antropova">Wchodzi Antropova, drugi atakujący: dotknij nazwiska.</string>
+    <string name="tutorial_in_antropova">Wchodzi Antropova, druga atakująca: dotknij nazwiska.</string>
     <string name="tutorial_setter_menu">Teraz rozgrywa Cambi: znowu półksiężyc.</string>
     <string name="tutorial_setter">Dotknij Rozgr.</string>
-    <string name="tutorial_setter_cambi">Dotknij Cambi: ustawienie idzie za nowym rozgrywającym.</string>
+    <string name="tutorial_setter_cambi">Dotknij Cambi: ustawienie idzie za nową rozgrywającą.</string>
     <string name="tutorial_libero_menu">Na koniec drugi libero: półksiężyc.</string>
     <string name="tutorial_libero">Dotknij Libero: Fersino zastępuje Spirito.</string>
     <string name="tutorial_stats">Statystyki seta i meczu: dotknij tutaj albo przesuń stąd w górę.</string>

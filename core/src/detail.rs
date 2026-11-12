@@ -504,10 +504,12 @@ pub fn by_player(
 }
 
 /// The phases won in a rotation (0 to 5, the setter in position 1 to 6
-/// and so on, as `StatsFilter::rotation`).
+/// and so on, as `StatsFilter::rotation`), and all its rallies.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RotationLine {
     pub rotation: u8,
+    /// every rally of the rotation, in the phase of the filter if any
+    pub total: RalliesWon,
     pub side_out: RalliesWon,
     pub break_points: RalliesWon,
 }
@@ -530,6 +532,7 @@ pub fn by_rotation_in(stats: &Stats, filter: &StatsFilter) -> Vec<RotationLine> 
                 |p| crate::overview::in_phase(&in_rotation, p).and_then(|f| stats.rallies_won(&f));
             RotationLine {
                 rotation,
+                total: stats.rallies_won(&in_rotation),
                 side_out: phase(PhaseEnum::SideOut),
                 break_points: phase(PhaseEnum::Break),
             }

@@ -72,6 +72,7 @@
     <string name="serving_team">Serving</string>
     <string name="position_n">Pos %d</string>
     <string name="setter">Setter</string>
+    <string name="setter_women">Setter</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Second libero</string>
     <string name="none">None</string>

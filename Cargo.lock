@@ -6068,6 +6068,7 @@ name = "scout4all-desktop"
 version = "0.17.0"
 dependencies = [
  "ab_glyph",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "crokey",
@@ -6099,6 +6100,8 @@ dependencies = [
  "self_update",
  "serde",
  "serde_json",
+ "sha1_smol",
+ "socket2 0.6.5",
  "tempfile",
  "tiny-skia 0.11.4",
  "tokio",

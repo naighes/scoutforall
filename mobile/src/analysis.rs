@@ -12,7 +12,7 @@ use scout4all_core::{
     analysis::{Analysis, MOVING_WINDOW, Period, Played, day},
     benchmark::{band, grade},
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
+        enums::{EvalEnum, EventTypeEnum, GenderEnum, RoleEnum},
         flags::ReceptionSchemeEnum,
         r#match::{MatchEntry, MatchSummary},
         stats::EvalSet,
@@ -180,7 +180,7 @@ impl Scout4All {
 
     /// What the filters on the situation offer, also for a match.
     pub fn situation_choices(&self) -> SituationChoices {
-        situation_choices(self.language.labels())
+        situation_choices(self.language.labels(), None)
     }
 }
 
@@ -356,11 +356,16 @@ pub(crate) fn team_analysis(
         summary: summary(&total, &narrowed, team, labels),
         trend,
         detail: detail_of(&total, &total, &teams, labels, event, filter)?,
-        situation: situation_choices(labels),
+        situation: situation_choices(labels, team.gender),
     })
 }
 
-fn situation_choices(labels: &scout4all_core::localization::Labels) -> SituationChoices {
+/// The choices of the filters; the roles in the gender of the team, if
+/// known.
+fn situation_choices(
+    labels: &scout4all_core::localization::Labels,
+    gender: Option<GenderEnum>,
+) -> SituationChoices {
     use EvalEnum::*;
     let group = |set: EvalSet| {
         let evals: Vec<EvalEnum> = [Perfect, Positive, Exclamative, Negative, Over]
@@ -383,7 +388,7 @@ fn situation_choices(labels: &scout4all_core::localization::Labels) -> Situation
         .into_iter()
         .map(|r| RoleChoice {
             value: r,
-            name: r.friendly_name(labels).to_string(),
+            name: r.name(gender, labels).to_string(),
         })
         .collect(),
         groups: [EvalSet::POSITIVE, EvalSet::EXCLAMATIVE, EvalSet::NEGATIVE]

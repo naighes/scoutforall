@@ -31,7 +31,7 @@ class PlayerFormTest {
 
     private fun players() = core { it.team(team) }.players
 
-    private fun role(role: RoleEnum) = core { it.roles() }.first { it.value == role }.name
+    private fun role(role: RoleEnum) = core { it.roles(team) }.first { it.value == role }.name
 
     @Test
     fun aPlayerWithoutNumberIsNotSaved() {

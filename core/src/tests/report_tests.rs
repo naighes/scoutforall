@@ -402,11 +402,27 @@ mod tests {
         assert_eq!(rotations.len(), 6);
         assert_eq!(rotations[0][0], "S6");
         assert_eq!(rotations[5][0], "S1");
-        let diff: i64 = rotations
-            .iter()
-            .map(|r| r[1].parse::<i64>().unwrap_or(0))
-            .sum();
-        assert_eq!(diff, 2 - 3);
+        assert_eq!(
+            summary.rotations.columns,
+            ["rotation", "rallies", "SO", "BP", "+/-"]
+        );
+        let sum = |column: usize| -> i64 {
+            rotations
+                .iter()
+                .map(|r| r[column].parse::<i64>().unwrap_or(0))
+                .sum()
+        };
+        assert_eq!(sum(4), 2 - 3);
+        assert_eq!(sum(1), 2 + 3);
+        // the side out and the break make the balance of each rotation
+        assert!(rotations.iter().all(|r| {
+            let n = |c: usize| r[c].parse::<i64>().ok();
+            match (n(2), n(3), n(4)) {
+                (None, None, None) => r[1] == "-",
+                (so, bp, Some(all)) => so.unwrap_or(0) + bp.unwrap_or(0) == all,
+                _ => false,
+            }
+        }));
         let [side_out, break_phase] = summary.phases.as_slice() else {
             panic!("expected the two phases");
         };

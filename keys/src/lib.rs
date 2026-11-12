@@ -18,6 +18,8 @@ use {
 
 pub use crokey::{KeyCombination, KeyCombinationFormat, key};
 
+pub mod shirt;
+
 /// Opens the settings, from home and while scouting.
 pub const SETTINGS_KEY: KeyCombination = key!(f2);
 /// Undoes the last scouting step: with shift, not to press it by mistake.
@@ -287,6 +289,20 @@ impl ScoutingOptionEnum {
     ];
 }
 
+/// How the digits choose a player while scouting: by the shirt number
+/// (`shirt`), or by the place in the lineup, as the TUI did.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerKeysEnum {
+    #[default]
+    Number,
+    Role,
+}
+
+impl PlayerKeysEnum {
+    pub const ALL: [PlayerKeysEnum; 2] = [PlayerKeysEnum::Number, PlayerKeysEnum::Role];
+}
+
 /// The keys the scout can change, as `config.json` has them: each kind on
 /// its own (the events, the evaluations, the sets, the serves, the
 /// options).
@@ -302,6 +318,8 @@ pub struct ScoutingKeys {
     pub serve_type_keybindings: KeyBindings<ServeTypeEnum>,
     #[serde(default)]
     pub option_keybindings: KeyBindings<ScoutingOptionEnum>,
+    #[serde(default)]
+    pub player_keys: PlayerKeysEnum,
 }
 
 impl ScoutingKeys {
@@ -333,6 +351,7 @@ impl ScoutingKeys {
                 .one_key_each(&KeyBindings::default().without_keys(taken)),
             eval_keybindings,
             option_keybindings: self.option_keybindings,
+            player_keys: self.player_keys,
         }
     }
 

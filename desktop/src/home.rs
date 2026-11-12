@@ -77,10 +77,6 @@ pub struct HomeScreen {
     editor: Option<Box<Editor>>,
 }
 
-fn date(m: &HomeMatch) -> String {
-    m.date.get(..10).unwrap_or(&m.date).to_string()
-}
-
 fn team_id(t: &TeamListing) -> Option<String> {
     match t {
         TeamListing::Team { id, .. } => Some(id.clone()),
@@ -343,7 +339,7 @@ fn match_row<'a>(
             ]
             .spacing(6)
             .wrap(),
-            text(format!("{} · {next}", date(m)))
+            text(format!("{} · {next}", s.day(&m.date)))
                 .size(SIZE_SMALL)
                 .color(c.muted),
         ]

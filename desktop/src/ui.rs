@@ -821,3 +821,12 @@ pub fn choice_line<'a, M: 'a>(
     .align_y(Alignment::Start)
     .into()
 }
+
+/// An error of the disk in `language`, as the core says them: "the disk is
+/// full", the others with the system's text.
+pub fn io_error(
+    e: &std::io::Error,
+    language: scout4all_core::shapes::enums::LanguageEnum,
+) -> String {
+    scout4all_core::errors::io_message(e, scout4all_core::localization::labels(language))
+}

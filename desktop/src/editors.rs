@@ -189,7 +189,7 @@ impl Editor {
         id: Option<String>,
         start: PlayerForm,
     ) -> Editor {
-        let roles = core.roles();
+        let roles = core.roles(team_id.clone());
         let fields = vec![
             Field::text(s.name, start.name.clone()),
             Field::text(s.number, start.number.clone()),
@@ -715,6 +715,17 @@ impl Editor {
                 .into(),
             );
         }
+        // the grey ones told, when there are
+        let legend: Element<'a, M> = match m.roster.iter().any(|p| p.played) {
+            true => row![
+                text("■").size(SIZE_SMALL).color(c.muted),
+                text(s.roster_played).size(SIZE_SMALL).color(c.muted),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into(),
+            false => space::vertical().height(0).into(),
+        };
         let error: Element<'a, M> = match &self.form.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => space::vertical().height(0).into(),
@@ -732,6 +743,7 @@ impl Editor {
                 text(ui::fill(s.roster_count, &[chosen.to_string()]))
                     .size(SIZE_SMALL)
                     .color(c.muted),
+                legend,
                 scrollable(Column::with_children(rows).spacing(10)).height(Length::Fill),
                 error,
                 container(buttons)

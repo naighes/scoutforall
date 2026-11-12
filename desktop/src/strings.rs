@@ -252,6 +252,10 @@ pub struct Strings {
     pub video_step_detail: &'static str,
     pub video_lead: &'static str,
     pub video_lead_detail: &'static str,
+    pub player_keys: &'static str,
+    pub player_keys_number: &'static str,
+    pub player_keys_role: &'static str,
+    pub player_keys_detail: &'static str,
     pub about: &'static str,
     pub version: &'static str,
     pub license: &'static str,
@@ -276,6 +280,8 @@ pub struct Strings {
     pub go_on: &'static str,
     pub roster_count: &'static str,
     pub roster_toggle: &'static str,
+    /// the legend of the grey ones: they played in a set
+    pub roster_played: &'static str,
     pub home_page: &'static str,
     pub switch_theme: &'static str,
     pub quit: &'static str,
@@ -304,8 +310,16 @@ pub struct Strings {
     pub calendar_month: &'static str,
     pub from_to: &'static str,
     pub period_hint: &'static str,
-    /// Monday first
     pub months: [&'static str; 12],
+    /// the months short, in a date
+    pub months_short: [&'static str; 12],
+    /// a day as the language writes it (as Android's medium style): `{d}`
+    /// the day, `{dd}` with two digits, `{mm}` the month in two digits,
+    /// `{b}` its short name, `{y}` the year
+    pub date_pattern: &'static str,
+    /// day and month only, in digits (under the trend)
+    pub short_date_pattern: &'static str,
+    /// Monday first
     pub weekdays: [&'static str; 7],
     /// the calendar starts the week on Sunday
     pub week_from_sunday: bool,
@@ -447,6 +461,10 @@ pub struct Strings {
     pub receiver_qr: &'static str,
     pub saved_sources: &'static str,
     pub new_source: &'static str,
+    pub onvif_cameras: &'static str,
+    pub search_cameras: &'static str,
+    pub searching_cameras: &'static str,
+    pub no_onvif_cameras: &'static str,
     pub source_name_hint: &'static str,
     pub receiver_also: &'static str,
     pub preview: &'static str,
@@ -698,6 +716,10 @@ const EN: Strings = Strings {
     video_step_detail: "How far back and forward the video jumps",
     video_lead: "Video lead",
     video_lead_detail: "How long before an event the video starts, out of clip mode",
+    player_keys: "Choose players by",
+    player_keys_number: "Shirt number",
+    player_keys_role: "Place in the lineup",
+    player_keys_detail: "Shirt number: type it, Enter if another starts the same way (3 or 31); “.” for the team",
     about: "About",
     version: "Version",
     license: "License",
@@ -727,6 +749,7 @@ What did you expect instead?
     go_on: "Next",
     roster_count: "{1} on the score sheet",
     roster_toggle: "put on / take off",
+    roster_played: "already played: stays on the score sheet",
     home_page: "Home",
     switch_theme: "Light or dark theme",
     quit: "Quit",
@@ -769,6 +792,11 @@ What did you expect instead?
         "November",
         "December",
     ],
+    months_short: [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ],
+    date_pattern: "{b} {d}, {y}",
+    short_date_pattern: "{mm}/{dd}",
     weekdays: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
     week_from_sunday: true,
     video: "Video",
@@ -906,6 +934,10 @@ What did you expect instead?
     receiver_qr: "Frame it with the phone: Larix opens with the connection ready (other apps: the address below)",
     saved_sources: "Saved sources",
     new_source: "New source",
+    onvif_cameras: "Cameras on the network (ONVIF)",
+    search_cameras: "Search",
+    searching_cameras: "Searching…",
+    no_onvif_cameras: "No camera answered",
     source_name_hint: "To find it in the list; empty, its address",
     receiver_also: "From the other networks of this computer (Ethernet, Wi-Fi)",
     preview: "Preview",
@@ -1157,6 +1189,10 @@ const IT: Strings = Strings {
     video_step_detail: "Di quanto il video va indietro e avanti",
     video_lead: "Anticipo del video",
     video_lead_detail: "Quanto prima di un evento parte il video, fuori dalla modalità clip",
+    player_keys: "Scelta dei giocatori",
+    player_keys_number: "Numero di maglia",
+    player_keys_role: "Posto nella formazione",
+    player_keys_detail: "Numero di maglia: digitalo, Invio se un altro comincia allo stesso modo (3 o 31); «.» per la squadra",
     about: "Informazioni",
     version: "Versione",
     license: "Licenza",
@@ -1186,6 +1222,7 @@ Cosa ti aspettavi invece?
     go_on: "Avanti",
     roster_count: "{1} a referto",
     roster_toggle: "metti / togli",
+    roster_played: "ha già giocato: resta a referto",
     home_page: "Home",
     switch_theme: "Tema chiaro o scuro",
     quit: "Esci",
@@ -1228,6 +1265,11 @@ Cosa ti aspettavi invece?
         "Novembre",
         "Dicembre",
     ],
+    months_short: [
+        "gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic",
+    ],
+    date_pattern: "{d} {b} {y}",
+    short_date_pattern: "{dd}/{mm}",
     weekdays: ["Lu", "Ma", "Me", "Gi", "Ve", "Sa", "Do"],
     week_from_sunday: false,
     video: "Video",
@@ -1365,6 +1407,10 @@ Cosa ti aspettavi invece?
     receiver_qr: "Inquadralo con il telefono: Larix si apre con la connessione già pronta (altre app: l'indirizzo sotto)",
     saved_sources: "Sorgenti salvate",
     new_source: "Nuova sorgente",
+    onvif_cameras: "Telecamere in rete (ONVIF)",
+    search_cameras: "Cerca",
+    searching_cameras: "Ricerca in corso…",
+    no_onvif_cameras: "Nessuna telecamera ha risposto",
     source_name_hint: "Per ritrovarla nell'elenco; vuoto, il suo indirizzo",
     receiver_also: "Dalle altre reti di questo computer (Ethernet, Wi-Fi)",
     preview: "Anteprima",
@@ -1616,6 +1662,10 @@ const PT: Strings = Strings {
     video_step_detail: "Quanto o vídeo volta e avança",
     video_lead: "Antecedência do vídeo",
     video_lead_detail: "Quanto antes de um evento o vídeo começa, fora do modo clipe",
+    player_keys: "Escolha dos jogadores",
+    player_keys_number: "Número da camisa",
+    player_keys_role: "Posição na formação",
+    player_keys_detail: "Número da camisa: digite-o, Enter se outro começa igual (3 ou 31); “.” para a equipe",
     about: "Sobre",
     version: "Versão",
     license: "Licença",
@@ -1645,6 +1695,7 @@ O que você esperava?
     go_on: "Avançar",
     roster_count: "{1} na súmula",
     roster_toggle: "incluir / tirar",
+    roster_played: "já jogou: fica na súmula",
     home_page: "Início",
     switch_theme: "Tema claro ou escuro",
     quit: "Sair",
@@ -1687,6 +1738,12 @@ O que você esperava?
         "Novembro",
         "Dezembro",
     ],
+    months_short: [
+        "jan.", "fev.", "mar.", "abr.", "mai.", "jun.", "jul.", "ago.", "set.", "out.", "nov.",
+        "dez.",
+    ],
+    date_pattern: "{d} de {b} de {y}",
+    short_date_pattern: "{dd}/{mm}",
     weekdays: ["Se", "Te", "Qa", "Qi", "Sx", "Sá", "Do"],
     week_from_sunday: true,
     video: "Vídeo",
@@ -1824,6 +1881,10 @@ O que você esperava?
     receiver_qr: "Aponte o celular: o Larix abre com a conexão pronta (outros apps: o endereço abaixo)",
     saved_sources: "Fontes salvas",
     new_source: "Nova fonte",
+    onvif_cameras: "Câmeras na rede (ONVIF)",
+    search_cameras: "Procurar",
+    searching_cameras: "Procurando…",
+    no_onvif_cameras: "Nenhuma câmera respondeu",
     source_name_hint: "Para encontrá-la na lista; vazio, o seu endereço",
     receiver_also: "Das outras redes deste computador (Ethernet, Wi-Fi)",
     preview: "Pré-visualização",
@@ -2075,6 +2136,10 @@ const PL: Strings = Strings {
     video_step_detail: "O ile wideo cofa się i przeskakuje do przodu",
     video_lead: "Wyprzedzenie wideo",
     video_lead_detail: "Ile przed zdarzeniem zaczyna się wideo, poza trybem klipu",
+    player_keys: "Wybór zawodników",
+    player_keys_number: "Numer na koszulce",
+    player_keys_role: "Miejsce w ustawieniu",
+    player_keys_detail: "Numer na koszulce: wpisz go, Enter, jeśli inny zaczyna się tak samo (3 lub 31); „.” dla drużyny",
     about: "O aplikacji",
     version: "Wersja",
     license: "Licencja",
@@ -2104,6 +2169,7 @@ Czego się spodziewałeś(-aś)?
     go_on: "Dalej",
     roster_count: "{1} w protokole",
     roster_toggle: "dodaj / usuń",
+    roster_played: "już grał(a): zostaje w protokole",
     home_page: "Strona główna",
     switch_theme: "Jasny lub ciemny motyw",
     quit: "Zakończ",
@@ -2146,6 +2212,11 @@ Czego się spodziewałeś(-aś)?
         "Listopad",
         "Grudzień",
     ],
+    months_short: [
+        "sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru",
+    ],
+    date_pattern: "{d} {b} {y}",
+    short_date_pattern: "{dd}.{mm}",
     weekdays: ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"],
     week_from_sunday: false,
     video: "Wideo",
@@ -2283,6 +2354,10 @@ Czego się spodziewałeś(-aś)?
     receiver_qr: "Zeskanuj telefonem: Larix otworzy się z gotowym połączeniem (inne aplikacje: adres poniżej)",
     saved_sources: "Zapisane źródła",
     new_source: "Nowe źródło",
+    onvif_cameras: "Kamery w sieci (ONVIF)",
+    search_cameras: "Szukaj",
+    searching_cameras: "Szukanie…",
+    no_onvif_cameras: "Żadna kamera nie odpowiedziała",
     source_name_hint: "Aby znaleźć je na liście; puste: jego adres",
     receiver_also: "Z innych sieci tego komputera (Ethernet, Wi-Fi)",
     preview: "Podgląd",
@@ -2534,6 +2609,10 @@ const JA: Strings = Strings {
     video_step_detail: "ビデオを戻す・進める秒数",
     video_lead: "ビデオの先行時間",
     video_lead_detail: "クリップモード以外で、イベントの何秒前からビデオを再生するか",
+    player_keys: "選手の選び方",
+    player_keys_number: "背番号",
+    player_keys_role: "ラインナップの位置",
+    player_keys_detail: "背番号：入力し、同じ数字で始まる番号があればEnter（3と31）。「.」でチーム",
     about: "アプリについて",
     version: "バージョン",
     license: "ライセンス",
@@ -2563,6 +2642,7 @@ const JA: Strings = Strings {
     go_on: "次へ",
     roster_count: "記録用紙に{1}人",
     roster_toggle: "追加 / 削除",
+    roster_played: "出場済み: 記録用紙に残ります",
     home_page: "ホーム",
     switch_theme: "ライト / ダークテーマ",
     quit: "終了",
@@ -2594,6 +2674,11 @@ const JA: Strings = Strings {
     months: [
         "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月",
     ],
+    months_short: [
+        "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月",
+    ],
+    date_pattern: "{y}/{mm}/{dd}",
+    short_date_pattern: "{mm}/{dd}",
     weekdays: ["月", "火", "水", "木", "金", "土", "日"],
     week_from_sunday: true,
     video: "ビデオ",
@@ -2731,6 +2816,10 @@ const JA: Strings = Strings {
     receiver_qr: "スマホで読み取ると、接続設定済みの Larix が開きます(他のアプリは下のアドレス)",
     saved_sources: "保存したソース",
     new_source: "新しいソース",
+    onvif_cameras: "ネットワーク上のカメラ(ONVIF)",
+    search_cameras: "検索",
+    searching_cameras: "検索中…",
+    no_onvif_cameras: "応答したカメラはありません",
     source_name_hint: "一覧で見分けるための名前(空欄ならアドレス)",
     receiver_also: "このコンピューターの他のネットワークから(Ethernet、Wi-Fi)",
     preview: "プレビュー",
@@ -2750,6 +2839,43 @@ pub const fn strings(language: LanguageEnum) -> &'static Strings {
 }
 
 impl Strings {
+    /// `day` as the language writes it.
+    pub fn date(&self, day: chrono::NaiveDate) -> String {
+        self.dated(self.date_pattern, day)
+    }
+
+    /// Day and month of `day`, in digits.
+    pub fn short_date(&self, day: chrono::NaiveDate) -> String {
+        self.dated(self.short_date_pattern, day)
+    }
+
+    /// The day of a date as saved (`YYYY-MM-DD`, or the whole RFC 3339
+    /// with the time), as the language writes it; one not understood as
+    /// it is.
+    pub fn day(&self, date: &str) -> String {
+        date.get(..10)
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .map_or_else(|| date.to_string(), |d| self.date(d))
+    }
+
+    /// Day and time (seconds too) as the language writes them.
+    pub fn date_time<T: chrono::TimeZone>(&self, at: &chrono::DateTime<T>) -> String
+    where
+        T::Offset: std::fmt::Display,
+    {
+        format!("{} {}", self.date(at.date_naive()), at.format("%H:%M:%S"))
+    }
+
+    fn dated(&self, pattern: &str, day: chrono::NaiveDate) -> String {
+        use chrono::Datelike;
+        pattern
+            .replace("{dd}", &format!("{:02}", day.day()))
+            .replace("{d}", &day.day().to_string())
+            .replace("{mm}", &format!("{:02}", day.month()))
+            .replace("{b}", self.months_short[day.month0() as usize])
+            .replace("{y}", &day.year().to_string())
+    }
+
     /// What the court asks while evaluating `event`, if it asks anything:
     /// the destination of a serve or an attack, the zone of the others.
     pub const fn target(&self, event: EventTypeEnum) -> Option<&'static str> {
@@ -2768,6 +2894,21 @@ impl Strings {
 mod tests {
     /// `ui::fill` puts the values in `{1}`, `{2}`…: a zero would be shown
     /// as it is.
+    #[test]
+    fn dates_as_each_language_writes_them() {
+        use {super::strings, scout4all_core::shapes::enums::LanguageEnum::*};
+        let day = "2026-03-07T18:00:00+01:00";
+        assert_eq!(strings(En).day(day), "Mar 7, 2026");
+        assert_eq!(strings(It).day(day), "7 mar 2026");
+        assert_eq!(strings(Pt).day(day), "7 de mar. de 2026");
+        assert_eq!(strings(Pl).day(day), "7 mar 2026");
+        assert_eq!(strings(Ja).day(day), "2026/03/07");
+        assert_eq!(strings(It).day("not a date"), "not a date");
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
+        assert_eq!(strings(En).short_date(d), "10/24");
+        assert_eq!(strings(Pl).short_date(d), "24.10");
+    }
+
     #[test]
     fn the_places_of_the_values_from_one() {
         let zero = ["{", "0", "}"].concat();

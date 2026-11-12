@@ -1,6 +1,6 @@
 //! The settings of the app, beside its keys (F2): the language, the
 //! country a new team starts with, the statistics sent, the seconds of the
-//! video; the terms of use
+//! video, how the digits choose a player while scouting; the terms of use
 //! and what the app is, with how to report a problem. Each change is saved
 //! as it's made: the language in `config.json` as the TUI keeps it, the
 //! rest as the app saves it (`mobile`).
@@ -21,7 +21,7 @@ use {
         settings::{LEAD_SECONDS, STEP_SECONDS, VideoSeconds},
         shapes::enums::LanguageEnum,
     },
-    scout4all_keys::{KeyCombination, key},
+    scout4all_keys::{KeyCombination, PlayerKeysEnum, key},
     scout4all_mobile::{Scout4All, Terms},
     std::{path::Path, sync::Arc},
 };
@@ -38,6 +38,14 @@ const COUNTRY: usize = 1;
 const STATISTICS: usize = 2;
 const STEP: usize = 3;
 const LEAD: usize = 4;
+const PLAYER_KEYS: usize = 5;
+
+fn player_keys_name(keys: PlayerKeysEnum, s: &Strings) -> &'static str {
+    match keys {
+        PlayerKeysEnum::Number => s.player_keys_number,
+        PlayerKeysEnum::Role => s.player_keys_role,
+    }
+}
 
 /// The seconds a field of the video offers, as its menu shows them.
 fn seconds_options(bounds: &std::ops::RangeInclusive<u32>) -> Vec<String> {
@@ -125,12 +133,23 @@ pub fn report_url(s: &Strings) -> String {
 /// Writes the language in `config.json`, as the TUI keeps it.
 fn save_language(dir: &Path, language: LanguageEnum) -> Result<(), String> {
     // the code, as serde writes it and the TUI reads it
-    crate::settings::merge(dir, serde_json::json!({ "language": language }))
+    crate::settings::merge(dir, serde_json::json!({ "language": language }), language)
+}
+
+/// Writes how the digits choose a player in `config.json`, with the keys.
+fn save_player_keys(
+    dir: &Path,
+    keys: PlayerKeysEnum,
+    language: LanguageEnum,
+) -> Result<(), String> {
+    crate::settings::merge(dir, serde_json::json!({ "player_keys": keys }), language)
 }
 
 pub struct General {
     core: Arc<Scout4All>,
     pub language: LanguageEnum,
+    /// how the digits choose a player while scouting: kept with the keys
+    pub player_keys: PlayerKeysEnum,
     pub form: Form,
     /// the terms of use, being read
     pub terms: Option<Terms>,
@@ -138,9 +157,15 @@ pub struct General {
 }
 
 impl General {
-    pub fn new(core: Arc<Scout4All>, language: LanguageEnum, s: &Strings) -> General {
+    pub fn new(
+        core: Arc<Scout4All>,
+        language: LanguageEnum,
+        player_keys: PlayerKeysEnum,
+        s: &Strings,
+    ) -> General {
         let mut general = General {
             language,
+            player_keys,
             form: Form::new(s.general, vec![]),
             terms: None,
             error: None,
@@ -188,6 +213,18 @@ impl General {
                     seconds_index(&LEAD_SECONDS, seconds.lead_s),
                 )
                 .hint(s.video_lead_detail),
+                Field::choice(
+                    s.player_keys,
+                    PlayerKeysEnum::ALL
+                        .iter()
+                        .map(|k| player_keys_name(*k, s).to_string())
+                        .collect(),
+                    PlayerKeysEnum::ALL
+                        .iter()
+                        .position(|k| *k == self.player_keys)
+                        .unwrap_or(0),
+                )
+                .hint(s.player_keys_detail),
             ],
         );
         form.plain = true;
@@ -253,6 +290,13 @@ impl General {
                     .set_video_seconds(seconds)
                     .map(|_| ())
                     .map_err(|e| e.to_string())
+            }
+            PLAYER_KEYS => {
+                let keys = PlayerKeysEnum::ALL
+                    .get(self.form.index(PLAYER_KEYS))
+                    .copied()
+                    .unwrap_or_default();
+                save_player_keys(dir, keys, self.language).map(|()| self.player_keys = keys)
             }
             _ => Ok(()),
         };

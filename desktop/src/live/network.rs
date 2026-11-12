@@ -21,11 +21,12 @@ use {
     retina::{
         client::{
             Credentials, PlayOptions, Session, SessionOptions, SetupOptions, TcpTransportOptions,
-            Transport,
+            Transport, UdpTransportOptions,
         },
         codec::{CodecItem, ParametersRef},
     },
     std::{
+        net::Ipv4Addr,
         sync::{
             Arc, Mutex,
             mpsc::{Receiver, TryRecvError},
@@ -48,12 +49,15 @@ pub(super) const LOOK_EVERY: Duration = Duration::from_millis(100);
 
 /// The ports of the protocols, when not written.
 const RTSP_PORT: u16 = 554;
+const RTSPS_PORT: u16 = 322;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     Rtsp,
     Rtmp,
     Hls,
+    /// an IP camera's ONVIF address: its RTSP one asked of it
+    Onvif,
 }
 
 /// What went wrong, to say it to the user in their words.
@@ -112,6 +116,7 @@ pub fn parse(written: &str) -> Result<(url::Url, Protocol, Option<(String, Strin
         ("rtsp" | "rtsps", _) => Protocol::Rtsp,
         ("rtmp" | "rtmps", _) => Protocol::Rtmp,
         ("http" | "https", path) if path.ends_with(".m3u8") => Protocol::Hls,
+        ("http" | "https", _) if super::onvif::is_onvif(&url) => Protocol::Onvif,
         _ => return Err(Problem::Invalid),
     };
     let user = match url.username() {
@@ -452,6 +457,13 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
                     Ok((url, Protocol::Hls, in_url)) => {
                         super::hls::pull(url, source, in_url, &mut io).await
                     }
+                    Ok((url, Protocol::Onvif, in_url)) => {
+                        let user = credentials(source, in_url.clone());
+                        match super::onvif::stream_uri(&url, user).await {
+                            Ok(rtsp) => stream(rtsp, source, in_url, &mut io).await,
+                            Err(problem) => Err(problem),
+                        }
+                    }
                     Err(problem) => Err(problem),
                 },
                 Reading::Receive(receiver) => super::rtmp::receive(receiver, &mut io).await,
@@ -527,6 +539,41 @@ pub(super) fn credentials(
     }
 }
 
+/// The camera doesn't send over the transport asked for (`461
+/// Unsupported Transport`).
+fn transport_refused(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("461") || e.contains("unsupported transport")
+}
+
+/// `rtsps://`: the client speaks RTSP in the clear only, so a bridge on
+/// this computer (127.0.0.1, a port of its own, one connection) takes it
+/// over TLS to the source, trusted as `rtmps://` is: the address to give
+/// the client in its place. The certificate is checked here, before.
+async fn bridged(url: &url::Url) -> Result<url::Url, Problem> {
+    let host = url.host_str().unwrap_or_default().to_string();
+    let port = url.port().unwrap_or(RTSPS_PORT);
+    let mut wire = super::rtmp::connect(&host, port, Some(super::rtmp::trusted()?)).await?;
+    let other = |e: std::io::Error| Problem::Other(e.to_string());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .map_err(other)?;
+    let local = listener.local_addr().map_err(other)?.port();
+    tokio::spawn(async move {
+        if let Ok(Ok((mut tcp, _))) = tokio::time::timeout(ANSWER_WITHIN, listener.accept()).await {
+            let _ = tcp.set_nodelay(true);
+            let _ = tokio::io::copy_bidirectional(&mut tcp, &mut wire).await;
+        }
+    });
+    let mut local_url = url.clone();
+    local_url
+        .set_scheme("rtsp")
+        .and_then(|()| local_url.set_ip_host(Ipv4Addr::LOCALHOST.into()))
+        .and_then(|()| local_url.set_port(Some(local)))
+        .map_err(|()| Problem::Invalid)?;
+    Ok(local_url)
+}
+
 /// Connected over RTSP and read until cut off (`Ok(Nothing)`) or asked to
 /// quit.
 async fn stream(
@@ -535,8 +582,15 @@ async fn stream(
     in_url: Option<(String, String)>,
     io: &mut Io<'_>,
 ) -> Result<Asked, Problem> {
+    let encrypted = url.scheme() == "rtsps";
     if url.port().is_none() {
-        let _ = url.set_port(Some(RTSP_PORT));
+        let _ = url.set_port(Some(match encrypted {
+            true => RTSPS_PORT,
+            false => RTSP_PORT,
+        }));
+    }
+    if encrypted {
+        url = bridged(&url).await?;
     }
     let credentials =
         credentials(source, in_url).map(|(username, password)| Credentials { username, password });
@@ -562,14 +616,25 @@ async fn stream(
         "h265" | "hevc" => return Err(Problem::Hevc),
         other => return Err(Problem::NoVideo(other.to_uppercase())),
     }
-    let transport = Transport::Tcp(TcpTransportOptions::default());
-    tokio::time::timeout(
-        ANSWER_WITHIN,
-        session.setup(video, SetupOptions::default().transport(transport)),
-    )
-    .await
-    .map_err(|_| Problem::Silent)?
-    .map_err(|e| problem_of(&e.to_string()))?;
+    // over TCP, which crosses routers and firewalls; over UDP the cameras
+    // that don't take TCP (461), not through the bridge of `rtsps://`
+    let mut transports = vec![Transport::Tcp(TcpTransportOptions::default())];
+    if !encrypted {
+        transports.push(Transport::Udp(UdpTransportOptions::default()));
+    }
+    for (i, transport) in transports.into_iter().enumerate() {
+        let set_up = tokio::time::timeout(
+            ANSWER_WITHIN,
+            session.setup(video, SetupOptions::default().transport(transport)),
+        )
+        .await
+        .map_err(|_| Problem::Silent)?;
+        match set_up {
+            Ok(()) => break,
+            Err(e) if i == 0 && !encrypted && transport_refused(&e.to_string()) => {}
+            Err(e) => return Err(problem_of(&e.to_string())),
+        }
+    }
     let playing = tokio::time::timeout(ANSWER_WITHIN, session.play(PlayOptions::default()))
         .await
         .map_err(|_| Problem::Silent)?
@@ -672,6 +737,58 @@ mod tests {
         assert!((2500..=3600).contains(&recorded), "{made:?}");
         let video = crate::video::source::Source::open(&done[0].mp4).unwrap();
         assert!(video.samples.len() as u64 >= made.length_ms * 30 / 1000 - 3);
+    }
+
+    /// A camera that sends over UDP only (`S4A_RTSP_UDP`: mediamtx with
+    /// `rtspTransports: [udp]`, natively, not in Docker for Mac, whose
+    /// network doesn't bring the packets back), and `rtsps://` (the test
+    /// server's `rtspsAddress`, `S4A_RTSPS`, with the test certificate):
+    /// their pictures; `rtsps://` not trusted by the system said so.
+    /// `cargo test -p scout4all-desktop -- --ignored rtsp_udp`.
+    #[test]
+    #[ignore]
+    fn rtsp_udp_and_rtsps_from_the_test_servers() {
+        use crate::live::capture::{Capture, Source};
+        let udp = std::env::var("S4A_RTSP_UDP").unwrap_or_else(|_| "127.0.0.1:8555".to_string());
+        let rtsps = std::env::var("S4A_RTSPS").unwrap_or_else(|_| "localhost:8322".to_string());
+        let wait = |capture: &Capture, until: &dyn Fn(&Status) -> bool| {
+            for _ in 0..150 {
+                if capture.status().is_some_and(|s| until(&s)) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            false
+        };
+        let open = |url: String| {
+            Capture::open(Source::Network(NetworkSource {
+                url,
+                username: "scout".into(),
+                password: "segreta".into(),
+            }))
+        };
+        // not trusted by the system, unless a test of the same run trusted
+        // the test authority already (one for all)
+        if crate::live::rtmp::tests::TRUSTED.get().is_none() {
+            let untrusted = open(format!("rtsps://{rtsps}/campo"));
+            assert!(wait(&untrusted, &|s| s.problem == Some(Problem::Certificate)));
+        }
+        let over_udp = open(format!("rtsp://{udp}/campo"));
+        assert!(
+            wait(&over_udp, &|s| s.frame.is_some()),
+            "{:?}",
+            over_udp.status()
+        );
+        let _ = crate::live::rtmp::tests::TRUSTED.set(crate::live::rtmp::tests::test_authority());
+        let encrypted = open(format!("rtsps://{rtsps}/campo"));
+        assert!(
+            wait(&encrypted, &|s| s.frame.is_some()),
+            "{:?}",
+            encrypted.status()
+        );
+        assert_eq!(encrypted.status().unwrap().size, Some((1280, 720)));
+        let refused = open(format!("rtsps://{rtsps}/nessuno"));
+        assert!(wait(&refused, &|s| s.problem == Some(Problem::NotFound)));
     }
 
     /// A stream with B-frames: a picture of nearly each frame, not only
@@ -833,6 +950,66 @@ mod tests {
             feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
         }
         assert!(take.is_some_and(|t| !t.out_of_space));
+    }
+
+    /// A disk that fills up for real while recording from the test server
+    /// (`S4A_SMALL_DISK`: the folder of a small volume, e.g. a disk image
+    /// of 1 GB made with `hdiutil create -size 1g -fs APFS`): another
+    /// program fills it, the recording stops by itself with its MP4 made
+    /// and readable, the disk not full.
+    /// `cargo test -p scout4all-desktop -- --ignored small_disk`.
+    #[test]
+    #[ignore]
+    fn recorded_on_a_small_disk() {
+        use crate::live::{
+            capture::{Capture, Source},
+            space::{RESERVE, free},
+        };
+        let folder = std::path::PathBuf::from(std::env::var("S4A_SMALL_DISK").unwrap());
+        let base_url = std::env::var("S4A_RTSP").unwrap_or_else(|_| "127.0.0.1:8554".to_string());
+        let capture = Capture::open(Source::Network(NetworkSource {
+            url: format!("{base_url}/campo"),
+            username: "scout".into(),
+            password: "segreta".into(),
+        }));
+        let seen = (0..150).any(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            capture.status().is_some_and(|s| s.frame.is_some())
+        });
+        assert!(seen);
+        capture.record(
+            folder.join("20261112 120000"),
+            chrono::Local::now(),
+            Default::default(),
+        );
+        std::thread::sleep(Duration::from_secs(3));
+        // another program takes the room down to a little over the reserve
+        let filler = folder.join("filler.bin");
+        let left = free(&folder).unwrap();
+        let fill = left.saturating_sub(RESERVE + 2_000_000);
+        let file = std::fs::File::create(&filler).unwrap();
+        file.set_len(0).unwrap();
+        {
+            use std::io::Write;
+            let mut writer = std::io::BufWriter::new(&file);
+            let chunk = vec![1u8; 1 << 20];
+            for _ in 0..fill / (1 << 20) {
+                writer.write_all(&chunk).unwrap();
+            }
+        }
+        file.sync_all().unwrap();
+        let stopped = (0..300).any(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            capture.status().is_some_and(|s| !s.done.is_empty())
+        });
+        let _ = std::fs::remove_file(&filler);
+        assert!(stopped, "{:?} free {:?}", capture.status(), free(&folder));
+        let done = capture.take_done();
+        assert!(done[0].out_of_space, "{done:?}");
+        let made = done[0].result.clone().unwrap();
+        let video = crate::video::source::Source::open(&done[0].mp4).unwrap();
+        eprintln!("{made:?}, {} frames", video.samples.len());
+        assert!(made.length_ms >= 2_000, "{made:?}");
     }
 
     /// The bitrate of a source said once counted for a while.

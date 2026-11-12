@@ -110,7 +110,7 @@ class PlayerFormViewModel(
                     val player = playerId?.let { id -> core.team(teamId).players.first { it.id == id } }
                     PlayerFormState.Editing(
                         form = player?.form ?: PlayerForm(name = "", role = null, number = ""),
-                        roles = core.roles(),
+                        roles = core.roles(teamId),
                         savedName = player?.name.orEmpty(),
                     )
                 }

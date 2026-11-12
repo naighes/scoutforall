@@ -111,13 +111,17 @@ pub fn assigned(
 
 /// Writes the keys in `config.json`, leaving the rest as it is (the other
 /// apps keep their settings there too): written aside, then renamed.
-pub fn save(dir: &Path, keys: &ScoutingKeys) -> Result<(), String> {
-    merge(dir, serde_json::to_value(keys).map_err(|e| e.to_string())?)
+pub fn save(dir: &Path, keys: &ScoutingKeys, language: LanguageEnum) -> Result<(), String> {
+    merge(
+        dir,
+        serde_json::to_value(keys).map_err(|e| e.to_string())?,
+        language,
+    )
 }
 
 /// Writes `values` (an object) in `config.json`, leaving the rest as it
-/// is: written aside, then renamed.
-pub fn merge(dir: &Path, values: serde_json::Value) -> Result<(), String> {
+/// is: written aside, then renamed. The errors of the disk in `language`.
+pub fn merge(dir: &Path, values: serde_json::Value, language: LanguageEnum) -> Result<(), String> {
     let path = dir.join("config.json");
     let mut json: serde_json::Value = std::fs::read_to_string(&path)
         .ok()
@@ -130,8 +134,9 @@ pub fn merge(dir: &Path, values: serde_json::Value) -> Result<(), String> {
     }
     let content = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
     let aside = dir.join("config.json.tmp");
-    std::fs::write(&aside, content).map_err(|e| e.to_string())?;
-    std::fs::rename(&aside, &path).map_err(|e| e.to_string())
+    let disk = |e: std::io::Error| crate::ui::io_error(&e, language);
+    std::fs::write(&aside, content).map_err(disk)?;
+    std::fs::rename(&aside, &path).map_err(disk)
 }
 
 pub struct SettingsScreen {
@@ -156,7 +161,7 @@ impl SettingsScreen {
     ) -> Self {
         Self {
             page: Page::General,
-            general: General::new(core, language, s),
+            general: General::new(core, language, keys.player_keys, s),
             dir,
             keys,
             labels: labels(language),
@@ -199,7 +204,9 @@ impl SettingsScreen {
                 self.waiting = false;
             }
             Message::General(m) => {
-                return match self.general.update(&self.dir, s, m) {
+                let stay = self.general.update(&self.dir, s, m);
+                self.keys.player_keys = self.general.player_keys;
+                return match stay {
                     true => Outcome::Stay,
                     false => Outcome::Close,
                 };
@@ -209,13 +216,22 @@ impl SettingsScreen {
                 self.waiting = true;
                 self.error = None;
             }
-            Message::Reset => self.store(ScoutingKeys::default().normalized(), s),
+            // the keys only: how the digits choose a player is a general
+            // setting
+            Message::Reset => self.store(
+                ScoutingKeys {
+                    player_keys: self.keys.player_keys,
+                    ..ScoutingKeys::default()
+                }
+                .normalized(),
+                s,
+            ),
         }
         Outcome::Stay
     }
 
     fn store(&mut self, keys: ScoutingKeys, s: &Strings) {
-        match save(&self.dir, &keys) {
+        match save(&self.dir, &keys, self.general.language) {
             Ok(()) => {
                 self.keys = keys;
                 self.error = None;
@@ -237,7 +253,9 @@ impl SettingsScreen {
                 return Outcome::Stay;
             }
             (Page::General, false) => {
-                return match self.general.key(&self.dir, s, ck) {
+                let stay = self.general.key(&self.dir, s, ck);
+                self.keys.player_keys = self.general.player_keys;
+                return match stay {
                     true => Outcome::Stay,
                     false => Outcome::Close,
                 };
@@ -253,15 +271,14 @@ impl SettingsScreen {
                 match assigned(&self.keys, shortcut, ck) {
                     Ok(keys) => self.store(keys, s),
                     Err(Conflict::Reserved) => {
-                        self.error = Some(s.reserved_key.replace("{}", &keymap::label(&ck)))
+                        self.error = Some(s.reserved_key.replace("{}", &keymap::label(&ck, s)))
                     }
                     Err(Conflict::Taken(other)) => {
-                        self.error =
-                            Some(s.taken_key.replacen("{}", &keymap::label(&ck), 1).replacen(
-                                "{}",
-                                &name(other, self.labels, s),
-                                1,
-                            ))
+                        self.error = Some(
+                            s.taken_key
+                                .replacen("{}", &keymap::label(&ck, s), 1)
+                                .replacen("{}", &name(other, self.labels, s), 1),
+                        )
                     }
                 }
             }
@@ -413,7 +430,7 @@ impl SettingsScreen {
         let key: Element<'a, Message> =
             match (selected && self.waiting, key_of(&self.keys, shortcut)) {
                 (true, _) => ui::keycap("…", c),
-                (false, Some(ck)) => ui::keycap(&keymap::label(&ck), c),
+                (false, Some(ck)) => ui::keycap(&keymap::label(&ck, s), c),
                 (false, None) => ui::body("–").color(c.muted).into(),
             };
         let body = row![
@@ -433,7 +450,10 @@ fn shortcuts_before(index: usize) -> Option<Shortcut> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, scout4all_keys::key};
+    use {
+        super::*,
+        scout4all_keys::{PlayerKeysEnum, key},
+    };
 
     #[test]
     fn keys_refused_and_assigned() {
@@ -466,6 +486,44 @@ mod tests {
         );
     }
 
+    /// How the digits choose a player: in the general settings, saved
+    /// with the keys and given to the scouting, kept when the keys go back
+    /// to the defaults.
+    #[test]
+    fn the_player_keys_chosen_among_the_general_settings() {
+        let s = crate::strings::strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let keys = ScoutingKeys::default().normalized();
+        assert_eq!(keys.player_keys, PlayerKeysEnum::Number);
+        let mut screen =
+            SettingsScreen::new(core, dir.path().to_path_buf(), keys, LanguageEnum::It, s);
+        let role = PlayerKeysEnum::ALL
+            .iter()
+            .position(|k| *k == PlayerKeysEnum::Role)
+            .unwrap();
+        let field = screen
+            .general
+            .form
+            .fields
+            .iter()
+            .position(|f| f.label == s.player_keys)
+            .unwrap();
+        screen.update(
+            Message::General(crate::general::Message::Form(crate::form::Message::Choose(
+                field, role,
+            ))),
+            s,
+        );
+        assert_eq!(screen.keys.player_keys, PlayerKeysEnum::Role);
+        let saved: ScoutingKeys =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved.player_keys, PlayerKeysEnum::Role);
+        screen.update(Message::Reset, s);
+        assert_eq!(screen.keys.player_keys, PlayerKeysEnum::Role);
+    }
+
     #[test]
     fn saved_with_the_rest_of_the_config() {
         let dir = tempfile::tempdir().unwrap();
@@ -478,7 +536,7 @@ mod tests {
             .normalized()
             .assigned(EventTypeEnum::A, key!(z))
             .unwrap();
-        save(dir.path(), &keys).unwrap();
+        save(dir.path(), &keys, LanguageEnum::En).unwrap();
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.path().join("config.json")).unwrap())
                 .unwrap();

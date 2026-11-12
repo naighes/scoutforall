@@ -6,7 +6,6 @@
 use {
     crate::{
         strings::Strings,
-        team::day,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
@@ -319,7 +318,7 @@ impl Importing {
                 opponent.clone(),
                 format!(
                     "{} · {} · {won}–{lost}",
-                    day(date),
+                    s.day(date),
                     match home {
                         true => s.home_game,
                         false => s.away_game,

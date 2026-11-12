@@ -71,6 +71,7 @@
     <string name="serving_team">Saque</string>
     <string name="position_n">Pos %d</string>
     <string name="setter">Levantador</string>
+    <string name="setter_women">Levantadora</string>
     <string name="libero">Líbero</string>
     <string name="fallback_libero">Segundo líbero</string>
     <string name="none">Nenhum</string>
@@ -278,9 +279,9 @@
     <string name="tutorial_match_next">Toque em Continuar: depois os jogadores na súmula.</string>
     <string name="tutorial_roster">Todo o time está na súmula, até 14: um toque tira ou recoloca um jogador.</string>
     <string name="tutorial_save_match">Toque em Salvar.</string>
-    <string name="tutorial_lineup">A escalação do primeiro set está pronta: levantador na 6 (P6), nós na recepção; Spirito é o líbero, Fersino o segundo líbero. Tocando uma posição, troca-se o jogador.</string>
+    <string name="tutorial_lineup">A escalação do primeiro set está pronta: levantadora na 6 (P6), nós na recepção; Spirito é o líbero, Fersino o segundo líbero. Tocando uma posição, troca-se o jogador.</string>
     <string name="tutorial_start_set">Toque em Iniciar o set.</string>
-    <string name="tutorial_score">O placar, a fase e o rodízio: side-out, P6 (levantador na 6). Eles sacam.</string>
+    <string name="tutorial_score">O placar, a fase e o rodízio: side-out, P6 (levantadora na 6). Eles sacam.</string>
     <string name="tutorial_reception">Nervini recebe: toque no seu nome.</string>
     <string name="tutorial_reception_eval">Recepção perfeita: toque em #.</string>
     <string name="tutorial_attack">O levantamento é para Nervini, que ataca: toque no seu nome de novo.</string>
@@ -305,13 +306,13 @@
     <string name="tutorial_lineup_menu">Agora uma dupla substituição. As mudanças de escalação estão na meia-lua: toque na meia-lua.</string>
     <string name="tutorial_substitution">Toque em Subst.</string>
     <string name="tutorial_out_egonu">Sai Egonu: toque no seu nome.</string>
-    <string name="tutorial_in_cambi">Entra Cambi, o segundo levantador: toque no seu nome.</string>
+    <string name="tutorial_in_cambi">Entra Cambi, a segunda levantadora: toque no seu nome.</string>
     <string name="tutorial_lineup_again">A outra: a meia-lua de novo.</string>
     <string name="tutorial_out_orro">Sai Orro: toque no seu nome.</string>
-    <string name="tutorial_in_antropova">Entra Antropova, o segundo oposto: toque no seu nome.</string>
+    <string name="tutorial_in_antropova">Entra Antropova, a segunda oposta: toque no seu nome.</string>
     <string name="tutorial_setter_menu">Agora Cambi levanta: a meia-lua de novo.</string>
     <string name="tutorial_setter">Toque em Levant.</string>
-    <string name="tutorial_setter_cambi">Toque em Cambi: o rodízio segue o novo levantador.</string>
+    <string name="tutorial_setter_cambi">Toque em Cambi: o rodízio segue a nova levantadora.</string>
     <string name="tutorial_libero_menu">Por último, o outro líbero: a meia-lua.</string>
     <string name="tutorial_libero">Toque em Líbero: Fersino toma o lugar de Spirito.</string>
     <string name="tutorial_stats">As estatísticas do set e da partida: toque aqui ou deslize para cima daqui.</string>

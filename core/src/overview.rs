@@ -48,6 +48,12 @@ impl Fundamental {
 /// `Stats::rallies_won`.
 pub type RalliesWon = Option<(f64, u32, u32)>;
 
+/// The points won minus the ones lost in the rallies, none when no rally
+/// was played.
+pub fn balance(rallies: RalliesWon) -> Option<i64> {
+    rallies.map(|(_, won, total)| 2 * i64::from(won) - i64::from(total))
+}
+
 /// The errors of a kind, by the fundamental they were made in, always all
 /// of them in the same order (some may be 0).
 #[derive(Debug, Clone, PartialEq, Eq)]

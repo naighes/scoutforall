@@ -41,7 +41,7 @@ pub const RTMP_PORT: u16 = 1935;
 pub const RTMPS_PORT: u16 = 443;
 
 /// What RTMP goes over: TCP, or TLS on it (`rtmps://`).
-trait Wire: AsyncRead + AsyncWrite + Unpin + Send {}
+pub(super) trait Wire: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Wire for T {}
 
@@ -341,7 +341,7 @@ pub fn app_and_key(url: &url::Url) -> (String, String) {
 
 /// Whom `rtmps://` trusts: the certificates the system trusts (the
 /// test certificate authority in the tests that set it).
-fn trusted() -> Result<Arc<ClientConfig>, Problem> {
+pub(super) fn trusted() -> Result<Arc<ClientConfig>, Problem> {
     #[cfg(test)]
     if let Some(config) = tests::TRUSTED.get() {
         return Ok(config.clone());
@@ -371,7 +371,7 @@ fn tls_problem(error: &std::io::Error) -> Problem {
 }
 
 /// Connected to `host`: over TLS when `tls` says whom to trust.
-async fn connect(
+pub(super) async fn connect(
     host: &str,
     port: u16,
     tls: Option<Arc<ClientConfig>>,
@@ -697,7 +697,7 @@ async fn publisher(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use {
         super::*,
         crate::live::capture::{Capture, Source, Status},
@@ -711,11 +711,11 @@ mod tests {
 
     /// Whom `rtmps://` trusts in the tests that set it, in place of the
     /// system.
-    pub(super) static TRUSTED: OnceLock<Arc<ClientConfig>> = OnceLock::new();
+    pub(crate) static TRUSTED: OnceLock<Arc<ClientConfig>> = OnceLock::new();
 
     /// The test certificate authority (`testdata/rtmps_ca.crt`), which
     /// signed `rtmps_server.crt` for `localhost` and 127.0.0.1.
-    fn test_authority() -> Arc<ClientConfig> {
+    pub(crate) fn test_authority() -> Arc<ClientConfig> {
         let mut roots = rustls::RootCertStore::empty();
         let ca = CertificateDer::from_pem_slice(include_bytes!("testdata/rtmps_ca.crt")).unwrap();
         roots.add(ca).unwrap();
