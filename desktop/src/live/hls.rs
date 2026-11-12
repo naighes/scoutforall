@@ -1164,6 +1164,37 @@ seg43.mp4
         std::fs::copy(&done[0].mp4, &kept).unwrap();
     }
 
+    /// A master playlist with two qualities on a network too slow for
+    /// the higher (`S4A_HLS_SLOW`: its segments served slower than they
+    /// play, `scout`/`segreta`): first the higher, then the lower, on.
+    /// `cargo test -p scout4all-desktop -- --ignored hls_slow`.
+    #[test]
+    #[ignore]
+    fn hls_slow_network_lower_quality() {
+        use crate::live::capture::{Capture, Source};
+        let url = std::env::var("S4A_HLS_SLOW")
+            .unwrap_or_else(|_| "http://127.0.0.1:18889/master.m3u8".to_string());
+        let capture = Capture::open(Source::Network(NetworkSource {
+            url,
+            username: "scout".into(),
+            password: "segreta".into(),
+        }));
+        let size = |wanted: (u32, u32)| {
+            (0..300).any(|_| {
+                std::thread::sleep(Duration::from_millis(100));
+                capture.status().is_some_and(|s| s.size == Some(wanted))
+            })
+        };
+        assert!(size((1280, 720)), "{:?}", capture.status());
+        assert!(size((640, 360)), "{:?}", capture.status());
+        // and it goes on, the pictures coming
+        let serial = |c: &Capture| c.status().and_then(|s| s.frame.map(|f| f.serial));
+        let before = serial(&capture);
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(serial(&capture) > before);
+        assert_eq!(capture.status().unwrap().problem, None);
+    }
+
     /// The frames given as they play: on time after the first, again
     /// from the frame after a jump or once a second behind.
     #[test]

@@ -6,6 +6,7 @@
 pub mod capture;
 pub mod hls;
 pub mod network;
+pub mod onvif;
 pub mod picture;
 pub mod preview;
 pub mod raw;

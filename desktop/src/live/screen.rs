@@ -11,6 +11,7 @@ use {
         LiveConfig, SavedNetwork, SavedReceiver,
         capture::{self, CameraEntry, Capture, Quality, Source, Status},
         network::{self, NetworkSource, Problem, Protocol},
+        onvif,
         preview::{self, Preview},
         rtmp::{self, Receiver},
         space::{self as disk, Room},
@@ -80,6 +81,10 @@ pub enum Message {
     Saved(Option<usize>),
     /// a source on the network out of the list
     Forget(usize),
+    /// a camera found on the network (ONVIF)
+    Found(usize),
+    /// the cameras on the network looked for again
+    Search,
 }
 
 pub enum Outcome {
@@ -129,6 +134,10 @@ pub struct LiveScreen {
     qr: Option<(String, image::Handle)>,
     /// the space free in the folder of the recordings
     free: Option<u64>,
+    /// the ONVIF cameras that answered, not among the sources saved
+    found: Vec<onvif::Found>,
+    /// the cameras being looked for: their answers as they come
+    searching: Option<std::sync::mpsc::Receiver<Vec<onvif::Found>>>,
 }
 
 /// The problem of a source on the network, in the user's words.
@@ -227,6 +236,8 @@ impl LiveScreen {
             here: vec![],
             qr: None,
             free,
+            found: vec![],
+            searching: None,
         }
     }
 
@@ -256,10 +267,10 @@ impl LiveScreen {
 
     /// The form of the source on the network: as used before, its
     /// password from the keychain; the authentication on if it had a user.
-    fn network_form(saved: &SavedNetwork, s: &Strings) -> Form {
+    fn network_form(saved: &SavedNetwork, asked: bool, s: &Strings) -> Form {
         let kept = super::kept_password(&saved.url, &saved.username).unwrap_or_default();
         let (url, password) = given_back(saved, kept);
-        let asked = !saved.username.is_empty();
+        let asked = asked || !saved.username.is_empty();
         let mut form = Form::new(
             s.source_network,
             vec![
@@ -428,7 +439,7 @@ impl LiveScreen {
 
     /// Whether the preview wants the frames of the window.
     pub fn awake(&self) -> bool {
-        self.capture.is_some()
+        self.capture.is_some() || self.searching.is_some()
     }
 
     /// The camera and how to record, for the app to keep recording once
@@ -452,15 +463,12 @@ impl LiveScreen {
                 self.step = Step::Camera;
                 Outcome::AskPermission
             }
-            // the ones used before to choose from, if any
+            // the ones used before and the cameras that answer to choose
+            // from, or a new one
             Kind::Network => {
-                match self.config.networks.is_empty() {
-                    true => self.open_network(None, s),
-                    false => {
-                        self.network_row = 0;
-                        self.step = Step::Networks;
-                    }
-                }
+                self.network_row = 0;
+                self.step = Step::Networks;
+                self.search();
                 Outcome::Stay
             }
             // listening at once: the app sends when it likes
@@ -485,8 +493,63 @@ impl LiveScreen {
             .cloned()
             .unwrap_or_default();
         self.chosen = i.filter(|i| *i < self.config.networks.len());
-        self.form = Self::network_form(&saved, s);
+        self.form = Self::network_form(&saved, false, s);
         self.step = Step::Network;
+    }
+
+    /// The cameras on the network looked for (ONVIF), in the background:
+    /// their answers in a few seconds (`tick`).
+    fn search(&mut self) {
+        let (send, answers) = std::sync::mpsc::channel();
+        // the tests choose what's found (`found`): nothing asked of the network
+        #[cfg(not(test))]
+        std::thread::spawn(move || {
+            let _ = send.send(onvif::discover(onvif::SEARCH_WITHIN));
+        });
+        #[cfg(test)]
+        drop(send);
+        self.searching = Some(answers);
+    }
+
+    /// The cameras found that aren't saved already (by their address).
+    fn found_unsaved(&self) -> Vec<&onvif::Found> {
+        self.found
+            .iter()
+            .filter(|f| !self.config.networks.iter().any(|n| n.url == f.address))
+            .collect()
+    }
+
+    /// The camera found `i` in the form: its address and name, the user
+    /// and the password asked for (ONVIF asks for them).
+    fn open_found(&mut self, i: usize, s: &Strings) {
+        let Some(found) = self.found_unsaved().get(i).map(|f| (*f).clone()) else {
+            return;
+        };
+        let saved = SavedNetwork {
+            name: found.name,
+            url: found.address,
+            username: String::new(),
+        };
+        self.chosen = None;
+        self.form = Self::network_form(&saved, true, s);
+        self.step = Step::Network;
+    }
+
+    /// The rows of the list: the sources saved, the cameras found, a new
+    /// one.
+    fn network_rows(&self) -> usize {
+        self.config.networks.len() + self.found_unsaved().len() + 1
+    }
+
+    /// The row `row` of the list opened.
+    fn open_row(&mut self, row: usize, s: &Strings) {
+        let saved = self.config.networks.len();
+        let found = self.found_unsaved().len();
+        match row {
+            r if r < saved => self.open_network(Some(r), s),
+            r if r < saved + found => self.open_found(r - saved, s),
+            _ => self.open_network(None, s),
+        }
     }
 
     /// The source `i` out of the list, its password out of the keychain.
@@ -497,7 +560,7 @@ impl LiveScreen {
             }
             self.save_config();
         }
-        self.network_row = self.network_row.min(self.config.networks.len());
+        self.network_row = self.network_row.min(self.network_rows() - 1);
     }
 
     fn refresh(&mut self) {
@@ -538,6 +601,16 @@ impl LiveScreen {
     }
 
     fn tick(&mut self) -> Outcome {
+        if let Some(answers) = &self.searching {
+            match answers.try_recv() {
+                Ok(found) => {
+                    self.found = found;
+                    self.searching = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.searching = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         self.status = self.capture.as_ref().and_then(Capture::status);
         self.free = disk::free(&self.config.folder(&self.dir));
         match self.preview.wanted(self.status.as_ref()) {
@@ -551,11 +624,11 @@ impl LiveScreen {
         self.preview.clear();
         self.status = None;
         match (self.step, self.config.networks.is_empty()) {
-            (Step::Network, false) => {
+            (Step::Network, _) => {
                 self.step = Step::Networks;
                 Outcome::Stay
             }
-            (Step::Camera | Step::Network | Step::Networks | Step::Receiver, _) => {
+            (Step::Camera | Step::Networks | Step::Receiver, _) => {
                 self.step = Step::Source;
                 Outcome::Stay
             }
@@ -638,6 +711,8 @@ impl LiveScreen {
             Message::Tick => return self.tick(),
             Message::Saved(i) => self.open_network(i, s),
             Message::Forget(i) => self.forget_network(i),
+            Message::Found(i) => self.open_found(i, s),
+            Message::Search => self.search(),
             Message::Allocated(frame, handle, allocation) => {
                 self.preview.allocated(frame, handle, allocation);
             }
@@ -694,20 +769,27 @@ impl LiveScreen {
             }
             (_, k) if k == BACK_KEY => self.back(),
             (Step::Networks, k) if k == key!(up) || k == key!(down) => {
-                let rows: Vec<usize> = (0..=self.config.networks.len()).collect();
+                let rows: Vec<usize> = (0..self.network_rows()).collect();
                 self.network_row =
                     ui::cycle(&rows, &self.network_row, k == key!(down)).unwrap_or(0);
                 Outcome::Stay
             }
             (Step::Networks, k) if k == key!(enter) => {
-                self.open_network(Some(self.network_row), s);
+                self.open_row(self.network_row, s);
+                Outcome::Stay
+            }
+            (Step::Networks, k) if k == key!(u) => {
+                self.search();
                 Outcome::Stay
             }
             (Step::Networks, k) if k == key!(n) => {
                 self.open_network(None, s);
                 Outcome::Stay
             }
-            (Step::Networks, k) if k == key!(backspace) || k == key!(delete) => {
+            (Step::Networks, k)
+                if (k == key!(backspace) || k == key!(delete))
+                    && self.network_row < self.config.networks.len() =>
+            {
                 self.forget_network(self.network_row);
                 Outcome::Stay
             }
@@ -751,6 +833,7 @@ impl LiveScreen {
             Step::Networks => vec![
                 hint("↑ ↓ Enter", s.choose),
                 hint("n", s.new_source),
+                hint("u", s.search_cameras),
                 hint("⌫", &ui::capitalized(s.remove)),
                 hint("Esc", s.back),
             ],
@@ -813,15 +896,62 @@ impl LiveScreen {
             .align_y(Alignment::Center)
             .into()
         });
+        let first_found = self.config.networks.len();
+        let found_rows: Vec<Element<'a, Message>> = self
+            .found_unsaved()
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let body = column![
+                    text(f.name.clone()).size(SIZE_BODY),
+                    text(format!("ONVIF · {}", f.host()))
+                        .size(SIZE_SMALL)
+                        .color(c.muted),
+                ]
+                .spacing(4);
+                ui::list_row(
+                    body,
+                    self.network_row == first_found + i,
+                    Some(Message::Found(i)),
+                    c,
+                )
+            })
+            .collect();
+        let new_row = self.network_rows() - 1;
+        let searched = match (self.searching.is_some(), found_rows.is_empty()) {
+            (true, _) => Some(s.searching_cameras),
+            (false, true) => Some(s.no_onvif_cameras),
+            (false, false) => None,
+        };
+        let cameras = row![
+            text(s.onvif_cameras).size(SIZE_SMALL).color(c.muted),
+            space::horizontal(),
+            ui::pill(
+                s.search_cameras,
+                false,
+                self.searching.is_none().then_some(Message::Search),
+                c
+            ),
+        ]
+        .align_y(Alignment::Center);
+        let searched: Element<'a, Message> = match searched {
+            Some(t) => text(t).size(SIZE_SMALL).color(c.muted).into(),
+            None => space::vertical().height(0).into(),
+        };
         let new = ui::list_row(
             text(s.new_source).size(SIZE_BODY),
-            self.network_row == self.config.networks.len(),
+            self.network_row == new_row,
             Some(Message::Saved(None)),
             c,
         );
-        let rows = Column::with_children(saved.chain(std::iter::once(new)))
-            .spacing(8)
-            .width(Length::Fixed(620.0));
+        let rows = Column::with_children(
+            saved
+                .chain([cameras.into(), searched])
+                .chain(found_rows)
+                .chain(std::iter::once(new)),
+        )
+        .spacing(8)
+        .width(Length::Fixed(620.0));
         let notice: Element<'a, Message> = match &self.error {
             Some(e) => text(e.clone()).size(SIZE_SMALL).color(c.danger).into(),
             None => space::vertical().height(0).into(),
@@ -1158,15 +1288,19 @@ mod tests {
         assert!(matches!(screen.key(BACK_KEY, s()), Outcome::Back));
     }
 
-    /// On the network, none used before: the form at once; the address
-    /// written, Enter tries it (kept for the next time), not recorded
-    /// until seen; Esc from the form back to the list, then the kinds.
+    /// On the network, none used before and no camera found: the list
+    /// with only a new one, Enter the form; the address written, Enter
+    /// tries it (kept for the next time), not recorded until seen; Esc
+    /// from the form back to the list, then the kinds.
     #[test]
     fn a_source_on_the_network() {
         let dir = tempfile::tempdir().unwrap();
         let mut screen = screen(&dir);
         screen.key(key!(down), s());
         assert!(matches!(screen.key(key!(enter), s()), Outcome::Stay));
+        assert_eq!(screen.step, Step::Networks);
+        assert_eq!(screen.network_rows(), 1);
+        screen.key(key!(enter), s());
         assert_eq!(screen.step, Step::Network);
         assert!(screen.focus_id().is_some());
         screen.update(
@@ -1262,6 +1396,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut screen = screen(&dir);
         screen.update(Message::Kind(Kind::Network), s());
+        screen.update(Message::Saved(None), s());
         let url = "rtmp://127.0.0.1:1/live/cam?user=scout&pass=segreta";
         screen.update(
             Message::Form(form::Message::Input(ADDRESS, url.into())),
@@ -1300,6 +1435,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut screen = screen(&dir);
         screen.update(Message::Kind(Kind::Network), s());
+        screen.update(Message::Saved(None), s());
         let url = "rtsp://admin:segreta@127.0.0.1:1/live";
         screen.update(
             Message::Form(form::Message::Input(ADDRESS, url.into())),
@@ -1353,7 +1489,7 @@ mod tests {
 
     /// The sources used before listed, the last first: one chosen by the
     /// keys fills the form, renamed and tried goes first in its place; a
-    /// new one; one removed; none left, the form at once.
+    /// new one; one removed; none left, the list with a new one only.
     #[test]
     fn the_sources_saved() {
         let dir = tempfile::tempdir().unwrap();
@@ -1425,11 +1561,57 @@ mod tests {
         screen.update(Message::Forget(0), s());
         assert!(names(&dir).is_empty());
         assert_eq!(screen.network_row, 0);
-        // none left: Esc to the kinds, and the form at once
+        // none left: Esc to the kinds; the list again, a new one in it
         screen.key(BACK_KEY, s());
         assert_eq!(screen.step, Step::Source);
         screen.update(Message::Kind(Kind::Network), s());
+        assert_eq!(screen.step, Step::Networks);
+        assert_eq!(screen.network_rows(), 1);
+    }
+
+    /// The cameras found (ONVIF) after the sources saved, those saved
+    /// already not again: one opened in the form, its address and name in
+    /// it, the user and the password asked for; not removed by the keys.
+    #[test]
+    fn the_cameras_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = LiveConfig {
+            networks: vec![kept("http://192.168.1.65/onvif/device_service", "Tribuna")],
+            ..Default::default()
+        };
+        config.write(dir.path()).unwrap();
+        let mut screen = screen(&dir);
+        screen.update(Message::Kind(Kind::Network), s());
+        assert_eq!(screen.step, Step::Networks);
+        assert!(screen.awake());
+        screen.update(Message::Tick, s());
+        assert!(screen.searching.is_none());
+        let camera = |name: &str, host: &str| onvif::Found {
+            name: name.into(),
+            address: format!("http://{host}/onvif/device_service"),
+        };
+        screen.found = vec![
+            camera("Campo Nord", "192.168.1.64"),
+            camera("Tribuna", "192.168.1.65"),
+        ];
+        assert_eq!(screen.network_rows(), 3);
+        screen.key(key!(down), s());
+        assert_eq!(screen.network_row, 1);
+        screen.key(key!(delete), s());
+        assert_eq!(screen.config.networks.len(), 1);
+        screen.key(key!(enter), s());
         assert_eq!(screen.step, Step::Network);
+        assert_eq!(
+            screen.form.text(ADDRESS),
+            "http://192.168.1.64/onvif/device_service"
+        );
+        assert_eq!(screen.form.text(NAME), "Campo Nord");
+        assert_eq!(screen.form.shown, Some(ADDRESS..PASSWORD + 1));
+        assert_eq!(screen.chosen, None);
+        screen.key(BACK_KEY, s());
+        assert_eq!(screen.step, Step::Networks);
+        screen.update(Message::Found(5), s());
+        assert_eq!(screen.step, Step::Networks);
     }
 
     /// An app sending: listening at once on the port and with the key of
