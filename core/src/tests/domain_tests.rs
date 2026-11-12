@@ -895,30 +895,40 @@ mod tests {
         assert_eq!(team.players.len(), 3);
         for ((player, person), member) in team.players.iter().zip(&rows.persons).zip(&rows.members)
         {
-            assert_eq!(
-                (
-                    player.id,
-                    &player.name,
-                    player.birth_date,
-                    player.height_cm,
-                    &player.notes
-                ),
-                (
-                    person.id,
-                    &person.name,
-                    person.birth_date,
-                    person.height_cm,
-                    &person.notes
-                )
-            );
+            assert_eq!((player.id, &player.name), (person.id, &person.name));
             assert_eq!(
                 (player.number, player.role, player.deleted),
                 (member.number, member.role, member.deleted)
             );
         }
+        // the active ones with the details of the person
+        for (player, person) in team.players.iter().zip(&rows.persons).take(2) {
+            assert_eq!(
+                (player.birth_date, player.height_cm, &player.notes),
+                (person.birth_date, person.height_cm, &person.notes)
+            );
+        }
         // the same number twice in the team: allowed in the database
         assert_eq!(team.players[0].number, team.players[1].number);
-        assert_eq!(TeamRows::of(&team).unwrap(), rows);
+        let back = TeamRows::of(&team).unwrap();
+        assert_eq!((&back.row, &back.members), (&rows.row, &rows.members));
+        assert_eq!(back.persons[..2], rows.persons[..2]);
+    }
+
+    /// A player removed from the team shows only what the matches show:
+    /// the person keeps the rest, for its other teams.
+    #[test]
+    fn a_removed_member_shows_no_personal_details() {
+        let rows = sample_team();
+        assert!(rows.members[2].deleted);
+        let person = &rows.persons[2];
+        assert!(person.birth_date.is_some() && person.height_cm.is_some());
+        assert!(!person.notes.is_empty());
+        let player = rows.entry().unwrap().players[2].clone();
+        assert!(player.deleted);
+        assert_eq!(player.name, person.name);
+        assert_eq!((player.birth_date, player.height_cm), (None, None));
+        assert_eq!(player.notes, "");
     }
 
     #[test]

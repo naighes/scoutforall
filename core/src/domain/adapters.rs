@@ -4,7 +4,9 @@
 //!
 //! - A team is its row, its memberships and their persons: a player
 //!   removed from the team, or a person deleted, is a removed player; the
-//!   players are in the order of the places of their memberships.
+//!   players are in the order of the places of their memberships. A player
+//!   removed from the team shows only what the matches show (name, number,
+//!   role), as `player_form::removed`: the person keeps the rest.
 //! - A match from the files gets its id, its team B and where it came
 //!   from (`LegacyId`); its roster copies number and role from the team
 //!   (D9), the whole active team when the match has none (up to v0.10.1).
@@ -19,6 +21,7 @@ use crate::{
         SetLineup, Side, Team, TeamRef,
     },
     errors::{AppError, IOError},
+    player_form::removed,
     shapes::{r#match::MatchEntry, player::PlayerEntry, set::SetEntry, team::TeamEntry},
 };
 use uuid::Uuid;
@@ -110,6 +113,11 @@ impl TeamRows {
                 birth_date: person.birth_date,
                 height_cm: person.height_cm,
                 notes: person.notes.clone(),
+            })
+            .map(|player| match member.deleted {
+                // the person keeps them, for the other teams
+                true => removed(&player),
+                false => player,
             }),
             (false, _) => Err(not_consistent(format!(
                 "member {} of team {}, not of team {}",

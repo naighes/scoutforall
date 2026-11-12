@@ -261,9 +261,11 @@ BEGIN
     SELECT RAISE(ABORT, 'match_videos: the anchor is an event of another match');
 END;
 
--- The matches waiting to be uploaded (of this device: never synced).
+-- The matches waiting to be uploaded (of this device: never synced), in
+-- the order they're tried: one that keeps failing goes last.
 CREATE TABLE upload_queue (
     match_id    TEXT PRIMARY KEY REFERENCES matches (id),
+    position    INTEGER NOT NULL UNIQUE CHECK (position >= 0),
     -- seconds since the epoch
     queued_at   INTEGER NOT NULL,
     retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0)

@@ -270,7 +270,10 @@ mod tests {
                     "deleted",
                 ],
             ),
-            ("upload_queue", &["match_id", "queued_at", "retry_count"]),
+            (
+                "upload_queue",
+                &["match_id", "position", "queued_at", "retry_count"],
+            ),
         ];
         assert_eq!(
             names(&db, "table"),
@@ -359,7 +362,7 @@ mod tests {
                  UPDATE teams SET classification = 'national_mid_level', gender = 'women',
                      country = 'IT' WHERE id = '{TEAM_A}';
                  INSERT INTO match_summary VALUES ('{MATCH}', 1, 0, 0, 0, 1, NULL);
-                 INSERT INTO upload_queue VALUES ('{MATCH}', 1794509535, 0);"
+                 INSERT INTO upload_queue VALUES ('{MATCH}', 0, 1794509535, 0);"
             ),
         );
     }
@@ -983,20 +986,42 @@ mod tests {
         passes(
             &db,
             &format!(
-                "INSERT INTO upload_queue (match_id, queued_at) VALUES ('{MATCH}', 1794509535)"
+                "INSERT INTO upload_queue (match_id, position, queued_at)
+                 VALUES ('{MATCH}', 0, 1794509535)"
             ),
         );
         fails(
             &db,
             &format!(
-                "INSERT INTO upload_queue (match_id, queued_at) VALUES ('{MATCH}', 1794509536)"
+                "INSERT INTO upload_queue (match_id, position, queued_at)
+                 VALUES ('{MATCH}', 1, 1794509536)"
             ),
         );
         fails(
             &db,
-            &format!("INSERT INTO upload_queue (match_id, queued_at) VALUES ('{TEAM_A}', 1)"),
+            &format!(
+                "INSERT INTO upload_queue (match_id, position, queued_at) VALUES ('{TEAM_A}', 1, 1)"
+            ),
         );
         fails(&db, "UPDATE upload_queue SET retry_count = -1");
+        fails(&db, "UPDATE upload_queue SET position = -1");
+        // another match: a place of its own
+        let other = "dddddddd-0000-4000-8000-000000000044";
+        passes(
+            &db,
+            &format!(
+                "INSERT INTO matches (id, team_a, team_b_name, start, max_substitutions)
+                 VALUES ('{other}', '{TEAM_A}', 'X', '2026-11-12T18:00:00+01:00', 6)"
+            ),
+        );
+        let queue = |position: i64| {
+            format!(
+                "INSERT INTO upload_queue (match_id, position, queued_at)
+                 VALUES ('{other}', {position}, 1)"
+            )
+        };
+        fails(&db, &queue(0));
+        passes(&db, &queue(1));
         let retries: i64 = db
             .query_row("SELECT retry_count FROM upload_queue", [], |r| r.get(0))
             .unwrap();
