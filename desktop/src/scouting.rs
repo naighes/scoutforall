@@ -909,7 +909,7 @@ impl ScoutingScreen {
                 for e in &snap.events {
                     let key = self.keys.scouting_keybindings.key_for(&e.value);
                     list = list.push(choice(
-                        key.as_ref().map(keymap::label),
+                        key.as_ref().map(|k| keymap::label(k, s)),
                         e.name.clone(),
                         false,
                         Message::Event(e.value),
@@ -921,7 +921,7 @@ impl ScoutingScreen {
                         .option_keybindings
                         .key_for(&o)
                         .as_ref()
-                        .map(keymap::label)
+                        .map(|k| keymap::label(k, s))
                 };
                 if st.inverted_p1_applies {
                     list = list.push(choice(
@@ -986,7 +986,9 @@ impl ScoutingScreen {
                             .iter()
                             .map(|t| {
                                 half(
-                                    self.technique_key(&t.value).as_ref().map(keymap::label),
+                                    self.technique_key(&t.value)
+                                        .as_ref()
+                                        .map(|k| keymap::label(k, s)),
                                     t.name.clone(),
                                     t.chosen,
                                     Message::Technique(t.value),
@@ -1000,7 +1002,7 @@ impl ScoutingScreen {
                     // one key goes through them: once, before them all
                     list = list.push(
                         row![
-                            ui::keycap(&keymap::label(&BLOCKERS_KEY), c),
+                            ui::keycap(&keymap::label(&BLOCKERS_KEY, s), c),
                             iced::widget::Row::with_children(snap.blockers.iter().map(|b| {
                                 let message = match b.chosen {
                                     true => Message::Blockers(None),
@@ -1023,14 +1025,14 @@ impl ScoutingScreen {
                     true => list,
                     false => group(list, s.eval),
                 };
-                list = list.push(self.evals(c));
+                list = list.push(self.evals(s, c));
                 let asked = snap.state.event.as_ref().and_then(|e| s.target(e.value));
                 if let (false, Some(asked)) = (snap.target.is_empty(), asked) {
                     list = group(list, asked);
                     list = list.push(
                         row![
                             ui::keycap("← ↑ ↓ →", c),
-                            ui::keycap(&keymap::label(&ZONE_KEY), c),
+                            ui::keycap(&keymap::label(&ZONE_KEY, s), c),
                             ui::body(self.told(s)).color(c.accent),
                         ]
                         .spacing(6)
@@ -1050,7 +1052,7 @@ impl ScoutingScreen {
     /// The evaluations in a row, by their symbol, as in the app: a click
     /// or the key saves the event; the key under the symbol when it's
     /// another, the name under the mouse.
-    fn evals<'a>(&'a self, c: Colors) -> Element<'a, Message> {
+    fn evals<'a>(&'a self, s: &Strings, c: Colors) -> Element<'a, Message> {
         let bold = theme::fonts().bold;
         iced::widget::Row::with_children(self.snapshot.evals.iter().map(|e| {
             let key = self
@@ -1058,7 +1060,7 @@ impl ScoutingScreen {
                 .eval_keybindings
                 .key_for(&e.value)
                 .as_ref()
-                .map(keymap::label)
+                .map(|k| keymap::label(k, s))
                 .filter(|k| *k != e.symbol);
             let face = column![
                 text(e.symbol.clone())

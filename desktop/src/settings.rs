@@ -266,15 +266,14 @@ impl SettingsScreen {
                 match assigned(&self.keys, shortcut, ck) {
                     Ok(keys) => self.store(keys, s),
                     Err(Conflict::Reserved) => {
-                        self.error = Some(s.reserved_key.replace("{}", &keymap::label(&ck)))
+                        self.error = Some(s.reserved_key.replace("{}", &keymap::label(&ck, s)))
                     }
                     Err(Conflict::Taken(other)) => {
-                        self.error =
-                            Some(s.taken_key.replacen("{}", &keymap::label(&ck), 1).replacen(
-                                "{}",
-                                &name(other, self.labels, s),
-                                1,
-                            ))
+                        self.error = Some(
+                            s.taken_key
+                                .replacen("{}", &keymap::label(&ck, s), 1)
+                                .replacen("{}", &name(other, self.labels, s), 1),
+                        )
                     }
                 }
             }
@@ -426,7 +425,7 @@ impl SettingsScreen {
         let key: Element<'a, Message> =
             match (selected && self.waiting, key_of(&self.keys, shortcut)) {
                 (true, _) => ui::keycap("…", c),
-                (false, Some(ck)) => ui::keycap(&keymap::label(&ck), c),
+                (false, Some(ck)) => ui::keycap(&keymap::label(&ck, s), c),
                 (false, None) => ui::body("–").color(c.muted).into(),
             };
         let body = row![

@@ -7,6 +7,8 @@ use {
     scout4all_keys::{KeyCombination, combination_of},
 };
 
+use crate::strings::Strings;
+
 /// The combination of a key pressed, none for the keys scouting doesn't
 /// use (e.g. shift alone). `key` has shift applied (iced's
 /// `modified_key`): "L" for shift-l, "+" for the symbol, as a terminal
@@ -56,37 +58,52 @@ pub fn digit(ck: &KeyCombination) -> Option<u8> {
         .and_then(|d| u8::try_from(d).ok())
 }
 
-/// How the scout reads the key, as the TUI writes it.
-pub fn label(ck: &KeyCombination) -> String {
-    let label = scout4all_keys::KeyCombinationFormat::default()
-        .format(*ck)
-        .to_string();
-    // crokey names the minus: the scout reads the symbol, as in the TUI;
-    // the modifiers as symbols, to fit a keycap: "⇧E" for shift-e
-    match label.as_str() {
-        "Hyphen" => "-".to_string(),
-        _ => {
-            let short = label
-                .replace("Shift-", "⇧")
-                .replace("Ctrl-", "⌃")
-                .replace("Alt-", "⌥");
-            // the letter after a modifier in capitals, as on the keyboard
-            match short.rfind(['⇧', '⌃', '⌥']) {
-                Some(at) => {
-                    let end = at
-                        + short
-                            .get(at..)
-                            .and_then(|s| s.chars().next())
-                            .map_or(0, char::len_utf8);
-                    match (short.get(..end), short.get(end..)) {
-                        (Some(mods), Some(key)) => format!("{mods}{}", key.to_uppercase()),
-                        _ => short,
-                    }
-                }
-                None => short,
-            }
-        }
-    }
+/// How the scout reads the key, on a keycap: the modifiers as symbols
+/// ("⇧E" for shift-e, the letter in capitals as on the keyboard), the
+/// named keys as the hints write them (← ⌫ ⇥ Enter Esc), the space in
+/// the language.
+pub fn label(ck: &KeyCombination, s: &Strings) -> String {
+    let mods = [
+        (KeyModifiers::CONTROL, "⌃"),
+        (KeyModifiers::ALT, "⌥"),
+        (KeyModifiers::SHIFT, "⇧"),
+    ];
+    // a lone shift-tab (crossterm's BackTab carries the shift): "⇧⇥"
+    let modified = ck.modifiers != KeyModifiers::NONE;
+    let mut label: String = mods
+        .iter()
+        .filter(|(m, _)| ck.modifiers.contains(*m))
+        .map(|(_, symbol)| *symbol)
+        .collect();
+    let keys: Vec<String> = ck
+        .codes
+        .iter()
+        .map(|code| match code {
+            KeyCode::Char(' ') => s.space.to_string(),
+            KeyCode::Char(c) if modified => c.to_uppercase().to_string(),
+            KeyCode::Char(c) => c.to_string(),
+            KeyCode::Enter => "Enter".to_string(),
+            KeyCode::Esc => "Esc".to_string(),
+            KeyCode::Tab => "⇥".to_string(),
+            KeyCode::BackTab if !ck.modifiers.contains(KeyModifiers::SHIFT) => "⇧⇥".to_string(),
+            KeyCode::BackTab => "⇥".to_string(),
+            KeyCode::Backspace => "⌫".to_string(),
+            KeyCode::Delete => "⌦".to_string(),
+            KeyCode::Left => "←".to_string(),
+            KeyCode::Right => "→".to_string(),
+            KeyCode::Up => "↑".to_string(),
+            KeyCode::Down => "↓".to_string(),
+            KeyCode::PageUp => "PgUp".to_string(),
+            KeyCode::PageDown => "PgDn".to_string(),
+            KeyCode::Home => "Home".to_string(),
+            KeyCode::End => "End".to_string(),
+            KeyCode::Insert => "Ins".to_string(),
+            KeyCode::F(n) => format!("F{n}"),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    label.push_str(&keys.join("+"));
+    label
 }
 
 #[cfg(test)]
@@ -121,10 +138,28 @@ mod tests {
             Some(scout4all_keys::ZONE_KEY)
         );
         assert_eq!(digit(&key!('3')), Some(3));
-        assert_eq!(label(&key!('-')), "-");
-        assert_eq!(label(&key!(shift - e)), "⇧E");
-        assert_eq!(label(&key!(a)), "a");
         assert_eq!(digit(&key!(a)), None);
+    }
+
+    #[test]
+    fn labels_as_on_the_keycaps() {
+        use scout4all_core::shapes::enums::LanguageEnum::{En, It, Ja};
+        let it = crate::strings::strings(It);
+        assert_eq!(label(&key!('-'), it), "-");
+        assert_eq!(label(&key!(shift - e), it), "⇧E");
+        assert_eq!(label(&key!(ctrl - shift - z), it), "⌃⇧Z");
+        assert_eq!(label(&key!(a), it), "a");
+        assert_eq!(label(&key!('.'), it), ".");
+        assert_eq!(label(&key!(space), it), "spazio");
+        assert_eq!(label(&key!(space), crate::strings::strings(En)), "space");
+        assert_eq!(label(&key!(space), crate::strings::strings(Ja)), "スペース");
+        assert_eq!(label(&key!(tab), it), "⇥");
+        assert_eq!(label(&key!(shift - backtab), it), "⇧⇥");
+        assert_eq!(label(&key!(enter), it), "Enter");
+        assert_eq!(label(&key!(esc), it), "Esc");
+        assert_eq!(label(&key!(backspace), it), "⌫");
+        assert_eq!(label(&key!(left), it), "←");
+        assert_eq!(label(&key!(f2), it), "F2");
     }
 
     #[test]
