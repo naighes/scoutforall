@@ -15,7 +15,10 @@ use rusqlite::{Connection, TransactionBehavior};
 use std::{path::Path, time::Duration};
 
 /// The changes of the schema, in order: the `n`-th gives version `n`.
-pub const MIGRATIONS: &[&str] = &[];
+pub const MIGRATIONS: &[&str] = &[
+    // v1: TODO/001, the data moved from the files
+    include_str!("migrations/0001_schema.sql"),
+];
 
 /// The version of the schema this app writes.
 pub fn schema_version() -> i64 {

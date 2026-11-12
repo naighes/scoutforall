@@ -35,6 +35,7 @@ mod pinned_teams_tests;
 mod player_form_tests;
 mod point_sequence_tests;
 mod report_tests;
+mod schema_tests;
 mod scouting_tests;
 mod set_start_tests;
 mod situation_tests;
