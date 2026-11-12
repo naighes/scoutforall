@@ -156,7 +156,7 @@ impl SettingsScreen {
     ) -> Self {
         Self {
             page: Page::General,
-            general: General::new(core, language, s),
+            general: General::new(core, language, keys.player_keys, s),
             dir,
             keys,
             labels: labels(language),
@@ -199,7 +199,9 @@ impl SettingsScreen {
                 self.waiting = false;
             }
             Message::General(m) => {
-                return match self.general.update(&self.dir, s, m) {
+                let stay = self.general.update(&self.dir, s, m);
+                self.keys.player_keys = self.general.player_keys;
+                return match stay {
                     true => Outcome::Stay,
                     false => Outcome::Close,
                 };
@@ -209,7 +211,16 @@ impl SettingsScreen {
                 self.waiting = true;
                 self.error = None;
             }
-            Message::Reset => self.store(ScoutingKeys::default().normalized(), s),
+            // the keys only: how the digits choose a player is a general
+            // setting
+            Message::Reset => self.store(
+                ScoutingKeys {
+                    player_keys: self.keys.player_keys,
+                    ..ScoutingKeys::default()
+                }
+                .normalized(),
+                s,
+            ),
         }
         Outcome::Stay
     }
@@ -237,7 +248,9 @@ impl SettingsScreen {
                 return Outcome::Stay;
             }
             (Page::General, false) => {
-                return match self.general.key(&self.dir, s, ck) {
+                let stay = self.general.key(&self.dir, s, ck);
+                self.keys.player_keys = self.general.player_keys;
+                return match stay {
                     true => Outcome::Stay,
                     false => Outcome::Close,
                 };
@@ -433,7 +446,10 @@ fn shortcuts_before(index: usize) -> Option<Shortcut> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, scout4all_keys::key};
+    use {
+        super::*,
+        scout4all_keys::{PlayerKeysEnum, key},
+    };
 
     #[test]
     fn keys_refused_and_assigned() {
@@ -464,6 +480,44 @@ mod tests {
                 .and_then(|k| key_of(&k, Shortcut::Event(EventTypeEnum::A))),
             Some(key!(z))
         );
+    }
+
+    /// How the digits choose a player: in the general settings, saved
+    /// with the keys and given to the scouting, kept when the keys go back
+    /// to the defaults.
+    #[test]
+    fn the_player_keys_chosen_among_the_general_settings() {
+        let s = crate::strings::strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let keys = ScoutingKeys::default().normalized();
+        assert_eq!(keys.player_keys, PlayerKeysEnum::Number);
+        let mut screen =
+            SettingsScreen::new(core, dir.path().to_path_buf(), keys, LanguageEnum::It, s);
+        let role = PlayerKeysEnum::ALL
+            .iter()
+            .position(|k| *k == PlayerKeysEnum::Role)
+            .unwrap();
+        let field = screen
+            .general
+            .form
+            .fields
+            .iter()
+            .position(|f| f.label == s.player_keys)
+            .unwrap();
+        screen.update(
+            Message::General(crate::general::Message::Form(crate::form::Message::Choose(
+                field, role,
+            ))),
+            s,
+        );
+        assert_eq!(screen.keys.player_keys, PlayerKeysEnum::Role);
+        let saved: ScoutingKeys =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("config.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved.player_keys, PlayerKeysEnum::Role);
+        screen.update(Message::Reset, s);
+        assert_eq!(screen.keys.player_keys, PlayerKeysEnum::Role);
     }
 
     #[test]

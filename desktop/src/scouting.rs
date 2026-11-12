@@ -1,7 +1,8 @@
 //! The scouting of a set: the choices of the step with their keys on the
 //! left, the court in the middle with the last events, the live statistics
 //! on the right. The keyboard chooses as in the TUI (the event, the player
-//! by its digit, the evaluation), the mouse as an alternative.
+//! by its shirt number or by the digit of its place in the lineup, the
+//! evaluation), the mouse as an alternative.
 
 use {
     crate::{
@@ -29,8 +30,9 @@ use {
         },
     },
     scout4all_keys::{
-        BACK_KEY, BLOCKERS_KEY, KeyCombination, STATS_KEY, ScoutingKeys, ScoutingOptionEnum,
-        UNDO_KEY, ZONE_KEY, key,
+        BACK_KEY, BLOCKERS_KEY, KeyCombination, PlayerKeysEnum, STATS_KEY, ScoutingKeys,
+        ScoutingOptionEnum, UNDO_KEY, ZONE_KEY, key,
+        shirt::{self, Pick},
     },
     scout4all_mobile::{
         BlockersChoice, EvalChoice, EventChoice, LiveStats, MobileError, Scouting, ScoutingState,
@@ -38,10 +40,15 @@ use {
     },
     std::sync::Arc,
     tokio::runtime::Runtime,
+    uuid::Uuid,
 };
 
 /// The digit that chooses the team, for our fault, as in the TUI.
 const TEAM_KEY: u8 = 0;
+/// The team with the shirt numbers, where the 0 is a shirt: the point,
+/// or the comma the decimal key of some keypads types.
+const TEAM_SHIRT_KEY: char = '.';
+const TEAM_SHIRT_KEYS: [char; 2] = [TEAM_SHIRT_KEY, ','];
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -99,6 +106,9 @@ pub struct ScoutingScreen {
     /// the cursor of the arrows on the zones our serve starts from, below
     /// the net: there instead of on the court
     start_cursor: Option<ServeStartEnum>,
+    /// the digits of the shirt number typed so far, while more than one
+    /// player's number starts with them
+    typed: String,
     /// an error, or that the set is over: any key closes it
     notice: Option<(String, bool)>,
     set_over: bool,
@@ -130,6 +140,7 @@ impl ScoutingScreen {
             target_cursor: None,
             net_cursor: None,
             start_cursor: None,
+            typed: String::new(),
             notice: None,
             set_over: false,
             show_stats: true,
@@ -149,6 +160,13 @@ impl ScoutingScreen {
     fn refresh(&mut self) {
         let started = std::time::Instant::now();
         self.snapshot = read(&self.scouting, self.match_scope);
+        // the digits typed are for the players of this step only
+        if !matches!(
+            self.snapshot.state.step,
+            ScoutingStep::Player | ScoutingStep::Replacement
+        ) {
+            self.typed.clear();
+        }
         self.trend = Trend::of_stats(self.snapshot.stats.as_ref(), self.series, self.recent);
         self.refresh_ms = started.elapsed().as_millis();
     }
@@ -175,6 +193,7 @@ impl ScoutingScreen {
     }
 
     pub fn update(&mut self, message: Message) -> Outcome {
+        self.typed.clear();
         let mobile = |r: Result<Progress, MobileError>| r.map_err(|e| e.to_string());
         let outcome = match message {
             Message::Dismiss => return self.dismiss(),
@@ -305,6 +324,8 @@ impl ScoutingScreen {
         }
         let step = self.with(|s, _| s.step());
         match (ck, step) {
+            // Esc forgets the digits typed first
+            (k, _) if k == BACK_KEY && !self.typed.is_empty() => self.typed.clear(),
             (k, _) if k == BACK_KEY => return Outcome::Leave,
             (k, _) if k == UNDO_KEY => return self.update(Message::Undo),
             (k, _) if k == STATS_KEY => self.show_stats = !self.show_stats,
@@ -337,6 +358,69 @@ impl ScoutingScreen {
     }
 
     fn player_key(&mut self, ck: KeyCombination) {
+        match self.keys.player_keys {
+            PlayerKeysEnum::Number => self.player_shirt_key(ck),
+            PlayerKeysEnum::Role => self.player_role_key(ck),
+        }
+    }
+
+    fn player_shirt_key(&mut self, ck: KeyCombination) {
+        let team = ck.as_letter().is_some_and(|c| TEAM_SHIRT_KEYS.contains(&c));
+        let r = match (team, self.shirt(ck, false)) {
+            (_, Some(Ok(id))) => self.with(|s, rt| rt.block_on(s.choose_player(id))),
+            (_, Some(Err(e))) => Err(e),
+            (true, None) if self.snapshot.state.team_choice => {
+                self.typed.clear();
+                self.with(|s, rt| rt.block_on(s.choose_team()))
+            }
+            (_, None) => return,
+        };
+        let r = self.core(r);
+        self.show(r);
+    }
+
+    /// A digit, Enter or Backspace on the shirt numbers of the players (or
+    /// of the replacements): the player chosen, an error for digits no
+    /// number starts with, none while waiting for more.
+    fn shirt(
+        &mut self,
+        ck: KeyCombination,
+        replacements: bool,
+    ) -> Option<Result<Uuid, ScoutingError>> {
+        let choices = match replacements {
+            true => &self.snapshot.replacements,
+            false => &self.snapshot.players,
+        };
+        let numbers: Vec<u8> = choices.iter().map(|p| p.number).collect();
+        let ids: Vec<Uuid> = choices.iter().map(|p| p.id).collect();
+        let digit = keymap::digit(&ck);
+        let typed = digit.map_or_else(|| self.typed.clone(), |d| format!("{}{d}", self.typed));
+        let pick = match digit {
+            Some(_) => shirt::after_digit(&numbers, &typed),
+            None if ck == key!(enter) && !typed.is_empty() => shirt::after_enter(&numbers, &typed),
+            None if ck == key!(backspace) => {
+                self.typed.pop();
+                return None;
+            }
+            None => return None,
+        };
+        match pick {
+            Pick::Chosen(place) => {
+                self.typed.clear();
+                ids.get(place).copied().map(Ok)
+            }
+            Pick::Waiting => {
+                self.typed = typed;
+                None
+            }
+            Pick::Nobody => {
+                self.typed.clear();
+                Some(Err(ScoutingError::InvalidPlayerSelection))
+            }
+        }
+    }
+
+    fn player_role_key(&mut self, ck: KeyCombination) {
         let digit = keymap::digit(&ck);
         let player = digit.and_then(|d| self.snapshot.players.iter().find(|p| p.index == d));
         let r = match (digit, player.map(|p| p.id)) {
@@ -350,6 +434,20 @@ impl ScoutingScreen {
     }
 
     fn replacement_key(&mut self, ck: KeyCombination) {
+        let chosen = match self.keys.player_keys {
+            PlayerKeysEnum::Number => self.shirt(ck, true),
+            PlayerKeysEnum::Role => return self.replacement_role_key(ck),
+        };
+        let r = match chosen {
+            Some(Ok(id)) => self.with(|s, rt| rt.block_on(s.choose_replacement(id))),
+            Some(Err(e)) => Err(e),
+            None => return,
+        };
+        let r = self.core(r);
+        self.show(r);
+    }
+
+    fn replacement_role_key(&mut self, ck: KeyCombination) {
         let replacement = ck
             .as_letter()
             .and_then(replacement_index)
@@ -598,12 +696,16 @@ impl ScoutingScreen {
 
     /// The keys of the screen, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        vec![
-            ("Esc".to_string(), s.back.to_string()),
-            ("⇧U".to_string(), s.undo.to_string()),
-            ("F2".to_string(), s.settings.to_string()),
-            ("F3".to_string(), s.stats.to_string()),
-        ]
+        let typing = (!self.typed.is_empty()).then(|| ("Enter".to_string(), s.choose.to_string()));
+        typing
+            .into_iter()
+            .chain([
+                ("Esc".to_string(), s.back.to_string()),
+                ("⇧U".to_string(), s.undo.to_string()),
+                ("F2".to_string(), s.settings.to_string()),
+                ("F3".to_string(), s.stats.to_string()),
+            ])
+            .collect()
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -839,18 +941,23 @@ impl ScoutingScreen {
                 }
             }
             ScoutingStep::Player => {
-                if st.team_choice {
+                let team_key = match self.keys.player_keys {
+                    PlayerKeysEnum::Number => TEAM_SHIRT_KEY.to_string(),
+                    PlayerKeysEnum::Role => TEAM_KEY.to_string(),
+                };
+                list = list.push(self.typed_line(s, c));
+                if st.team_choice && self.typed.is_empty() {
                     list = list.push(choice(
-                        Some(TEAM_KEY.to_string()),
+                        Some(team_key),
                         s.team_fault.to_string(),
                         false,
                         Message::Team,
                     ));
                 }
-                for p in &snap.players {
+                for p in self.offered(&snap.players) {
                     list = list.push(ui::choice(
-                        Some(p.index.to_string()),
-                        player_label(p, c),
+                        Some(self.player_key_label(p, p.index.to_string())),
+                        self.player_label(p, c),
                         false,
                         Some(Message::Player(p.id.to_string())),
                         c,
@@ -858,10 +965,11 @@ impl ScoutingScreen {
                 }
             }
             ScoutingStep::Replacement => {
-                for p in &snap.replacements {
+                list = list.push(self.typed_line(s, c));
+                for p in self.offered(&snap.replacements) {
                     list = list.push(ui::choice(
-                        Some(replacement_key(p.index)),
-                        player_label(p, c),
+                        Some(self.player_key_label(p, replacement_key(p.index))),
+                        self.player_label(p, c),
                         false,
                         Some(Message::Replacement(p.id.to_string())),
                         c,
@@ -1354,6 +1462,49 @@ fn two_by_two<'a>(choices: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     lines.into()
 }
 
+impl ScoutingScreen {
+    /// The players whose number starts with the digits typed: all, before
+    /// any.
+    fn offered<'a>(&self, choices: &'a [PlayerChoice]) -> Vec<&'a PlayerChoice> {
+        choices
+            .iter()
+            .filter(|p| self.typed.is_empty() || shirt::matches(p.number, &self.typed))
+            .collect()
+    }
+
+    /// The key of the player: the shirt number, or the one of its place.
+    fn player_key_label(&self, p: &PlayerChoice, by_place: String) -> String {
+        match self.keys.player_keys {
+            PlayerKeysEnum::Number => p.number.to_string(),
+            PlayerKeysEnum::Role => by_place,
+        }
+    }
+
+    /// With the shirt number on the key, the name alone.
+    fn player_label<'a>(&self, p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
+        match self.keys.player_keys {
+            PlayerKeysEnum::Number => ui::name(p.name.clone()),
+            PlayerKeysEnum::Role => player_label(p, c),
+        }
+    }
+
+    /// The digits typed so far, while they wait for one more or Enter.
+    fn typed_line<'a>(&self, s: &Strings, c: Colors) -> Option<Element<'a, Message>> {
+        (!self.typed.is_empty()).then(|| {
+            row![
+                small(format!("{}:", s.number), c),
+                text(format!("{}…", self.typed))
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold)
+                    .color(c.accent),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into()
+        })
+    }
+}
+
 fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
     row![
         text(p.number.to_string())
@@ -1383,6 +1534,202 @@ mod tests {
         scout4all_core::{scouting::ChoiceOrder, shapes::enums::LanguageEnum},
         scout4all_mobile::Scout4All,
     };
+
+    /// A team whose shirt numbers start the same (3, 30, 31), with a 0 as
+    /// libero (in for the 1) and two on the bench, in its first set: we
+    /// serve.
+    fn team_with_shirts(core: &Scout4All) -> (String, String) {
+        use scout4all_core::{
+            match_form::MatchForm,
+            player_form::PlayerForm,
+            shapes::{
+                country::CountryCode,
+                enums::{GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
+            },
+            team_form::TeamForm,
+        };
+        let team = core
+            .save_team(
+                None,
+                TeamForm {
+                    name: "Cortona".into(),
+                    classification: Some(TeamClassificationEnum::Regional),
+                    gender: Some(GenderEnum::Women),
+                    country: CountryCode::known("IT"),
+                    year: "2026".into(),
+                },
+            )
+            .unwrap();
+        let ids: Vec<String> = [3, 30, 31, 7, 12, 1, 0, 33, 8]
+            .into_iter()
+            .map(|n| {
+                core.save_player(
+                    team.clone(),
+                    None,
+                    PlayerForm {
+                        name: format!("P{n}"),
+                        role: Some(match n {
+                            0 => RoleEnum::Libero,
+                            _ => RoleEnum::OutsideHitter,
+                        }),
+                        number: n.to_string(),
+                        ..PlayerForm::default()
+                    },
+                    false,
+                )
+                .unwrap()
+            })
+            .collect();
+        let m = core
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent: "Arezzo".into(),
+                    date: chrono::DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").ok(),
+                    home: true,
+                    max_substitutions: "6".into(),
+                    notes: String::new(),
+                    roster: None,
+                },
+            )
+            .unwrap();
+        let start = core.set_start(team.clone(), m.clone()).unwrap();
+        start.choose_serving_team(TeamSideEnum::Us);
+        for (position, id) in (1..=6).zip(&ids) {
+            start.place(position, Some(id.clone())).unwrap();
+        }
+        start.choose_setter(Some(ids[0].clone())).unwrap();
+        start.choose_libero(Some(ids[6].clone())).unwrap();
+        core.start_set(start).unwrap();
+        (team, m)
+    }
+
+    fn shirt_screen(keys: ScoutingKeys) -> (tempfile::TempDir, ScoutingScreen) {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = team_with_shirts(&core);
+        let scouting = core
+            .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
+            .unwrap();
+        (dir, ScoutingScreen::new(scouting, keys, team, m))
+    }
+
+    fn offered(screen: &ScoutingScreen) -> Vec<u8> {
+        screen
+            .offered(&screen.snapshot.players)
+            .iter()
+            .map(|p| p.number)
+            .collect()
+    }
+
+    /// The number of the player of the last event saved.
+    fn last_shirt(screen: &ScoutingScreen) -> Option<Option<u8>> {
+        screen
+            .snapshot
+            .state
+            .events
+            .first()
+            .map(|e| e.player.as_ref().map(|p| p.number))
+    }
+
+    /// Issue #69: the digits are the shirt number; one is enough when no
+    /// other number on court starts with it, Enter takes the number typed
+    /// when others start the same way, the second digit the longer one.
+    #[test]
+    fn the_shirt_number_chooses_the_player() {
+        let (_dir, mut screen) = shirt_screen(ScoutingKeys::default());
+        assert_eq!(screen.keys.player_keys, PlayerKeysEnum::Number);
+        // our fault: the player who made it
+        screen.key(key!(f));
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Player);
+        assert_eq!(offered(&screen), vec![3, 30, 31, 7, 12, 0]);
+        screen.key(key!('7'));
+        assert_eq!(last_shirt(&screen), Some(Some(7)));
+        // 3, 30 and 31: waiting, the others left out
+        screen.key(key!(f));
+        screen.key(key!('3'));
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Player);
+        assert_eq!(offered(&screen), vec![3, 30, 31]);
+        screen.key(key!('1'));
+        assert_eq!(last_shirt(&screen), Some(Some(31)));
+        screen.key(key!(f));
+        screen.key(key!('3'));
+        screen.key(key!(enter));
+        assert_eq!(last_shirt(&screen), Some(Some(3)));
+        // the 0 is the libero's shirt, not the team
+        screen.key(key!(f));
+        screen.key(key!('0'));
+        assert_eq!(last_shirt(&screen), Some(Some(0)));
+        // the point is the team
+        screen.key(key!(f));
+        screen.key(key!('.'));
+        assert_eq!(last_shirt(&screen), Some(None));
+    }
+
+    /// The digits typed are forgotten with Backspace (the last one) and
+    /// Esc (all, staying in the scouting); a number nobody on court has
+    /// tells so.
+    #[test]
+    fn the_shirt_number_typed_can_be_corrected() {
+        let (_dir, mut screen) = shirt_screen(ScoutingKeys::default());
+        screen.key(key!(f));
+        screen.key(key!('3'));
+        screen.key(key!(backspace));
+        assert_eq!(offered(&screen), vec![3, 30, 31, 7, 12, 0]);
+        screen.key(key!('3'));
+        assert!(matches!(screen.key(BACK_KEY), Outcome::Stay));
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Player);
+        assert_eq!(offered(&screen), vec![3, 30, 31, 7, 12, 0]);
+        // 33 is on the bench
+        screen.key(key!('3'));
+        screen.key(key!('3'));
+        assert!(screen.notice.as_ref().is_some_and(|(_, error)| *error));
+        screen.key(key!(enter));
+        assert_eq!(screen.notice, None);
+        assert!(screen.typed.is_empty());
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Player);
+        assert!(screen.snapshot.state.events.is_empty());
+    }
+
+    /// The change of a player by the shirt numbers: the one going out, then
+    /// the one coming in from the bench.
+    #[test]
+    fn the_shirt_numbers_change_a_player() {
+        let (_dir, mut screen) = shirt_screen(ScoutingKeys::default());
+        screen.key(key!(r));
+        screen.key(key!('3'));
+        screen.key(key!('0'));
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Replacement);
+        let bench: Vec<u8> = screen
+            .offered(&screen.snapshot.replacements)
+            .iter()
+            .map(|p| p.number)
+            .collect();
+        assert!(bench.contains(&8) && bench.contains(&33), "{bench:?}");
+        screen.key(key!('8'));
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Event);
+        assert!(offered(&screen).contains(&8));
+        assert!(!offered(&screen).contains(&30));
+    }
+
+    /// As the TUI, by choice: the digit of the place in the lineup, 0 the
+    /// team.
+    #[test]
+    fn the_place_in_the_lineup_chooses_the_player() {
+        let keys = ScoutingKeys {
+            player_keys: PlayerKeysEnum::Role,
+            ..ScoutingKeys::default()
+        };
+        let (_dir, mut screen) = shirt_screen(keys);
+        screen.key(key!(f));
+        // the fourth place, not the shirt 3
+        screen.key(key!('3'));
+        assert_eq!(last_shirt(&screen), Some(Some(31)));
+        screen.key(key!(f));
+        screen.key(key!('0'));
+        assert_eq!(last_shirt(&screen), Some(None));
+    }
 
     /// Where our serve starts from, from the keyboard: down from the row
     /// at the net onto the zones below it, across them, the space bar
