@@ -54,6 +54,12 @@ pub enum IOError {
     Std(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error("zip error: {0}")]
     Zip(#[from] ZipError),
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    /// the schema of the database is newer than the one this version knows:
+    /// a newer version of the app wrote it (see `db::migrate`)
+    #[error("database schema {found} newer than {known}")]
+    DatabaseNewer { found: i64, known: i64 },
 }
 
 impl AppError {
@@ -78,6 +84,8 @@ impl IOError {
             IOError::Zip(e) => format!("{}: {e}", labels.io_invalid_file),
             IOError::Reqwest(e) => format!("{}: {e}", labels.io_network),
             IOError::Std(e) => format!("{}: {e}", labels.io_failed),
+            IOError::Sqlite(e) => sqlite_message(e, labels),
+            IOError::DatabaseNewer { .. } => labels.io_database_newer.to_string(),
         }
     }
 }
@@ -91,6 +99,19 @@ pub fn io_message(e: &std::io::Error, labels: &Labels) -> String {
         PermissionDenied => labels.io_permission_denied.to_string(),
         StorageFull | QuotaExceeded => labels.io_storage_full.to_string(),
         ReadOnlyFilesystem => labels.io_read_only.to_string(),
+        _ => format!("{}: {e}", labels.io_failed),
+    }
+}
+
+/// An error of the database in the language of `labels`, as `io_message`
+/// for the files: the disk, the permissions, a file that isn't a database.
+pub fn sqlite_message(e: &rusqlite::Error, labels: &Labels) -> String {
+    use rusqlite::ErrorCode::*;
+    match e.sqlite_error_code() {
+        Some(DiskFull) => labels.io_storage_full.to_string(),
+        Some(ReadOnly) => labels.io_read_only.to_string(),
+        Some(PermissionDenied) => labels.io_permission_denied.to_string(),
+        Some(NotADatabase | DatabaseCorrupt) => format!("{}: {e}", labels.io_invalid_file),
         _ => format!("{}: {e}", labels.io_failed),
     }
 }
@@ -118,5 +139,20 @@ mod tests {
         assert_eq!(said.message(it), "partita già esistente");
         let json = IOError::SerdeJson(serde_json::from_str::<u8>("x").unwrap_err());
         assert!(json.message(it).starts_with("il file non è valido: "));
+        let newer = AppError::IO(IOError::DatabaseNewer { found: 3, known: 1 });
+        assert_eq!(
+            newer.message(it),
+            "i dati sono stati salvati da una versione più recente dell'app: aggiornala"
+        );
+        let not_a_db = IOError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_NOTADB),
+            None,
+        ));
+        assert!(not_a_db.message(it).starts_with("il file non è valido: "));
+        let full = IOError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL),
+            None,
+        ));
+        assert_eq!(full.message(it), "il disco è pieno");
     }
 }

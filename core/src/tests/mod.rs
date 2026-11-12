@@ -11,6 +11,7 @@ mod ball_tests;
 mod benchmark_tests;
 mod config_tests;
 mod country_tests;
+mod db_tests;
 mod dvw_import_tests;
 mod dvw_tests;
 mod dvw_translate_tests;
