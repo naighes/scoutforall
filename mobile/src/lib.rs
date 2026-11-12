@@ -1655,7 +1655,8 @@ pub struct DetailStats {
     pub filter: DetailFilter,
     /// serve, reception, dig, block, attack, freeballs
     pub fundamentals: Vec<EventChoice>,
-    /// the players with an event in the match so far, by their number
+    /// the players with an event of the fundamental in the match so far
+    /// (and the one chosen, even with none), by their number
     pub players: Vec<ScoutingPlayer>,
     pub rotations: Vec<RotationChoice>,
     pub phases: Vec<PhaseChoice>,
@@ -2248,8 +2249,8 @@ fn detail_stats(
 }
 
 /// A fundamental (one of `detail::FUNDAMENTALS`) of the statistics, narrowed
-/// by the filter: the players to choose are the ones with an event in
-/// `everyone`, found in the first of `teams` having them (the team as each
+/// by the filter: the players to choose are the ones with an event of
+/// the fundamental in `everyone` (and the one chosen), found in the first of `teams` having them (the team as each
 /// match saw it); the grades by the level of the first team. With no sets
 /// to choose (see `detail_stats`).
 fn detail_of(
@@ -2407,10 +2408,15 @@ fn detail_of(
                 }),
             ),
         };
-    let mut players: Vec<ScoutingPlayer> = involved(everyone)
-        .into_iter()
-        .filter_map(player_of)
-        .collect();
+    // who has the fundamental, and the one chosen even with none (the
+    // filter is shown, to take it off)
+    let mut ids = involved(everyone, event);
+    if let Some(chosen) = narrowed.player
+        && !ids.contains(&chosen)
+    {
+        ids.push(chosen);
+    }
+    let mut players: Vec<ScoutingPlayer> = ids.into_iter().filter_map(player_of).collect();
     players.sort_by_key(|p| p.number);
     let fundamental_name = |e: EventTypeEnum| match e {
         EventTypeEnum::FB => labels.freeballs.to_string(),
@@ -2465,11 +2471,12 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
     )
 }
 
-/// The players with an event of ours in the statistics, by their id.
-fn involved(stats: &Stats) -> Vec<Uuid> {
+/// The players with an event of ours of the kind `event` in the
+/// statistics, by their id.
+fn involved(stats: &Stats, event: EventTypeEnum) -> Vec<Uuid> {
     let mut players: Vec<Uuid> = stats
         .events
-        .iter(|k| k.player.is_some())
+        .iter(|k| k.player.is_some() && k.event_type == event)
         .filter_map(|(k, _)| k.player)
         .collect();
     players.sort_unstable();
@@ -6601,6 +6608,15 @@ mod tests {
             .fundamental
             .unwrap();
         assert_eq!((theirs.total, theirs.phases_per_point), (1, None));
+        // to choose, only who has the fundamental: no reception, nobody;
+        // the one chosen stays, to take the filter off
+        let reception = detail(StatsScope::Match, EventTypeEnum::P, &all);
+        assert!(reception.players.is_empty());
+        let chosen = detail(StatsScope::Match, EventTypeEnum::P, &second);
+        assert_eq!(
+            chosen.players.iter().map(|p| p.number).collect::<Vec<_>>(),
+            vec![2]
+        );
         // a set
         let set = detail(StatsScope::Set { number: 2 }, EventTypeEnum::S, &all);
         assert_eq!(set.fundamental.unwrap().total, 2);
