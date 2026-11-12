@@ -21,6 +21,9 @@ dirs = "7"
 encoding_rs = "0.8"
 futures = "0.3.31"
 regex = "1"
+# SQLite compiled into the binary (bundled): the same engine everywhere,
+# Windows static, Android, macOS; no SQLite of the system needed
+rusqlite = { version = "0.42", default-features = false, features = ["bundled"] }
 reqwest = { version = "0.13", features = ["json", "cookies"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

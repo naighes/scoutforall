@@ -38,6 +38,7 @@ mod scouting_tests;
 mod set_start_tests;
 mod situation_tests;
 mod snapshot_tests;
+mod sqlite_tests;
 mod stats_tests;
 mod storage_tests;
 mod substitution_tests;
