@@ -1,0 +1,16 @@
+{
+  "opponent": "Visiting",
+  "date": "2025-10-25T00:00:00+02:00",
+  "home": true,
+  "max_substitutions": 6,
+  "roster": [
+    "5bd3c745-b67b-4029-9f0e-e7d4779cfaea",
+    "b5252927-15b5-4df3-8b6b-a6138dbd08af",
+    "2ddeb50a-54ec-4b27-9c4a-6a8dce7adacd",
+    "2bdd2268-bf2c-48a6-9212-edcaa6b7861f",
+    "c5b2b1a3-597f-4cbd-b059-6a7fbc37a215",
+    "48ba2fc6-32bd-4a31-8447-b761f82fbbcf",
+    "52b4e996-0636-4ab3-80c3-f3643d4e94bf"
+  ],
+  "source": "dvw"
+}

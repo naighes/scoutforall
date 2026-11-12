@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "videos/20251108 182500.mp4",
+      "start": "2025-11-08T18:25:00+01:00"
+    },
+    {
+      "path": "/Volumes/camera/parte 2.mp4"
+    }
+  ],
+  "anchor": {
+    "at": "2025-11-08T00:01:35Z",
+    "offset_ms": 312000,
+    "event": {
+      "set_number": 1,
+      "index": 0
+    }
+  },
+  "corrections": [
+    {
+      "event": {
+        "set_number": 1,
+        "index": 7
+      },
+      "by_ms": -1500
+    }
+  ]
+}

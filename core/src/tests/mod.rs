@@ -23,6 +23,7 @@ mod flags_tests;
 mod freeball_tests;
 mod language_tests;
 mod legacy_data_tests;
+mod legacy_fixtures_tests;
 mod libero_for_tests;
 mod libero_out_tests;
 mod lineup_scenario_tests;

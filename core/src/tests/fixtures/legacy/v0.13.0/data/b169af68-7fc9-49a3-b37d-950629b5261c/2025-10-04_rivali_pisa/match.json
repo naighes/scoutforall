@@ -1,0 +1,20 @@
+{
+  "opponent": "Rivali Pisa",
+  "date": "2025-10-04T18:00:00+02:00",
+  "home": true,
+  "max_substitutions": 8,
+  "notes": "notes of the match: rientro dopo l'infortunio",
+  "roster": [
+    "99c848bd-7f0f-45f0-8272-727e9cb07f6d",
+    "2cc2f3fc-43f4-4655-8f0f-5dd73944ec06",
+    "0dfa0249-8426-4821-9863-85b2a90d7d19",
+    "0e28cfff-5e0a-407f-9459-619af7357d56",
+    "93bda639-7567-49f5-8f46-04a9b955993b",
+    "f163e400-3e82-47b9-958a-7766eac27399",
+    "be4f535b-fd48-4260-9204-bd70fc6b16eb",
+    "9eeca2f3-5ac6-4a95-a1f0-ffa7de504553",
+    "995d175b-32b7-4a7b-9a09-1ed82806ad46",
+    "1f077fcf-2737-4da8-85a9-f878f5080b6c",
+    "cb892a15-df0b-4642-80ca-5abde2b9317f"
+  ]
+}

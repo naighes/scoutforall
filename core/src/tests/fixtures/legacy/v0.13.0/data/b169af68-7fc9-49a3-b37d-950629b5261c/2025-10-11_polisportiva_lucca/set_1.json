@@ -1,0 +1,15 @@
+{
+  "serving_team": "Them",
+  "initial_positions": [
+    "995d175b-32b7-4a7b-9a09-1ed82806ad46",
+    "1f077fcf-2737-4da8-85a9-f878f5080b6c",
+    "f2e61cdd-5d76-4c09-8958-83012b5f05e6",
+    "cb892a15-df0b-4642-80ca-5abde2b9317f",
+    "93bda639-7567-49f5-8f46-04a9b955993b",
+    "f163e400-3e82-47b9-958a-7766eac27399"
+  ],
+  "libero": "be4f535b-fd48-4260-9204-bd70fc6b16eb",
+  "fallback_libero": "9eeca2f3-5ac6-4a95-a1f0-ffa7de504553",
+  "setter": "995d175b-32b7-4a7b-9a09-1ed82806ad46",
+  "lineup_rules": "v2"
+}

@@ -1,0 +1,16 @@
+{
+  "pending": [
+    {
+      "team_id": "5a00e6ae-bd04-4007-a233-caa17f378d26",
+      "match_id": "2025-10-04_rivali_pisa",
+      "queued_at": 1794509420,
+      "retry_count": 0
+    },
+    {
+      "team_id": "809ddaa2-f564-42f1-96b1-af3824e62229",
+      "match_id": "2025-10-25_visiting",
+      "queued_at": 1794509420,
+      "retry_count": 0
+    }
+  ]
+}
