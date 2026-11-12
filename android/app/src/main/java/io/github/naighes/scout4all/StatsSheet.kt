@@ -334,13 +334,14 @@ private fun Possessions(possessions: List<PossessionStats>) = Column(verticalArr
     }
 }
 
-/** The side out and the break points of each rotation, side by side. */
+/** The side out and the break points of each rotation, side by side, then
+ * all its rallies: the points won minus lost over the rallies won. */
 @Composable
-private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Text(stringResource(R.string.rotations), Modifier.title(), style = MaterialTheme.typography.titleMedium)
-    Row {
-        Spacer(Modifier.width(48.dp))
-        listOf(R.string.side_out, R.string.break_points).forEach {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Spacer(Modifier.width(32.dp))
+        listOf(R.string.side_out, R.string.break_points, R.string.total).forEach {
             Text(
                 stringResource(it),
                 Modifier.weight(1f),
@@ -351,28 +352,67 @@ private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangeme
         }
     }
     rotations.forEach { r ->
-        Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
-            Text(r.name, Modifier.width(48.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Row(
+            Modifier.semantics(mergeDescendants = true) {},
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(r.name, Modifier.width(32.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             listOf(r.sideOut, r.breakPoints).forEach { p ->
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-                    p?.let {
+                RotationCell(Modifier.weight(1f), p) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        p?.let {
+                            Text(
+                                signed(it.balance),
+                                Modifier.padding(end = 8.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
-                            stringResource(R.string.rallies_detail, it.won.toInt(), it.rallies.toInt()) + "  ",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            pct(p?.percentage),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = p?.grade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text(
-                        pct(p?.percentage),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = p?.grade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
+            }
+            RotationCell(Modifier.weight(1f), r.total) {
+                Text(
+                    r.total?.let { signed(it.balance) } ?: "–",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = r.total?.balance?.let { b ->
+                        when {
+                            b > 0 -> Won
+                            b < 0 -> Lost
+                            else -> null
+                        }
+                    } ?: MaterialTheme.colorScheme.onSurface,
+                )
             }
         }
     }
 }
+
+/** A phase of a rotation: its figure over the rallies won of the played ones. */
+@Composable
+private fun RotationCell(modifier: Modifier, phase: PhaseStats?, top: @Composable () -> Unit) =
+    Column(modifier, horizontalAlignment = Alignment.End) {
+        top()
+        phase?.let {
+            Text(
+                stringResource(R.string.rallies_detail, it.won.toInt(), it.rallies.toInt()),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+            )
+        }
+    }
+
+/** The points won minus the lost ones, with the sign when positive. */
+internal fun signed(balance: Long) = if (balance > 0) "+$balance" else balance.toString()
 
 @Composable
 private fun Tile(modifier: Modifier, content: @Composable () -> Unit) = Surface(

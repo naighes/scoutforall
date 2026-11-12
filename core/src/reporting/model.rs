@@ -6,7 +6,7 @@
 //! (see `sides`).
 use crate::errors::AppError;
 use crate::localization::Labels;
-use crate::overview::side_out_possessions;
+use crate::overview::{balance, side_out_possessions};
 use crate::shapes::enums::{
     EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
@@ -51,8 +51,9 @@ pub struct Report {
 #[derive(Debug, Serialize)]
 pub struct Summary {
     pub title: String,
-    /// the points won minus the ones lost in each rotation, the last one
-    /// first, as DataVolley lays them out
+    /// the rallies of each rotation and the points won minus the ones lost
+    /// in side out, in break and in all, the last rotation first, as
+    /// DataVolley lays them out
     pub rotations: Table,
     pub phases: Vec<PhaseFigures>,
     pub direct_side_out: Comparison,
@@ -803,18 +804,23 @@ fn errors_not_blocked(s: &FirstRallySummary) -> u32 {
 fn summary(labels: &Labels, m: &MatchEntry, stats: &Stats) -> Summary {
     use EventTypeEnum::*;
     let all = StatsFilter::default();
-    let rotations = (0..6u8)
+    let signed = |balance: Option<i64>| {
+        balance.map_or("-".to_string(), |d| match d {
+            1.. => format!("+{d}"),
+            _ => d.to_string(),
+        })
+    };
+    let rotations = crate::detail::by_rotation(stats)
+        .into_iter()
         .rev()
-        .map(|rotation| {
-            let diff = stats
-                .rallies_won(&StatsFilter::new(None, Some(rotation), None))
-                .map(|(_, won, total)| 2 * won as i64 - total as i64);
+        .map(|r| {
             vec![
-                format!("{}{}", labels.setter_prefix, rotation + 1),
-                diff.map_or("-".to_string(), |d| match d {
-                    1.. => format!("+{d}"),
-                    _ => d.to_string(),
-                }),
+                format!("{}{}", labels.setter_prefix, r.rotation + 1),
+                r.total
+                    .map_or("-".to_string(), |(_, _, rallies)| rallies.to_string()),
+                signed(balance(r.side_out)),
+                signed(balance(r.break_points)),
+                signed(balance(r.total)),
             ]
         })
         .collect();
@@ -870,7 +876,13 @@ fn summary(labels: &Labels, m: &MatchEntry, stats: &Stats) -> Summary {
         title: m.team.name.clone(),
         rotations: Table {
             title: labels.points_by_rotation.to_string(),
-            columns: vec![labels.rotation.to_string(), "+/-".to_string()],
+            columns: vec![
+                labels.rotation.to_string(),
+                labels.rallies_short.to_string(),
+                labels.so_short.to_string(),
+                labels.bp_short.to_string(),
+                "+/-".to_string(),
+            ],
             rows: rotations,
             total: false,
         },

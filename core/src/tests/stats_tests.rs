@@ -7,9 +7,11 @@ mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::detail::{
         Breakdown, Detail, EvalShare, FUNDAMENTALS, Freeballs, PlayerLine, RotationLine, Tone,
-        ZoneDetail, by_player, by_rotation, evaluations,
+        ZoneDetail, by_player, by_rotation, by_rotation_in, evaluations,
     };
-    use crate::overview::{Errors, Fundamental, Overview, distribution, stats_of as sets_stats};
+    use crate::overview::{
+        Errors, Fundamental, Overview, balance, distribution, stats_of as sets_stats,
+    };
     use crate::shapes::{
         enums::{
             ErrorTypeEnum, EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum,
@@ -2002,6 +2004,47 @@ mod tests {
             )
         });
         assert_eq!((side_out, break_points), (6, 3));
+        // all the rallies of a rotation, and their points won minus lost
+        let mut totals: Vec<_> = played
+            .iter()
+            .map(|l| (won(l.total), balance(l.total)))
+            .collect();
+        totals.sort();
+        assert_eq!(
+            totals,
+            vec![
+                (Some((1, 1)), Some(1)),
+                (Some((1, 2)), Some(0)),
+                (Some((1, 6)), Some(-4)),
+            ]
+        );
+        assert!(played.iter().all(|l| balance(l.total)
+            == Some(balance(l.side_out).unwrap_or(0) + balance(l.break_points).unwrap_or(0))));
+        assert_eq!(balance(None), None);
+    }
+
+    /// A phase asked: the total of a rotation is its rallies in that phase.
+    #[test]
+    fn rotation_totals_in_a_phase() {
+        let t = Team::new();
+        let stats = side_out_stats(&t);
+        let lines = by_rotation_in(
+            &stats,
+            &StatsFilter::new(Some(PhaseEnum::SideOut), None, None),
+        );
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.total == l.side_out && l.break_points.is_none())
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter_map(|l| l.total)
+                .map(|(_, _, r)| r)
+                .sum::<u32>(),
+            6
+        );
     }
 
     /// The distribution of the set: the share of each zone and its

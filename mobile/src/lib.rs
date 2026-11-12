@@ -1269,6 +1269,8 @@ pub struct PhaseStats {
     pub percentage: f64,
     pub won: u32,
     pub rallies: u32,
+    /// the points won minus the ones lost
+    pub balance: i64,
     pub grade: Option<f64>,
 }
 
@@ -1391,13 +1393,16 @@ pub struct LiveStats {
     pub rotations: Vec<RotationStats>,
 }
 
-/// The phases won in a rotation.
+/// The phases won in a rotation, and all its rallies.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RotationStats {
     /// 0 to 5, as `DetailFilter::rotation`
     pub rotation: u8,
     /// P1 to P6 in Italian, S1 to S6 in English
     pub name: String,
+    /// every rally of the rotation, in the phase of the filter if any:
+    /// never graded
+    pub total: Option<PhaseStats>,
     pub side_out: Option<PhaseStats>,
     pub break_points: Option<PhaseStats>,
 }
@@ -2131,12 +2136,13 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
         errors: f.errors,
         grade: Measure::of(event).and_then(|m| level(m, f.efficiency)),
     };
-    let phase = |p: Option<(f64, u32, u32)>, measure| {
+    let phase = |p: Option<(f64, u32, u32)>, measure: Option<Measure>| {
         p.map(|(percentage, won, rallies)| PhaseStats {
             percentage,
             won,
             rallies,
-            grade: level(measure, Some(percentage)),
+            balance: 2 * i64::from(won) - i64::from(rallies),
+            grade: measure.and_then(|m| level(m, Some(percentage))),
         })
     };
     let errors = |e: &Errors| {
@@ -2168,7 +2174,7 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
             fundamental(EventTypeEnum::B, o.block),
             fundamental(EventTypeEnum::D, o.dig),
         ],
-        side_out: phase(o.side_out, Measure::SideOut),
+        side_out: phase(o.side_out, Some(Measure::SideOut)),
         side_out_possessions: o
             .side_out_possessions
             .iter()
@@ -2180,7 +2186,7 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
                 percentage: summary.map(|s| s.finalization()),
             })
             .collect(),
-        break_points: phase(o.break_points, Measure::BreakPoint),
+        break_points: phase(o.break_points, Some(Measure::BreakPoint)),
         first_attack: o.first_attack.map(attack_stats),
         counter_attack: o.counter_attack.map(attack_stats),
         unforced_errors: o.unforced_errors.total,
@@ -2201,8 +2207,9 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
             .map(|r| RotationStats {
                 rotation: r.rotation,
                 name: rotation_name(r.rotation, labels),
-                side_out: phase(r.side_out, Measure::SideOut),
-                break_points: phase(r.break_points, Measure::BreakPoint),
+                total: phase(r.total, None),
+                side_out: phase(r.side_out, Some(Measure::SideOut)),
+                break_points: phase(r.break_points, Some(Measure::BreakPoint)),
             })
             .collect(),
     }
@@ -6670,6 +6677,32 @@ mod tests {
         assert_eq!(played.len(), 2);
         assert_eq!(played[0], ("S1", Some((1, 1)), Some((25, 26))));
         assert_eq!((played[1].1, played[1].2), (None, Some((0, 1))));
+        // all the rallies of each rotation, and the points won minus lost
+        let balance = |p: &Option<PhaseStats>| p.as_ref().map(|p| p.balance);
+        let totals: Vec<_> = rotations
+            .iter()
+            .filter(|r| r.total.is_some())
+            .map(|r| {
+                (
+                    won(&r.total),
+                    balance(&r.total),
+                    balance(&r.side_out),
+                    balance(&r.break_points),
+                )
+            })
+            .collect();
+        assert_eq!(
+            totals,
+            vec![
+                (Some((26, 27)), Some(25), Some(1), Some(24)),
+                (Some((0, 1)), Some(-1), None, Some(-1)),
+            ]
+        );
+        assert!(
+            rotations
+                .iter()
+                .all(|r| r.total.as_ref().is_none_or(|t| t.grade.is_none()))
+        );
     }
 
     #[test]

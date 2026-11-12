@@ -258,7 +258,7 @@
   grid(
     columns: (auto, 15em, 1fr),
     column-gutter: 12pt,
-    simple-table(s.rotations, columns: (auto, auto)),
+    simple-table(s.rotations, columns: (auto,) * 5),
     stack(spacing: 6pt, ..s.phases.map(phase-figures)),
     comparison(s.direct_side_out),
   )

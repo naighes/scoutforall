@@ -309,6 +309,17 @@ fn same_set(a: &[EvalEnum], b: &[EvalEnum]) -> bool {
     a.len() == b.len() && a.iter().all(|e| b.contains(e))
 }
 
+/// The width of P1 to P6 (S1, R1... in the other languages).
+const ROTATION_NAME: f32 = 32.0;
+
+/// The points won minus the lost ones, with the sign when positive.
+fn signed(balance: i64) -> String {
+    match balance {
+        1.. => format!("+{balance}"),
+        _ => balance.to_string(),
+    }
+}
+
 fn pct(v: Option<f64>) -> String {
     v.map_or_else(|| "–".to_string(), |v| format!("{v:.0}%"))
 }
@@ -2507,48 +2518,74 @@ fn summary<'a>(
         .height(height(tall)),
         c,
     );
-    let rotations = live.rotations.iter().map(|r| {
-        let side = |p: &Option<PhaseStats>| -> Element<'a, Message> {
-            column![
-                graded(
-                    p.as_ref().map(|p| p.percentage),
-                    p.as_ref().and_then(|p| p.grade)
-                ),
-                small(
-                    p.as_ref()
-                        .map(|p| ui::fill(s.of_total, &[p.won.to_string(), p.rallies.to_string()]))
-                        .unwrap_or_default(),
-                    c
-                ),
-            ]
+    // the rallies won of the played ones
+    let played = |p: &PhaseStats| ui::fill(s.of_total, &[p.won.to_string(), p.rallies.to_string()]);
+    let cell = |top: Element<'a, Message>, bottom: String| -> Element<'a, Message> {
+        column![top, small(bottom, c)]
             .align_x(Alignment::End)
-            .width(Length::Fixed(90.0))
+            .width(Length::FillPortion(2))
             .into()
+    };
+    let rotations = live.rotations.iter().map(|r| {
+        // the points won minus lost, then the rallies won
+        let side = |p: &Option<PhaseStats>| {
+            cell(
+                row![
+                    small(p.as_ref().map(|p| signed(p.balance)).unwrap_or_default(), c),
+                    graded(
+                        p.as_ref().map(|p| p.percentage),
+                        p.as_ref().and_then(|p| p.grade),
+                    ),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into(),
+                p.as_ref().map(played).unwrap_or_default(),
+            )
         };
+        let total = cell(
+            text(
+                r.total
+                    .as_ref()
+                    .map_or("-".to_string(), |t| signed(t.balance)),
+            )
+            .size(SIZE_BODY)
+            .font(theme::fonts().bold)
+            .color(match r.total.as_ref().map(|t| t.balance) {
+                Some(1..) => c.won,
+                Some(..=-1) => c.lost,
+                _ => c.text,
+            })
+            .into(),
+            r.total.as_ref().map(played).unwrap_or_default(),
+        );
         share(
             row![
-                ui::body(r.name.clone()).width(Length::Fill),
+                ui::body(r.name.clone()).width(Length::Fixed(ROTATION_NAME)),
                 side(&r.side_out),
                 side(&r.break_points),
+                total,
             ]
-            .spacing(8)
+            .spacing(12)
             .align_y(Alignment::Center),
             tall,
         )
     });
+    let header = |label: &'static str| {
+        small(label, c)
+            .width(Length::FillPortion(2))
+            .align_x(Alignment::End)
+    };
     let second = ui::panel(
         Some(s.rotations),
         column![
             row![
-                space::horizontal(),
-                small(s.side_out, c)
-                    .width(Length::Fixed(90.0))
-                    .align_x(Alignment::End),
-                small(s.break_point, c)
-                    .width(Length::Fixed(90.0))
-                    .align_x(Alignment::End),
+                space::horizontal().width(Length::Fixed(ROTATION_NAME)),
+                header(s.side_out),
+                header(s.break_point),
+                header(s.total),
             ]
-            .spacing(8),
+            .spacing(12),
             Column::with_children(rotations)
                 .spacing(6)
                 .height(height(tall)),

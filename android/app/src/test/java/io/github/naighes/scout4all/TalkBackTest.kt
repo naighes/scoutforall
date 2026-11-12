@@ -155,6 +155,9 @@ class TalkBackTest {
         assertSpoken("${string(R.string.break_points)}, 100%, ${string(R.string.rallies_detail, 1, 1)}")
         assertSpoken("Serve, 100%, ${string(R.string.touches_spoken, 2, 1, 0)}")
         assertTitle(string(R.string.rotations))
+        // the rotation: no side out, the break point won, all its rallies
+        val won = string(R.string.rallies_detail, 1, 1)
+        assertSpoken("S1, –, +1, 100%, $won, +1, $won")
         // we served: no possession of ours
         assertTitle(string(R.string.side_out_by_possession))
         assertSpoken("1st, –")
