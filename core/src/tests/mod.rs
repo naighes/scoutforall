@@ -38,6 +38,7 @@ mod match_index_tests;
 mod pinned_teams_tests;
 mod player_form_tests;
 mod point_sequence_tests;
+mod provider_tests;
 mod report_tests;
 mod schema_tests;
 mod scouting_tests;
