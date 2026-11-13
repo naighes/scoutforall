@@ -119,9 +119,14 @@ impl PinnedTeams {
     /// pinned.
     pub fn sorted(&self, teams: Vec<Listed<TeamEntry>>) -> Vec<Listed<TeamEntry>> {
         let mut teams = teams;
+        // the same name: by id, whatever order they were read in
         teams.sort_by_cached_key(|team| match team {
-            Ok(team) => (!self.is_pinned(&team.id), team.name.to_lowercase()),
-            Err(unreadable) => (true, unreadable.id.to_lowercase()),
+            Ok(team) => (
+                !self.is_pinned(&team.id),
+                team.name.to_lowercase(),
+                team.id.to_string(),
+            ),
+            Err(unreadable) => (true, unreadable.id.to_lowercase(), unreadable.id.clone()),
         });
         teams
     }

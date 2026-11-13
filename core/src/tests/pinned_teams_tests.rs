@@ -54,6 +54,28 @@ mod tests {
     }
 
     #[test]
+    fn the_teams_with_the_same_name_are_by_id() {
+        let named = |id: u128, name: &str| {
+            Ok(TeamEntry {
+                id: Uuid::from_u128(id),
+                ..team(name)
+            })
+        };
+        let sorted = PinnedTeams::default().sorted(vec![
+            named(3, "ok merkur"),
+            named(2, "OK MERKUR"),
+            named(4, "Alfa"),
+            named(1, "OK Merkur"),
+        ]);
+        let ids: Vec<u128> = sorted
+            .iter()
+            .filter_map(|t| t.as_ref().ok())
+            .map(|t| t.id.as_u128())
+            .collect();
+        assert_eq!(ids, [4, 1, 2, 3]);
+    }
+
+    #[test]
     fn a_team_unpinned_leaves_the_pins() {
         let id = Uuid::new_v4();
         let pins = PinnedTeams::default().with(id, true);

@@ -10,11 +10,10 @@
 #     scripts/bench.sh generate DIR [TxM]  an archive of T teams of M matches
 #                                          each (default 1x300) kept in DIR,
 #                                          e.g. to try the apps on it
-#     scripts/bench.sh measure DIR         the reads on DIR, e.g.
-#                                          ~/.scout4all: only the index of
-#                                          the matches is written (and
-#                                          removed, to time the lists
-#                                          without it)
+#     scripts/bench.sh measure DIR         the reads on DIR, e.g. a copy of
+#                                          ~/.scout4all: the cache of the
+#                                          lists is emptied (and rebuilt),
+#                                          to time them without it
 #     scripts/bench.sh scouting DIR        the scouting of the match in
 #                                          progress of an archive made by
 #                                          `generate` (it changes its last
@@ -24,12 +23,17 @@
 #                                          before and after a change, then
 #                                          `diff -r` (e.g. on an archive of
 #                                          every real match, `generate DIR
-#                                          162x1`, and on ~/.scout4all); the
-#                                          lists too, from the index of the
-#                                          matches (removing DIR/.index.json
-#                                          compares them without it), and the
-#                                          analysis of the last 3 and 10
-#                                          matches and of October 2026
+#                                          162x1`, and on a copy of
+#                                          ~/.scout4all); the lists too, and
+#                                          the analysis of the last 3 and 10
+#                                          matches and of October 2026. The
+#                                          matches migrated are named by
+#                                          their id of before the database,
+#                                          so OUT compares with reports taken
+#                                          on the folders
+#
+# DIR is opened as the apps open it: a folder of before the database is
+# migrated into it (its backup zip beside it), so give a copy.
 #
 # The table is Markdown, to paste where the times are compared. Built in
 # release, as the apps; run it with the machine otherwise idle, and compare

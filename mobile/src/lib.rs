@@ -3250,7 +3250,8 @@ impl Scout4All {
                 )
             }));
         }
-        matches.sort_by(|(a, _), (b, _)| b.cmp(a));
+        // the same time: by team, whatever order the teams were read in
+        matches.sort_by(|(a, x), (b, y)| b.cmp(a).then_with(|| x.team_id.cmp(&y.team_id)));
         let (recent, in_progress): (Vec<HomeMatch>, Vec<HomeMatch>) = matches
             .into_iter()
             .map(|(_, m)| m)
@@ -6525,6 +6526,38 @@ mod tests {
         assert_eq!((home.recent[0].won, home.recent[0].lost), (3, 0));
         assert_eq!(home.recent[0].team_id, cortona);
         assert_eq!(home.teams.len(), 2);
+    }
+
+    #[test]
+    fn the_matches_of_the_home_at_the_same_time_are_by_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        // more teams than the recent matches, each a match over on the 1st
+        let mut teams = vec![];
+        for t in 1..=RECENT_MATCHES + 1 {
+            let team = app.save_team(None, form(&format!("Team {t}"))).unwrap();
+            for n in 1..=7 {
+                app.save_player(
+                    team.clone(),
+                    None,
+                    player(&format!("P{n}"), &n.to_string()),
+                    false,
+                )
+                .unwrap();
+            }
+            let m = match_on(&app, &team, "Same day", 1);
+            play(&app, &team, &m, 3);
+            teams.push(team);
+        }
+        teams.sort();
+        let recent: Vec<String> = app
+            .home()
+            .unwrap()
+            .recent
+            .into_iter()
+            .map(|m| m.team_id)
+            .collect();
+        assert_eq!(recent, teams[..RECENT_MATCHES]);
     }
 
     #[test]

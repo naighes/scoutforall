@@ -6057,6 +6057,7 @@ name = "scout4all-bench"
 version = "0.18.0"
 dependencies = [
  "chrono",
+ "rusqlite",
  "scout4all-core",
  "scout4all-mobile",
  "serde_json",
