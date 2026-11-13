@@ -24,12 +24,11 @@
 //!   why, and nothing is written.
 
 use crate::{
-    archive::{is_match_of, roster_for},
     db,
     domain::{LegacyId, adapters::TeamRows},
     errors::{AppError, IOError},
     legacy::{
-        archive::{Archive, read_archive},
+        archive::{Archive, is_match_of, read_archive, roster_for},
         migrate::{already, insert_team_rows},
         rows::match_rows,
     },

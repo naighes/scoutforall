@@ -1,23 +1,21 @@
-//! The archives of a team or a match move between the versions, both ways:
-//! the fixtures are archives as exported up to v0.9.0, with the data saved
-//! by the older versions.
+//! The archives exported by the versions before the database (up to
+//! v0.9.0 in the fixtures, with the data saved by the older versions),
+//! imported into it (`legacy_archive`): the team takes its id, the match
+//! replays as scouted, what isn't of the team or doesn't replay is refused.
+//! The archives of every legacy version are in `legacy_archive_tests`.
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        archive::{
-            Archive, export_match, export_team, file_team_id, import_match, import_team,
-            match_to_import, read_archive, teams_of_match,
-        },
         errors::{AppError, IOError},
+        legacy::archive::{Archive, file_team_id, read_archive},
         localization::Language,
         providers::{
             match_reader::MatchReader,
             match_writer::MatchWriter,
-            store::{
-                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-                set_reader::StoreSetReader, set_writer::StoreSetWriter,
-                team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
+            sqlite::{
+                archive::{self as archives, Subject},
+                legacy_archive::{Opened, import_legacy_match, import_legacy_team, open},
             },
             team_reader::TeamReader,
             team_writer::{PlayerInput, TeamInput, TeamWriter},
@@ -27,14 +25,9 @@ mod tests {
             r#match::{MatchEntry, MatchSource},
             team::TeamEntry,
         },
-        storage::{Store, layout, memory::MemoryStore},
-        tests::EN,
-        video::{
-            StoredProfile, VIDEO_PROFILE_FILE_NAME, VideoFile, VideoProfile, read_profile,
-            write_profile,
-        },
+        tests::{EN, Sqlite},
     };
-    use std::{io::Write, sync::Arc};
+    use std::io::Write;
     use uuid::Uuid;
 
     const TEAM_ID: &str = "45a589d5-004a-4a50-99f5-6d78fd052a3c";
@@ -48,30 +41,18 @@ mod tests {
     /// Middle blocker 2, who serves in the set of the match.
     const MB2: &str = "00000000-0000-4000-8000-000000000003";
 
-    struct Providers {
-        store: Arc<dyn Store>,
-        team_reader: StoreTeamReader,
-        team_writer: StoreTeamWriter,
-        match_reader: StoreMatchReader,
-        match_writer: StoreMatchWriter,
-        set_writer: StoreSetWriter,
+    struct Providers(Sqlite);
+
+    impl std::ops::Deref for Providers {
+        type Target = Sqlite;
+        fn deref(&self) -> &Sqlite {
+            &self.0
+        }
     }
 
     impl Providers {
         fn new() -> Self {
-            let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-            Self {
-                team_reader: StoreTeamReader::new(Arc::clone(&store), Language::default()),
-                team_writer: StoreTeamWriter::new(Arc::clone(&store)),
-                match_reader: StoreMatchReader::new(
-                    Arc::clone(&store),
-                    Arc::new(StoreSetReader::new(Arc::clone(&store), Language::default())),
-                    Language::default(),
-                ),
-                match_writer: StoreMatchWriter::new(Arc::clone(&store)),
-                set_writer: StoreSetWriter::new(Arc::clone(&store), Language::default()),
-                store,
-            }
+            Providers(Sqlite::new())
         }
 
         async fn import_team(
@@ -79,7 +60,8 @@ mod tests {
             archive: &[u8],
             file_id: Option<Uuid>,
         ) -> Result<TeamEntry, AppError> {
-            import_team(archive, file_id, &self.team_reader, &self.team_writer, EN).await
+            let imported = import_legacy_team(&self.db, archive, file_id, &Language::default())?;
+            self.team_reader.read_single(&imported.id).await
         }
 
         async fn import_match(
@@ -87,15 +69,11 @@ mod tests {
             archive: &[u8],
             team: &TeamEntry,
         ) -> Result<MatchEntry, AppError> {
-            import_match(
-                archive,
-                team,
-                &self.match_reader,
-                &self.match_writer,
-                &self.set_writer,
-                EN,
-            )
-            .await
+            let imported = import_legacy_match(&self.db, archive, team.id, &Language::default())?;
+            let team = self.team_reader.read_single(&team.id).await?;
+            self.match_reader
+                .read_single(&team, &imported.id.to_string())
+                .await
         }
 
         /// The team and the match of the fixtures.
@@ -104,15 +82,22 @@ mod tests {
                 .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
                 .await
                 .expect("expected the team");
-            self.import_match(MATCH_UP_TO_V0_9_0, &team)
+            let m = self
+                .import_match(MATCH_UP_TO_V0_9_0, &team)
                 .await
                 .expect("expected the match");
-            let m = self
-                .match_reader
-                .read_single(&team, MATCH_ID)
-                .await
-                .expect("expected a readable match");
             (team, m)
+        }
+
+        /// The matches of the team.
+        async fn matches(&self, team: &TeamEntry) -> Vec<MatchEntry> {
+            self.match_reader
+                .read_all(team)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|m| m.unwrap())
+                .collect()
         }
 
         /// Another team, with players of its own.
@@ -139,6 +124,18 @@ mod tests {
                 .await
                 .unwrap()
         }
+    }
+
+    /// The match `m` exported from `from` (an archive of the database) and
+    /// imported into a new database.
+    async fn moved(from: &Providers, m: &MatchEntry) -> (Providers, TeamEntry, MatchEntry) {
+        let id = Uuid::parse_str(&m.id).unwrap();
+        let archive = archives::export(&from.db, Subject::Match(id)).unwrap();
+        let to = Providers::new();
+        archives::import(&to.db, &archive, &Language::default()).unwrap();
+        let team = to.team_reader.read_single(&m.team.id).await.unwrap();
+        let again = to.match_reader.read_single(&team, &m.id).await.unwrap();
+        (to, team, again)
     }
 
     /// The player with `number` in the fixtures.
@@ -199,46 +196,35 @@ mod tests {
         assert_eq!(message(result), EN.team_archive_without_id);
     }
 
-    /// The archive is renamed on the way, e.g. received twice.
+    /// From v0.10.1 the id is in the archive: renamed on the way, e.g.
+    /// received twice, it keeps it; again, it's the same team.
     #[tokio::test]
     async fn team_archive_keeps_its_id_whatever_its_name() {
-        let from = Providers::new();
-        let (team, _) = from.legacy_match().await;
-        let archive = export_team(&*from.store, &team.id).await.unwrap();
-        let to = Providers::new();
-        let imported = to
-            .import_team(&archive, Some(Uuid::new_v4()))
-            .await
-            .unwrap();
-        assert_eq!(imported.id, team.id);
-        let again = to.import_team(&archive, None).await;
-        assert_eq!(message(again), EN.team_already_exists);
-    }
-
-    /// Up to v0.9.0 the descriptor is read as a team, the id ignored.
-    #[tokio::test]
-    async fn team_archive_is_read_up_to_v0_9_0() {
+        let archive = edited(TEAM_UP_TO_V0_9_0, "team.json", |json| {
+            let mut team: serde_json::Value = serde_json::from_str(&json).unwrap();
+            team["id"] = TEAM_ID.into();
+            team.to_string()
+        });
         let p = Providers::new();
-        let (team, _) = p.legacy_match().await;
-        let archive = export_team(&*p.store, &team.id).await.unwrap();
-        let Ok(Archive::Team { team: read, id }) = read_archive(&archive, EN) else {
-            panic!("expected a team");
-        };
-        assert_eq!(id, Some(team.id));
-        assert_eq!(read.players.len(), team.players.len());
-        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(archive)).unwrap();
-        let names: Vec<_> = zip.file_names().map(|n| n.unwrap().to_string()).collect();
-        assert_eq!(names, ["team.json"]);
-        let json = std::io::read_to_string(zip.by_index(0).unwrap()).unwrap();
-        let old: TeamEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(old.name, team.name);
+        let imported = p.import_team(&archive, Some(Uuid::new_v4())).await.unwrap();
+        assert_eq!(imported.id.to_string(), TEAM_ID);
+        let again = p.import_team(&archive, None).await.unwrap();
+        assert_eq!(again, imported);
+        assert_eq!(p.team_reader.read_all().await.unwrap().len(), 1);
     }
 
     #[tokio::test]
     async fn match_archive_up_to_v0_9_0_replays_as_scouted() {
         let (_, m) = Providers::new().legacy_match().await;
-        assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V1));
-        assert!(m.roster.is_empty());
+        // saved without its rules, as from its folder: those it replays with
+        assert_eq!(m.sets[0].lineup_rules, None);
+        assert_eq!(
+            m.sets[0].find_lineup_rules(m.max_substitutions).unwrap(),
+            LineupRulesEnum::V1
+        );
+        // no roster up to v0.10.1: the active team
+        let active: Vec<Uuid> = m.team.active_players().iter().map(|p| p.id).collect();
+        assert_eq!(m.roster, active);
         let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!((snapshot.score_us, snapshot.score_them), (3, 1));
         assert_eq!(
@@ -270,8 +256,7 @@ mod tests {
             panic!("expected a match");
         };
         assert_eq!(read.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
-        p.import_match(&archive, &team).await.unwrap();
-        let m = p.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        let m = p.import_match(&archive, &team).await.unwrap();
         assert_eq!(m.sets[0].lineup_rules, Some(LineupRulesEnum::V2));
         let snapshot = m.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!(
@@ -280,65 +265,45 @@ mod tests {
         );
     }
 
-    /// The match moves again, from this version.
-    /// The video stays on this computer; a match on the video clock (from
-    /// DataVolley) stays on it.
+    /// A match from DataVolley on the video clock (from v0.15.0) stays so,
+    /// and so it moves on from the database.
     #[tokio::test]
-    async fn match_archive_without_its_video_on_its_clock() {
-        let from = Providers::new();
-        let (team, m) = from.legacy_match().await;
-        let m = from
-            .match_writer
-            .save_source(&m, MatchSource::Dvw, true)
+    async fn match_archive_on_its_clock() {
+        let p = Providers::new();
+        let team = p
+            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
             .await
             .unwrap();
-        let profile = VideoProfile {
-            files: vec![VideoFile {
-                path: "/media/match.mp4".into(),
-                start: None,
-            }],
-            ..Default::default()
-        };
-        write_profile(&*from.store, &team.id, &m.id, &profile)
-            .await
-            .unwrap();
-        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
-        let names: Vec<String> = zip::ZipArchive::new(std::io::Cursor::new(&archive))
-            .unwrap()
-            .file_names()
-            .map(|n| n.unwrap().into_owned())
-            .collect();
-        assert!(
-            !names.iter().any(|n| n == VIDEO_PROFILE_FILE_NAME),
-            "{names:?}"
-        );
-        let to = Providers::new();
-        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
-        let team = to.import_team(&team_archive, None).await.unwrap();
-        to.import_match(&archive, &team).await.unwrap();
-        let again = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        let archive = edited(MATCH_UP_TO_V0_9_0, "match.json", |json| {
+            let mut descriptor: serde_json::Value = serde_json::from_str(&json).unwrap();
+            descriptor["source"] = "dvw".into();
+            descriptor["video_clock"] = true.into();
+            descriptor.to_string()
+        });
+        let m = p.import_match(&archive, &team).await.unwrap();
+        assert_eq!((m.source, m.video_clock), (MatchSource::Dvw, true));
+        let (_, _, again) = moved(&p, &m).await;
         assert_eq!((again.source, again.video_clock), (MatchSource::Dvw, true));
-        assert_eq!(
-            read_profile(&*to.store, &team.id, MATCH_ID).await.unwrap(),
-            StoredProfile::Missing
-        );
     }
 
+    /// The match moves on from the database with its rules, once.
     #[tokio::test]
     async fn match_archive_moves_on_with_its_rules() {
         let from = Providers::new();
-        let (team, m) = from.legacy_match().await;
-        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
-        let to = Providers::new();
-        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
-        let team = to.import_team(&team_archive, None).await.unwrap();
-        to.import_match(&archive, &team).await.unwrap();
-        let again = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
-        assert_eq!(again.sets[0].lineup_rules, Some(LineupRulesEnum::V1));
+        let (_, m) = from.legacy_match().await;
+        let (to, team, again) = moved(&from, &m).await;
+        assert_eq!(again.sets, m.sets);
+        assert_eq!(
+            again.sets[0]
+                .find_lineup_rules(m.max_substitutions)
+                .unwrap(),
+            LineupRulesEnum::V1
+        );
         let snapshot = again.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!((snapshot.score_us, snapshot.score_them), (3, 1));
-        let twice = to.import_match(&archive, &team).await;
+        let twice = to.import_match(MATCH_UP_TO_V0_9_0, &team).await;
         assert_eq!(message(twice), EN.match_already_exists);
+        assert_eq!(to.matches(&team).await.len(), 1);
     }
 
     /// The details of the players and the notes of the match go with the
@@ -367,11 +332,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let to = Providers::new();
-        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
-        let team = to.import_team(&team_archive, None).await.unwrap();
-        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
-        to.import_match(&archive, &team).await.unwrap();
+        let (_, team, again) = moved(&from, &m).await;
         let imported = team.find_player(player.id).unwrap();
         assert_eq!(
             (
@@ -381,7 +342,6 @@ mod tests {
             ),
             (player.birth_date, Some(182), "captain")
         );
-        let again = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
         assert_eq!(again.notes, "windy");
         assert_eq!(again.roster, (1..=8).map(numbered).collect::<Vec<_>>());
     }
@@ -390,41 +350,42 @@ mod tests {
     /// later.
     #[tokio::test]
     async fn match_archive_with_rows_of_v0_4_3_is_imported() {
-        let from = Providers::new();
-        let (team, m) = from.legacy_match().await;
-        let events = layout::set_events(&team.id, &m.id, 1);
+        let p = Providers::new();
+        let team = p
+            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
+            .await
+            .unwrap();
         let ace = format!("2025-09-20T20:01:00.000000Z,S,{MB2},#,\n");
-        from.store.append(&events, ace.as_bytes()).await.unwrap();
-        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
-        let to = Providers::new();
-        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
-        let team = to.import_team(&team_archive, None).await.unwrap();
-        to.import_match(&archive, &team).await.unwrap();
-        let imported = to.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        let archive = edited(MATCH_UP_TO_V0_9_0, "set_1.csv", |csv| csv + &ace);
+        let imported = p.import_match(&archive, &team).await.unwrap();
         let snapshot = imported.get_set_snapshot(1).unwrap().unwrap();
         assert_eq!((snapshot.score_us, snapshot.score_them), (4, 1));
     }
 
-    /// A set this version doesn't replay, e.g. saved by a version whose
-    /// scouting allowed an event no more: the import says which and writes
-    /// nothing.
+    /// A set this version doesn't replay with its rules, e.g. saved by a
+    /// version whose scouting allowed an event no more: the import says
+    /// which and writes nothing.
     #[tokio::test]
     async fn match_archive_with_a_set_that_does_not_replay_is_refused() {
-        let from = Providers::new();
-        let (team, m) = from.legacy_match().await;
-        let rows = m.sets[0].events.len();
-        let events = layout::set_events(&team.id, &m.id, 1);
-        // their error gives us the serve: they can't score an ace
-        let rows_added = "2025-09-20T20:01:00.000000Z,OE,,,\n2025-09-20T20:01:01.000000Z,OS,,,\n";
-        from.store
-            .append(&events, rows_added.as_bytes())
+        let p = Providers::new();
+        let team = p
+            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
             .await
             .unwrap();
-        let archive = export_match(&*from.store, &team.id, &m.id).await.unwrap();
-        let to = Providers::new();
-        let team_archive = export_team(&*from.store, &team.id).await.unwrap();
-        let team = to.import_team(&team_archive, None).await.unwrap();
-        let result = to.import_match(&archive, &team).await;
+        let Ok(Archive::Match(read)) = read_archive(MATCH_UP_TO_V0_9_0, EN) else {
+            panic!("expected a match");
+        };
+        let rows = read.sets[0].events.len();
+        // their error gives us the serve: they can't score an ace
+        let rows_added = "2025-09-20T20:01:00.000000Z,OE,,,\n2025-09-20T20:01:01.000000Z,OS,,,\n";
+        let archive = edited(MATCH_UP_TO_V0_9_0, "set_1.csv", |csv| csv + rows_added);
+        // the rules in the set, as saved from v0.4.0
+        let archive = edited(&archive, "set_1.json", |json| {
+            let mut set: serde_json::Value = serde_json::from_str(&json).unwrap();
+            set["lineup_rules"] = "v1".into();
+            set.to_string()
+        });
+        let result = p.import_match(&archive, &team).await;
         let why = EN
             .set_event_not_valid
             .replace("{set}", "1")
@@ -432,7 +393,7 @@ mod tests {
             .replace("{event}", "OS")
             .replace("{previous}", "OE");
         assert_eq!(message(result), why);
-        assert!(!to.match_reader.exists(&team, MATCH_ID).await.unwrap());
+        assert!(p.matches(&team).await.is_empty());
     }
 
     #[tokio::test]
@@ -444,7 +405,7 @@ mod tests {
         let other = p.other_team().await;
         let result = p.import_match(MATCH_UP_TO_V0_9_0, &other).await;
         assert_eq!(message(result), EN.match_of_another_team);
-        assert!(!p.match_reader.exists(&other, MATCH_ID).await.unwrap());
+        assert!(p.matches(&other).await.is_empty());
     }
 
     /// A substitution that brings in a player who isn't of the team, e.g.
@@ -463,7 +424,7 @@ mod tests {
         assert!(read_archive(&archive, EN).is_ok());
         let result = p.import_match(&archive, &team).await;
         assert_eq!(message(result), EN.match_of_another_team);
-        assert!(!p.match_reader.exists(&team, MATCH_ID).await.unwrap());
+        assert!(p.matches(&team).await.is_empty());
     }
 
     /// A roster written by hand, as no version saves it: without who came
@@ -480,53 +441,33 @@ mod tests {
         let archive = edited(MATCH_UP_TO_V0_9_0, "match.json", |json| {
             with_roster(&json, &roster)
         });
-        p.import_match(&archive, &team).await.unwrap();
-        let m = p.match_reader.read_single(&team, MATCH_ID).await.unwrap();
+        let m = p.import_match(&archive, &team).await.unwrap();
         assert_eq!(m.roster, (1..=8).map(numbered).collect::<Vec<_>>());
         assert_eq!(m.team.active_players().len(), 8);
     }
 
+    /// Before importing, e.g. to show the archive opened from outside: the
+    /// match goes to its team only, until imported.
     #[tokio::test]
-    async fn the_match_finds_its_team() {
+    async fn the_match_finds_its_team_until_imported() {
         let p = Providers::new();
+        p.other_team().await;
+        let none = open(&p.db, MATCH_UP_TO_V0_9_0, EN);
+        assert_eq!(message(none), EN.match_of_another_team);
         let team = p
             .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
             .await
             .unwrap();
-        let teams = [p.other_team().await, team];
-        let Ok(Archive::Match(m)) = read_archive(MATCH_UP_TO_V0_9_0, EN) else {
+        let Ok(Opened::LegacyMatch { archived, teams }) = open(&p.db, MATCH_UP_TO_V0_9_0, EN)
+        else {
             panic!("expected a match");
         };
-        assert_eq!(m.id, MATCH_ID);
-        assert_eq!(m.opponent, "Club Arezzo");
-        let found: Vec<_> = teams_of_match(&m, &teams).iter().map(|t| t.id).collect();
-        assert_eq!(found, [teams[1].id]);
-    }
-
-    /// Before importing, e.g. to show the archive opened from outside.
-    #[tokio::test]
-    async fn the_match_to_import_goes_to_its_team_until_imported() {
-        let p = Providers::new();
-        let other = p.other_team().await;
-        let only_other = [other.clone()];
-        let none = match_to_import(MATCH_UP_TO_V0_9_0, &only_other, &p.match_reader, EN);
-        assert_eq!(message(none.await), EN.match_of_another_team);
-        let team = p
-            .import_team(TEAM_UP_TO_V0_9_0, Uuid::parse_str(TEAM_ID).ok())
-            .await
-            .unwrap();
-        let teams = [other, team];
-        let (m, found) = match_to_import(MATCH_UP_TO_V0_9_0, &teams, &p.match_reader, EN)
-            .await
-            .unwrap();
-        assert_eq!(m.opponent, "Club Arezzo");
-        assert_eq!(
-            found.iter().map(|t| t.id).collect::<Vec<_>>(),
-            [teams[1].id]
-        );
-        p.import_match(MATCH_UP_TO_V0_9_0, &teams[1]).await.unwrap();
-        let again = match_to_import(MATCH_UP_TO_V0_9_0, &teams, &p.match_reader, EN);
-        assert_eq!(message(again.await), EN.match_already_exists);
+        assert_eq!(archived.id, MATCH_ID);
+        assert_eq!(archived.opponent, "Club Arezzo");
+        assert_eq!(teams.iter().map(|t| t.id).collect::<Vec<_>>(), [team.id]);
+        p.import_match(MATCH_UP_TO_V0_9_0, &team).await.unwrap();
+        let again = open(&p.db, MATCH_UP_TO_V0_9_0, EN);
+        assert_eq!(message(again), EN.match_already_exists);
     }
 
     #[test]

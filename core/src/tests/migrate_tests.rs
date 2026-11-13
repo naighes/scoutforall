@@ -11,7 +11,7 @@ mod tests {
     use crate::{
         errors::{AppError, IOError},
         legacy::{
-            folder::NotRead,
+            folder::{NotRead, read_folder, read_match, read_profile, read_team},
             migrate::{Backup, Migrated, migrate, unzip},
         },
         localization::Language,
@@ -21,27 +21,20 @@ mod tests {
                 Database, matches::SqliteMatchReader, teams::SqliteTeamReader,
                 video::SqliteVideoProfiles,
             },
-            store::{
-                match_reader::StoreMatchReader, set_reader::StoreSetReader,
-                team_reader::StoreTeamReader,
-            },
             team_reader::TeamReader,
         },
         shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
-        storage::{Stamps, Store, StoreEntry, fs::FsStore},
+        storage::{Store, StoreEntry, fs::FsStore},
         tests::{
             EN, LEGACY_VERSIONS as VERSIONS, LegacyScores, copy_dir, legacy_fixtures, legacy_scores,
         },
-        video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place, read_profile},
+        video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place},
     };
     use async_trait::async_trait;
     use std::{
         collections::{BTreeMap, BTreeSet},
         path::{Path, PathBuf},
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
+        sync::atomic::{AtomicUsize, Ordering},
     };
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -133,23 +126,16 @@ mod tests {
     /// its opponent, its sets and their scores.
     type Matches = BTreeMap<(Uuid, String), (String, Vec<SetEntry>, Vec<(u8, u8)>)>;
 
-    /// The matches by team and id in the files, as the providers over the
-    /// files read them.
+    /// The matches by team and id in the files, as the reader of the
+    /// versions before the database reads them.
     async fn in_files(root: &Path) -> Matches {
-        let store: Arc<dyn Store> = Arc::new(FsStore::new(root));
-        let teams = StoreTeamReader::new(Arc::clone(&store), Language::default());
-        let matches = StoreMatchReader::new(
-            Arc::clone(&store),
-            Arc::new(StoreSetReader::new(Arc::clone(&store), Language::default())),
-            Language::default(),
-        );
         let mut read = Matches::new();
-        for team in teams.read_all().await.unwrap() {
+        for team in read_folder(&FsStore::new(root), EN).await.unwrap() {
             let team = team.unwrap();
-            for m in matches.read_all(&team).await.unwrap() {
+            for m in team.matches {
                 let m = m.unwrap();
                 read.insert(
-                    (team.id, m.id.clone()),
+                    (team.team.id, m.id.clone()),
                     (m.opponent.clone(), m.sets.clone(), m.set_scores().unwrap()),
                 );
             }
@@ -446,10 +432,6 @@ mod tests {
             self.call()?;
             self.store.write(key, data).await
         }
-        async fn append(&self, key: &str, data: &[u8]) -> Result<(), AppError> {
-            self.call()?;
-            self.store.append(key, data).await
-        }
         async fn exists(&self, key: &str) -> Result<bool, AppError> {
             self.call()?;
             self.store.exists(key).await
@@ -465,14 +447,6 @@ mod tests {
         async fn remove_folder(&self, folder: &str) -> Result<(), AppError> {
             self.call()?;
             self.store.remove_folder(folder).await
-        }
-        async fn stamps(&self, folder: &str) -> Result<Stamps, AppError> {
-            self.call()?;
-            self.store.stamps(folder).await
-        }
-        async fn folder_stamps(&self, folder: &str) -> Result<Vec<(String, Stamps)>, AppError> {
-            self.call()?;
-            self.store.folder_stamps(folder).await
         }
     }
 
@@ -1027,20 +1001,9 @@ mod tests {
             else {
                 panic!("{version}: no video");
             };
-            let store: Arc<dyn Store> = Arc::new(device.store());
-            let team_id = Uuid::parse_str(&team).unwrap();
-            let team_entry = StoreTeamReader::new(Arc::clone(&store), Language::default())
-                .read_single(&team_id)
-                .await
-                .unwrap();
-            let m_in_files = StoreMatchReader::new(
-                Arc::clone(&store),
-                Arc::new(StoreSetReader::new(Arc::clone(&store), Language::default())),
-                Language::default(),
-            )
-            .read_single(&team_entry, VIDEO)
-            .await
-            .unwrap();
+            let store = device.store();
+            let team_entry = read_team(&store, &team, EN).await.unwrap();
+            let m_in_files = read_match(&store, &team_entry, VIDEO, EN).await.unwrap();
 
             let db = database();
             assert_eq!(device.migrate(&db).await.videos, 1, "{version}");

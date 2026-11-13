@@ -48,17 +48,14 @@ use crate::{
     },
     localization::Labels,
     logging::logger::log_info,
-    providers::{
-        sqlite::{
-            Database, not_found,
-            rows::{insert_match, match_rows},
-            sqlite, summary,
-            video::{self, write_video},
-        },
-        store::write_json,
+    providers::sqlite::{
+        Database, not_found,
+        rows::{insert_match, match_rows},
+        sqlite, summary,
+        video::{self, write_video},
     },
     shapes::set::SetEntry,
-    storage::{Store, StoreEntry, layout},
+    storage::{Store, StoreEntry, layout, write_json},
     video::{VIDEO_PROFILE_FILE_NAME, VideoProfile},
 };
 use chrono::{Local, NaiveDate};

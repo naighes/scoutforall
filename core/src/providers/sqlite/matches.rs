@@ -1,7 +1,8 @@
 use crate::{
     domain::{Home, RosterEntry, TeamRef, adapters::MatchRows, sql::Sql},
-    errors::{AppError, IOError},
+    errors::{AppError, IOError, MatchError},
     localization::Language,
+    logging::logger::log_error,
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -14,10 +15,9 @@ use crate::{
             teams::read_team,
             video::forget_video,
         },
-        store::match_reader::{recent_first, replay_status, unreadable},
     },
     shapes::{
-        listed::Listed,
+        listed::{Listed, Unreadable},
         r#match::{MatchEntry, MatchSource, MatchStatus, MatchSummary},
         team::TeamEntry,
     },
@@ -25,6 +25,7 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
 use rusqlite::{Transaction, params};
+use std::cmp::Ordering;
 use uuid::Uuid;
 
 /// The id of a match, its UUID as text.
@@ -406,5 +407,44 @@ impl MatchWriter for SqliteMatchWriter {
                 _ => forget(tx, id).and_then(|()| forget_video(tx, id)),
             }
         })
+    }
+}
+
+/// The status of the match, as its sets replay: a match whose sets don't
+/// replay can't be shown nor scouted, the first event that doesn't tells
+/// why.
+fn replay_status(entry: &MatchEntry, language: &Language) -> Result<MatchStatus, AppError> {
+    entry.get_status().map_err(|e| match entry.replay_issue() {
+        Some(issue) => AppError::Match(MatchError::SetNotValid(issue.describe(language.labels()))),
+        None => e,
+    })
+}
+
+/// Why the match `match_id` of the team can't be read (logged).
+fn unreadable(match_id: &str, team: &TeamEntry, e: AppError) -> Unreadable {
+    log_error(&format!(
+        "match {:?} of team {} is unreadable: {}",
+        match_id, team.id, e
+    ));
+    Unreadable {
+        id: match_id.to_string(),
+        reason: match e {
+            AppError::Match(MatchError::SetNotValid(reason)) => Some(reason),
+            _ => None,
+        },
+    }
+}
+
+/// The most recent first, then the unreadable ones by name.
+fn recent_first<T>(
+    a: &Listed<T>,
+    b: &Listed<T>,
+    date: impl Fn(&T) -> DateTime<FixedOffset>,
+) -> Ordering {
+    match (a, b) {
+        (Ok(a), Ok(b)) => date(b).cmp(&date(a)),
+        (Ok(_), Err(_)) => Ordering::Less,
+        (Err(_), Ok(_)) => Ordering::Greater,
+        (Err(a), Err(b)) => a.id.cmp(&b.id),
     }
 }

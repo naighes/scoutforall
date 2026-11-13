@@ -2,98 +2,23 @@
 
 use crate::{
     errors::{AppError, IOError},
-    storage::{Stamp, Stamps, Store, StoreEntry},
+    storage::{Store, StoreEntry},
 };
 use async_trait::async_trait;
 use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     fs::{
-        File, OpenOptions, create_dir_all, metadata, read, read_dir, remove_dir_all, remove_file,
-        rename, try_exists,
+        File, create_dir_all, metadata, read, read_dir, remove_dir_all, remove_file, rename,
+        try_exists,
     },
     io::AsyncWriteExt,
 };
 
 #[derive(Debug)]
 pub struct FsStore(PathBuf);
-
-/// How long a file must be left alone before its stamp tells it changed:
-/// some file systems keep when a file was modified to the second (or two,
-/// FAT), and a file written twice within that time, the same size, would
-/// look the same. As git does with the files changed right after its index.
-const SETTLED: Duration = Duration::from_secs(3);
-
-/// The stamps of each folder right in the folder, the hidden ones left out.
-fn folder_stamps_of(folder: &Path) -> Result<Vec<(String, Stamps)>, AppError> {
-    let dir = match std::fs::read_dir(folder) {
-        Ok(dir) => dir,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(vec![]),
-        Err(e) => return Err(AppError::IO(IOError::from(e))),
-    };
-    let mut folders = Vec::new();
-    for entry in dir {
-        let entry = entry.map_err(|e| AppError::IO(IOError::from(e)))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        // the links count as what they point to
-        if name.starts_with('.') || !entry.path().is_dir() {
-            continue;
-        }
-        folders.push((name, stamps_of(&entry.path())?));
-    }
-    folders.sort_by(|(a, _), (b, _)| a.cmp(b));
-    Ok(folders)
-}
-
-/// The files right in the folder, the hidden ones left out (see `list`),
-/// with their stamps, `None` for the ones not settled.
-fn stamps_of(folder: &Path) -> Result<Stamps, AppError> {
-    let dir = match std::fs::read_dir(folder) {
-        Ok(dir) => dir,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(vec![]),
-        Err(e) => return Err(AppError::IO(IOError::from(e))),
-    };
-    let now = SystemTime::now();
-    let mut stamps = Vec::new();
-    for entry in dir {
-        let entry = entry.map_err(|e| AppError::IO(IOError::from(e)))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
-            continue;
-        }
-        // the links count as what they point to; the others from the
-        // folder read, without looking the path up again
-        let meta = match entry.file_type() {
-            Ok(t) if t.is_symlink() => std::fs::metadata(entry.path()),
-            _ => entry.metadata(),
-        };
-        let Ok(meta) = meta else {
-            continue;
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let modified = meta
-            .modified()
-            .ok()
-            // in the future (the clock moved back) isn't settled either
-            .filter(|t| now.duration_since(*t).is_ok_and(|age| age >= SETTLED))
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .and_then(|d| u64::try_from(d.as_nanos()).ok());
-        stamps.push((
-            name,
-            modified.map(|modified| Stamp {
-                size: meta.len(),
-                modified,
-            }),
-        ));
-    }
-    stamps.sort_by(|(a, _), (b, _)| a.cmp(b));
-    Ok(stamps)
-}
 
 impl FsStore {
     pub fn new(root: &Path) -> Self {
@@ -203,24 +128,6 @@ impl Store for FsStore {
         Self::sync_folder(&path).await
     }
 
-    async fn append(&self, key: &str, data: &[u8]) -> Result<(), AppError> {
-        let path = self.path(key)?;
-        Self::create_parent(&path).await?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        file.write_all(data)
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        file.flush()
-            .await
-            .map_err(|e| AppError::IO(IOError::from(e)))?;
-        Self::sync(&file).await
-    }
-
     async fn exists(&self, key: &str) -> Result<bool, AppError> {
         try_exists(self.path(key)?)
             .await
@@ -254,21 +161,6 @@ impl Store for FsStore {
         }
         entries.sort();
         Ok(entries)
-    }
-
-    async fn stamps(&self, folder: &str) -> Result<Vec<(String, Option<Stamp>)>, AppError> {
-        // the folder at once: a task for each file costs more than the file
-        let path = self.path(folder)?;
-        tokio::task::spawn_blocking(move || stamps_of(&path))
-            .await
-            .map_err(|e| AppError::IO(IOError::Msg(e.to_string())))?
-    }
-
-    async fn folder_stamps(&self, folder: &str) -> Result<Vec<(String, Stamps)>, AppError> {
-        let path = self.path(folder)?;
-        tokio::task::spawn_blocking(move || folder_stamps_of(&path))
-            .await
-            .map_err(|e| AppError::IO(IOError::Msg(e.to_string())))?
     }
 
     async fn remove(&self, key: &str) -> Result<(), AppError> {

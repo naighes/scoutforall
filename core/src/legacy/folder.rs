@@ -1,6 +1,5 @@
 //! The data folder (`~/.scout4all`) as the versions before the database
-//! left it, only read: nothing is written, not even the index of the
-//! matches the providers over the files keep.
+//! left it, only read: nothing is written.
 //!
 //! ```text
 //! <team id>/team.json
@@ -22,12 +21,12 @@ use crate::{
     errors::{AppError, IOError, MatchError},
     legacy::format::{fill_lineup_rules, read_descriptor, read_events, read_lineup, set_file},
     localization::Labels,
-    providers::store::read_json,
     shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
-    storage::{Store, StoreEntry, layout},
-    video::{StoredProfile, VIDEO_PROFILE_FILE_NAME, VideoProfile, read_profile},
+    storage::{Store, StoreEntry, layout, read_json},
+    video::{StoredProfile, VIDEO_PROFILE_FILE_NAME, VIDEO_PROFILE_VERSION, VideoProfile},
 };
 use futures::future::{join_all, try_join_all};
+use serde::Deserialize;
 use uuid::Uuid;
 
 /// A team or a match that couldn't be read: its folder (the key in the
@@ -154,6 +153,36 @@ pub async fn read_match(
     entry.sets = read_sets(store, &layout::match_folder(&team.id, match_id), labels).await?;
     fill_lineup_rules(&mut entry.sets, rules);
     Ok(entry)
+}
+
+#[derive(Deserialize)]
+struct Versioned {
+    version: u8,
+}
+
+/// The key of `video.json` of the match.
+pub fn profile_key(team_id: &Uuid, match_id: &str) -> String {
+    layout::child(
+        &layout::match_folder(team_id, match_id),
+        VIDEO_PROFILE_FILE_NAME,
+    )
+}
+
+/// The profile in `video.json` of the match, unless written by a newer
+/// version.
+pub async fn read_profile(
+    store: &dyn Store,
+    team_id: &Uuid,
+    match_id: &str,
+) -> Result<StoredProfile, AppError> {
+    let key = profile_key(team_id, match_id);
+    match store.exists(&key).await? {
+        false => Ok(StoredProfile::Missing),
+        true => match read_json::<Versioned>(store, &key).await?.version {
+            v if v > VIDEO_PROFILE_VERSION => Ok(StoredProfile::Newer(v)),
+            _ => read_json(store, &key).await.map(StoredProfile::Profile),
+        },
+    }
 }
 
 /// The profile of the video of the match, if it has one: unless written

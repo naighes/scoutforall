@@ -1,20 +1,18 @@
 use crate::{
-    analytics::{global::uploads_enabled, queue_manager::QueueManager},
+    analytics::queue_manager::QueueManager,
     errors::{AppError, IOError},
     logging::logger::{log_error, log_info},
-    providers::{
-        match_reader::MatchReader, queue_reader::QueueReader, queue_writer::QueueWriter,
-        store::set_writer::events_csv, team_reader::TeamReader,
-    },
+    providers::{queue_reader::QueueReader, queue_writer::QueueWriter},
     shapes::{
         country::CountryCode,
         enums::{GenderEnum, TeamClassificationEnum},
         r#match::{MatchEntry, MatchSource},
+        snapshot::EventEntry,
     },
-    storage::{Store, layout},
     util::config_var,
 };
 use async_trait::async_trait;
+use csv::WriterBuilder;
 use futures::TryFutureExt;
 #[cfg(target_os = "android")]
 use reqwest::Certificate;
@@ -23,11 +21,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{to_string_pretty, to_vec_pretty};
 use std::{
     io::{Cursor, Write},
-    sync::Arc,
     time::Duration,
 };
-use tokio::time::interval;
-use tokio::{spawn, task::JoinHandle};
 use uuid::Uuid;
 use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
@@ -195,36 +190,11 @@ pub struct ToUpload {
     pub set_files: Vec<(String, Vec<u8>)>,
 }
 
-/// Where the matches to upload are read: the database, or the files of the
-/// versions before it.
+/// Where the matches to upload are read (`SqliteUploads`).
 #[async_trait]
 pub trait UploadSource: Sync {
     /// The match `match_id` of team `team_id`, as in the queue.
     async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<ToUpload, AppError>;
-}
-
-/// The matches in the files of the versions before the database: the files
-/// of the sets go as saved.
-pub struct StoreUploads<'a, TR: ?Sized, MR: ?Sized> {
-    pub store: &'a dyn Store,
-    pub team_reader: &'a TR,
-    pub match_reader: &'a MR,
-}
-
-#[async_trait]
-impl<TR: TeamReader + Sync + ?Sized, MR: MatchReader + Sync + ?Sized> UploadSource
-    for StoreUploads<'_, TR, MR>
-{
-    async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<ToUpload, AppError> {
-        let team = self.team_reader.read_single(team_id).await?;
-        let entry = self.match_reader.read_single(&team, match_id).await?;
-        let set_files = saved_set_files(&entry, self.store).await?;
-        Ok(ToUpload {
-            file_id: entry.id.clone(),
-            set_files,
-            entry,
-        })
-    }
 }
 
 /// The names of the files of a set in the archive.
@@ -235,31 +205,17 @@ fn set_file_names(set_number: u8) -> (String, String) {
     )
 }
 
-/// The files of the sets of `m` as saved in `store`.
-async fn saved_set_files(
-    m: &MatchEntry,
-    store: &dyn Store,
-) -> Result<Vec<(String, Vec<u8>)>, AppError> {
-    let mut files = Vec::new();
-    for set in &m.sets {
-        let (descriptor, events) = set_file_names(set.set_number);
-        let keys = [
-            (
-                layout::set_descriptor(&m.team.id, &m.id, set.set_number),
-                descriptor,
-            ),
-            (
-                layout::set_events(&m.team.id, &m.id, set.set_number),
-                events,
-            ),
-        ];
-        for (key, name) in keys {
-            if let Some(contents) = store.read(&key).await? {
-                files.push((name, contents));
-            }
-        }
-    }
-    Ok(files)
+/// The events in the format of the files of the versions before the
+/// database (`set_<n>.csv`), which the API reads.
+fn events_csv(events: &[EventEntry]) -> Result<Vec<u8>, AppError> {
+    let mut writer = WriterBuilder::new().has_headers(false).from_writer(vec![]);
+    events
+        .iter()
+        .try_for_each(|event| writer.serialize(event))
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+    writer
+        .into_inner()
+        .map_err(|e| AppError::IO(IOError::Msg(e.to_string())))
 }
 
 /// The files of the sets of `m` written as the versions before the
@@ -275,16 +231,6 @@ pub(crate) fn written_set_files(m: &MatchEntry) -> Result<Vec<(String, Vec<u8>)>
         })
         .collect::<Result<Vec<_>, AppError>>()
         .map(|files| files.into_iter().flatten().collect())
-}
-
-/// The archive of `m` with the files of its sets as saved in `store`.
-#[cfg(test)]
-pub(crate) async fn create_match_archive(
-    m: &MatchEntry,
-    store: &dyn Store,
-    keys: Option<MatchKeys>,
-) -> Result<Vec<u8>, AppError> {
-    match_archive(m, saved_set_files(m, store).await?, keys)
 }
 
 /// The archive of an upload: `match.json` (`MatchMetadata`), then the
@@ -395,74 +341,6 @@ async fn get_signed_url(
     }
 }
 
-pub struct AnalyticsUploadWorker<
-    TR: TeamReader + Send + Sync + 'static,
-    MR: MatchReader + Send + Sync + 'static,
-    QR: QueueReader + Send + Sync + 'static,
-    QW: QueueWriter + Send + Sync + 'static,
-> {
-    store: Arc<dyn Store>,
-    team_reader: Arc<TR>,
-    match_reader: Arc<MR>,
-    queue_manager: Arc<QueueManager<QR, QW>>,
-    polling_interval: Duration,
-}
-
-impl<
-    TR: TeamReader + Send + Sync + 'static,
-    MR: MatchReader + Send + Sync + 'static,
-    QR: QueueReader + Send + Sync + 'static,
-    QW: QueueWriter + Send + Sync + 'static,
-> AnalyticsUploadWorker<TR, MR, QR, QW>
-{
-    pub fn new(
-        store: Arc<dyn Store>,
-        team_reader: Arc<TR>,
-        match_reader: Arc<MR>,
-        queue_reader: Arc<QR>,
-        queue_writer: Arc<QW>,
-        polling_interval: Duration,
-    ) -> Self {
-        let queue_manager = Arc::new(QueueManager::new(queue_reader, queue_writer));
-        Self {
-            store,
-            team_reader,
-            match_reader,
-            queue_manager,
-            polling_interval,
-        }
-    }
-
-    // get a reference to the queue manager (for enqueuing from other parts of the app)
-    pub fn queue_manager(&self) -> Arc<QueueManager<QR, QW>> {
-        Arc::clone(&self.queue_manager)
-    }
-
-    // start background worker that processes upload queue
-    pub fn start(&self) -> JoinHandle<()> {
-        let store = Arc::clone(&self.store);
-        let polling_interval = self.polling_interval;
-        let team_reader = self.team_reader.clone();
-        let match_reader = self.match_reader.clone();
-        let queue_manager = self.queue_manager.clone();
-
-        spawn(async move {
-            let mut ticker = interval(polling_interval);
-            loop {
-                ticker.tick().await;
-                if let (true, Some(url)) = (uploads_enabled(), upload_url()) {
-                    let source = StoreUploads {
-                        store: &*store,
-                        team_reader: &*team_reader,
-                        match_reader: &*match_reader,
-                    };
-                    let _ = upload_next(&source, &queue_manager, &url).await;
-                }
-            }
-        })
-    }
-}
-
 /// What an attempt at the first upload of the queue did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UploadStep {
@@ -477,8 +355,8 @@ pub enum UploadStep {
 }
 
 /// Tries once the first upload of the queue, through the API at
-/// `upload_url`. Whoever calls it decides when: the TUI every few seconds,
-/// the phone when there's a network.
+/// `upload_url`. Whoever calls it decides when: the desktop every few
+/// seconds, the phone when there's a network.
 pub async fn upload_next<QR: QueueReader + Send + Sync, QW: QueueWriter + Send + Sync>(
     source: &(impl UploadSource + ?Sized),
     queue_manager: &QueueManager<QR, QW>,

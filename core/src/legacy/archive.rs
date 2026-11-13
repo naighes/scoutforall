@@ -8,7 +8,10 @@ use crate::{
     errors::{AppError, IOError},
     legacy::format::{fill_lineup_rules, read_descriptor, read_events, read_lineup, set_file},
     localization::Labels,
-    shapes::{r#match::MatchEntry, set::SetEntry, snapshot::EventEntry, team::TeamEntry},
+    shapes::{
+        r#match::MatchEntry, player::PlayerEntry, set::SetEntry, snapshot::EventEntry,
+        team::TeamEntry,
+    },
 };
 use serde::Deserialize;
 use std::{
@@ -131,5 +134,33 @@ fn match_entry(
     match match_entry.sets.len() == len {
         true => Ok(match_entry),
         false => Err(import_error()),
+    }
+}
+
+/// Whether the match was scouted for the team: its players, in its lineups
+/// and its events, are the team's.
+pub fn is_match_of(m: &MatchEntry, team: &TeamEntry) -> bool {
+    m.played().iter().all(|id| team.find_player(*id).is_some())
+}
+
+/// The roster of the archive, as the match form would save it for the
+/// team: its players of the team and, after them by number, who played.
+/// None if the archive has none (up to v0.10.1).
+pub(crate) fn roster_for(m: &MatchEntry, team: &TeamEntry) -> Vec<Uuid> {
+    let played = m.played();
+    let mut players: Vec<&PlayerEntry> = team.players.iter().collect();
+    players.sort_by_key(|p| p.number);
+    let kept = m
+        .roster
+        .iter()
+        .copied()
+        .filter(|id| team.find_player(*id).is_some());
+    let missing = players
+        .into_iter()
+        .map(|p| p.id)
+        .filter(|id| played.contains(id) && !m.roster.contains(id));
+    match m.roster.is_empty() {
+        true => vec![],
+        false => kept.chain(missing).collect(),
     }
 }

@@ -5,11 +5,10 @@
 mod tests {
     use crate::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
-        localization::Language,
         providers::{
             match_writer::MatchWriter,
             set_writer::SetWriter,
-            store::{match_writer::StoreMatchWriter, set_writer::StoreSetWriter},
+            team_writer::{TeamInput, TeamWriter},
         },
         scouting::ScoutingStep,
         set_start::{self, NextSet, SetStartError, SetStartForm, next_set},
@@ -20,8 +19,7 @@ mod tests {
             set::SetEntry,
             team::TeamEntry,
         },
-        storage::{Store, memory::MemoryStore},
-        tests::EN,
+        tests::{EN, Sqlite},
     };
     use chrono::Utc;
     use std::sync::Arc;
@@ -344,9 +342,14 @@ mod tests {
 
     #[tokio::test]
     async fn starting_saves_the_set_and_scouts_it() {
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-        let team = team(8);
-        let m = StoreMatchWriter::new(Arc::clone(&store))
+        let p = Sqlite::new();
+        let team = p
+            .team_writer
+            .save(TeamInput::Existing(team(8)))
+            .await
+            .unwrap();
+        let m = p
+            .match_writer
             .create(
                 &team,
                 "Cortona Volley".into(),
@@ -358,8 +361,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let set_writer: Arc<dyn SetWriter + Send + Sync> =
-            Arc::new(StoreSetWriter::new(Arc::clone(&store), Language::default()));
+        let set_writer: Arc<dyn SetWriter + Send + Sync> = Arc::new(p.set_writer);
         let input = complete(&team).validate(&team).unwrap();
         let session = set_start::start(m.clone(), input, Arc::clone(&set_writer))
             .await

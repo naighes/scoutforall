@@ -6,25 +6,22 @@
 mod tests {
     use crate::{
         analytics::{finished::QueuedFinishedMatches, queue_manager::QueueManager},
-        archive::import_team,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         localization::Language,
         providers::{
             match_writer::MatchWriter,
             set_writer::SetWriter,
-            store::{
-                match_writer::StoreMatchWriter, queue_reader::StoreQueueReader,
-                queue_writer::StoreQueueWriter, set_writer::StoreSetWriter,
-                team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
+            sqlite::{
+                legacy_archive::import_legacy_team, queue::SqliteQueue, sets::SqliteSetWriter,
             },
+            team_reader::TeamReader,
         },
         set_start,
         shapes::{
             enums::{EventTypeEnum, TeamSideEnum},
             snapshot::EventEntry,
         },
-        storage::{Store, memory::MemoryStore},
-        tests::EN,
+        tests::Sqlite,
     };
     use chrono::Utc;
     use std::sync::{Arc, atomic::AtomicBool};
@@ -47,20 +44,21 @@ mod tests {
     }
 
     /// The match point of the third set, the first two won: whether the
-    /// match is over, and the matches in the queue of the scouting.
-    async fn match_point(enabled: bool) -> (bool, Vec<String>) {
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-        let team = import_team(
+    /// match is over, the matches in the queue of the scouting, and the id
+    /// of the match.
+    async fn match_point(enabled: bool) -> (bool, Vec<String>, String) {
+        let p = Sqlite::new();
+        let imported = import_legacy_team(
+            &p.db,
             include_bytes!("fixtures/45a589d5-004a-4a50-99f5-6d78fd052a3c.zip"),
             Uuid::parse_str(TEAM_ID).ok(),
-            &StoreTeamReader::new(store.clone(), Language::default()),
-            &StoreTeamWriter::new(store.clone()),
-            EN,
+            &Language::default(),
         )
-        .await
         .unwrap();
+        let team = p.team_reader.read_single(&imported.id).await.unwrap();
         let ids: Vec<Uuid> = team.players.iter().map(|p| p.id).collect();
-        let mut m = StoreMatchWriter::new(store.clone())
+        let mut m = p
+            .match_writer
             .create(
                 &team,
                 "Arezzo".into(),
@@ -72,7 +70,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let set_writer = Arc::new(StoreSetWriter::new(store.clone(), Language::default()));
+        let set_writer = Arc::new(SqliteSetWriter::new(p.db.clone(), Language::default()));
         for (number, points) in [(1, 25), (2, 25), (3, 24)] {
             let set = set_writer
                 .create(
@@ -90,9 +88,10 @@ mod tests {
             m.sets.push(set);
         }
         let set = m.sets.pop().unwrap();
+        let id = m.id.clone();
         let queue = Arc::new(QueueManager::new(
-            Arc::new(StoreQueueReader::new(store.clone())),
-            Arc::new(StoreQueueWriter::new(store.clone())),
+            Arc::new(SqliteQueue::new(p.db.clone())),
+            Arc::new(SqliteQueue::new(p.db.clone())),
         ));
         let finished = QueuedFinishedMatches {
             queue: queue.clone(),
@@ -111,19 +110,19 @@ mod tests {
                 .map(|p| p.match_id.clone())
                 .into_iter()
                 .collect(),
+            id,
         )
     }
 
     #[tokio::test]
     async fn the_finished_match_goes_to_the_queue_of_the_scouting() {
-        assert_eq!(
-            match_point(true).await,
-            (true, vec!["2026-10-25_arezzo".to_string()])
-        );
+        let (over, queued, id) = match_point(true).await;
+        assert_eq!((over, queued), (true, vec![id]));
     }
 
     #[tokio::test]
     async fn not_when_the_user_turned_the_statistics_off() {
-        assert_eq!(match_point(false).await, (true, vec![]));
+        let (over, queued, _) = match_point(false).await;
+        assert_eq!((over, queued), (true, vec![]));
     }
 }

@@ -11,17 +11,17 @@ mod tests {
             queue::{PendingUpload, UploadQueue},
             queue_manager::QueueManager,
             upload::{
-                StoreUploads, ToUpload, UploadSource, UploadStep, keys_request, match_archive,
-                upload_next,
+                ToUpload, UploadSource, UploadStep, keys_request, match_archive, upload_next,
             },
         },
         constants::DEFAULT_MAX_SUBSTITUTIONS,
+        errors::AppError,
         legacy::{
+            folder::{read_folder, read_match, read_team},
             format::read_events,
             migrate::{Backup, Migrated, migrate, unzip},
         },
         providers::{
-            match_reader::MatchReader,
             match_writer::MatchWriter,
             queue_reader::QueueReader,
             queue_writer::QueueWriter,
@@ -32,24 +32,24 @@ mod tests {
                 teams::{SqliteTeamReader, SqliteTeamWriter},
                 upload::SqliteUploads,
             },
-            store::{
-                match_reader::StoreMatchReader, queue_reader::StoreQueueReader,
-                queue_writer::StoreQueueWriter, set_reader::StoreSetReader,
-                team_reader::StoreTeamReader,
-            },
             team_reader::TeamReader,
             team_writer::{TeamInput, TeamWriter},
         },
         shapes::{player::PlayerEntry, set::SetEntry},
-        storage::{Store, fs::FsStore},
+        storage::{Store, fs::FsStore, layout},
         tests::{
             EN, LEGACY_VERSIONS as VERSIONS, copy_dir, legacy_fixtures,
             sqlite_archive_tests::tests::{database, en, execute},
             upload_tests::tests::FakeApi,
         },
     };
+    use async_trait::async_trait;
     use rusqlite::params;
-    use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+    use std::{
+        collections::BTreeMap,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -130,27 +130,79 @@ mod tests {
         }
     }
 
+    /// The matches of a data folder of the versions before the database,
+    /// as they uploaded them: the files of the sets as saved.
+    struct FileUploads(Arc<dyn Store>);
+
+    #[async_trait]
+    impl UploadSource for FileUploads {
+        async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<ToUpload, AppError> {
+            let store = &*self.0;
+            let team = read_team(store, &team_id.to_string(), EN).await?;
+            let entry = read_match(store, &team, match_id, EN).await?;
+            let mut set_files = Vec::new();
+            for set in &entry.sets {
+                let n = set.set_number;
+                let files = [
+                    (
+                        layout::set_descriptor(team_id, match_id, n),
+                        format!("set_{n}_descriptor.json"),
+                    ),
+                    (
+                        layout::set_events(team_id, match_id, n),
+                        format!("set_{n}_events.csv"),
+                    ),
+                ];
+                for (key, name) in files {
+                    if let Some(contents) = store.read(&key).await? {
+                        set_files.push((name, contents));
+                    }
+                }
+            }
+            Ok(ToUpload {
+                file_id: entry.id.clone(),
+                set_files,
+                entry,
+            })
+        }
+    }
+
+    /// The queue of a data folder of the versions before the database: its
+    /// file, kept in memory.
+    struct FileQueue(Mutex<Vec<u8>>);
+
+    impl FileQueue {
+        fn of(device: &Device) -> Self {
+            FileQueue(Mutex::new(std::fs::read(device.queue_file()).unwrap()))
+        }
+    }
+
+    #[async_trait]
+    impl QueueReader for FileQueue {
+        async fn load(&self) -> Result<UploadQueue, AppError> {
+            Ok(serde_json::from_slice(&self.0.lock().unwrap()).unwrap())
+        }
+    }
+
+    #[async_trait]
+    impl QueueWriter for FileQueue {
+        async fn save(&self, queue: &UploadQueue) -> Result<(), AppError> {
+            *self.0.lock().unwrap() = serde_json::to_vec(queue).unwrap();
+            Ok(())
+        }
+    }
+
     /// Every match of the files, by team and folder, as uploaded from
     /// them.
     async fn uploads_of_files(store: Arc<dyn Store>) -> BTreeMap<(Uuid, String), ToUpload> {
-        let teams = StoreTeamReader::new(Arc::clone(&store), en());
-        let matches = StoreMatchReader::new(
-            Arc::clone(&store),
-            Arc::new(StoreSetReader::new(Arc::clone(&store), en())),
-            en(),
-        );
-        let source = StoreUploads {
-            store: &*store,
-            team_reader: &teams,
-            match_reader: &matches,
-        };
+        let source = FileUploads(Arc::clone(&store));
         let mut all = BTreeMap::new();
-        for team in teams.read_all().await.unwrap() {
+        for team in read_folder(&*store, EN).await.unwrap() {
             let team = team.unwrap();
-            for m in matches.read_all(&team).await.unwrap() {
+            for m in team.matches {
                 let m = m.unwrap();
-                let upload = source.read(&team.id, &m.id).await.unwrap();
-                all.insert((team.id, m.id), upload);
+                let upload = source.read(&team.team.id, &m.id).await.unwrap();
+                all.insert((team.team.id, m.id), upload);
             }
         }
         all
@@ -427,23 +479,9 @@ mod tests {
     #[tokio::test]
     async fn the_queue_of_the_database_uploads_as_the_files_did() {
         let files = Device::of("v0.18.0");
-        let store = files.store();
-        let teams = StoreTeamReader::new(Arc::clone(&store), en());
-        let matches = StoreMatchReader::new(
-            Arc::clone(&store),
-            Arc::new(StoreSetReader::new(Arc::clone(&store), en())),
-            en(),
-        );
-        let source = StoreUploads {
-            store: &*store,
-            team_reader: &teams,
-            match_reader: &matches,
-        };
-        let queue = QueueManager::new(
-            Arc::new(StoreQueueReader::new(Arc::clone(&store))),
-            Arc::new(StoreQueueWriter::new(Arc::clone(&store))),
-        );
-        let (requests, archives) = upload_all(&source, &queue).await;
+        let queue = Arc::new(FileQueue::of(&files));
+        let queue = QueueManager::new(Arc::clone(&queue), queue);
+        let (requests, archives) = upload_all(&FileUploads(files.store()), &queue).await;
         assert_eq!(archives.len(), 2);
 
         let device = Device::of("v0.18.0");

@@ -31,10 +31,9 @@ pub const CONFIG: &str = "config.json";
 /// The settings that couldn't be read, set aside as they were.
 pub const UNREADABLE_CONFIG: &str = "config.json.unreadable";
 
-/// What the lists show of each match, with the stamps of the files it
-/// comes from (see `providers::store::match_index`): derived from the
-/// matches, rebuilt when missing, never backed up nor exported. Hidden, as
-/// what `Store::list` leaves out: not a team, nor data.
+/// The index of the matches the versions before the database kept (what
+/// the lists show of each match): derived, removed by the migration.
+/// Hidden, as what `Store::list` leaves out: not a team, nor data.
 pub const MATCH_INDEX: &str = ".index.json";
 
 /// The database of the apps (TODO/001), with its files beside it

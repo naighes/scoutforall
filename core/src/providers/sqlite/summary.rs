@@ -1,6 +1,7 @@
 //! The cache `match_summary` (D7): what the lists show of a match, so the
 //! home and the matches of a team don't read and replay every set. It
-//! takes the place of the index of the files (`store::match_index`).
+//! takes the place of the index of the files of the versions before the
+//! database (`.index.json`).
 //!
 //! - Updated in the transaction of every write that changes what the
 //!   status of a match comes from (its sets, their events, its

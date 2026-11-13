@@ -1,11 +1,10 @@
 //! The video of a match: its files, played one after the other as a single
 //! video, and where each event is in it.
 //!
-//! The profile is saved in `video.json`, next to the other files of the
-//! match (`StoreVideoProfiles`), or in the database (`SqliteVideoProfiles`,
-//! TODO/001 step 15): the older versions don't read it (they read
-//! `set_<n>.*` only), and the exports leave it out, since its paths are of
-//! this computer.
+//! The profile is saved in the database (`SqliteVideoProfiles`, TODO/001
+//! step 15); the versions before it saved it in `video.json`, next to the
+//! other files of the match (read by `legacy` for the migration). The
+//! exports leave it out, since its paths are of this computer.
 //!
 //! Where an event is: `offset = event.timestamp − anchor.at +
 //! anchor.offset_ms`. The anchor is chosen by the user (an event and the
@@ -23,24 +22,16 @@
 //! once the video is tied to an event, a time written for another one is a
 //! correction (`with_time`).
 
-use crate::{
-    errors::{AppError, IOError},
-    providers::store::{read_json, write_json},
-    shapes::r#match::MatchEntry,
-    storage::{Store, layout},
-};
+use crate::{errors::AppError, shapes::r#match::MatchEntry};
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// The version of `video.json` this version writes and reads: a newer one
-/// is left as it is.
+/// The version of the profile this version reads (`video.json` of the
+/// versions before the database): a newer one is left as it is.
 pub const VIDEO_PROFILE_VERSION: u8 = 1;
 
 /// The name of the profile, in the folder of its match.
@@ -183,63 +174,13 @@ pub struct EventRef {
     pub index: usize,
 }
 
-/// What the folder of a match has.
+/// The profile of a match, if any.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoredProfile {
     Missing,
     /// Written by a newer version: not read, and not to overwrite.
     Newer(u8),
     Profile(VideoProfile),
-}
-
-#[derive(Deserialize)]
-struct Versioned {
-    version: u8,
-}
-
-pub fn profile_key(team_id: &Uuid, match_id: &str) -> String {
-    layout::child(
-        &layout::match_folder(team_id, match_id),
-        VIDEO_PROFILE_FILE_NAME,
-    )
-}
-
-/// The profile of the match.
-pub async fn read_profile(
-    store: &dyn Store,
-    team_id: &Uuid,
-    match_id: &str,
-) -> Result<StoredProfile, AppError> {
-    let key = profile_key(team_id, match_id);
-    match store.exists(&key).await? {
-        false => Ok(StoredProfile::Missing),
-        true => match read_json::<Versioned>(store, &key).await?.version {
-            v if v > VIDEO_PROFILE_VERSION => Ok(StoredProfile::Newer(v)),
-            _ => read_json(store, &key).await.map(StoredProfile::Profile),
-        },
-    }
-}
-
-/// Saves the profile of the match, unless a newer version wrote it.
-pub async fn write_profile(
-    store: &dyn Store,
-    team_id: &Uuid,
-    match_id: &str,
-    profile: &VideoProfile,
-) -> Result<(), AppError> {
-    match read_profile(store, team_id, match_id).await? {
-        StoredProfile::Newer(v) => Err(AppError::IO(IOError::Msg(format!(
-            "{} written by a newer version ({v})",
-            VIDEO_PROFILE_FILE_NAME
-        )))),
-        _ => {
-            let saved = VideoProfile {
-                version: VIDEO_PROFILE_VERSION,
-                ..profile.clone()
-            };
-            write_json(store, &profile_key(team_id, match_id), &saved).await
-        }
-    }
 }
 
 /// Where the profiles of the videos of the matches are kept.
@@ -255,25 +196,6 @@ pub trait VideoProfiles: Send + Sync {
         match_id: &str,
         profile: &VideoProfile,
     ) -> Result<(), AppError>;
-}
-
-/// The profiles in `video.json`, in the folder of each match.
-pub struct StoreVideoProfiles(pub Arc<dyn Store>);
-
-#[async_trait]
-impl VideoProfiles for StoreVideoProfiles {
-    async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<StoredProfile, AppError> {
-        read_profile(&*self.0, team_id, match_id).await
-    }
-
-    async fn write(
-        &self,
-        team_id: &Uuid,
-        match_id: &str,
-        profile: &VideoProfile,
-    ) -> Result<(), AppError> {
-        write_profile(&*self.0, team_id, match_id, profile).await
-    }
 }
 
 /// When the file starts, from its name: the date and the time, as

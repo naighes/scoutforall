@@ -1,6 +1,6 @@
 //! The profile of the video of a match in the database (TODO/001, step
-//! 15, `providers::sqlite::video`): the same as in `video.json` while both
-//! exist, then what only the database does (events referred to by their
+//! 15, `providers::sqlite::video`): saved and read back, and what only
+//! the database does (events referred to by their
 //! ids, a profile with an event that isn't there refused, replaced as a
 //! whole, only for a match of its team A, never exported).
 
@@ -23,11 +23,6 @@ mod tests {
                 teams::SqliteTeamWriter,
                 video::SqliteVideoProfiles,
             },
-            store::{
-                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-                set_reader::StoreSetReader, set_writer::StoreSetWriter,
-                team_writer::StoreTeamWriter,
-            },
             team_writer::{TeamInput, TeamWriter},
         },
         shapes::{
@@ -38,14 +33,12 @@ mod tests {
             team::TeamEntry,
             technique::{ServeTypeEnum, TechniqueEnum},
         },
-        storage::{Store, memory::MemoryStore},
         video::{
-            Anchor, Correction, EventRef, StoreVideoProfiles, StoredProfile, VideoFile,
-            VideoProfile, VideoProfiles, anchor_on,
+            Anchor, Correction, EventRef, StoredProfile, VideoFile, VideoProfile, VideoProfiles,
+            anchor_on,
         },
     };
     use chrono::{DateTime, Duration, FixedOffset, Utc};
-    use std::sync::Arc;
     use uuid::Uuid;
 
     struct Providers {
@@ -54,23 +47,6 @@ mod tests {
         match_reader: Box<dyn MatchReader + Send + Sync>,
         set_writer: Box<dyn SetWriter + Send + Sync>,
         videos: Box<dyn VideoProfiles>,
-    }
-
-    fn store() -> Providers {
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-        let language = Language::default();
-        let set_reader = Arc::new(StoreSetReader::new(Arc::clone(&store), language.clone()));
-        Providers {
-            team_writer: Box::new(StoreTeamWriter::new(Arc::clone(&store))),
-            match_writer: Box::new(StoreMatchWriter::new(Arc::clone(&store))),
-            match_reader: Box::new(StoreMatchReader::new(
-                Arc::clone(&store),
-                set_reader,
-                language.clone(),
-            )),
-            set_writer: Box::new(StoreSetWriter::new(Arc::clone(&store), language)),
-            videos: Box::new(StoreVideoProfiles(store)),
-        }
     }
 
     fn database() -> Database {
@@ -86,10 +62,6 @@ mod tests {
             set_writer: Box::new(SqliteSetWriter::new(db.clone(), language)),
             videos: Box::new(SqliteVideoProfiles(db.clone())),
         }
-    }
-
-    fn both() -> Vec<(&'static str, Providers)> {
-        vec![("files", store()), ("database", sqlite(&database()))]
     }
 
     fn time(text: &str) -> DateTime<FixedOffset> {
@@ -242,49 +214,42 @@ mod tests {
 
     #[tokio::test]
     async fn the_same_on_files_and_database() {
-        for (name, p) in both() {
-            let (team, m) = scouted_match(&p).await;
-            assert_eq!(read(&p, &team, &m).await, StoredProfile::Missing, "{name}");
+        let p = sqlite(&database());
+        let (team, m) = scouted_match(&p).await;
+        assert_eq!(read(&p, &team, &m).await, StoredProfile::Missing);
 
-            let saved = profile();
-            p.videos.write(&team.id, &m.id, &saved).await.unwrap();
-            assert_eq!(
-                read(&p, &team, &m).await,
-                StoredProfile::Profile(saved.clone()),
-                "{name}"
-            );
+        let saved = profile();
+        p.videos.write(&team.id, &m.id, &saved).await.unwrap();
+        assert_eq!(
+            read(&p, &team, &m).await,
+            StoredProfile::Profile(saved.clone()),
+        );
 
-            // tied to another event: the files in another order, the
-            // corrections gone
-            let changed = VideoProfile {
-                files: saved.files.iter().rev().cloned().collect(),
-                ..saved.tied_to(event(7), start() + Duration::seconds(68), 900)
-            }
-            .automatic()
-            .corrected(event(1), 250);
-            p.videos.write(&team.id, &m.id, &changed).await.unwrap();
-            assert_eq!(
-                read(&p, &team, &m).await,
-                StoredProfile::Profile(changed.clone()),
-                "{name}"
-            );
-
-            // the anchor of the user without an event, no files
-            let bare = VideoProfile {
-                anchor: Some(Anchor {
-                    at: start(),
-                    offset_ms: -40,
-                    event: None,
-                }),
-                ..Default::default()
-            };
-            p.videos.write(&team.id, &m.id, &bare).await.unwrap();
-            assert_eq!(
-                read(&p, &team, &m).await,
-                StoredProfile::Profile(bare),
-                "{name}"
-            );
+        // tied to another event: the files in another order, the
+        // corrections gone
+        let changed = VideoProfile {
+            files: saved.files.iter().rev().cloned().collect(),
+            ..saved.tied_to(event(7), start() + Duration::seconds(68), 900)
         }
+        .automatic()
+        .corrected(event(1), 250);
+        p.videos.write(&team.id, &m.id, &changed).await.unwrap();
+        assert_eq!(
+            read(&p, &team, &m).await,
+            StoredProfile::Profile(changed.clone()),
+        );
+
+        // the anchor of the user without an event, no files
+        let bare = VideoProfile {
+            anchor: Some(Anchor {
+                at: start(),
+                offset_ms: -40,
+                event: None,
+            }),
+            ..Default::default()
+        };
+        p.videos.write(&team.id, &m.id, &bare).await.unwrap();
+        assert_eq!(read(&p, &team, &m).await, StoredProfile::Profile(bare),);
     }
 
     #[tokio::test]
@@ -566,7 +531,7 @@ mod tests {
     /// places whatever the order of the rows.
     #[tokio::test]
     async fn the_adapter_on_rows_as_given() {
-        let p = store();
+        let p = sqlite(&database());
         let (_, m) = scouted_match(&p).await;
         let id = Uuid::new_v4();
         let set = SetRows::of(&m.sets[0], id).unwrap();

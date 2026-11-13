@@ -1,7 +1,6 @@
-//! The providers over the files and over the database (TODO/001, step 7):
-//! the same tests on both while both exist, then what only the database
-//! does (nothing removed, persons apart from the teams, places of the
-//! events, numbers of the roster).
+//! The providers over the database (TODO/001, step 7): what the apps read
+//! and write, and what only the database does (nothing removed, persons
+//! apart from the teams, places of the events, numbers of the roster).
 
 #[cfg(test)]
 mod tests {
@@ -18,16 +17,11 @@ mod tests {
             set_writer::SetWriter,
             sqlite::{
                 Database,
+                archive::{self, Subject},
                 matches::{SqliteMatchReader, SqliteMatchWriter},
                 queue::SqliteQueue,
                 sets::{SqliteSetReader, SqliteSetWriter},
                 teams::{SqliteTeamReader, SqliteTeamWriter},
-            },
-            store::{
-                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-                queue_reader::StoreQueueReader, queue_writer::StoreQueueWriter,
-                set_reader::StoreSetReader, set_writer::StoreSetWriter,
-                team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
             },
             team_reader::TeamReader,
             team_writer::{PlayerInput, TeamInput, TeamWriter},
@@ -40,10 +34,8 @@ mod tests {
             team::TeamEntry,
             technique::{ServeTypeEnum, TechniqueEnum},
         },
-        storage::{Store, memory::MemoryStore},
     };
     use chrono::{Duration, Utc};
-    use std::sync::Arc;
     use uuid::Uuid;
 
     struct Providers {
@@ -55,26 +47,6 @@ mod tests {
         set_writer: Box<dyn SetWriter + Send + Sync>,
         queue_reader: Box<dyn QueueReader + Send + Sync>,
         queue_writer: Box<dyn QueueWriter + Send + Sync>,
-    }
-
-    fn store() -> Providers {
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-        let language = Language::default();
-        let set_reader = Arc::new(StoreSetReader::new(Arc::clone(&store), language.clone()));
-        Providers {
-            team_reader: Box::new(StoreTeamReader::new(Arc::clone(&store), language.clone())),
-            team_writer: Box::new(StoreTeamWriter::new(Arc::clone(&store))),
-            match_reader: Box::new(StoreMatchReader::new(
-                Arc::clone(&store),
-                set_reader,
-                language.clone(),
-            )),
-            match_writer: Box::new(StoreMatchWriter::new(Arc::clone(&store))),
-            set_reader: Box::new(StoreSetReader::new(Arc::clone(&store), language.clone())),
-            set_writer: Box::new(StoreSetWriter::new(Arc::clone(&store), language.clone())),
-            queue_reader: Box::new(StoreQueueReader::new(Arc::clone(&store))),
-            queue_writer: Box::new(StoreQueueWriter::new(store)),
-        }
     }
 
     fn database() -> Database {
@@ -93,11 +65,6 @@ mod tests {
             queue_reader: Box::new(SqliteQueue::new(db.clone())),
             queue_writer: Box::new(SqliteQueue::new(db.clone())),
         }
-    }
-
-    /// Both implementations, by name.
-    fn both() -> Vec<(&'static str, Providers)> {
-        vec![("files", store()), ("database", sqlite(&database()))]
     }
 
     fn players() -> Vec<PlayerEntry> {
@@ -216,116 +183,83 @@ mod tests {
 
     #[tokio::test]
     async fn a_scouted_match_reads_back() {
-        for (name, p) in both() {
-            let (team, m) = scouted_match(&p).await;
-            assert_eq!(
-                summary(&m),
-                vec![(vec![EventTypeEnum::S, EventTypeEnum::OE], 1, 0)],
-                "{name}"
-            );
-            let teams = p.team_reader.read_all().await.unwrap();
-            assert_eq!(teams.len(), 1, "{name}");
-            assert_eq!(teams[0].as_ref().unwrap(), &team, "{name}");
-            assert!(p.team_reader.exists(&team.id).await.unwrap(), "{name}");
-            assert!(!p.team_reader.exists(&Uuid::new_v4()).await.unwrap());
-            let matches = p.match_reader.read_all(&team).await.unwrap();
-            assert_eq!(matches.len(), 1, "{name}");
-            assert_eq!(matches[0].as_ref().unwrap(), &m, "{name}");
-            assert!(p.match_reader.exists(&team, &m.id).await.unwrap(), "{name}");
-            assert!(!p.match_reader.exists(&team, "nope").await.unwrap());
-            assert_eq!(p.set_reader.read_all(&m).await.unwrap(), m.sets, "{name}");
-            let summaries = p.match_reader.read_summaries(&team).await.unwrap();
-            assert_eq!(summaries.len(), 1, "{name}");
-            assert_eq!(summaries[0].as_ref().unwrap().id, m.id, "{name}");
-            let some = p
-                .match_reader
-                .read_some(&team, &[m.id.clone(), "nope".into()])
-                .await;
-            assert!(some[0].is_ok() && some[1].is_err(), "{name}");
-        }
+        let p = sqlite(&database());
+        let (team, m) = scouted_match(&p).await;
+        assert_eq!(
+            summary(&m),
+            vec![(vec![EventTypeEnum::S, EventTypeEnum::OE], 1, 0)],
+        );
+        let teams = p.team_reader.read_all().await.unwrap();
+        assert_eq!(teams.len(), 1);
+        assert_eq!(teams[0].as_ref().unwrap(), &team);
+        assert!(p.team_reader.exists(&team.id).await.unwrap());
+        assert!(!p.team_reader.exists(&Uuid::new_v4()).await.unwrap());
+        let matches = p.match_reader.read_all(&team).await.unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].as_ref().unwrap(), &m);
+        assert!(p.match_reader.exists(&team, &m.id).await.unwrap());
+        assert!(!p.match_reader.exists(&team, "nope").await.unwrap());
+        assert_eq!(p.set_reader.read_all(&m).await.unwrap(), m.sets);
+        let summaries = p.match_reader.read_summaries(&team).await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].as_ref().unwrap().id, m.id);
+        let some = p
+            .match_reader
+            .read_some(&team, &[m.id.clone(), "nope".into()])
+            .await;
+        assert!(some[0].is_ok() && some[1].is_err());
     }
 
     #[tokio::test]
     async fn events_are_appended_and_undone() {
-        for (name, p) in both() {
-            let (team, m) = scouted_match(&p).await;
-            let server = team.players[0].id;
-            p.set_writer
-                .append_event(&m, 1, &serve(server))
-                .await
-                .unwrap();
-            let m = p.match_reader.read_single(&team, &m.id).await.unwrap();
-            assert_eq!(
-                summary(&m),
-                vec![(
-                    vec![EventTypeEnum::S, EventTypeEnum::OE, EventTypeEnum::S],
-                    1,
-                    0
-                )],
-                "{name}"
-            );
-            let undone = p.set_writer.remove_last_event(&m, 1).await.unwrap();
-            assert_eq!(undone.map(|e| e.event_type), Some(EventTypeEnum::S));
-            p.set_writer.remove_last_event(&m, 1).await.unwrap();
-            let m = p.match_reader.read_single(&team, &m.id).await.unwrap();
-            assert_eq!(summary(&m), vec![(vec![EventTypeEnum::S], 0, 0)], "{name}");
-            p.set_writer.remove_last_event(&m, 1).await.unwrap();
-            assert_eq!(
-                p.set_writer.remove_last_event(&m, 1).await.unwrap(),
-                None,
-                "{name}"
-            );
-        }
+        let p = sqlite(&database());
+        let (team, m) = scouted_match(&p).await;
+        let server = team.players[0].id;
+        p.set_writer
+            .append_event(&m, 1, &serve(server))
+            .await
+            .unwrap();
+        let m = p.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!(
+            summary(&m),
+            vec![(
+                vec![EventTypeEnum::S, EventTypeEnum::OE, EventTypeEnum::S],
+                1,
+                0
+            )],
+        );
+        let undone = p.set_writer.remove_last_event(&m, 1).await.unwrap();
+        assert_eq!(undone.map(|e| e.event_type), Some(EventTypeEnum::S));
+        p.set_writer.remove_last_event(&m, 1).await.unwrap();
+        let m = p.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!(summary(&m), vec![(vec![EventTypeEnum::S], 0, 0)]);
+        p.set_writer.remove_last_event(&m, 1).await.unwrap();
+        assert_eq!(p.set_writer.remove_last_event(&m, 1).await.unwrap(), None,);
     }
 
     /// A set saved again: its events changed, cut, added; a set removed
     /// and scouted again.
     #[tokio::test]
     async fn sets_are_updated_removed_and_scouted_again() {
-        for (name, p) in both() {
-            let (team, m) = scouted_match(&p).await;
-            let mut set = m.sets[0].clone();
-            set.events[0].eval = Some(EvalEnum::Perfect);
-            set.events.truncate(1);
-            p.set_writer.update(&m, &set).await.unwrap();
-            let read = p.set_reader.read_all(&m).await.unwrap();
-            assert_eq!(read, vec![set.clone()], "{name}");
-            set.events.push(their_error());
-            set.events.push(serve(team.players[0].id));
-            p.set_writer.update(&m, &set).await.unwrap();
-            assert_eq!(
-                p.set_reader.read_all(&m).await.unwrap(),
-                vec![set],
-                "{name}"
-            );
+        let p = sqlite(&database());
+        let (team, m) = scouted_match(&p).await;
+        let mut set = m.sets[0].clone();
+        set.events[0].eval = Some(EvalEnum::Perfect);
+        set.events.truncate(1);
+        p.set_writer.update(&m, &set).await.unwrap();
+        let read = p.set_reader.read_all(&m).await.unwrap();
+        assert_eq!(read, vec![set.clone()]);
+        set.events.push(their_error());
+        set.events.push(serve(team.players[0].id));
+        p.set_writer.update(&m, &set).await.unwrap();
+        assert_eq!(p.set_reader.read_all(&m).await.unwrap(), vec![set],);
 
-            p.set_writer.remove(&m, 1).await.unwrap();
-            assert!(
-                p.set_reader.read_all(&m).await.unwrap().is_empty(),
-                "{name}"
-            );
-            let ids: Vec<Uuid> = team.players.iter().map(|p| p.id).collect();
-            let again = p
-                .set_writer
-                .create(
-                    &m,
-                    1,
-                    TeamSideEnum::Them,
-                    ids[..6].try_into().unwrap(),
-                    ids[6],
-                    None,
-                    ids[0],
-                    vec![],
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                p.set_reader.read_all(&m).await.unwrap(),
-                vec![again],
-                "{name}"
-            );
-            // not twice
-            let twice = p.set_writer.create(
+        p.set_writer.remove(&m, 1).await.unwrap();
+        assert!(p.set_reader.read_all(&m).await.unwrap().is_empty(),);
+        let ids: Vec<Uuid> = team.players.iter().map(|p| p.id).collect();
+        let again = p
+            .set_writer
+            .create(
                 &m,
                 1,
                 TeamSideEnum::Them,
@@ -334,54 +268,65 @@ mod tests {
                 None,
                 ids[0],
                 vec![],
-            );
-            assert!(twice.await.is_err(), "{name}");
-        }
+            )
+            .await
+            .unwrap();
+        assert_eq!(p.set_reader.read_all(&m).await.unwrap(), vec![again],);
+        // not twice
+        let twice = p.set_writer.create(
+            &m,
+            1,
+            TeamSideEnum::Them,
+            ids[..6].try_into().unwrap(),
+            ids[6],
+            None,
+            ids[0],
+            vec![],
+        );
+        assert!(twice.await.is_err());
     }
 
     /// What the form of the match changes, and where it came from.
     #[tokio::test]
     async fn a_match_is_updated() {
-        for (name, p) in both() {
-            let (team, m) = scouted_match(&p).await;
-            let date = m.date - Duration::days(3);
-            let roster: Vec<Uuid> = team.players[..6].iter().map(|p| p.id).collect();
-            p.match_writer
-                .update(
-                    &m,
-                    "Arezzo".into(),
-                    date,
-                    false,
-                    4,
-                    "notes".into(),
-                    roster.clone(),
-                )
-                .await
-                .unwrap();
-            let read = p.match_reader.read_single(&team, &m.id).await.unwrap();
-            assert_eq!(
-                (
-                    read.opponent.as_str(),
-                    read.date,
-                    read.home,
-                    read.max_substitutions,
-                    read.notes.as_str()
-                ),
-                ("Arezzo", date, false, 4, "notes"),
-                "{name}"
-            );
-            assert_eq!(read.roster, roster, "{name}");
-            assert_eq!(read.team.active_players().len(), 6, "{name}");
-            assert_eq!(summary(&read), summary(&m), "{name}");
-            let saved = p
-                .match_writer
-                .save_source(&read, MatchSource::Dvw, true)
-                .await
-                .unwrap();
-            let read = p.match_reader.read_single(&team, &m.id).await.unwrap();
-            assert_eq!((read.source, read.video_clock), (MatchSource::Dvw, true));
-            assert_eq!(saved, read, "{name}");
-        }
+        let p = sqlite(&database());
+        let (team, m) = scouted_match(&p).await;
+        let date = m.date - Duration::days(3);
+        let roster: Vec<Uuid> = team.players[..6].iter().map(|p| p.id).collect();
+        p.match_writer
+            .update(
+                &m,
+                "Arezzo".into(),
+                date,
+                false,
+                4,
+                "notes".into(),
+                roster.clone(),
+            )
+            .await
+            .unwrap();
+        let read = p.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!(
+            (
+                read.opponent.as_str(),
+                read.date,
+                read.home,
+                read.max_substitutions,
+                read.notes.as_str()
+            ),
+            ("Arezzo", date, false, 4, "notes"),
+        );
+        assert_eq!(read.roster, roster);
+        assert_eq!(read.team.active_players().len(), 6);
+        assert_eq!(summary(&read), summary(&m));
+        let saved = p
+            .match_writer
+            .save_source(&read, MatchSource::Dvw, true)
+            .await
+            .unwrap();
+        let read = p.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!((read.source, read.video_clock), (MatchSource::Dvw, true));
+        assert_eq!(saved, read);
     }
 
     /// A player no match tells of leaves the team; one a match tells of (in
@@ -389,159 +334,147 @@ mod tests {
     /// out of the active players.
     #[tokio::test]
     async fn a_removed_player_leaves_the_team_unless_a_match_tells_of_them() {
-        for (name, p) in both() {
-            let (mut team, m) = scouted_match(&p).await;
-            // the roster tells of every player: only the lineup and the events
-            let roster: Vec<Uuid> = team.players[..6].iter().map(|p| p.id).collect();
-            p.match_writer
-                .update(
-                    &m,
-                    m.opponent.clone(),
-                    m.date,
-                    m.home,
-                    m.max_substitutions,
-                    String::new(),
-                    roster,
-                )
-                .await
-                .unwrap();
-            let bench = p
-                .team_writer
-                .save_player(
-                    PlayerInput::New {
-                        name: "bench".into(),
-                        role: RoleEnum::Setter,
-                        number: 10,
-                        details: Default::default(),
-                    },
-                    &mut team,
-                )
-                .await
-                .unwrap();
-            let mut server = team.players[0].clone();
-            server.birth_date = chrono::NaiveDate::from_ymd_opt(2010, 1, 2);
-            server.height_cm = Some(180);
-            server.notes = "notes".into();
-            p.team_writer
-                .save_player(PlayerInput::Existing(server.clone()), &mut team)
-                .await
-                .unwrap();
-            assert_eq!(
-                p.team_reader.read_single(&team.id).await.unwrap(),
-                team,
-                "{name}"
-            );
-            // in the lineup only
-            let libero = team.players[6].clone();
-            for id in [bench.id, server.id, libero.id] {
-                p.team_writer.remove_player(id, &mut team).await.unwrap();
-            }
-            let read = p.team_reader.read_single(&team.id).await.unwrap();
-            assert_eq!(read, team, "{name}");
-            assert!(read.find_player(bench.id).is_none(), "{name}");
-            let kept = read.find_player(server.id).unwrap();
-            assert!(kept.deleted, "{name}");
-            assert_eq!((kept.name.as_str(), kept.number), ("player 1", 1));
-            assert_eq!((kept.birth_date, kept.height_cm), (None, None), "{name}");
-            assert!(kept.notes.is_empty(), "{name}");
-            assert!(read.find_player(libero.id).unwrap().deleted, "{name}");
-            assert_eq!(read.active_players().len(), 5, "{name}");
-            let loaded = p.match_reader.read_single(&read, &m.id).await.unwrap();
-            assert_eq!(summary(&loaded), summary(&m), "{name}");
+        let p = sqlite(&database());
+        let (mut team, m) = scouted_match(&p).await;
+        // the roster tells of every player: only the lineup and the events
+        let roster: Vec<Uuid> = team.players[..6].iter().map(|p| p.id).collect();
+        p.match_writer
+            .update(
+                &m,
+                m.opponent.clone(),
+                m.date,
+                m.home,
+                m.max_substitutions,
+                String::new(),
+                roster,
+            )
+            .await
+            .unwrap();
+        let bench = p
+            .team_writer
+            .save_player(
+                PlayerInput::New {
+                    name: "bench".into(),
+                    role: RoleEnum::Setter,
+                    number: 10,
+                    details: Default::default(),
+                },
+                &mut team,
+            )
+            .await
+            .unwrap();
+        let mut server = team.players[0].clone();
+        server.birth_date = chrono::NaiveDate::from_ymd_opt(2010, 1, 2);
+        server.height_cm = Some(180);
+        server.notes = "notes".into();
+        p.team_writer
+            .save_player(PlayerInput::Existing(server.clone()), &mut team)
+            .await
+            .unwrap();
+        assert_eq!(p.team_reader.read_single(&team.id).await.unwrap(), team,);
+        // in the lineup only
+        let libero = team.players[6].clone();
+        for id in [bench.id, server.id, libero.id] {
+            p.team_writer.remove_player(id, &mut team).await.unwrap();
         }
+        let read = p.team_reader.read_single(&team.id).await.unwrap();
+        assert_eq!(read, team);
+        assert!(read.find_player(bench.id).is_none());
+        let kept = read.find_player(server.id).unwrap();
+        assert!(kept.deleted);
+        assert_eq!((kept.name.as_str(), kept.number), ("player 1", 1));
+        assert_eq!((kept.birth_date, kept.height_cm), (None, None));
+        assert!(kept.notes.is_empty());
+        assert!(read.find_player(libero.id).unwrap().deleted);
+        assert_eq!(read.active_players().len(), 5);
+        let loaded = p.match_reader.read_single(&read, &m.id).await.unwrap();
+        assert_eq!(summary(&loaded), summary(&m));
     }
 
     /// A match removed: no longer read, the other matches are; a team
     /// removed: no longer read with its matches, the other teams are.
     #[tokio::test]
     async fn teams_and_matches_are_removed() {
-        for (name, p) in both() {
-            let (team, m) = scouted_match(&p).await;
-            let (other_team, other_match) = scouted_match(&p).await;
-            let second = p
-                .match_writer
-                .create(
-                    &team,
-                    "B".into(),
-                    Utc::now().fixed_offset(),
-                    true,
-                    6,
-                    String::new(),
-                    vec![],
-                )
-                .await
-                .unwrap();
-            p.match_writer.remove(&team.id, &m.id).await.unwrap();
-            let left = p.match_reader.read_all(&team).await.unwrap();
-            assert_eq!(left.len(), 1, "{name}");
-            assert_eq!(left[0].as_ref().unwrap().id, second.id, "{name}");
-            assert!(!p.match_reader.exists(&team, &m.id).await.unwrap());
-            assert!(p.match_reader.read_single(&team, &m.id).await.is_err());
-            for id in ["", "x/..", "a/b"] {
-                assert!(p.match_writer.remove(&team.id, id).await.is_err(), "{id}");
-            }
-            p.team_writer.remove(&team.id).await.unwrap();
-            let teams = p.team_reader.read_all().await.unwrap();
-            assert_eq!(teams.len(), 1, "{name}");
-            let ids: Vec<Uuid> = teams.iter().flatten().map(|t| t.id).collect();
-            assert_eq!(ids, vec![other_team.id], "{name}");
-            assert!(!p.team_reader.exists(&team.id).await.unwrap(), "{name}");
-            assert!(p.team_reader.read_single(&team.id).await.is_err());
-            assert!(p.match_reader.read_all(&team).await.unwrap().is_empty());
-            let left = p.match_reader.read_all(&other_team).await.unwrap();
-            assert_eq!(left.len(), 1, "{name}");
-            assert_eq!(left[0].as_ref().unwrap().id, other_match.id, "{name}");
+        let p = sqlite(&database());
+        let (team, m) = scouted_match(&p).await;
+        let (other_team, other_match) = scouted_match(&p).await;
+        let second = p
+            .match_writer
+            .create(
+                &team,
+                "B".into(),
+                Utc::now().fixed_offset(),
+                true,
+                6,
+                String::new(),
+                vec![],
+            )
+            .await
+            .unwrap();
+        p.match_writer.remove(&team.id, &m.id).await.unwrap();
+        let left = p.match_reader.read_all(&team).await.unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].as_ref().unwrap().id, second.id);
+        assert!(!p.match_reader.exists(&team, &m.id).await.unwrap());
+        assert!(p.match_reader.read_single(&team, &m.id).await.is_err());
+        for id in ["", "x/..", "a/b"] {
+            assert!(p.match_writer.remove(&team.id, id).await.is_err(), "{id}");
         }
+        p.team_writer.remove(&team.id).await.unwrap();
+        let teams = p.team_reader.read_all().await.unwrap();
+        assert_eq!(teams.len(), 1);
+        let ids: Vec<Uuid> = teams.iter().flatten().map(|t| t.id).collect();
+        assert_eq!(ids, vec![other_team.id]);
+        assert!(!p.team_reader.exists(&team.id).await.unwrap());
+        assert!(p.team_reader.read_single(&team.id).await.is_err());
+        assert!(p.match_reader.read_all(&team).await.unwrap().is_empty());
+        let left = p.match_reader.read_all(&other_team).await.unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].as_ref().unwrap().id, other_match.id);
     }
 
     /// The queue reads back in its order, a match that keeps failing last.
     #[tokio::test]
     async fn the_upload_queue_keeps_its_order() {
-        for (name, p) in both() {
-            assert!(p.queue_reader.load().await.unwrap().is_empty(), "{name}");
-            let (team, first) = scouted_match(&p).await;
-            let second = p
-                .match_writer
-                .create(
-                    &team,
-                    "B".into(),
-                    Utc::now().fixed_offset(),
-                    true,
-                    6,
-                    String::new(),
-                    vec![],
-                )
-                .await
-                .unwrap();
-            let mut queue = UploadQueue::default();
-            queue.enqueue(team.id, first.id.clone());
-            queue.enqueue(team.id, second.id.clone());
-            queue.mark_retry(&team.id, &first.id);
-            p.queue_writer.save(&queue).await.unwrap();
-            let read = p.queue_reader.load().await.unwrap();
-            let pending: Vec<(Uuid, &str, u8)> = read
-                .pending()
-                .iter()
-                .map(|p| (p.team_id, p.match_id.as_str(), p.retry_count))
-                .collect();
-            assert_eq!(
-                pending,
-                vec![
-                    (team.id, second.id.as_str(), 0),
-                    (team.id, first.id.as_str(), 1)
-                ],
-                "{name}"
-            );
-            assert_eq!(
-                read.pending()[0].queued_at,
-                queue.pending()[0].queued_at,
-                "{name}"
-            );
-            let mut queue = read;
-            queue.dequeue(&team.id, &second.id);
-            p.queue_writer.save(&queue).await.unwrap();
-            assert_eq!(p.queue_reader.load().await.unwrap().pending().len(), 1);
-        }
+        let p = sqlite(&database());
+        assert!(p.queue_reader.load().await.unwrap().is_empty());
+        let (team, first) = scouted_match(&p).await;
+        let second = p
+            .match_writer
+            .create(
+                &team,
+                "B".into(),
+                Utc::now().fixed_offset(),
+                true,
+                6,
+                String::new(),
+                vec![],
+            )
+            .await
+            .unwrap();
+        let mut queue = UploadQueue::default();
+        queue.enqueue(team.id, first.id.clone());
+        queue.enqueue(team.id, second.id.clone());
+        queue.mark_retry(&team.id, &first.id);
+        p.queue_writer.save(&queue).await.unwrap();
+        let read = p.queue_reader.load().await.unwrap();
+        let pending: Vec<(Uuid, &str, u8)> = read
+            .pending()
+            .iter()
+            .map(|p| (p.team_id, p.match_id.as_str(), p.retry_count))
+            .collect();
+        assert_eq!(
+            pending,
+            vec![
+                (team.id, second.id.as_str(), 0),
+                (team.id, first.id.as_str(), 1)
+            ],
+        );
+        assert_eq!(read.pending()[0].queued_at, queue.pending()[0].queued_at,);
+        let mut queue = read;
+        queue.dequeue(&team.id, &second.id);
+        p.queue_writer.save(&queue).await.unwrap();
+        assert_eq!(p.queue_reader.load().await.unwrap().pending().len(), 1);
     }
 
     // What only the database does.
@@ -824,6 +757,66 @@ mod tests {
         // the team itself has the new numbers
         let team = p.team_reader.read_single(&team.id).await.unwrap();
         assert_eq!((team.players[0].number, team.players[6].number), (21, 27));
+    }
+
+    /// A match sees the players of its roster as they were: one removed
+    /// from the team since is still active, one added since is not; the
+    /// roster goes with the match in an archive.
+    #[tokio::test]
+    async fn a_match_keeps_its_roster() {
+        let db = database();
+        let p = sqlite(&db);
+        let (mut team, m) = scouted_match(&p).await;
+        let roster: Vec<Uuid> = team.players.iter().map(|p| p.id).collect();
+        p.match_writer
+            .update(
+                &m,
+                m.opponent.clone(),
+                m.date,
+                m.home,
+                m.max_substitutions,
+                m.notes.clone(),
+                roster.clone(),
+            )
+            .await
+            .unwrap();
+        let first = team.players[0].clone();
+        p.team_writer
+            .remove_player(first.id, &mut team)
+            .await
+            .unwrap();
+        let added = p
+            .team_writer
+            .save_player(
+                PlayerInput::New {
+                    name: "new".into(),
+                    role: RoleEnum::Setter,
+                    number: 10,
+                    details: Default::default(),
+                },
+                &mut team,
+            )
+            .await
+            .unwrap();
+        let active = |m: &MatchEntry| -> Vec<Uuid> {
+            m.team.active_players().iter().map(|p| p.id).collect()
+        };
+        let loaded = p.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!(loaded.roster, roster);
+        assert_eq!(active(&loaded), roster);
+        assert!(loaded.team.find_player(added.id).is_some());
+
+        // exported and imported elsewhere
+        let uuid = Uuid::parse_str(&m.id).unwrap();
+        let zip = archive::export(&db, Subject::Match(uuid)).unwrap();
+        let target = database();
+        archive::import(&target, &zip, &Language::default()).unwrap();
+        let target = sqlite(&target);
+        let team = target.team_reader.read_single(&team.id).await.unwrap();
+        let loaded = target.match_reader.read_single(&team, &m.id).await.unwrap();
+        assert_eq!(loaded.roster, roster);
+        assert_eq!(active(&loaded), roster);
+        assert_eq!(active(&m).len(), 7);
     }
 
     /// The role of a match (D9) is where the player stands in the lineup of

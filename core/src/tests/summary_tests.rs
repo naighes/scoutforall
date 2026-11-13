@@ -1,10 +1,11 @@
 //! The cache `match_summary` (TODO/001, step 8): the lists of the matches
-//! from the database are those of the index of the files, the cache is
-//! up to date after every write and is what the lists read.
+//! from the database are those of the matches replayed, the cache is up
+//! to date after every write and is what the lists read.
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        legacy::folder::read_folder,
         localization::Language,
         providers::{
             match_reader::MatchReader,
@@ -17,12 +18,6 @@ mod tests {
                 sets::{SqliteSetReader, SqliteSetWriter},
                 teams::SqliteTeamWriter,
             },
-            store::{
-                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-                set_reader::StoreSetReader, set_writer::StoreSetWriter,
-                team_reader::StoreTeamReader, team_writer::StoreTeamWriter,
-            },
-            team_reader::TeamReader,
             team_writer::{TeamInput, TeamWriter},
         },
         shapes::{
@@ -31,10 +26,10 @@ mod tests {
             set::SetEntry,
             team::TeamEntry,
         },
-        storage::{Store, fs::FsStore, memory::MemoryStore},
-        tests::{LEGACY_VERSIONS, copy_dir, legacy_fixtures},
+        storage::fs::FsStore,
+        tests::{EN, LEGACY_VERSIONS, copy_dir, legacy_fixtures},
     };
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
     use tempfile::TempDir;
 
     struct Providers {
@@ -43,22 +38,6 @@ mod tests {
         match_writer: Box<dyn MatchWriter + Send + Sync>,
         set_reader: Box<dyn SetReader + Send + Sync>,
         set_writer: Box<dyn SetWriter + Send + Sync>,
-    }
-
-    fn files(store: Arc<dyn Store>) -> Providers {
-        let language = Language::default();
-        let set_reader = Arc::new(StoreSetReader::new(Arc::clone(&store), language.clone()));
-        Providers {
-            team_writer: Box::new(StoreTeamWriter::new(Arc::clone(&store))),
-            match_reader: Box::new(StoreMatchReader::new(
-                Arc::clone(&store),
-                set_reader,
-                language.clone(),
-            )),
-            match_writer: Box::new(StoreMatchWriter::new(Arc::clone(&store))),
-            set_reader: Box::new(StoreSetReader::new(Arc::clone(&store), language.clone())),
-            set_writer: Box::new(StoreSetWriter::new(store, language)),
-        }
     }
 
     fn database() -> Database {
@@ -165,48 +144,58 @@ mod tests {
             .unwrap();
     }
 
+    /// The teams of a version of the legacy fixtures, each with its matches.
+    async fn legacy_data(version: &str) -> Vec<(TeamEntry, Vec<MatchEntry>)> {
+        let dir = TempDir::new().unwrap();
+        copy_dir(&legacy_fixtures(version).join("data"), dir.path());
+        read_folder(&FsStore::new(dir.path()), EN)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| {
+                let t = t.unwrap();
+                let matches = t.matches.into_iter().map(|m| m.unwrap()).collect();
+                (t.team, matches)
+            })
+            .collect()
+    }
+
+    /// The listing of the matches replayed, the most recent first.
+    fn listing(matches: &[MatchEntry]) -> Vec<Listed<MatchSummary>> {
+        let mut listed: Vec<MatchSummary> = matches
+            .iter()
+            .map(|m| MatchSummary::of(m, &m.get_status().unwrap()))
+            .collect();
+        listed.sort_by_key(|s| std::cmp::Reverse(s.date));
+        listed.into_iter().map(Ok).collect()
+    }
+
     /// Every match of every version of the legacy fixtures: the listing of
     /// the database, from the cache and rebuilt from nothing, is the one
-    /// of the index of the files, and the one replaying every match.
+    /// replaying every match.
     #[tokio::test]
-    async fn the_listings_are_those_of_the_index_of_the_files() {
+    async fn the_listings_are_those_of_the_matches_replayed() {
         let mut matches = 0;
         let mut finished = 0;
         let mut going_on = 0;
         for version in LEGACY_VERSIONS {
-            let dir = TempDir::new().unwrap();
-            copy_dir(&legacy_fixtures(version).join("data"), dir.path());
-            let store: Arc<dyn Store> = Arc::new(FsStore::new(dir.path()));
-            let legacy = files(Arc::clone(&store));
-            let teams: Vec<TeamEntry> = StoreTeamReader::new(store, Language::default())
-                .read_all()
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|t| t.unwrap())
-                .collect();
+            let teams = legacy_data(version).await;
             let db = database();
             let p = sqlite(&db);
-            for team in &teams {
+            for (team, _) in &teams {
                 p.team_writer
                     .save(TeamInput::Existing(team.clone()))
                     .await
                     .unwrap();
             }
-            for team in &teams {
-                // the index of the files: built, then read
-                let indexed = legacy.match_reader.read_summaries(team).await.unwrap();
-                assert_eq!(
-                    legacy.match_reader.read_summaries(team).await.unwrap(),
-                    indexed
-                );
+            for (team, ms) in &teams {
                 let mut legacy_id = BTreeMap::new();
-                for m in legacy.match_reader.read_all(team).await.unwrap() {
-                    let m = m.unwrap();
-                    let new = scout_again(&p, team, &m).await;
+                for m in ms {
+                    let new = scout_again(&p, team, m).await;
                     legacy_id.insert(new.id.clone(), m.id.clone());
                 }
                 let back = |id: &str| legacy_id[id].clone();
+                let indexed = listing(ms);
                 let expected = by_id(indexed.clone(), str::to_string);
                 // up to date after the writes
                 let cached = p.match_reader.read_summaries(team).await.unwrap();
@@ -226,10 +215,9 @@ mod tests {
             // rebuilt from nothing
             let before = rows(&db);
             execute(&db, "DELETE FROM match_summary");
-            for team in &teams {
-                let indexed = legacy.match_reader.read_summaries(team).await.unwrap();
+            for (team, ms) in &teams {
                 let rebuilt = p.match_reader.read_summaries(team).await.unwrap();
-                assert_eq!(rebuilt.len(), indexed.len(), "{version}");
+                assert_eq!(rebuilt.len(), ms.len(), "{version}");
                 assert_eq!(
                     by_id(rebuilt, str::to_string),
                     by_id(
@@ -248,78 +236,57 @@ mod tests {
 
     /// The finished match of v0.18.0 and its team, from the files.
     async fn finished_match() -> (TeamEntry, MatchEntry) {
-        let dir = TempDir::new().unwrap();
-        copy_dir(&legacy_fixtures("v0.18.0").join("data"), dir.path());
-        let store: Arc<dyn Store> = Arc::new(FsStore::new(dir.path()));
-        let p = files(Arc::clone(&store));
-        for team in StoreTeamReader::new(store, Language::default())
-            .read_all()
+        legacy_data("v0.18.0")
             .await
-            .unwrap()
-        {
-            let team = team.unwrap();
-            for m in p.match_reader.read_all(&team).await.unwrap() {
-                let m = m.unwrap();
-                if m.id == "2025-10-04_rivali_pisa" {
-                    return (team, m);
-                }
-            }
-        }
-        unreachable!("the finished match of v0.18.0")
+            .into_iter()
+            .find_map(|(team, ms)| {
+                ms.into_iter()
+                    .find(|m| m.id == "2025-10-04_rivali_pisa")
+                    .map(|m| (team, m))
+            })
+            .expect("the finished match of v0.18.0")
     }
 
-    /// The listing of the team, as the replay of its matches has it, the
-    /// same on the files and on the database: after every write.
-    struct Both {
-        files: Providers,
+    /// The listing of the team, as the replay of its matches has it: after
+    /// every write.
+    struct Again {
         db: Database,
         sqlite: Providers,
         team: TeamEntry,
-        /// on the files, on the database
-        matches: (MatchEntry, MatchEntry),
+        m: MatchEntry,
     }
 
-    impl Both {
+    impl Again {
         async fn new(team: &TeamEntry, m: &MatchEntry) -> Self {
             let db = database();
-            let both = Both {
-                files: files(Arc::new(MemoryStore::new())),
-                sqlite: sqlite(&db),
+            let sqlite = sqlite(&db);
+            sqlite
+                .team_writer
+                .save(TeamInput::Existing(team.clone()))
+                .await
+                .unwrap();
+            let created = sqlite
+                .match_writer
+                .create(
+                    team,
+                    m.opponent.clone(),
+                    m.date,
+                    m.home,
+                    m.max_substitutions,
+                    m.notes.clone(),
+                    m.roster.clone(),
+                )
+                .await
+                .unwrap();
+            Again {
                 db,
+                sqlite,
                 team: team.clone(),
-                matches: (m.clone(), m.clone()),
-            };
-            let mut matches = vec![];
-            for p in [&both.files, &both.sqlite] {
-                p.team_writer
-                    .save(TeamInput::Existing(team.clone()))
-                    .await
-                    .unwrap();
-                let created = p
-                    .match_writer
-                    .create(
-                        team,
-                        m.opponent.clone(),
-                        m.date,
-                        m.home,
-                        m.max_substitutions,
-                        m.notes.clone(),
-                        m.roster.clone(),
-                    )
-                    .await
-                    .unwrap();
-                matches.push(created);
-            }
-            let sqlite = matches.pop().unwrap();
-            let files = matches.pop().unwrap();
-            Both {
-                matches: (files, sqlite),
-                ..both
+                m: created,
             }
         }
 
-        /// The listing of the database: the one replaying, the one of the
-        /// files; its only match.
+        /// The listing of the database, the one replaying: its only match.
         async fn check(&self, what: &str) -> Listed<MatchSummary> {
             let listed = self
                 .sqlite
@@ -329,21 +296,6 @@ mod tests {
                 .unwrap();
             let replayed = replayed(&self.sqlite, &self.team).await;
             assert_eq!(listed, replayed, "{what}");
-            let same = |id: &str| match id == self.matches.1.id {
-                true => self.matches.0.id.clone(),
-                false => id.to_string(),
-            };
-            let files = self
-                .files
-                .match_reader
-                .read_summaries(&self.team)
-                .await
-                .unwrap();
-            assert_eq!(
-                by_id(listed.clone(), same),
-                by_id(files, str::to_string),
-                "{what}"
-            );
             assert_eq!(listed.len(), 1);
             listed.into_iter().next().unwrap()
         }
@@ -355,20 +307,19 @@ mod tests {
         }
 
         async fn each(&self, f: impl AsyncFn(&Providers, &MatchEntry)) {
-            f(&self.files, &self.matches.0).await;
-            f(&self.sqlite, &self.matches.1).await;
+            f(&self.sqlite, &self.m).await;
         }
     }
 
     /// A real match scouted again touch by touch, undone, corrected, its
     /// sets removed and created again, its form changed: after each write
-    /// the cache is there, and the listing is the replay and the files.
+    /// the cache is there, and the listing is the replay.
     #[tokio::test]
     async fn the_cache_follows_every_write() {
         let (team, m) = finished_match().await;
-        let both = Both::new(&team, &m).await;
-        assert!(both.cached());
-        let new = both.check("created").await.unwrap();
+        let again = Again::new(&team, &m).await;
+        assert!(again.cached());
+        let new = again.check("created").await.unwrap();
         assert_eq!(
             (new.sets, new.us_wins, new.them_wins, new.finished),
             (0, 0, 0, false)
@@ -377,25 +328,27 @@ mod tests {
 
         let mut touches = 0;
         for set in &m.sets {
-            both.each(async |p, m| create_set(p, m, set).await).await;
-            assert!(both.cached());
+            again.each(async |p, m| create_set(p, m, set).await).await;
+            assert!(again.cached());
             assert_eq!(
-                both.check("set").await.unwrap().resume,
+                again.check("set").await.unwrap().resume,
                 Some(set.set_number)
             );
             for (i, event) in set.events.iter().enumerate() {
-                both.each(async |p, m| {
-                    p.set_writer
-                        .append_event(m, set.set_number, event)
-                        .await
-                        .unwrap()
-                })
-                .await;
-                assert!(both.cached());
+                again
+                    .each(async |p, m| {
+                        p.set_writer
+                            .append_event(m, set.set_number, event)
+                            .await
+                            .unwrap()
+                    })
+                    .await;
+                assert!(again.cached());
                 // every touch of the first set, then the last ones of a set
                 match (set.set_number, set.events.len() - i) {
                     (1, _) | (_, 0..=3) => {
-                        both.check(&format!("set {} touch {i}", set.set_number))
+                        again
+                            .check(&format!("set {} touch {i}", set.set_number))
                             .await
                             .unwrap();
                     }
@@ -403,87 +356,93 @@ mod tests {
                 }
                 touches += 1;
             }
-            let after = both.check("set over").await.unwrap();
+            let after = again.check("set over").await.unwrap();
             assert_eq!(after.resume, None);
         }
         assert!(touches > 300, "{touches}");
         let last = m.sets.last().unwrap();
-        let over = both.check("match over").await.unwrap();
+        let over = again.check("match over").await.unwrap();
         assert!(over.finished);
         assert_eq!(over.sets, u8::try_from(m.sets.len()).unwrap());
         assert_eq!(over.next_set_number, None);
 
         // the last touch undone: the set and the match go on
-        both.each(async |p, m| {
-            p.set_writer
-                .remove_last_event(m, last.set_number)
-                .await
-                .unwrap();
-        })
-        .await;
-        assert!(both.cached());
-        let undone = both.check("undone").await.unwrap();
+        again
+            .each(async |p, m| {
+                p.set_writer
+                    .remove_last_event(m, last.set_number)
+                    .await
+                    .unwrap();
+            })
+            .await;
+        assert!(again.cached());
+        let undone = again.check("undone").await.unwrap();
         assert!(!undone.finished);
         assert_eq!(undone.resume, Some(last.set_number));
         // and done again
         let point = last.events.last().unwrap();
-        both.each(async |p, m| {
-            p.set_writer
-                .append_event(m, last.set_number, point)
-                .await
-                .unwrap()
-        })
-        .await;
-        assert!(both.check("done again").await.unwrap().finished);
+        again
+            .each(async |p, m| {
+                p.set_writer
+                    .append_event(m, last.set_number, point)
+                    .await
+                    .unwrap()
+            })
+            .await;
+        assert!(again.check("done again").await.unwrap().finished);
 
         // the last set corrected to half its touches
         let half = SetEntry {
             events: last.events[..last.events.len() / 2].to_vec(),
             ..last.clone()
         };
-        both.each(async |p, m| p.set_writer.update(m, &half).await.unwrap())
+        again
+            .each(async |p, m| p.set_writer.update(m, &half).await.unwrap())
             .await;
-        assert!(both.cached());
+        assert!(again.cached());
         assert_eq!(
-            both.check("corrected").await.unwrap().resume,
+            again.check("corrected").await.unwrap().resume,
             Some(last.set_number)
         );
 
         // the last set removed: the match is to go on with it
-        both.each(async |p, m| p.set_writer.remove(m, last.set_number).await.unwrap())
+        again
+            .each(async |p, m| p.set_writer.remove(m, last.set_number).await.unwrap())
             .await;
-        assert!(both.cached());
-        let removed = both.check("removed").await.unwrap();
+        assert!(again.cached());
+        let removed = again.check("removed").await.unwrap();
         assert_eq!(removed.sets, u8::try_from(m.sets.len() - 1).unwrap());
         assert_eq!(removed.next_set_number, Some(last.set_number));
         assert_eq!(removed.resume, None);
         // and scouted again at once
-        both.each(async |p, m| {
-            create_set(p, m, last).await;
-            p.set_writer.update(m, last).await.unwrap();
-        })
-        .await;
-        assert!(both.check("scouted again").await.unwrap().finished);
+        again
+            .each(async |p, m| {
+                create_set(p, m, last).await;
+                p.set_writer.update(m, last).await.unwrap();
+            })
+            .await;
+        assert!(again.check("scouted again").await.unwrap().finished);
 
         // the form: opponent, date and court are read from the match
         let date = m.date + chrono::Duration::days(1);
-        both.each(async |p, m| {
-            p.match_writer
-                .update(
-                    m,
-                    "Rivali Siena".into(),
-                    date,
-                    !m.home,
-                    m.max_substitutions,
-                    String::new(),
-                    m.roster.clone(),
-                )
-                .await
-                .unwrap()
-        })
-        .await;
-        assert!(both.cached());
-        let changed = both.check("form").await.unwrap();
+        again
+            .each(async |p, m| {
+                p.match_writer
+                    .update(
+                        m,
+                        "Rivali Siena".into(),
+                        date,
+                        !m.home,
+                        m.max_substitutions,
+                        String::new(),
+                        m.roster.clone(),
+                    )
+                    .await
+                    .unwrap()
+            })
+            .await;
+        assert!(again.cached());
+        let changed = again.check("form").await.unwrap();
         assert_eq!(
             (changed.opponent.as_str(), changed.date, changed.home),
             ("Rivali Siena", date, !m.home)
@@ -496,41 +455,43 @@ mod tests {
     #[tokio::test]
     async fn fewer_substitutions_than_made_leave_no_row() {
         let (team, m) = finished_match().await;
-        let both = Both::new(&team, &m).await;
+        let again = Again::new(&team, &m).await;
         for set in &m.sets {
-            both.each(async |p, m| {
-                create_set(p, m, set).await;
-                p.set_writer.update(m, set).await.unwrap();
-            })
-            .await;
+            again
+                .each(async |p, m| {
+                    create_set(p, m, set).await;
+                    p.set_writer.update(m, set).await.unwrap();
+                })
+                .await;
         }
-        assert!(both.check("scouted").await.unwrap().finished);
+        assert!(again.check("scouted").await.unwrap().finished);
         let update = async |max_substitutions: u8| {
-            both.each(async |p, m| {
-                p.match_writer
-                    .update(
-                        m,
-                        m.opponent.clone(),
-                        m.date,
-                        m.home,
-                        max_substitutions,
-                        String::new(),
-                        m.roster.clone(),
-                    )
-                    .await
-                    .unwrap()
-            })
-            .await
+            again
+                .each(async |p, m| {
+                    p.match_writer
+                        .update(
+                            m,
+                            m.opponent.clone(),
+                            m.date,
+                            m.home,
+                            max_substitutions,
+                            String::new(),
+                            m.roster.clone(),
+                        )
+                        .await
+                        .unwrap()
+                })
+                .await
         };
         update(0).await;
-        assert!(!both.cached());
-        let unreadable = both.check("no substitutions").await.unwrap_err();
+        assert!(!again.cached());
+        let unreadable = again.check("no substitutions").await.unwrap_err();
         assert!(unreadable.reason.is_some());
         // the listing doesn't write it either
-        assert!(!both.cached());
+        assert!(!again.cached());
         update(m.max_substitutions).await;
-        assert!(both.cached());
-        assert!(both.check("substitutions back").await.unwrap().finished);
+        assert!(again.cached());
+        assert!(again.check("substitutions back").await.unwrap().finished);
     }
 
     /// A new team, and a match of it on the database with the first set

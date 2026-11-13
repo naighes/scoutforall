@@ -211,12 +211,10 @@ fn generate(seeds: &Seeds, dir: &Path, size: &str) -> R<()> {
         .map(|(i, _)| i)
         .ok_or("no seed for the match in progress")?;
     let mut connection = db::open(&dir.join(layout::DATABASE)).map_err(|e| e.to_string())?;
-    sql(
-        connection.execute(
-            "ATTACH DATABASE ?1 AS seed",
-            [seeds.database.to_string_lossy()],
-        ),
-    )?;
+    sql(connection.execute(
+        "ATTACH DATABASE ?1 AS seed",
+        [seeds.database.to_string_lossy()],
+    ))?;
     let tx = sql(connection.transaction())?;
     for table in ["persons", "competitions"] {
         sql(tx.execute_batch(&format!(
@@ -493,7 +491,8 @@ fn open(dir: &Path) -> R<Arc<Scout4All>> {
 /// Empties the cache of the lists (`match_summary`), as after an update
 /// of the app: it's rebuilt from the events.
 fn without_cache(dir: &Path) -> R<()> {
-    let connection: Connection = db::open(&dir.join(layout::DATABASE)).map_err(|e| e.to_string())?;
+    let connection: Connection =
+        db::open(&dir.join(layout::DATABASE)).map_err(|e| e.to_string())?;
     sql(connection.execute("DELETE FROM match_summary", [])).map(|_| ())
 }
 
@@ -580,4 +579,3 @@ impl Values for Vec<f64> {
 fn read(path: &Path) -> R<Vec<u8>> {
     fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
 }
-

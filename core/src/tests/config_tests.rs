@@ -5,21 +5,17 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        analytics::upload::create_match_archive,
+        analytics::upload::{match_archive, written_set_files},
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         providers::{
             match_writer::MatchWriter,
-            store::{match_writer::StoreMatchWriter, team_writer::StoreTeamWriter},
             team_writer::{TeamInput, TeamWriter},
         },
-        storage::{Store, memory::MemoryStore},
+        tests::Sqlite,
         util::{config_var, config_var_in},
     };
     use chrono::Utc;
-    use std::{
-        io::{Cursor, Read},
-        sync::Arc,
-    };
+    use std::io::{Cursor, Read};
 
     // no test changes the environment of the process: tests run in parallel
     // and share it
@@ -55,8 +51,9 @@ mod tests {
 
     #[tokio::test]
     async fn uploaded_metadata_has_the_substitutions() {
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-        let team = StoreTeamWriter::new(Arc::clone(&store))
+        let p = Sqlite::new();
+        let team = p
+            .team_writer
             .save(TeamInput::New {
                 id: None,
                 name: "Volley Club".to_string(),
@@ -68,7 +65,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let m = StoreMatchWriter::new(Arc::clone(&store))
+        let m = p
+            .match_writer
             .create(
                 &team,
                 "Cortona Volley".to_string(),
@@ -80,7 +78,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let zip = create_match_archive(&m, &*store, None).await.unwrap();
+        let zip = match_archive(&m, written_set_files(&m).unwrap(), None).unwrap();
         let mut archive = zip::ZipArchive::new(Cursor::new(zip)).unwrap();
         let mut content = String::new();
         archive

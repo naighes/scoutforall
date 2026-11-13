@@ -43,7 +43,6 @@
 //!   its numbers are those of its roster, the roles its lineups' places.
 
 use crate::{
-    archive::zip_files,
     db::{self, MIGRATIONS},
     domain::sql::Sql,
     errors::{AppError, IOError},
@@ -64,8 +63,9 @@ use rusqlite::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as Json};
+use std::io::{Cursor, Write};
 use uuid::Uuid;
-use zip::CompressionMethod::Deflated;
+use zip::{CompressionMethod::Deflated, ZipWriter, write::FileOptions};
 
 /// The version of the layout of the archives (the files and the manifest);
 /// the rows follow the schema, whose version is in the manifest too.
@@ -895,4 +895,24 @@ fn merge_match<'a>(
         }
         Some(_) => Ok(false),
     }
+}
+
+/// The files zipped, in their order.
+pub(crate) fn zip_files(
+    files: &[(String, Vec<u8>)],
+    compression: zip::CompressionMethod,
+) -> Result<Vec<u8>, AppError> {
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, data) in files {
+        zip.start_file::<_, ()>(
+            name.as_str(),
+            FileOptions::default().compression_method(compression),
+        )
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+        zip.write_all(data)
+            .map_err(|e| AppError::IO(IOError::from(e)))?;
+    }
+    zip.finish()
+        .map(Cursor::into_inner)
+        .map_err(|e| AppError::IO(IOError::from(e)))
 }

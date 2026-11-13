@@ -13,7 +13,6 @@ use scout4all_core::{
         queue_manager::QueueManager,
         upload::{UploadStep, upload_next, upload_url},
     },
-    archive::file_team_id,
     benchmark::{Measure, band, grade},
     db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
@@ -29,7 +28,10 @@ use scout4all_core::{
     errors::{AppError, IOError},
     event_edit::{EditField, EventEdit},
     example,
-    legacy::migrate::{Backup, migrate},
+    legacy::{
+        archive::file_team_id,
+        migrate::{Backup, migrate},
+    },
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error, log_info},
     match_form::{MatchForm, MatchFormError},
@@ -4681,34 +4683,30 @@ mod tests {
     type Listed = std::collections::BTreeMap<String, Vec<(String, String, u8, u8, bool)>>;
 
     async fn listed_in_files(dir: &Path) -> Listed {
-        use scout4all_core::providers::store::{
-            match_reader::StoreMatchReader, set_reader::StoreSetReader,
-            team_reader::StoreTeamReader,
-        };
-        let store: Arc<dyn Store> = Arc::new(FsStore::new(dir));
-        let language = Language::default();
-        let teams = StoreTeamReader::new(store.clone(), language.clone());
-        let matches = StoreMatchReader::new(
-            store.clone(),
-            Arc::new(StoreSetReader::new(store, language.clone())),
-            language,
-        );
+        use scout4all_core::legacy::folder::read_folder;
+        let store = FsStore::new(dir);
         let mut listed = Listed::new();
-        for team in teams.read_all().await.unwrap() {
+        for team in read_folder(&store, Language::default().labels())
+            .await
+            .unwrap()
+        {
             let team = team.unwrap();
-            let summaries = matches.read_summaries(&team).await.unwrap();
+            let mut matches: Vec<MatchEntry> =
+                team.matches.into_iter().map(|m| m.unwrap()).collect();
+            // the most recent first, as the lists
+            matches.sort_by_key(|m| std::cmp::Reverse(m.date));
             listed.insert(
-                team.name.clone(),
-                summaries
-                    .into_iter()
+                team.team.name.clone(),
+                matches
+                    .iter()
                     .map(|m| {
-                        let m = m.unwrap();
+                        let status = m.get_status().unwrap();
                         (
-                            m.opponent,
+                            m.opponent.clone(),
                             m.date.to_rfc3339(),
-                            m.us_wins,
-                            m.them_wins,
-                            m.finished,
+                            status.us_wins,
+                            status.them_wins,
+                            status.match_finished,
                         )
                     })
                     .collect(),

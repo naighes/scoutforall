@@ -8,7 +8,6 @@
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::{
-        archive::zip_files,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         errors::{AppError, IOError},
         legacy::migrate::{Backup, migrate, unzip},
@@ -21,7 +20,7 @@ pub(crate) mod tests {
                 Database,
                 archive::{
                     FORMAT, Imported, Kind, MANIFEST, Manifest, MatchPreview, Merged, Preview,
-                    Subject, export, import, manifest, preview,
+                    Subject, export, import, manifest, preview, zip_files,
                 },
                 matches::{SqliteMatchReader, SqliteMatchWriter},
                 sets::SqliteSetWriter,

@@ -1,16 +1,17 @@
 //! The video of a match: the start of its files from their names, the
-//! anchor the events line up with, the profile saved next to the match.
+//! anchor the events line up with, the profile the versions before the
+//! database saved next to the match (`video.json`).
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        legacy::folder::{profile_key, read_profile},
         shapes::{r#match::MatchEntry, team::TeamEntry},
         storage::{Store, memory::MemoryStore},
         video::{
             Anchor, AnchorSource, Correction, EventRef, StoredProfile, TimeEffect,
             VIDEO_PROFILE_VERSION, VideoFile, VideoProfile, anchor, anchor_on, anchor_source,
-            in_order, offset_ms, place, profile_key, read_profile, resolved_path, start_from_name,
-            stored_path, write_profile,
+            in_order, offset_ms, place, resolved_path, start_from_name, stored_path,
         },
     };
     use chrono::{DateTime, FixedOffset, TimeDelta, TimeZone, Utc};
@@ -343,8 +344,9 @@ mod tests {
 
     const MATCH_ID: &str = "2026-11-01_polisportiva";
 
+    /// `video.json` as the versions before the database saved it.
     #[tokio::test]
-    async fn the_profile_saved_and_read() {
+    async fn the_profile_saved_is_read() {
         let store = MemoryStore::new();
         let team = Uuid::new_v4();
         assert_eq!(
@@ -366,7 +368,9 @@ mod tests {
             )),
         )
         .corrected(event(7), -2_500);
-        write_profile(&store, &team, MATCH_ID, &saved)
+        let json = serde_json::to_vec_pretty(&saved).unwrap();
+        store
+            .write(&profile_key(&team, MATCH_ID), &json)
             .await
             .unwrap();
         assert_eq!(
@@ -375,7 +379,7 @@ mod tests {
         );
     }
 
-    /// A profile of a newer version: neither read nor overwritten.
+    /// A profile of a newer version: not read.
     #[tokio::test]
     async fn a_newer_profile_is_left_as_it_is() {
         let store = MemoryStore::new();
@@ -388,11 +392,5 @@ mod tests {
             read_profile(&store, &team, MATCH_ID).await.unwrap(),
             StoredProfile::Newer(newer)
         );
-        assert!(
-            write_profile(&store, &team, MATCH_ID, &VideoProfile::default())
-                .await
-                .is_err()
-        );
-        assert_eq!(store.read(&key).await.unwrap(), Some(json.into_bytes()));
     }
 }

@@ -14,15 +14,7 @@ mod tests {
             adapters::{MatchRows, SetRows, TeamRows},
             sql::{DbText, Sql, technique_from_db},
         },
-        localization::Language,
-        providers::{
-            match_reader::MatchReader,
-            store::{
-                match_reader::StoreMatchReader, set_reader::StoreSetReader,
-                team_reader::StoreTeamReader,
-            },
-            team_reader::TeamReader,
-        },
+        legacy::folder::read_folder,
         shapes::{
             country::CountryCode,
             enums::{
@@ -35,15 +27,15 @@ mod tests {
             team::TeamEntry,
             technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
         },
-        storage::{Store, fs::FsStore},
-        tests::{LEGACY_VERSIONS, copy_dir, legacy_fixtures},
+        storage::fs::FsStore,
+        tests::{EN, LEGACY_VERSIONS, copy_dir, legacy_fixtures},
     };
     use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
     use rusqlite::{
         Connection,
         types::{FromSql, ToSql},
     };
-    use std::{collections::BTreeSet, fmt::Debug, sync::Arc};
+    use std::{collections::BTreeSet, fmt::Debug};
     use tempfile::TempDir;
     use uuid::Uuid;
 
@@ -523,27 +515,19 @@ mod tests {
     async fn legacy_data(version: &str) -> Data {
         let dir = TempDir::new().unwrap();
         copy_dir(&legacy_fixtures(version).join("data"), dir.path());
-        let store: Arc<dyn Store> = Arc::new(FsStore::new(dir.path()));
-        let team_reader = StoreTeamReader::new(Arc::clone(&store), Language::default());
-        let match_reader = StoreMatchReader::new(
-            Arc::clone(&store),
-            Arc::new(StoreSetReader::new(Arc::clone(&store), Language::default())),
-            Language::default(),
-        );
-        let teams: Vec<TeamEntry> = team_reader
-            .read_all()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|t| t.unwrap())
-            .collect();
-        let mut matches = vec![];
-        for team in &teams {
-            for m in match_reader.read_all(team).await.unwrap() {
-                matches.push((team.clone(), m.unwrap()));
+        let read = read_folder(&FsStore::new(dir.path()), EN).await.unwrap();
+        let mut data = Data {
+            teams: vec![],
+            matches: vec![],
+        };
+        for team in read {
+            let team = team.unwrap();
+            for m in team.matches {
+                data.matches.push((team.team.clone(), m.unwrap()));
             }
+            data.teams.push(team.team);
         }
-        Data { teams, matches }
+        data
     }
 
     #[tokio::test]

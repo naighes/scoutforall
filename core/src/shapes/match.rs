@@ -25,8 +25,8 @@ pub struct MatchStatus {
     pub last_set: Option<SetEntry>,
 }
 
-/// What a list shows of a match: kept in the index of the matches (see
-/// `providers::store::match_index`), so a list doesn't read nor replay its
+/// What a list shows of a match: kept in the cache of the database (see
+/// `providers::sqlite::summary`), so a list doesn't read nor replay its
 /// sets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchSummary {

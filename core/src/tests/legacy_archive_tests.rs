@@ -7,10 +7,10 @@
 //! team changes nothing.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::{
-        archive::{Archive, file_team_id, read_archive},
         errors::{AppError, IOError},
+        legacy::archive::{Archive, file_team_id, read_archive},
         providers::{
             match_reader::MatchReader,
             sqlite::{
@@ -122,7 +122,7 @@ mod tests {
     }
 
     /// The scores of every match, by its id before the database.
-    async fn scores(db: &Database) -> BTreeMap<String, Vec<(u8, u8)>> {
+    pub(crate) async fn scores(db: &Database) -> BTreeMap<String, Vec<(u8, u8)>> {
         let ids: Vec<(String, String, String)> = db
             .read(|tx| {
                 tx.prepare("SELECT id, team_a, legacy_id FROM matches WHERE deleted = 0")

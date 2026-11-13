@@ -1,6 +1,6 @@
 //! The reader of the data of the versions before the database and its
-//! rows (`legacy`, TODO/001 step 10): it reads what the providers over the
-//! files read, writes nothing, tells what it can't read; the rows of every
+//! rows (`legacy`, TODO/001 step 10): it reads every match to the scores
+//! its version scouted, writes nothing, tells what it can't read; the rows of every
 //! legacy fixture go into the database and read back the same, with one
 //! person per player id, unique numbers in the rosters, and no player
 //! outside the team.
@@ -8,9 +8,9 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        archive::{Archive, file_team_id, read_archive, teams_of_match},
         domain::{LegacyId, Person, TeamRef, adapters::MatchRows},
         legacy::{
+            archive::{Archive, file_team_id, is_match_of, read_archive},
             folder::{LegacyTeam, NotRead, read_folder},
             rows::{FolderRows, SharedTeams, folder_rows, match_rows, team_rows},
         },
@@ -23,17 +23,13 @@ mod tests {
                 rows::{insert_match, write_team},
                 teams::SqliteTeamReader,
             },
-            store::{
-                match_reader::StoreMatchReader, set_reader::StoreSetReader,
-                team_reader::StoreTeamReader,
-            },
             team_reader::TeamReader,
         },
         shapes::{
             enums::LineupRulesEnum, r#match::MatchEntry, player::PlayerEntry, snapshot::EventEntry,
             team::TeamEntry,
         },
-        storage::{Store, fs::FsStore},
+        storage::fs::FsStore,
         tests::{
             EN, LEGACY_VERSIONS as VERSIONS, LegacyScores, copy_dir, legacy_fixtures as fixtures,
             legacy_scores,
@@ -42,7 +38,6 @@ mod tests {
     use std::{
         collections::{BTreeMap, BTreeSet},
         path::{Path, PathBuf},
-        sync::Arc,
     };
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -84,54 +79,30 @@ mod tests {
             .collect()
     }
 
-    /// The teams and their matches as the providers over the files read
-    /// them, by id.
-    async fn by_providers(dir: &Path) -> BTreeMap<Uuid, (TeamEntry, Vec<MatchEntry>)> {
-        let store: Arc<dyn Store> = Arc::new(FsStore::new(dir));
-        let teams = StoreTeamReader::new(Arc::clone(&store), Language::default());
-        let matches = StoreMatchReader::new(
-            Arc::clone(&store),
-            Arc::new(StoreSetReader::new(Arc::clone(&store), Language::default())),
-            Language::default(),
-        );
-        let mut read = BTreeMap::new();
-        for team in teams.read_all().await.unwrap() {
-            let team = team.expect("a readable team");
-            let mut ms: Vec<MatchEntry> = matches
-                .read_all(&team)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|m| m.expect("a readable match"))
-                .collect();
-            ms.sort_by(|a, b| a.id.cmp(&b.id));
-            read.insert(team.id, (team, ms));
-        }
-        read
+    /// The teams and their matches as the reader reads them, by id.
+    async fn by_reader(dir: &Path) -> BTreeMap<Uuid, (TeamEntry, Vec<MatchEntry>)> {
+        readable(legacy(dir).await)
+            .into_iter()
+            .map(|t| {
+                let mut matches: Vec<MatchEntry> = t
+                    .matches
+                    .into_iter()
+                    .map(|m| m.expect("a readable match"))
+                    .collect();
+                matches.sort_by(|a, b| a.id.cmp(&b.id));
+                (t.team.id, (t.team, matches))
+            })
+            .collect()
     }
 
     #[tokio::test]
-    async fn the_reader_reads_what_the_providers_read_and_writes_nothing() {
+    async fn the_reader_reads_every_match_and_writes_nothing() {
         for version in VERSIONS {
             let dir = data(version);
             let before = files(dir.path());
-            let read = readable(legacy(dir.path()).await);
+            let read = by_reader(dir.path()).await;
             assert_eq!(files(dir.path()), before, "{version}: nothing written");
-            let read: BTreeMap<Uuid, (TeamEntry, Vec<MatchEntry>)> = read
-                .into_iter()
-                .map(|t| {
-                    let matches = t
-                        .matches
-                        .into_iter()
-                        .map(|m| m.expect("a readable match"))
-                        .collect();
-                    (t.team.id, (t.team, matches))
-                })
-                .collect();
-            let expected = by_providers(data(version).path()).await;
-            assert_eq!(read, expected, "{version}");
-            let matches: usize = read.values().map(|(_, ms)| ms.len()).sum();
-            assert_eq!(matches, legacy_scores(version).len(), "{version}");
+            assert_eq!(scores(&read), legacy_scores(version), "{version}");
         }
     }
 
@@ -411,7 +382,7 @@ mod tests {
             assert_eq!(scores(&back), legacy_scores(version), "{version}");
             assert_eq!(
                 comparable(back),
-                comparable(by_providers(dir.path()).await),
+                comparable(by_reader(dir.path()).await),
                 "{version}"
             );
         }
@@ -751,8 +722,9 @@ mod tests {
                 .map(|m| {
                     // the last one the match fits, as the import, with its
                     // roster (a match without sets fits every team)
-                    let team = teams_of_match(m, &teams)
-                        .into_iter()
+                    let team = teams
+                        .iter()
+                        .filter(|t| is_match_of(m, t))
                         .rfind(|t| m.roster.iter().all(|p| t.find_player(*p).is_some()))
                         .unwrap();
                     let id = Uuid::new_v4();
