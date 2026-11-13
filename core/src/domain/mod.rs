@@ -202,6 +202,11 @@ impl Home {
     pub fn is_a(self) -> bool {
         self == Home::A
     }
+
+    /// Whether B plays at home: not on a neutral court.
+    pub fn is_b(self) -> bool {
+        self == Home::B
+    }
 }
 
 /// Who is scouted in a match (D3): team A, or both teams (only when B is a

@@ -71,7 +71,7 @@ use scout4all_core::{
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
         flags::{BlockersEnum, ReceptionSchemeEnum},
-        r#match::{MatchEntry, MatchSummary},
+        r#match::{MatchEntry, MatchSummary, PlayedMatch},
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
@@ -665,6 +665,9 @@ pub enum MatchListing {
         won: u8,
         lost: u8,
         finished: bool,
+        /// team A, when the team is B of a match scouted from A's side
+        /// only: the result as B sees it, nothing to scout from here
+        scouted_by: Option<String>,
     },
     Unreadable {
         folder: String,
@@ -956,6 +959,24 @@ pub struct MatchDetails {
     pub next: NextSetKind,
     /// what the scout noted about the match, empty if nothing
     pub notes: String,
+    /// as in `MatchListing`: the match seen by team B, scouted by A
+    pub scouted_by: Option<ScoutedBy>,
+}
+
+/// Team A of a match seen by B: the team that scouted it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ScoutedBy {
+    pub team_id: String,
+    pub team_name: String,
+}
+
+/// What removing a team does to its matches (D16), to confirm it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TeamRemovalCounts {
+    /// the matches against another team: they stay to it
+    pub kept: u32,
+    /// the matches against a name: gone with the team
+    pub removed: u32,
 }
 
 /// A player to choose when starting a set.
@@ -3259,16 +3280,19 @@ impl Scout4All {
         })
     }
 
-    /// The matches of the team, the most recent first, then the unreadable
-    /// ones.
+    /// The matches the team plays, as A or as B, from its side: the most
+    /// recent first, then the unreadable ones.
     pub fn matches(&self, team_id: String) -> Result<Vec<MatchListing>, MobileError> {
         let team = self.read_team(&team_id)?;
         Ok(self
             .runtime
-            .block_on(self.match_reader.read_summaries(&team))?
+            .block_on(self.match_reader.played(&team))?
             .into_iter()
             .map(|listed| match listed {
-                Ok(m) => MatchListing::Match {
+                Ok(PlayedMatch {
+                    summary: m,
+                    scouted_by,
+                }) => MatchListing::Match {
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
@@ -3276,6 +3300,7 @@ impl Scout4All {
                     won: m.us_wins,
                     lost: m.them_wins,
                     finished: m.finished,
+                    scouted_by: scouted_by.map(|a| a.to_string()),
                 },
                 Err(unreadable) => MatchListing::Unreadable {
                     folder: unreadable.id,
@@ -3438,27 +3463,66 @@ impl Scout4All {
         })
     }
 
-    /// A match of the team, with its sets.
+    /// A match of the team, with its sets; a match it's B of, scouted by A
+    /// only, as B sees it: nothing to scout from its side.
     pub fn match_details(
         &self,
         team_id: String,
         match_id: String,
     ) -> Result<MatchDetails, MobileError> {
-        let m = self.read_match(&team_id, &match_id)?;
+        let team = self.read_team(&team_id)?;
+        let seen_by_b = self.match_reader.played_as_b(&team, &match_id)?;
+        let team_a = seen_by_b
+            .as_ref()
+            .map_or(team_id, |(a, _)| a.id.to_string());
+        let m = self.read_match(&team_a, &match_id)?;
         let status = m.get_status()?;
         let sets = set_scores(&m)?;
-        let next = next_kind(&status, &m.team);
-        Ok(MatchDetails {
+        let details = MatchDetails {
             date: m.date.to_rfc3339(),
-            id: m.id,
-            opponent: m.opponent,
+            id: m.id.clone(),
+            opponent: m.opponent.clone(),
             home: m.home,
             won: status.us_wins,
             lost: status.them_wins,
             finished: status.match_finished,
             sets,
-            next,
-            notes: m.notes,
+            next: next_kind(&status, &m.team),
+            notes: m.notes.clone(),
+            scouted_by: None,
+        };
+        Ok(match seen_by_b {
+            Some((a, home)) => MatchDetails {
+                opponent: a.name.clone(),
+                home,
+                won: details.lost,
+                lost: details.won,
+                sets: details
+                    .sets
+                    .into_iter()
+                    .map(|set| SetScore {
+                        us: set.them,
+                        them: set.us,
+                        ..set
+                    })
+                    .collect(),
+                next: NextSetKind::Over,
+                scouted_by: Some(ScoutedBy {
+                    team_id: a.id.to_string(),
+                    team_name: a.name,
+                }),
+                ..details
+            },
+            None => details,
+        })
+    }
+
+    /// What removing the team does to its matches, to confirm it.
+    pub fn team_removal(&self, team_id: String) -> Result<TeamRemovalCounts, MobileError> {
+        let removal = self.team_reader.removal(&parse_id(&team_id)?)?;
+        Ok(TeamRemovalCounts {
+            kept: u32::try_from(removal.kept).unwrap_or(u32::MAX),
+            removed: u32::try_from(removal.removed).unwrap_or(u32::MAX),
         })
     }
 
@@ -5605,6 +5669,7 @@ mod tests {
                     won: 0,
                     lost: 0,
                     finished: false,
+                    scouted_by: None,
                 },
                 MatchListing::Match {
                     id: ids[0].clone(),
@@ -5614,6 +5679,7 @@ mod tests {
                     won: 0,
                     lost: 0,
                     finished: false,
+                    scouted_by: None,
                 },
                 MatchListing::Unreadable {
                     folder: ids[2].clone(),
@@ -6041,6 +6107,123 @@ mod tests {
             }]
         );
         assert!(app.set_start(team, m).is_err());
+    }
+
+    /// A match between two teams (TODO/001, step 21): listed by both, B
+    /// seeing it from its side (A the opponent, its court, the sets the
+    /// other way), scouted by A, nothing to scout from B; the removal of
+    /// a team counts the matches that stay to the other one.
+    #[test]
+    fn a_match_between_two_teams_is_seen_by_both() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, _) = match_with_a_set(&app);
+        let livorno = app.save_team(None, form("Livorno")).unwrap();
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent_team: Some(parse_id(&livorno).unwrap()),
+                    home: false,
+                    ..match_form("Livorno", "2026-10-25T18:00:00+02:00", "8")
+                },
+            )
+            .unwrap();
+        let scouting = started_set(&app, &team, &m);
+        for _ in 0..25 {
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        }
+        let of_a = app.match_details(team.clone(), m.clone()).unwrap();
+        assert_eq!(
+            (
+                of_a.opponent.as_str(),
+                of_a.home,
+                of_a.won,
+                of_a.lost,
+                &of_a.next,
+                &of_a.scouted_by
+            ),
+            (
+                "Livorno",
+                false,
+                1,
+                0,
+                &NextSetKind::Start { set_number: 2 },
+                &None
+            )
+        );
+        let of_b = app.match_details(livorno.clone(), m.clone()).unwrap();
+        assert_eq!(
+            of_b,
+            MatchDetails {
+                opponent: "Cortona".into(),
+                home: true,
+                won: 0,
+                lost: 1,
+                sets: vec![SetScore {
+                    number: 1,
+                    us: 0,
+                    them: 25
+                }],
+                next: NextSetKind::Over,
+                scouted_by: Some(ScoutedBy {
+                    team_id: team.clone(),
+                    team_name: "Cortona".into()
+                }),
+                ..of_a
+            }
+        );
+        match app.matches(livorno.clone()).unwrap().as_slice() {
+            [
+                MatchListing::Match {
+                    id,
+                    opponent,
+                    home: true,
+                    won: 0,
+                    lost: 1,
+                    finished: false,
+                    scouted_by: Some(a),
+                    ..
+                },
+            ] => assert_eq!((id, opponent.as_str(), a), (&m, "Cortona", &team)),
+            other => unreachable!("{other:?}"),
+        }
+        // A's list: the match of the set and this one, its own
+        let listed = app.matches(team.clone()).unwrap();
+        assert!(
+            listed.iter().all(|l| matches!(
+                l,
+                MatchListing::Match {
+                    scouted_by: None,
+                    ..
+                }
+            )),
+            "{listed:?}"
+        );
+        assert_eq!(listed.len(), 2);
+        // a match of Livorno not scouted by it: not in its statistics
+        let analysis = app.team_analysis(
+            livorno.clone(),
+            AnalysisPeriod::LastMatches { count: 10 },
+            EventTypeEnum::S,
+            DetailFilter::default(),
+        );
+        assert!(analysis.is_ok_and(|a| a.matches.is_empty()));
+        assert_eq!(
+            app.team_removal(team.clone()).unwrap(),
+            TeamRemovalCounts {
+                kept: 1,
+                removed: 1
+            }
+        );
+        assert_eq!(
+            app.team_removal(livorno.clone()).unwrap(),
+            TeamRemovalCounts {
+                kept: 1,
+                removed: 0
+            }
+        );
     }
 
     /// A team of seven, a match and its first set started, the team serving.

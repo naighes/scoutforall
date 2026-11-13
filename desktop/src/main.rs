@@ -1715,6 +1715,7 @@ fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
             match_id: screen.match_id.clone(),
             start,
         }),
+        game::Outcome::OpenAs(team) => Go::Match(team, screen.match_id.clone()),
     }
 }
 

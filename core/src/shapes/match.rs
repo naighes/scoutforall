@@ -60,6 +60,30 @@ impl MatchSummary {
             next_set_number: status.next_set_number,
         }
     }
+
+    /// The summary of A's side as team B sees it: `opponent` is A, `home`
+    /// whether B plays at home, the sets won the other way; nothing to go
+    /// on with, as B isn't scouted.
+    pub fn seen_by_b(self, opponent: String, home: bool) -> Self {
+        MatchSummary {
+            opponent,
+            home,
+            us_wins: self.them_wins,
+            them_wins: self.us_wins,
+            resume: None,
+            next_set_number: None,
+            ..self
+        }
+    }
+}
+
+/// A match a team plays, as its list shows it: from its side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayedMatch {
+    pub summary: MatchSummary,
+    /// team A, when the team is B of a match scouted from A's side only:
+    /// the summary is A's, seen by B
+    pub scouted_by: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

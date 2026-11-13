@@ -16,7 +16,7 @@ use {
         widget::{Column, Id, column, container, row, scrollable, space, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
-    scout4all_mobile::{MatchListing, MobileError, Scout4All, TeamDetails},
+    scout4all_mobile::{MatchListing, MobileError, Scout4All, TeamDetails, TeamRemovalCounts},
     std::sync::Arc,
 };
 
@@ -39,7 +39,8 @@ enum Deletion {
     Player(String, String),
     /// id (or the folder of an unreadable one) and what it is
     Match(String, String),
-    Team,
+    /// what happens to its matches
+    Team(TeamRemovalCounts),
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +199,15 @@ impl TeamScreen {
         }
     }
 
+    /// The deletion of the team, to confirm with what happens to its
+    /// matches.
+    fn ask_team_deletion(&mut self) {
+        match self.core.team_removal(self.team_id.clone()) {
+            Ok(counts) => self.mode = Mode::Delete(Deletion::Team(counts)),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
     /// Deleted as confirmed: the team gone, back to the home.
     fn delete(&mut self) -> Outcome {
         let mode = std::mem::replace(&mut self.mode, Mode::Browse);
@@ -205,11 +215,11 @@ impl TeamScreen {
         let deleted = match &mode {
             Mode::Delete(Deletion::Player(id, _)) => self.core.remove_player(team, id.clone()),
             Mode::Delete(Deletion::Match(id, _)) => self.core.delete_match(team, id.clone()),
-            Mode::Delete(Deletion::Team) => self.core.delete_team(team),
+            Mode::Delete(Deletion::Team(_)) => self.core.delete_team(team),
             Mode::Browse | Mode::Edit(_) => Ok(()),
         };
         match (deleted, mode) {
-            (Ok(()), Mode::Delete(Deletion::Team)) => Outcome::Back,
+            (Ok(()), Mode::Delete(Deletion::Team(_))) => Outcome::Back,
             (deleted, _) => {
                 self.error = deleted.err().map(|e| e.to_string());
                 self.reload();
@@ -223,10 +233,20 @@ impl TeamScreen {
         match deletion {
             Deletion::Player(_, name) => ui::fill(s.delete_player_text, std::slice::from_ref(name)),
             Deletion::Match(_, name) => ui::fill(s.delete_match_text, std::slice::from_ref(name)),
-            Deletion::Team => ui::fill(
-                s.delete_team_text,
-                &[self.details.name.clone(), self.matches.len().to_string()],
-            ),
+            Deletion::Team(counts) => {
+                let name = self.details.name.clone();
+                let text = ui::fill(
+                    s.delete_team_text,
+                    &[name.clone(), counts.removed.to_string()],
+                );
+                match counts.kept {
+                    0 => text,
+                    kept => format!(
+                        "{text} {}",
+                        ui::fill(s.delete_team_kept, &[kept.to_string(), name])
+                    ),
+                }
+            }
         }
     }
 
@@ -292,7 +312,7 @@ impl TeamScreen {
             (Message::Export, Mode::Browse) => Outcome::Export,
             (Message::Analysis, Mode::Browse) => Outcome::Analysis,
             (Message::DeleteTeam, Mode::Browse) => {
-                self.mode = Mode::Delete(Deletion::Team);
+                self.ask_team_deletion();
                 Outcome::Stay
             }
             (Message::Form(_) | Message::Confirm, Mode::Browse) => Outcome::Stay,
@@ -351,7 +371,7 @@ impl TeamScreen {
             }
             (Panel::Matches, k) if k == key!(enter) => return self.open_match(self.game),
             (_, k) if k == key!(shift - backspace) || k == key!(shift - delete) => {
-                self.mode = Mode::Delete(Deletion::Team)
+                self.ask_team_deletion()
             }
             (_, k) if (k == key!(backspace) || k == key!(delete)) && count > 0 => {
                 self.ask_deletion(s)
@@ -528,70 +548,75 @@ impl TeamScreen {
 
     fn matches<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let active = self.panel == Panel::Matches;
-        let rows = self.matches.iter().enumerate().map(|(i, m)| match m {
-            MatchListing::Match {
-                opponent,
-                home,
-                date,
-                won,
-                lost,
-                finished,
-                ..
-            } => ui::list_row(
-                row![
-                    // home or away at a glance, as on Android
-                    ui::tip(
-                        ui::icon(
+        let rows =
+            self.matches.iter().enumerate().map(|(i, m)| match m {
+                MatchListing::Match {
+                    opponent,
+                    home,
+                    date,
+                    won,
+                    lost,
+                    finished,
+                    scouted_by,
+                    ..
+                } => ui::list_row(
+                    row![
+                        // home or away at a glance, as on Android
+                        ui::tip(
+                            ui::icon(
+                                match home {
+                                    true => theme::icons::HOME,
+                                    false => theme::icons::AWAY,
+                                },
+                                22.0,
+                                c.muted,
+                            ),
                             match home {
-                                true => theme::icons::HOME,
-                                false => theme::icons::AWAY,
+                                true => s.home_game,
+                                false => s.away_game,
                             },
-                            22.0,
-                            c.muted,
+                            c,
                         ),
-                        match home {
-                            true => s.home_game,
-                            false => s.away_game,
-                        },
-                        c,
-                    ),
-                    column![
-                        ui::body(opponent.clone()).font(theme::fonts().bold),
-                        row![
-                            text(s.day(date)).size(SIZE_SMALL).color(c.muted),
-                            text(match finished {
-                                true => String::new(),
-                                false => format!("· {}", s.in_progress),
-                            })
-                            .size(SIZE_SMALL)
-                            .color(c.accent),
+                        column![
+                            ui::body(opponent.clone()).font(theme::fonts().bold),
+                            row![
+                                text(s.day(date)).size(SIZE_SMALL).color(c.muted),
+                                text(match finished {
+                                    true => String::new(),
+                                    false => format!("· {}", s.in_progress),
+                                })
+                                .size(SIZE_SMALL)
+                                .color(c.accent),
+                            ]
+                            .spacing(6),
                         ]
-                        .spacing(6),
+                        .push(scouted_by.as_ref().map(|_| {
+                            text(s.scouted_by_opponent).size(SIZE_SMALL).color(c.muted)
+                        }))
+                        .spacing(2)
+                        .width(Length::Fill),
+                        text(format!("{won}–{lost}"))
+                            .size(20)
+                            .font(theme::fonts().bold)
+                            .color(ui::score_color(*won, *lost, *finished, c)),
                     ]
-                    .spacing(2)
-                    .width(Length::Fill),
-                    text(format!("{won}–{lost}"))
-                        .size(20)
-                        .font(theme::fonts().bold)
-                        .color(ui::score_color(*won, *lost, *finished, c)),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-                active && i == self.game,
-                Some(Message::Match(i)),
-                c,
-            ),
-            MatchListing::Unreadable { folder, reason } => text(format!(
-                "{folder}{}",
-                reason
-                    .as_ref()
-                    .map(|r| format!(": {r}"))
-                    .unwrap_or_default()
-            ))
-            .size(SIZE_SMALL)
-            .color(c.danger)
-            .into(),
-        });
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                    active && i == self.game,
+                    Some(Message::Match(i)),
+                    c,
+                ),
+                MatchListing::Unreadable { folder, reason } => text(format!(
+                    "{folder}{}",
+                    reason
+                        .as_ref()
+                        .map(|r| format!(": {r}"))
+                        .unwrap_or_default()
+                ))
+                .size(SIZE_SMALL)
+                .color(c.danger)
+                .into(),
+            });
         let list: Element<'a, Message> = match self.matches.is_empty() {
             true => ui::body(s.no_matches_yet).color(c.muted).into(),
             false => scrollable(Column::with_children(rows).spacing(3))
@@ -617,12 +642,136 @@ mod tests {
             home::{self, HomeScreen},
             strings::strings,
         },
+        chrono::DateTime,
         form::Message::{Choose, Input, Save, Take},
-        scout4all_core::{player_form::PlayerForm, shapes::enums::LanguageEnum},
+        scout4all_core::{
+            match_form::MatchForm,
+            player_form::PlayerForm,
+            shapes::{
+                country::CountryCode,
+                enums::{GenderEnum, LanguageEnum, TeamClassificationEnum},
+            },
+            team_form::TeamForm,
+        },
+        uuid::Uuid,
     };
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
         Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    fn team_form(name: &str) -> TeamForm {
+        TeamForm {
+            name: name.into(),
+            classification: Some(TeamClassificationEnum::Regional),
+            gender: Some(GenderEnum::Women),
+            country: CountryCode::known("IT"),
+            year: "2026".into(),
+        }
+    }
+
+    /// A match between two teams (TODO/001, step 21): in the list of B,
+    /// marked as scouted by the opponent; opened from B, only its result,
+    /// Enter opens it as A; removing a team tells which matches stay.
+    #[test]
+    fn a_match_of_b_is_listed_and_opens_as_a() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let a = core.save_team(None, team_form("Cortona")).unwrap();
+        let b = core.save_team(None, team_form("Cascina")).unwrap();
+        for n in 1..=7u8 {
+            let player = PlayerForm {
+                name: format!("P{n}"),
+                number: n.to_string(),
+                role: Some(scout4all_core::shapes::enums::RoleEnum::OutsideHitter),
+                ..PlayerForm::default()
+            };
+            core.save_player(a.clone(), None, player, false).unwrap();
+        }
+        let form = |opponent: &str, team: Option<Uuid>| MatchForm {
+            opponent: opponent.into(),
+            opponent_team: team,
+            date: DateTime::parse_from_rfc3339("2026-10-18T18:00:00+02:00").ok(),
+            home: true,
+            max_substitutions: "8".into(),
+            ..MatchForm::default()
+        };
+        let m = core
+            .save_match(a.clone(), None, form("Cascina", Uuid::parse_str(&b).ok()))
+            .unwrap();
+        core.save_match(a.clone(), None, form("Arezzo", None))
+            .unwrap();
+
+        let mut team = TeamScreen::new(core.clone(), b.clone()).unwrap();
+        assert!(matches!(
+            team.matches.as_slice(),
+            [MatchListing::Match { opponent, scouted_by: Some(of), .. }]
+                if opponent == "Cortona" && of == &a
+        ));
+        team.key(s, key!(right));
+        assert!(matches!(team.key(s, key!(enter)), Outcome::OpenMatch(id) if id == m));
+
+        let mut seen = MatchScreen::new(core.clone(), b.clone(), m.clone()).unwrap();
+        assert_eq!(seen.title(), "Cascina – Cortona");
+        // nothing to scout nor to look into from B's side
+        for k in [
+            key!(s),
+            key!(e),
+            key!(x),
+            key!(p),
+            key!(v),
+            key!(r),
+            key!(1),
+        ] {
+            assert!(matches!(seen.key(s, k), game::Outcome::Stay));
+        }
+        for message in [
+            game::Message::Stats,
+            game::Message::Next,
+            game::Message::Set(1),
+        ] {
+            assert!(matches!(seen.update(s, message), game::Outcome::Stay));
+        }
+        assert_eq!(
+            seen.hints(s),
+            vec![
+                ("Enter".to_string(), "Apri come Cortona".to_string()),
+                ("Esc".to_string(), s.back.to_string())
+            ]
+        );
+        assert!(matches!(seen.key(s, key!(enter)), game::Outcome::OpenAs(of) if of == a));
+        assert!(matches!(seen.key(s, BACK_KEY), game::Outcome::Back));
+        // from A: its own match
+        let mut of_a = MatchScreen::new(core.clone(), a.clone(), m).unwrap();
+        assert!(matches!(of_a.key(s, key!(s)), game::Outcome::Stats));
+
+        // removing B: its match stays to A; removing A: one stays, one goes
+        team.key(s, key!(shift - backspace));
+        let Mode::Delete(deletion) = &team.mode else {
+            unreachable!("the deletion of the team, to confirm")
+        };
+        assert_eq!(
+            team.deletion_text(s, deletion),
+            "La squadra Cascina sarà eliminata con tutti i suoi giocatori e le sue partite (0): \
+             scouting, report e statistiche. Le partite contro altre squadre (1) restano a \
+             loro, senza lo scouting di Cascina."
+        );
+        let mut team = TeamScreen::new(core.clone(), a).unwrap();
+        team.key(s, key!(shift - delete));
+        let Mode::Delete(deletion) = &team.mode else {
+            unreachable!("the deletion of the team, to confirm")
+        };
+        assert!(
+            team.deletion_text(s, deletion)
+                .contains("le sue partite (1)")
+        );
+        team.key(s, key!(enter));
+        let listed = TeamScreen::new(core, b).unwrap().matches;
+        assert!(matches!(
+            listed.as_slice(),
+            [MatchListing::Match { opponent, scouted_by: None, .. }] if opponent == "Cortona"
+        ));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use crate::{
     domain::{
-        Event, LegacyId, Match, MatchSet, Membership, Person, RosterEntry, SetLineup, Team,
+        Event, Home, LegacyId, Match, MatchSet, Membership, Person, RosterEntry, SetLineup, Team,
         TeamRef,
         adapters::{MatchRows, SetRows, TeamRows},
         sql::{Sql, technique_from_db},
@@ -24,8 +24,8 @@ fn some_id(row: &Row, i: usize) -> rusqlite::Result<Option<Uuid>> {
         .map(|id| id.map(|id| id.0))
 }
 
-/// Whether a match of team `?1` tells of the person in `person`: its
-/// roster, a lineup of a set, an event. The removed matches, sets and
+/// Whether a match of team `?1`, as A or as B, tells of the person in
+/// `person`: its roster, a lineup of a set, an event of its side. The removed matches, sets and
 /// events don't.
 fn tells_of_sql(person: &str) -> String {
     format!(
@@ -34,11 +34,13 @@ fn tells_of_sql(person: &str) -> String {
          OR EXISTS (SELECT 1 FROM set_lineups l
                     JOIN matches m ON m.id = l.match_id
                     JOIN sets s ON s.match_id = l.match_id AND s.number = l.set_number
-                    WHERE m.team_a = ?1 AND m.deleted = 0 AND s.deleted = 0
+                    WHERE ((m.team_a = ?1 AND l.side = 'a') OR (m.team_b = ?1 AND l.side = 'b'))
+                    AND m.deleted = 0 AND s.deleted = 0
                     AND {person} IN (l.p1, l.p2, l.p3, l.p4, l.p5, l.p6, l.libero,
                                      l.fallback_libero, l.setter))
          OR EXISTS (SELECT 1 FROM events e JOIN matches m ON m.id = e.match_id
-                    WHERE m.team_a = ?1 AND m.deleted = 0 AND e.deleted = 0
+                    WHERE ((m.team_a = ?1 AND e.side = 'a') OR (m.team_b = ?1 AND e.side = 'b'))
+                    AND m.deleted = 0 AND e.deleted = 0
                     AND {person} IN (e.player, e.target_player))"
     )
 }
@@ -247,6 +249,25 @@ pub(crate) fn match_ids(tx: &Transaction, team: Uuid) -> Result<Vec<String>, App
                 .collect::<Result<_, _>>()
         })
         .map_err(sqlite)
+}
+
+/// The matches not removed in which `team` is B: id, team A and court.
+pub(crate) fn matches_as_b(
+    tx: &Transaction,
+    team: Uuid,
+) -> Result<Vec<(String, Uuid, Home)>, AppError> {
+    tx.prepare(
+        "SELECT id, team_a, home FROM matches WHERE team_b = ?1 AND deleted = 0
+         ORDER BY start, id",
+    )
+    .and_then(|mut statement| {
+        statement
+            .query_map([Sql(team)], |row| {
+                Ok((row.get(0)?, id(row, 1)?, row.get::<_, Home>(2)?))
+            })?
+            .collect::<Result<_, _>>()
+    })
+    .map_err(sqlite)
 }
 
 /// The match not removed, with its roster and its sets not removed.

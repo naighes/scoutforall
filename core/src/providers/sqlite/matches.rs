@@ -15,7 +15,8 @@ use crate::{
             competitions::{competition_row, insert_competition},
             not_found,
             rows::{
-                insert_match, insert_roster_entry, match_ids, match_rows, team_row, write_team,
+                insert_match, insert_roster_entry, match_ids, match_rows, matches_as_b, team_row,
+                write_team,
             },
             sets::numbered,
             sqlite,
@@ -26,7 +27,7 @@ use crate::{
     },
     shapes::{
         listed::{Listed, Unreadable},
-        r#match::{MatchEntry, MatchSource, MatchStatus, MatchSummary},
+        r#match::{MatchEntry, MatchSource, MatchStatus, MatchSummary, PlayedMatch},
         player::PlayerEntry,
         team::TeamEntry,
     },
@@ -110,6 +111,110 @@ impl SqliteMatchReader {
         })
     }
 
+    /// The summaries of these matches, each of its team A, in their
+    /// order: from the cache (`summary`), the matches without a row of
+    /// this version replayed and their rows written.
+    fn summaries(
+        &self,
+        matches: &[(TeamEntry, String)],
+    ) -> Result<Vec<Listed<MatchSummary>>, AppError> {
+        let cached: Vec<Option<Listed<MatchSummary>>> = self.db.read(|tx| {
+            Ok(matches
+                .iter()
+                .map(
+                    |(team, id)| match match_uuid(id).and_then(|uuid| cached(tx, team, uuid)) {
+                        Ok(Some(summary)) => Some(Ok(summary)),
+                        Ok(None) => None,
+                        Err(e) => Some(Err(unreadable(id, team, e))),
+                    },
+                )
+                .collect())
+        })?;
+        let missing: Vec<&(TeamEntry, String)> = matches
+            .iter()
+            .zip(&cached)
+            .filter(|(_, summary)| summary.is_none())
+            .map(|(m, _)| m)
+            .collect();
+        let rebuilt = match missing.as_slice() {
+            [] => vec![],
+            missing => self.db.write(|tx| {
+                missing
+                    .iter()
+                    .map(|(team, id)| match self.listed(tx, team, id) {
+                        Ok((m, status)) => {
+                            let summary = MatchSummary::of(&m, &status);
+                            save(tx, match_uuid(id)?, &summary).map(|()| Ok(summary))
+                        }
+                        Err(unreadable) => Ok(Err(unreadable)),
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })?,
+        };
+        let mut rebuilt = rebuilt.into_iter();
+        Ok(cached
+            .into_iter()
+            .filter_map(|summary| summary.or_else(|| rebuilt.next()))
+            .collect())
+    }
+
+    /// Every match the team plays, from its side, the most recent first,
+    /// then the unreadable ones: those it's A of (`read_summaries`), and
+    /// those it's B of, scouted from A's side only: A's summary seen by B.
+    pub async fn played(&self, team: &TeamEntry) -> Result<Vec<Listed<PlayedMatch>>, AppError> {
+        let as_a = self.read_summaries(team).await?.into_iter().map(|listed| {
+            listed.map(|summary| PlayedMatch {
+                summary,
+                scouted_by: None,
+            })
+        });
+        let (readable, unreadable): (Vec<_>, Vec<_>) = self.db.read(|tx| {
+            Ok(matches_as_b(tx, team.id)?
+                .into_iter()
+                .map(|(id, a, home)| match read_team(tx, &a) {
+                    Ok(a) => Ok((a, id, home)),
+                    Err(e) => Err(unreadable(&id, team, e)),
+                })
+                .partition(Result::is_ok))
+        })?;
+        let readable: Vec<_> = readable.into_iter().flatten().collect();
+        let matches: Vec<_> = readable
+            .iter()
+            .map(|(a, id, _)| (a.clone(), id.clone()))
+            .collect();
+        let as_b =
+            self.summaries(&matches)?
+                .into_iter()
+                .zip(&readable)
+                .map(|(listed, (a, _, home))| {
+                    listed.map(|summary| PlayedMatch {
+                        summary: summary.seen_by_b(a.name.clone(), home.is_b()),
+                        scouted_by: Some(a.id),
+                    })
+                });
+        let unreadable = unreadable.into_iter().filter_map(Result::err).map(Err);
+        let mut played: Vec<_> = as_a.chain(as_b).chain(unreadable).collect();
+        played.sort_by(|a, b| recent_first(a, b, |m| m.summary.date));
+        Ok(played)
+    }
+
+    /// The match in which `team` is B, as B sees it: team A, and whether
+    /// B plays at home; `None` when the team isn't B of that match, or the
+    /// match was removed.
+    pub fn played_as_b(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<Option<(TeamEntry, bool)>, AppError> {
+        self.db.read(|tx| {
+            matches_as_b(tx, team.id)?
+                .into_iter()
+                .find(|(id, ..)| id == match_id)
+                .map(|(_, a, home)| read_team(tx, &a).map(|a| (a, home.is_b())))
+                .transpose()
+        })
+    }
+
     fn listed(
         &self,
         tx: &Transaction,
@@ -175,33 +280,9 @@ impl MatchReader for SqliteMatchReader {
         &self,
         team: &TeamEntry,
     ) -> Result<Vec<Listed<MatchSummary>>, AppError> {
-        let (mut summaries, missing) = self.db.read(|tx| {
-            let mut summaries = vec![];
-            let mut missing = vec![];
-            for id in match_ids(tx, team.id)? {
-                match match_uuid(&id).and_then(|uuid| cached(tx, team, uuid)) {
-                    Ok(Some(summary)) => summaries.push(Ok(summary)),
-                    Ok(None) => missing.push(id),
-                    Err(e) => summaries.push(Err(unreadable(&id, team, e))),
-                }
-            }
-            Ok((summaries, missing))
-        })?;
-        let rebuilt = match missing.as_slice() {
-            [] => vec![],
-            ids => self.db.write(|tx| {
-                ids.iter()
-                    .map(|id| match self.listed(tx, team, id) {
-                        Ok((m, status)) => {
-                            let summary = MatchSummary::of(&m, &status);
-                            save(tx, match_uuid(id)?, &summary).map(|()| Ok(summary))
-                        }
-                        Err(unreadable) => Ok(Err(unreadable)),
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })?,
-        };
-        summaries.extend(rebuilt);
+        let ids = self.db.read(|tx| match_ids(tx, team.id))?;
+        let matches: Vec<_> = ids.into_iter().map(|id| (team.clone(), id)).collect();
+        let mut summaries = self.summaries(&matches)?;
         summaries.sort_by(|a, b| recent_first(a, b, |s| s.date));
         Ok(summaries)
     }
