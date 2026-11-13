@@ -13,6 +13,7 @@ use crate::{
                 events, insert_event, next_seq, remove_event, set_rows, update_event, write_set,
             },
             sqlite,
+            summary::refresh,
         },
     },
     shapes::{enums::TeamSideEnum, r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
@@ -162,7 +163,8 @@ impl SetWriter for SqliteSetWriter {
             ))),
             _ => {
                 write_set(tx, &rows)?;
-                append(tx, id, set_number, &set.events)
+                append(tx, id, set_number, &set.events)?;
+                refresh(tx, id)
             }
         })?;
         Ok(set)
@@ -177,7 +179,8 @@ impl SetWriter for SqliteSetWriter {
         let id = match_uuid(&m.id)?;
         self.db.write(|tx| {
             played(tx, id, set_number)?;
-            append(tx, id, set_number, std::slice::from_ref(event))
+            append(tx, id, set_number, std::slice::from_ref(event))?;
+            refresh(tx, id)
         })
     }
 
@@ -190,10 +193,12 @@ impl SetWriter for SqliteSetWriter {
         let id = match_uuid(&m.id)?;
         self.db.write(|tx| {
             played(tx, id, set_number)?;
-            events_of_a(tx, id, set_number)?
+            let removed = events_of_a(tx, id, set_number)?
                 .pop()
                 .map(|last| remove_event(tx, last.id).map(|()| last.entry))
-                .transpose()
+                .transpose()?;
+            refresh(tx, id)?;
+            Ok(removed)
         })
     }
 
@@ -219,7 +224,8 @@ impl SetWriter for SqliteSetWriter {
                 id,
                 set.set_number,
                 set.events.get(saved.len()..).unwrap_or_default(),
-            )
+            )?;
+            refresh(tx, id)
         })
     }
 
@@ -237,8 +243,8 @@ impl SetWriter for SqliteSetWriter {
                     params![Sql(id), set_number],
                 )
             })
-            .map(|_| ())
-            .map_err(sqlite)
+            .map_err(sqlite)?;
+            refresh(tx, id)
         })
     }
 }

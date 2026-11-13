@@ -184,6 +184,7 @@ mod tests {
                     "finished",
                     "resume",
                     "next_set_number",
+                    "version",
                 ],
             ),
             (
@@ -361,7 +362,7 @@ mod tests {
                  VALUES ('22222222-0000-4000-8000-000000000000', 'Giulia', '2004-03-01', 171, 'mancina');
                  UPDATE teams SET classification = 'national_mid_level', gender = 'women',
                      country = 'IT' WHERE id = '{TEAM_A}';
-                 INSERT INTO match_summary VALUES ('{MATCH}', 1, 0, 0, 0, 1, NULL);
+                 INSERT INTO match_summary VALUES ('{MATCH}', 1, 0, 0, 0, 1, NULL, '0.18.0');
                  INSERT INTO upload_queue VALUES ('{MATCH}', 0, 1794509535, 0);"
             ),
         );
@@ -1034,15 +1035,19 @@ mod tests {
         let db = database();
         passes(
             &db,
-            &format!("INSERT INTO match_summary VALUES ('{MATCH}', 5, 3, 2, 1, NULL, NULL)"),
+            &format!(
+                "INSERT INTO match_summary VALUES ('{MATCH}', 5, 3, 2, 1, NULL, NULL, '0.18.0')"
+            ),
         );
         fails(
             &db,
-            &format!("INSERT INTO match_summary VALUES ('{MATCH}', 1, 0, 0, 0, 1, NULL)"),
+            &format!("INSERT INTO match_summary VALUES ('{MATCH}', 1, 0, 0, 0, 1, NULL, '0.18.0')"),
         );
         fails(
             &db,
-            &format!("INSERT INTO match_summary VALUES ('{TEAM_A}', 1, 0, 0, 0, 1, NULL)"),
+            &format!(
+                "INSERT INTO match_summary VALUES ('{TEAM_A}', 1, 0, 0, 0, 1, NULL, '0.18.0')"
+            ),
         );
         fails(&db, "UPDATE match_summary SET sets = 6");
         fails(&db, "UPDATE match_summary SET a_wins = 4");
@@ -1050,6 +1055,8 @@ mod tests {
         fails(&db, "UPDATE match_summary SET finished = 2");
         fails(&db, "UPDATE match_summary SET resume = 0");
         fails(&db, "UPDATE match_summary SET next_set_number = 6");
+        fails(&db, "UPDATE match_summary SET version = ''");
+        fails(&db, "UPDATE match_summary SET version = NULL");
     }
 
     /// Rows are referred to, not removed (D7): removing a referred row fails.
@@ -1071,7 +1078,7 @@ mod tests {
         // the summary is not a reference that holds the match
         passes(&db, &format!(
             "DELETE FROM events; DELETE FROM set_lineups; DELETE FROM sets; DELETE FROM match_roster;
-             INSERT INTO match_summary VALUES ('{MATCH}', 0, 0, 0, 0, NULL, 1);
+             INSERT INTO match_summary VALUES ('{MATCH}', 0, 0, 0, 0, NULL, 1, '0.18.0');
              DELETE FROM matches WHERE id = '{MATCH}';"
         ));
         let rows: i64 = db

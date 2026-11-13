@@ -10,6 +10,7 @@ use crate::{
             rows::{insert_match, insert_roster_entry, match_ids, match_rows, team_row},
             sets::numbered,
             sqlite,
+            summary::{cached, forget, refresh, save},
             teams::read_team,
         },
         store::match_reader::{recent_first, replay_status, unreadable},
@@ -33,6 +34,30 @@ pub(crate) fn match_uuid(match_id: &str) -> Result<Uuid, AppError> {
         .ok_or_else(|| AppError::IO(IOError::Msg(format!("invalid match: {match_id:?}"))))
 }
 
+/// The match of team A `team`, with the status its sets replay to.
+pub(crate) fn replayed(
+    tx: &Transaction,
+    team: &TeamEntry,
+    match_id: &str,
+    language: &Language,
+) -> Result<(MatchEntry, MatchStatus), AppError> {
+    let id = match_uuid(match_id)?;
+    let rows = match_rows(tx, id)?
+        .filter(|rows| rows.row.team_a == team.id)
+        .ok_or_else(|| not_found(&format!("match {match_id} of team {}", team.id)))?;
+    let team_b = match &rows.row.team_b {
+        TeamRef::Team(b) => team_row(tx, *b)?,
+        TeamRef::Name(_) => None,
+    };
+    let entry = rows.entry(team, team_b.as_ref())?;
+    let entry = MatchEntry {
+        sets: numbered(entry.sets, language, match_id)?,
+        ..entry
+    };
+    let status = replay_status(&entry, language)?;
+    Ok((entry, status))
+}
+
 pub struct SqliteMatchReader {
     db: Database,
     language: Language,
@@ -50,21 +75,7 @@ impl SqliteMatchReader {
         team: &TeamEntry,
         match_id: &str,
     ) -> Result<(MatchEntry, MatchStatus), AppError> {
-        let id = match_uuid(match_id)?;
-        let rows = match_rows(tx, id)?
-            .filter(|rows| rows.row.team_a == team.id)
-            .ok_or_else(|| not_found(&format!("match {match_id} of team {}", team.id)))?;
-        let team_b = match &rows.row.team_b {
-            TeamRef::Team(b) => team_row(tx, *b)?,
-            TeamRef::Name(_) => None,
-        };
-        let entry = rows.entry(team, team_b.as_ref())?;
-        let entry = MatchEntry {
-            sets: numbered(entry.sets, &self.language, match_id)?,
-            ..entry
-        };
-        let status = replay_status(&entry, &self.language)?;
-        Ok((entry, status))
+        replayed(tx, team, match_id, &self.language)
     }
 
     fn listed(
@@ -126,18 +137,41 @@ impl MatchReader for SqliteMatchReader {
         }
     }
 
-    /// From the replay of every match (the cache `match_summary` comes at
-    /// step 8).
+    /// From the cache (`summary`): the matches without a row of this
+    /// version are replayed, and their rows written.
     async fn read_summaries(
         &self,
         team: &TeamEntry,
     ) -> Result<Vec<Listed<MatchSummary>>, AppError> {
-        Ok(self
-            .read_all_with_status(team)
-            .await?
-            .into_iter()
-            .map(|listed| listed.map(|(m, status)| MatchSummary::of(&m, &status)))
-            .collect())
+        let (mut summaries, missing) = self.db.read(|tx| {
+            let mut summaries = vec![];
+            let mut missing = vec![];
+            for id in match_ids(tx, team.id)? {
+                match match_uuid(&id).and_then(|uuid| cached(tx, team, uuid)) {
+                    Ok(Some(summary)) => summaries.push(Ok(summary)),
+                    Ok(None) => missing.push(id),
+                    Err(e) => summaries.push(Err(unreadable(&id, team, e))),
+                }
+            }
+            Ok((summaries, missing))
+        })?;
+        let rebuilt = match missing.as_slice() {
+            [] => vec![],
+            ids => self.db.write(|tx| {
+                ids.iter()
+                    .map(|id| match self.listed(tx, team, id) {
+                        Ok((m, status)) => {
+                            let summary = MatchSummary::of(&m, &status);
+                            save(tx, match_uuid(id)?, &summary).map(|()| Ok(summary))
+                        }
+                        Err(unreadable) => Ok(Err(unreadable)),
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })?,
+        };
+        summaries.extend(rebuilt);
+        summaries.sort_by(|a, b| recent_first(a, b, |s| s.date));
+        Ok(summaries)
     }
 
     async fn read_single(&self, team: &TeamEntry, match_id: &str) -> Result<MatchEntry, AppError> {
@@ -201,7 +235,10 @@ impl MatchWriter for SqliteMatchWriter {
             sets: vec![],
         };
         let rows = MatchRows::of(&m, id, TeamRef::Name(opponent), None)?;
-        self.0.write(|tx| insert_match(tx, &rows))?;
+        self.0.write(|tx| {
+            insert_match(tx, &rows)?;
+            refresh(tx, id)
+        })?;
         rows.entry(team, None)
     }
 
@@ -286,7 +323,9 @@ impl MatchWriter for SqliteMatchWriter {
                             role: player.role,
                         },
                     )
-                })
+                })?;
+            // the substitutions decide how the sets replay
+            refresh(tx, id)
         })
     }
 
@@ -322,8 +361,8 @@ impl MatchWriter for SqliteMatchWriter {
                 "UPDATE matches SET deleted = 1 WHERE id = ?1 AND team_a = ?2",
                 params![Sql(id), Sql(*team_id)],
             )
-            .map(|_| ())
-            .map_err(sqlite)
+            .map_err(sqlite)?;
+            forget(tx, id)
         })
     }
 }

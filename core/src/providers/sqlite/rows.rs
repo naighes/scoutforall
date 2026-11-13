@@ -8,7 +8,7 @@ use crate::{
         sql::{Sql, technique_from_db},
     },
     errors::AppError,
-    providers::sqlite::sqlite,
+    providers::sqlite::{sqlite, summary::forget_team},
     shapes::{enums::EventTypeEnum, snapshot::EventEntry, team::TeamEntry},
 };
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
@@ -215,7 +215,8 @@ pub(crate) fn write_team(tx: &Transaction, team: &TeamEntry) -> Result<(), AppEr
         )
         .map_err(sqlite)?;
     }
-    Ok(())
+    // as `team.json` did with the index of the files
+    forget_team(tx, team.id)
 }
 
 /// The ids of the matches of team A not removed, as written.

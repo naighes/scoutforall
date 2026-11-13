@@ -9,6 +9,8 @@
 //! - Nothing is removed (D7): a removed team, match, set or event is
 //!   marked deleted and no longer read. The roster of a match and the
 //!   lineups of a set aren't data of their own: they're replaced.
+//! - What the lists show of a match is cached (`summary`), updated in the
+//!   transaction of each write.
 //! - A player removed from a team stays in it, deleted, for the matches
 //!   that tell of them (roster, lineup, event): the others are no longer
 //!   read, as the files leave them out.
@@ -17,6 +19,7 @@ pub mod matches;
 pub mod queue;
 mod rows;
 pub mod sets;
+mod summary;
 pub mod teams;
 
 use crate::errors::{AppError, IOError};

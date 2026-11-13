@@ -273,6 +273,8 @@ CREATE TABLE upload_queue (
 
 -- D7: a cache, from A's side, updated in the transaction of the event,
 -- rebuilt from the events when missing; never synced. Rows are removed.
+-- A row replayed by another version of the app counts as missing: the
+-- rules of a version decide the status of a match.
 CREATE TABLE match_summary (
     match_id        TEXT PRIMARY KEY REFERENCES matches (id) ON DELETE CASCADE,
     sets            INTEGER NOT NULL CHECK (sets BETWEEN 0 AND 5),
@@ -281,5 +283,7 @@ CREATE TABLE match_summary (
     finished        INTEGER NOT NULL CHECK (finished IN (0, 1)),
     -- the set to resume, if any
     resume          INTEGER CHECK (resume BETWEEN 1 AND 5),
-    next_set_number INTEGER CHECK (next_set_number BETWEEN 1 AND 5)
+    next_set_number INTEGER CHECK (next_set_number BETWEEN 1 AND 5),
+    -- of the app that replayed the match
+    version         TEXT NOT NULL CHECK (version <> '')
 ) STRICT;

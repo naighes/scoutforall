@@ -8,6 +8,7 @@ use crate::{
             Database, not_found,
             rows::{team_ids, team_rows, tells_of, write_team},
             sqlite,
+            summary::forget_team,
         },
         team_reader::TeamReader,
         team_writer::{PlayerInput, TeamInput, TeamWriter},
@@ -177,8 +178,8 @@ impl TeamWriter for SqliteTeamWriter {
                     params![Sql(*team_id)],
                 )
             })
-            .map(|_| ())
-            .map_err(sqlite)
+            .map_err(sqlite)?;
+            forget_team(tx, *team_id)
         })
     }
 }
