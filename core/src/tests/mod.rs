@@ -37,6 +37,7 @@ mod lineup_scenario_tests;
 mod lineup_tests;
 mod match_form_tests;
 mod match_index_tests;
+mod migrate_tests;
 mod pinned_teams_tests;
 mod player_form_tests;
 mod point_sequence_tests;

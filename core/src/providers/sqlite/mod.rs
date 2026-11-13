@@ -19,7 +19,7 @@ pub mod matches;
 pub mod queue;
 pub(crate) mod rows;
 pub mod sets;
-mod summary;
+pub(crate) mod summary;
 pub mod teams;
 
 use crate::errors::{AppError, IOError};
