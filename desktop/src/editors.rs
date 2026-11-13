@@ -1,4 +1,5 @@
-//! The forms of a team, of a player and of a match, new or saved: the
+//! The forms of a team, of a player, of a match, new or saved, and of a
+//! competition (only edited: created in the form of a match): the
 //! fields of `form`, saved through the core, which checks them. An error
 //! takes the keys to its field.
 
@@ -18,10 +19,13 @@ use {
             text::Wrapping,
         },
     },
-    scout4all_core::{match_form::MatchForm, player_form::PlayerForm, team_form::TeamForm},
+    scout4all_core::{
+        competition_form::CompetitionForm, match_form::MatchForm, player_form::PlayerForm,
+        team_form::TeamForm,
+    },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        ClassificationChoice, CompetitionChoice, ExistingPlayer, FormatChoice, GenderChoice,
+        ClassificationChoice, CompetitionChoice, CompetitionField, ExistingPlayer, FormatChoice, GenderChoice,
         MatchField, MatchRoster, MobileError, OpponentChoice, PlayerField, RoleChoice,
         RosterPlayer, Scout4All, SeasonPlayer, StageChoice, TeamField, TeamListing,
     },
@@ -70,6 +74,21 @@ const TEAM_YEAR: usize = 1;
 const TEAM_CLASSIFICATION: usize = 2;
 const TEAM_GENDER: usize = 3;
 const TEAM_COUNTRY: usize = 4;
+
+/// A competition (D12), only edited.
+pub struct CompetitionEditor {
+    id: uuid::Uuid,
+    formats: Vec<FormatChoice>,
+    genders: Vec<GenderChoice>,
+}
+
+// the fields of the competition
+const COMPETITION_NAME: usize = 0;
+const COMPETITION_SEASON: usize = 1;
+const COMPETITION_FORMAT: usize = 2;
+const COMPETITION_GENDER: usize = 3;
+const COMPETITION_COUNTRY: usize = 4;
+const COMPETITION_FRIENDLY: usize = 5;
 
 pub struct PlayerEditor {
     team_id: String,
@@ -282,6 +301,7 @@ fn linked_competition(
 
 pub enum Kind {
     Team(TeamEditor),
+    Competition(CompetitionEditor),
     Player(Box<PlayerEditor>),
     Match(Box<MatchEditor>),
     Season(Box<SeasonEditor>),
@@ -421,6 +441,49 @@ impl Editor {
                 genders,
             }),
         }
+    }
+
+    /// The competition `id` to edit, as saved.
+    pub fn competition(
+        core: &Scout4All,
+        s: &Strings,
+        id: uuid::Uuid,
+    ) -> Result<Editor, MobileError> {
+        let start = core.competition_form(id)?;
+        let formats = core.competition_formats();
+        let genders = core.genders();
+        let country = start
+            .country
+            .map(|c| core.country_name(c))
+            .unwrap_or_default();
+        let fields = vec![
+            Field::text(s.name, start.name.clone()),
+            Field::text(s.season, start.season.clone()).hint(s.season_placeholder),
+            Field::choice(
+                s.competition_format,
+                formats.iter().map(|f| f.name.clone()).collect(),
+                formats
+                    .iter()
+                    .position(|f| f.value == start.format)
+                    .unwrap_or(0),
+            ),
+            Field::choice(
+                s.gender,
+                with_empty(genders.iter().map(|g| g.name.clone())),
+                option_of(genders.iter().map(|g| g.value), start.gender),
+            ),
+            Field::search(s.country, country).hint(s.search_country),
+            Field::check(s.friendly_default, start.friendly, false),
+        ];
+        Ok(Editor {
+            form: Form::new(s.edit_competition, fields),
+            namesake: None,
+            kind: Kind::Competition(CompetitionEditor {
+                id,
+                formats,
+                genders,
+            }),
+        })
     }
 
     pub fn player(
@@ -886,7 +949,7 @@ impl Editor {
         let team = match &self.kind {
             Kind::Match(m) => m.team_id.clone(),
             Kind::Season(t) => t.team_id.clone(),
-            Kind::Team(_) | Kind::Player(_) => return,
+            Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => return,
         };
         let roles = core.roles(team);
         let fields = vec![
@@ -918,7 +981,7 @@ impl Editor {
         match &mut self.kind {
             Kind::Match(m) => Some(&mut m.correcting),
             Kind::Season(t) => Some(&mut t.correcting),
-            Kind::Team(_) | Kind::Player(_) => None,
+            Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => None,
         }
     }
 
@@ -927,7 +990,7 @@ impl Editor {
         match &self.kind {
             Kind::Match(m) => m.correcting.as_ref(),
             Kind::Season(t) => t.correcting.as_ref(),
-            Kind::Team(_) | Kind::Player(_) => None,
+            Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => None,
         }
     }
 
@@ -982,7 +1045,7 @@ impl Editor {
             Kind::Season(t) => core
                 .correct_season_player(t.team_id.clone(), t.players.clone(), player, number, role)
                 .map(Corrected::Season),
-            Kind::Team(_) | Kind::Player(_) => return,
+            Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => return,
         };
         match corrected {
             Ok(Corrected::Roster(roster)) => self.set_roster(*roster),
@@ -1045,6 +1108,11 @@ impl Editor {
                 let written = self.form.text(TEAM_COUNTRY);
                 self.form
                     .suggest(TEAM_COUNTRY, countries::suggestions(core, &written));
+            }
+            (Kind::Competition(_), COMPETITION_COUNTRY) => {
+                let written = self.form.text(COMPETITION_COUNTRY);
+                self.form
+                    .suggest(COMPETITION_COUNTRY, countries::suggestions(core, &written));
             }
             // another team A: its players, the teams it can meet
             (Kind::Match(m), MATCH_TEAM) => {
@@ -1127,6 +1195,35 @@ impl Editor {
                 let form = team_form_of(core, s, f, &t.classifications, &t.genders)?;
                 core.save_new_season(t.team_id.clone(), form, t.players.clone())
             }
+            Kind::Competition(c) => {
+                let country = countries::chosen(core, &f.text(COMPETITION_COUNTRY)).map_err(
+                    |()| MobileError::InvalidCompetition {
+                        field: CompetitionField::Country,
+                        reason: s.no_country_found.to_string(),
+                    },
+                )?;
+                let form = CompetitionForm {
+                    name: f.text(COMPETITION_NAME),
+                    season: f.text(COMPETITION_SEASON),
+                    format: c
+                        .formats
+                        .get(f.index(COMPETITION_FORMAT))
+                        .map_or(scout4all_core::domain::CompetitionFormat::League, |format| {
+                            format.value
+                        }),
+                    gender: f
+                        .index(COMPETITION_GENDER)
+                        .checked_sub(1)
+                        .and_then(|i| c.genders.get(i))
+                        .map(|g| g.value),
+                    country,
+                    friendly: matches!(
+                        f.fields.get(COMPETITION_FRIENDLY).map(|x| &x.value),
+                        Some(form::Value::Check { on: true, .. })
+                    ),
+                };
+                core.save_competition(c.id, form).map(|()| c.id.to_string())
+            }
             Kind::Player(p) => {
                 let form = PlayerForm {
                     name: f.text(PLAYER_NAME),
@@ -1167,6 +1264,10 @@ impl Editor {
                 PlayerField::Role => PLAYER_ROLE,
                 PlayerField::BirthDate => PLAYER_BIRTH,
                 PlayerField::Height => PLAYER_HEIGHT,
+            }),
+            MobileError::InvalidCompetition { field, .. } => Some(match field {
+                CompetitionField::Name => COMPETITION_NAME,
+                CompetitionField::Country => COMPETITION_COUNTRY,
             }),
             MobileError::InvalidMatch { field, .. } => Some(match field {
                 MatchField::Opponent => MATCH_OPPONENT,
@@ -1214,7 +1315,7 @@ impl Editor {
                     match self.kind {
                         Kind::Match(_) => self.show(MatchStep::of(field)),
                         Kind::Season(_) => self.show_season(field >= SEASON_PLAYERS),
-                        Kind::Team(_) | Kind::Player(_) => {}
+                        Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => {}
                     }
                     self.form.focused = field;
                 }

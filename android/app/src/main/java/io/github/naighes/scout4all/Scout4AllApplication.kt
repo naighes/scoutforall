@@ -158,6 +158,7 @@ val MobileException.reason: String
         is MobileException.InvalidTeam -> reason
         is MobileException.InvalidPlayer -> reason
         is MobileException.InvalidMatch -> reason
+        is MobileException.InvalidCompetition -> reason
         is MobileException.Scouting -> reason
         is MobileException.Namesake -> reason
     }.replaceFirstChar { it.titlecase(Locale.getDefault()) }

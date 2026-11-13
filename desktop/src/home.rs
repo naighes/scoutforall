@@ -1,7 +1,7 @@
 //! The home: the matches in progress, the recent ones and the teams side by
 //! side. ← → (or ⇧Tab Tab) between them, ↑ ↓ in the list, Enter opens: a
 //! match in progress straight to its set, a recent one, a team; `n` a new
-//! team.
+//! team, `c` the competitions.
 
 use {
     crate::{
@@ -53,6 +53,7 @@ pub enum Message {
     Team(String),
     NewTeam,
     Import,
+    Competitions,
     Form(form::Message),
 }
 
@@ -63,6 +64,7 @@ pub enum Outcome {
     Team(String),
     /// an archive or a DataVolley file to choose
     Import,
+    Competitions,
 }
 
 const IN_PROGRESS: usize = 0;
@@ -158,6 +160,7 @@ impl HomeScreen {
             (Message::Match(team, m), None) => Outcome::Match(team, m),
             (Message::Team(team), None) => Outcome::Team(team),
             (Message::Import, None) => Outcome::Import,
+            (Message::Competitions, None) => Outcome::Competitions,
             (Message::NewTeam, None) => {
                 self.new_team(core, s);
                 Outcome::Stay
@@ -194,6 +197,7 @@ impl HomeScreen {
                 None
             }
             k if k == key!(i) => return Outcome::Import,
+            k if k == key!(c) => return Outcome::Competitions,
             _ => None,
         };
         if let (Some(index), Some(slot)) = (moved, self.selected.get_mut(self.panel)) {
@@ -211,6 +215,7 @@ impl HomeScreen {
                 ("Enter".to_string(), s.open.to_string()),
                 ("n".to_string(), s.new_team.to_string()),
                 ("i".to_string(), s.import_archive.to_string()),
+                ("c".to_string(), s.competitions.to_string()),
                 ("F2".to_string(), s.settings.to_string()),
             ],
         }
@@ -307,7 +312,15 @@ impl HomeScreen {
         ];
         row![
             list(s.in_progress, vec![], in_progress, s.no_matches, c),
-            list(s.recent, vec![], recent, s.no_matches, c),
+            // the competitions their matches are played in: the teams
+            // have no room left for a third action in a small window
+            list(
+                s.recent,
+                vec![ui::pill(s.competitions, false, Some(Message::Competitions), c)],
+                recent,
+                s.no_matches,
+                c
+            ),
             list(s.teams, actions, teams, "", c),
         ]
         .spacing(14)

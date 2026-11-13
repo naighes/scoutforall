@@ -53,6 +53,7 @@ mod set_start_tests;
 mod situation_tests;
 mod snapshot_tests;
 mod sqlite_archive_tests;
+mod sqlite_competition_tests;
 mod sqlite_match_form_tests;
 mod sqlite_person_tests;
 mod sqlite_played_tests;

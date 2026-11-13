@@ -14,6 +14,7 @@ use scout4all_core::{
         upload::{UploadStep, upload_next, upload_url},
     },
     benchmark::{Measure, band, grade},
+    competition_form::{CompetitionForm, CompetitionFormError},
     db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
     domain::{CompetitionFormat, Stage},
@@ -366,6 +367,18 @@ pub struct MatchForm {
     pub numbers: Vec<RosterNumber>,
 }
 
+/// The form of a competition: edited in their list, created in the form
+/// of a match.
+#[uniffi::remote(Record)]
+pub struct CompetitionForm {
+    pub name: String,
+    pub format: CompetitionFormat,
+    pub season: String,
+    pub gender: Option<GenderEnum>,
+    pub country: Option<CountryCode>,
+    pub friendly: bool,
+}
+
 #[uniffi::remote(Record)]
 pub struct RosterNumber {
     pub player: Uuid,
@@ -430,6 +443,12 @@ pub enum MobileError {
     /// a field of the match form
     #[error("{reason}")]
     InvalidMatch { field: MatchField, reason: String },
+    /// a field of the form of a competition
+    #[error("{reason}")]
+    InvalidCompetition {
+        field: CompetitionField,
+        reason: String,
+    },
     /// a choice of the scout that doesn't apply, or an event not saved
     #[error("{reason}")]
     Scouting { reason: String },
@@ -497,6 +516,24 @@ impl From<PlayerFormError> for PlayerField {
             PlayerFormError::InvalidNumber | PlayerFormError::NumberInUse => PlayerField::Number,
             PlayerFormError::InvalidBirthDate => PlayerField::BirthDate,
             PlayerFormError::InvalidHeight => PlayerField::Height,
+        }
+    }
+}
+
+/// The fields of the form of a competition an error can be about: the
+/// country is the app's to find among the ones it offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CompetitionField {
+    Name,
+    Country,
+}
+
+impl From<CompetitionFormError> for CompetitionField {
+    fn from(e: CompetitionFormError) -> Self {
+        match e {
+            CompetitionFormError::EmptyName | CompetitionFormError::AlreadyThere => {
+                CompetitionField::Name
+            }
         }
     }
 }
@@ -649,6 +686,17 @@ pub struct CompetitionChoice {
     pub format: CompetitionFormat,
     /// the default of its matches
     pub friendly: bool,
+}
+
+/// A competition in their list: its season and format, how many matches
+/// are played in it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CompetitionListing {
+    pub id: Uuid,
+    pub name: String,
+    pub season: Option<String>,
+    pub format: String,
+    pub matches: u32,
 }
 
 /// A gender as the form offers it.
@@ -3434,6 +3482,47 @@ impl Scout4All {
             .collect())
     }
 
+    /// The competitions in their list, by name, the most recent season
+    /// first, each with its matches.
+    pub fn competition_listings(&self) -> Result<Vec<CompetitionListing>, MobileError> {
+        let labels = self.language.labels();
+        Ok(self
+            .competitions
+            .read_counted()?
+            .into_iter()
+            .map(|(c, matches)| CompetitionListing {
+                id: c.id,
+                name: c.name,
+                season: c.season,
+                format: c.format.name(labels).to_string(),
+                matches,
+            })
+            .collect())
+    }
+
+    /// The form of the competition, to edit it.
+    pub fn competition_form(&self, id: Uuid) -> Result<CompetitionForm, MobileError> {
+        Ok(CompetitionForm::of(&self.competition(id)?))
+    }
+
+    /// Saves the competition as edited: its matches keep their own
+    /// friendly.
+    pub fn save_competition(&self, id: Uuid, form: CompetitionForm) -> Result<(), MobileError> {
+        let existing = self.competition(id)?;
+        let edited = form
+            .validate(&existing, &self.competitions.read_all()?)
+            .map_err(|e| MobileError::InvalidCompetition {
+                field: e.into(),
+                reason: e.message(self.language.labels()),
+            })?;
+        Ok(self.competitions.update(&edited)?)
+    }
+
+    /// Removes the competition: its matches stay, without it.
+    pub fn delete_competition(&self, id: Uuid) -> Result<(), MobileError> {
+        Ok(self.competitions.remove(id)?)
+    }
+
     /// The stages of a competition a match may be played in.
     pub fn stages(&self) -> Vec<StageChoice> {
         let labels = self.language.labels();
@@ -4868,6 +4957,16 @@ impl Scout4All {
             .collect())
     }
 
+    /// The competition not removed.
+    fn competition(&self, id: Uuid) -> Result<scout4all_core::domain::Competition, MobileError> {
+        self.competitions
+            .read(id)?
+            .filter(|c| !c.deleted)
+            .ok_or_else(|| MobileError::Failed {
+                reason: format!("competition {id} not found"),
+            })
+    }
+
     /// The match form changed by `change`, with the players of its roster.
     fn roster_after(
         &self,
@@ -6166,6 +6265,85 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Campionato", "Coppa", "Torneo"]
         );
+    }
+
+    /// The competitions in their list (TODO/001, step 23): counted with
+    /// their matches, edited (a name taken refused on the name), removed
+    /// leaving their matches without one.
+    #[test]
+    fn a_competition_is_listed_edited_and_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        for n in 1..=7 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let date = "2026-10-24T18:00:00+02:00";
+        let mut matches = vec![];
+        for (opponent, competition) in [("Arezzo", "Serie C"), ("Livorno", "Coppa")] {
+            let form = MatchForm {
+                competition: competition.into(),
+                ..match_form(opponent, date, "8")
+            };
+            matches.push(app.save_match(team.clone(), None, form).unwrap());
+        }
+        let listed = app.competition_listings().unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|c| (c.name.as_str(), c.season.as_deref(), c.format.as_str(), c.matches))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Coppa", Some("2026/2027"), "Campionato", 1),
+                ("Serie C", Some("2026/2027"), "Campionato", 1),
+            ]
+        );
+        let (coppa, serie_c) = (listed[0].id, listed[1].id);
+
+        let form = app.competition_form(coppa).unwrap();
+        let taken = app.save_competition(
+            coppa,
+            CompetitionForm {
+                name: "serie c".into(),
+                ..form.clone()
+            },
+        );
+        assert!(matches!(
+            taken,
+            Err(MobileError::InvalidCompetition { field: CompetitionField::Name, ref reason })
+                if reason.contains("stagione")
+        ));
+        app.save_competition(
+            coppa,
+            CompetitionForm {
+                name: "Coppa Toscana".into(),
+                format: CompetitionFormat::Cup,
+                ..form
+            },
+        )
+        .unwrap();
+        let edited = app.competition_form(coppa).unwrap();
+        assert_eq!(
+            (edited.name.as_str(), edited.format),
+            ("Coppa Toscana", CompetitionFormat::Cup)
+        );
+        let read = app.match_form(team.clone(), matches[1].clone()).unwrap();
+        assert_eq!(read.competition, "Coppa Toscana");
+
+        app.delete_competition(serie_c).unwrap();
+        assert_eq!(app.competition_listings().unwrap().len(), 1);
+        assert!(app.competition_form(serie_c).is_err());
+        assert!(app.delete_competition(serie_c).is_err());
+        let read = app.match_form(team.clone(), matches[0].clone()).unwrap();
+        assert_eq!((read.competition.as_str(), read.competition_id), ("", None));
+        // the match stays, saved again as it is
+        app.save_match(team, Some(matches[0].clone()), read).unwrap();
     }
 
     /// Number and role corrected on the score sheet: a wrong one refused

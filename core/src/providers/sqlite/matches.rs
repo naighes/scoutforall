@@ -12,7 +12,7 @@ use crate::{
         match_writer::MatchWriter,
         sqlite::{
             Database,
-            competitions::{competition_row, insert_competition},
+            competitions::{competition_row, competition_rows, insert_competition},
             not_found,
             rows::{
                 insert_match, insert_roster_entry, match_ids, match_rows, matches_as_b, team_row,
@@ -387,7 +387,8 @@ fn saved_team_b(
 
 /// The competition as saved for a match of team A `team`: one not
 /// removed, or a new one of the season of A (its year and the next), its
-/// gender and country.
+/// gender and country; a new one with the name of one of that season is
+/// that one.
 fn saved_competition(
     tx: &Transaction,
     team: &TeamEntry,
@@ -400,18 +401,30 @@ fn saved_competition(
             .map(|c| Some(c.id))
             .ok_or_else(|| not_found(&format!("competition {id}"))),
         Some(CompetitionInput::New { name, format }) => {
-            let c = Competition {
-                id: Uuid::new_v4(),
-                name: name.clone(),
-                format: *format,
-                season: Some(format!("{}/{}", team.year, team.year.saturating_add(1))),
-                gender: team.gender,
-                country: team.country,
-                friendly: false,
-                deleted: false,
-            };
-            insert_competition(tx, &c)?;
-            Ok(Some(c.id))
+            let season = format!("{}/{}", team.year, team.year.saturating_add(1));
+            // the one of the name and the season if there's one already
+            // (the form of a competition keeps them apart): no twin
+            let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
+            let there = competition_rows(tx)?.into_iter().find(|c| {
+                same(&c.name, name) && same(c.season.as_deref().unwrap_or_default(), &season)
+            });
+            match there {
+                Some(c) => Ok(Some(c.id)),
+                None => {
+                    let c = Competition {
+                        id: Uuid::new_v4(),
+                        name: name.clone(),
+                        format: *format,
+                        season: Some(season),
+                        gender: team.gender,
+                        country: team.country,
+                        friendly: false,
+                        deleted: false,
+                    };
+                    insert_competition(tx, &c)?;
+                    Ok(Some(c.id))
+                }
+            }
         }
     }
 }

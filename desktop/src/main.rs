@@ -9,6 +9,7 @@
 
 mod calendar;
 mod charts;
+mod competitions;
 mod countries;
 mod court;
 mod dvw;
@@ -117,6 +118,7 @@ fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys, Option<bool>) {
 
 enum Screen {
     Home(Box<HomeScreen>),
+    Competitions(Box<competitions::CompetitionsScreen>),
     Team(Box<TeamScreen>),
     Match(Box<MatchScreen>),
     Start(Box<start::StartScreen>),
@@ -136,6 +138,8 @@ enum Go {
     /// a file made, to share or save: what it shows, the file
     Share(String, PathBuf),
     Home,
+    /// the competitions, from the home
+    Competitions,
     Team(String),
     Match(String, String),
     Stats(String, String),
@@ -240,6 +244,7 @@ enum Message {
     Quit,
     OpenSettings,
     Home(home::Message),
+    Competitions(competitions::Message),
     Team(team::Message),
     Match(game::Message),
     Scouting(scouting::Message),
@@ -398,6 +403,7 @@ impl App {
         match (&self.settings, &self.screen) {
             (Some(_), _) => self.strings.settings.to_string(),
             (None, Screen::Home(_)) => String::new(),
+            (None, Screen::Competitions(_)) => self.strings.competitions.to_string(),
             (None, Screen::Team(screen)) => screen.title(),
             (None, Screen::Match(screen)) => screen.title(),
             (None, Screen::Start(screen)) => screen.title(),
@@ -446,6 +452,8 @@ impl App {
             Go::Home => core
                 .home()
                 .map(|home| Screen::Home(Box::new(HomeScreen::new(home)))),
+            Go::Competitions => competitions::CompetitionsScreen::new(core)
+                .map(|screen| Screen::Competitions(Box::new(screen))),
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
             Go::Match(team, m) => {
                 MatchScreen::new(core, team, m).map(|m| Screen::Match(Box::new(m)))
@@ -729,6 +737,7 @@ impl App {
     fn here(&self) -> Go {
         match &self.screen {
             Screen::Home(_) => Go::Home,
+            Screen::Competitions(_) => Go::Competitions,
             Screen::Team(t) => Go::Team(t.team_id.clone()),
             Screen::Match(m) => Go::Match(m.team_id.clone(), m.match_id.clone()),
             Screen::Stats(st) => match st.match_id() {
@@ -819,6 +828,7 @@ impl App {
             }
             (Some(settings), _) => settings.focus_id(),
             (None, Screen::Home(screen)) => screen.focus_id(),
+            (None, Screen::Competitions(screen)) => screen.focus_id(),
             (None, Screen::Team(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
             (None, Screen::Dvw(screen)) => screen.focus_id(),
@@ -1243,6 +1253,10 @@ impl App {
                 self.error = None;
                 home_go(screen.key(&core, s, ck))
             }
+            (Message::Competitions(m), Screen::Competitions(screen)) => {
+                competitions_go(screen.update(s, m))
+            }
+            (Message::Key(ck), Screen::Competitions(screen)) => competitions_go(screen.key(s, ck)),
             (Message::Team(m), Screen::Team(screen)) => {
                 team_go(&screen.team_id.clone(), screen.update(s, m))
             }
@@ -1351,6 +1365,11 @@ impl App {
                 (None, None, Screen::Home(screen)) => {
                     (screen.view(s, c).map(Message::Home), screen.hints(s), false)
                 }
+                (None, None, Screen::Competitions(screen)) => (
+                    screen.view(s, c).map(Message::Competitions),
+                    screen.hints(s),
+                    true,
+                ),
                 (None, None, Screen::Team(screen)) => {
                     (screen.view(s, c).map(Message::Team), screen.hints(s), true)
                 }
@@ -1578,6 +1597,14 @@ fn home_go(outcome: home::Outcome) -> Go {
         home::Outcome::Scout(open) => Go::Scout(open),
         home::Outcome::Match(team, m) => Go::Match(team, m),
         home::Outcome::Team(team) => Go::Team(team),
+        home::Outcome::Competitions => Go::Competitions,
+    }
+}
+
+fn competitions_go(outcome: competitions::Outcome) -> Go {
+    match outcome {
+        competitions::Outcome::Stay => Go::Stay,
+        competitions::Outcome::Back => Go::Home,
     }
 }
 
