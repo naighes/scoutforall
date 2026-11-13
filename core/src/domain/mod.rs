@@ -2,12 +2,14 @@
 //! `migrations/0001_schema.sql`): persons apart from the teams they're
 //! members of, matches between team A and team B (a team or only a name),
 //! competitions, the roster of each team in a match with its numbers and
-//! roles, sets with a lineup per side, one event per touch.
+//! roles, sets with a lineup per side, one event per touch, the video of a
+//! match.
 //!
 //! One type per table, the columns as Rust values; `sql` converts each
 //! value to and from the database, `adapters` turns the rows into the
-//! types of today (`TeamEntry`, `MatchEntry`, `SetEntry`) and back: the
-//! replay, the statistics and the interfaces keep using those.
+//! types of today (`TeamEntry`, `MatchEntry`, `SetEntry`, `VideoProfile`)
+//! and back: the replay, the statistics and the interfaces keep using
+//! those.
 
 pub mod adapters;
 pub mod sql;
@@ -18,7 +20,8 @@ use crate::shapes::{
     r#match::MatchSource,
     snapshot::EventEntry,
 };
-use chrono::{DateTime, FixedOffset, NaiveDate};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use std::num::NonZeroI64;
 use uuid::Uuid;
 
 /// A person, in one place whatever the teams (D5). Deleted: only the id
@@ -272,4 +275,44 @@ pub struct Event {
     pub side: Side,
     pub entry: EventEntry,
     pub deleted: bool,
+}
+
+/// The video of a match (`VideoProfile`), of this device: its files are
+/// paths of this computer. Its files and corrections are rows of their
+/// own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchVideo {
+    pub match_id: Uuid,
+    /// chosen by the user; none: found by itself (`video::anchor`)
+    pub anchor: Option<VideoAnchor>,
+}
+
+/// The time of an event and the moment of the video it happens at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoAnchor {
+    pub at: DateTime<Utc>,
+    /// from the start of the first file
+    pub offset_ms: i64,
+    /// the event chosen by the user, if any: the time is its own
+    pub event: Option<Uuid>,
+}
+
+/// A file of the video of a match, at its place among them: they're
+/// played one after the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchVideoFile {
+    pub match_id: Uuid,
+    pub position: u16,
+    /// relative to the data folder when in it, absolute otherwise
+    pub path: String,
+    pub start: Option<DateTime<FixedOffset>>,
+}
+
+/// An event of a match put at its own time: `by_ms` from where the anchor
+/// puts it (earlier when negative); where the anchor puts it isn't one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoCorrection {
+    pub match_id: Uuid,
+    pub event_id: Uuid,
+    pub by_ms: NonZeroI64,
 }

@@ -14,16 +14,24 @@
 //!   roster, and plays at home only when A does (a neutral court isn't).
 //! - The events of a set are A's, in their order, the undone ones left
 //!   out.
+//! - The video refers to an event by its id; the profile of today by the
+//!   set and the index among the events of the set (`EventRef`), as
+//!   `SetEntry` has them. An event the profile refers to that isn't one
+//!   of those (a typo, one undone since) isn't written; read back, a
+//!   reference to an event no longer among them (undone, of a removed set,
+//!   of B) is left out: the anchor keeps its time, the correction goes.
 
 use crate::{
     domain::{
-        Event, Home, LegacyId, Match, MatchSet, Membership, Person, RosterEntry, ScoutingMode,
-        SetLineup, Side, Team, TeamRef,
+        Event, Home, LegacyId, Match, MatchSet, MatchVideo, MatchVideoFile, Membership, Person,
+        RosterEntry, ScoutingMode, SetLineup, Side, Team, TeamRef, VideoAnchor, VideoCorrection,
     },
     errors::{AppError, IOError},
     player_form::removed,
     shapes::{r#match::MatchEntry, player::PlayerEntry, set::SetEntry, team::TeamEntry},
+    video::{Anchor, Correction, EventRef, VIDEO_PROFILE_VERSION, VideoFile, VideoProfile},
 };
+use std::{collections::BTreeMap, num::NonZeroI64};
 use uuid::Uuid;
 
 fn not_consistent(message: String) -> AppError {
@@ -345,12 +353,7 @@ impl SetRows {
                     self.row.number, self.row.match_id
                 ))
             })?;
-        let mut events: Vec<&Event> = self
-            .events
-            .iter()
-            .filter(|e| e.side == Side::A && !e.deleted)
-            .collect();
-        events.sort_by_key(|e| e.seq);
+        let events = self.events_of_a();
         Ok(SetEntry {
             set_number: self.row.number,
             serving_team: self.row.serving.to_a(),
@@ -361,5 +364,170 @@ impl SetRows {
             lineup_rules: self.row.lineup_rules,
             events: events.into_iter().map(|e| e.entry.clone()).collect(),
         })
+    }
+
+    /// The events of A not undone, in their order: those of `SetEntry`.
+    pub fn events_of_a(&self) -> Vec<&Event> {
+        let mut events: Vec<&Event> = self
+            .events
+            .iter()
+            .filter(|e| e.side == Side::A && !e.deleted)
+            .collect();
+        events.sort_by_key(|e| e.seq);
+        events
+    }
+}
+
+/// The events of the sets of a match as `SetEntry` has them, by
+/// `EventRef` and by id.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EventsOfA {
+    by_ref: BTreeMap<(u8, usize), Uuid>,
+    by_id: BTreeMap<Uuid, EventRef>,
+}
+
+impl EventsOfA {
+    pub fn of(sets: &[SetRows]) -> Self {
+        let pairs: Vec<(EventRef, Uuid)> = sets
+            .iter()
+            .filter(|s| !s.row.deleted)
+            .flat_map(|s| {
+                s.events_of_a()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, e)| {
+                        (
+                            EventRef {
+                                set_number: s.row.number,
+                                index,
+                            },
+                            e.id,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        EventsOfA {
+            by_ref: pairs
+                .iter()
+                .map(|(r, id)| ((r.set_number, r.index), *id))
+                .collect(),
+            by_id: pairs.into_iter().map(|(r, id)| (id, r)).collect(),
+        }
+    }
+
+    pub fn id(&self, event: EventRef) -> Option<Uuid> {
+        self.by_ref.get(&(event.set_number, event.index)).copied()
+    }
+
+    pub fn event_ref(&self, id: Uuid) -> Option<EventRef> {
+        self.by_id.get(&id).copied()
+    }
+}
+
+/// The video of a match with its files and its corrections: the
+/// corrections in the order of the ids of their events (a set: the order
+/// of the profile doesn't count).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoRows {
+    pub row: MatchVideo,
+    pub files: Vec<MatchVideoFile>,
+    pub corrections: Vec<VideoCorrection>,
+}
+
+impl VideoRows {
+    /// The profile of match `match_id`, its events those of `events`.
+    /// Every event it refers to must be one of them. A correction of 0
+    /// isn't one (the event where the anchor puts it); of two for the same
+    /// event, the first counts (`VideoProfile::correction`).
+    pub fn of(
+        profile: &VideoProfile,
+        match_id: Uuid,
+        events: &EventsOfA,
+    ) -> Result<Self, AppError> {
+        let id_of = |event: EventRef| {
+            events.id(event).ok_or_else(|| {
+                not_consistent(format!(
+                    "video of match {match_id}: no event {} of set {}",
+                    event.index, event.set_number
+                ))
+            })
+        };
+        let anchor = profile
+            .anchor
+            .as_ref()
+            .map(|a| {
+                a.event.map(id_of).transpose().map(|event| VideoAnchor {
+                    at: a.at,
+                    offset_ms: a.offset_ms,
+                    event,
+                })
+            })
+            .transpose()?;
+        let files = profile
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                u16::try_from(i)
+                    .map(|position| MatchVideoFile {
+                        match_id,
+                        position,
+                        path: f.path.clone(),
+                        start: f.start,
+                    })
+                    .map_err(|_| not_consistent(format!("video file {i} of match {match_id}")))
+            })
+            .collect::<Result<_, _>>()?;
+        let mut corrections: BTreeMap<Uuid, VideoCorrection> = BTreeMap::new();
+        for c in &profile.corrections {
+            let event_id = id_of(c.event)?;
+            if let Some(by_ms) = NonZeroI64::new(c.by_ms) {
+                corrections.entry(event_id).or_insert(VideoCorrection {
+                    match_id,
+                    event_id,
+                    by_ms,
+                });
+            }
+        }
+        Ok(VideoRows {
+            row: MatchVideo { match_id, anchor },
+            files,
+            corrections: corrections.into_values().collect(),
+        })
+    }
+
+    /// The profile from A's side, its events those of `events`: the
+    /// corrections in the order of their events.
+    pub fn profile(&self, events: &EventsOfA) -> VideoProfile {
+        let mut files: Vec<&MatchVideoFile> = self.files.iter().collect();
+        files.sort_by_key(|f| f.position);
+        let mut corrections: Vec<Correction> = self
+            .corrections
+            .iter()
+            .filter_map(|c| {
+                events.event_ref(c.event_id).map(|event| Correction {
+                    event,
+                    by_ms: c.by_ms.get(),
+                })
+            })
+            .collect();
+        corrections.sort_by_key(|c| (c.event.set_number, c.event.index));
+        VideoProfile {
+            version: VIDEO_PROFILE_VERSION,
+            files: files
+                .into_iter()
+                .map(|f| VideoFile {
+                    path: f.path.clone(),
+                    start: f.start,
+                })
+                .collect(),
+            anchor: self.row.anchor.map(|a| Anchor {
+                at: a.at,
+                offset_ms: a.offset_ms,
+                event: a.event.and_then(|id| events.event_ref(id)),
+            }),
+            corrections,
+        }
     }
 }

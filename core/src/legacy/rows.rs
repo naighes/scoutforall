@@ -18,17 +18,21 @@
 //!   number of the team, as for a player out of the roster.
 //! - Every player the match tells of (lineups, events) must be of the
 //!   team: the rows of the events refer to the persons.
+//! - The video of a match refers to its events by set and index: one not
+//!   among the events of the match (undone after the profile was saved)
+//!   didn't count there and isn't moved; the anchor keeps its time.
 
 use crate::{
     domain::{
         LegacyId, Person, TeamRef,
-        adapters::{MatchRows, TeamRows},
+        adapters::{EventsOfA, MatchRows, TeamRows, VideoRows},
     },
     errors::{AppError, IOError},
     legacy::folder::{LegacyTeam, NotRead},
     logging::logger::log_info,
     shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry},
     storage::layout,
+    video::{Anchor, VideoProfile},
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -159,6 +163,36 @@ fn roster(team: &TeamEntry, m: &MatchEntry) -> Vec<Uuid> {
         })
         .map(|(id, _)| *id)
         .collect()
+}
+
+/// The rows of the video of match `m`, its profile `profile` (see the
+/// module).
+pub fn video_rows(profile: &VideoProfile, m: &MatchRows) -> Result<VideoRows, AppError> {
+    let events = EventsOfA::of(&m.sets);
+    let anchor = profile.anchor.as_ref().map(|a| Anchor {
+        event: a.event.filter(|e| events.id(*e).is_some()),
+        ..a.clone()
+    });
+    let corrections: Vec<_> = profile
+        .corrections
+        .iter()
+        .filter(|c| events.id(c.event).is_some())
+        .copied()
+        .collect();
+    let dropped = profile.corrections.len() - corrections.len()
+        + usize::from(anchor.as_ref().map(|a| a.event) != profile.anchor.as_ref().map(|a| a.event));
+    if dropped > 0 {
+        log_info(&format!(
+            "video of match {}: {dropped} references to events no longer there left out",
+            m.row.id
+        ));
+    }
+    let pruned = VideoProfile {
+        anchor,
+        corrections,
+        ..profile.clone()
+    };
+    VideoRows::of(&pruned, m.row.id, &events)
 }
 
 /// The rows of a data folder: the teams read, and each match read, or why

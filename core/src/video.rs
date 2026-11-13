@@ -2,8 +2,10 @@
 //! video, and where each event is in it.
 //!
 //! The profile is saved in `video.json`, next to the other files of the
-//! match: the older versions don't read it (they read `set_<n>.*` only), and
-//! the exports leave it out, since its paths are of this computer.
+//! match (`StoreVideoProfiles`), or in the database (`SqliteVideoProfiles`,
+//! TODO/001 step 15): the older versions don't read it (they read
+//! `set_<n>.*` only), and the exports leave it out, since its paths are of
+//! this computer.
 //!
 //! Where an event is: `offset = event.timestamp − anchor.at +
 //! anchor.offset_ms`. The anchor is chosen by the user (an event and the
@@ -27,10 +29,14 @@ use crate::{
     shapes::r#match::MatchEntry,
     storage::{Store, layout},
 };
+use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use uuid::Uuid;
 
 /// The version of `video.json` this version writes and reads: a newer one
@@ -233,6 +239,40 @@ pub async fn write_profile(
             };
             write_json(store, &profile_key(team_id, match_id), &saved).await
         }
+    }
+}
+
+/// Where the profiles of the videos of the matches are kept.
+#[async_trait]
+pub trait VideoProfiles: Send + Sync {
+    /// The profile of the match of team A `team_id`.
+    async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<StoredProfile, AppError>;
+
+    /// Saves the profile of the match of team A `team_id`.
+    async fn write(
+        &self,
+        team_id: &Uuid,
+        match_id: &str,
+        profile: &VideoProfile,
+    ) -> Result<(), AppError>;
+}
+
+/// The profiles in `video.json`, in the folder of each match.
+pub struct StoreVideoProfiles(pub Arc<dyn Store>);
+
+#[async_trait]
+impl VideoProfiles for StoreVideoProfiles {
+    async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<StoredProfile, AppError> {
+        read_profile(&*self.0, team_id, match_id).await
+    }
+
+    async fn write(
+        &self,
+        team_id: &Uuid,
+        match_id: &str,
+        profile: &VideoProfile,
+    ) -> Result<(), AppError> {
+        write_profile(&*self.0, team_id, match_id, profile).await
     }
 }
 

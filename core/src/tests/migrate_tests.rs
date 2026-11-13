@@ -3,7 +3,8 @@
 //! fixtures moves with its scores; a backup first, read back; a stop at
 //! any point and a run after it end as one run alone; a second run does
 //! nothing; what an old version writes again moves, once; what can't be
-//! read, converted or written stays, told, and the rest moves.
+//! read, converted or written stays, told, and the rest moves. The video
+//! of a match moves with it (step 15), also to a match moved before.
 
 #[cfg(test)]
 mod tests {
@@ -16,18 +17,22 @@ mod tests {
         localization::Language,
         providers::{
             match_reader::MatchReader,
-            sqlite::{Database, matches::SqliteMatchReader, teams::SqliteTeamReader},
+            sqlite::{
+                Database, matches::SqliteMatchReader, teams::SqliteTeamReader,
+                video::SqliteVideoProfiles,
+            },
             store::{
                 match_reader::StoreMatchReader, set_reader::StoreSetReader,
                 team_reader::StoreTeamReader,
             },
             team_reader::TeamReader,
         },
-        shapes::{set::SetEntry, team::TeamEntry},
+        shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
         storage::{Stamps, Store, StoreEntry, fs::FsStore},
         tests::{
             EN, LEGACY_VERSIONS as VERSIONS, LegacyScores, copy_dir, legacy_fixtures, legacy_scores,
         },
+        video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place, read_profile},
     };
     use async_trait::async_trait;
     use std::{
@@ -210,6 +215,15 @@ mod tests {
             ("sets", "SELECT count(*) FROM sets"),
             ("set_lineups", "SELECT count(*) FROM set_lineups"),
             ("events", "SELECT count(*) FROM events"),
+            ("match_videos", "SELECT count(*) FROM match_videos"),
+            (
+                "match_video_files",
+                "SELECT count(*) FROM match_video_files",
+            ),
+            (
+                "match_video_corrections",
+                "SELECT count(*) FROM match_video_corrections",
+            ),
             ("upload_queue", "SELECT count(*) FROM upload_queue"),
         ]
         .into_iter()
@@ -217,8 +231,7 @@ mod tests {
         .collect()
     }
 
-    /// The folder of the match with the video (from v0.15.0): its
-    /// `video.json` isn't moved yet (step 15), so it stays.
+    /// The folder of the match with the video (from v0.15.0).
     const VIDEO: &str = "2025-11-08_pallavolo_prato";
 
     fn has_video(version: &str) -> bool {
@@ -242,6 +255,7 @@ mod tests {
             let video = has_video(version);
             assert_eq!(migrated.teams, teams, "{version}");
             assert_eq!(migrated.matches, legacy_scores(version).len(), "{version}");
+            assert_eq!(migrated.videos, usize::from(video), "{version}");
             assert_eq!(migrated.already, 0, "{version}");
             let read = in_database(&db).await;
             assert_eq!(read, expected, "{version}");
@@ -271,35 +285,16 @@ mod tests {
                 .collect();
             assert_eq!(zipped, before, "{version}");
 
-            // what's left: the settings (the queue moves), and the match
-            // with the video, whole, in its team
+            // what's left: the settings (the queue moves)
             let after = data_files(&device.data());
             let kept: BTreeMap<String, Vec<u8>> = before
                 .iter()
-                .filter(|(key, _)| {
-                    (!key.contains('/') && key.as_str() != "upload_queue.json")
-                        || (video && key.contains(VIDEO))
-                        || (video
-                            && key.ends_with("/team.json")
-                            && before.keys().any(|k| {
-                                k.contains(VIDEO) && k.split('/').next() == key.split('/').next()
-                            }))
-                })
+                .filter(|(key, _)| !key.contains('/') && key.as_str() != "upload_queue.json")
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             assert_eq!(after, kept, "{version}");
             assert!(!device.data().join(".index.json").exists(), "{version}");
-            match video {
-                true => {
-                    assert_eq!(migrated.left.len(), 1, "{version}");
-                    assert!(migrated.left[0].folder.ends_with(VIDEO));
-                    assert_eq!(
-                        migrated.left[0].reason,
-                        EN.migration_files_kept.replace("{}", "video.json")
-                    );
-                }
-                false => assert_eq!(migrated.left, vec![], "{version}"),
-            }
+            assert_eq!(migrated.left, vec![], "{version}");
         }
     }
 
@@ -372,6 +367,11 @@ mod tests {
             &fresh.data().join(&team).join("2025-10-04_rivali_pisa"),
             &device.data().join(&team).join("2025-12-01_again"),
         );
+        std::fs::copy(
+            fresh.data().join(&team).join("team.json"),
+            device.data().join(&team).join("team.json"),
+        )
+        .unwrap();
         let second = device.migrate(&db).await;
         let backups = device.backups();
         assert_eq!(backups.len(), 2);
@@ -384,6 +384,14 @@ mod tests {
                 .ends_with("-2.zip"),
             "{backups:?}"
         );
+    }
+
+    /// How many matches the folder of a team has.
+    fn matches_of(team: &Path) -> usize {
+        std::fs::read_dir(team)
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().is_dir())
+            .count()
     }
 
     /// The team of the match `2025-10-04_rivali_pisa` and its folder.
@@ -653,13 +661,21 @@ mod tests {
         let fresh = Device::of("v0.18.0");
         let (team, folder) = first_match(&fresh.data());
         let again = device.data().join(&team).join("2025-10-04_rivali_pisa");
+        let team_json = || {
+            std::fs::copy(
+                fresh.data().join(&team).join("team.json"),
+                device.data().join(&team).join("team.json"),
+            )
+            .unwrap();
+        };
 
         // the same match, the same: its folder removed, nothing written
         copy_dir(&fresh.data().join(&team), &device.data().join(&team));
         let migrated = device.migrate(&db).await;
         assert_eq!((migrated.teams, migrated.matches), (0, 0));
-        // every match of the team (but the video's) was already there
-        assert!(migrated.already >= 1);
+        // every match of the team was already there, the video's too
+        assert_eq!(migrated.already, matches_of(&fresh.data().join(&team)));
+        assert_eq!(migrated.videos, 0);
         assert!(!again.exists());
         assert_eq!(rows(&db), rows_after);
         assert_eq!(in_database(&db).await, matches_after);
@@ -667,6 +683,7 @@ mod tests {
 
         // the same match, different (an event less): left, told
         copy_dir(&folder, &again);
+        team_json();
         let csv = again.join("set_1.csv");
         let content = std::fs::read_to_string(&csv).unwrap();
         let mut lines: Vec<&str> = content.lines().collect();
@@ -684,6 +701,7 @@ mod tests {
 
         // the same match with another opponent: left, told
         copy_dir(&folder, &again);
+        team_json();
         let descriptor = again.join("match.json");
         let mut json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&descriptor).unwrap()).unwrap();
@@ -699,6 +717,7 @@ mod tests {
 
         // the same match with a player less in its roster: left, told
         copy_dir(&folder, &again);
+        team_json();
         let descriptor = again.join("match.json");
         let mut json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&descriptor).unwrap()).unwrap();
@@ -716,6 +735,7 @@ mod tests {
         // (the team keeps its details)
         let new = device.data().join(&team).join("2025-12-01_rivali_pisa");
         copy_dir(&folder, &new);
+        team_json();
         let descriptor = device.data().join(&team).join("team.json");
         let mut json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&descriptor).unwrap()).unwrap();
@@ -820,6 +840,414 @@ mod tests {
             .find(|p| p.id.to_string() == player)
             .unwrap();
         assert_eq!(person.name, "Changed in the app");
+    }
+
+    /// The team (its folder) and the folder of the match with the video.
+    fn video_folder(root: &Path) -> (String, PathBuf) {
+        let team = std::fs::read_dir(root)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.join(VIDEO).exists())
+            .unwrap();
+        let name = team.file_name().unwrap().to_string_lossy().into_owned();
+        (name, team.join(VIDEO))
+    }
+
+    /// The id of the match moved from the folder `legacy_id`.
+    fn moved_id(db: &Database, legacy_id: &str) -> Option<String> {
+        db.read(|tx| {
+            Ok(tx
+                .query_row(
+                    "SELECT id FROM matches WHERE legacy_id = ?1",
+                    [legacy_id],
+                    |r| r.get(0),
+                )
+                .ok())
+        })
+        .unwrap()
+    }
+
+    /// The match with the video and its profile, in the database.
+    async fn video_in_database(db: &Database, team: &str) -> (MatchEntry, StoredProfile) {
+        let team = Uuid::parse_str(team).unwrap();
+        let id = moved_id(db, VIDEO).unwrap();
+        let team_entry = SqliteTeamReader::new(db.clone())
+            .read_single(&team)
+            .await
+            .unwrap();
+        let m = SqliteMatchReader::new(db.clone(), Language::default())
+            .read_single(&team_entry, &id)
+            .await
+            .unwrap();
+        let profile = SqliteVideoProfiles(db.clone())
+            .read(&team, &id)
+            .await
+            .unwrap();
+        (m, profile)
+    }
+
+    /// The profile of the video of the match in the folder.
+    async fn video_in_files(root: &Path, team: &str) -> StoredProfile {
+        read_profile(&FsStore::new(root), &Uuid::parse_str(team).unwrap(), VIDEO)
+            .await
+            .unwrap()
+    }
+
+    /// The folder of the match with the video and its team back, as the
+    /// fixture has them: as a version before the database (or before
+    /// step 15, which left the folder for its video) would.
+    fn restore_video_folder(device: &Device, version: &str) {
+        let fresh = Device::of(version);
+        let (team, folder) = video_folder(&fresh.data());
+        copy_dir(&folder, &device.data().join(&team).join(VIDEO));
+        std::fs::copy(
+            fresh.data().join(&team).join("team.json"),
+            device.data().join(&team).join("team.json"),
+        )
+        .unwrap();
+    }
+
+    /// Where every event of the match is in its video, as the desktop
+    /// shows it (`video_events`): its place, plus its correction.
+    fn placed(m: &MatchEntry, profile: &VideoProfile) -> Vec<Option<i64>> {
+        let durations = [600_000, 3_600_000];
+        m.sets
+            .iter()
+            .flat_map(|set| {
+                set.events.iter().enumerate().map(move |(index, e)| {
+                    let correction = profile.correction(EventRef {
+                        set_number: set.set_number,
+                        index,
+                    });
+                    place(profile, m, &durations, e.timestamp)
+                        .map(|ms| ms + correction.unwrap_or(0))
+                })
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn every_version_moves_the_video_of_its_match() {
+        for version in VERSIONS.into_iter().filter(|v| has_video(v)) {
+            let device = Device::of(version);
+            let (team, _) = video_folder(&device.data());
+            let StoredProfile::Profile(in_files) = video_in_files(&device.data(), &team).await
+            else {
+                panic!("{version}: no video");
+            };
+            let store: Arc<dyn Store> = Arc::new(device.store());
+            let team_id = Uuid::parse_str(&team).unwrap();
+            let team_entry = StoreTeamReader::new(Arc::clone(&store), Language::default())
+                .read_single(&team_id)
+                .await
+                .unwrap();
+            let m_in_files = StoreMatchReader::new(
+                Arc::clone(&store),
+                Arc::new(StoreSetReader::new(Arc::clone(&store), Language::default())),
+                Language::default(),
+            )
+            .read_single(&team_entry, VIDEO)
+            .await
+            .unwrap();
+
+            let db = database();
+            assert_eq!(device.migrate(&db).await.videos, 1, "{version}");
+            let (m, profile) = video_in_database(&db, &team).await;
+            assert_eq!(
+                profile,
+                StoredProfile::Profile(in_files.clone()),
+                "{version}"
+            );
+            // every event where it was in the video
+            let before = placed(&m_in_files, &in_files);
+            assert!(before.iter().all(Option::is_some), "{version}");
+            assert_eq!(placed(&m, &in_files), before, "{version}");
+            // tied to the first event, the eighth corrected, by their ids
+            assert_eq!(
+                count(
+                    &db,
+                    "SELECT count(*) FROM match_videos v JOIN events e ON e.id = v.anchor_event
+                     WHERE e.set_number = 1 AND e.seq = 0"
+                ),
+                1,
+                "{version}"
+            );
+            assert_eq!(
+                count(
+                    &db,
+                    "SELECT count(*) FROM match_video_corrections c
+                     JOIN events e ON e.id = c.event_id
+                     WHERE e.set_number = 1 AND e.seq = 7 AND c.by_ms = -1500"
+                ),
+                1,
+                "{version}"
+            );
+            assert_eq!(
+                count(&db, "SELECT count(*) FROM match_video_files"),
+                2,
+                "{version}"
+            );
+        }
+    }
+
+    /// The folder left for its video by the versions before step 15: the
+    /// match already there gets it, then the folder goes.
+    #[tokio::test]
+    async fn a_folder_left_for_its_video_moves_it() {
+        let device = Device::of("v0.18.0");
+        let db = database();
+        device.migrate(&db).await;
+        let (team, folder) = video_folder(&Device::of("v0.18.0").data());
+        let (_, moved) = video_in_database(&db, &team).await;
+        let rows_then = rows(&db);
+        db.write(|tx| {
+            tx.execute_batch(
+                "DELETE FROM match_video_corrections; DELETE FROM match_video_files;
+                 DELETE FROM match_videos;",
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        restore_video_folder(&device, "v0.18.0");
+        let migrated = device.migrate(&db).await;
+        assert_eq!(
+            (
+                migrated.teams,
+                migrated.matches,
+                migrated.already,
+                migrated.videos
+            ),
+            (0, 0, 1, 1)
+        );
+        assert!(migrated.backup.is_some());
+        assert_eq!(migrated.left, vec![]);
+        assert!(
+            !device.data().join(&team).join(VIDEO).exists(),
+            "{folder:?}"
+        );
+        assert!(!device.data().join(&team).exists());
+        assert_eq!(video_in_database(&db, &team).await.1, moved);
+        assert_eq!(rows(&db), rows_then);
+        // then nothing
+        assert_eq!(device.migrate(&db).await, Migrated::default());
+        assert_eq!(rows(&db), rows_then);
+    }
+
+    /// The database wins: a video changed since stays, the folder is left
+    /// and told; the same video, the folder goes.
+    #[tokio::test]
+    async fn a_video_changed_in_the_app_stays_as_it_is() {
+        let device = Device::of("v0.18.0");
+        let db = database();
+        device.migrate(&db).await;
+        let (team, _) = video_folder(&Device::of("v0.18.0").data());
+        let (m, StoredProfile::Profile(moved)) = video_in_database(&db, &team).await else {
+            panic!("no video");
+        };
+        let team_id = Uuid::parse_str(&team).unwrap();
+        let videos = SqliteVideoProfiles(db.clone());
+        let changed = moved.automatic();
+        videos.write(&team_id, &m.id, &changed).await.unwrap();
+        let rows_then = rows(&db);
+
+        restore_video_folder(&device, "v0.18.0");
+        let migrated = device.migrate(&db).await;
+        assert_eq!(
+            migrated.left,
+            vec![NotRead {
+                folder: format!("{team}/{VIDEO}"),
+                reason: EN.migration_differs.to_string(),
+            }]
+        );
+        assert_eq!((migrated.already, migrated.videos), (0, 0));
+        assert!(device.data().join(&team).join(VIDEO).exists());
+        assert_eq!(
+            video_in_database(&db, &team).await.1,
+            StoredProfile::Profile(changed)
+        );
+        assert_eq!(rows(&db), rows_then);
+
+        // the video of the folder back in the app: the same, the folder goes
+        videos.write(&team_id, &m.id, &moved).await.unwrap();
+        let migrated = device.migrate(&db).await;
+        assert_eq!((migrated.already, migrated.videos), (1, 0));
+        assert_eq!(migrated.left, vec![]);
+        assert!(!device.data().join(&team).exists());
+    }
+
+    /// A `video.json` that can't be read (cut, or of a newer version):
+    /// the match moves, the folder stays with it, told; once readable, it
+    /// moves.
+    #[tokio::test]
+    async fn a_video_that_cant_be_read_stays_in_its_folder() {
+        let device = Device::of("v0.18.0");
+        let (team, folder) = video_folder(&device.data());
+        let profile = folder.join("video.json");
+        let original = std::fs::read(&profile).unwrap();
+        std::fs::write(&profile, "{\"version\": 1, \"files\": [").unwrap();
+        let db = database();
+        let migrated = device.migrate(&db).await;
+        let kept = vec![NotRead {
+            folder: format!("{team}/{VIDEO}"),
+            reason: EN.migration_files_kept.replace("{}", "video.json"),
+        }];
+        assert_eq!(migrated.matches, legacy_scores("v0.18.0").len());
+        assert_eq!(migrated.videos, 0);
+        assert_eq!(migrated.left, kept);
+        assert!(profile.exists() && folder.join("match.json").exists());
+        assert_eq!(
+            video_in_database(&db, &team).await.1,
+            StoredProfile::Missing
+        );
+
+        std::fs::write(&profile, "{\"version\": 2, \"files\": []}").unwrap();
+        let migrated = device.migrate(&db).await;
+        assert_eq!(
+            migrated,
+            Migrated {
+                left: kept,
+                ..Migrated::default()
+            }
+        );
+        assert_eq!(
+            video_in_database(&db, &team).await.1,
+            StoredProfile::Missing
+        );
+
+        std::fs::write(&profile, &original).unwrap();
+        let in_files = video_in_files(&device.data(), &team).await;
+        let migrated = device.migrate(&db).await;
+        assert_eq!((migrated.already, migrated.videos), (1, 1));
+        assert_eq!(migrated.left, vec![]);
+        assert!(!device.data().join(&team).exists());
+        assert_eq!(video_in_database(&db, &team).await.1, in_files);
+    }
+
+    /// The events a `video.json` refers to that the match no longer has
+    /// (undone after it was saved) didn't count there: left out, the
+    /// anchor keeps its time.
+    #[tokio::test]
+    async fn references_to_events_no_longer_there_are_left_out() {
+        let device = Device::of("v0.18.0");
+        let (team, folder) = video_folder(&device.data());
+        let StoredProfile::Profile(in_files) = video_in_files(&device.data(), &team).await else {
+            panic!("no video");
+        };
+        let profile = folder.join("video.json");
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&profile).unwrap()).unwrap();
+        json["anchor"]["event"]["index"] = 9999.into();
+        let corrections = json["corrections"].as_array_mut().unwrap();
+        corrections.push(serde_json::json!({"event": {"set_number": 9, "index": 0}, "by_ms": 100}));
+        corrections
+            .push(serde_json::json!({"event": {"set_number": 1, "index": 9999}, "by_ms": 5}));
+        std::fs::write(&profile, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        let db = database();
+        let migrated = device.migrate(&db).await;
+        assert_eq!(migrated.videos, 1);
+        assert_eq!(migrated.left, vec![]);
+        let expected = VideoProfile {
+            anchor: in_files
+                .anchor
+                .clone()
+                .map(|a| crate::video::Anchor { event: None, ..a }),
+            ..in_files
+        };
+        assert_eq!(
+            video_in_database(&db, &team).await.1,
+            StoredProfile::Profile(expected)
+        );
+    }
+
+    /// The video is written in the transaction of its match: when it
+    /// fails, the match isn't written either, and moves the next time.
+    #[tokio::test]
+    async fn a_video_not_written_leaves_its_match_in_the_folder() {
+        let device = Device::of("v0.18.0");
+        let (team, folder) = video_folder(&device.data());
+        let db = database();
+        db.write(|tx| {
+            tx.execute_batch(
+                "CREATE TEMP TRIGGER fail BEFORE INSERT ON match_video_files
+                 BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let migrated = device.migrate(&db).await;
+        assert_eq!(migrated.matches, legacy_scores("v0.18.0").len() - 1);
+        assert_eq!(migrated.videos, 0);
+        assert_eq!(migrated.left.len(), 1, "{:?}", migrated.left);
+        assert_eq!(migrated.left[0].folder, format!("{team}/{VIDEO}"));
+        assert!(migrated.left[0].reason.contains("injected"));
+        assert!(folder.join("video.json").exists());
+        assert_eq!(moved_id(&db, VIDEO), None);
+        assert_eq!(count(&db, "SELECT count(*) FROM match_videos"), 0);
+
+        drop_trigger(&db, "fail");
+        let again = device.migrate(&db).await;
+        assert_eq!((again.matches, again.videos, again.already), (1, 1, 0));
+        assert!(!device.data().join(&team).exists());
+        assert_eq!(
+            video_in_database(&db, &team).await.1,
+            video_in_files(&Device::of("v0.18.0").data(), &team).await
+        );
+    }
+
+    #[tokio::test]
+    async fn a_video_not_read_back_as_written_isnt_written() {
+        let device = Device::of("v0.18.0");
+        let (team, folder) = video_folder(&device.data());
+        let db = database();
+        db.write(|tx| {
+            tx.execute_batch(
+                "CREATE TEMP TRIGGER change AFTER INSERT ON match_video_files
+                 BEGIN UPDATE match_video_files SET path = 'elsewhere.mp4'
+                       WHERE match_id = NEW.match_id AND position = NEW.position; END;",
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let migrated = device.migrate(&db).await;
+        assert_eq!(migrated.left.len(), 1, "{:?}", migrated.left);
+        assert_eq!(migrated.left[0].folder, format!("{team}/{VIDEO}"));
+        assert!(
+            migrated.left[0].reason.contains("not read back"),
+            "{}",
+            migrated.left[0].reason
+        );
+        assert!(folder.join("video.json").exists());
+        assert_eq!(moved_id(&db, VIDEO), None);
+        assert_eq!(count(&db, "SELECT count(*) FROM match_videos"), 0);
+    }
+
+    #[tokio::test]
+    async fn the_video_of_a_match_removed_in_the_database_doesnt_come_back() {
+        let device = Device::of("v0.18.0");
+        let db = database();
+        device.migrate(&db).await;
+        db.write(|tx| {
+            tx.execute_batch(&format!(
+                "UPDATE matches SET deleted = 1 WHERE legacy_id = '{VIDEO}';
+                 DELETE FROM match_video_corrections; DELETE FROM match_video_files;
+                 DELETE FROM match_videos;"
+            ))
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let rows_then = rows(&db);
+        restore_video_folder(&device, "v0.18.0");
+        let (team, _) = video_folder(&Device::of("v0.18.0").data());
+        let migrated = device.migrate(&db).await;
+        assert_eq!((migrated.already, migrated.videos), (1, 0));
+        assert_eq!(migrated.left, vec![]);
+        assert!(!device.data().join(&team).exists());
+        assert_eq!(rows(&db), rows_then);
     }
 
     /// The migration of a copy of a real data folder: `S4A_MIGRATE_DIR`

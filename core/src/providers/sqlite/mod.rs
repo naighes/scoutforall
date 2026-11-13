@@ -11,6 +11,7 @@
 //!   lineups of a set aren't data of their own: they're replaced.
 //! - What the lists show of a match is cached (`summary`), updated in the
 //!   transaction of each write.
+//! - The video of a match is of this device (`video`): replaced when saved.
 //! - A player removed from a team stays in it, deleted, for the matches
 //!   that tell of them (roster, lineup, event): the others are no longer
 //!   read, as the files leave them out.
@@ -24,6 +25,7 @@ pub mod sets;
 pub(crate) mod summary;
 pub mod teams;
 pub mod upload;
+pub mod video;
 
 use crate::errors::{AppError, IOError};
 use rusqlite::{Connection, Transaction, TransactionBehavior};

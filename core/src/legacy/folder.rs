@@ -6,6 +6,7 @@
 //! <team id>/team.json
 //! <team id>/<match id>/match.json
 //! <team id>/<match id>/set_<n>.json, set_<n>.csv
+//! <team id>/<match id>/video.json (from v0.15.0)
 //! ```
 //!
 //! A team or a match that can't be read is told with why (`NotRead`), the
@@ -19,6 +20,7 @@ use crate::{
     providers::store::read_json,
     shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
     storage::{Store, StoreEntry, layout},
+    video::{StoredProfile, VIDEO_PROFILE_FILE_NAME, VideoProfile, read_profile},
 };
 use futures::future::{join_all, try_join_all};
 use uuid::Uuid;
@@ -130,6 +132,22 @@ pub async fn read_match(
     entry.sets = read_sets(store, &layout::match_folder(&team.id, match_id), labels).await?;
     fill_lineup_rules(&mut entry.sets, rules);
     Ok(entry)
+}
+
+/// The profile of the video of the match, if it has one: unless written
+/// by a newer version.
+pub async fn read_video(
+    store: &dyn Store,
+    team_id: &Uuid,
+    match_id: &str,
+) -> Result<Option<VideoProfile>, AppError> {
+    match read_profile(store, team_id, match_id).await? {
+        StoredProfile::Missing => Ok(None),
+        StoredProfile::Profile(profile) => Ok(Some(profile)),
+        StoredProfile::Newer(version) => Err(AppError::IO(IOError::Msg(format!(
+            "{VIDEO_PROFILE_FILE_NAME} written by a newer version ({version})"
+        )))),
+    }
 }
 
 /// The sets in the folder of a match, by number: a lineup without events

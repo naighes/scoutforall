@@ -17,9 +17,12 @@
 //!   match already there but different (changed since, here or there) is
 //!   left in its folder, and told.
 //! - What can't be read or converted stays where it is, with why; the rest
-//!   moves. So does a folder with files not moved to the database yet (the
-//!   video of a match, TODO/001 step 15): the match moves, its folder
-//!   stays until those files move too.
+//!   moves. So does a folder with files the database doesn't know (or a
+//!   `video.json` that can't be read): the match moves, its folder stays.
+//! - The video of a match (`video.json`) moves with it, in its
+//!   transaction. A match already there gets the video of its folder if it
+//!   has none (a folder left for its video by a version before TODO/001
+//!   step 15); with a different one it's left, and told.
 //! - The settings (`config.json`, `clips.json`) aren't data of the teams:
 //!   they stay.
 //! - The queue of the uploads (`upload_queue.json`) moves after the
@@ -31,6 +34,7 @@
 use crate::{
     analytics::queue::UploadQueue,
     constants::{MATCH_DESCRIPTOR_FILE_NAME, TEAM_DESCRIPTOR_FILE_NAME},
+    domain::adapters::VideoRows,
     domain::{
         LegacyId, Match,
         adapters::{MatchRows, SetRows, TeamRows},
@@ -38,9 +42,9 @@ use crate::{
     },
     errors::{AppError, IOError},
     legacy::{
-        folder::{LegacyTeam, NotRead, read_folder},
+        folder::{LegacyTeam, NotRead, read_folder, read_video},
         format::set_file,
-        rows::{FolderRows, folder_rows},
+        rows::{FolderRows, folder_rows, video_rows},
     },
     localization::Labels,
     logging::logger::log_info,
@@ -49,11 +53,13 @@ use crate::{
             Database, not_found,
             rows::{insert_match, match_rows},
             sqlite, summary,
+            video::{self, write_video},
         },
         store::write_json,
     },
     shapes::set::SetEntry,
     storage::{Store, StoreEntry, layout},
+    video::{VIDEO_PROFILE_FILE_NAME, VideoProfile},
 };
 use chrono::{Local, NaiveDate};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -82,29 +88,81 @@ pub struct Migrated {
     pub teams: usize,
     /// matches written
     pub matches: usize,
+    /// videos written, with their matches or to matches already there
+    pub videos: usize,
     /// folders of matches already in the database, removed
     pub already: usize,
     /// the folders left in the data folder, with why
     pub left: Vec<NotRead>,
 }
 
-/// What's done with a match of the folder.
+/// What's done with a match of the folder; then its folder is removed if
+/// `remove` (it holds only what's moved).
 enum Step {
-    /// written to the database, then its folder removed if `remove` (it
-    /// holds only what's moved)
-    Write { rows: Box<MatchRows>, remove: bool },
-    /// already there: its folder removed
-    Remove,
+    /// written to the database, with its video if any
+    Write {
+        rows: Box<MatchRows>,
+        video: Option<VideoRows>,
+        remove: bool,
+    },
+    /// already there: the video written to it, if any
+    Already {
+        video: Option<VideoRows>,
+        remove: bool,
+    },
 }
 
 /// What's to do with a match of the folder, by the database.
 enum Plan {
-    /// not in the database: written, then its folder removed
-    New(Box<MatchRows>),
-    /// in the database (or removed there) and the same: its folder removed
-    Already,
-    /// in the database but different: left, told
+    /// not in the database: written with its video, then its folder
+    /// removed
+    New {
+        rows: Box<MatchRows>,
+        video: Option<VideoRows>,
+    },
+    /// in the database (or removed there) and the same: the video written
+    /// if the database has none, then its folder removed
+    Already { video: Option<VideoRows> },
+    /// in the database but different (or its video): left, told
     Differs,
+}
+
+/// The video in the folder of a match.
+enum FolderVideo {
+    None,
+    /// moved to the database with the match
+    Moves(VideoProfile),
+    /// can't be read: it stays in the folder (why in the log)
+    Stays,
+}
+
+impl FolderVideo {
+    fn profile(&self) -> Option<&VideoProfile> {
+        match self {
+            FolderVideo::Moves(profile) => Some(profile),
+            FolderVideo::None | FolderVideo::Stays => None,
+        }
+    }
+
+    /// Whether its `video.json`, if any, goes with the folder.
+    fn moves(&self) -> bool {
+        matches!(self, FolderVideo::Moves(_))
+    }
+}
+
+/// The video of the match in the folder, if any.
+async fn folder_video(store: &dyn Store, team: &Uuid, match_id: &str) -> FolderVideo {
+    match read_video(store, team, match_id).await {
+        Ok(None) => FolderVideo::None,
+        Ok(Some(profile)) => FolderVideo::Moves(profile),
+        Err(e) => {
+            log_info(&format!(
+                "{}: {VIDEO_PROFILE_FILE_NAME} not moved: {e}",
+                layout::match_folder(team, match_id)
+            ));
+            FolderVideo::Stays
+        }
+    }
 }
 
 /// Moves what's in the data folder `store` into `db`: see the module.
@@ -124,15 +182,18 @@ pub async fn migrate(
         teams: shared,
         matches,
     } = folder_rows(&teams)?;
-    let folders: Vec<String> = teams
-        .iter()
-        .flat_map(|t| {
-            t.matches.iter().map(|m| match m {
-                Ok(m) => layout::match_folder(&t.team.id, &m.id),
-                Err(e) => e.folder.clone(),
-            })
-        })
-        .collect();
+    let mut folders: Vec<(String, FolderVideo)> = Vec::new();
+    for t in &teams {
+        for m in &t.matches {
+            folders.push(match m {
+                Ok(m) => (
+                    layout::match_folder(&t.team.id, &m.id),
+                    folder_video(store, &t.team.id, &m.id).await,
+                ),
+                Err(e) => (e.folder.clone(), FolderVideo::None),
+            });
+        }
+    }
     let (to_write, plans) = db.read(|tx| {
         let to_write: Vec<&TeamRows> = shared
             .teams
@@ -146,17 +207,21 @@ pub async fn migrate(
             .collect::<Result<_, _>>()?;
         let plans: Vec<Result<Plan, NotRead>> = matches
             .into_iter()
-            .map(|m| match m {
-                Ok(rows) => plan(tx, rows),
+            .zip(&folders)
+            .map(|(m, (_, video))| match m {
+                Ok(rows) => plan(tx, rows, video.profile()),
                 Err(e) => Ok(Err(e)),
             })
             .collect::<Result<_, _>>()?;
         Ok((to_write, plans))
     })?;
-    let mut steps: Vec<(String, Step)> = Vec::new();
-    for (folder, plan) in folders.into_iter().zip(plans) {
+    let mut steps: Vec<(String, Step, bool)> = Vec::new();
+    for ((folder, video), plan) in folders.into_iter().zip(plans) {
+        let video_moves = video.moves();
         let kept = match &plan {
-            Ok(Plan::New(_) | Plan::Already) => kept_files(store, &folder, labels).await,
+            Ok(Plan::New { .. } | Plan::Already { .. }) => {
+                kept_files(store, &folder, video_moves, labels).await
+            }
             _ => Ok(None),
         };
         let told = |reason: String| NotRead {
@@ -167,24 +232,36 @@ pub async fn migrate(
             (Err(e), _) => left.push(e),
             (Ok(Plan::Differs), _) => left.push(told(labels.migration_differs.to_string())),
             (Ok(_), Err(e)) => left.push(e),
-            (Ok(Plan::New(rows)), Ok(kept)) => {
-                left.extend(kept.clone());
+            (Ok(Plan::New { rows, video }), Ok(kept)) => {
+                let remove = kept.is_none();
+                left.extend(kept);
                 steps.push((
                     folder,
                     Step::Write {
                         rows,
-                        remove: kept.is_none(),
+                        video,
+                        remove,
                     },
+                    video_moves,
                 ));
             }
-            (Ok(Plan::Already), Ok(Some(kept))) => left.push(kept),
-            (Ok(Plan::Already), Ok(None)) => steps.push((folder, Step::Remove)),
+            (Ok(Plan::Already { video: None }), Ok(Some(kept))) => left.push(kept),
+            (Ok(Plan::Already { video }), Ok(kept)) => {
+                let remove = kept.is_none();
+                left.extend(kept);
+                steps.push((folder, Step::Already { video, remove }, video_moves));
+            }
         }
     }
     let going: Vec<&str> = steps
         .iter()
-        .filter(|(_, step)| matches!(step, Step::Remove | Step::Write { remove: true, .. }))
-        .map(|(folder, _)| folder.as_str())
+        .filter(|(_, step, _)| {
+            matches!(
+                step,
+                Step::Already { remove: true, .. } | Step::Write { remove: true, .. }
+            )
+        })
+        .map(|(folder, _, _)| folder.as_str())
         .collect();
     let empty_teams = teams_to_remove(store, &teams, &going).await;
     if to_write.is_empty() && steps.is_empty() && empty_teams.is_empty() {
@@ -208,27 +285,38 @@ pub async fn migrate(
         teams: to_write.len(),
         ..Migrated::default()
     };
-    for (folder, step) in steps {
-        let remove = match step {
-            Step::Write { rows, remove } => match db.write(|tx| insert_checked(tx, &rows)) {
-                Ok(()) => {
-                    migrated.matches += 1;
-                    remove
-                }
-                Err(e) => {
-                    left.push(NotRead {
-                        folder: folder.clone(),
-                        reason: e.to_string(),
-                    });
-                    false
-                }
-            },
-            Step::Remove => {
+    for (folder, step, video_moves) in steps {
+        let written = match &step {
+            Step::Write { rows, video, .. } => db.write(|tx| {
+                insert_checked(tx, rows)?;
+                video
+                    .as_ref()
+                    .map_or(Ok(()), |video| write_video_checked(tx, video))
+            }),
+            Step::Already { video, .. } => video.as_ref().map_or(Ok(()), |video| {
+                db.write(|tx| write_video_checked(tx, video))
+            }),
+        };
+        let remove = match (written, step) {
+            (Err(e), _) => {
+                left.push(NotRead {
+                    folder: folder.clone(),
+                    reason: e.to_string(),
+                });
+                false
+            }
+            (Ok(()), Step::Write { video, remove, .. }) => {
+                migrated.matches += 1;
+                migrated.videos += usize::from(video.is_some());
+                remove
+            }
+            (Ok(()), Step::Already { video, remove }) => {
                 migrated.already += 1;
-                true
+                migrated.videos += usize::from(video.is_some());
+                remove
             }
         };
-        if remove && let Err(e) = remove_match_folder(store, &folder, labels).await {
+        if remove && let Err(e) = remove_match_folder(store, &folder, video_moves, labels).await {
             left.push(e);
         }
     }
@@ -243,9 +331,10 @@ pub async fn migrate(
     move_queue(store, db, &mut left).await;
     remove_index(store, &mut left).await;
     log_info(&format!(
-        "data folder migrated: {} teams, {} matches, {} already there, {} left",
+        "data folder migrated: {} teams, {} matches, {} videos, {} already there, {} left",
         migrated.teams,
         migrated.matches,
+        migrated.videos,
         migrated.already,
         left.len()
     ));
@@ -412,31 +501,50 @@ pub(crate) fn insert_team_rows(tx: &Transaction, team: &TeamRows) -> Result<(), 
     })
 }
 
-/// What's to do with the match: by where it was, whether the database has
-/// it, and the same.
-fn plan(tx: &Transaction, rows: MatchRows) -> Result<Result<Plan, NotRead>, AppError> {
+/// What's to do with the match and its video: by where it was, whether
+/// the database has them, and the same.
+fn plan(
+    tx: &Transaction,
+    rows: MatchRows,
+    video: Option<&VideoProfile>,
+) -> Result<Result<Plan, NotRead>, AppError> {
+    let folder = rows
+        .row
+        .legacy
+        .as_ref()
+        .map_or_else(String::new, |l| layout::match_folder(&l.team, &l.id));
+    let not_read = |e: AppError| NotRead {
+        folder: folder.clone(),
+        reason: e.to_string(),
+    };
+    let new = |rows: MatchRows| match video.map(|v| video_rows(v, &rows)).transpose() {
+        Ok(video) => Ok(Plan::New {
+            rows: Box::new(rows),
+            video,
+        }),
+        Err(e) => Err(not_read(e)),
+    };
     let Some(legacy) = rows.row.legacy.clone() else {
-        return Ok(Ok(Plan::New(Box::new(rows))));
+        return Ok(new(rows));
     };
     match already(tx, &legacy)? {
-        None => Ok(Ok(Plan::New(Box::new(rows)))),
-        // removed in the database: not brought back
-        Some((_, true)) => Ok(Ok(Plan::Already)),
+        None => Ok(new(rows)),
+        // removed in the database: not brought back, nor its video
+        Some((_, true)) => Ok(Ok(Plan::Already { video: None })),
         Some((id, false)) => {
-            let there = match_rows(tx, id)?;
-            Ok(match there {
-                Some(there) => match same(&rows, &there) {
-                    Ok(true) => Ok(Plan::Already),
-                    Ok(false) => Ok(Plan::Differs),
-                    Err(e) => Err(NotRead {
-                        folder: layout::match_folder(&legacy.team, &legacy.id),
-                        reason: e.to_string(),
-                    }),
+            let Some(there) = match_rows(tx, id)? else {
+                return Ok(Err(not_read(not_found(&format!("match {id}")))));
+            };
+            let video = video.map(|v| video_rows(v, &there)).transpose();
+            Ok(match (same(&rows, &there), video) {
+                (Err(e), _) | (_, Err(e)) => Err(not_read(e)),
+                (Ok(false), _) => Ok(Plan::Differs),
+                (Ok(true), Ok(None)) => Ok(Plan::Already { video: None }),
+                (Ok(true), Ok(Some(video))) => match video::video_rows(tx, id)? {
+                    None => Ok(Plan::Already { video: Some(video) }),
+                    Some(saved) if saved == video => Ok(Plan::Already { video: None }),
+                    Some(_) => Ok(Plan::Differs),
                 },
-                None => Err(NotRead {
-                    folder: layout::match_folder(&legacy.team, &legacy.id),
-                    reason: not_found(&format!("match {id}")).to_string(),
-                }),
             })
         }
     }
@@ -495,16 +603,33 @@ fn insert_checked(tx: &Transaction, rows: &MatchRows) -> Result<(), AppError> {
     }
 }
 
-/// Whether a blob of a match folder is moved to the database.
-fn moved(name: &str) -> bool {
-    name == MATCH_DESCRIPTOR_FILE_NAME || matches!(set_file(name), Some((Some(_), "json" | "csv")))
+/// The video written, then read back: the same rows, or nothing is
+/// written.
+fn write_video_checked(tx: &Transaction, rows: &VideoRows) -> Result<(), AppError> {
+    write_video(tx, rows)?;
+    match video::video_rows(tx, rows.row.match_id)? {
+        Some(back) if back == *rows => Ok(()),
+        _ => Err(AppError::IO(IOError::Msg(format!(
+            "video of match {}: not read back as written",
+            rows.row.match_id
+        )))),
+    }
 }
 
-/// What in the folder of a match isn't moved to the database (yet): told
-/// as why the folder stays, `None` when there's nothing.
+/// Whether a blob of a match folder is moved to the database: its video
+/// only if `video_moves`.
+fn moved(name: &str, video_moves: bool) -> bool {
+    name == MATCH_DESCRIPTOR_FILE_NAME
+        || (video_moves && name == VIDEO_PROFILE_FILE_NAME)
+        || matches!(set_file(name), Some((Some(_), "json" | "csv")))
+}
+
+/// What in the folder of a match isn't moved to the database: told as why
+/// the folder stays, `None` when there's nothing.
 async fn kept_files(
     store: &dyn Store,
     folder: &str,
+    video_moves: bool,
     labels: &Labels,
 ) -> Result<Option<NotRead>, NotRead> {
     let not_read = |reason: String| NotRead {
@@ -518,7 +643,7 @@ async fn kept_files(
     let kept: Vec<String> = entries
         .into_iter()
         .filter_map(|entry| match entry {
-            StoreEntry::Blob(name) if moved(&name) => None,
+            StoreEntry::Blob(name) if moved(&name, video_moves) => None,
             StoreEntry::Blob(name) | StoreEntry::Folder(name) => Some(name),
         })
         .collect();
@@ -535,9 +660,10 @@ async fn kept_files(
 async fn remove_match_folder(
     store: &dyn Store,
     folder: &str,
+    video_moves: bool,
     labels: &Labels,
 ) -> Result<(), NotRead> {
-    match kept_files(store, folder, labels).await? {
+    match kept_files(store, folder, video_moves, labels).await? {
         Some(kept) => Err(kept),
         None => store.remove_folder(folder).await.map_err(|e| NotRead {
             folder: folder.to_string(),
