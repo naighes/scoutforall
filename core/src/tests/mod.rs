@@ -50,6 +50,7 @@ mod set_start_tests;
 mod situation_tests;
 mod snapshot_tests;
 mod sqlite_archive_tests;
+mod sqlite_removal_tests;
 mod sqlite_tests;
 mod sqlite_upload_tests;
 mod sqlite_video_tests;

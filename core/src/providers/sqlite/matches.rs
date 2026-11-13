@@ -12,6 +12,7 @@ use crate::{
             sqlite,
             summary::{cached, forget, refresh, save},
             teams::read_team,
+            video::forget_video,
         },
         store::match_reader::{recent_first, replay_status, unreadable},
     },
@@ -353,16 +354,22 @@ impl MatchWriter for SqliteMatchWriter {
         }
     }
 
-    /// Marked removed, with what it has (D7).
+    /// Marked removed, with what it has (D7), by either team: one match
+    /// for both (D2). Its video, of this device, goes with it.
     async fn remove(&self, team_id: &Uuid, match_id: &str) -> Result<(), AppError> {
         let id = match_uuid(match_id)?;
         self.0.write(|tx| {
-            tx.execute(
-                "UPDATE matches SET deleted = 1 WHERE id = ?1 AND team_a = ?2",
-                params![Sql(id), Sql(*team_id)],
-            )
-            .map_err(sqlite)?;
-            forget(tx, id)
+            let removed = tx
+                .execute(
+                    "UPDATE matches SET deleted = 1
+                     WHERE id = ?1 AND ?2 IN (team_a, team_b) AND deleted = 0",
+                    params![Sql(id), Sql(*team_id)],
+                )
+                .map_err(sqlite)?;
+            match removed {
+                0 => Ok(()),
+                _ => forget(tx, id).and_then(|()| forget_video(tx, id)),
+            }
         })
     }
 }

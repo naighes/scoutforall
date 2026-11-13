@@ -15,10 +15,15 @@
 //! - A player removed from a team stays in it, deleted, for the matches
 //!   that tell of them (roster, lineup, event): the others are no longer
 //!   read, as the files leave them out.
+//! - D16: a removed team takes with it its matches against a name, the
+//!   others stay to the other team, against its name (B becoming A when
+//!   it was A); a person removed from the registry (`persons`) keeps only
+//!   its id, out of every team, anonymous in the matches played.
 
 pub mod archive;
 pub mod legacy_archive;
 pub mod matches;
+pub mod persons;
 pub mod queue;
 pub(crate) mod rows;
 pub mod sets;

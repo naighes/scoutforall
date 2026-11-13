@@ -206,11 +206,12 @@ pub(crate) fn write_team(tx: &Transaction, team: &TeamEntry) -> Result<(), AppEr
             }
         };
         tx.execute(sql, person).map_err(sqlite)?;
+        // a person removed from the registry (D16) is in no team
         tx.execute(
             "INSERT INTO team_members (team_id, person_id, position, number, role, deleted)
              VALUES (?1, ?2,
                      (SELECT coalesce(max(position) + 1, 0) FROM team_members WHERE team_id = ?1),
-                     ?3, ?4, ?5)
+                     ?3, ?4, ?5 OR (SELECT deleted FROM persons WHERE id = ?2))
              ON CONFLICT (team_id, person_id) DO UPDATE SET number = excluded.number,
                  role = excluded.role, deleted = excluded.deleted",
             params![

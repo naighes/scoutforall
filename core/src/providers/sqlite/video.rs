@@ -147,6 +147,19 @@ pub(crate) fn video_rows(tx: &Transaction, match_id: Uuid) -> Result<Option<Vide
     }))
 }
 
+/// No video for the match: of this device, it goes with the match.
+pub(crate) fn forget_video(tx: &Transaction, match_id: Uuid) -> Result<(), AppError> {
+    let id = Sql(match_id);
+    tx.execute(
+        "DELETE FROM match_video_corrections WHERE match_id = ?1",
+        [id],
+    )
+    .and_then(|_| tx.execute("DELETE FROM match_video_files WHERE match_id = ?1", [id]))
+    .and_then(|_| tx.execute("DELETE FROM match_videos WHERE match_id = ?1", [id]))
+    .map(|_| ())
+    .map_err(sqlite)
+}
+
 /// The video of the match, in place of the one it had.
 pub(crate) fn write_video(tx: &Transaction, video: &VideoRows) -> Result<(), AppError> {
     let id = Sql(video.row.match_id);

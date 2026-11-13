@@ -529,7 +529,8 @@ mod tests {
         assert_eq!(video_rows(&db), (1, 2, 2));
         assert_eq!(read(&p, &other, &theirs).await, StoredProfile::Missing);
 
-        // a match removed: its video is no longer read, nor saved
+        // a match removed: its video goes with it (of this device, D16),
+        // no longer read, nor saved
         p.match_writer.remove(&team.id, &m.id).await.unwrap();
         assert!(p.videos.read(&team.id, &m.id).await.is_err());
         assert!(
@@ -538,7 +539,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert_eq!(video_rows(&db), (1, 2, 2));
+        assert_eq!(video_rows(&db), (0, 0, 0));
     }
 
     /// Its paths are of this computer: an archive leaves it out.
