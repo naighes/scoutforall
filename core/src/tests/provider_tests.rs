@@ -826,6 +826,110 @@ mod tests {
         assert_eq!((team.players[0].number, team.players[6].number), (21, 27));
     }
 
+    /// The role of a match (D9) is where the player stands in the lineup of
+    /// the set, not the role in the team nor in the roster: an outside
+    /// hitter of the team playing opposite attacks as an opposite (from 2
+    /// in break), the opposite of the team in their place from 4. Not
+    /// something to add in step 9: `Snapshot` never sees the team.
+    #[tokio::test]
+    async fn the_role_of_a_match_is_its_place_in_the_lineup() {
+        use crate::{
+            analysis::match_stats,
+            shapes::{enums::ZoneEnum, stats::Touch},
+        };
+        let db = database();
+        let p = sqlite(&db);
+        let team = team(&p, players()).await;
+        let ids: Vec<Uuid> = team.players.iter().map(|p| p.id).collect();
+        let (setter, oh1, mb2, opposite, oh2, mb1, libero) =
+            (ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6]);
+        let act = |event_type, player, eval| EventEntry {
+            timestamp: Utc::now(),
+            event_type,
+            player: Some(player),
+            eval: Some(eval),
+            target_player: None,
+            technique: None,
+            flags: Default::default(),
+        };
+        // rotation 0, break: the attacks of the two hitters
+        let scouted = |positions: [Uuid; 6]| {
+            let p = &p;
+            let team = &team;
+            async move {
+                let m = p
+                    .match_writer
+                    .create(
+                        team,
+                        "Cortona Volley".into(),
+                        Utc::now().fixed_offset(),
+                        true,
+                        DEFAULT_MAX_SUBSTITUTIONS,
+                        String::new(),
+                        vec![],
+                    )
+                    .await
+                    .unwrap();
+                p.set_writer
+                    .create(
+                        &m,
+                        1,
+                        TeamSideEnum::Us,
+                        positions,
+                        libero,
+                        None,
+                        setter,
+                        vec![
+                            act(EventTypeEnum::S, setter, EvalEnum::Negative),
+                            act(EventTypeEnum::D, oh2, EvalEnum::Positive),
+                            act(EventTypeEnum::A, oh1, EvalEnum::Negative),
+                            // their error: our point, the same rotation
+                            their_error(),
+                            act(EventTypeEnum::S, setter, EvalEnum::Negative),
+                            act(EventTypeEnum::D, oh2, EvalEnum::Positive),
+                            act(EventTypeEnum::A, opposite, EvalEnum::Negative),
+                        ],
+                    )
+                    .await
+                    .unwrap();
+                p.match_reader.read_single(team, &m.id).await.unwrap()
+            }
+        };
+        let attack = |m: &MatchEntry, player: Uuid| {
+            match_stats(m)
+                .unwrap()
+                .events
+                .iter(|k| k.event_type == EventTypeEnum::A && k.player == Some(player))
+                .map(|(k, _)| (k.zone, k.touch.as_ref().and_then(|t: &Touch| t.role)))
+                .collect::<Vec<_>>()
+        };
+        use RoleEnum::*;
+        let as_in_the_team = scouted([setter, oh1, mb2, opposite, oh2, mb1]).await;
+        assert_eq!(
+            attack(&as_in_the_team, oh1),
+            vec![(Some(ZoneEnum::Four), Some(OutsideHitter))]
+        );
+        assert_eq!(
+            attack(&as_in_the_team, opposite),
+            vec![(Some(ZoneEnum::Two), Some(OppositeHitter))]
+        );
+        // the two swapped: each attacks as the place they play
+        let swapped = scouted([setter, opposite, mb2, oh1, oh2, mb1]).await;
+        let role = |player| swapped.team.find_player(player).unwrap().role;
+        assert_eq!(
+            (role(oh1), role(opposite)),
+            (Some(OutsideHitter), Some(OppositeHitter))
+        );
+        assert_eq!(
+            attack(&swapped, oh1),
+            vec![(Some(ZoneEnum::Two), Some(OppositeHitter))]
+        );
+        assert_eq!(
+            attack(&swapped, opposite),
+            vec![(Some(ZoneEnum::Four), Some(OutsideHitter))]
+        );
+    }
+
     /// A neutral court stays neutral when the form says "not at home".
     #[tokio::test]
     async fn a_neutral_court_stays_neutral() {
