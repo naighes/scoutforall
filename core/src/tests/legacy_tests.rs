@@ -30,7 +30,8 @@ mod tests {
             team_reader::TeamReader,
         },
         shapes::{
-            enums::LineupRulesEnum, r#match::MatchEntry, player::PlayerEntry, snapshot::EventEntry, team::TeamEntry,
+            enums::LineupRulesEnum, r#match::MatchEntry, player::PlayerEntry, snapshot::EventEntry,
+            team::TeamEntry,
         },
         storage::{Store, fs::FsStore},
         tests::{
@@ -688,8 +689,11 @@ mod tests {
             ..event.clone()
         };
         let rows = folder_rows(&teams).unwrap();
-        let not_converted: Vec<&NotRead> =
-            rows.matches.iter().filter_map(|m| m.as_ref().err()).collect();
+        let not_converted: Vec<&NotRead> = rows
+            .matches
+            .iter()
+            .filter_map(|m| m.as_ref().err())
+            .collect();
         assert_eq!(not_converted.len(), 1);
         assert_eq!(
             not_converted[0].folder,
@@ -760,7 +764,11 @@ mod tests {
                 })
                 .collect();
             let db = database();
-            write(&db, &shared, &rows.iter().map(|(r, _)| r).collect::<Vec<_>>());
+            write(
+                &db,
+                &shared,
+                &rows.iter().map(|(r, _)| r).collect::<Vec<_>>(),
+            );
             let reader = SqliteMatchReader::new(db.clone(), Language::default());
             let mut scores = LegacyScores::new();
             for (row, team) in &rows {

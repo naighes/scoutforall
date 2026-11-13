@@ -1,9 +1,9 @@
 use crate::{
     constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError, MatchError},
+    legacy::format::{fill_lineup_rules, read_descriptor},
     localization::Language,
     logging::logger::log_error,
-    legacy::format::{fill_lineup_rules, read_descriptor},
     providers::{
         match_reader::MatchReader,
         set_reader::SetReader,

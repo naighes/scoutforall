@@ -99,9 +99,8 @@ pub async fn read_team(
     folder: &str,
     labels: &Labels,
 ) -> Result<TeamEntry, AppError> {
-    let id = Uuid::parse_str(folder).map_err(|_| {
-        AppError::IO(IOError::Msg(labels.invalid_team_folder_name.to_string()))
-    })?;
+    let id = Uuid::parse_str(folder)
+        .map_err(|_| AppError::IO(IOError::Msg(labels.invalid_team_folder_name.to_string())))?;
     let team: TeamEntry = read_json(store, &layout::team_descriptor(&id)).await?;
     Ok(TeamEntry { id, ..team })
 }
@@ -162,7 +161,9 @@ pub async fn read_sets(
     if sets.len() > 5 {
         let match_id = folder.rsplit('/').next().unwrap_or(folder);
         return Err(AppError::Match(MatchError::LoadSetError(
-            labels.found_more_than_5_sets_in_match.replace("{}", match_id),
+            labels
+                .found_more_than_5_sets_in_match
+                .replace("{}", match_id),
         )));
     }
     sets.sort_by_key(|s| s.set_number);
@@ -190,7 +191,9 @@ async fn read_set(
     let set = read_lineup(number, &json)?;
     let events_key = layout::child(folder, &layout::set_events_name(number));
     match store.read(&events_key).await.ok()? {
-        Some(csv) => read_events(&csv).ok().map(|events| SetEntry { events, ..set }),
+        Some(csv) => read_events(&csv)
+            .ok()
+            .map(|events| SetEntry { events, ..set }),
         None => Some(set),
     }
 }
