@@ -6,7 +6,7 @@ use crate::{
     errors::{AppError, IOError, MatchError},
     localization::Language,
     logging::logger::log_error,
-    match_form::{CompetitionInput, MatchInput, Opponent},
+    match_form::{CompetitionInput, MatchInput, Opponent, RosterNumber},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -27,6 +27,7 @@ use crate::{
     shapes::{
         listed::{Listed, Unreadable},
         r#match::{MatchEntry, MatchSource, MatchStatus, MatchSummary},
+        player::PlayerEntry,
         team::TeamEntry,
     },
 };
@@ -334,10 +335,29 @@ fn saved_competition(
     }
 }
 
+/// `team` with the numbers and roles of a match.
+fn with_numbers(team: &TeamEntry, numbers: &[RosterNumber]) -> TeamEntry {
+    TeamEntry {
+        players: team
+            .players
+            .iter()
+            .map(|p| match numbers.iter().find(|n| n.player == p.id) {
+                Some(n) => PlayerEntry {
+                    number: n.number,
+                    role: n.role,
+                    ..p.clone()
+                },
+                None => p.clone(),
+            })
+            .collect(),
+        ..team.clone()
+    }
+}
+
 /// Updates the match `id` with `input`: team B changes, unless both teams
-/// are scouted. The roster: the players left out go, the ones added copy
-/// number and role from the team (D9), the others keep those of the
-/// match; empty, the active team.
+/// are scouted. The roster: the players left out go; number and role as in
+/// `numbers`, else the ones added copy them from the team (D9) and the
+/// others keep those of the match; empty, the active team.
 fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), AppError> {
     let MatchInput {
         opponent,
@@ -346,6 +366,7 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
         max_substitutions,
         notes,
         roster,
+        numbers,
         friendly,
         competition,
         stage,
@@ -383,47 +404,45 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
     .map_err(sqlite)?;
     let team_a = rows.row.team_a;
     let roster = match roster.as_slice() {
-        [] => read_team(tx, &team_a)?
-            .active_players()
-            .iter()
-            .map(|p| p.id)
-            .collect(),
+        [] => team.active_players().iter().map(|p| p.id).collect(),
         ids => ids.to_vec(),
     };
-    let saved: Vec<Uuid> = rows
-        .roster
+    let entries = roster
         .iter()
-        .filter(|r| r.team_id == team_a)
-        .map(|r| r.person_id)
-        .collect();
-    for gone in saved.iter().filter(|p| !roster.contains(p)) {
-        tx.execute(
-            "DELETE FROM match_roster WHERE match_id = ?1 AND team_id = ?2
-                 AND person_id = ?3",
-            params![Sql(id), Sql(team_a), Sql(*gone)],
-        )
-        .map_err(sqlite)?;
-    }
-    let team = read_team(tx, &team_a)?;
-    roster
+        .map(|person_id| {
+            let given = numbers.iter().find(|n| n.player == *person_id);
+            let saved = rows
+                .roster
+                .iter()
+                .find(|r| r.team_id == team_a && r.person_id == *person_id);
+            let player = team.find_player(*person_id);
+            let (number, role) = match (given, saved, player) {
+                (Some(n), _, _) => (n.number, n.role),
+                (None, Some(r), _) => (r.number, r.role),
+                (None, None, Some(p)) => (p.number, p.role),
+                (None, None, None) => {
+                    return Err(not_found(&format!("player {person_id} of team {team_a}")));
+                }
+            };
+            Ok(RosterEntry {
+                match_id: id,
+                team_id: team_a,
+                person_id: *person_id,
+                number,
+                role,
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    // all written again: two players may swap their numbers, unique in
+    // the roster
+    tx.execute(
+        "DELETE FROM match_roster WHERE match_id = ?1 AND team_id = ?2",
+        params![Sql(id), Sql(team_a)],
+    )
+    .map_err(sqlite)?;
+    entries
         .iter()
-        .filter(|p| !saved.contains(p))
-        .try_for_each(|person_id| {
-            let player = team
-                .find_player(*person_id)
-                .ok_or_else(|| not_found(&format!("player {person_id} of team {team_a}")))?;
-            insert_roster_entry(
-                tx,
-                &RosterEntry {
-                    match_id: id,
-                    team_id: team_a,
-                    person_id: player.id,
-                    number: player.number,
-                    role: player.role,
-                },
-            )
-        })?;
-    // the substitutions decide how the sets replay
+        .try_for_each(|entry| insert_roster_entry(tx, entry))?;
     // the substitutions decide how the sets replay
     refresh(tx, id)
 }
@@ -432,8 +451,8 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
 impl MatchWriter for SqliteMatchWriter {
     /// A match with a new id: two matches against the same opponent on the
     /// same day are two matches (no `MatchAlreadyExists`). Its roster
-    /// copies number and role from the team (D9), the whole active team
-    /// when empty.
+    /// takes number and role from `numbers`, else copies them from the
+    /// team (D9); the whole active team when empty.
     async fn create(&self, team: &TeamEntry, input: MatchInput) -> Result<MatchEntry, AppError> {
         let id = Uuid::new_v4();
         let m = MatchEntry {
@@ -442,7 +461,7 @@ impl MatchWriter for SqliteMatchWriter {
             opponent: String::new(),
             date: input.date,
             id: id.to_string(),
-            team: team.with_roster(&input.roster),
+            team: with_numbers(team, &input.numbers).with_roster(&input.roster),
             home: input.home.is_a(),
             max_substitutions: input.max_substitutions,
             notes: input.notes,

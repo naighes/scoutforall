@@ -6,6 +6,7 @@ use crate::{
     constants::{DEFAULT_MAX_SUBSTITUTIONS, MAX_ROSTER, MAX_ROSTER_WITHOUT_LIBERO, MIN_ROSTER},
     domain::{Competition, CompetitionFormat, Home, Match, Stage, TeamRef},
     localization::Labels,
+    player_form::parse_number,
     shapes::{
         enums::{EventTypeEnum, RoleEnum},
         r#match::MatchEntry,
@@ -28,6 +29,10 @@ use uuid::Uuid;
 /// `create_opponent`. The competition is `competition_id` when chosen,
 /// else the name written, a new one of `competition_format` (a league if
 /// none); none when empty. `neutral` wins over `home`.
+///
+/// `numbers`: the number and role a player has in this match, corrected on
+/// the score sheet (D9); the others keep those of the match, or of the team
+/// when not on it yet.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchForm {
     pub opponent: String,
@@ -45,6 +50,16 @@ pub struct MatchForm {
     pub competition_format: Option<CompetitionFormat>,
     pub stage: Option<Stage>,
     pub round: String,
+    pub numbers: Vec<RosterNumber>,
+}
+
+/// The number and the role of a player on the score sheet of a match:
+/// copied from the team, then of the match (D9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RosterNumber {
+    pub player: Uuid,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
 }
 
 /// Team B as the form saves it (D3).
@@ -66,7 +81,8 @@ pub enum CompetitionInput {
     },
 }
 
-/// A player that can be on the score sheet, and whether it is.
+/// A player that can be on the score sheet, and whether it is; with the
+/// number and the role of the match.
 #[derive(Debug, Clone)]
 pub struct RosterChoice {
     pub player: PlayerEntry,
@@ -85,6 +101,9 @@ pub struct MatchInput {
     pub notes: String,
     /// empty for a match saved without one, which keeps the whole team
     pub roster: Vec<Uuid>,
+    /// the number and role of the players of the roster; one missing keeps
+    /// those saved for the match, else takes those of the team
+    pub numbers: Vec<RosterNumber>,
     pub friendly: bool,
     pub competition: Option<CompetitionInput>,
     pub stage: Option<Stage>,
@@ -109,6 +128,7 @@ impl MatchInput {
             max_substitutions,
             notes: notes.into(),
             roster,
+            numbers: vec![],
             friendly: false,
             competition: None,
             stage: None,
@@ -136,6 +156,10 @@ pub enum MatchFormError {
     /// more than 12 players and no libero among them: the score sheet
     /// takes 13 or 14 only with a libero
     RosterWithoutLibero,
+    /// a number of the score sheet not from 0 to 99
+    InvalidRosterNumber,
+    /// two players of the score sheet with the same number
+    RosterNumberInUse,
 }
 
 impl MatchFormError {
@@ -147,6 +171,8 @@ impl MatchFormError {
                 | MatchFormError::RosterTooLarge
                 | MatchFormError::RosterWithoutPlayed
                 | MatchFormError::RosterWithoutLibero
+                | MatchFormError::InvalidRosterNumber
+                | MatchFormError::RosterNumberInUse
         )
     }
 
@@ -162,6 +188,8 @@ impl MatchFormError {
             RosterTooLarge => labels.roster_too_large,
             RosterWithoutPlayed => labels.roster_without_played,
             RosterWithoutLibero => labels.roster_without_libero,
+            InvalidRosterNumber => labels.number_must_be_between_0_and_99,
+            RosterNumberInUse => labels.roster_number_in_use,
         }
         .to_string()
     }
@@ -199,6 +227,7 @@ impl MatchForm {
             competition_format: competition.map(|c| c.format),
             stage: row.stage,
             round: row.round.clone().unwrap_or_default(),
+            numbers: vec![],
         }
     }
 
@@ -255,14 +284,85 @@ impl MatchForm {
             .players
             .iter()
             .filter(|p| !p.deleted || kept.contains(&p.id))
-            .map(|p| RosterChoice {
-                player: p.clone(),
-                chosen: chosen.contains(&p.id),
-                played: played.contains(&p.id),
+            .map(|p| {
+                let n = self.number_of(p, existing);
+                RosterChoice {
+                    player: PlayerEntry {
+                        number: n.number,
+                        role: n.role,
+                        ..p.clone()
+                    },
+                    chosen: chosen.contains(&p.id),
+                    played: played.contains(&p.id),
+                }
             })
             .collect();
         choices.sort_by_key(|c| c.player.number);
         choices
+    }
+
+    /// The number and role of `player` in the match: as corrected, else
+    /// as on the roster of `existing`, else as in the team.
+    fn number_of(&self, player: &PlayerEntry, existing: Option<&MatchEntry>) -> RosterNumber {
+        let corrected = self.numbers.iter().find(|n| n.player == player.id);
+        let saved = existing
+            .filter(|m| m.roster.contains(&player.id))
+            .and_then(|m| m.team.find_player(player.id));
+        match (corrected, saved) {
+            (Some(n), _) => *n,
+            (None, Some(p)) => RosterNumber {
+                player: p.id,
+                number: p.number,
+                role: p.role,
+            },
+            (None, None) => RosterNumber {
+                player: player.id,
+                number: player.number,
+                role: player.role,
+            },
+        }
+    }
+
+    /// Gives `player` the number written and `role` in this match, on the
+    /// score sheet or not: the number from 0 to 99, not of another player
+    /// on it. A match saved without a roster gets the one it shows.
+    pub fn correct(
+        &mut self,
+        player: Uuid,
+        number: &str,
+        role: Option<RoleEnum>,
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) -> Result<(), MatchFormError> {
+        let choices = self.roster_choices(team, existing);
+        let number = parse_number(number);
+        let taken = |n: u8| {
+            choices
+                .iter()
+                .any(|c| c.chosen && c.player.id != player && c.player.number == n)
+        };
+        let known = choices.iter().any(|c| c.player.id == player);
+        match (known, number) {
+            (false, _) => Ok(()),
+            (true, None) => Err(MatchFormError::InvalidRosterNumber),
+            (true, Some(n)) if taken(n) => Err(MatchFormError::RosterNumberInUse),
+            (true, Some(number)) => {
+                self.roster.get_or_insert_with(|| {
+                    choices
+                        .iter()
+                        .filter(|c| c.chosen)
+                        .map(|c| c.player.id)
+                        .collect()
+                });
+                self.numbers.retain(|n| n.player != player);
+                self.numbers.push(RosterNumber {
+                    player,
+                    number,
+                    role,
+                });
+                Ok(())
+            }
+        }
     }
 
     /// Puts `player` on the score sheet, or takes it off unless it played.
@@ -323,29 +423,33 @@ impl MatchForm {
             (_, _, None, _) => Err(MatchFormError::InvalidMaxSubstitutions),
             (_, _, Some(max), _) if max < used => Err(MatchFormError::MaxSubstitutionsBelowUsed),
             (_, _, _, Err(e)) => Err(e),
-            (Some(opponent), Some(date), Some(max_substitutions), Ok(roster)) => Ok(MatchInput {
-                opponent,
-                date,
-                home: self.court(),
-                max_substitutions,
-                notes: self.notes.trim().to_string(),
-                roster,
-                friendly: self.friendly,
-                competition: self.competition_input(),
-                stage: self.stage,
-                round: Some(self.round.trim().to_string()).filter(|r| !r.is_empty()),
-            }),
+            (Some(opponent), Some(date), Some(max_substitutions), Ok((roster, numbers))) => {
+                Ok(MatchInput {
+                    opponent,
+                    date,
+                    home: self.court(),
+                    max_substitutions,
+                    notes: self.notes.trim().to_string(),
+                    roster,
+                    numbers,
+                    friendly: self.friendly,
+                    competition: self.competition_input(),
+                    stage: self.stage,
+                    round: Some(self.round.trim().to_string()).filter(|r| !r.is_empty()),
+                })
+            }
         }
     }
 
-    /// The roster to save: none for a match saved without one and left so,
-    /// else from `MIN_ROSTER` to `MAX_ROSTER` players with all who played,
-    /// and a libero when more than `MAX_ROSTER_WITHOUT_LIBERO`.
+    /// The roster to save, with the numbers and roles of its players: none
+    /// for a match saved without one and left so, else from `MIN_ROSTER` to
+    /// `MAX_ROSTER` players with all who played, a number each, and a libero
+    /// when more than `MAX_ROSTER_WITHOUT_LIBERO`.
     fn valid_roster(
         &self,
         team: &TeamEntry,
         existing: Option<&MatchEntry>,
-    ) -> Result<Vec<Uuid>, MatchFormError> {
+    ) -> Result<(Vec<Uuid>, Vec<RosterNumber>), MatchFormError> {
         let chosen: Vec<PlayerEntry> = self
             .roster_choices(team, existing)
             .into_iter()
@@ -356,8 +460,9 @@ impl MatchForm {
         let roster: Vec<Uuid> = chosen.iter().map(|p| p.id).collect();
         let played = existing.map(MatchEntry::played).unwrap_or_default();
         let undeclared = self.roster.is_none() && existing.is_some_and(|m| m.roster.is_empty());
+        let numbers: HashSet<u8> = chosen.iter().map(|p| p.number).collect();
         match roster.len() {
-            _ if undeclared => Ok(vec![]),
+            _ if undeclared => Ok((vec![], vec![])),
             n if n < MIN_ROSTER => Err(MatchFormError::RosterTooSmall),
             n if n > MAX_ROSTER => Err(MatchFormError::RosterTooLarge),
             _ if !played.iter().all(|p| roster.contains(p)) => {
@@ -366,7 +471,18 @@ impl MatchForm {
             n if n > MAX_ROSTER_WITHOUT_LIBERO && !with_libero => {
                 Err(MatchFormError::RosterWithoutLibero)
             }
-            _ => Ok(roster),
+            n if numbers.len() < n => Err(MatchFormError::RosterNumberInUse),
+            _ => Ok((
+                roster,
+                chosen
+                    .iter()
+                    .map(|p| RosterNumber {
+                        player: p.id,
+                        number: p.number,
+                        role: p.role,
+                    })
+                    .collect(),
+            )),
         }
     }
 }

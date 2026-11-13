@@ -4,7 +4,7 @@
 mod tests {
     use crate::{
         domain::{Home, Match, ScoutingMode, TeamRef},
-        match_form::{MatchForm, MatchFormError, MatchInput},
+        match_form::{MatchForm, MatchFormError, MatchInput, RosterNumber},
         shapes::{
             enums::{EventTypeEnum, RoleEnum, TeamSideEnum},
             r#match::MatchEntry,
@@ -134,14 +134,26 @@ mod tests {
     fn a_valid_form_has_the_opponent_trimmed() {
         assert_eq!(
             form("6").validate(&team(), None),
-            Ok(MatchInput::against(
-                "Arezzo",
-                date(),
-                true,
-                6,
-                "",
-                team().players.iter().map(|p| p.id).collect(),
-            ))
+            Ok(MatchInput {
+                // the numbers and roles of the team, copied (D9)
+                numbers: team()
+                    .players
+                    .iter()
+                    .map(|p| RosterNumber {
+                        player: p.id,
+                        number: p.number,
+                        role: p.role,
+                    })
+                    .collect(),
+                ..MatchInput::against(
+                    "Arezzo",
+                    date(),
+                    true,
+                    6,
+                    "",
+                    team().players.iter().map(|p| p.id).collect(),
+                )
+            })
         );
     }
 
@@ -511,5 +523,176 @@ mod tests {
             notes: String,
         }
         assert!(serde_json::from_str::<MatchOfV0_10_1>(&written).is_ok());
+    }
+
+    fn numbered(team: &TeamEntry, number: u8, role: Option<RoleEnum>) -> RosterNumber {
+        RosterNumber {
+            player: ids(team, &[number])[0],
+            number,
+            role,
+        }
+    }
+
+    /// The number and the role of the match: as corrected, else as in the
+    /// team; the score sheet by number.
+    #[test]
+    fn a_number_is_corrected_for_the_match() {
+        let team = team_of(9);
+        let mut f = form("6");
+        let two = ids(&team, &[2])[0];
+        f.correct(two, " 12 ", Some(RoleEnum::OppositeHitter), &team, None)
+            .unwrap();
+        let choices = f.roster_choices(&team, None);
+        assert_eq!(
+            choices
+                .iter()
+                .map(|c| (c.player.number, c.player.role))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, None),
+                (3, None),
+                (4, None),
+                (5, None),
+                (6, None),
+                (7, Some(RoleEnum::Libero)),
+                (8, None),
+                (9, None),
+                (12, Some(RoleEnum::OppositeHitter))
+            ]
+        );
+        let input = f.validate(&team, None).unwrap();
+        assert_eq!(
+            input.numbers.last(),
+            Some(&RosterNumber {
+                player: two,
+                number: 12,
+                role: Some(RoleEnum::OppositeHitter)
+            })
+        );
+        assert_eq!(input.numbers.first(), Some(&numbered(&team, 1, None)));
+        assert_eq!(team.find_player(two).map(|p| p.number), Some(2));
+    }
+
+    /// From 0 to 99, not the number of another player on the score sheet:
+    /// a wrong one leaves the form as it was.
+    #[test]
+    fn a_corrected_number_is_valid_and_not_of_another_on_the_sheet() {
+        let team = team_of(9);
+        let mut f = form("6");
+        let two = ids(&team, &[2])[0];
+        let nine = ids(&team, &[9])[0];
+        for (number, error) in [
+            ("100", MatchFormError::InvalidRosterNumber),
+            ("x", MatchFormError::InvalidRosterNumber),
+            ("", MatchFormError::InvalidRosterNumber),
+            ("3", MatchFormError::RosterNumberInUse),
+        ] {
+            assert_eq!(f.correct(two, number, None, &team, None), Err(error));
+        }
+        assert_eq!(f, form("6"));
+        // keeping its own number is fine
+        assert_eq!(f.correct(two, "2", None, &team, None), Ok(()));
+        // 9 off the score sheet: its number is free
+        f.toggle(nine, &team, None);
+        assert_eq!(f.correct(two, "9", None, &team, None), Ok(()));
+        // 9 back on: two with the same number
+        f.toggle(nine, &team, None);
+        assert_eq!(
+            f.validate(&team, None),
+            Err(MatchFormError::RosterNumberInUse)
+        );
+    }
+
+    /// Over 12 players, the libero is the role in the match, not in the
+    /// team.
+    #[test]
+    fn the_role_of_the_match_counts_for_the_libero() {
+        let team = team_of(13);
+        let mut f = form("6");
+        f.correct(
+            ids(&team, &[7])[0],
+            "7",
+            Some(RoleEnum::OutsideHitter),
+            &team,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            f.clone().validate(&team, None),
+            Err(MatchFormError::RosterWithoutLibero)
+        );
+        f.correct(
+            ids(&team, &[8])[0],
+            "8",
+            Some(RoleEnum::Libero),
+            &team,
+            None,
+        )
+        .unwrap();
+        assert!(f.validate(&team, None).is_ok());
+    }
+
+    /// A saved match shows the numbers of its score sheet, not the ones
+    /// the team has now; who isn't on it, the team's.
+    #[test]
+    fn a_saved_match_shows_its_numbers() {
+        let team = team_of(9);
+        let mut m = started(&team, ids(&team, &[1, 2, 3, 4, 5, 6, 7, 8]));
+        let two = ids(&team, &[2])[0];
+        let nine = ids(&team, &[9])[0];
+        m.team.players.iter_mut().for_each(|p| {
+            match (p.id == two, p.id == nine) {
+                (true, _) => p.number = 22,
+                // not on the score sheet: as the team when read
+                (_, true) => p.number = 99,
+                _ => {}
+            }
+        });
+        let f = of(&m);
+        let numbers: Vec<(Uuid, u8)> = f
+            .roster_choices(&team, Some(&m))
+            .iter()
+            .map(|c| (c.player.id, c.player.number))
+            .collect();
+        assert_eq!(numbers.last(), Some(&(two, 22)));
+        assert!(numbers.contains(&(nine, 9)));
+        let input = f.validate(&team, Some(&m)).unwrap();
+        assert!(
+            input
+                .numbers
+                .iter()
+                .any(|n| n.player == two && n.number == 22)
+        );
+    }
+
+    /// Who played can have number and role corrected (the events tell of
+    /// the player, not of the number).
+    #[test]
+    fn who_played_can_have_number_and_role_corrected() {
+        let team = team_of(9);
+        let m = started(&team, ids(&team, &[1, 2, 3, 4, 5, 6, 7, 8]));
+        let one = ids(&team, &[1])[0];
+        let mut f = of(&m);
+        f.correct(one, "10", Some(RoleEnum::Setter), &team, Some(&m))
+            .unwrap();
+        let input = f.validate(&team, Some(&m)).unwrap();
+        assert!(input.numbers.contains(&RosterNumber {
+            player: one,
+            number: 10,
+            role: Some(RoleEnum::Setter)
+        }));
+    }
+
+    /// A match saved without a roster gets the one it shows when a number
+    /// is corrected.
+    #[test]
+    fn a_match_without_roster_gets_one_when_a_number_is_corrected() {
+        let team = team_of(9);
+        let m = started(&team, vec![]);
+        let mut f = of(&m);
+        f.correct(ids(&team, &[9])[0], "19", None, &team, Some(&m))
+            .unwrap();
+        assert_eq!(f.roster, Some(ids(&team, &[1, 2, 3, 4, 5, 6, 7, 8, 9])));
+        assert_eq!(f.validate(&team, Some(&m)).unwrap().roster.len(), 9);
     }
 }

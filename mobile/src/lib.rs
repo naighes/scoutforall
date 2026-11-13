@@ -35,7 +35,7 @@ use scout4all_core::{
     },
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error, log_info},
-    match_form::{MatchForm, MatchFormError},
+    match_form::{MatchForm, MatchFormError, RosterNumber},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
     player_form::{self, PlayerForm, PlayerFormError},
     providers::{
@@ -358,6 +358,15 @@ pub struct MatchForm {
     pub stage: Option<Stage>,
     #[uniffi(default = "")]
     pub round: String,
+    #[uniffi(default = [])]
+    pub numbers: Vec<RosterNumber>,
+}
+
+#[uniffi::remote(Record)]
+pub struct RosterNumber {
+    pub player: Uuid,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
 }
 
 #[uniffi::remote(Enum)]
@@ -507,7 +516,9 @@ impl From<MatchFormError> for MatchField {
             MatchFormError::RosterTooSmall
             | MatchFormError::RosterTooLarge
             | MatchFormError::RosterWithoutPlayed
-            | MatchFormError::RosterWithoutLibero => MatchField::Roster,
+            | MatchFormError::RosterWithoutLibero
+            | MatchFormError::InvalidRosterNumber
+            | MatchFormError::RosterNumberInUse => MatchField::Roster,
         }
     }
 }
@@ -529,6 +540,9 @@ pub struct RosterPlayer {
     pub chosen: bool,
     /// played in a set of the match: on the score sheet for good
     pub played: bool,
+    /// the role named by `role`, to correct it
+    #[uniffi(default = None)]
+    pub role_value: Option<RoleEnum>,
 }
 
 /// The match form with the players of its roster, by number.
@@ -3655,32 +3669,34 @@ impl Scout4All {
         form: MatchForm,
         toggled: Option<Uuid>,
     ) -> Result<MatchRoster, MobileError> {
-        // the team as it is, also with the players not on the roster
-        let team = self.read_team(&team_id)?;
-        let existing = match_id
-            .map(|id| self.read_match(&team_id, &id))
-            .transpose()?;
-        let mut form = form;
-        if let Some(player) = toggled {
-            form.toggle(player, &team, existing.as_ref());
-        }
+        self.roster_after(team_id, match_id, form, |form, team, existing| {
+            if let Some(player) = toggled {
+                form.toggle(player, team, existing);
+            }
+            Ok(())
+        })
+    }
+
+    /// The match form with `player` given `number` and `role` in this
+    /// match (D9), and the players of its roster; an error, for the
+    /// roster, when the number isn't valid or another player on it has it.
+    pub fn correct_roster_number(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+        player: Uuid,
+        number: String,
+        role: Option<RoleEnum>,
+    ) -> Result<MatchRoster, MobileError> {
         let labels = self.language.labels();
-        let players = form
-            .roster_choices(&team, existing.as_ref())
-            .into_iter()
-            .map(|c| RosterPlayer {
-                id: c.player.id,
-                name: c.player.name,
-                number: c.player.number,
-                role: c
-                    .player
-                    .role
-                    .map(|r| r.name(team.gender, labels).to_string()),
-                chosen: c.chosen,
-                played: c.played,
-            })
-            .collect();
-        Ok(MatchRoster { form, players })
+        self.roster_after(team_id, match_id, form, |form, team, existing| {
+            form.correct(player, &number, role, team, existing)
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(labels),
+                })
+        })
     }
 
     /// The form of a match of the team, to edit it.
@@ -4622,6 +4638,41 @@ impl Scout4All {
             .into_iter()
             .filter_map(Result::ok)
             .collect())
+    }
+
+    /// The match form changed by `change`, with the players of its roster.
+    fn roster_after(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+        change: impl FnOnce(&mut MatchForm, &TeamEntry, Option<&MatchEntry>) -> Result<(), MobileError>,
+    ) -> Result<MatchRoster, MobileError> {
+        // the team as it is, also with the players not on the roster
+        let team = self.read_team(&team_id)?;
+        let existing = match_id
+            .map(|id| self.read_match(&team_id, &id))
+            .transpose()?;
+        let mut form = form;
+        change(&mut form, &team, existing.as_ref())?;
+        let labels = self.language.labels();
+        let players = form
+            .roster_choices(&team, existing.as_ref())
+            .into_iter()
+            .map(|c| RosterPlayer {
+                id: c.player.id,
+                name: c.player.name,
+                number: c.player.number,
+                role: c
+                    .player
+                    .role
+                    .map(|r| r.name(team.gender, labels).to_string()),
+                chosen: c.chosen,
+                played: c.played,
+                role_value: c.player.role,
+            })
+            .collect();
+        Ok(MatchRoster { form, players })
     }
 
     fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
@@ -5708,6 +5759,77 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Campionato", "Coppa", "Torneo"]
         );
+    }
+
+    /// Number and role corrected on the score sheet: a wrong one refused
+    /// with the message of the roster, a good one shown, saved for the
+    /// match and read back.
+    #[test]
+    fn a_number_of_the_score_sheet_is_corrected_and_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let ids: Vec<Uuid> = (1..=7)
+            .map(|n| {
+                let id = app
+                    .save_player(
+                        team.clone(),
+                        None,
+                        player(&format!("P{n}"), &n.to_string()),
+                        false,
+                    )
+                    .unwrap();
+                parse_id(&id).unwrap()
+            })
+            .collect();
+        let two = ids[1];
+        let new = match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8");
+        let taken = app.correct_roster_number(
+            team.clone(),
+            None,
+            new.clone(),
+            two,
+            "3".into(),
+            Some(RoleEnum::Setter),
+        );
+        match taken {
+            Err(MobileError::InvalidMatch { field, reason }) => assert_eq!(
+                (field, reason.as_str()),
+                (
+                    MatchField::Roster,
+                    "un altro giocatore a referto ha questo numero"
+                )
+            ),
+            other => unreachable!("expected the number in use, got {other:?}"),
+        }
+        let corrected = app
+            .correct_roster_number(
+                team.clone(),
+                None,
+                new,
+                two,
+                "12".into(),
+                Some(RoleEnum::Libero),
+            )
+            .unwrap();
+        let shown = corrected.players.last().unwrap();
+        assert_eq!(
+            (
+                shown.id,
+                shown.number,
+                shown.role.as_deref(),
+                shown.role_value
+            ),
+            (two, 12, Some("libero"), Some(RoleEnum::Libero))
+        );
+        let m = app.save_match(team.clone(), None, corrected.form).unwrap();
+        let read = app.match_form(team.clone(), m.clone()).unwrap();
+        let roster = app.match_roster(team.clone(), Some(m), read, None).unwrap();
+        assert_eq!(
+            roster.players.last().map(|p| (p.id, p.number)),
+            Some((two, 12))
+        );
+        assert_eq!(app.team(team).unwrap().players[1].number, 2);
     }
 
     #[test]

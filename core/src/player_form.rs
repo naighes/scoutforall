@@ -178,7 +178,7 @@ fn parse_height(height: &str) -> Option<u16> {
 }
 
 /// One or two digits, surrounding spaces aside.
-fn parse_number(number: &str) -> Option<u8> {
+pub(crate) fn parse_number(number: &str) -> Option<u8> {
     let number = number.trim();
     match (number.len(), number.chars().all(|c| c.is_ascii_digit())) {
         (1 | 2, true) => number.parse().ok(),

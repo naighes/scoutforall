@@ -267,6 +267,9 @@ pub enum Message {
     /// a suggestion of a search taken
     Take(usize, usize),
     Focus(usize),
+    /// more about a field asked (the number and the role of a player on
+    /// the score sheet): for the screen, the form stays as it is
+    Details(usize),
     Save,
     Cancel,
 }
@@ -639,6 +642,7 @@ impl Form {
                 self.focused = field.min(self.fields.len().saturating_sub(1));
                 Outcome::Stay
             }
+            Message::Details(_) => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
         }

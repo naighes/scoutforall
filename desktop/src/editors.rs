@@ -13,14 +13,17 @@ use {
     chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone},
     iced::{
         Alignment, Element, Length, Padding,
-        widget::{Column, Id, Row, button, column, container, row, scrollable, space, text},
+        widget::{
+            Column, Id, Row, button, column, container, responsive, row, scrollable, space, text,
+            text::Wrapping,
+        },
     },
     scout4all_core::{match_form::MatchForm, player_form::PlayerForm, team_form::TeamForm},
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         ClassificationChoice, CompetitionChoice, FormatChoice, GenderChoice, MatchField,
-        MobileError, OpponentChoice, PlayerField, RoleChoice, RosterPlayer, Scout4All, StageChoice,
-        TeamField, TeamListing,
+        MatchRoster, MobileError, OpponentChoice, PlayerField, RoleChoice, RosterPlayer, Scout4All,
+        StageChoice, TeamField, TeamListing,
     },
 };
 
@@ -35,8 +38,22 @@ pub enum Edited {
 const DATE_FORMAT: &str = "%Y-%m-%d";
 const TIME_FORMAT: &str = "%H:%M";
 
-/// The players of the score sheet in a row.
+/// The players of the score sheet in a row: as many as fit, at least
+/// `ROSTER_MIN_COLUMNS`, at most `ROSTER_COLUMNS`.
 const ROSTER_COLUMNS: usize = 4;
+const ROSTER_MIN_COLUMNS: usize = 2;
+
+/// The narrowest a tile of the score sheet is, a column fewer below.
+const ROSTER_TILE_WIDTH: f32 = 240.0;
+
+/// The columns of the score sheet in `width`.
+fn roster_columns(width: f32) -> usize {
+    let fit = ((width + 10.0) / (ROSTER_TILE_WIDTH + 10.0)).floor();
+    // a finite, small number: as usize it's what fits
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let fit = fit.max(0.0) as usize;
+    fit.clamp(ROSTER_MIN_COLUMNS, ROSTER_COLUMNS)
+}
 
 /// The first option of a choice that can be left empty.
 const EMPTY: &str = "–";
@@ -83,7 +100,23 @@ pub struct MatchEditor {
     formats: Vec<FormatChoice>,
     stages: Vec<StageChoice>,
     step: MatchStep,
+    /// the number and role of a player of the score sheet being corrected
+    correcting: Option<Correction>,
+    /// the columns of the score sheet as last drawn, for the arrows
+    columns: std::cell::Cell<usize>,
 }
+
+/// The number and the role a player has in the match, corrected in a
+/// small form over the score sheet (D9).
+struct Correction {
+    player: uuid::Uuid,
+    roles: Vec<RoleChoice>,
+    form: Form,
+}
+
+// the fields of a correction
+const CORRECTION_NUMBER: usize = 0;
+const CORRECTION_ROLE: usize = 1;
 
 /// The steps of the form of a match: the teams and when, the competition
 /// and the rules, the players of the score sheet (as on Android).
@@ -441,6 +474,8 @@ impl Editor {
                 formats,
                 stages,
                 step: MatchStep::Match,
+                correcting: None,
+                columns: std::cell::Cell::new(ROSTER_COLUMNS),
             })),
         };
         editor.show(MatchStep::Match);
@@ -535,6 +570,7 @@ impl Editor {
                 .and_then(|i| m.stages.get(i))
                 .map(|st| st.value),
             round: f.text(MATCH_ROUND),
+            numbers: m.data.numbers.clone(),
         }
     }
 
@@ -546,6 +582,12 @@ impl Editor {
         };
         let data = self.match_data(m);
         let roster = core.match_roster(m.team_id.clone(), m.id.clone(), data, toggled)?;
+        self.set_roster(roster);
+        Ok(())
+    }
+
+    /// The roster as the core gives it back: one check for each player.
+    fn set_roster(&mut self, roster: MatchRoster) {
         self.form.fields.truncate(MATCH_ROSTER);
         self.form.fields.extend(
             roster
@@ -557,7 +599,106 @@ impl Editor {
             m.data = roster.form;
             m.roster = roster.players;
         }
-        Ok(())
+    }
+
+    /// The small form of the number and the role of the player of the
+    /// score sheet at `field`.
+    fn open_correction(&mut self, core: &Scout4All, s: &Strings, field: usize) {
+        let Kind::Match(m) = &mut self.kind else {
+            return;
+        };
+        let Some(p) = field
+            .checked_sub(MATCH_ROSTER)
+            .and_then(|n| m.roster.get(n))
+        else {
+            return;
+        };
+        let roles = core.roles(m.team_id.clone());
+        let fields = vec![
+            Field::text(s.number, p.number.to_string()),
+            Field::choice(
+                s.role,
+                with_empty(roles.iter().map(|r| r.name.clone())),
+                option_of(roles.iter().map(|r| r.value), p.role_value),
+            ),
+        ];
+        let mut form = Form::new(&format!("{} {}", p.number, p.name), fields);
+        form.actions = Some((
+            (theme::icons::CLOSE, s.cancel.to_string()),
+            (theme::icons::CHECK, s.ok.to_string()),
+        ));
+        self.form.focused = field;
+        m.correcting = Some(Correction {
+            player: p.id,
+            roles,
+            form,
+        });
+    }
+
+    /// The correction saved in the form of the match, the keys on the
+    /// player (wherever its number puts it now); or its error shown.
+    fn corrected(&mut self, core: &Scout4All) {
+        let Kind::Match(m) = &self.kind else {
+            return;
+        };
+        let Some(c) = &m.correcting else {
+            return;
+        };
+        let role = c
+            .form
+            .index(CORRECTION_ROLE)
+            .checked_sub(1)
+            .and_then(|i| c.roles.get(i))
+            .map(|r| r.value);
+        let player = c.player;
+        let corrected = core.correct_roster_number(
+            m.team_id.clone(),
+            m.id.clone(),
+            self.match_data(m),
+            player,
+            c.form.text(CORRECTION_NUMBER),
+            role,
+        );
+        match corrected {
+            Ok(roster) => {
+                self.set_roster(roster);
+                if let Kind::Match(m) = &mut self.kind {
+                    m.correcting = None;
+                    if let Some(n) = m.roster.iter().position(|p| p.id == player) {
+                        self.form.focused = MATCH_ROSTER + n;
+                    }
+                }
+            }
+            Err(e) => {
+                if let Kind::Match(m) = &mut self.kind
+                    && let Some(c) = &mut m.correcting
+                {
+                    c.form.error = Some(e.to_string());
+                }
+            }
+        }
+    }
+
+    /// What the small form of a correction did: confirmed, closed.
+    fn correction_outcome(&mut self, core: &Scout4All, outcome: Outcome) -> Edited {
+        match outcome {
+            Outcome::Save => self.corrected(core),
+            Outcome::Cancel => {
+                if let Kind::Match(m) = &mut self.kind {
+                    m.correcting = None;
+                }
+            }
+            Outcome::Stay | Outcome::Changed(_) => {}
+        }
+        Edited::Stay
+    }
+
+    /// The small form of a correction, when open.
+    fn correction(&mut self) -> Option<&mut Form> {
+        match &mut self.kind {
+            Kind::Match(m) => m.correcting.as_mut().map(|c| &mut c.form),
+            _ => None,
+        }
     }
 
     fn changed(&mut self, core: &Scout4All, field: usize) {
@@ -573,6 +714,7 @@ impl Editor {
                 if let Some(team) = chosen.filter(|team| **team != m.team_id) {
                     m.team_id = team.clone();
                     m.data.roster = None;
+                    m.data.numbers.clear();
                     m.opponents = core.opponent_choices(team.clone()).unwrap_or_default();
                 }
                 self.linked();
@@ -772,6 +914,14 @@ impl Editor {
         }
     }
 
+    /// The columns of the score sheet as drawn.
+    fn columns(&self) -> usize {
+        match &self.kind {
+            Kind::Match(m) => m.columns.get(),
+            _ => ROSTER_COLUMNS,
+        }
+    }
+
     fn on_roster(&self) -> bool {
         matches!(&self.kind, Kind::Match(m) if m.step == MatchStep::Roster)
     }
@@ -792,10 +942,20 @@ impl Editor {
                 Edited::Stay
             }
             (Some(_), _) => Edited::Stay,
-            (None, message) => {
-                let outcome = self.form.update(message);
-                self.outcome(core, s, outcome)
-            }
+            (None, message) => match (self.correction(), message) {
+                (Some(form), message) => {
+                    let outcome = form.update(message);
+                    self.correction_outcome(core, outcome)
+                }
+                (None, form::Message::Details(field)) => {
+                    self.open_correction(core, s, field);
+                    Edited::Stay
+                }
+                (None, message) => {
+                    let outcome = self.form.update(message);
+                    self.outcome(core, s, outcome)
+                }
+            },
         }
     }
 
@@ -814,6 +974,14 @@ impl Editor {
     }
 
     fn form_key(&mut self, core: &Scout4All, s: &Strings, ck: KeyCombination) -> Edited {
+        if let Some(form) = self.correction() {
+            let outcome = form.key(ck);
+            return self.correction_outcome(core, outcome);
+        }
+        if self.on_roster() && ck == key!(e) {
+            self.open_correction(core, s, self.form.focused);
+            return Edited::Stay;
+        }
         // the score sheet is a grid: the arrows move in it
         let players = self.form.fields.len().saturating_sub(MATCH_ROSTER);
         let at = self.form.focused.saturating_sub(MATCH_ROSTER);
@@ -821,8 +989,8 @@ impl Editor {
             (false, _) => None,
             (true, k) if k == key!(left) => Some(at.checked_sub(1)),
             (true, k) if k == key!(right) => Some(Some(at + 1)),
-            (true, k) if k == key!(up) => Some(at.checked_sub(ROSTER_COLUMNS)),
-            (true, k) if k == key!(down) => Some(Some(at + ROSTER_COLUMNS)),
+            (true, k) if k == key!(up) => Some(at.checked_sub(self.columns())),
+            (true, k) if k == key!(down) => Some(Some(at + self.columns())),
             _ => None,
         };
         match moved {
@@ -841,7 +1009,16 @@ impl Editor {
 
     /// The keys, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        let correcting = matches!(&self.kind, Kind::Match(m) if m.correcting.is_some());
         match (self.namesake.is_some(), self.on_roster()) {
+            // the small form of a correction: Enter confirms it
+            (false, true) if correcting => Form::hints(s)
+                .into_iter()
+                .map(|(k, what)| match k.as_str() {
+                    "Enter" => (k, s.ok.to_string()),
+                    _ => (k, what),
+                })
+                .collect(),
             (true, _) => vec![
                 ("Enter".to_string(), s.save_anyway.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
@@ -849,6 +1026,7 @@ impl Editor {
             (false, true) => vec![
                 ("← → ↑ ↓".to_string(), String::new()),
                 (s.space.to_string(), s.roster_toggle.to_string()),
+                ("e".to_string(), s.roster_correct.to_string()),
                 ("Enter".to_string(), s.save.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ],
@@ -869,7 +1047,13 @@ impl Editor {
     }
 
     pub fn focus_id(&self) -> Id {
-        self.form.focus_id()
+        match &self.kind {
+            Kind::Match(m) => m
+                .correcting
+                .as_ref()
+                .map_or_else(|| self.form.focus_id(), |c| c.form.focus_id()),
+            _ => self.form.focus_id(),
+        }
     }
 
     pub fn view<'a, M: Clone + 'a>(
@@ -888,10 +1072,23 @@ impl Editor {
                 on(form::Message::Cancel),
                 c,
             ),
-            (None, Kind::Match(m)) if m.step == MatchStep::Roster => self.roster_view(m, s, c, on),
+            (None, Kind::Match(m)) => match (&m.correcting, m.step) {
+                // small, over the score sheet
+                (Some(correction), _) => container(
+                    container(correction.form.view(s, c, on, None))
+                        .max_width(Self::CORRECTION_WIDTH),
+                )
+                .center_x(Length::Fill)
+                .into(),
+                (None, MatchStep::Roster) => self.roster_view(m, s, c, on),
+                (None, _) => self.form.view(s, c, on, None),
+            },
             (None, _) => self.form.view(s, c, on, None),
         }
     }
+
+    /// How wide the small form of a correction is at most.
+    const CORRECTION_WIDTH: f32 = 520.0;
 
     /// How tall a tile of the score sheet is.
     const TILE_HEIGHT: f32 = 80.0;
@@ -906,7 +1103,29 @@ impl Editor {
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
         let chosen = m.roster.iter().filter(|p| p.chosen).count();
-        let tile = |n: usize, p: &'a RosterPlayer| -> Element<'a, M> {
+        // the number and the role of the match, also of who played
+        let correct = move |field: usize| -> Element<'a, M> {
+            ui::tip(
+                button(ui::icon(theme::icons::EDIT, 16.0, c.muted))
+                    .padding(4)
+                    .on_press(on(form::Message::Details(field)))
+                    .style(move |_, status| button::Style {
+                        background: matches!(
+                            status,
+                            button::Status::Hovered | button::Status::Pressed
+                        )
+                        .then(|| iced::Color { a: 0.7, ..c.button }.into()),
+                        border: iced::Border {
+                            radius: 6.0.into(),
+                            ..iced::Border::default()
+                        },
+                        ..button::Style::default()
+                    }),
+                s.roster_correct,
+                c,
+            )
+        };
+        let tile = move |n: usize, p: &'a RosterPlayer| -> Element<'a, M> {
             let field = MATCH_ROSTER + n;
             let focused = self.form.focused == field;
             let lit = p.chosen;
@@ -915,7 +1134,11 @@ impl Editor {
                 false => c.muted,
             };
             let role: Element<'a, M> = match &p.role {
-                Some(role) => text(role.clone()).size(SIZE_SMALL).color(c.muted).into(),
+                Some(role) => text(role.clone())
+                    .size(SIZE_SMALL)
+                    .color(c.muted)
+                    .wrapping(Wrapping::WordOrGlyph)
+                    .into(),
                 None => space::vertical().height(0).into(),
             };
             button(
@@ -928,18 +1151,32 @@ impl Editor {
                             false => c.muted,
                         })
                         .width(Length::Fixed(34.0)),
-                    column![text(p.name.clone()).size(SIZE_BODY).color(fg), role].spacing(2),
-                    space::horizontal(),
-                    text(match lit {
-                        true => "■",
-                        false => "□",
-                    })
-                    .size(SIZE_BODY)
-                    .color(match (lit, p.played) {
-                        (_, true) => c.muted,
-                        (true, false) => c.accent,
-                        (false, false) => c.border,
-                    }),
+                    // the name wraps: the pencil and the check always fit
+                    column![
+                        text(p.name.clone())
+                            .size(SIZE_BODY)
+                            .color(fg)
+                            .wrapping(Wrapping::WordOrGlyph),
+                        role
+                    ]
+                    .spacing(2)
+                    .width(Length::Fill),
+                    // the check over the pencil: narrow, the name keeps the room
+                    column![
+                        text(match lit {
+                            true => "■",
+                            false => "□",
+                        })
+                        .size(SIZE_BODY)
+                        .color(match (lit, p.played) {
+                            (_, true) => c.muted,
+                            (true, false) => c.accent,
+                            (false, false) => c.border,
+                        }),
+                        correct(field),
+                    ]
+                    .spacing(4)
+                    .align_x(Alignment::Center),
                 ]
                 .spacing(8)
                 .height(Length::Fill)
@@ -985,25 +1222,35 @@ impl Editor {
             })
             .into()
         };
-        let tiles: Vec<Element<'a, M>> = m
-            .roster
-            .iter()
-            .enumerate()
-            .map(|(n, p)| tile(n, p))
-            .collect();
-        let mut rows: Vec<Element<'a, M>> = vec![];
-        let mut tiles = tiles.into_iter().peekable();
-        while tiles.peek().is_some() {
-            let line: Vec<Element<'a, M>> = tiles.by_ref().take(ROSTER_COLUMNS).collect();
-            let missing = ROSTER_COLUMNS - line.len();
-            rows.push(
-                Row::with_children(line.into_iter().chain(
-                    (0..missing).map(|_| space::horizontal().width(Length::FillPortion(1)).into()),
-                ))
-                .spacing(10)
-                .into(),
-            );
-        }
+        // as many columns as fit; the arrows go by them
+        let grid = responsive(move |size| {
+            let columns = roster_columns(size.width);
+            m.columns.set(columns);
+            let mut tiles = m
+                .roster
+                .iter()
+                .enumerate()
+                .map(|(n, p)| tile(n, p))
+                .peekable();
+            let mut rows: Vec<Element<'a, M>> = vec![];
+            while tiles.peek().is_some() {
+                let line: Vec<Element<'a, M>> = tiles.by_ref().take(columns).collect();
+                let missing = columns - line.len();
+                rows.push(
+                    Row::with_children(
+                        line.into_iter().chain(
+                            (0..missing)
+                                .map(|_| space::horizontal().width(Length::FillPortion(1)).into()),
+                        ),
+                    )
+                    .spacing(10)
+                    .into(),
+                );
+            }
+            scrollable(Column::with_children(rows).spacing(10))
+                .height(Length::Fill)
+                .into()
+        });
         // the grey ones told, when there are
         let legend: Element<'a, M> = match m.roster.iter().any(|p| p.played) {
             true => row![
@@ -1033,7 +1280,7 @@ impl Editor {
                     .size(SIZE_SMALL)
                     .color(c.muted),
                 legend,
-                scrollable(Column::with_children(rows).spacing(10)).height(Length::Fill),
+                grid,
                 error,
                 container(buttons)
                     .width(Length::Fill)
@@ -1325,6 +1572,116 @@ mod tests {
             unreachable!("a match")
         };
         assert_eq!(m.teams.len(), 1);
+    }
+
+    fn correcting(e: &Editor) -> Option<&Correction> {
+        match &e.kind {
+            Kind::Match(m) => m.correcting.as_ref(),
+            _ => unreachable!("a match"),
+        }
+    }
+
+    fn roster(e: &Editor) -> Vec<(String, u8, Option<RoleEnum>)> {
+        match &e.kind {
+            Kind::Match(m) => m
+                .roster
+                .iter()
+                .map(|p| (p.name.clone(), p.number, p.role_value))
+                .collect(),
+            _ => unreachable!("a match"),
+        }
+    }
+
+    /// On the score sheet, "e" (or the pencil) opens number and role of
+    /// the player: a number in use refused there, a good one moves the
+    /// player where its number goes, the keys still on it; Esc closes
+    /// without changes; saved for the match, not for the team.
+    #[test]
+    fn number_and_role_are_corrected_on_the_score_sheet() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let s = strings(LanguageEnum::It);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert!(
+            e.hints(s)
+                .contains(&("e".to_string(), s.roster_correct.to_string()))
+        );
+        press(&mut e, &core, key!(right));
+        press(&mut e, &core, key!(e));
+        let c = correcting(&e).unwrap();
+        assert_eq!(c.form.title, "2 Cortona P2");
+        assert_eq!(c.form.text(CORRECTION_NUMBER), "2");
+        assert_eq!(e.focus_id(), Id::from("form-field-0"));
+        assert!(
+            e.hints(s)
+                .contains(&("Enter".to_string(), s.ok.to_string()))
+        );
+        // in use: refused, the form stays
+        send(&mut e, &core, Input(CORRECTION_NUMBER, "3".into()));
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        assert!(correcting(&e).and_then(|c| c.form.error.clone()).is_some());
+        let opposite = core
+            .roles(cortona.clone())
+            .iter()
+            .position(|r| r.value == RoleEnum::OppositeHitter)
+            .unwrap();
+        send(&mut e, &core, Input(CORRECTION_NUMBER, "12".into()));
+        send(&mut e, &core, Choose(CORRECTION_ROLE, opposite + 1));
+        press(&mut e, &core, key!(enter));
+        assert!(correcting(&e).is_none());
+        assert_eq!(
+            roster(&e).last(),
+            Some(&("Cortona P2".to_string(), 12, Some(RoleEnum::OppositeHitter)))
+        );
+        assert_eq!(e.form.focused, MATCH_ROSTER + 6);
+        // the pencil of the first one, then Esc: nothing changes
+        send(&mut e, &core, form::Message::Details(MATCH_ROSTER));
+        assert_eq!(
+            correcting(&e).map(|c| c.form.title.as_str()),
+            Some("1 Cortona P1")
+        );
+        send(&mut e, &core, Input(CORRECTION_NUMBER, "10".into()));
+        assert!(matches!(press(&mut e, &core, BACK_KEY), Edited::Stay));
+        assert!(correcting(&e).is_none());
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert_eq!(roster(&e).first().map(|p| p.1), Some(1));
+        let Edited::Saved(id) = press(&mut e, &core, key!(enter)) else {
+            unreachable!("saved")
+        };
+        let edit =
+            Editor::a_match(strings(LanguageEnum::It), &core, cortona.clone(), Some(id)).unwrap();
+        assert_eq!(
+            roster(&edit).last(),
+            Some(&("Cortona P2".to_string(), 12, Some(RoleEnum::OppositeHitter)))
+        );
+        assert_eq!(core.team(cortona).unwrap().players[1].number, 2);
+    }
+
+    /// As many tiles as fit, from 2 to 4; the arrows go by the columns
+    /// drawn.
+    #[test]
+    fn the_score_sheet_has_the_columns_that_fit() {
+        assert_eq!(roster_columns(0.0), 2);
+        assert_eq!(roster_columns(640.0), 2);
+        assert_eq!(roster_columns(760.0), 3);
+        assert_eq!(roster_columns(1100.0), 4);
+        assert_eq!(roster_columns(f32::NAN), 2);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 9);
+        let mut e = new_match(&core, &cortona);
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        if let Kind::Match(m) = &e.kind {
+            m.columns.set(2);
+        }
+        press(&mut e, &core, key!(down));
+        assert_eq!(e.form.focused, MATCH_ROSTER + 2);
     }
 
     #[test]
