@@ -89,6 +89,25 @@ pub(crate) fn team_ids(tx: &Transaction) -> Result<Vec<String>, AppError> {
 /// The team not removed, with its members in their order: the removed
 /// ones only when a match tells of them.
 pub(crate) fn team_rows(tx: &Transaction, team: Uuid) -> Result<Option<TeamRows>, AppError> {
+    team_rows_where(
+        tx,
+        team,
+        &format!("tm.deleted = 0 OR {}", tells_of_sql("tm.person_id")),
+    )
+}
+
+/// The team not removed, with all its members in their order, also the
+/// removed ones no match here tells of (one in an archive may).
+pub(crate) fn whole_team_rows(tx: &Transaction, team: Uuid) -> Result<Option<TeamRows>, AppError> {
+    team_rows_where(tx, team, "1")
+}
+
+/// The team not removed, with its members chosen by `members`.
+fn team_rows_where(
+    tx: &Transaction,
+    team: Uuid,
+    members: &str,
+) -> Result<Option<TeamRows>, AppError> {
     let Some(row) = team_row(tx, team)?.filter(|t| !t.deleted) else {
         return Ok(None);
     };
@@ -96,9 +115,8 @@ pub(crate) fn team_rows(tx: &Transaction, team: Uuid) -> Result<Option<TeamRows>
         "SELECT tm.person_id, tm.position, tm.number, tm.role, tm.deleted,
                 p.name, p.birth_date, p.height_cm, p.notes, p.deleted
          FROM team_members tm JOIN persons p ON p.id = tm.person_id
-         WHERE tm.team_id = ?1 AND (tm.deleted = 0 OR {})
-         ORDER BY tm.position",
-        tells_of_sql("tm.person_id")
+         WHERE tm.team_id = ?1 AND ({members})
+         ORDER BY tm.position"
     );
     let members: Vec<(Person, Membership)> = tx
         .prepare(&sql)

@@ -6,7 +6,7 @@
 //! nothing.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::{
         archive::zip_files,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
@@ -48,16 +48,16 @@ mod tests {
     use uuid::Uuid;
     use zip::CompressionMethod::Deflated;
 
-    fn en() -> Language {
+    pub(crate) fn en() -> Language {
         Language::new(LanguageEnum::En)
     }
 
-    fn database() -> Database {
+    pub(crate) fn database() -> Database {
         Database::new(crate::db::open_in_memory().unwrap())
     }
 
     /// The data folder of a version of the legacy fixtures, migrated.
-    async fn migrated(version: &str) -> Database {
+    pub(crate) async fn migrated(version: &str) -> Database {
         let dir = TempDir::new().unwrap();
         copy_dir(
             &legacy_fixtures(version).join("data"),
@@ -76,7 +76,7 @@ mod tests {
 
     /// Every team with its matches, as the providers read them; every
     /// match replays.
-    async fn contents(db: &Database) -> BTreeMap<Uuid, (TeamEntry, Vec<MatchEntry>)> {
+    pub(crate) async fn contents(db: &Database) -> BTreeMap<Uuid, (TeamEntry, Vec<MatchEntry>)> {
         let teams = SqliteTeamReader::new(db.clone());
         let matches = SqliteMatchReader::new(db.clone(), en());
         let mut all = BTreeMap::new();
@@ -96,7 +96,7 @@ mod tests {
     }
 
     /// Every row of every table, as text: to tell nothing changed.
-    fn rows(db: &Database) -> Vec<String> {
+    pub(crate) fn rows(db: &Database) -> Vec<String> {
         db.read(|tx| {
             let tables: Vec<String> = tx
                 .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
@@ -124,7 +124,7 @@ mod tests {
         .unwrap()
     }
 
-    fn execute(db: &Database, sql: &str) {
+    pub(crate) fn execute(db: &Database, sql: &str) {
         db.write(|tx| {
             tx.execute_batch(sql)
                 .map_err(crate::providers::sqlite::sqlite)

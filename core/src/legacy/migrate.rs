@@ -273,7 +273,7 @@ fn missing(tx: &Transaction, team: &TeamRows) -> Result<bool, AppError> {
 /// team, its persons, its memberships (after those there, in the order of
 /// the folder). What's there stays as it is. The cache of its matches
 /// holds: players added don't change how they replay.
-fn insert_team_rows(tx: &Transaction, team: &TeamRows) -> Result<(), AppError> {
+pub(crate) fn insert_team_rows(tx: &Transaction, team: &TeamRows) -> Result<(), AppError> {
     let t = &team.row;
     tx.execute(
         "INSERT INTO teams (id, name, year, classification, gender, country)
@@ -356,7 +356,10 @@ fn plan(tx: &Transaction, rows: MatchRows) -> Result<Result<Plan, NotRead>, AppE
 }
 
 /// The match moved from where it was, and whether it's removed.
-fn already(tx: &Transaction, legacy: &LegacyId) -> Result<Option<(Uuid, bool)>, AppError> {
+pub(crate) fn already(
+    tx: &Transaction,
+    legacy: &LegacyId,
+) -> Result<Option<(Uuid, bool)>, AppError> {
     tx.query_row(
         "SELECT id, deleted FROM matches WHERE legacy_id = ?1 AND legacy_team = ?2",
         params![legacy.id, Sql(legacy.team)],
@@ -368,7 +371,7 @@ fn already(tx: &Transaction, legacy: &LegacyId) -> Result<Option<(Uuid, bool)>, 
 
 /// Whether the match of the folder is the one in the database: the same
 /// match (but its id), roster and sets (but the ids of the events).
-fn same(folder: &MatchRows, there: &MatchRows) -> Result<bool, AppError> {
+pub(crate) fn same(folder: &MatchRows, there: &MatchRows) -> Result<bool, AppError> {
     let entries = |rows: &MatchRows| -> Result<Vec<SetEntry>, AppError> {
         rows.sets.iter().map(SetRows::entry).collect()
     };

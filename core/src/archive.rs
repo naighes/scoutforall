@@ -146,7 +146,7 @@ pub fn is_match_of(m: &MatchEntry, team: &TeamEntry) -> bool {
 /// The roster of the archive, as the match form would save it for the
 /// team: its players of the team and, after them by number, who played.
 /// None if the archive has none (up to v0.10.1).
-fn roster_for(m: &MatchEntry, team: &TeamEntry) -> Vec<Uuid> {
+pub(crate) fn roster_for(m: &MatchEntry, team: &TeamEntry) -> Vec<Uuid> {
     let played = m.played();
     let mut players: Vec<&PlayerEntry> = team.players.iter().collect();
     players.sort_by_key(|p| p.number);

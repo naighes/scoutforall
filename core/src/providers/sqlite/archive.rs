@@ -3,7 +3,8 @@
 //! `manifest.json` and one file per table (`persons.json`, `teams.json`…),
 //! an array of rows by the names of the columns of the schema, the words
 //! of the database for the enumerations. An archive without a manifest is
-//! one of the versions before the database (`legacy::archive`).
+//! one of the versions before the database (`legacy::archive`), imported
+//! through the same merge (`legacy_archive`).
 //!
 //! What's in an archive:
 //! - a **match** is self-contained: its row, its rosters, its sets with
@@ -46,7 +47,7 @@ use crate::{
     db::{self, MIGRATIONS},
     domain::sql::Sql,
     errors::{AppError, IOError},
-    legacy::migrate::unzip,
+    legacy::migrate::{same, unzip},
     localization::{Labels, Language},
     providers::sqlite::{
         Database, matches::replayed, not_found, rows::match_rows, sqlite, summary, teams::read_team,
@@ -476,6 +477,21 @@ pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Impo
     let mut staging = db::open_in_memory_with(MIGRATIONS.get(..schema).unwrap_or(MIGRATIONS))?;
     load(&staging, &files, labels)?;
     db::migrate(&mut staging, MIGRATIONS)?;
+    merge_staged(db, &mut staging, manifest.kind, manifest.id, language)
+}
+
+/// Adds what `staging` holds that isn't here, as an archive of `kind` of
+/// `subject` (see the module): `staging` has the schema of today, with
+/// the rows of an archive, of this version or of one before the database
+/// (`legacy_archive`).
+pub(crate) fn merge_staged(
+    db: &Database,
+    staging: &mut Connection,
+    kind: Kind,
+    subject: Uuid,
+    language: &Language,
+) -> Result<Imported, AppError> {
+    let labels = language.labels();
     let staged = staging.transaction().map_err(sqlite)?;
     let tables: Vec<(&str, Vec<Row>)> = TABLES
         .iter()
@@ -498,8 +514,9 @@ pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Impo
     of("matches")
         .iter()
         .try_for_each(|m| staged_replays(&staged, m, language))?;
-    let subject = manifest.id.to_string();
-    let there = match manifest.kind {
+    let id = subject;
+    let subject = id.to_string();
+    let there = match kind {
         Kind::Team => of("teams")
             .iter()
             .any(|t| text(t, "id") == Some(&subject) && t.get("deleted") == Some(&Json::from(0))),
@@ -508,7 +525,7 @@ pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Impo
             .any(|m| text(m, "id") == Some(&subject)),
     };
     if !there {
-        return Err(invalid(labels, format!("{:?} {subject}", manifest.kind)));
+        return Err(invalid(labels, format!("{kind:?} {subject}")));
     }
     db.write(|tx| {
         let persons = merge(tx, "persons", of("persons"), agrees_person)?;
@@ -516,8 +533,8 @@ pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Impo
         let members = merge_members(tx, of("team_members"))?;
         let competitions = merge(tx, "competitions", of("competitions"), |l, r| l == r)?;
         let mut imported = Imported {
-            kind: manifest.kind,
-            id: manifest.id,
+            kind,
+            id,
             persons,
             teams,
             members,
@@ -532,12 +549,38 @@ pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Impo
                 false => imported.matches_here += 1,
             }
         }
-        match (manifest.kind, imported.matches_here) {
+        match (kind, imported.matches_here) {
             (Kind::Match, 1..) => Err(AppError::IO(IOError::Msg(
                 labels.match_already_exists.to_string(),
             ))),
             _ => Ok(imported),
         }
+    })
+}
+
+/// The rows of team `team` here (its row, all its members, their persons)
+/// copied as they are into `staging`: what's merged back is the same.
+pub(crate) fn copy_team(
+    local: &Connection,
+    staging: &Connection,
+    team: Uuid,
+) -> Result<(), AppError> {
+    let id = [team.to_string()];
+    [
+        (
+            "persons",
+            "id IN (SELECT person_id FROM team_members WHERE team_id = ?1)",
+        ),
+        ("teams", "id = ?1"),
+        ("team_members", "team_id = ?1"),
+    ]
+    .iter()
+    .try_for_each(|(table, filter)| {
+        let known = columns(staging, table)?;
+        select(local, &format!("SELECT * FROM {table} WHERE {filter}"), &id)?
+            .iter()
+            .try_for_each(|row| insert(staging, table, &known, row))
+            .map_err(|e| AppError::IO(IOError::Msg(e)))
     })
 }
 
@@ -728,7 +771,8 @@ fn merge_members(tx: &Connection, rows: &[Row]) -> Result<Merged, AppError> {
 
 /// The match added with its rows, unless it's here (by id, or by where it
 /// was before the database): whether it's added. One removed here comes
-/// back when the archive has it as it was. Its row in the cache of the
+/// back when the archive has it as it was (but the ids of the events: an
+/// archive of a version before gives them new). Its row in the cache of the
 /// lists is written.
 fn merge_match<'a>(
     tx: &Transaction,
@@ -765,7 +809,11 @@ fn merge_match<'a>(
         Some((here, true)) if here == id => {
             tx.execute("UPDATE matches SET deleted = 0 WHERE id = ?1", [id])
                 .map_err(sqlite)?;
-            match match_rows(tx, uuid)? == match_rows(staged, uuid)? {
+            let agree = match (match_rows(tx, uuid)?, match_rows(staged, uuid)?) {
+                (Some(here), Some(archived)) => same(&archived, &here)?,
+                _ => false,
+            };
+            match agree {
                 true => summary::refresh(tx, uuid).map(|()| true),
                 false => tx
                     .execute("UPDATE matches SET deleted = 1 WHERE id = ?1", [id])

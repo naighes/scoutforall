@@ -16,6 +16,7 @@
 //!   read, as the files leave them out.
 
 pub mod archive;
+pub mod legacy_archive;
 pub mod matches;
 pub mod queue;
 pub(crate) mod rows;

@@ -28,6 +28,7 @@ mod finished_match_tests;
 mod flags_tests;
 mod freeball_tests;
 mod language_tests;
+mod legacy_archive_tests;
 mod legacy_data_tests;
 mod legacy_fixtures_tests;
 mod legacy_tests;
