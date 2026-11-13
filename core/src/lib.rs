@@ -22,6 +22,7 @@ pub mod player_form;
 pub mod providers;
 pub mod reporting;
 pub mod scouting;
+pub mod season;
 pub mod set_start;
 pub mod settings;
 pub mod shapes;

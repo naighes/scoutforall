@@ -680,6 +680,20 @@ pub fn confirm_deletion<'a, M: Clone + 'a>(
     on_no: M,
     c: Colors,
 ) -> Element<'a, M> {
+    confirm_deletion_with(s, what, vec![], s.delete_forever, on_yes, on_no, c)
+}
+
+/// As `confirm_deletion`, with other answers before the main one, `yes`
+/// (e.g. to delete a player from the registry, not only from the team).
+pub fn confirm_deletion_with<'a, M: Clone + 'a>(
+    s: &Strings,
+    what: &str,
+    others: Vec<(&'static [u8], &str, M)>,
+    yes: &str,
+    on_yes: M,
+    on_no: M,
+    c: Colors,
+) -> Element<'a, M> {
     let danger = Colors {
         accent: c.danger,
         on_accent: Color::WHITE,
@@ -701,10 +715,11 @@ pub fn confirm_deletion<'a, M: Clone + 'a>(
             body(s.irreversible.to_string())
                 .font(theme::fonts().bold)
                 .color(c.danger),
-            answers(
+            answers_with(
                 Some((theme::icons::CLOSE, s.cancel, on_no)),
+                others,
                 theme::icons::DELETE,
-                s.delete_forever,
+                yes,
                 Some(on_yes),
                 danger
             )

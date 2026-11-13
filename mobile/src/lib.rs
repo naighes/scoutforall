@@ -37,7 +37,7 @@ use scout4all_core::{
     logging::logger::{init_logger, log_error, log_info},
     match_form::{MatchForm, MatchFormError, RosterNumber},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
-    player_form::{self, PlayerForm, PlayerFormError},
+    player_form::{self, PlayerForm, PlayerFormError, name_the_removed},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -48,6 +48,7 @@ use scout4all_core::{
             competitions::SqliteCompetitions,
             legacy_archive::{self, Opened, import_legacy_match, import_legacy_team},
             matches::{SqliteMatchReader, SqliteMatchWriter},
+            persons::SqlitePersons,
             queue::SqliteQueue,
             sets::SqliteSetWriter,
             teams::{SqliteTeamReader, SqliteTeamWriter},
@@ -58,6 +59,7 @@ use scout4all_core::{
         team_writer::TeamWriter,
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
+    season::{self, SeasonError, SeasonMember},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
     settings::{Consent, PinnedTeams, TeamDefaults, VideoSeconds},
     shapes::{
@@ -319,6 +321,8 @@ pub struct PlayerForm {
     pub height_cm: String,
     #[uniffi(default = "")]
     pub notes: String,
+    #[uniffi(default = None)]
+    pub person: Option<Uuid>,
 }
 
 #[uniffi::remote(Record)]
@@ -531,7 +535,7 @@ pub struct RoleChoice {
 }
 
 /// A player that can be on the score sheet of a match, and whether it is.
-#[derive(Debug, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RosterPlayer {
     pub id: Uuid,
     pub name: String,
@@ -561,6 +565,41 @@ pub struct Player {
     pub role: Option<String>,
     /// what the form starts from, to edit the player
     pub form: PlayerForm,
+}
+
+/// A person of the registry that can be added to a team (D5): playing in
+/// another team, in a past season, or in none any more.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ExistingPlayer {
+    pub id: Uuid,
+    pub name: String,
+    /// the name with the teams they play in, to tell namesakes apart:
+    /// "Anna Rossi (Cortona 2025)"
+    pub label: String,
+    /// what the player form starts from once chosen: their details, the
+    /// number and the role of their most recent team
+    pub form: PlayerForm,
+}
+
+/// A player of the team as the new season offers them (D15).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SeasonPlayer {
+    pub id: Uuid,
+    pub name: String,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
+    /// the role as the team shows it
+    pub role_name: Option<String>,
+    /// going on to the new season
+    pub chosen: bool,
+}
+
+/// The new season of a team: the form of the new team, the players to
+/// take there.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct NewSeason {
+    pub form: TeamForm,
+    pub players: Vec<SeasonPlayer>,
 }
 
 /// A classification as the form offers it.
@@ -3149,6 +3188,7 @@ pub struct Scout4All {
     match_reader: SqliteMatchReader,
     match_writer: SqliteMatchWriter,
     competitions: SqliteCompetitions,
+    persons: SqlitePersons,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     videos: SqliteVideoProfiles,
     /// for `config.json`
@@ -3200,6 +3240,7 @@ impl Scout4All {
             team_writer: SqliteTeamWriter::new(db.clone()),
             match_writer: SqliteMatchWriter::new(db.clone()),
             competitions: SqliteCompetitions::new(db.clone()),
+            persons: SqlitePersons::new(db.clone()),
             set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
             match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
             videos: SqliteVideoProfiles(db.clone()),
@@ -3871,8 +3912,9 @@ impl Scout4All {
             .collect()
     }
 
-    /// Adds a player to the team (no `player_id`) or updates the one with
-    /// `player_id`; returns its id.
+    /// Adds a player to the team (no `player_id`), a person of the registry
+    /// when the form has one, or updates the one with `player_id`; returns
+    /// its id.
     #[uniffi::method(default(namesake_confirmed = false))]
     pub fn save_player(
         &self,
@@ -3882,7 +3924,13 @@ impl Scout4All {
         namesake_confirmed: bool,
     ) -> Result<String, MobileError> {
         let mut team = self.read_team(&team_id)?;
-        let existing = player_id.map(|id| find_player(&team, &id)).transpose()?;
+        // a person of the registry chosen: the player they were, removed
+        // from the team, comes back
+        let existing = match (player_id, form.person) {
+            (Some(id), _) => Some(find_player(&team, &id)?),
+            (None, Some(person)) => team.find_player(person).cloned(),
+            (None, None) => None,
+        };
         let labels = self.language.labels();
         let namesake = player_form::namesake(&form, &team, existing.as_ref())
             .filter(|_| !namesake_confirmed)
@@ -3910,6 +3958,122 @@ impl Scout4All {
         self.runtime
             .block_on(self.team_writer.remove_player(player.id, &mut team))?;
         Ok(())
+    }
+
+    /// The persons of the registry that can be added to the team, by name.
+    pub fn existing_players(&self, team_id: String) -> Result<Vec<ExistingPlayer>, MobileError> {
+        let team = parse_id(&team_id)?;
+        Ok(self
+            .persons
+            .choices(&team)?
+            .into_iter()
+            .map(|c| {
+                let teams: Vec<String> = c
+                    .teams
+                    .iter()
+                    .map(|t| format!("{} {}", t.name, t.year))
+                    .collect();
+                let label = match teams.is_empty() {
+                    true => c.person.name.clone(),
+                    false => format!("{} ({})", c.person.name, teams.join(", ")),
+                };
+                let latest = c.teams.first();
+                ExistingPlayer {
+                    id: c.person.id,
+                    name: c.person.name.clone(),
+                    label,
+                    form: PlayerForm {
+                        name: c.person.name,
+                        role: latest.and_then(|t| t.role),
+                        number: latest.map(|t| t.number.to_string()).unwrap_or_default(),
+                        birth_date: c
+                            .person
+                            .birth_date
+                            .map(|d| d.format(player_form::BIRTH_DATE).to_string())
+                            .unwrap_or_default(),
+                        height_cm: c
+                            .person
+                            .height_cm
+                            .map(|h| h.to_string())
+                            .unwrap_or_default(),
+                        notes: c.person.notes,
+                        person: Some(c.person.id),
+                    },
+                }
+            })
+            .collect())
+    }
+
+    /// The other teams the player plays in, the most recent first:
+    /// "Cortona U19 (2026)". Their details are the same there (D5).
+    pub fn other_teams(
+        &self,
+        team_id: String,
+        player_id: String,
+    ) -> Result<Vec<String>, MobileError> {
+        let team = parse_id(&team_id)?;
+        Ok(self
+            .persons
+            .teams_of(&parse_id(&player_id)?)?
+            .into_iter()
+            .filter(|t| t.team != team)
+            .map(|t| format!("{} ({})", t.name, t.year))
+            .collect())
+    }
+
+    /// Removes the player from the registry (D16), so from every team: in
+    /// the matches played they stay, as a removed player with their number.
+    pub fn delete_person(&self, player_id: String) -> Result<(), MobileError> {
+        Ok(self.persons.remove(&parse_id(&player_id)?)?)
+    }
+
+    /// The new season of the team (D15): its form, the year after, and
+    /// its active players, all chosen.
+    pub fn new_season(&self, team_id: String) -> Result<NewSeason, MobileError> {
+        let team = self.read_team(&team_id)?;
+        Ok(NewSeason {
+            form: season::team_form(&team),
+            players: self.season_players(&team, &season::members(&team)),
+        })
+    }
+
+    /// The players of the new season with `player` given `number` and
+    /// `role`, by number again.
+    pub fn correct_season_player(
+        &self,
+        team_id: String,
+        players: Vec<SeasonPlayer>,
+        player: Uuid,
+        number: String,
+        role: Option<RoleEnum>,
+    ) -> Result<Vec<SeasonPlayer>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let members = season::correct(&season_members(&players), player, &number, role)
+            .map_err(|e| self.season_error(e))?;
+        Ok(self.season_players(&team, &members))
+    }
+
+    /// Creates the team of the new season with the players chosen: the same
+    /// persons, in one more team; returns its id. The old team stays.
+    pub fn save_new_season(
+        &self,
+        team_id: String,
+        form: TeamForm,
+        players: Vec<SeasonPlayer>,
+    ) -> Result<String, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let input = form.validate(None).map_err(|e| MobileError::InvalidTeam {
+            field: e.into(),
+            reason: e.message(self.language.labels()),
+        })?;
+        let input = season::new_team(&team, input, &season_members(&players))
+            .map_err(|e| self.season_error(e))?;
+        let saved = self.runtime.block_on(self.team_writer.save(input))?;
+        // as a team created by hand: at the top of the list
+        if let Err(e) = self.set_pinned(saved.id.to_string(), true) {
+            log_error(&format!("could not pin the new team: {e:?}"));
+        }
+        Ok(saved.id.to_string())
     }
 
     /// Removes the team with its matches, for good; unpinned. The folder
@@ -4739,18 +4903,54 @@ impl Scout4All {
         Ok(MatchRoster { form, players })
     }
 
-    fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
-        let id = parse_id(id)?;
-        self.runtime
-            .block_on(self.team_reader.read_single(&id))
-            .map_err(|e| unreadable(&e, self.language.labels().unreadable_team))
+    /// The members of the new season as the form shows them.
+    fn season_players(&self, team: &TeamEntry, members: &[SeasonMember]) -> Vec<SeasonPlayer> {
+        let labels = self.language.labels();
+        members
+            .iter()
+            .filter_map(|m| {
+                team.find_player(m.player).map(|p| SeasonPlayer {
+                    id: m.player,
+                    name: p.name.clone(),
+                    number: m.number,
+                    role: m.role,
+                    role_name: m.role.map(|r| r.name(team.gender, labels).to_string()),
+                    chosen: m.chosen,
+                })
+            })
+            .collect()
     }
 
+    /// An error of the new season, on the number of a player.
+    fn season_error(&self, e: SeasonError) -> MobileError {
+        MobileError::InvalidPlayer {
+            field: PlayerField::Number,
+            reason: e.message(self.language.labels()),
+        }
+    }
+
+    /// The team, a player removed from the registry named as such.
+    fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
+        let id = parse_id(id)?;
+        let labels = self.language.labels();
+        let mut team = self
+            .runtime
+            .block_on(self.team_reader.read_single(&id))
+            .map_err(|e| unreadable(&e, labels.unreadable_team))?;
+        name_the_removed(&mut team, labels);
+        Ok(team)
+    }
+
+    /// The match, a player removed from the registry named as such.
     fn read_match(&self, team_id: &str, match_id: &str) -> Result<MatchEntry, MobileError> {
         let team = self.read_team(team_id)?;
-        self.runtime
+        let labels = self.language.labels();
+        let mut m = self
+            .runtime
             .block_on(self.match_reader.read_single(&team, match_id))
-            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))
+            .map_err(|e| unreadable(&e, labels.unreadable_match))?;
+        name_the_removed(&mut m.team, labels);
+        Ok(m)
     }
 }
 
@@ -4879,6 +5079,19 @@ fn find_player(team: &TeamEntry, id: &str) -> Result<PlayerEntry, MobileError> {
         .ok_or_else(|| MobileError::Failed {
             reason: format!("no player {id} in the team"),
         })
+}
+
+/// The players of the new season as the core keeps them.
+fn season_members(players: &[SeasonPlayer]) -> Vec<SeasonMember> {
+    players
+        .iter()
+        .map(|p| SeasonMember {
+            player: p.id,
+            number: p.number,
+            role: p.role,
+            chosen: p.chosen,
+        })
+        .collect()
 }
 
 fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
@@ -5576,7 +5789,135 @@ mod tests {
             birth_date: String::new(),
             height_cm: String::new(),
             notes: String::new(),
+            person: None,
         }
+    }
+
+    /// The registry through the app (TODO/001, step 22): a person of
+    /// another team offered with their teams and added; the new season
+    /// with the same persons; a person removed from the registry, named as
+    /// a removed player on the score sheet of the matches played.
+    #[test]
+    fn the_registry_offers_adds_takes_to_a_new_season_and_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let senior = app.save_team(None, form("Cortona")).unwrap();
+        let ids: Vec<String> = (1..=7)
+            .map(|n| {
+                app.save_player(
+                    senior.clone(),
+                    None,
+                    PlayerForm {
+                        height_cm: "180".into(),
+                        ..player(&format!("P{n}"), &n.to_string())
+                    },
+                    false,
+                )
+                .unwrap()
+            })
+            .collect();
+        let under = app.save_team(None, form("Cortona U19")).unwrap();
+        let offered = app.existing_players(under.clone()).unwrap();
+        assert_eq!(offered.len(), 7);
+        let p1 = &offered[0];
+        assert_eq!(p1.label, "P1 (Cortona 2026)");
+        assert_eq!(
+            p1.form,
+            PlayerForm {
+                height_cm: "180".into(),
+                person: Some(p1.id),
+                ..player("P1", "1")
+            }
+        );
+        let added = app
+            .save_player(under.clone(), None, p1.form.clone(), false)
+            .unwrap();
+        assert_eq!(added, ids[0]);
+        assert_eq!(app.existing_players(under.clone()).unwrap().len(), 6);
+        assert_eq!(
+            app.other_teams(under.clone(), added.clone()).unwrap(),
+            ["Cortona (2026)".to_string()]
+        );
+
+        // the new season: P7 left, P2 with the 10
+        let season = app.new_season(senior.clone()).unwrap();
+        assert_eq!(season.form.year, "2027");
+        assert_eq!(season.players.len(), 7);
+        assert!(season.players.iter().all(|p| p.chosen));
+        let mut players = season.players;
+        players[6].chosen = false;
+        let taken = app.correct_season_player(
+            senior.clone(),
+            players.clone(),
+            players[1].id,
+            "3".into(),
+            None,
+        );
+        assert!(matches!(
+            taken,
+            Err(MobileError::InvalidPlayer {
+                field: PlayerField::Number,
+                ..
+            })
+        ));
+        let players = app
+            .correct_season_player(
+                senior.clone(),
+                players.clone(),
+                players[1].id,
+                "10".into(),
+                Some(RoleEnum::Libero),
+            )
+            .unwrap();
+        assert_eq!(
+            players.last().map(|p| (p.number, p.role_name.as_deref())),
+            Some((10, Some("libero")))
+        );
+        let new = app
+            .save_new_season(senior.clone(), season.form, players)
+            .unwrap();
+        let details = app.team(new.clone()).unwrap();
+        assert_eq!(details.year, 2027);
+        let numbers: Vec<(String, u8)> = details
+            .players
+            .iter()
+            .map(|p| (p.id.clone(), p.number))
+            .collect();
+        assert_eq!(numbers.len(), 6);
+        assert!(numbers.contains(&(ids[1].clone(), 10)));
+        assert!(!numbers.iter().any(|(id, _)| *id == ids[6]));
+        // pinned, as a team created by hand
+        assert!(app.teams().unwrap().iter().any(|t| matches!(
+            t,
+            TeamListing::Team { id, pinned: true, .. } if *id == new
+        )));
+
+        // a match played, then P3 removed from the registry: everywhere
+        let m = app
+            .save_match(
+                senior.clone(),
+                None,
+                match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8"),
+            )
+            .unwrap();
+        app.delete_person(ids[2].clone()).unwrap();
+        assert!(
+            app.team(new)
+                .unwrap()
+                .players
+                .iter()
+                .all(|p| p.id != ids[2])
+        );
+        assert_eq!(app.team(senior.clone()).unwrap().players.len(), 6);
+        let read = app.match_form(senior.clone(), m.clone()).unwrap();
+        let roster = app.match_roster(senior, Some(m), read, None).unwrap();
+        let gone = roster
+            .players
+            .iter()
+            .find(|p| p.id.to_string() == ids[2])
+            .map(|p| (p.name.as_str(), p.number));
+        assert_eq!(gone, Some(("giocatore rimosso", 3)));
+        assert!(app.delete_person("not an id".into()).is_err());
     }
 
     #[test]

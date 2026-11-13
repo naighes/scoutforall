@@ -1590,6 +1590,7 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Import => Go::Import(Some(team_id.to_string())),
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
+        team::Outcome::OpenTeam(team) => Go::Team(team),
     }
 }
 

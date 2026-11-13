@@ -342,7 +342,8 @@ fn written(value: &Value) -> Option<&String> {
 }
 
 /// The suggestions shown: written since the last taken, and not just the
-/// text there is; the one lit, if any.
+/// text there is (unless ↑ ↓ wrote it: it's lit, for Enter to take); the
+/// one lit, if any.
 fn offered(value: &Value) -> Option<(&[Suggestion], Option<usize>)> {
     match value {
         Value::Search {
@@ -352,7 +353,8 @@ fn offered(value: &Value) -> Option<(&[Suggestion], Option<usize>)> {
             open: true,
             ..
         } if !suggestions.is_empty()
-            && !(suggestions.len() == 1
+            && !(highlighted.is_none()
+                && suggestions.len() == 1
                 && suggestions.first().is_some_and(|s| &s.value == text)) =>
         {
             Some((
@@ -1182,6 +1184,28 @@ mod tests {
         assert_eq!(f.text(0), "Haiti");
         f.key(key!(ctrl - z));
         assert_eq!(f.text(0), "it");
+    }
+
+    /// The only suggestion, lit by ↓, is still offered though the field
+    /// now has its text: Enter takes it (a person of the registry, whose
+    /// details come with it), it doesn't save.
+    #[test]
+    fn the_only_suggestion_lit_is_taken() {
+        let mut f = Form::new("t", vec![Field::search("name", "")]);
+        f.update(Message::Input(0, "ross".into()));
+        f.suggest(
+            0,
+            vec![Suggestion {
+                label: "Anna Rossi (Cortona 2025)".into(),
+                value: "Anna Rossi".into(),
+            }],
+        );
+        f.key(key!(down));
+        assert_eq!(f.text(0), "Anna Rossi");
+        assert_eq!((f.offering(), f.lit()), (true, Some(0)));
+        assert_eq!(f.key(key!(enter)), Outcome::Changed(0));
+        assert!(!f.offering());
+        assert_eq!(f.key(key!(enter)), Outcome::Save);
     }
 
     #[test]

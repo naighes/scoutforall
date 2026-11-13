@@ -2809,6 +2809,7 @@ pub(crate) mod tests {
                     birth_date: String::new(),
                     height_cm: String::new(),
                     notes: String::new(),
+                    person: None,
                 },
                 false,
             )

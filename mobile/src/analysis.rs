@@ -7,6 +7,7 @@ use super::{
     StatsScope, clips_of, detail_of, narrowed, series_name, summary,
 };
 use chrono::{Local, NaiveDate};
+use scout4all_core::player_form::name_the_removed;
 use scout4all_core::providers::match_reader::MatchReader;
 use scout4all_core::{
     analysis::{Analysis, MOVING_WINDOW, Period, Played, day},
@@ -261,6 +262,10 @@ impl Scout4All {
             .block_on(self.match_reader.read_some(team, &ids))
             .into_iter()
             .filter_map(Result::ok)
+            .map(|mut m: MatchEntry| {
+                name_the_removed(&mut m.team, self.language.labels());
+                m
+            })
             .collect();
         Ok((all, chosen))
     }

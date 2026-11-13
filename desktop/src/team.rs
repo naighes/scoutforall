@@ -1,7 +1,9 @@
 //! A team: what it is, its players and its matches side by side. The
-//! players are added, edited and removed here, the matches created, opened
-//! and deleted, the team deleted. ← → (or ⇧Tab Tab) between players and
-//! matches, ↑ ↓ in the list, ⌫ deletes the one chosen, ⇧⌫ the team.
+//! players are added (new, or from the registry), edited and removed here
+//! (from the team, or from the registry), the matches created, opened and
+//! deleted, the team deleted or taken to a new season. ← → (or ⇧Tab Tab)
+//! between players and matches, ↑ ↓ in the list, ⌫ deletes the one
+//! chosen, ⇧⌫ the team, t starts the new season.
 
 use {
     crate::{
@@ -35,17 +37,29 @@ enum Mode {
 
 /// What goes, for good, with what the question says of it.
 enum Deletion {
-    /// id and name
-    Player(String, String),
+    /// a player, from the team or from the registry
+    Player(PlayerDeletion),
     /// id (or the folder of an unreadable one) and what it is
     Match(String, String),
     /// what happens to its matches
     Team(TeamRemovalCounts),
 }
 
+/// A player to remove: from the team, or from the registry (so from every
+/// team: D16).
+struct PlayerDeletion {
+    id: String,
+    /// number and name
+    name: String,
+    number: u8,
+    /// the other teams they play in
+    others: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     EditTeam,
+    NewSeason,
     NewPlayer,
     Player(usize),
     NewMatch,
@@ -56,6 +70,8 @@ pub enum Message {
     DeleteTeam,
     Form(form::Message),
     Confirm,
+    /// the player of the deletion asked removed from the registry
+    DeletePerson,
     Cancel,
 }
 
@@ -75,6 +91,8 @@ pub enum Outcome {
     Export,
     /// the statistics of the team over its matches
     Analysis,
+    /// a team saved now (the new season), to open
+    OpenTeam(String),
 }
 
 pub struct TeamScreen {
@@ -165,6 +183,12 @@ impl TeamScreen {
         self.edit(Ok(editor));
     }
 
+    /// The new season of the team (D15), a step at a time.
+    fn new_season(&mut self, s: &Strings) {
+        let editor = Editor::season(&self.core, s, self.team_id.clone());
+        self.edit(editor);
+    }
+
     fn new_match(&mut self, s: &Strings) {
         let editor = Editor::a_match(s, &self.core, self.team_id.clone(), None);
         self.edit(editor);
@@ -180,11 +204,17 @@ impl TeamScreen {
     /// The deletion of the player or the match chosen, to confirm.
     fn ask_deletion(&mut self, s: &Strings) {
         let deletion = match self.panel {
-            Panel::Players => self
-                .details
-                .players
-                .get(self.player)
-                .map(|p| Deletion::Player(p.id.clone(), format!("{} {}", p.number, p.name))),
+            Panel::Players => self.details.players.get(self.player).map(|p| {
+                Deletion::Player(PlayerDeletion {
+                    id: p.id.clone(),
+                    name: format!("{} {}", p.number, p.name),
+                    number: p.number,
+                    others: self
+                        .core
+                        .other_teams(self.team_id.clone(), p.id.clone())
+                        .unwrap_or_default(),
+                })
+            }),
             Panel::Matches => self.matches.get(self.game).map(|m| match m {
                 MatchListing::Match {
                     id, opponent, date, ..
@@ -213,7 +243,7 @@ impl TeamScreen {
         let mode = std::mem::replace(&mut self.mode, Mode::Browse);
         let team = self.team_id.clone();
         let deleted = match &mode {
-            Mode::Delete(Deletion::Player(id, _)) => self.core.remove_player(team, id.clone()),
+            Mode::Delete(Deletion::Player(p)) => self.core.remove_player(team, p.id.clone()),
             Mode::Delete(Deletion::Match(id, _)) => self.core.delete_match(team, id.clone()),
             Mode::Delete(Deletion::Team(_)) => self.core.delete_team(team),
             Mode::Browse | Mode::Edit(_) => Ok(()),
@@ -228,10 +258,33 @@ impl TeamScreen {
         }
     }
 
+    /// The player of the deletion asked removed from the registry, so from
+    /// every team, as confirmed.
+    fn delete_person(&mut self) -> Outcome {
+        let mode = std::mem::replace(&mut self.mode, Mode::Browse);
+        if let Mode::Delete(Deletion::Player(p)) = &mode {
+            self.error = self
+                .core
+                .delete_person(p.id.clone())
+                .err()
+                .map(|e| e.to_string());
+            self.reload();
+        }
+        Outcome::Stay
+    }
+
     /// What the question of the deletion says.
     fn deletion_text(&self, s: &Strings, deletion: &Deletion) -> String {
         match deletion {
-            Deletion::Player(_, name) => ui::fill(s.delete_player_text, std::slice::from_ref(name)),
+            Deletion::Player(p) => {
+                let text = ui::fill(s.delete_player_text, std::slice::from_ref(&p.name));
+                let others = match p.others.is_empty() {
+                    true => String::new(),
+                    false => format!("\n{}", ui::fill(s.plays_also_in, &[p.others.join(", ")])),
+                };
+                let registry = ui::fill(s.delete_person_text, &[p.number.to_string()]);
+                format!("{text}{others}\n\n{registry}")
+            }
             Deletion::Match(_, name) => ui::fill(s.delete_match_text, std::slice::from_ref(name)),
             Deletion::Team(counts) => {
                 let name = self.details.name.clone();
@@ -256,6 +309,7 @@ impl TeamScreen {
             Mode::Edit(e) if e.is_new_match() => e.match_team().map(str::to_string),
             _ => None,
         };
+        let season = matches!(&self.mode, Mode::Edit(e) if e.is_season());
         match edited {
             Edited::Stay => Outcome::Stay,
             Edited::Cancel => {
@@ -265,9 +319,10 @@ impl TeamScreen {
             Edited::Saved(id) => {
                 self.mode = Mode::Browse;
                 self.reload();
-                match new_match {
-                    Some(team) => Outcome::OpenNewMatch { team, id },
-                    None => Outcome::Stay,
+                match (new_match, season) {
+                    (Some(team), _) => Outcome::OpenNewMatch { team, id },
+                    (None, true) => Outcome::OpenTeam(id),
+                    (None, false) => Outcome::Stay,
                 }
             }
         }
@@ -280,6 +335,7 @@ impl TeamScreen {
                 self.edited(edited)
             }
             (Message::Confirm, Mode::Delete(_)) => self.delete(),
+            (Message::DeletePerson, Mode::Delete(Deletion::Player(_))) => self.delete_person(),
             (Message::Cancel, _) => {
                 self.mode = Mode::Browse;
                 Outcome::Stay
@@ -287,6 +343,10 @@ impl TeamScreen {
             (_, Mode::Edit(_) | Mode::Delete(_)) => Outcome::Stay,
             (Message::EditTeam, Mode::Browse) => {
                 self.edit_team(s);
+                Outcome::Stay
+            }
+            (Message::NewSeason, Mode::Browse) => {
+                self.new_season(s);
                 Outcome::Stay
             }
             (Message::NewPlayer, Mode::Browse) => {
@@ -315,7 +375,9 @@ impl TeamScreen {
                 self.ask_team_deletion();
                 Outcome::Stay
             }
-            (Message::Form(_) | Message::Confirm, Mode::Browse) => Outcome::Stay,
+            (Message::Form(_) | Message::Confirm | Message::DeletePerson, Mode::Browse) => {
+                Outcome::Stay
+            }
         }
     }
 
@@ -324,9 +386,11 @@ impl TeamScreen {
             let edited = editor.key(&self.core, s, ck);
             return self.edited(edited);
         }
-        if let Mode::Delete(_) = self.mode {
+        if let Mode::Delete(deletion) = &self.mode {
+            let player = matches!(deletion, Deletion::Player(_));
             return match ck {
                 k if k == key!(enter) => self.delete(),
+                k if k == key!(a) && player => self.delete_person(),
                 k if k == BACK_KEY => {
                     self.mode = Mode::Browse;
                     Outcome::Stay
@@ -361,6 +425,7 @@ impl TeamScreen {
                 *selected = selected.checked_sub(1).unwrap_or(count - 1)
             }
             (_, k) if k == key!(e) => self.edit_team(s),
+            (_, k) if k == key!(t) => self.new_season(s),
             (_, k) if k == key!(i) => return Outcome::Import,
             (_, k) if k == key!(x) => return Outcome::Export,
             (_, k) if k == key!(s) => return Outcome::Analysis,
@@ -384,6 +449,11 @@ impl TeamScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match (&self.mode, self.panel) {
             (Mode::Edit(editor), _) => editor.hints(s),
+            (Mode::Delete(Deletion::Player(_)), _) => vec![
+                ("Enter".to_string(), s.remove_from_team.to_string()),
+                ("a".to_string(), s.delete_person.to_string()),
+                ("Esc".to_string(), s.cancel.to_string()),
+            ],
             (Mode::Delete(_), _) => vec![
                 ("Enter".to_string(), s.delete_forever.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
@@ -408,6 +478,7 @@ impl TeamScreen {
                         ("Enter".to_string(), enter.to_string()),
                         ("n".to_string(), new.to_string()),
                         ("e".to_string(), s.edit_team.to_string()),
+                        ("t".to_string(), s.new_season.to_string()),
                         ("i".to_string(), s.import_archive.to_string()),
                         ("x".to_string(), s.export_team.to_string()),
                         ("s".to_string(), s.analysis.to_string()),
@@ -426,6 +497,15 @@ impl TeamScreen {
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let body: Element<'a, Message> = match &self.mode {
             Mode::Edit(editor) => editor.view(s, c, Message::Form),
+            Mode::Delete(deletion @ Deletion::Player(_)) => ui::confirm_deletion_with(
+                s,
+                &self.deletion_text(s, deletion),
+                vec![(theme::icons::DELETE, s.delete_person, Message::DeletePerson)],
+                s.remove_from_team,
+                Message::Confirm,
+                Message::Cancel,
+                c,
+            ),
             Mode::Delete(deletion) => ui::confirm_deletion(
                 s,
                 &self.deletion_text(s, deletion),
@@ -461,50 +541,61 @@ impl TeamScreen {
         let or_dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "–".to_string());
         ui::panel(
             Some(s.details),
-            column![
-                text(d.name.clone()).size(22).font(theme::fonts().bold),
-                line(s.year, d.year.to_string()),
-                line(s.classification, or_dash(&d.classification)),
-                line(s.gender, or_dash(&d.gender)),
-                line(s.country, or_dash(&d.country)),
-                space::vertical(),
-                ui::action(
-                    theme::icons::ANALYSIS,
-                    s.analysis,
-                    Message::Analysis,
-                    false,
-                    c
-                )
-                .width(Length::Fill),
-                ui::action(theme::icons::EDIT, s.edit_team, Message::EditTeam, false, c)
+            // the actions scroll when the window is low: none cut off
+            scrollable(
+                column![
+                    text(d.name.clone()).size(22).font(theme::fonts().bold),
+                    line(s.year, d.year.to_string()),
+                    line(s.classification, or_dash(&d.classification)),
+                    line(s.gender, or_dash(&d.gender)),
+                    line(s.country, or_dash(&d.country)),
+                    space::vertical().height(6),
+                    ui::action(
+                        theme::icons::ANALYSIS,
+                        s.analysis,
+                        Message::Analysis,
+                        false,
+                        c
+                    )
                     .width(Length::Fill),
-                ui::action(
-                    theme::icons::SHARE,
-                    s.export_team,
-                    Message::Export,
-                    false,
-                    c
-                )
+                    ui::action(theme::icons::EDIT, s.edit_team, Message::EditTeam, false, c)
+                        .width(Length::Fill),
+                    ui::action(
+                        theme::icons::FORWARD_ARROW,
+                        s.new_season,
+                        Message::NewSeason,
+                        false,
+                        c
+                    )
+                    .width(Length::Fill),
+                    ui::action(
+                        theme::icons::SHARE,
+                        s.export_team,
+                        Message::Export,
+                        false,
+                        c
+                    )
+                    .width(Length::Fill),
+                    ui::action(
+                        theme::icons::IMPORT,
+                        s.import_match,
+                        Message::Import,
+                        false,
+                        c
+                    )
+                    .width(Length::Fill),
+                    ui::action(
+                        theme::icons::DELETE,
+                        s.delete_team,
+                        Message::DeleteTeam,
+                        false,
+                        c
+                    )
+                    .width(Length::Fill),
+                ]
+                .spacing(12)
                 .width(Length::Fill),
-                ui::action(
-                    theme::icons::IMPORT,
-                    s.import_match,
-                    Message::Import,
-                    false,
-                    c
-                )
-                .width(Length::Fill),
-                ui::action(
-                    theme::icons::DELETE,
-                    s.delete_team,
-                    Message::DeleteTeam,
-                    false,
-                    c
-                )
-                .width(Length::Fill),
-            ]
-            .spacing(12)
-            .width(Length::Fill)
+            )
             .height(Length::Fill),
             c,
         )
@@ -653,6 +744,7 @@ mod tests {
             },
             team_form::TeamForm,
         },
+        scout4all_mobile::Player,
         uuid::Uuid,
     };
 
@@ -753,9 +845,9 @@ mod tests {
         };
         assert_eq!(
             team.deletion_text(s, deletion),
-            "La squadra Cascina sarà eliminata con tutti i suoi giocatori e le sue partite (0): \
-             scouting, report e statistiche. Le partite contro altre squadre (1) restano a \
-             loro, senza lo scouting di Cascina."
+            "La squadra Cascina sarà eliminata con le sue partite (0): scouting, report e \
+             statistiche. I suoi giocatori restano nell'anagrafica. Le partite contro altre \
+             squadre (1) restano a loro, senza lo scouting di Cascina."
         );
         let mut team = TeamScreen::new(core.clone(), a).unwrap();
         team.key(s, key!(shift - delete));
@@ -920,6 +1012,328 @@ mod tests {
         team.update(s, Message::DeleteTeam);
         assert!(matches!(team.update(s, Message::Confirm), Outcome::Back));
         assert!(core.home().unwrap().teams.is_empty());
+    }
+
+    /// A team of 2025 with Anna Rossi (9, setter, with her details) and
+    /// six more players; its id and Anna's.
+    fn senior(core: &Scout4All) -> (String, String) {
+        let team = core
+            .save_team(
+                None,
+                TeamForm {
+                    year: "2025".into(),
+                    ..team_form("Cortona")
+                },
+            )
+            .unwrap();
+        let anna = PlayerForm {
+            name: "Anna Rossi".into(),
+            number: "9".into(),
+            role: Some(scout4all_core::shapes::enums::RoleEnum::Setter),
+            birth_date: "2008-03-14".into(),
+            height_cm: "181".into(),
+            notes: "mancina".into(),
+            ..PlayerForm::default()
+        };
+        let anna = core.save_player(team.clone(), None, anna, false).unwrap();
+        for n in 1..=6u8 {
+            let player = PlayerForm {
+                name: format!("P{n}"),
+                number: n.to_string(),
+                role: Some(scout4all_core::shapes::enums::RoleEnum::OutsideHitter),
+                ..PlayerForm::default()
+            };
+            core.save_player(team.clone(), None, player, false).unwrap();
+        }
+        (team, anna)
+    }
+
+    /// The name of a new player offers the persons of the registry with
+    /// their teams; Enter takes one: their details, number and role, and
+    /// saved, the same person in one more team. A name written over lets
+    /// the person go: a new one.
+    #[test]
+    fn a_player_of_the_registry_is_added_by_name() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (senior, anna) = senior(&core);
+        let under = core.save_team(None, team_form("Cortona U19")).unwrap();
+        let mut team = TeamScreen::new(core.clone(), under.clone()).unwrap();
+        team.key(s, key!(n));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form of the new player")
+        };
+        assert_eq!(
+            editor.form.fields[0].hint.as_deref(),
+            Some(s.name_or_existing)
+        );
+        team.update(s, Message::Form(Input(0, "ross".into())));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form of the new player")
+        };
+        let form::Value::Search { suggestions, .. } = &editor.form.fields[0].value else {
+            unreachable!("a search")
+        };
+        assert_eq!(
+            suggestions,
+            &[form::Suggestion {
+                label: "Anna Rossi (Cortona 2025)".into(),
+                value: "Anna Rossi".into(),
+            }]
+        );
+        // "ross" isn't the beginning: ↓ lights it, Enter takes it
+        team.key(s, key!(down));
+        team.key(s, key!(enter));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("still the form")
+        };
+        let f = &editor.form;
+        assert_eq!(
+            (f.text(0), f.text(1), f.text(3), f.text(4), f.text(5)),
+            (
+                "Anna Rossi".to_string(),
+                "9".to_string(),
+                "2008-03-14".to_string(),
+                "181".to_string(),
+                "mancina".to_string()
+            )
+        );
+        assert!(f.index(2) > 0);
+        assert_eq!(
+            f.fields[0].hint.as_deref(),
+            Some(
+                "Già nell'anagrafica: la stessa persona, con gli stessi dati · Gioca anche in: \
+                 Cortona 2025"
+            )
+        );
+        team.update(s, Message::Form(Input(1, "10".into())));
+        team.update(s, Message::Form(Save));
+        assert!(matches!(team.mode, Mode::Browse));
+        let added = &core.team(under.clone()).unwrap().players;
+        assert_eq!(
+            added
+                .iter()
+                .map(|p| (p.id.as_str(), p.number))
+                .collect::<Vec<_>>(),
+            [(anna.as_str(), 10)]
+        );
+        assert_eq!(core.team(senior.clone()).unwrap().players[6].number, 9);
+        // once added, the other team is told in the form; not offered again
+        team.key(s, key!(enter));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form of Anna")
+        };
+        assert_eq!(
+            editor.form.fields[0].hint.as_deref(),
+            Some("Gioca anche in: Cortona (2025)")
+        );
+        team.key(s, BACK_KEY);
+        assert!(
+            core.existing_players(under.clone())
+                .unwrap()
+                .iter()
+                .all(|p| p.id.to_string() != anna)
+        );
+
+        // taken with the mouse, then written over: a new person
+        team.update(s, Message::NewPlayer);
+        team.update(s, Message::Form(Input(0, "P".into())));
+        team.update(s, Message::Form(Take(0, 0)));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert_eq!(editor.form.text(0), "P1");
+        team.update(s, Message::Form(Input(0, "P1 bis".into())));
+        team.update(s, Message::Form(Input(1, "11".into())));
+        team.update(s, Message::Form(Save));
+        let players = core.team(under).unwrap().players;
+        let ids: Vec<String> = core
+            .team(senior)
+            .unwrap()
+            .players
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        assert!(matches!(
+            players.as_slice(),
+            [_, Player { name, number: 11, id, .. }] if name == "P1 bis" && !ids.contains(id)
+        ));
+    }
+
+    /// ⌫ on a player: Enter removes them from the team only (still in the
+    /// other one, offered again); "a" from the registry, so from every
+    /// team.
+    #[test]
+    fn a_player_is_removed_from_the_team_or_from_the_registry() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (senior, anna) = senior(&core);
+        let under = core.save_team(None, team_form("Cortona U19")).unwrap();
+        let form = PlayerForm {
+            number: "10".into(),
+            person: Uuid::parse_str(&anna).ok(),
+            ..core.team(senior.clone()).unwrap().players[6].form.clone()
+        };
+        core.save_player(under.clone(), None, form, false).unwrap();
+
+        let mut team = TeamScreen::new(core.clone(), under.clone()).unwrap();
+        team.key(s, key!(backspace));
+        let Mode::Delete(deletion) = &team.mode else {
+            unreachable!("the deletion to confirm")
+        };
+        assert_eq!(
+            team.deletion_text(s, deletion),
+            "Il giocatore 10 Anna Rossi sarà tolto dalla squadra. Resta nelle partite già \
+             giocate e nell'anagrafica, da cui si può aggiungere di nuovo.\nGioca anche in: \
+             Cortona (2025)\n\nEliminato dall'anagrafica, sparisce da tutte le squadre e i \
+             suoi dati si cancellano; nelle partite giocate resta come «#10, giocatore \
+             rimosso»."
+        );
+        assert_eq!(
+            team.hints(s),
+            vec![
+                ("Enter".to_string(), s.remove_from_team.to_string()),
+                ("a".to_string(), s.delete_person.to_string()),
+                ("Esc".to_string(), s.cancel.to_string()),
+            ]
+        );
+        // the other keys stay on the question
+        team.key(s, key!(x));
+        assert!(matches!(team.mode, Mode::Delete(_)));
+        team.key(s, key!(enter));
+        assert!(team.details.players.is_empty());
+        assert_eq!(core.team(senior.clone()).unwrap().players.len(), 7);
+        let offered = core.existing_players(under.clone()).unwrap();
+        assert!(offered.iter().any(|p| p.id.to_string() == anna));
+
+        // from the registry: gone from the senior team too
+        let mut team = TeamScreen::new(core.clone(), senior.clone()).unwrap();
+        team.player = 6;
+        team.key(s, key!(delete));
+        assert!(matches!(
+            team.update(s, Message::DeletePerson),
+            Outcome::Stay
+        ));
+        assert!(team.error.is_none());
+        assert_eq!(team.details.players.len(), 6);
+        assert!(team.details.players.iter().all(|p| p.id != anna));
+        assert!(
+            core.existing_players(under)
+                .unwrap()
+                .iter()
+                .all(|p| p.id.to_string() != anna)
+        );
+        // "a" is the deletion from the registry only for a player
+        team.key(s, key!(right));
+        team.key(s, key!(shift - backspace));
+        team.key(s, key!(a));
+        assert!(matches!(team.mode, Mode::Delete(Deletion::Team(_))));
+    }
+
+    /// "t" starts the new season: the team the year after, then its
+    /// players, all taken; space leaves one, "e" corrects a number; a
+    /// number taken twice refused there. Saved, the new team opens with
+    /// the same persons; the old one is as it was.
+    #[test]
+    fn a_new_season_takes_the_players_chosen() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (senior, anna) = senior(&core);
+        let before = core.team(senior.clone()).unwrap();
+        let mut team = TeamScreen::new(core.clone(), senior.clone()).unwrap();
+        assert!(
+            team.hints(s)
+                .contains(&("t".to_string(), s.new_season.to_string()))
+        );
+        team.key(s, key!(t));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the new season")
+        };
+        assert_eq!(editor.form.title, s.new_season);
+        assert_eq!(editor.form.visible(), vec![0, 1, 2, 3, 4]);
+        assert_eq!(
+            (editor.form.text(0), editor.form.text(1)),
+            ("Cortona".to_string(), "2026".to_string())
+        );
+        assert!(
+            editor
+                .hints(s)
+                .contains(&("Enter".to_string(), s.go_on.to_string()))
+        );
+        team.key(s, key!(enter));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the players of the new season")
+        };
+        // seven tiles, by number: Anna is the last
+        assert_eq!(editor.form.visible(), (5..12).collect::<Vec<_>>());
+        assert_eq!(editor.form.focused, 5);
+        assert!(
+            editor
+                .hints(s)
+                .contains(&(s.space.to_string(), s.season_toggle.to_string()))
+        );
+        // P1 left, P2 given number 9... taken by Anna: refused
+        team.key(s, key!(space));
+        team.key(s, key!(right));
+        team.key(s, key!(e));
+        team.update(s, Message::Form(Input(0, "9".into())));
+        team.key(s, key!(enter));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("still the correction")
+        };
+        assert!(
+            editor
+                .hints(s)
+                .contains(&("Enter".to_string(), s.ok.to_string()))
+        );
+        // 1, P1's, is free: P1 isn't taken
+        team.update(s, Message::Form(Input(0, "1".into())));
+        team.key(s, key!(enter));
+        // P1 taken back: two with the 1, refused on saving
+        team.update(s, Message::Form(Choose(5, 1)));
+        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("still the players")
+        };
+        assert_eq!(editor.form.focused, 5);
+        assert!(editor.form.error.is_some());
+        team.update(s, Message::Form(Choose(5, 0)));
+        // Esc goes back to the team, Enter on again
+        team.key(s, BACK_KEY);
+        team.update(s, Message::Form(Input(1, "2027".into())));
+        team.key(s, key!(enter));
+        let Outcome::OpenTeam(new) = team.update(s, Message::Form(Save)) else {
+            unreachable!("the new team opens")
+        };
+        let new = core.team(new).unwrap();
+        assert_eq!((new.name.as_str(), new.year), ("Cortona", 2027));
+        assert_eq!(new.classification, before.classification);
+        let players: Vec<(u8, &str)> = new
+            .players
+            .iter()
+            .map(|p| (p.number, p.name.as_str()))
+            .collect();
+        assert_eq!(
+            players,
+            [
+                (1, "P2"),
+                (3, "P3"),
+                (4, "P4"),
+                (5, "P5"),
+                (6, "P6"),
+                (9, "Anna Rossi")
+            ]
+        );
+        assert_eq!(new.players[5].id, anna);
+        assert_eq!(new.players[5].form.height_cm, "181");
+        assert_eq!(core.team(senior.clone()).unwrap(), before);
+        assert_eq!(
+            core.other_teams(senior, anna).unwrap(),
+            ["Cortona (2027)".to_string()]
+        );
     }
 
     /// A player with the name of another one is asked about first: Esc

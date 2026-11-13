@@ -21,9 +21,9 @@ use {
     scout4all_core::{match_form::MatchForm, player_form::PlayerForm, team_form::TeamForm},
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        ClassificationChoice, CompetitionChoice, FormatChoice, GenderChoice, MatchField,
-        MatchRoster, MobileError, OpponentChoice, PlayerField, RoleChoice, RosterPlayer, Scout4All,
-        StageChoice, TeamField, TeamListing,
+        ClassificationChoice, CompetitionChoice, ExistingPlayer, FormatChoice, GenderChoice,
+        MatchField, MatchRoster, MobileError, OpponentChoice, PlayerField, RoleChoice,
+        RosterPlayer, Scout4All, SeasonPlayer, StageChoice, TeamField, TeamListing,
     },
 };
 
@@ -75,6 +75,13 @@ pub struct PlayerEditor {
     team_id: String,
     id: Option<String>,
     roles: Vec<RoleChoice>,
+    /// the persons of the registry offered as a new player's name is
+    /// written (D5)
+    existing: Vec<ExistingPlayer>,
+    /// the ones of `existing` the name offers now, in their order
+    offered: Vec<usize>,
+    /// the person chosen, while the name is still theirs
+    person: Option<ExistingPlayer>,
 }
 
 // the fields of the player
@@ -117,6 +124,40 @@ struct Correction {
 // the fields of a correction
 const CORRECTION_NUMBER: usize = 0;
 const CORRECTION_ROLE: usize = 1;
+
+/// The new season of a team (D15): the new team, as the team form writes
+/// it, then its players among the ones of the team, on tiles as the score
+/// sheet of a match.
+pub struct SeasonEditor {
+    /// the team of the season before
+    team_id: String,
+    classifications: Vec<ClassificationChoice>,
+    genders: Vec<GenderChoice>,
+    players: Vec<SeasonPlayer>,
+    /// the players as tiles
+    tiles: Vec<RosterPlayer>,
+    /// on the players
+    on_players: bool,
+    correcting: Option<Correction>,
+    columns: std::cell::Cell<usize>,
+}
+
+/// The fields of the new season: the ones of the team, then a check for
+/// each player.
+const SEASON_PLAYERS: usize = TEAM_COUNTRY + 1;
+
+/// A player of the new season on a tile.
+fn season_tile(p: &SeasonPlayer) -> RosterPlayer {
+    RosterPlayer {
+        id: p.id,
+        name: p.name.clone(),
+        number: p.number,
+        role: p.role_name.clone(),
+        chosen: p.chosen,
+        played: false,
+        role_value: p.role,
+    }
+}
 
 /// The steps of the form of a match: the teams and when, the competition
 /// and the rules, the players of the score sheet (as on Android).
@@ -241,8 +282,17 @@ fn linked_competition(
 
 pub enum Kind {
     Team(TeamEditor),
-    Player(PlayerEditor),
+    Player(Box<PlayerEditor>),
     Match(Box<MatchEditor>),
+    Season(Box<SeasonEditor>),
+}
+
+/// The tiles of a score sheet (of a match, or of a new season) being
+/// shown: the field of the first, the players, the columns drawn.
+struct Sheet<'a> {
+    first: usize,
+    tiles: &'a [RosterPlayer],
+    columns: &'a std::cell::Cell<usize>,
 }
 
 pub struct Editor {
@@ -291,32 +341,73 @@ fn parse_date(
     }
 }
 
+/// The fields of a team, from `start`, with the classifications and the
+/// genders they offer.
+fn team_fields(
+    core: &Scout4All,
+    s: &Strings,
+    start: &TeamForm,
+) -> (Vec<Field>, Vec<ClassificationChoice>, Vec<GenderChoice>) {
+    let classifications = core.classifications();
+    let genders = core.genders();
+    let country = start
+        .country
+        .map(|c| core.country_name(c))
+        .unwrap_or_default();
+    let fields = vec![
+        Field::text(s.name, start.name.clone()),
+        Field::text(s.year, start.year.clone()),
+        Field::choice(
+            s.classification,
+            with_empty(classifications.iter().map(|c| c.name.clone())),
+            option_of(
+                classifications.iter().map(|c| c.value),
+                start.classification,
+            ),
+        ),
+        Field::choice(
+            s.gender,
+            with_empty(genders.iter().map(|g| g.name.clone())),
+            option_of(genders.iter().map(|g| g.value), start.gender),
+        ),
+        Field::search(s.country, country).hint(s.search_country),
+    ];
+    (fields, classifications, genders)
+}
+
+/// The team as its fields have it.
+fn team_form_of(
+    core: &Scout4All,
+    s: &Strings,
+    f: &Form,
+    classifications: &[ClassificationChoice],
+    genders: &[GenderChoice],
+) -> Result<TeamForm, MobileError> {
+    let country =
+        countries::chosen(core, &f.text(TEAM_COUNTRY)).map_err(|()| MobileError::InvalidTeam {
+            field: TeamField::Country,
+            reason: s.no_country_found.to_string(),
+        })?;
+    Ok(TeamForm {
+        name: f.text(TEAM_NAME),
+        year: f.text(TEAM_YEAR),
+        classification: f
+            .index(TEAM_CLASSIFICATION)
+            .checked_sub(1)
+            .and_then(|i| classifications.get(i))
+            .map(|c| c.value),
+        gender: f
+            .index(TEAM_GENDER)
+            .checked_sub(1)
+            .and_then(|i| genders.get(i))
+            .map(|g| g.value),
+        country,
+    })
+}
+
 impl Editor {
     pub fn team(core: &Scout4All, s: &Strings, id: Option<String>, start: TeamForm) -> Editor {
-        let classifications = core.classifications();
-        let genders = core.genders();
-        let country = start
-            .country
-            .map(|c| core.country_name(c))
-            .unwrap_or_default();
-        let fields = vec![
-            Field::text(s.name, start.name.clone()),
-            Field::text(s.year, start.year.clone()),
-            Field::choice(
-                s.classification,
-                with_empty(classifications.iter().map(|c| c.name.clone())),
-                option_of(
-                    classifications.iter().map(|c| c.value),
-                    start.classification,
-                ),
-            ),
-            Field::choice(
-                s.gender,
-                with_empty(genders.iter().map(|g| g.name.clone())),
-                option_of(genders.iter().map(|g| g.value), start.gender),
-            ),
-            Field::search(s.country, country).hint(s.search_country),
-        ];
+        let (fields, classifications, genders) = team_fields(core, s, &start);
         let title = match id {
             Some(_) => s.edit_team,
             None => s.new_team,
@@ -340,8 +431,24 @@ impl Editor {
         start: PlayerForm,
     ) -> Editor {
         let roles = core.roles(team_id.clone());
+        // a new player may be a person of the registry; one saved may play
+        // in other teams too, with the same details
+        let existing = match &id {
+            Some(_) => vec![],
+            None => core.existing_players(team_id.clone()).unwrap_or_default(),
+        };
+        let others = id
+            .as_ref()
+            .and_then(|id| core.other_teams(team_id.clone(), id.clone()).ok())
+            .unwrap_or_default();
+        let name = match (existing.is_empty(), others.is_empty()) {
+            (false, _) => Field::search(s.name, start.name.clone()).hint(s.name_or_existing),
+            (true, false) => Field::text(s.name, start.name.clone())
+                .hint(&ui::fill(s.plays_also_in, &[others.join(", ")])),
+            (true, true) => Field::text(s.name, start.name.clone()),
+        };
         let fields = vec![
-            Field::text(s.name, start.name.clone()),
+            name,
             Field::text(s.number, start.number.clone()),
             Field::choice(
                 s.role,
@@ -364,8 +471,169 @@ impl Editor {
         Editor {
             form: Form::new(title, fields),
             namesake: None,
-            kind: Kind::Player(PlayerEditor { team_id, id, roles }),
+            kind: Kind::Player(Box::new(PlayerEditor {
+                team_id,
+                id,
+                roles,
+                existing,
+                offered: vec![],
+                person: None,
+            })),
         }
+    }
+
+    /// The new season of the team `team_id` (D15): the team the year
+    /// after, then its players.
+    pub fn season(core: &Scout4All, s: &Strings, team_id: String) -> Result<Editor, MobileError> {
+        let season = core.new_season(team_id.clone())?;
+        let (fields, classifications, genders) = team_fields(core, s, &season.form);
+        let mut form = Form::new(s.new_season, fields);
+        form.actions = Some((
+            (theme::icons::CLOSE, s.cancel.to_string()),
+            (theme::icons::FORWARD_ARROW, s.go_on.to_string()),
+        ));
+        let mut editor = Editor {
+            form,
+            namesake: None,
+            kind: Kind::Season(Box::new(SeasonEditor {
+                team_id,
+                classifications,
+                genders,
+                players: vec![],
+                tiles: vec![],
+                on_players: false,
+                correcting: None,
+                columns: std::cell::Cell::new(ROSTER_COLUMNS),
+            })),
+        };
+        editor.set_season_players(season.players);
+        editor.show_season(false);
+        Ok(editor)
+    }
+
+    /// The players of the new season, one check for each.
+    fn set_season_players(&mut self, players: Vec<SeasonPlayer>) {
+        self.form.fields.truncate(SEASON_PLAYERS);
+        self.form.fields.extend(
+            players
+                .iter()
+                .map(|p| Field::check(&p.name, p.chosen, false)),
+        );
+        if let Kind::Season(t) = &mut self.kind {
+            t.tiles = players.iter().map(season_tile).collect();
+            t.players = players;
+        }
+    }
+
+    /// The team of the new season, or its players: the keys on the first
+    /// field.
+    fn show_season(&mut self, players: bool) {
+        if let Kind::Season(t) = &mut self.kind {
+            t.on_players = players;
+            let fields = match players {
+                true => SEASON_PLAYERS..self.form.fields.len().max(SEASON_PLAYERS),
+                false => TEAM_NAME..SEASON_PLAYERS,
+            };
+            self.form.focused = fields.start;
+            self.form.shown = Some(fields);
+        }
+    }
+
+    /// The persons of the registry the name written offers, with the teams
+    /// they play in; the one chosen let go once the name isn't theirs.
+    fn offer_persons(&mut self, s: &Strings) {
+        let Kind::Player(p) = &mut self.kind else {
+            return;
+        };
+        let written = self.form.text(PLAYER_NAME);
+        if p.person
+            .as_ref()
+            .is_some_and(|person| !same_name(&person.name, &written))
+        {
+            p.person = None;
+            if let Some(field) = self.form.fields.get_mut(PLAYER_NAME) {
+                field.hint = Some(s.name_or_existing.to_string());
+            }
+        }
+        let labels: Vec<String> = p.existing.iter().map(|e| e.label.clone()).collect();
+        let offered = scout4all_mobile::offered_names(labels, written);
+        // two with the same label: each once, in its order
+        let mut taken: Vec<usize> = vec![];
+        for label in &offered {
+            if let Some(i) = p
+                .existing
+                .iter()
+                .enumerate()
+                .position(|(i, e)| e.label == *label && !taken.contains(&i))
+            {
+                taken.push(i);
+            }
+        }
+        let suggestions = taken
+            .iter()
+            .filter_map(|i| p.existing.get(*i))
+            .map(|e| Suggestion {
+                label: e.label.clone(),
+                value: e.name.clone(),
+            })
+            .collect();
+        p.offered = taken;
+        self.form.suggest(PLAYER_NAME, suggestions);
+    }
+
+    /// The person of the registry offered `n`th taken: the form gets their
+    /// details, and the number and the role of their most recent team.
+    fn take_person(&mut self, s: &Strings, n: usize) {
+        let Kind::Player(p) = &mut self.kind else {
+            return;
+        };
+        let Some(person) = p.offered.get(n).and_then(|i| p.existing.get(*i)).cloned() else {
+            return;
+        };
+        let start = &person.form;
+        let role = option_of(p.roles.iter().map(|r| r.value), start.role);
+        let teams = person
+            .label
+            .strip_prefix(&person.name)
+            .map(|rest| rest.trim().trim_start_matches('(').trim_end_matches(')'))
+            .unwrap_or_default()
+            .to_string();
+        let hint = match teams.is_empty() {
+            true => s.in_registry.to_string(),
+            false => format!(
+                "{} · {}",
+                s.in_registry,
+                ui::fill(s.plays_also_in, &[teams])
+            ),
+        };
+        let values = [
+            (PLAYER_NUMBER, Field::text("", start.number.clone()).value),
+            (
+                PLAYER_ROLE,
+                form::Value::Choice {
+                    options: with_empty(p.roles.iter().map(|r| r.name.clone())),
+                    index: role,
+                },
+            ),
+            (
+                PLAYER_BIRTH,
+                Field::masked("", &start.birth_date, Mask::Date, "").value,
+            ),
+            (
+                PLAYER_HEIGHT,
+                Field::text("", start.height_cm.clone()).value,
+            ),
+            (PLAYER_NOTES, Field::text("", start.notes.clone()).value),
+        ];
+        for (field, value) in values {
+            if let Some(f) = self.form.fields.get_mut(field) {
+                f.value = value;
+            }
+        }
+        if let Some(f) = self.form.fields.get_mut(PLAYER_NAME) {
+            f.hint = Some(hint);
+        }
+        p.person = Some(person);
     }
 
     /// A new match (no `id`) of team A `team_id`, on the date of now, or
@@ -604,16 +872,23 @@ impl Editor {
     /// The small form of the number and the role of the player of the
     /// score sheet at `field`.
     fn open_correction(&mut self, core: &Scout4All, s: &Strings, field: usize) {
-        let Kind::Match(m) = &mut self.kind else {
-            return;
-        };
-        let Some(p) = field
-            .checked_sub(MATCH_ROSTER)
-            .and_then(|n| m.roster.get(n))
+        let Some(p) = self
+            .sheet()
+            .and_then(|sheet| {
+                field
+                    .checked_sub(sheet.first)
+                    .and_then(|n| sheet.tiles.get(n))
+            })
+            .cloned()
         else {
             return;
         };
-        let roles = core.roles(m.team_id.clone());
+        let team = match &self.kind {
+            Kind::Match(m) => m.team_id.clone(),
+            Kind::Season(t) => t.team_id.clone(),
+            Kind::Team(_) | Kind::Player(_) => return,
+        };
+        let roles = core.roles(team);
         let fields = vec![
             Field::text(s.number, p.number.to_string()),
             Field::choice(
@@ -628,20 +903,61 @@ impl Editor {
             (theme::icons::CHECK, s.ok.to_string()),
         ));
         self.form.focused = field;
-        m.correcting = Some(Correction {
-            player: p.id,
-            roles,
-            form,
-        });
+        if let Some(slot) = self.correcting_slot() {
+            *slot = Some(Correction {
+                player: p.id,
+                roles,
+                form,
+            });
+        }
     }
 
-    /// The correction saved in the form of the match, the keys on the
-    /// player (wherever its number puts it now); or its error shown.
+    /// Where the correction of a score sheet goes, for the kinds that have
+    /// one.
+    fn correcting_slot(&mut self) -> Option<&mut Option<Correction>> {
+        match &mut self.kind {
+            Kind::Match(m) => Some(&mut m.correcting),
+            Kind::Season(t) => Some(&mut t.correcting),
+            Kind::Team(_) | Kind::Player(_) => None,
+        }
+    }
+
+    /// The correction open, if any.
+    fn correcting(&self) -> Option<&Correction> {
+        match &self.kind {
+            Kind::Match(m) => m.correcting.as_ref(),
+            Kind::Season(t) => t.correcting.as_ref(),
+            Kind::Team(_) | Kind::Player(_) => None,
+        }
+    }
+
+    /// The tiles shown, on the step of the score sheet or of the players
+    /// of a new season.
+    fn sheet(&self) -> Option<Sheet<'_>> {
+        match &self.kind {
+            Kind::Match(m) if m.step == MatchStep::Roster => Some(Sheet {
+                first: MATCH_ROSTER,
+                tiles: &m.roster,
+                columns: &m.columns,
+            }),
+            Kind::Season(t) if t.on_players => Some(Sheet {
+                first: SEASON_PLAYERS,
+                tiles: &t.tiles,
+                columns: &t.columns,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The correction saved in the form of the match (or among the
+    /// players of the new season), the keys on the player (wherever its
+    /// number puts it now); or its error shown.
     fn corrected(&mut self, core: &Scout4All) {
-        let Kind::Match(m) = &self.kind else {
-            return;
-        };
-        let Some(c) = &m.correcting else {
+        enum Corrected {
+            Roster(Box<MatchRoster>),
+            Season(Vec<SeasonPlayer>),
+        }
+        let Some(c) = self.correcting() else {
             return;
         };
         let role = c
@@ -651,31 +967,45 @@ impl Editor {
             .and_then(|i| c.roles.get(i))
             .map(|r| r.value);
         let player = c.player;
-        let corrected = core.correct_roster_number(
-            m.team_id.clone(),
-            m.id.clone(),
-            self.match_data(m),
-            player,
-            c.form.text(CORRECTION_NUMBER),
-            role,
-        );
+        let number = c.form.text(CORRECTION_NUMBER);
+        let corrected = match &self.kind {
+            Kind::Match(m) => core
+                .correct_roster_number(
+                    m.team_id.clone(),
+                    m.id.clone(),
+                    self.match_data(m),
+                    player,
+                    number,
+                    role,
+                )
+                .map(|r| Corrected::Roster(Box::new(r))),
+            Kind::Season(t) => core
+                .correct_season_player(t.team_id.clone(), t.players.clone(), player, number, role)
+                .map(Corrected::Season),
+            Kind::Team(_) | Kind::Player(_) => return,
+        };
         match corrected {
-            Ok(roster) => {
-                self.set_roster(roster);
-                if let Kind::Match(m) = &mut self.kind {
-                    m.correcting = None;
-                    if let Some(n) = m.roster.iter().position(|p| p.id == player) {
-                        self.form.focused = MATCH_ROSTER + n;
-                    }
-                }
-            }
+            Ok(Corrected::Roster(roster)) => self.set_roster(*roster),
+            Ok(Corrected::Season(players)) => self.set_season_players(players),
             Err(e) => {
-                if let Kind::Match(m) = &mut self.kind
-                    && let Some(c) = &mut m.correcting
-                {
+                if let Some(Some(c)) = self.correcting_slot() {
                     c.form.error = Some(e.to_string());
                 }
+                return;
             }
+        }
+        if let Some(slot) = self.correcting_slot() {
+            *slot = None;
+        }
+        let at = self.sheet().and_then(|sheet| {
+            sheet
+                .tiles
+                .iter()
+                .position(|p| p.id == player)
+                .map(|n| sheet.first + n)
+        });
+        if let Some(field) = at {
+            self.form.focused = field;
         }
     }
 
@@ -684,8 +1014,8 @@ impl Editor {
         match outcome {
             Outcome::Save => self.corrected(core),
             Outcome::Cancel => {
-                if let Kind::Match(m) = &mut self.kind {
-                    m.correcting = None;
+                if let Some(slot) = self.correcting_slot() {
+                    *slot = None;
                 }
             }
             Outcome::Stay | Outcome::Changed(_) => {}
@@ -695,15 +1025,23 @@ impl Editor {
 
     /// The small form of a correction, when open.
     fn correction(&mut self) -> Option<&mut Form> {
-        match &mut self.kind {
-            Kind::Match(m) => m.correcting.as_mut().map(|c| &mut c.form),
-            _ => None,
-        }
+        self.correcting_slot()
+            .and_then(|c| c.as_mut())
+            .map(|c| &mut c.form)
     }
 
-    fn changed(&mut self, core: &Scout4All, field: usize) {
+    fn changed(&mut self, core: &Scout4All, s: &Strings, field: usize) {
         match (&mut self.kind, field) {
-            (Kind::Team(_), TEAM_COUNTRY) => {
+            (Kind::Player(p), PLAYER_NAME) if p.id.is_none() => self.offer_persons(s),
+            // a player taken to the new season, or left
+            (Kind::Season(t), f) if f >= SEASON_PLAYERS => {
+                let mut players = t.players.clone();
+                if let Some(p) = players.get_mut(f - SEASON_PLAYERS) {
+                    p.chosen = !p.chosen;
+                }
+                self.set_season_players(players);
+            }
+            (Kind::Team(_) | Kind::Season(_), TEAM_COUNTRY) => {
                 let written = self.form.text(TEAM_COUNTRY);
                 self.form
                     .suggest(TEAM_COUNTRY, countries::suggestions(core, &written));
@@ -782,28 +1120,12 @@ impl Editor {
         let f = &self.form;
         match &self.kind {
             Kind::Team(t) => {
-                let country = countries::chosen(core, &f.text(TEAM_COUNTRY)).map_err(|()| {
-                    MobileError::InvalidTeam {
-                        field: TeamField::Country,
-                        reason: s.no_country_found.to_string(),
-                    }
-                })?;
-                let form = TeamForm {
-                    name: f.text(TEAM_NAME),
-                    year: f.text(TEAM_YEAR),
-                    classification: f
-                        .index(TEAM_CLASSIFICATION)
-                        .checked_sub(1)
-                        .and_then(|i| t.classifications.get(i))
-                        .map(|c| c.value),
-                    gender: f
-                        .index(TEAM_GENDER)
-                        .checked_sub(1)
-                        .and_then(|i| t.genders.get(i))
-                        .map(|g| g.value),
-                    country,
-                };
+                let form = team_form_of(core, s, f, &t.classifications, &t.genders)?;
                 core.save_team(t.id.clone(), form)
+            }
+            Kind::Season(t) => {
+                let form = team_form_of(core, s, f, &t.classifications, &t.genders)?;
+                core.save_new_season(t.team_id.clone(), form, t.players.clone())
             }
             Kind::Player(p) => {
                 let form = PlayerForm {
@@ -817,6 +1139,7 @@ impl Editor {
                     birth_date: f.text(PLAYER_BIRTH),
                     height_cm: f.text(PLAYER_HEIGHT),
                     notes: f.text(PLAYER_NOTES),
+                    person: p.person.as_ref().map(|person| person.id),
                 };
                 core.save_player(p.team_id.clone(), p.id.clone(), form, namesake_confirmed)
             }
@@ -834,6 +1157,10 @@ impl Editor {
                 TeamField::Gender => TEAM_GENDER,
                 TeamField::Country => TEAM_COUNTRY,
             }),
+            // a number of the new season: on its players
+            MobileError::InvalidPlayer { .. } if matches!(self.kind, Kind::Season(_)) => {
+                Some(SEASON_PLAYERS)
+            }
             MobileError::InvalidPlayer { field, .. } => Some(match field {
                 PlayerField::Name => PLAYER_NAME,
                 PlayerField::Number => PLAYER_NUMBER,
@@ -858,7 +1185,7 @@ impl Editor {
             Outcome::Cancel if self.step(true) => Edited::Stay,
             Outcome::Cancel => Edited::Cancel,
             Outcome::Changed(field) => {
-                self.changed(core, field);
+                self.changed(core, s, field);
                 Edited::Stay
             }
             // the details of a match, then its score sheet
@@ -884,8 +1211,10 @@ impl Editor {
                 if let Some(field) = self.field_of(&e) {
                     let field = field.min(self.form.fields.len().saturating_sub(1));
                     // the step of the field the error is about
-                    if matches!(self.kind, Kind::Match(_)) {
-                        self.show(MatchStep::of(field));
+                    match self.kind {
+                        Kind::Match(_) => self.show(MatchStep::of(field)),
+                        Kind::Season(_) => self.show_season(field >= SEASON_PLAYERS),
+                        Kind::Team(_) | Kind::Player(_) => {}
                     }
                     self.form.focused = field;
                 }
@@ -898,6 +1227,13 @@ impl Editor {
     /// To the next step of a match, or the one before when `back`: false
     /// when there's no step to take.
     fn step(&mut self, back: bool) -> bool {
+        if let Kind::Season(t) = &self.kind {
+            let to = (back == t.on_players).then_some(!back);
+            if let Some(players) = to {
+                self.show_season(players);
+            }
+            return to.is_some();
+        }
         let Kind::Match(m) = &self.kind else {
             return false;
         };
@@ -916,14 +1252,17 @@ impl Editor {
 
     /// The columns of the score sheet as drawn.
     fn columns(&self) -> usize {
-        match &self.kind {
-            Kind::Match(m) => m.columns.get(),
-            _ => ROSTER_COLUMNS,
-        }
+        self.sheet()
+            .map_or(ROSTER_COLUMNS, |sheet| sheet.columns.get())
     }
 
     fn on_roster(&self) -> bool {
-        matches!(&self.kind, Kind::Match(m) if m.step == MatchStep::Roster)
+        self.sheet().is_some()
+    }
+
+    /// A new season: once saved, its team opens.
+    pub fn is_season(&self) -> bool {
+        matches!(self.kind, Kind::Season(_))
     }
 
     /// Team A of the match being edited.
@@ -952,6 +1291,15 @@ impl Editor {
                     Edited::Stay
                 }
                 (None, message) => {
+                    // a person of the registry taken as the new player
+                    if let (form::Message::Take(PLAYER_NAME, n), Kind::Player(_)) =
+                        (&message, &self.kind)
+                    {
+                        let n = *n;
+                        let outcome = self.form.update(message);
+                        self.take_person(s, n);
+                        return self.outcome(core, s, outcome);
+                    }
                     let outcome = self.form.update(message);
                     self.outcome(core, s, outcome)
                 }
@@ -982,9 +1330,24 @@ impl Editor {
             self.open_correction(core, s, self.form.focused);
             return Edited::Stay;
         }
+        // the person of the registry Enter or Tab takes from the name
+        let taking = match (&self.kind, self.form.offering(), self.form.lit()) {
+            (Kind::Player(_), true, Some(lit))
+                if self.form.focused == PLAYER_NAME && (ck == key!(enter) || ck == key!(tab)) =>
+            {
+                Some(lit)
+            }
+            _ => None,
+        };
+        if let Some(n) = taking {
+            let outcome = self.form.key(ck);
+            self.take_person(s, n);
+            return self.outcome(core, s, outcome);
+        }
         // the score sheet is a grid: the arrows move in it
-        let players = self.form.fields.len().saturating_sub(MATCH_ROSTER);
-        let at = self.form.focused.saturating_sub(MATCH_ROSTER);
+        let first = self.sheet().map_or(MATCH_ROSTER, |sheet| sheet.first);
+        let players = self.form.fields.len().saturating_sub(first);
+        let at = self.form.focused.saturating_sub(first);
         let moved = match (self.on_roster(), ck) {
             (false, _) => None,
             (true, k) if k == key!(left) => Some(at.checked_sub(1)),
@@ -996,7 +1359,7 @@ impl Editor {
         match moved {
             Some(to) => {
                 if let Some(to) = to.filter(|to| *to < players) {
-                    self.form.focused = MATCH_ROSTER + to;
+                    self.form.focused = first + to;
                 }
                 Edited::Stay
             }
@@ -1009,7 +1372,11 @@ impl Editor {
 
     /// The keys, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        let correcting = matches!(&self.kind, Kind::Match(m) if m.correcting.is_some());
+        let correcting = self.correcting().is_some();
+        let toggle = match self.kind {
+            Kind::Season(_) => s.season_toggle,
+            _ => s.roster_toggle,
+        };
         match (self.namesake.is_some(), self.on_roster()) {
             // the small form of a correction: Enter confirms it
             (false, true) if correcting => Form::hints(s)
@@ -1025,7 +1392,7 @@ impl Editor {
             ],
             (false, true) => vec![
                 ("← → ↑ ↓".to_string(), String::new()),
-                (s.space.to_string(), s.roster_toggle.to_string()),
+                (s.space.to_string(), toggle.to_string()),
                 ("e".to_string(), s.roster_correct.to_string()),
                 ("Enter".to_string(), s.save.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
@@ -1034,7 +1401,7 @@ impl Editor {
             (false, false) => Form::hints(s)
                 .into_iter()
                 .map(|(k, what)| match (k.as_str(), &self.kind) {
-                    ("Enter", Kind::Match(_)) => (k, s.go_on.to_string()),
+                    ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
                     _ => (k, what),
                 })
                 .collect(),
@@ -1047,13 +1414,8 @@ impl Editor {
     }
 
     pub fn focus_id(&self) -> Id {
-        match &self.kind {
-            Kind::Match(m) => m
-                .correcting
-                .as_ref()
-                .map_or_else(|| self.form.focus_id(), |c| c.form.focus_id()),
-            _ => self.form.focus_id(),
-        }
+        self.correcting()
+            .map_or_else(|| self.form.focus_id(), |c| c.form.focus_id())
     }
 
     pub fn view<'a, M: Clone + 'a>(
@@ -1072,18 +1434,26 @@ impl Editor {
                 on(form::Message::Cancel),
                 c,
             ),
-            (None, Kind::Match(m)) => match (&m.correcting, m.step) {
+            (None, kind) => match (self.correcting(), self.sheet(), kind) {
                 // small, over the score sheet
-                (Some(correction), _) => container(
+                (Some(correction), _, _) => container(
                     container(correction.form.view(s, c, on, None))
                         .max_width(Self::CORRECTION_WIDTH),
                 )
                 .center_x(Length::Fill)
                 .into(),
-                (None, MatchStep::Roster) => self.roster_view(m, s, c, on),
-                (None, _) => self.form.view(s, c, on, None),
+                (None, Some(sheet), Kind::Season(_)) => {
+                    let chosen = sheet.tiles.iter().filter(|p| p.chosen).count();
+                    let count = ui::fill(s.season_count, &[chosen.to_string()]);
+                    self.sheet_view(sheet, s.season_players, count, s, c, on)
+                }
+                (None, Some(sheet), _) => {
+                    let chosen = sheet.tiles.iter().filter(|p| p.chosen).count();
+                    let count = ui::fill(s.roster_count, &[chosen.to_string()]);
+                    self.sheet_view(sheet, s.roster, count, s, c, on)
+                }
+                (None, None, _) => self.form.view(s, c, on, None),
             },
-            (None, _) => self.form.view(s, c, on, None),
         }
     }
 
@@ -1095,14 +1465,20 @@ impl Editor {
 
     /// The score sheet: the players as tiles, by number, the ones on it
     /// lit, as on Android; who played in a set stays.
-    fn roster_view<'a, M: Clone + 'a>(
+    fn sheet_view<'a, M: Clone + 'a>(
         &'a self,
-        m: &'a MatchEditor,
+        sheet: Sheet<'a>,
+        title: &'static str,
+        count: String,
         s: &'static Strings,
         c: Colors,
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
-        let chosen = m.roster.iter().filter(|p| p.chosen).count();
+        let Sheet {
+            first,
+            tiles,
+            columns,
+        } = sheet;
         // the number and the role of the match, also of who played
         let correct = move |field: usize| -> Element<'a, M> {
             ui::tip(
@@ -1126,7 +1502,7 @@ impl Editor {
             )
         };
         let tile = move |n: usize, p: &'a RosterPlayer| -> Element<'a, M> {
-            let field = MATCH_ROSTER + n;
+            let field = first + n;
             let focused = self.form.focused == field;
             let lit = p.chosen;
             let fg = match lit {
@@ -1224,14 +1600,10 @@ impl Editor {
         };
         // as many columns as fit; the arrows go by them
         let grid = responsive(move |size| {
-            let columns = roster_columns(size.width);
-            m.columns.set(columns);
-            let mut tiles = m
-                .roster
-                .iter()
-                .enumerate()
-                .map(|(n, p)| tile(n, p))
-                .peekable();
+            let fit = roster_columns(size.width);
+            columns.set(fit);
+            let columns = fit;
+            let mut tiles = tiles.iter().enumerate().map(|(n, p)| tile(n, p)).peekable();
             let mut rows: Vec<Element<'a, M>> = vec![];
             while tiles.peek().is_some() {
                 let line: Vec<Element<'a, M>> = tiles.by_ref().take(columns).collect();
@@ -1252,7 +1624,7 @@ impl Editor {
                 .into()
         });
         // the grey ones told, when there are
-        let legend: Element<'a, M> = match m.roster.iter().any(|p| p.played) {
+        let legend: Element<'a, M> = match tiles.iter().any(|p| p.played) {
             true => row![
                 text("■").size(SIZE_SMALL).color(c.muted),
                 text(s.roster_played).size(SIZE_SMALL).color(c.muted),
@@ -1274,11 +1646,9 @@ impl Editor {
             c,
         );
         let panel = ui::panel(
-            Some(s.roster),
+            Some(title),
             column![
-                text(ui::fill(s.roster_count, &[chosen.to_string()]))
-                    .size(SIZE_SMALL)
-                    .color(c.muted),
+                text(count).size(SIZE_SMALL).color(c.muted),
                 legend,
                 grid,
                 error,
