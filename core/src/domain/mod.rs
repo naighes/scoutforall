@@ -14,6 +14,7 @@
 pub mod adapters;
 pub mod sql;
 
+use crate::localization::Labels;
 use crate::shapes::{
     country::CountryCode,
     enums::{GenderEnum, LineupRulesEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
@@ -76,6 +77,14 @@ impl CompetitionFormat {
         CompetitionFormat::Cup,
         CompetitionFormat::Tournament,
     ];
+
+    pub fn name(self, labels: &Labels) -> &'static str {
+        match self {
+            CompetitionFormat::League => labels.format_league,
+            CompetitionFormat::Cup => labels.format_cup,
+            CompetitionFormat::Tournament => labels.format_tournament,
+        }
+    }
 }
 
 /// A competition, shared by the teams that play it (D12): its name is the
@@ -118,6 +127,19 @@ impl Stage {
         Stage::Placement,
         Stage::Other,
     ];
+
+    pub fn name(self, labels: &Labels) -> &'static str {
+        match self {
+            Stage::Regular => labels.stage_regular,
+            Stage::Pool => labels.stage_pool,
+            Stage::Qualification => labels.stage_qualification,
+            Stage::Playoff => labels.stage_playoff,
+            Stage::Playout => labels.stage_playout,
+            Stage::FinalRound => labels.stage_final_round,
+            Stage::Placement => labels.stage_placement,
+            Stage::Other => labels.stage_other,
+        }
+    }
 }
 
 /// One of the two teams of a match: A, the team one starts from, or B.

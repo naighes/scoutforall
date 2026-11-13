@@ -18,8 +18,9 @@ use {
     scout4all_core::{match_form::MatchForm, player_form::PlayerForm, team_form::TeamForm},
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        ClassificationChoice, GenderChoice, MatchField, MobileError, PlayerField, RoleChoice,
-        RosterPlayer, Scout4All, TeamField,
+        ClassificationChoice, CompetitionChoice, FormatChoice, GenderChoice, MatchField,
+        MobileError, OpponentChoice, PlayerField, RoleChoice, RosterPlayer, Scout4All, StageChoice,
+        TeamField, TeamListing,
     },
 };
 
@@ -68,31 +69,147 @@ const PLAYER_HEIGHT: usize = 4;
 const PLAYER_NOTES: usize = 5;
 
 pub struct MatchEditor {
+    /// team A: chosen among `teams` for a new match, then fixed
     team_id: String,
+    teams: Vec<(String, String)>,
     id: Option<String>,
-    /// the form as the core keeps it: the roster, the offset of the date
+    /// the form as the core keeps it: the roster, the offset of the date,
+    /// team B and the competition chosen
     data: MatchForm,
     roster: Vec<RosterPlayer>,
-    /// the teams and the opponents met, offered as the opponent is written
-    opponents: Vec<String>,
-    /// the second step, as on Android: the players of the score sheet
-    on_roster: bool,
+    /// the other teams and the names met, offered as team B is written
+    opponents: Vec<OpponentChoice>,
+    competitions: Vec<CompetitionChoice>,
+    formats: Vec<FormatChoice>,
+    stages: Vec<StageChoice>,
+    step: MatchStep,
 }
 
-// the fields of the match, then a check for each player of the roster,
-// shown in a step of their own
-const MATCH_OPPONENT: usize = 0;
-const MATCH_DATE: usize = 1;
-const MATCH_TIME: usize = 2;
-const MATCH_HOME: usize = 3;
-const MATCH_SUBSTITUTIONS: usize = 4;
-const MATCH_NOTES: usize = 5;
-const MATCH_ROSTER: usize = 6;
+/// The steps of the form of a match: the teams and when, the competition
+/// and the rules, the players of the score sheet (as on Android).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MatchStep {
+    Match,
+    Competition,
+    Roster,
+}
+
+impl MatchStep {
+    /// The fields of the step.
+    fn fields(self, all: usize) -> std::ops::Range<usize> {
+        match self {
+            MatchStep::Match => MATCH_TEAM..MATCH_COMPETITION,
+            MatchStep::Competition => MATCH_COMPETITION..MATCH_ROSTER,
+            MatchStep::Roster => MATCH_ROSTER..all.max(MATCH_ROSTER),
+        }
+    }
+
+    /// The step of `field`.
+    fn of(field: usize) -> MatchStep {
+        match field {
+            f if f < MATCH_COMPETITION => MatchStep::Match,
+            f if f < MATCH_ROSTER => MatchStep::Competition,
+            _ => MatchStep::Roster,
+        }
+    }
+
+    fn next(self) -> Option<MatchStep> {
+        match self {
+            MatchStep::Match => Some(MatchStep::Competition),
+            MatchStep::Competition => Some(MatchStep::Roster),
+            MatchStep::Roster => None,
+        }
+    }
+
+    fn previous(self) -> Option<MatchStep> {
+        match self {
+            MatchStep::Match => None,
+            MatchStep::Competition => Some(MatchStep::Match),
+            MatchStep::Roster => Some(MatchStep::Competition),
+        }
+    }
+}
+
+// the fields of the match in their steps, then a check for each player of
+// the roster
+const MATCH_TEAM: usize = 0;
+const MATCH_OPPONENT: usize = 1;
+const MATCH_CREATE_OPPONENT: usize = 2;
+const MATCH_DATE: usize = 3;
+const MATCH_TIME: usize = 4;
+const MATCH_COURT: usize = 5;
+const MATCH_COMPETITION: usize = 6;
+const MATCH_FORMAT: usize = 7;
+const MATCH_FRIENDLY: usize = 8;
+const MATCH_STAGE: usize = 9;
+const MATCH_ROUND: usize = 10;
+const MATCH_SUBSTITUTIONS: usize = 11;
+const MATCH_NOTES: usize = 12;
+const MATCH_ROSTER: usize = 13;
+
+// the options of the court
+const COURT_HOME: usize = 0;
+const COURT_AWAY: usize = 1;
+const COURT_NEUTRAL: usize = 2;
+
+/// The option of the court of the form.
+fn court_of(form: &MatchForm) -> usize {
+    match (form.neutral, form.home) {
+        (true, _) => COURT_NEUTRAL,
+        (false, true) => COURT_HOME,
+        (false, false) => COURT_AWAY,
+    }
+}
+
+/// The name of a team or a competition as written, to compare.
+fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+/// The team written: the one linked if it's still its name, else the
+/// first with that name (the most recent year, as offered).
+fn linked_team(
+    choices: &[OpponentChoice],
+    written: &str,
+    linked: Option<uuid::Uuid>,
+) -> Option<uuid::Uuid> {
+    let named = |id: uuid::Uuid| {
+        choices
+            .iter()
+            .any(|c| c.team == Some(id) && same_name(&c.name, written))
+    };
+    linked.filter(|id| named(*id)).or_else(|| {
+        choices
+            .iter()
+            .find(|c| c.team.is_some() && same_name(&c.name, written))
+            .and_then(|c| c.team)
+    })
+}
+
+/// The competition written: the one linked if it's still its name, else
+/// the first with that name (the most recent season, as offered).
+fn linked_competition(
+    choices: &[CompetitionChoice],
+    written: &str,
+    linked: Option<uuid::Uuid>,
+) -> Option<uuid::Uuid> {
+    let named = |id: uuid::Uuid| {
+        choices
+            .iter()
+            .any(|c| c.id == id && same_name(&c.name, written))
+    };
+    linked.filter(|id| named(*id)).or_else(|| {
+        choices
+            .iter()
+            .find(|c| same_name(&c.name, written))
+            .map(|c| c.id)
+    })
+}
 
 pub enum Kind {
     Team(TeamEditor),
     Player(PlayerEditor),
-    Match(MatchEditor),
+    Match(Box<MatchEditor>),
 }
 
 pub struct Editor {
@@ -218,7 +335,8 @@ impl Editor {
         }
     }
 
-    /// A new match (no `id`), on the date of now, or a saved one.
+    /// A new match (no `id`) of team A `team_id`, on the date of now, or
+    /// a saved one.
     pub fn a_match(
         s: &Strings,
         core: &Scout4All,
@@ -229,8 +347,28 @@ impl Editor {
             Some(id) => core.match_form(team_id.clone(), id.clone())?,
             None => MatchForm::new(Local::now().fixed_offset()),
         };
+        // a saved match keeps its team A
+        let teams: Vec<(String, String)> = core
+            .teams()?
+            .into_iter()
+            .filter_map(|t| match t {
+                TeamListing::Team { id, name, year, .. } => Some((id, format!("{name} ({year})"))),
+                TeamListing::Unreadable { .. } => None,
+            })
+            .filter(|(team, _)| id.is_none() || *team == team_id)
+            .collect();
+        let team_index = teams.iter().position(|(t, _)| *t == team_id).unwrap_or(0);
+        let competitions = core.competitions()?;
+        let formats = core.competition_formats();
+        let stages = core.stages();
         let fields = vec![
+            Field::choice(
+                s.team_a,
+                teams.iter().map(|(_, name)| name.clone()).collect(),
+                team_index,
+            ),
             Field::search(s.opponent, data.opponent.clone()),
+            Field::check(s.create_opponent, data.create_opponent, false),
             Field::masked(
                 s.date,
                 &date_text(data.date, DATE_FORMAT),
@@ -245,10 +383,33 @@ impl Editor {
             ),
             Field::segments(
                 "",
-                vec![s.home_game.to_string(), s.away_game.to_string()],
-                usize::from(!data.home),
+                vec![
+                    s.home_game.to_string(),
+                    s.away_game.to_string(),
+                    s.neutral_game.to_string(),
+                ],
+                court_of(&data),
             )
-            .icons(vec![theme::icons::HOME, theme::icons::AWAY]),
+            .icons(vec![
+                theme::icons::HOME,
+                theme::icons::AWAY,
+                theme::icons::VOLLEYBALL,
+            ]),
+            Field::search(s.competition, data.competition.clone()),
+            Field::choice(
+                s.competition_format,
+                formats.iter().map(|f| f.name.clone()).collect(),
+                data.competition_format
+                    .and_then(|v| formats.iter().position(|f| f.value == v))
+                    .unwrap_or(0),
+            ),
+            Field::check(s.friendly, data.friendly, false),
+            Field::choice(
+                s.stage,
+                with_empty(stages.iter().map(|st| st.name.clone())),
+                option_of(stages.iter().map(|st| st.value), data.stage),
+            ),
+            Field::text(s.round, data.round.clone()).placeholder(s.round_placeholder),
             Field::text(s.max_substitutions, data.max_substitutions.clone()),
             Field::text(s.notes, data.notes.clone()),
         ];
@@ -257,38 +418,123 @@ impl Editor {
             None => s.new_match,
         };
         let mut form = Form::new(title, fields);
-        form.shown = Some(0..MATCH_ROSTER);
+        form.sections = vec![
+            (MATCH_TEAM, s.match_section.to_string()),
+            (MATCH_COMPETITION, s.competition_section.to_string()),
+        ];
         form.actions = Some((
             (theme::icons::CLOSE, s.cancel.to_string()),
             (theme::icons::FORWARD_ARROW, s.go_on.to_string()),
         ));
-        let opponents = core.opponents(team_id.clone()).unwrap_or_default();
+        let opponents = core.opponent_choices(team_id.clone()).unwrap_or_default();
         let mut editor = Editor {
             form,
             namesake: None,
-            kind: Kind::Match(MatchEditor {
+            kind: Kind::Match(Box::new(MatchEditor {
                 team_id,
+                teams,
                 id,
                 data,
                 roster: vec![],
                 opponents,
-                on_roster: false,
-            }),
+                competitions,
+                formats,
+                stages,
+                step: MatchStep::Match,
+            })),
         };
+        editor.show(MatchStep::Match);
+        editor.linked();
         editor.toggle(core, None)?;
         Ok(editor)
     }
 
-    /// The match form as written, the roster as the core keeps it.
+    /// The fields of `step`, the keys on its first one.
+    fn show(&mut self, step: MatchStep) {
+        if let Kind::Match(m) = &mut self.kind {
+            m.step = step;
+            let fields = step.fields(self.form.fields.len());
+            self.form.focused = fields.start;
+            self.form.shown = Some(fields);
+        }
+    }
+
+    /// Team B and the competition linked to what's written, and the fields
+    /// that apply shown: "create as a team" for a name that isn't a team,
+    /// the format for a new competition. A competition just chosen gives
+    /// its friendly.
+    fn linked(&mut self) {
+        let Kind::Match(m) = &mut self.kind else {
+            return;
+        };
+        let f = &mut self.form;
+        let opponent = f.text(MATCH_OPPONENT);
+        // A isn't among the teams offered
+        m.data.opponent_team = linked_team(&m.opponents, &opponent, m.data.opponent_team);
+        let competition = f.text(MATCH_COMPETITION);
+        let was = m.data.competition_id;
+        m.data.competition_id = linked_competition(&m.competitions, &competition, was);
+        let chosen = m
+            .competitions
+            .iter()
+            .find(|c| Some(c.id) == m.data.competition_id);
+        let friendly = f.fields.get_mut(MATCH_FRIENDLY);
+        if let (Some(c), true, Some(field)) = (chosen, m.data.competition_id != was, friendly) {
+            field.value = form::Value::Check {
+                on: c.friendly,
+                fixed: false,
+            };
+        }
+        f.hidden = [
+            (
+                MATCH_CREATE_OPPONENT,
+                opponent.trim().is_empty() || m.data.opponent_team.is_some(),
+            ),
+            (
+                MATCH_FORMAT,
+                competition.trim().is_empty() || m.data.competition_id.is_some(),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(field, hidden)| hidden.then_some(field))
+        .collect();
+    }
+
+    /// The match form as written, the roster and what's linked as the
+    /// core keeps them.
     fn match_data(&self, m: &MatchEditor) -> MatchForm {
         let f = &self.form;
+        let court = f.index(MATCH_COURT);
+        // "create as a team" left on for a team: the team wins
+        let checked = |field: usize| {
+            matches!(
+                f.fields.get(field).map(|x| &x.value),
+                Some(form::Value::Check { on: true, .. })
+            )
+        };
         MatchForm {
             opponent: f.text(MATCH_OPPONENT),
             date: parse_date(&f.text(MATCH_DATE), &f.text(MATCH_TIME), m.data.date),
-            home: f.index(MATCH_HOME) == 0,
+            home: court == COURT_HOME,
             max_substitutions: f.text(MATCH_SUBSTITUTIONS),
             notes: f.text(MATCH_NOTES),
             roster: m.data.roster.clone(),
+            opponent_team: m.data.opponent_team,
+            create_opponent: checked(MATCH_CREATE_OPPONENT),
+            neutral: court == COURT_NEUTRAL,
+            friendly: checked(MATCH_FRIENDLY),
+            competition: f.text(MATCH_COMPETITION),
+            competition_id: m.data.competition_id,
+            competition_format: m
+                .formats
+                .get(f.index(MATCH_FORMAT))
+                .map(|format| format.value),
+            stage: f
+                .index(MATCH_STAGE)
+                .checked_sub(1)
+                .and_then(|i| m.stages.get(i))
+                .map(|st| st.value),
+            round: f.text(MATCH_ROUND),
         }
     }
 
@@ -321,18 +567,57 @@ impl Editor {
                 self.form
                     .suggest(TEAM_COUNTRY, countries::suggestions(core, &written));
             }
+            // another team A: its players, the teams it can meet
+            (Kind::Match(m), MATCH_TEAM) => {
+                let chosen = m.teams.get(self.form.index(MATCH_TEAM)).map(|(id, _)| id);
+                if let Some(team) = chosen.filter(|team| **team != m.team_id) {
+                    m.team_id = team.clone();
+                    m.data.roster = None;
+                    m.opponents = core.opponent_choices(team.clone()).unwrap_or_default();
+                }
+                self.linked();
+                if let Err(e) = self.toggle(core, None) {
+                    self.form.error = Some(e.to_string());
+                }
+            }
             (Kind::Match(m), MATCH_OPPONENT) => {
-                let offered = scout4all_mobile::offered_names(
-                    m.opponents.clone(),
-                    self.form.text(MATCH_OPPONENT),
-                )
-                .into_iter()
-                .map(|o| Suggestion {
-                    label: o.clone(),
-                    value: o,
-                })
-                .collect();
+                let names = m.opponents.iter().map(|o| o.name.clone()).collect();
+                let offered =
+                    scout4all_mobile::offered_names(names, self.form.text(MATCH_OPPONENT))
+                        .into_iter()
+                        .map(|name| {
+                            let label = m
+                                .opponents
+                                .iter()
+                                .find(|o| o.name == name)
+                                .and_then(|o| o.year)
+                                .map_or_else(|| name.clone(), |year| format!("{name} ({year})"));
+                            Suggestion { label, value: name }
+                        })
+                        .collect();
                 self.form.suggest(MATCH_OPPONENT, offered);
+                self.linked();
+            }
+            (Kind::Match(m), MATCH_COMPETITION) => {
+                let names = m.competitions.iter().map(|c| c.name.clone()).collect();
+                let offered =
+                    scout4all_mobile::offered_names(names, self.form.text(MATCH_COMPETITION))
+                        .into_iter()
+                        .map(|name| {
+                            let label = m
+                                .competitions
+                                .iter()
+                                .find(|c| c.name == name)
+                                .and_then(|c| c.season.clone())
+                                .map_or_else(
+                                    || name.clone(),
+                                    |season| format!("{name} ({season})"),
+                                );
+                            Suggestion { label, value: name }
+                        })
+                        .collect();
+                self.form.suggest(MATCH_COMPETITION, offered);
+                self.linked();
             }
             (Kind::Match(m), f) if f >= MATCH_ROSTER => {
                 let toggled = m.roster.get(f - MATCH_ROSTER).map(|p| p.id);
@@ -456,9 +741,9 @@ impl Editor {
             Err(e) => {
                 if let Some(field) = self.field_of(&e) {
                     let field = field.min(self.form.fields.len().saturating_sub(1));
-                    // the details, if the error is about them
-                    if field < MATCH_ROSTER {
-                        self.step(true);
+                    // the step of the field the error is about
+                    if matches!(self.kind, Kind::Match(_)) {
+                        self.show(MatchStep::of(field));
                     }
                     self.form.focused = field;
                 }
@@ -468,31 +753,35 @@ impl Editor {
         }
     }
 
-    /// From the details of a match to its score sheet, or `back`: false
+    /// To the next step of a match, or the one before when `back`: false
     /// when there's no step to take.
     fn step(&mut self, back: bool) -> bool {
-        let Kind::Match(m) = &mut self.kind else {
+        let Kind::Match(m) = &self.kind else {
             return false;
         };
-        match (m.on_roster, back) {
-            (false, false) => {
-                m.on_roster = true;
-                self.form.shown = Some(MATCH_ROSTER..self.form.fields.len());
-                self.form.focused = MATCH_ROSTER;
+        let to = match back {
+            true => m.step.previous(),
+            false => m.step.next(),
+        };
+        match to {
+            Some(step) => {
+                self.show(step);
                 true
             }
-            (true, true) => {
-                m.on_roster = false;
-                self.form.shown = Some(0..MATCH_ROSTER);
-                self.form.focused = MATCH_OPPONENT;
-                true
-            }
-            _ => false,
+            None => false,
         }
     }
 
     fn on_roster(&self) -> bool {
-        matches!(&self.kind, Kind::Match(m) if m.on_roster)
+        matches!(&self.kind, Kind::Match(m) if m.step == MatchStep::Roster)
+    }
+
+    /// Team A of the match being edited.
+    pub fn match_team(&self) -> Option<&str> {
+        match &self.kind {
+            Kind::Match(m) => Some(&m.team_id),
+            _ => None,
+        }
     }
 
     pub fn update(&mut self, core: &Scout4All, s: &Strings, message: form::Message) -> Edited {
@@ -599,7 +888,7 @@ impl Editor {
                 on(form::Message::Cancel),
                 c,
             ),
-            (None, Kind::Match(m)) if m.on_roster => self.roster_view(m, s, c, on),
+            (None, Kind::Match(m)) if m.step == MatchStep::Roster => self.roster_view(m, s, c, on),
             (None, _) => self.form.view(s, c, on, None),
         }
     }
@@ -763,8 +1052,280 @@ impl Editor {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreachable)]
 mod tests {
-    use super::*;
+    use {
+        super::*,
+        crate::strings::strings,
+        form::Message::{Choose, Input},
+        scout4all_core::shapes::{
+            country::CountryCode,
+            enums::{GenderEnum, LanguageEnum, RoleEnum, TeamClassificationEnum},
+        },
+        std::sync::Arc,
+    };
+
+    fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
+        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    /// A team with `players` players, numbered from 1, the seventh the
+    /// libero; its id.
+    fn team(core: &Scout4All, name: &str, players: u8) -> String {
+        let id = core
+            .save_team(
+                None,
+                TeamForm {
+                    name: name.into(),
+                    classification: Some(TeamClassificationEnum::Regional),
+                    gender: Some(GenderEnum::Women),
+                    country: CountryCode::known("IT"),
+                    year: "2026".into(),
+                },
+            )
+            .unwrap();
+        for n in 1..=players {
+            let player = PlayerForm {
+                name: format!("{name} P{n}"),
+                role: Some(match n {
+                    1 => RoleEnum::Setter,
+                    7 => RoleEnum::Libero,
+                    _ => RoleEnum::OutsideHitter,
+                }),
+                number: n.to_string(),
+                ..PlayerForm::default()
+            };
+            core.save_player(id.clone(), None, player, false).unwrap();
+        }
+        id
+    }
+
+    fn new_match(core: &Scout4All, team_id: &str) -> Editor {
+        Editor::a_match(strings(LanguageEnum::It), core, team_id.into(), None).unwrap()
+    }
+
+    fn send(e: &mut Editor, core: &Scout4All, message: form::Message) -> Edited {
+        e.update(core, strings(LanguageEnum::It), message)
+    }
+
+    fn press(e: &mut Editor, core: &Scout4All, ck: KeyCombination) -> Edited {
+        e.key(core, strings(LanguageEnum::It), ck)
+    }
+
+    fn step(e: &Editor) -> MatchStep {
+        match &e.kind {
+            Kind::Match(m) => m.step,
+            _ => unreachable!("a match"),
+        }
+    }
+
+    /// The match, a step at a time: Enter goes on, Esc back, and from the
+    /// first step cancels.
+    #[test]
+    fn the_match_is_written_in_three_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let mut e = new_match(&core, &cortona);
+        assert_eq!(
+            e.form.visible(),
+            vec![
+                MATCH_TEAM,
+                MATCH_OPPONENT,
+                MATCH_DATE,
+                MATCH_TIME,
+                MATCH_COURT
+            ]
+        );
+        assert!(matches!(
+            send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into())),
+            Edited::Stay
+        ));
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        assert_eq!(step(&e), MatchStep::Competition);
+        assert_eq!(e.form.focused, MATCH_COMPETITION);
+        // no competition written: no format to choose
+        assert_eq!(
+            e.form.visible(),
+            vec![
+                MATCH_COMPETITION,
+                MATCH_FRIENDLY,
+                MATCH_STAGE,
+                MATCH_ROUND,
+                MATCH_SUBSTITUTIONS,
+                MATCH_NOTES
+            ]
+        );
+        press(&mut e, &core, key!(enter));
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert!(matches!(press(&mut e, &core, BACK_KEY), Edited::Stay));
+        assert_eq!(step(&e), MatchStep::Competition);
+        press(&mut e, &core, BACK_KEY);
+        assert_eq!(step(&e), MatchStep::Match);
+        assert!(matches!(press(&mut e, &core, BACK_KEY), Edited::Cancel));
+    }
+
+    /// The name of a team links it as team B: nothing to create; a new
+    /// name can be made a team, saved without players.
+    #[test]
+    fn team_b_is_a_team_or_a_name_made_a_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let cascina = team(&core, "Cascina 2", 0);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "cascina 2".into()));
+        assert!(e.form.hidden.contains(&MATCH_CREATE_OPPONENT));
+        let Kind::Match(m) = &e.kind else {
+            unreachable!("a match")
+        };
+        assert_eq!(
+            e.match_data(m).opponent_team.map(|id| id.to_string()),
+            Some(cascina.clone())
+        );
+        // a name that isn't a team: it may become one; Tab goes through it
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Volley Pisa".into()));
+        assert!(!e.form.hidden.contains(&MATCH_CREATE_OPPONENT));
+        press(&mut e, &core, key!(tab));
+        assert_eq!(e.form.focused, MATCH_CREATE_OPPONENT);
+        press(&mut e, &core, key!(space));
+        let Kind::Match(m) = &e.kind else {
+            unreachable!("a match")
+        };
+        let data = e.match_data(m);
+        assert_eq!((data.opponent_team, data.create_opponent), (None, true));
+        for _ in 0..3 {
+            press(&mut e, &core, key!(enter));
+        }
+        let teams = core.teams().unwrap();
+        let pisa = teams.iter().find_map(|t| match t {
+            TeamListing::Team {
+                id, name, players, ..
+            } if name == "Volley Pisa" => Some((id.clone(), *players)),
+            _ => None,
+        });
+        assert!(matches!(pisa, Some((_, 0))), "{teams:?}");
+        // the check left on, the name of a team written: no team created
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        send(&mut e, &core, Choose(MATCH_CREATE_OPPONENT, 1));
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Cascina 2".into()));
+        for _ in 0..3 {
+            press(&mut e, &core, key!(enter));
+        }
+        assert_eq!(core.teams().unwrap().len(), 3);
+    }
+
+    /// A new competition asks for its format; an existing one doesn't, and
+    /// gives its friendly.
+    #[test]
+    fn the_competition_is_chosen_or_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        press(&mut e, &core, key!(enter));
+        send(
+            &mut e,
+            &core,
+            Input(MATCH_COMPETITION, "Torneo di Natale".into()),
+        );
+        assert!(!e.form.hidden.contains(&MATCH_FORMAT));
+        // the third format: the tournament
+        send(&mut e, &core, Choose(MATCH_FORMAT, 2));
+        send(&mut e, &core, Choose(MATCH_STAGE, 2));
+        send(&mut e, &core, Input(MATCH_ROUND, "Finale".into()));
+        send(&mut e, &core, Choose(MATCH_COURT, COURT_NEUTRAL));
+        press(&mut e, &core, key!(enter));
+        let Edited::Saved(id) = press(&mut e, &core, key!(enter)) else {
+            unreachable!("saved")
+        };
+        let saved = core.match_form(cortona.clone(), id).unwrap();
+        assert_eq!(saved.competition, "Torneo di Natale");
+        assert_eq!(
+            saved.competition_format,
+            Some(scout4all_core::domain::CompetitionFormat::Tournament)
+        );
+        assert_eq!(saved.stage, Some(scout4all_core::domain::Stage::Pool));
+        assert_eq!(saved.round, "Finale");
+        assert!(saved.neutral);
+        // written again: chosen, no format; its friendly
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        press(&mut e, &core, key!(enter));
+        send(
+            &mut e,
+            &core,
+            Input(MATCH_COMPETITION, "torneo di natale".into()),
+        );
+        assert!(e.form.hidden.contains(&MATCH_FORMAT));
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        assert_eq!(core.competitions().unwrap().len(), 1);
+    }
+
+    /// The error of a field takes the keys back to its step.
+    #[test]
+    fn an_error_goes_back_to_the_step_of_its_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let mut e = new_match(&core, &cortona);
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        assert_eq!(step(&e), MatchStep::Match);
+        assert_eq!(e.form.focused, MATCH_OPPONENT);
+        assert!(e.form.error.is_some());
+        // the substitutions: the second step
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        press(&mut e, &core, key!(enter));
+        send(&mut e, &core, Input(MATCH_SUBSTITUTIONS, "0".into()));
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        assert_eq!(step(&e), MatchStep::Competition);
+        assert_eq!(e.form.focused, MATCH_SUBSTITUTIONS);
+    }
+
+    /// A new match can be of another team A, with its players, not against
+    /// itself; a saved one keeps its team A.
+    #[test]
+    fn team_a_is_chosen_for_a_new_match_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let arezzo = team(&core, "Arezzo", 8);
+        let mut e = new_match(&core, &cortona);
+        let Kind::Match(m) = &e.kind else {
+            unreachable!("a match")
+        };
+        let other = m.teams.iter().position(|(id, _)| *id == arezzo).unwrap();
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        send(&mut e, &core, Choose(MATCH_TEAM, other));
+        assert_eq!(e.match_team(), Some(arezzo.as_str()));
+        // Arezzo isn't its own opponent: a name, that may become a team
+        let Kind::Match(m) = &e.kind else {
+            unreachable!("a match")
+        };
+        assert_eq!(e.match_data(m).opponent_team, None);
+        assert_eq!(m.roster.len(), 8);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Cortona".into()));
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        let Edited::Saved(id) = press(&mut e, &core, key!(enter)) else {
+            unreachable!("saved")
+        };
+        let saved = core.match_form(arezzo.clone(), id.clone()).unwrap();
+        assert_eq!(saved.opponent_team.map(|t| t.to_string()), Some(cortona));
+        let edit =
+            Editor::a_match(strings(LanguageEnum::It), &core, arezzo.clone(), Some(id)).unwrap();
+        let Kind::Match(m) = &edit.kind else {
+            unreachable!("a match")
+        };
+        assert_eq!(m.teams.len(), 1);
+    }
 
     #[test]
     fn a_date_is_read_where_the_match_is_played() {

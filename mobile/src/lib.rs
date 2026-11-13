@@ -16,6 +16,7 @@ use scout4all_core::{
     benchmark::{Measure, band, grade},
     db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
+    domain::{CompetitionFormat, Stage},
     dvw::{
         self,
         import::{
@@ -44,6 +45,7 @@ use scout4all_core::{
         sqlite::{
             Database,
             archive::{self as archives, Imported, Kind, Preview},
+            competitions::SqliteCompetitions,
             legacy_archive::{self, Opened, import_legacy_match, import_legacy_team},
             matches::{SqliteMatchReader, SqliteMatchWriter},
             queue::SqliteQueue,
@@ -338,6 +340,43 @@ pub struct MatchForm {
     pub notes: String,
     #[uniffi(default = None)]
     pub roster: Option<Vec<Uuid>>,
+    #[uniffi(default = None)]
+    pub opponent_team: Option<Uuid>,
+    #[uniffi(default = false)]
+    pub create_opponent: bool,
+    #[uniffi(default = false)]
+    pub neutral: bool,
+    #[uniffi(default = false)]
+    pub friendly: bool,
+    #[uniffi(default = "")]
+    pub competition: String,
+    #[uniffi(default = None)]
+    pub competition_id: Option<Uuid>,
+    #[uniffi(default = None)]
+    pub competition_format: Option<CompetitionFormat>,
+    #[uniffi(default = None)]
+    pub stage: Option<Stage>,
+    #[uniffi(default = "")]
+    pub round: String,
+}
+
+#[uniffi::remote(Enum)]
+pub enum CompetitionFormat {
+    League,
+    Cup,
+    Tournament,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Stage {
+    Regular,
+    Pool,
+    Qualification,
+    Playoff,
+    Playout,
+    FinalRound,
+    Placement,
+    Other,
 }
 
 // the id of a player, as text for the app
@@ -460,7 +499,7 @@ pub enum MatchField {
 impl From<MatchFormError> for MatchField {
     fn from(e: MatchFormError) -> Self {
         match e {
-            MatchFormError::EmptyOpponent => MatchField::Opponent,
+            MatchFormError::EmptyOpponent | MatchFormError::OpponentIsTeamA => MatchField::Opponent,
             MatchFormError::InvalidDate => MatchField::Date,
             MatchFormError::InvalidMaxSubstitutions | MatchFormError::MaxSubstitutionsBelowUsed => {
                 MatchField::MaxSubstitutions
@@ -523,6 +562,40 @@ pub struct ClassificationChoice {
 pub struct CountryChoice {
     pub value: CountryCode,
     pub name: String,
+}
+
+/// A stage of a competition as the form of a match offers it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct StageChoice {
+    pub value: Stage,
+    pub name: String,
+}
+
+/// A format of a competition as the form of a match offers it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct FormatChoice {
+    pub value: CompetitionFormat,
+    pub name: String,
+}
+
+/// What team B of a match may be, as the form offers it: a team (with
+/// its year), or a name met before.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct OpponentChoice {
+    pub team: Option<Uuid>,
+    pub name: String,
+    pub year: Option<u16>,
+}
+
+/// A competition as the form of a match offers it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CompetitionChoice {
+    pub id: Uuid,
+    pub name: String,
+    pub season: Option<String>,
+    pub format: CompetitionFormat,
+    /// the default of its matches
+    pub friendly: bool,
 }
 
 /// A gender as the form offers it.
@@ -3040,6 +3113,7 @@ pub struct Scout4All {
     team_writer: SqliteTeamWriter,
     match_reader: SqliteMatchReader,
     match_writer: SqliteMatchWriter,
+    competitions: SqliteCompetitions,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     videos: SqliteVideoProfiles,
     /// for `config.json`
@@ -3090,6 +3164,7 @@ impl Scout4All {
             team_reader: SqliteTeamReader::new(db.clone()),
             team_writer: SqliteTeamWriter::new(db.clone()),
             match_writer: SqliteMatchWriter::new(db.clone()),
+            competitions: SqliteCompetitions::new(db.clone()),
             set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
             match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
             videos: SqliteVideoProfiles(db.clone()),
@@ -3217,6 +3292,90 @@ impl Scout4All {
         names.sort_by_key(|name| name.to_lowercase());
         names.dedup_by_key(|name| name.to_lowercase());
         Ok(names)
+    }
+
+    /// What team B of a match of the team may be, offered as it's written:
+    /// the other teams, by name and the most recent year first, then the
+    /// names it met that aren't a team, each once.
+    pub fn opponent_choices(&self, team_id: String) -> Result<Vec<OpponentChoice>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let mut teams: Vec<TeamEntry> = self
+            .runtime
+            .block_on(self.team_reader.read_all())?
+            .into_iter()
+            .flatten()
+            .filter(|t| t.id != team.id)
+            .collect();
+        teams.sort_by(|a, b| (a.name.to_lowercase(), b.year).cmp(&(b.name.to_lowercase(), a.year)));
+        let taken: Vec<String> = teams
+            .iter()
+            .map(|t| t.name.trim().to_lowercase())
+            .chain(std::iter::once(team.name.trim().to_lowercase()))
+            .collect();
+        let mut met: Vec<String> = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(&team))?
+            .into_iter()
+            .flatten()
+            .map(|m| m.opponent.trim().to_string())
+            .filter(|name| !name.is_empty() && !taken.contains(&name.to_lowercase()))
+            .collect();
+        met.sort_by_key(|name| name.to_lowercase());
+        met.dedup_by_key(|name| name.to_lowercase());
+        Ok(teams
+            .into_iter()
+            .map(|t| OpponentChoice {
+                team: Some(t.id),
+                name: t.name,
+                year: Some(t.year),
+            })
+            .chain(met.into_iter().map(|name| OpponentChoice {
+                team: None,
+                name,
+                year: None,
+            }))
+            .collect())
+    }
+
+    /// The competitions to choose for a match, by name, the most recent
+    /// season first.
+    pub fn competitions(&self) -> Result<Vec<CompetitionChoice>, MobileError> {
+        Ok(self
+            .competitions
+            .read_all()?
+            .into_iter()
+            .map(|c| CompetitionChoice {
+                id: c.id,
+                name: c.name,
+                season: c.season,
+                format: c.format,
+                friendly: c.friendly,
+            })
+            .collect())
+    }
+
+    /// The stages of a competition a match may be played in.
+    pub fn stages(&self) -> Vec<StageChoice> {
+        let labels = self.language.labels();
+        Stage::ALL
+            .iter()
+            .map(|s| StageChoice {
+                value: *s,
+                name: s.name(labels).to_string(),
+            })
+            .collect()
+    }
+
+    /// The formats of a new competition.
+    pub fn competition_formats(&self) -> Vec<FormatChoice> {
+        let labels = self.language.labels();
+        CompetitionFormat::ALL
+            .iter()
+            .map(|f| FormatChoice {
+                value: *f,
+                name: f.name(labels).to_string(),
+            })
+            .collect()
     }
 
     /// The home: the matches of every team not over and the last ones
@@ -3526,7 +3685,9 @@ impl Scout4All {
 
     /// The form of a match of the team, to edit it.
     pub fn match_form(&self, team_id: String, match_id: String) -> Result<MatchForm, MobileError> {
-        Ok(MatchForm::of(&self.read_match(&team_id, &match_id)?))
+        let m = self.read_match(&team_id, &match_id)?;
+        let (row, competition) = self.match_reader.details(&m.team, &match_id)?;
+        Ok(MatchForm::of(&m, &row, competition.as_ref()))
     }
 
     /// Creates a match of the team (no `match_id`) or updates the one with
@@ -3553,27 +3714,11 @@ impl Scout4All {
         let saved = match existing {
             Some(m) => self
                 .runtime
-                .block_on(self.match_writer.update(
-                    &m,
-                    input.opponent,
-                    input.date,
-                    input.home,
-                    input.max_substitutions,
-                    input.notes,
-                    input.roster,
-                ))
+                .block_on(self.match_writer.update(&m, input))
                 .map(|()| m.id),
             None => self
                 .runtime
-                .block_on(self.match_writer.create(
-                    &team,
-                    input.opponent,
-                    input.date,
-                    input.home,
-                    input.max_substitutions,
-                    input.notes,
-                    input.roster,
-                ))
+                .block_on(self.match_writer.create(&team, input))
                 .map(|m| m.id),
         };
         Ok(saved?)
@@ -4646,7 +4791,7 @@ fn count(team: &TeamEntry) -> u32 {
 #[allow(clippy::unwrap_used, clippy::unreachable)]
 mod tests {
     use super::*;
-    use scout4all_core::{localization::labels, settings::TERMS_VERSION};
+    use scout4all_core::{localization::labels, match_form::MatchInput, settings::TERMS_VERSION};
 
     #[test]
     fn an_empty_folder_has_no_teams() {
@@ -5391,12 +5536,7 @@ mod tests {
                 .runtime
                 .block_on(app.match_writer.create(
                     &team,
-                    opponent.into(),
-                    date,
-                    home,
-                    6,
-                    String::new(),
-                    vec![],
+                    MatchInput::against(opponent, date, home, 6, "", vec![]),
                 ))
                 .unwrap();
             ids.push(m.id);
@@ -5446,12 +5586,7 @@ mod tests {
             app.runtime
                 .block_on(app.match_writer.create(
                     &team,
-                    opponent.into(),
-                    date,
-                    true,
-                    6,
-                    String::new(),
-                    vec![],
+                    MatchInput::against(opponent, date, true, 6, "", vec![]),
                 ))
                 .unwrap()
         };
@@ -5484,9 +5619,95 @@ mod tests {
             date: DateTime::parse_from_rfc3339(date).ok(),
             home: true,
             max_substitutions: max_substitutions.into(),
-            notes: String::new(),
-            roster: None,
+            ..MatchForm::default()
         }
+    }
+
+    /// The teams first, with their ids and years, then the names met that
+    /// aren't a team; team B a team, read back for the form; the
+    /// competition created once, then offered.
+    #[test]
+    fn team_b_and_the_competition_are_offered_and_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let livorno = app.save_team(None, form("Livorno")).unwrap();
+        for n in 1..=7 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let date = "2026-10-24T18:00:00+02:00";
+        for opponent in ["Arezzo", "livorno"] {
+            app.save_match(team.clone(), None, match_form(opponent, date, "8"))
+                .unwrap();
+        }
+        let livorno_id = parse_id(&livorno).unwrap();
+        let offered = app.opponent_choices(team.clone()).unwrap();
+        assert_eq!(
+            offered
+                .iter()
+                .map(|o| (o.name.as_str(), o.team))
+                .collect::<Vec<_>>(),
+            vec![("Livorno", Some(livorno_id)), ("Arezzo", None)]
+        );
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent_team: Some(livorno_id),
+                    neutral: true,
+                    competition: "Serie C".into(),
+                    competition_format: Some(CompetitionFormat::Cup),
+                    stage: Some(Stage::Playoff),
+                    round: "Semifinale".into(),
+                    ..match_form("Livorno", date, "8")
+                },
+            )
+            .unwrap();
+        let read = app.match_form(team.clone(), m.clone()).unwrap();
+        let competitions = app.competitions().unwrap();
+        assert_eq!(
+            competitions
+                .iter()
+                .map(|c| (c.name.as_str(), c.format))
+                .collect::<Vec<_>>(),
+            vec![("Serie C", CompetitionFormat::Cup)]
+        );
+        assert_eq!(
+            (
+                read.opponent.as_str(),
+                read.opponent_team,
+                read.neutral,
+                read.competition_id,
+                read.stage,
+                read.round.as_str()
+            ),
+            (
+                "Livorno",
+                Some(livorno_id),
+                true,
+                competitions.first().map(|c| c.id),
+                Some(Stage::Playoff),
+                "Semifinale"
+            )
+        );
+        // saved as read: the same competition
+        app.save_match(team.clone(), Some(m), read).unwrap();
+        assert_eq!(app.competitions().unwrap().len(), 1);
+        assert_eq!(app.stages().len(), 8);
+        assert_eq!(
+            app.competition_formats()
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Campionato", "Coppa", "Torneo"]
+        );
     }
 
     #[test]

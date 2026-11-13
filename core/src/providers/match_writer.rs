@@ -1,37 +1,27 @@
 use crate::{
     errors::AppError,
+    match_form::MatchInput,
     shapes::{
         r#match::{MatchEntry, MatchSource},
         team::TeamEntry,
     },
 };
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset};
 use uuid::Uuid;
 
 #[async_trait]
 pub trait MatchWriter {
-    async fn create(
-        &self,
-        team: &TeamEntry,
-        opponent: String,
-        date: DateTime<FixedOffset>,
-        home: bool,
-        max_substitutions: u8,
-        notes: String,
-        roster: Vec<Uuid>,
-    ) -> Result<MatchEntry, AppError>;
+    /// A new match of team A `team`: team B and the competition created
+    /// when new.
+    async fn create(&self, team: &TeamEntry, input: MatchInput) -> Result<MatchEntry, AppError>;
 
-    async fn update(
-        &self,
-        m: &MatchEntry,
-        opponent: String,
-        date: DateTime<FixedOffset>,
-        home: bool,
-        max_substitutions: u8,
-        notes: String,
-        roster: Vec<Uuid>,
-    ) -> Result<(), AppError>;
+    async fn update(&self, m: &MatchEntry, input: MatchInput) -> Result<(), AppError>;
+
+    /// The match saved again with the opponent, date, home, substitutions,
+    /// notes and roster of `m`, as the matches were before the database:
+    /// what isn't in `m` (team B a team, a neutral court, the competition)
+    /// stays.
+    async fn replace_details(&self, m: &MatchEntry) -> Result<(), AppError>;
 
     /// The match, saved, coming from `source`, with the times of its
     /// events in the video when `video_clock`: a match is created as

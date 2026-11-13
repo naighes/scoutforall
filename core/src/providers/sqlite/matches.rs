@@ -1,14 +1,22 @@
 use crate::{
-    domain::{Home, RosterEntry, TeamRef, adapters::MatchRows, sql::Sql},
+    domain::{
+        Competition, Home, Match, RosterEntry, ScoutingMode, Team, TeamRef, adapters::MatchRows,
+        sql::Sql,
+    },
     errors::{AppError, IOError, MatchError},
     localization::Language,
     logging::logger::log_error,
+    match_form::{CompetitionInput, MatchInput, Opponent},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
         sqlite::{
-            Database, not_found,
-            rows::{insert_match, insert_roster_entry, match_ids, match_rows, team_row},
+            Database,
+            competitions::{competition_row, insert_competition},
+            not_found,
+            rows::{
+                insert_match, insert_roster_entry, match_ids, match_rows, team_row, write_team,
+            },
             sets::numbered,
             sqlite,
             summary::{cached, forget, refresh, save},
@@ -78,6 +86,27 @@ impl SqliteMatchReader {
         match_id: &str,
     ) -> Result<(MatchEntry, MatchStatus), AppError> {
         replayed(tx, team, match_id, &self.language)
+    }
+
+    /// The row of the match of team A `team`, for its form, with the
+    /// competition it's played in.
+    pub fn details(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<(Match, Option<Competition>), AppError> {
+        let id = match_uuid(match_id)?;
+        self.db.read(|tx| {
+            let row = match_rows(tx, id)?
+                .map(|rows| rows.row)
+                .filter(|row| row.team_a == team.id)
+                .ok_or_else(|| not_found(&format!("match {match_id} of team {}", team.id)))?;
+            let competition = match row.competition_id {
+                Some(c) => competition_row(tx, c)?,
+                None => None,
+            };
+            Ok((row, competition))
+        })
     }
 
     fn listed(
@@ -241,128 +270,245 @@ impl SqliteMatchWriter {
     }
 }
 
+/// Team B as saved for a match of team A `team`: a team not removed, a
+/// new one without players (the year, classification, gender and country
+/// of A: likely of the same league),
+/// or a name; the team, for its name.
+fn saved_team_b(
+    tx: &Transaction,
+    team: &TeamEntry,
+    opponent: &Opponent,
+) -> Result<(TeamRef, Option<Team>), AppError> {
+    match opponent {
+        Opponent::Name(name) => Ok((TeamRef::Name(name.clone()), None)),
+        Opponent::Team(id) => team_row(tx, *id)?
+            .filter(|b| !b.deleted && b.id != team.id)
+            .map(|b| (TeamRef::Team(b.id), Some(b)))
+            .ok_or_else(|| not_found(&format!("team {id}"))),
+        Opponent::NewTeam(name) => {
+            let b = TeamEntry {
+                id: Uuid::new_v4(),
+                name: name.clone(),
+                year: team.year,
+                classification: team.classification,
+                gender: team.gender,
+                country: team.country,
+                players: vec![],
+            };
+            write_team(tx, &b)?;
+            team_row(tx, b.id)?
+                .map(|row| (TeamRef::Team(b.id), Some(row)))
+                .ok_or_else(|| not_found(&format!("team {}", b.id)))
+        }
+    }
+}
+
+/// The competition as saved for a match of team A `team`: one not
+/// removed, or a new one of the season of A (its year and the next), its
+/// gender and country.
+fn saved_competition(
+    tx: &Transaction,
+    team: &TeamEntry,
+    competition: Option<&CompetitionInput>,
+) -> Result<Option<Uuid>, AppError> {
+    match competition {
+        None => Ok(None),
+        Some(CompetitionInput::Existing(id)) => competition_row(tx, *id)?
+            .filter(|c| !c.deleted)
+            .map(|c| Some(c.id))
+            .ok_or_else(|| not_found(&format!("competition {id}"))),
+        Some(CompetitionInput::New { name, format }) => {
+            let c = Competition {
+                id: Uuid::new_v4(),
+                name: name.clone(),
+                format: *format,
+                season: Some(format!("{}/{}", team.year, team.year.saturating_add(1))),
+                gender: team.gender,
+                country: team.country,
+                friendly: false,
+                deleted: false,
+            };
+            insert_competition(tx, &c)?;
+            Ok(Some(c.id))
+        }
+    }
+}
+
+/// Updates the match `id` with `input`: team B changes, unless both teams
+/// are scouted. The roster: the players left out go, the ones added copy
+/// number and role from the team (D9), the others keep those of the
+/// match; empty, the active team.
+fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), AppError> {
+    let MatchInput {
+        opponent,
+        date,
+        home,
+        max_substitutions,
+        notes,
+        roster,
+        friendly,
+        competition,
+        stage,
+        round,
+    } = input;
+    let rows = match_rows(tx, id)?.ok_or_else(|| not_found(&format!("match {id}")))?;
+    let team = read_team(tx, &rows.row.team_a)?;
+    let (team_b, _) = saved_team_b(tx, &team, &opponent)?;
+    if rows.row.scouting == ScoutingMode::Both && team_b != rows.row.team_b {
+        return Err(AppError::IO(IOError::Msg(format!(
+            "match {id}: team B of a match scouted on both sides can't change"
+        ))));
+    }
+    let competition_id = saved_competition(tx, &team, competition.as_ref())?;
+    let (team_b, team_b_name) = team_b.columns();
+    tx.execute(
+        "UPDATE matches SET team_b = ?2, team_b_name = ?3, start = ?4, home = ?5,
+                 max_substitutions = ?6, notes = ?7, friendly = ?8, competition_id = ?9,
+                 stage = ?10, round = ?11
+             WHERE id = ?1",
+        params![
+            Sql(id),
+            team_b.map(Sql),
+            team_b_name,
+            Sql(date),
+            home,
+            max_substitutions,
+            notes,
+            friendly,
+            competition_id.map(Sql),
+            stage,
+            round
+        ],
+    )
+    .map_err(sqlite)?;
+    let team_a = rows.row.team_a;
+    let roster = match roster.as_slice() {
+        [] => read_team(tx, &team_a)?
+            .active_players()
+            .iter()
+            .map(|p| p.id)
+            .collect(),
+        ids => ids.to_vec(),
+    };
+    let saved: Vec<Uuid> = rows
+        .roster
+        .iter()
+        .filter(|r| r.team_id == team_a)
+        .map(|r| r.person_id)
+        .collect();
+    for gone in saved.iter().filter(|p| !roster.contains(p)) {
+        tx.execute(
+            "DELETE FROM match_roster WHERE match_id = ?1 AND team_id = ?2
+                 AND person_id = ?3",
+            params![Sql(id), Sql(team_a), Sql(*gone)],
+        )
+        .map_err(sqlite)?;
+    }
+    let team = read_team(tx, &team_a)?;
+    roster
+        .iter()
+        .filter(|p| !saved.contains(p))
+        .try_for_each(|person_id| {
+            let player = team
+                .find_player(*person_id)
+                .ok_or_else(|| not_found(&format!("player {person_id} of team {team_a}")))?;
+            insert_roster_entry(
+                tx,
+                &RosterEntry {
+                    match_id: id,
+                    team_id: team_a,
+                    person_id: player.id,
+                    number: player.number,
+                    role: player.role,
+                },
+            )
+        })?;
+    // the substitutions decide how the sets replay
+    // the substitutions decide how the sets replay
+    refresh(tx, id)
+}
+
 #[async_trait]
 impl MatchWriter for SqliteMatchWriter {
-    /// A match against a name, with a new id: two matches against the same
-    /// opponent on the same day are two matches (no `MatchAlreadyExists`).
-    /// Its roster copies number and role from the team (D9), the whole
-    /// active team when empty.
-    async fn create(
-        &self,
-        team: &TeamEntry,
-        opponent: String,
-        date: DateTime<FixedOffset>,
-        home: bool,
-        max_substitutions: u8,
-        notes: String,
-        roster: Vec<Uuid>,
-    ) -> Result<MatchEntry, AppError> {
+    /// A match with a new id: two matches against the same opponent on the
+    /// same day are two matches (no `MatchAlreadyExists`). Its roster
+    /// copies number and role from the team (D9), the whole active team
+    /// when empty.
+    async fn create(&self, team: &TeamEntry, input: MatchInput) -> Result<MatchEntry, AppError> {
         let id = Uuid::new_v4();
         let m = MatchEntry {
             source: Default::default(),
             video_clock: false,
-            opponent: opponent.clone(),
-            date,
+            opponent: String::new(),
+            date: input.date,
             id: id.to_string(),
-            team: team.with_roster(&roster),
-            home,
-            max_substitutions,
-            notes,
-            roster,
+            team: team.with_roster(&input.roster),
+            home: input.home.is_a(),
+            max_substitutions: input.max_substitutions,
+            notes: input.notes,
+            roster: input.roster,
             sets: vec![],
         };
-        let rows = MatchRows::of(&m, id, TeamRef::Name(opponent), None)?;
         self.0.write(|tx| {
+            let (team_b, b) = saved_team_b(tx, team, &input.opponent)?;
+            let competition_id = saved_competition(tx, team, input.competition.as_ref())?;
+            let rows = MatchRows::of(&m, id, team_b, None)?;
+            let rows = MatchRows {
+                row: Match {
+                    home: input.home,
+                    friendly: input.friendly,
+                    competition_id,
+                    stage: input.stage,
+                    round: input.round,
+                    ..rows.row
+                },
+                ..rows
+            };
             insert_match(tx, &rows)?;
-            refresh(tx, id)
-        })?;
-        rows.entry(team, None)
+            refresh(tx, id)?;
+            rows.entry(team, b.as_ref())
+        })
     }
 
-    /// The opponent changes only when B is a name; a neutral court stays
-    /// neutral when we don't play at home. The roster: the players left
-    /// out go, the ones added copy number and role from the team (D9),
-    /// the others keep those of the match; empty, the active team.
-    async fn update(
-        &self,
-        m: &MatchEntry,
-        opponent: String,
-        date: DateTime<FixedOffset>,
-        home: bool,
-        max_substitutions: u8,
-        notes: String,
-        roster: Vec<Uuid>,
-    ) -> Result<(), AppError> {
+    /// See `update_match`.
+    async fn update(&self, m: &MatchEntry, input: MatchInput) -> Result<(), AppError> {
+        let id = match_uuid(&m.id)?;
+        self.0.write(|tx| update_match(tx, id, input))
+    }
+
+    /// Team B changes only when it's a name; a neutral court stays neutral
+    /// when A doesn't play at home; the competition, its stage and round,
+    /// friendly or not, stay.
+    async fn replace_details(&self, m: &MatchEntry) -> Result<(), AppError> {
         let id = match_uuid(&m.id)?;
         self.0.write(|tx| {
-            let rows = match_rows(tx, id)?.ok_or_else(|| not_found(&format!("match {}", m.id)))?;
-            let team_b_name = match &rows.row.team_b {
-                TeamRef::Name(_) => Some(opponent.as_str()),
-                TeamRef::Team(_) => None,
-            };
-            let home = match (home, rows.row.home) {
-                (true, _) => Home::A,
-                (false, Home::Neutral) => Home::Neutral,
-                (false, _) => Home::B,
-            };
-            tx.execute(
-                "UPDATE matches SET team_b_name = ?2, start = ?3, home = ?4,
-                     max_substitutions = ?5, notes = ?6
-                 WHERE id = ?1",
-                params![
-                    Sql(id),
-                    team_b_name,
-                    Sql(date),
-                    home,
-                    max_substitutions,
-                    notes
-                ],
-            )
-            .map_err(sqlite)?;
-            let team_a = rows.row.team_a;
-            let roster = match roster.as_slice() {
-                [] => read_team(tx, &team_a)?
-                    .active_players()
-                    .iter()
-                    .map(|p| p.id)
-                    .collect(),
-                ids => ids.to_vec(),
-            };
-            let saved: Vec<Uuid> = rows
-                .roster
-                .iter()
-                .filter(|r| r.team_id == team_a)
-                .map(|r| r.person_id)
-                .collect();
-            for gone in saved.iter().filter(|p| !roster.contains(p)) {
-                tx.execute(
-                    "DELETE FROM match_roster WHERE match_id = ?1 AND team_id = ?2
-                     AND person_id = ?3",
-                    params![Sql(id), Sql(team_a), Sql(*gone)],
+            let row = match_rows(tx, id)?
+                .ok_or_else(|| not_found(&format!("match {id}")))?
+                .row;
+            let input = MatchInput {
+                opponent: match row.team_b {
+                    TeamRef::Team(b) => Opponent::Team(b),
+                    TeamRef::Name(_) => Opponent::Name(m.opponent.clone()),
+                },
+                home: match (m.home, row.home) {
+                    (true, _) => Home::A,
+                    (false, Home::Neutral) => Home::Neutral,
+                    (false, _) => Home::B,
+                },
+                friendly: row.friendly,
+                competition: row.competition_id.map(CompetitionInput::Existing),
+                stage: row.stage,
+                round: row.round,
+                ..MatchInput::against(
+                    &m.opponent,
+                    m.date,
+                    m.home,
+                    m.max_substitutions,
+                    &m.notes,
+                    m.roster.clone(),
                 )
-                .map_err(sqlite)?;
-            }
-            let team = read_team(tx, &team_a)?;
-            roster
-                .iter()
-                .filter(|p| !saved.contains(p))
-                .try_for_each(|person_id| {
-                    let player = team.find_player(*person_id).ok_or_else(|| {
-                        not_found(&format!("player {person_id} of team {team_a}"))
-                    })?;
-                    insert_roster_entry(
-                        tx,
-                        &RosterEntry {
-                            match_id: id,
-                            team_id: team_a,
-                            person_id: player.id,
-                            number: player.number,
-                            role: player.role,
-                        },
-                    )
-                })?;
-            // the substitutions decide how the sets replay
-            refresh(tx, id)
+            };
+            update_match(tx, id, input)
         })
     }
 

@@ -390,12 +390,14 @@ mod tests {
             .match_writer
             .update(
                 m,
-                "Arezzo".into(),
-                m.date,
-                true,
-                m.max_substitutions,
-                String::new(),
-                vec![],
+                crate::match_form::MatchInput::against(
+                    "Arezzo",
+                    m.date,
+                    true,
+                    m.max_substitutions,
+                    "",
+                    vec![],
+                ),
             )
             .await
             .expect("expected the match to be updated");

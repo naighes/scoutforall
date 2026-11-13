@@ -2842,8 +2842,7 @@ pub(crate) mod tests {
                         date: chrono::DateTime::parse_from_rfc3339(date).ok(),
                         home: true,
                         max_substitutions: "6".into(),
-                        notes: String::new(),
-                        roster: None,
+                        ..MatchForm::default()
                     },
                 )
                 .unwrap();

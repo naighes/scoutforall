@@ -1591,8 +1591,7 @@ mod tests {
                     date: chrono::DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").ok(),
                     home: true,
                     max_substitutions: "6".into(),
-                    notes: String::new(),
-                    roster: None,
+                    ..MatchForm::default()
                 },
             )
             .unwrap();

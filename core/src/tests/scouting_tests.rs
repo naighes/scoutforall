@@ -95,15 +95,17 @@ mod tests {
             .match_writer
             .create(
                 &team,
-                "Cortona Volley".into(),
-                Utc::now().fixed_offset(),
-                true,
-                DEFAULT_MAX_SUBSTITUTIONS,
-                String::new(),
-                match roster == roles.len() {
-                    true => vec![],
-                    false => ids[..roster].to_vec(),
-                },
+                crate::match_form::MatchInput::against(
+                    "Cortona Volley",
+                    Utc::now().fixed_offset(),
+                    true,
+                    DEFAULT_MAX_SUBSTITUTIONS,
+                    "",
+                    match roster == roles.len() {
+                        true => vec![],
+                        false => ids[..roster].to_vec(),
+                    },
+                ),
             )
             .await
             .unwrap();

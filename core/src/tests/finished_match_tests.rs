@@ -61,12 +61,14 @@ mod tests {
             .match_writer
             .create(
                 &team,
-                "Arezzo".into(),
-                "2026-10-25T18:00:00+02:00".parse().unwrap(),
-                true,
-                DEFAULT_MAX_SUBSTITUTIONS,
-                String::new(),
-                vec![],
+                crate::match_form::MatchInput::against(
+                    "Arezzo",
+                    "2026-10-25T18:00:00+02:00".parse().unwrap(),
+                    true,
+                    DEFAULT_MAX_SUBSTITUTIONS,
+                    "",
+                    vec![],
+                ),
             )
             .await
             .unwrap();

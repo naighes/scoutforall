@@ -140,12 +140,14 @@ mod tests {
             .match_writer
             .create(
                 &team,
-                "Cortona Volley".into(),
-                Utc::now().fixed_offset(),
-                true,
-                DEFAULT_MAX_SUBSTITUTIONS,
-                String::new(),
-                vec![],
+                crate::match_form::MatchInput::against(
+                    "Cortona Volley",
+                    Utc::now().fixed_offset(),
+                    true,
+                    DEFAULT_MAX_SUBSTITUTIONS,
+                    "",
+                    vec![],
+                ),
             )
             .await
             .unwrap();
@@ -296,12 +298,14 @@ mod tests {
         p.match_writer
             .update(
                 &m,
-                "Arezzo".into(),
-                date,
-                false,
-                4,
-                "notes".into(),
-                roster.clone(),
+                crate::match_form::MatchInput::against(
+                    "Arezzo",
+                    date,
+                    false,
+                    4,
+                    "notes",
+                    roster.clone(),
+                ),
             )
             .await
             .unwrap();
@@ -341,12 +345,14 @@ mod tests {
         p.match_writer
             .update(
                 &m,
-                m.opponent.clone(),
-                m.date,
-                m.home,
-                m.max_substitutions,
-                String::new(),
-                roster,
+                crate::match_form::MatchInput::against(
+                    m.opponent.clone(),
+                    m.date,
+                    m.home,
+                    m.max_substitutions,
+                    "",
+                    roster,
+                ),
             )
             .await
             .unwrap();
@@ -402,12 +408,14 @@ mod tests {
             .match_writer
             .create(
                 &team,
-                "B".into(),
-                Utc::now().fixed_offset(),
-                true,
-                6,
-                String::new(),
-                vec![],
+                crate::match_form::MatchInput::against(
+                    "B",
+                    Utc::now().fixed_offset(),
+                    true,
+                    6,
+                    "",
+                    vec![],
+                ),
             )
             .await
             .unwrap();
@@ -443,12 +451,14 @@ mod tests {
             .match_writer
             .create(
                 &team,
-                "B".into(),
-                Utc::now().fixed_offset(),
-                true,
-                6,
-                String::new(),
-                vec![],
+                crate::match_form::MatchInput::against(
+                    "B",
+                    Utc::now().fixed_offset(),
+                    true,
+                    6,
+                    "",
+                    vec![],
+                ),
             )
             .await
             .unwrap();
@@ -721,12 +731,14 @@ mod tests {
         p.match_writer
             .update(
                 &m,
-                m.opponent.clone(),
-                m.date,
-                m.home,
-                6,
-                String::new(),
-                roster.clone(),
+                crate::match_form::MatchInput::against(
+                    m.opponent.clone(),
+                    m.date,
+                    m.home,
+                    6,
+                    "",
+                    roster.clone(),
+                ),
             )
             .await
             .unwrap();
@@ -742,12 +754,14 @@ mod tests {
         p.match_writer
             .update(
                 &m,
-                m.opponent.clone(),
-                m.date,
-                m.home,
-                6,
-                String::new(),
-                all,
+                crate::match_form::MatchInput::against(
+                    m.opponent.clone(),
+                    m.date,
+                    m.home,
+                    6,
+                    "",
+                    all,
+                ),
             )
             .await
             .unwrap();
@@ -771,12 +785,14 @@ mod tests {
         p.match_writer
             .update(
                 &m,
-                m.opponent.clone(),
-                m.date,
-                m.home,
-                m.max_substitutions,
-                m.notes.clone(),
-                roster.clone(),
+                crate::match_form::MatchInput::against(
+                    m.opponent.clone(),
+                    m.date,
+                    m.home,
+                    m.max_substitutions,
+                    m.notes.clone(),
+                    roster.clone(),
+                ),
             )
             .await
             .unwrap();
@@ -854,12 +870,14 @@ mod tests {
                     .match_writer
                     .create(
                         team,
-                        "Cortona Volley".into(),
-                        Utc::now().fixed_offset(),
-                        true,
-                        DEFAULT_MAX_SUBSTITUTIONS,
-                        String::new(),
-                        vec![],
+                        crate::match_form::MatchInput::against(
+                            "Cortona Volley",
+                            Utc::now().fixed_offset(),
+                            true,
+                            DEFAULT_MAX_SUBSTITUTIONS,
+                            "",
+                            vec![],
+                        ),
                     )
                     .await
                     .unwrap();
@@ -923,31 +941,31 @@ mod tests {
         );
     }
 
-    /// A neutral court stays neutral when the form says "not at home".
+    /// Saved again as the matches were before the database (an import
+    /// over it), a neutral court stays neutral when "not at home".
     #[tokio::test]
     async fn a_neutral_court_stays_neutral() {
         let db = database();
         let p = sqlite(&db);
         let (team, m) = scouted_match(&p).await;
         execute(&db, "UPDATE matches SET home = NULL");
-        let update = |home: bool| {
-            p.match_writer.update(
-                &m,
-                m.opponent.clone(),
-                m.date,
-                home,
-                6,
-                String::new(),
-                m.roster.clone(),
-            )
-        };
-        update(false).await.unwrap();
+        let (away, home) = (
+            MatchEntry {
+                home: false,
+                ..m.clone()
+            },
+            MatchEntry {
+                home: true,
+                ..m.clone()
+            },
+        );
+        p.match_writer.replace_details(&away).await.unwrap();
         assert_eq!(
             count(&db, "SELECT count(*) FROM matches WHERE home IS NULL"),
             1
         );
         assert!(!p.match_reader.read_single(&team, &m.id).await.unwrap().home);
-        update(true).await.unwrap();
+        p.match_writer.replace_details(&home).await.unwrap();
         assert_eq!(
             count(&db, "SELECT count(*) FROM matches WHERE home = 'a'"),
             1
@@ -964,12 +982,14 @@ mod tests {
             .match_writer
             .create(
                 &team,
-                m.opponent.clone(),
-                m.date,
-                true,
-                6,
-                String::new(),
-                vec![],
+                crate::match_form::MatchInput::against(
+                    m.opponent.clone(),
+                    m.date,
+                    true,
+                    6,
+                    "",
+                    vec![],
+                ),
             )
             .await
             .unwrap();
@@ -999,7 +1019,10 @@ mod tests {
         let (other, _) = scouted_match(&p).await;
         let second = p
             .match_writer
-            .create(&team, "B".into(), m.date, true, 6, String::new(), vec![])
+            .create(
+                &team,
+                crate::match_form::MatchInput::against("B", m.date, true, 6, "", vec![]),
+            )
             .await
             .unwrap();
         execute(

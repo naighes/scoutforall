@@ -299,6 +299,8 @@ pub struct Form {
     pub plain: bool,
     /// the fields shown, and the keys move among: all, if none
     pub shown: Option<std::ops::Range<usize>>,
+    /// the fields left out of the ones shown, until they apply
+    pub hidden: Vec<usize>,
     /// the texts before the changes, to undo them: the field, its value
     undo: Vec<(usize, Value)>,
     /// the changes undone, to make again
@@ -392,6 +394,7 @@ impl Form {
             actions: None,
             plain: false,
             shown: None,
+            hidden: vec![],
             undo: vec![],
             redo: vec![],
         }
@@ -641,21 +644,28 @@ impl Form {
         }
     }
 
-    /// The fields shown.
-    fn range(&self) -> std::ops::Range<usize> {
-        self.shown.clone().unwrap_or(0..self.fields.len())
+    /// The fields shown, in order.
+    pub fn visible(&self) -> Vec<usize> {
+        self.shown
+            .clone()
+            .unwrap_or(0..self.fields.len())
+            .filter(|i| !self.hidden.contains(i))
+            .collect()
     }
 
     /// The field after the one the keys are on, among the ones shown;
-    /// before it, if `back`.
+    /// before it, if `back`. Around at the ends.
     fn step(&self, back: bool) -> usize {
-        let r = self.range();
-        match (back, self.focused) {
-            (true, f) if f <= r.start => r.end.saturating_sub(1),
-            (true, f) => f - 1,
-            (false, f) if f + 1 >= r.end => r.start,
-            (false, f) => f + 1,
-        }
+        let visible = self.visible();
+        let after = visible.iter().position(|f| *f > self.focused);
+        let before = visible.iter().rposition(|f| *f < self.focused);
+        let at = match (back, after, before) {
+            (false, Some(next), _) => visible.get(next),
+            (false, None, _) => visible.first(),
+            (true, _, Some(previous)) => visible.get(previous),
+            (true, _, None) => visible.last(),
+        };
+        at.copied().unwrap_or(self.focused)
     }
 
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
@@ -731,12 +741,12 @@ impl Form {
         on: impl Fn(Message) -> M + Copy + 'a,
         aside: Option<Element<'a, M>>,
     ) -> Element<'a, M> {
-        let range = self.range();
+        let visible = self.visible();
         let fields = self
             .fields
             .iter()
             .enumerate()
-            .filter(move |(i, _)| range.contains(i))
+            .filter(move |(i, _)| visible.contains(i))
             .map(|(i, f)| {
                 let field = self.field(i, f, c, on);
                 match self.sections.iter().find(|(at, _)| *at == i) {

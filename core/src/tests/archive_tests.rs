@@ -323,12 +323,14 @@ mod tests {
         from.match_writer
             .update(
                 &m,
-                m.opponent.clone(),
-                m.date,
-                m.home,
-                m.max_substitutions,
-                "windy".into(),
-                (1..=8).map(numbered).collect(),
+                crate::match_form::MatchInput::against(
+                    m.opponent.clone(),
+                    m.date,
+                    m.home,
+                    m.max_substitutions,
+                    "windy",
+                    (1..=8).map(numbered).collect(),
+                ),
             )
             .await
             .unwrap();

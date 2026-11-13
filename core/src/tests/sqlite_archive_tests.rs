@@ -383,12 +383,14 @@ pub(crate) mod tests {
         let create = |opponent: &str| {
             matches.create(
                 &team,
-                opponent.into(),
-                Utc::now().fixed_offset(),
-                true,
-                DEFAULT_MAX_SUBSTITUTIONS,
-                String::new(),
-                ids[..7].to_vec(),
+                crate::match_form::MatchInput::against(
+                    opponent,
+                    Utc::now().fixed_offset(),
+                    true,
+                    DEFAULT_MAX_SUBSTITUTIONS,
+                    "",
+                    ids[..7].to_vec(),
+                ),
             )
         };
         let m = create("Cortona Volley").await.unwrap();

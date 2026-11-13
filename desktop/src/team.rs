@@ -61,8 +61,13 @@ pub enum Message {
 pub enum Outcome {
     Stay,
     Back,
-    /// the match to open: saved now, or chosen
+    /// the match of the team to open, chosen
     OpenMatch(String),
+    /// the match saved now, of its team A (maybe another one)
+    OpenNewMatch {
+        team: String,
+        id: String,
+    },
     /// an archive of a match to choose, into the team
     Import,
     /// the archive of the team, to save
@@ -227,7 +232,10 @@ impl TeamScreen {
 
     /// After the form: saved, the team is read again; a new match opens.
     fn edited(&mut self, edited: Edited) -> Outcome {
-        let new_match = matches!(&self.mode, Mode::Edit(e) if e.is_new_match());
+        let new_match = match &self.mode {
+            Mode::Edit(e) if e.is_new_match() => e.match_team().map(str::to_string),
+            _ => None,
+        };
         match edited {
             Edited::Stay => Outcome::Stay,
             Edited::Cancel => {
@@ -238,8 +246,8 @@ impl TeamScreen {
                 self.mode = Mode::Browse;
                 self.reload();
                 match new_match {
-                    true => Outcome::OpenMatch(id),
-                    false => Outcome::Stay,
+                    Some(team) => Outcome::OpenNewMatch { team, id },
+                    None => Outcome::Stay,
                 }
             }
         }
@@ -683,14 +691,20 @@ mod tests {
         }
         team.key(s, key!(right));
         team.key(s, key!(n));
-        team.update(s, Message::Form(Input(0, "Arezzo".into())));
-        team.update(s, Message::Form(Input(1, "2026-11-05".into())));
-        team.update(s, Message::Form(Input(2, "2030".into())));
-        // the details, then the score sheet
+        team.update(s, Message::Form(Input(1, "Arezzo".into())));
+        team.update(s, Message::Form(Input(3, "2026-11-05".into())));
+        team.update(s, Message::Form(Input(4, "2030".into())));
+        // the details, the competition, then the score sheet
         assert!(matches!(team.update(s, Message::Form(Save)), Outcome::Stay));
-        let Outcome::OpenMatch(match_id) = team.update(s, Message::Form(Save)) else {
+        assert!(matches!(team.update(s, Message::Form(Save)), Outcome::Stay));
+        let Outcome::OpenNewMatch {
+            team: of,
+            id: match_id,
+        } = team.update(s, Message::Form(Save))
+        else {
             unreachable!("the match is saved and opened")
         };
+        assert_eq!(of, team_id);
         let mut m = MatchScreen::new(core.clone(), team_id.clone(), match_id.clone()).unwrap();
         assert!(matches!(m.key(s, key!(enter)), game::Outcome::Scout(true)));
         assert!(matches!(m.key(s, BACK_KEY), game::Outcome::Back));

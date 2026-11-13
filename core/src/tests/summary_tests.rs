@@ -111,12 +111,14 @@ mod tests {
             .match_writer
             .create(
                 team,
-                m.opponent.clone(),
-                m.date,
-                m.home,
-                m.max_substitutions,
-                m.notes.clone(),
-                m.roster.clone(),
+                crate::match_form::MatchInput::against(
+                    m.opponent.clone(),
+                    m.date,
+                    m.home,
+                    m.max_substitutions,
+                    m.notes.clone(),
+                    m.roster.clone(),
+                ),
             )
             .await
             .unwrap();
@@ -269,12 +271,14 @@ mod tests {
                 .match_writer
                 .create(
                     team,
-                    m.opponent.clone(),
-                    m.date,
-                    m.home,
-                    m.max_substitutions,
-                    m.notes.clone(),
-                    m.roster.clone(),
+                    crate::match_form::MatchInput::against(
+                        m.opponent.clone(),
+                        m.date,
+                        m.home,
+                        m.max_substitutions,
+                        m.notes.clone(),
+                        m.roster.clone(),
+                    ),
                 )
                 .await
                 .unwrap();
@@ -430,12 +434,14 @@ mod tests {
                 p.match_writer
                     .update(
                         m,
-                        "Rivali Siena".into(),
-                        date,
-                        !m.home,
-                        m.max_substitutions,
-                        String::new(),
-                        m.roster.clone(),
+                        crate::match_form::MatchInput::against(
+                            "Rivali Siena",
+                            date,
+                            !m.home,
+                            m.max_substitutions,
+                            "",
+                            m.roster.clone(),
+                        ),
                     )
                     .await
                     .unwrap()
@@ -471,12 +477,14 @@ mod tests {
                     p.match_writer
                         .update(
                             m,
-                            m.opponent.clone(),
-                            m.date,
-                            m.home,
-                            max_substitutions,
-                            String::new(),
-                            m.roster.clone(),
+                            crate::match_form::MatchInput::against(
+                                m.opponent.clone(),
+                                m.date,
+                                m.home,
+                                max_substitutions,
+                                "",
+                                m.roster.clone(),
+                            ),
                         )
                         .await
                         .unwrap()

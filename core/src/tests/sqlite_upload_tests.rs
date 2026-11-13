@@ -509,12 +509,14 @@ mod tests {
         let m = SqliteMatchWriter::new(db.clone())
             .create(
                 &team,
-                "Cortona Volley".into(),
-                chrono::Utc::now().fixed_offset(),
-                true,
-                DEFAULT_MAX_SUBSTITUTIONS,
-                String::new(),
-                team.players.iter().map(|p| p.id).collect(),
+                crate::match_form::MatchInput::against(
+                    "Cortona Volley",
+                    chrono::Utc::now().fixed_offset(),
+                    true,
+                    DEFAULT_MAX_SUBSTITUTIONS,
+                    "",
+                    team.players.iter().map(|p| p.id).collect(),
+                ),
             )
             .await
             .unwrap();

@@ -21,6 +21,7 @@
 //!   its id, out of every team, anonymous in the matches played.
 
 pub mod archive;
+pub mod competitions;
 pub mod legacy_archive;
 pub mod matches;
 pub mod persons;

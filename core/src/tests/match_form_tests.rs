@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
+        domain::{Home, Match, ScoutingMode, TeamRef},
         match_form::{MatchForm, MatchFormError, MatchInput},
         shapes::{
             enums::{EventTypeEnum, RoleEnum, TeamSideEnum},
@@ -27,9 +28,36 @@ mod tests {
             date: Some(date()),
             home: true,
             max_substitutions: max_substitutions.into(),
-            notes: String::new(),
-            roster: None,
+            ..MatchForm::default()
         }
+    }
+
+    /// The row of `m` against its opponent's name, in no competition.
+    fn row_of(m: &MatchEntry) -> Match {
+        Match {
+            id: Uuid::nil(),
+            team_a: m.team.id,
+            team_b: TeamRef::Name(m.opponent.clone()),
+            home: Home::from_a(m.home),
+            scouting: ScoutingMode::A,
+            start: m.date,
+            duration_min: None,
+            friendly: false,
+            competition_id: None,
+            stage: None,
+            round: None,
+            max_substitutions: m.max_substitutions,
+            notes: m.notes.clone(),
+            source: m.source,
+            video_clock: m.video_clock,
+            legacy: None,
+            deleted: false,
+        }
+    }
+
+    /// The form of `m` against its opponent's name, in no competition.
+    fn of(m: &MatchEntry) -> MatchForm {
+        MatchForm::of(m, &row_of(m), None)
     }
 
     /// A team of `n` players, numbered from 1, each with the same id in
@@ -106,14 +134,14 @@ mod tests {
     fn a_valid_form_has_the_opponent_trimmed() {
         assert_eq!(
             form("6").validate(&team(), None),
-            Ok(MatchInput {
-                opponent: "Arezzo".into(),
-                date: date(),
-                home: true,
-                max_substitutions: 6,
-                notes: String::new(),
-                roster: team().players.iter().map(|p| p.id).collect(),
-            })
+            Ok(MatchInput::against(
+                "Arezzo",
+                date(),
+                true,
+                6,
+                "",
+                team().players.iter().map(|p| p.id).collect(),
+            ))
         );
     }
 
@@ -158,10 +186,8 @@ mod tests {
             error(MatchForm {
                 opponent: "  ".into(),
                 date: None,
-                home: false,
-                max_substitutions: String::new(),
-                notes: String::new(),
                 roster: Some(vec![]),
+                ..MatchForm::default()
             }),
             MatchFormError::EmptyOpponent
         );
@@ -178,17 +204,16 @@ mod tests {
     fn the_form_of_a_match_validates_back_to_it() {
         let m = played();
         assert_eq!(
-            MatchForm::of(&m),
+            of(&m),
             MatchForm {
                 opponent: "Arezzo".into(),
                 date: Some(date()),
                 home: false,
                 max_substitutions: "6".into(),
-                notes: String::new(),
-                roster: None,
+                ..MatchForm::default()
             }
         );
-        assert!(MatchForm::of(&m).validate(&team(), Some(&m)).is_ok());
+        assert!(of(&m).validate(&team(), Some(&m)).is_ok());
     }
 
     #[test]
@@ -213,7 +238,7 @@ mod tests {
             notes: "windy".into(),
             ..played()
         };
-        assert_eq!(MatchForm::of(&m).notes, "windy");
+        assert_eq!(of(&m).notes, "windy");
     }
 
     /// A match without notes is written as before: an older version reads
@@ -339,7 +364,7 @@ mod tests {
             roster: vec![],
             ..played()
         };
-        let input = MatchForm::of(&m).validate(&team, Some(&m)).unwrap();
+        let input = of(&m).validate(&team, Some(&m)).unwrap();
         assert!(input.roster.is_empty());
     }
 
@@ -366,7 +391,7 @@ mod tests {
         let mut team = team_of(9);
         let m = started(&team, ids(&team, &[1, 2, 3, 4, 5, 6, 7, 8]));
         team.players[0].deleted = true;
-        let mut f = MatchForm::of(&m);
+        let mut f = of(&m);
         let choices = f.roster_choices(&team, Some(&m));
         assert_eq!(
             choices
@@ -395,7 +420,7 @@ mod tests {
         );
         // toggled, who played stays
         f.toggle(ids(&team, &[1])[0], &team, Some(&m));
-        assert_eq!(f, MatchForm::of(&m));
+        assert_eq!(f, of(&m));
         // a roster without them, as no form makes it, is refused
         let without = MatchForm {
             roster: Some(ids(&team, &[2, 3, 4, 5, 6, 7, 8, 9])),
@@ -419,7 +444,7 @@ mod tests {
     fn a_match_without_roster_keeps_none_until_chosen() {
         let team = team_of(16);
         let m = started(&team, vec![]);
-        let f = MatchForm::of(&m);
+        let f = of(&m);
         assert_eq!(f.roster, None);
         assert!(
             f.clone()

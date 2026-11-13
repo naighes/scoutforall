@@ -1586,6 +1586,7 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Stay => Go::Stay,
         team::Outcome::Back => Go::Home,
         team::Outcome::OpenMatch(m) => Go::Match(team_id.to_string(), m),
+        team::Outcome::OpenNewMatch { team, id } => Go::Match(team, id),
         team::Outcome::Import => Go::Import(Some(team_id.to_string())),
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),

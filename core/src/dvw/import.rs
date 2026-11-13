@@ -13,6 +13,7 @@ use crate::{
     },
     errors::{AppError, MatchError},
     localization::Labels,
+    match_form::MatchInput,
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -488,17 +489,7 @@ pub async fn save_import(
                 id,
                 ..plan.entry.clone()
             };
-            match_writer
-                .update(
-                    entry,
-                    entry.opponent.clone(),
-                    entry.date,
-                    entry.home,
-                    entry.max_substitutions,
-                    entry.notes.clone(),
-                    entry.roster.clone(),
-                )
-                .await?;
+            match_writer.replace_details(entry).await?;
             MatchEntry {
                 sets: vec![],
                 ..entry.clone()
@@ -509,12 +500,14 @@ pub async fn save_import(
             let created = match_writer
                 .create(
                     &saved_team,
-                    entry.opponent.clone(),
-                    entry.date,
-                    entry.home,
-                    entry.max_substitutions,
-                    entry.notes.clone(),
-                    entry.roster.clone(),
+                    MatchInput::against(
+                        &entry.opponent,
+                        entry.date,
+                        entry.home,
+                        entry.max_substitutions,
+                        &entry.notes,
+                        entry.roster.clone(),
+                    ),
                 )
                 .await?;
             match_writer

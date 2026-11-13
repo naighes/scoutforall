@@ -148,12 +148,14 @@ mod tests {
             .match_writer
             .create(
                 team,
-                "Cortona Volley".into(),
-                Utc::now().fixed_offset(),
-                true,
-                DEFAULT_MAX_SUBSTITUTIONS,
-                String::new(),
-                vec![],
+                crate::match_form::MatchInput::against(
+                    "Cortona Volley",
+                    Utc::now().fixed_offset(),
+                    true,
+                    DEFAULT_MAX_SUBSTITUTIONS,
+                    "",
+                    vec![],
+                ),
             )
             .await
             .unwrap();
