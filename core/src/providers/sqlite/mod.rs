@@ -15,6 +15,7 @@
 //!   that tell of them (roster, lineup, event): the others are no longer
 //!   read, as the files leave them out.
 
+pub mod archive;
 pub mod matches;
 pub mod queue;
 pub(crate) mod rows;

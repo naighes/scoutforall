@@ -75,7 +75,7 @@ pub async fn export_match(
     zip_files(&files, Deflated)
 }
 
-fn zip_files(
+pub(crate) fn zip_files(
     files: &[(String, Vec<u8>)],
     compression: zip::CompressionMethod,
 ) -> Result<Vec<u8>, AppError> {
