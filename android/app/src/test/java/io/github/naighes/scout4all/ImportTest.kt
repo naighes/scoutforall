@@ -35,7 +35,7 @@ class ImportTest {
         // from another phone: not here
         val team = saveNationalTeam()
         val archive = core { it.exportTeam(team) }.bytes
-        File(app.filesDir, "scout4all/$team").deleteRecursively()
+        core { it.deleteTeam(team) }
         open(archive).use { scenario ->
             rule.waitForText(string(R.string.import_team_title))
             scenario.recreate()

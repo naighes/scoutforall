@@ -30,6 +30,15 @@ impl SqliteTeamReader {
     pub fn new(db: Database) -> Self {
         Self(db)
     }
+
+    /// Whether a team was ever saved here, a removed one too: the data of
+    /// an installation used before.
+    pub fn any_team_ever(&self) -> Result<bool, AppError> {
+        self.0.read(|tx| {
+            tx.query_row("SELECT EXISTS (SELECT 1 FROM teams)", [], |row| row.get(0))
+                .map_err(sqlite)
+        })
+    }
 }
 
 /// The team not removed, or an error.

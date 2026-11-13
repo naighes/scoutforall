@@ -9,11 +9,16 @@
 //! <team id>/<match id>/video.json (from v0.15.0)
 //! ```
 //!
+//! A folder of the root is a team when it's named after an id or has a
+//! `team.json` (`team_folders`): any other (the recordings of the desktop,
+//! when it keeps them there) isn't data of the app, and isn't read.
+//!
 //! A team or a match that can't be read is told with why (`NotRead`), the
 //! others are read all the same. The sets aren't replayed: whether a match
 //! replays is for who uses it to tell.
 
 use crate::{
+    constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError, MatchError},
     legacy::format::{fill_lineup_rules, read_descriptor, read_events, read_lineup, set_file},
     localization::Labels,
@@ -55,7 +60,7 @@ pub async fn read_folder(
     store: &dyn Store,
     labels: &Labels,
 ) -> Result<Vec<Result<LegacyTeam, NotRead>>, AppError> {
-    let folders = folders(store, layout::ROOT).await?;
+    let folders = team_folders(store).await?;
     Ok(join_all(folders.iter().map(|folder| async move {
         let team = read_team(store, folder, labels)
             .await
@@ -79,6 +84,23 @@ async fn folders_of(store: &dyn Store, team: &TeamEntry) -> Result<Vec<String>, 
     folders(store, &folder)
         .await
         .map_err(|e| NotRead::of(&folder, e))
+}
+
+/// The folders of the root that are teams (see the module), by name.
+pub(crate) async fn team_folders(store: &dyn Store) -> Result<Vec<String>, AppError> {
+    let mut teams = Vec::new();
+    for folder in folders(store, layout::ROOT).await? {
+        let named = Uuid::parse_str(&folder).is_ok();
+        let described = || async {
+            store.list(&folder).await.map(|entries| {
+                entries.contains(&StoreEntry::Blob(TEAM_DESCRIPTOR_FILE_NAME.into()))
+            })
+        };
+        if named || described().await? {
+            teams.push(folder);
+        }
+    }
+    Ok(teams)
 }
 
 /// The folders right in `folder`, by name.

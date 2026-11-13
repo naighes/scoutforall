@@ -298,6 +298,19 @@ mod tests {
         }
     }
 
+    /// All moved: nothing to tell, with or without a backup.
+    #[test]
+    fn all_moved_tells_nothing() {
+        let moved = Migrated {
+            backup: Some(PathBuf::from("/home/x/.scout4all-backup-2026-11-13.zip")),
+            teams: 2,
+            matches: 3,
+            ..Migrated::default()
+        };
+        assert_eq!(moved.notice(EN), None);
+        assert_eq!(Migrated::default().notice(EN), None);
+    }
+
     #[tokio::test]
     async fn a_second_run_does_nothing() {
         for version in VERSIONS {
@@ -644,11 +657,90 @@ mod tests {
         // its team stays, with it
         assert!(root.join(&team).join("team.json").exists());
         assert!(!root.join(&team).join("2025-10-04_rivali_pisa").exists());
+        // told at the start: a line each, then the backup
+        let notice = migrated.notice(EN).unwrap();
+        let lines: Vec<&str> = notice.lines().collect();
+        assert_eq!(lines[0], EN.migration_left);
+        assert_eq!(lines.len(), 4, "{notice}");
+        assert!(lines[1].starts_with("- not-a-team: "), "{notice}");
+        assert!(lines[2].starts_with(&format!("- {lucca}: ")), "{notice}");
+        let backup = migrated.backup.clone().unwrap();
+        assert_eq!(
+            lines[3],
+            EN.migration_backup
+                .replace("{}", &backup.display().to_string())
+        );
         // nothing more to do: no backup, the same told
         let again = device.migrate(&db).await;
         assert_eq!(again.backup, None);
         assert_eq!(again.left, migrated.left);
+        assert_eq!(
+            again.notice(EN).unwrap(),
+            lines[..3].join("\n"),
+            "no backup this time"
+        );
         assert_eq!(device.backups().len(), 1);
+    }
+
+    /// The database in the data folder (TODO/001 step 17) and a folder
+    /// that isn't a team (the recordings of the desktop, when it keeps
+    /// them there) aren't data of the versions before: not read, not told,
+    /// not in the backup, left where they are.
+    #[tokio::test]
+    async fn the_database_and_folders_not_of_teams_are_left_out() {
+        let device = Device::of("v0.18.0");
+        let root = device.data();
+        let before = data_files(&root);
+        let file = db_file(&root);
+        let db = Database::new(crate::db::open(&file).unwrap());
+        // written in the database: its -wal is there too
+        count(&db, "SELECT count(*) FROM teams");
+        assert!(root.join("scout4all.db-wal").exists());
+        std::fs::create_dir(root.join("recordings")).unwrap();
+        std::fs::write(root.join("recordings/match.mp4"), b"video").unwrap();
+
+        let migrated = device.migrate(&db).await;
+        assert_eq!(migrated.left, vec![]);
+        assert_eq!(migrated.matches, legacy_scores("v0.18.0").len());
+        let backups = device.backups();
+        assert_eq!(backups.len(), 1);
+        let zipped: BTreeMap<String, Vec<u8>> = unzip(&std::fs::read(&backups[0]).unwrap())
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(zipped, before);
+        assert_eq!(
+            std::fs::read(root.join("recordings/match.mp4")).unwrap(),
+            b"video"
+        );
+        assert!(file.exists());
+
+        // a folder with a team.json is a team, whatever its name: told
+        std::fs::create_dir(root.join("not-a-team")).unwrap();
+        std::fs::write(root.join("not-a-team/team.json"), "{}").unwrap();
+        let again = device.migrate(&db).await;
+        let told: Vec<&str> = again.left.iter().map(|n| n.folder.as_str()).collect();
+        assert_eq!(told, vec!["not-a-team"]);
+    }
+
+    fn db_file(root: &Path) -> PathBuf {
+        root.join(crate::storage::layout::DATABASE)
+    }
+
+    #[test]
+    fn the_files_of_the_database_are_told_apart() {
+        use crate::storage::layout::is_database_file;
+        for name in [
+            "scout4all.db",
+            "scout4all.db-wal",
+            "scout4all.db-shm",
+            "scout4all.db-journal",
+        ] {
+            assert!(is_database_file(name), "{name}");
+        }
+        for name in ["scout4all.db.zip", "scout4all.log", "config.json", "x.db"] {
+            assert!(!is_database_file(name), "{name}");
+        }
     }
 
     #[tokio::test]

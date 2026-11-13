@@ -20,8 +20,8 @@ pub(crate) mod tests {
             sqlite::{
                 Database,
                 archive::{
-                    FORMAT, Imported, Kind, MANIFEST, Manifest, Merged, Subject, export, import,
-                    manifest,
+                    FORMAT, Imported, Kind, MANIFEST, Manifest, MatchPreview, Merged, Preview,
+                    Subject, export, import, manifest, preview,
                 },
                 matches::{SqliteMatchReader, SqliteMatchWriter},
                 sets::SqliteSetWriter,
@@ -888,6 +888,113 @@ pub(crate) mod tests {
 
     fn set_manifest(files: &mut BTreeMap<String, Json>, field: &str, value: i64) {
         files.get_mut(MANIFEST).unwrap()[field] = Json::from(value);
+    }
+
+    /// The preview (step 17, shown before importing): what the import
+    /// then reads, the team or the match with its team A and status;
+    /// nothing written anywhere.
+    #[tokio::test]
+    async fn the_preview_is_what_the_import_reads() {
+        for version in VERSIONS {
+            let db = migrated(version).await;
+            let before = rows(&db);
+            for (id, (team, matches)) in contents(&db).await {
+                let archive = export(&db, Subject::TeamWithMatches(id)).unwrap();
+                match preview(&archive, &en()).unwrap() {
+                    Preview::Team(previewed) => assert_eq!(previewed, team, "{version}"),
+                    other => panic!("{version}: {other:?}"),
+                }
+                for m in matches {
+                    let uuid = Uuid::parse_str(&m.id).unwrap();
+                    let archive = export(&db, Subject::Match(uuid)).unwrap();
+                    match preview(&archive, &en()).unwrap() {
+                        Preview::Match(previewed) => {
+                            let MatchPreview {
+                                team: previewed_team,
+                                entry,
+                                status,
+                            } = *previewed;
+                            assert_eq!(previewed_team, team, "{version}");
+                            assert_eq!(entry, m, "{version}");
+                            let expected = m.get_status().unwrap();
+                            assert_eq!(
+                                (status.us_wins, status.them_wins, status.match_finished),
+                                (
+                                    expected.us_wins,
+                                    expected.them_wins,
+                                    expected.match_finished
+                                ),
+                                "{version}"
+                            );
+                        }
+                        other => panic!("{version}: {other:?}"),
+                    }
+                }
+            }
+            assert_eq!(rows(&db), before, "{version}");
+        }
+    }
+
+    /// What an import tells: the matches of a team, what was here; a
+    /// match added alone, nothing.
+    #[test]
+    fn the_summary_tells_what_was_here() {
+        let imported = |kind: Kind| Imported {
+            kind,
+            id: Uuid::nil(),
+            persons: Merged::default(),
+            teams: Merged::default(),
+            members: Merged::default(),
+            competitions: Merged::default(),
+            matches: 1,
+            matches_here: 0,
+        };
+        assert_eq!(imported(Kind::Match).summary(EN), None);
+        assert_eq!(
+            imported(Kind::Team).summary(EN),
+            Some(format!("{}: 1", EN.import_matches_added))
+        );
+        let kept = |added: usize, same: usize, kept_local: usize| Merged {
+            added,
+            same,
+            kept_local,
+        };
+        let all = Imported {
+            matches: 0,
+            matches_here: 4,
+            teams: kept(0, 0, 1),
+            persons: kept(5, 1, 2),
+            members: kept(0, 3, 3),
+            competitions: kept(0, 0, 1),
+            ..imported(Kind::Team)
+        };
+        assert_eq!(
+            all.summary(EN).unwrap(),
+            [
+                format!("{}: 4", EN.import_matches_here),
+                format!("{}: 1", EN.import_teams_kept),
+                format!("{}: 2", EN.import_players_kept),
+                format!("{}: 3", EN.import_numbers_kept),
+            ]
+            .join("\n")
+        );
+    }
+
+    /// What the import refuses the preview refuses the same way.
+    #[tokio::test]
+    async fn the_preview_refuses_what_the_import_does() {
+        let s = scouted().await;
+        let archive = export(&s.db, Subject::Match(s.match_id())).unwrap();
+        let mut files = files(&archive);
+        set_manifest(&mut files, "schema", crate::db::schema_version() + 1);
+        assert!(matches!(
+            preview(&zipped(&files), &en()),
+            Err(AppError::IO(IOError::DatabaseNewer { .. }))
+        ));
+        let mut files = self::files(&archive);
+        table(&mut files, "team_members")[0]["role"] = Json::from("Setter");
+        let e = preview(&zipped(&files), &en()).unwrap_err();
+        assert!(message(e).starts_with(EN.invalid_archive));
     }
 
     #[tokio::test]

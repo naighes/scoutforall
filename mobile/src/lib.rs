@@ -11,10 +11,11 @@ use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
         queue_manager::QueueManager,
-        upload::{StoreUploads, UploadStep, upload_next, upload_url},
+        upload::{UploadStep, upload_next, upload_url},
     },
-    archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
+    archive::file_team_id,
     benchmark::{Measure, band, grade},
+    db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
     dvw::{
         self,
@@ -28,6 +29,7 @@ use scout4all_core::{
     errors::{AppError, IOError},
     event_edit::{EditField, EventEdit},
     example,
+    legacy::migrate::{Backup, migrate},
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error, log_info},
     match_form::{MatchForm, MatchFormError},
@@ -37,11 +39,16 @@ use scout4all_core::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
         set_writer::SetWriter,
-        store::{
-            match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-            queue_reader::StoreQueueReader, queue_writer::StoreQueueWriter,
-            set_reader::StoreSetReader, set_writer::StoreSetWriter, team_reader::StoreTeamReader,
-            team_writer::StoreTeamWriter,
+        sqlite::{
+            Database,
+            archive::{self as archives, Imported, Kind, Preview},
+            legacy_archive::{self, Opened, import_legacy_match, import_legacy_team},
+            matches::{SqliteMatchReader, SqliteMatchWriter},
+            queue::SqliteQueue,
+            sets::SqliteSetWriter,
+            teams::{SqliteTeamReader, SqliteTeamWriter},
+            upload::SqliteUploads,
+            video::SqliteVideoProfiles,
         },
         team_reader::TeamReader,
         team_writer::TeamWriter,
@@ -72,19 +79,19 @@ use scout4all_core::{
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
     storage::{
-        Store, StoreEntry,
+        Store,
         fs::FsStore,
         layout::{self, CONFIG, UNREADABLE_CONFIG},
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
-    video::{EventRef, StoredProfile, VideoProfile, place, read_profile, write_profile},
+    video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place},
 };
 use sender::{FIRST_RETRY, LAST_RETRY, UploadSender};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{
         Arc, Mutex, MutexGuard,
@@ -631,12 +638,68 @@ pub struct Home {
 /// How many matches over the home lists.
 pub const RECENT_MATCHES: usize = 5;
 
-/// An archive to share or to save: the zip of the CLI, and the name the
-/// CLI gives to its file.
+/// An archive to share or to save, and the name of its file.
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct ExportedArchive {
     pub file_name: String,
     pub bytes: Vec<u8>,
+}
+
+/// An archive imported: the team or the match, and what to tell of what
+/// was here already (the data here kept), if anything.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct ImportedArchive {
+    pub id: String,
+    /// a line each, in the language of the app
+    pub summary: Option<String>,
+}
+
+impl ImportedArchive {
+    fn of(imported: &Imported, labels: &Labels) -> Self {
+        ImportedArchive {
+            id: imported.id.to_string(),
+            summary: imported.summary(labels),
+        }
+    }
+}
+
+/// Moves into the database what the versions before left in the data
+/// folder, a copy of the folder beside it first (`<folder>-backup-<day>.zip`):
+/// what to tell at the start, if anything. A migration that can't start
+/// changes nothing, and is tried again at the next start.
+fn migrate_folder(
+    runtime: &Runtime,
+    store: &dyn Store,
+    db: &Database,
+    data_dir: &Path,
+    labels: &Labels,
+) -> Option<String> {
+    let backup = Backup {
+        dir: data_dir
+            .parent()
+            .map_or_else(|| data_dir.to_path_buf(), Path::to_path_buf),
+        prefix: data_dir.file_name().map_or_else(
+            || "scout4all".to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        ),
+    };
+    match runtime.block_on(migrate(store, db, &backup, labels)) {
+        Ok(migrated) => {
+            if migrated.backup.is_some() {
+                log_info(&format!(
+                    "data folder moved into the database: {} teams, {} matches, {} left",
+                    migrated.teams,
+                    migrated.matches,
+                    migrated.left.len()
+                ));
+            }
+            migrated.notice(labels)
+        }
+        Err(e) => {
+            log_error(&format!("could not move the data folder: {e}"));
+            Some(labels.migration_failed.replace("{}", &e.to_string()))
+        }
+    }
 }
 
 /// A team of a DataVolley file: the one playing at home or the visiting.
@@ -2795,7 +2858,7 @@ impl Scout4All {
         let m = self.read_match(team_id, match_id)?;
         let profile = self
             .runtime
-            .block_on(read_profile(&*self.store, &m.team.id, &m.id))
+            .block_on(self.videos.read(&m.team.id, &m.id))
             .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?;
         Ok((m, profile))
     }
@@ -2859,7 +2922,7 @@ impl Scout4All {
     /// Saves the profile of the video of the match.
     pub fn save_video(&self, m: &MatchEntry, profile: &VideoProfile) -> Result<(), MobileError> {
         self.runtime
-            .block_on(write_profile(&*self.store, &m.team.id, &m.id, profile))
+            .block_on(self.videos.write(&m.team.id, &m.id, profile))
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })
@@ -2961,19 +3024,27 @@ impl Correction {
     }
 }
 
-/// The data of the app, in a folder with the same layout as `~/.scout4all`.
+/// The data of the app, in a folder like `~/.scout4all`: the database
+/// (`scout4all.db`) and the settings (`config.json`, `clips.json`). The
+/// folders of the teams of the versions before the database move into it
+/// when the app starts (`legacy::migrate`).
 #[derive(uniffi::Object)]
 pub struct Scout4All {
     /// shared with the sets being scouted
     runtime: Arc<Runtime>,
     language: Language,
-    team_reader: StoreTeamReader,
-    team_writer: StoreTeamWriter,
-    match_reader: StoreMatchReader,
-    match_writer: StoreMatchWriter,
+    db: Database,
+    team_reader: SqliteTeamReader,
+    team_writer: SqliteTeamWriter,
+    match_reader: SqliteMatchReader,
+    match_writer: SqliteMatchWriter,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    videos: SqliteVideoProfiles,
     /// for `config.json`
     store: Arc<dyn Store>,
+    /// what the start has to tell (the migration of the data folder),
+    /// until the app asks for it
+    notice: Mutex<Option<String>>,
     /// the matches to upload for the statistics
     queue: Arc<UploadQueueManager>,
     /// whether the user allows the statistics, as in `config.json`
@@ -2982,12 +3053,15 @@ pub struct Scout4All {
     sender: Arc<UploadSender>,
 }
 
-type UploadQueueManager = QueueManager<StoreQueueReader, StoreQueueWriter>;
+type UploadQueueManager = QueueManager<SqliteQueue, SqliteQueue>;
 
 #[uniffi::export]
 impl Scout4All {
-    /// The data in `data_dir`; `language` is a code like `"it"`, English when
-    /// it isn't supported.
+    /// The data in `data_dir`, created if missing; `language` is a code
+    /// like `"it"`, English when it isn't supported. Opens the database
+    /// (an error when it can't be opened, e.g. saved by a newer version)
+    /// and moves into it what the versions before left in the folder,
+    /// after a copy of it beside it (`startup_notice` tells what stayed).
     #[uniffi::constructor]
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
@@ -2995,6 +3069,7 @@ impl Scout4All {
         *ERRORS_LANGUAGE
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language.clone());
+        std::fs::create_dir_all(&data_dir).map_err(|e| failed(AppError::IO(IOError::from(e))))?;
         let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
         let runtime = Builder::new_current_thread()
             .enable_all()
@@ -3002,30 +3077,39 @@ impl Scout4All {
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })?;
+        let db = Database::new(db::open(&data_dir.join(layout::DATABASE))?);
+        let notice = migrate_folder(&runtime, &*store, &db, &data_dir, language.labels());
+        let queue = Arc::new(SqliteQueue::new(db.clone()));
         let app = Self {
             runtime: Arc::new(runtime),
-            queue: Arc::new(QueueManager::new(
-                Arc::new(StoreQueueReader::new(store.clone())),
-                Arc::new(StoreQueueWriter::new(store.clone())),
-            )),
+            queue: Arc::new(QueueManager::new(queue.clone(), queue)),
             uploads_enabled: Arc::new(AtomicBool::new(false)),
             sender: UploadSender::new(FIRST_RETRY, LAST_RETRY),
-            team_reader: StoreTeamReader::new(store.clone(), language.clone()),
-            team_writer: StoreTeamWriter::new(store.clone()),
-            match_writer: StoreMatchWriter::new(store.clone()),
-            set_writer: Arc::new(StoreSetWriter::new(store.clone(), language.clone())),
-            match_reader: StoreMatchReader::new(
-                store.clone(),
-                Arc::new(StoreSetReader::new(store.clone(), language.clone())),
-                language.clone(),
-            ),
+            team_reader: SqliteTeamReader::new(db.clone()),
+            team_writer: SqliteTeamWriter::new(db.clone()),
+            match_writer: SqliteMatchWriter::new(db.clone()),
+            set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
+            match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
+            videos: SqliteVideoProfiles(db.clone()),
+            db,
             store,
+            notice: Mutex::new(notice),
             language,
         };
         // unreadable settings: nothing sent until the terms are accepted
         let enabled = app.read_config().is_ok_and(|c| c.consent.uploads_enabled());
         app.uploads_enabled.store(enabled, Ordering::Relaxed);
         Ok(Arc::new(app))
+    }
+
+    /// What the start has to tell, once: what of the data folder of the
+    /// versions before couldn't be moved into the database (with where its
+    /// copy is), or why nothing could. None after the first call.
+    pub fn startup_notice(&self) -> Option<String> {
+        self.notice
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
     /// The teams, the pinned ones at the top, each group by name.
@@ -3363,15 +3447,14 @@ impl Scout4All {
         team_id: String,
         date: MatchDate,
     ) -> Result<MatchForm, MobileError> {
-        let folder = layout::team_folder(&parse_id(&team_id)?);
+        let team = self.read_team(&team_id)?;
+        // the matches by opponent and day, as the tutorial numbers them
         let taken: Vec<String> = self
             .runtime
-            .block_on(self.store.list(&folder))?
+            .block_on(self.match_reader.read_summaries(&team))?
             .into_iter()
-            .filter_map(|entry| match entry {
-                StoreEntry::Folder(name) => Some(name),
-                StoreEntry::Blob(_) => None,
-            })
+            .filter_map(Result::ok)
+            .map(|m| MatchEntry::id_of(&m.opponent, &m.date))
             .collect();
         Ok(example::tutorial_match(
             self.language.labels(),
@@ -3642,30 +3725,29 @@ impl Scout4All {
         Ok(team.id.to_string())
     }
 
-    /// The archive of the team, as the CLI exports it.
+    /// The archive of the team, its players without its matches.
     pub fn export_team(&self, team_id: String) -> Result<ExportedArchive, MobileError> {
         let id = parse_id(&team_id)?;
-        let bytes = self
-            .runtime
-            .block_on(archive::export_team(&*self.store, &id))?;
+        // a team removed or not there: not exported
+        self.read_team(&team_id)?;
+        let bytes = archives::export(&self.db, archives::Subject::Team(id))?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
         })
     }
 
-    /// The archive of a match of the team, as the CLI exports it.
+    /// The archive of a match of the team, with its teams.
     pub fn export_match(
         &self,
         team_id: String,
         match_id: String,
     ) -> Result<ExportedArchive, MobileError> {
-        let id = parse_id(&team_id)?;
-        let bytes = self
-            .runtime
-            .block_on(archive::export_match(&*self.store, &id, &match_id))?;
+        let m = self.read_match(&team_id, &match_id)?;
+        let id = Uuid::parse_str(&m.id).map_err(failed)?;
+        let bytes = archives::export(&self.db, archives::Subject::Match(id))?;
         Ok(ExportedArchive {
-            file_name: format!("{match_id}.zip"),
+            file_name: format!("{id}.zip"),
             bytes,
         })
     }
@@ -3680,11 +3762,13 @@ impl Scout4All {
         )?)
     }
 
-    /// What the archive holds, unless it can't be imported: e.g. a team
-    /// already there, or a match of none of the teams, or not of `team_id`
-    /// when it's imported into that team. `file_name` is the name of the
-    /// file it comes from, when known: the archives exported up to v0.9.0
-    /// have the id of the team only there.
+    /// What the archive holds, unless it can't be imported: e.g. a match
+    /// of a version before the database of none of the teams, or not of
+    /// `team_id` when it's imported into that team, or there already.
+    /// `file_name` is the name of the file it comes from, when known: the
+    /// archives exported up to v0.9.0 have the id of the team only there.
+    /// An archive of the database brings its teams with it: the team of a
+    /// match is its own.
     pub fn preview_archive(
         &self,
         bytes: Vec<u8>,
@@ -3692,69 +3776,79 @@ impl Scout4All {
         team_id: Option<String>,
     ) -> Result<ArchivePreview, MobileError> {
         let labels = self.language.labels();
-        match read_archive(&bytes, labels)? {
-            Archive::Team { .. } => {
-                let file_id = file_name.as_deref().and_then(file_team_id);
-                let team = self.runtime.block_on(team_to_import(
-                    &bytes,
-                    file_id,
-                    &self.team_reader,
-                    labels,
-                ))?;
-                Ok(ArchivePreview::Team {
-                    players: count(&team),
-                    name: team.name,
-                    year: team.year,
-                })
+        let team_preview = |team: TeamEntry| ArchivePreview::Team {
+            players: count(&team),
+            name: team.name,
+            year: team.year,
+        };
+        let match_preview =
+            |m: &MatchEntry, won: u8, lost: u8, teams: Vec<TeamChoice>| ArchivePreview::Match {
+                date: m.date.to_rfc3339(),
+                opponent: m.opponent.clone(),
+                home: m.home,
+                won,
+                lost,
+                teams,
+            };
+        let choice = |t: &TeamEntry| TeamChoice {
+            id: t.id.to_string(),
+            name: t.name.clone(),
+        };
+        Ok(match legacy_archive::open(&self.db, &bytes, labels)? {
+            Opened::Database(_) => match archives::preview(&bytes, &self.language)? {
+                Preview::Team(team) => team_preview(team),
+                Preview::Match(m) => match_preview(
+                    &m.entry,
+                    m.status.us_wins,
+                    m.status.them_wins,
+                    vec![choice(&m.team)],
+                ),
+            },
+            // up to v0.9.0 the id only in the name of the file
+            Opened::LegacyTeam { team, id } => {
+                match id.or_else(|| file_name.as_deref().and_then(file_team_id)) {
+                    Some(_) => team_preview(team),
+                    None => return Err(failed(labels.team_archive_without_id)),
+                }
             }
-            Archive::Match(_) => {
-                let teams = match team_id {
-                    Some(id) => vec![self.read_team(&id)?],
-                    None => self.readable_teams()?,
-                };
-                let (m, found) = self.runtime.block_on(match_to_import(
-                    &bytes,
-                    &teams,
-                    &self.match_reader,
-                    labels,
-                ))?;
-                let status = m.get_status()?;
-                let mut choices: Vec<TeamChoice> = found
-                    .into_iter()
-                    .map(|t| TeamChoice {
-                        id: t.id.to_string(),
-                        name: t.name.clone(),
-                    })
+            Opened::LegacyMatch { archived, teams } => {
+                let mut choices: Vec<TeamChoice> = teams
+                    .iter()
+                    .filter(|t| team_id.as_ref().is_none_or(|id| t.id.to_string() == *id))
+                    .map(choice)
                     .collect();
+                if choices.is_empty() {
+                    return Err(failed(labels.match_of_another_team));
+                }
                 choices.sort_by_key(|t| t.name.to_lowercase());
-                Ok(ArchivePreview::Match {
-                    date: m.date.to_rfc3339(),
-                    opponent: m.opponent,
-                    home: m.home,
-                    won: status.us_wins,
-                    lost: status.them_wins,
-                    teams: choices,
-                })
+                let status = archived.get_status()?;
+                match_preview(&archived, status.us_wins, status.them_wins, choices)
             }
-        }
+        })
     }
 
-    /// Adds the team of the archive; its id.
+    /// Adds the team of the archive, or merges it into the one here (the
+    /// data here win): its id and what to tell of it.
     pub fn import_team(
         &self,
         bytes: Vec<u8>,
         file_name: Option<String>,
-    ) -> Result<String, MobileError> {
-        let file_id = file_name.as_deref().and_then(file_team_id);
-        let team = self.runtime.block_on(archive::import_team(
-            &bytes,
-            file_id,
-            &self.team_reader,
-            &self.team_writer,
-            self.language.labels(),
-        ))?;
+    ) -> Result<ImportedArchive, MobileError> {
+        let labels = self.language.labels();
+        let imported = match legacy_archive::open(&self.db, &bytes, labels)? {
+            Opened::Database(manifest) if manifest.kind == Kind::Team => {
+                archives::import(&self.db, &bytes, &self.language)?
+            }
+            Opened::LegacyTeam { .. } => {
+                let file_id = file_name.as_deref().and_then(file_team_id);
+                import_legacy_team(&self.db, &bytes, file_id, &self.language)?
+            }
+            Opened::Database(_) | Opened::LegacyMatch { .. } => {
+                return Err(failed(labels.invalid_archive));
+            }
+        };
         self.sender.request();
-        Ok(team.id.to_string())
+        Ok(ImportedArchive::of(&imported, labels))
     }
 
     /// What the DataVolley file holds.
@@ -3860,19 +3954,28 @@ impl Scout4All {
         })
     }
 
-    /// Adds the match of the archive to the team; its id.
-    pub fn import_match(&self, bytes: Vec<u8>, team_id: String) -> Result<String, MobileError> {
-        let team = self.read_team(&team_id)?;
-        let m = self.runtime.block_on(archive::import_match(
-            &bytes,
-            &team,
-            &self.match_reader,
-            &self.match_writer,
-            &*self.set_writer,
-            self.language.labels(),
-        ))?;
+    /// Adds the match of the archive: one of a version before the
+    /// database into the team `team_id` (one of those of its preview), one
+    /// of the database with its own teams. Its id and what to tell of it.
+    pub fn import_match(
+        &self,
+        bytes: Vec<u8>,
+        team_id: String,
+    ) -> Result<ImportedArchive, MobileError> {
+        let labels = self.language.labels();
+        let imported = match legacy_archive::open(&self.db, &bytes, labels)? {
+            Opened::Database(manifest) if manifest.kind == Kind::Match => {
+                archives::import(&self.db, &bytes, &self.language)?
+            }
+            Opened::LegacyMatch { .. } => {
+                import_legacy_match(&self.db, &bytes, parse_id(&team_id)?, &self.language)?
+            }
+            Opened::Database(_) | Opened::LegacyTeam { .. } => {
+                return Err(failed(labels.invalid_archive));
+            }
+        };
         self.sender.request();
-        Ok(m.id)
+        Ok(ImportedArchive::of(&imported, labels))
     }
 
     /// The language of the labels from now on, a code like `"it"` (English
@@ -3917,6 +4020,7 @@ impl Scout4All {
     pub fn add_example_team_if_new(&self) -> Result<bool, MobileError> {
         let added = self.runtime.block_on(example::add_example_team_if_new(
             &*self.store,
+            &self.team_reader,
             &self.team_writer,
             self.language.labels(),
         ))?;
@@ -4085,7 +4189,7 @@ impl Scout4All {
 
 /// The queue of the core, which then asks the sender to send it.
 struct SentFinishedMatches {
-    queued: QueuedFinishedMatches<StoreQueueReader, StoreQueueWriter>,
+    queued: QueuedFinishedMatches<SqliteQueue, SqliteQueue>,
     sender: Arc<UploadSender>,
 }
 
@@ -4224,11 +4328,7 @@ impl Scout4All {
 
     fn upload_pending_to(&self, url: &str) -> Uploads {
         loop {
-            let source = StoreUploads {
-                store: &*self.store,
-                team_reader: &self.team_reader,
-                match_reader: &self.match_reader,
-            };
+            let source = SqliteUploads::new(self.db.clone(), self.language.clone());
             let step = self
                 .runtime
                 .block_on(upload_next(&source, &self.queue, url));
@@ -4552,16 +4652,311 @@ mod tests {
         assert_eq!(app.teams().unwrap(), vec![]);
     }
 
+    /// The data folder of the legacy fixtures of the core, as a version
+    /// before the database left it.
+    fn legacy_data(version: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../core/src/tests/fixtures/legacy")
+            .join(version)
+            .join("data")
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            match entry.file_type().unwrap().is_dir() {
+                true => copy_dir(&entry.path(), &target),
+                false => {
+                    std::fs::copy(entry.path(), target).unwrap();
+                }
+            }
+        }
+    }
+
+    /// What the lists show of every match, by team name: as the files
+    /// tell it before and the database after (the ids aside).
+    type Listed = std::collections::BTreeMap<String, Vec<(String, String, u8, u8, bool)>>;
+
+    async fn listed_in_files(dir: &Path) -> Listed {
+        use scout4all_core::providers::store::{
+            match_reader::StoreMatchReader, set_reader::StoreSetReader,
+            team_reader::StoreTeamReader,
+        };
+        let store: Arc<dyn Store> = Arc::new(FsStore::new(dir));
+        let language = Language::default();
+        let teams = StoreTeamReader::new(store.clone(), language.clone());
+        let matches = StoreMatchReader::new(
+            store.clone(),
+            Arc::new(StoreSetReader::new(store, language.clone())),
+            language,
+        );
+        let mut listed = Listed::new();
+        for team in teams.read_all().await.unwrap() {
+            let team = team.unwrap();
+            let summaries = matches.read_summaries(&team).await.unwrap();
+            listed.insert(
+                team.name.clone(),
+                summaries
+                    .into_iter()
+                    .map(|m| {
+                        let m = m.unwrap();
+                        (
+                            m.opponent,
+                            m.date.to_rfc3339(),
+                            m.us_wins,
+                            m.them_wins,
+                            m.finished,
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        listed
+    }
+
+    fn listed_in_app(app: &Scout4All) -> Listed {
+        app.teams()
+            .unwrap()
+            .into_iter()
+            .map(|t| match t {
+                TeamListing::Team { id, name, .. } => (
+                    name,
+                    app.matches(id)
+                        .unwrap()
+                        .into_iter()
+                        .map(|m| match m {
+                            MatchListing::Match {
+                                opponent,
+                                date,
+                                won,
+                                lost,
+                                finished,
+                                ..
+                            } => (opponent, date, won, lost, finished),
+                            other => panic!("{other:?}"),
+                        })
+                        .collect(),
+                ),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    /// The day of the backups, as the migration names them.
+    fn backup_of(dir: &tempfile::TempDir) -> PathBuf {
+        let day = Local::now().date_naive();
+        dir.path().join(format!("data-backup-{day}.zip"))
+    }
+
+    /// TODO/001 step 17: the app opens the database in the data folder and
+    /// moves into it what a version before left there, a copy of the
+    /// folder beside it first; nothing to tell when all moved, nothing to
+    /// do at the next start.
     #[test]
-    fn a_team_folder_that_is_not_an_id_is_unreadable() {
+    fn the_start_moves_the_folder_of_a_version_before_into_the_database() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("not-a-team")).unwrap();
+        let data = dir.path().join("data");
+        copy_dir(&legacy_data("v0.18.0"), &data);
+        let expected = Runtime::new().unwrap().block_on(listed_in_files(&data));
+        assert_eq!(expected.len(), 3);
+        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        assert_eq!(app.startup_notice(), None);
+        assert_eq!(listed_in_app(&app), expected);
+        assert!(data.join(layout::DATABASE).exists());
+        assert!(backup_of(&dir).exists());
+        // only the database and the settings left: no folder
+        let folders: Vec<_> = std::fs::read_dir(&data)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
+            .collect();
+        assert_eq!(folders, Vec::<PathBuf>::new());
+        // the queue of the uploads moved with it
+        assert!(!queued_of(&data).is_empty());
+        drop(app);
+        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        assert_eq!(again.startup_notice(), None);
+        assert_eq!(listed_in_app(&again), expected);
+        let backups = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|x| x == "zip")
+            })
+            .count();
+        assert_eq!(backups, 1);
+    }
+
+    fn queued_of(data: &Path) -> Vec<String> {
+        let db = scout4all_core::db::open(&data.join(layout::DATABASE)).unwrap();
+        let mut rows = db.prepare("SELECT match_id FROM upload_queue").unwrap();
+        rows.query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// What can't be moved stays in the folder and is told once, in the
+    /// language of the app, with where the copy is; the rest moves.
+    #[test]
+    fn what_stays_in_the_folder_is_told_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        copy_dir(&legacy_data("v0.18.0"), &data);
+        // a set cut in two
+        let broken = std::fs::read_dir(&data)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
+            .flat_map(|team| std::fs::read_dir(team).unwrap().map(|e| e.unwrap().path()))
+            .find(|p| p.join("set_1.json").exists())
+            .unwrap();
+        std::fs::write(broken.join("set_1.json"), "{\"serving").unwrap();
+        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let it = labels(LanguageEnum::It);
+        let notice = app.startup_notice().unwrap();
+        let lines: Vec<&str> = notice.lines().collect();
+        assert_eq!(lines[0], it.migration_left);
+        let folder = broken
+            .strip_prefix(&data)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(lines[1].starts_with(&format!("- {folder}: ")), "{notice}");
+        assert_eq!(
+            lines[2],
+            it.migration_backup
+                .replace("{}", &backup_of(&dir).display().to_string())
+        );
+        assert_eq!(app.startup_notice(), None);
+        assert!(broken.join("match.json").exists());
+        assert_eq!(app.teams().unwrap().len(), 3);
+        // the next start tells it again, without a new copy
+        drop(app);
+        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        assert_eq!(again.startup_notice().unwrap(), lines[..2].join("\n"));
+    }
+
+    /// No copy of the folder (where it goes can't be written): nothing
+    /// moves, the app says why and opens all the same; the next start
+    /// moves it.
+    #[cfg(unix)]
+    #[test]
+    fn a_migration_that_cant_start_changes_nothing_and_is_told() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        let data = parent.join("data");
+        copy_dir(&legacy_data("v0.18.0"), &data);
+        let expected = Runtime::new().unwrap().block_on(listed_in_files(&data));
+        let mode = |m: u32| {
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(m)).unwrap();
+        };
+        mode(0o555);
+        let app = Scout4All::new(data.to_string_lossy().into_owned(), "en".into());
+        mode(0o755);
+        let app = app.unwrap();
+        let notice = app.startup_notice().unwrap();
+        let en = labels(LanguageEnum::En);
+        let (before, after) = en.migration_failed.split_once("{}").unwrap();
+        assert!(
+            notice.starts_with(before) && notice.ends_with(after),
+            "{notice}"
+        );
+        assert_eq!(app.teams().unwrap(), vec![]);
+        assert_eq!(
+            Runtime::new().unwrap().block_on(listed_in_files(&data)),
+            expected
+        );
+        drop(app);
+        let again = Scout4All::new(data.to_string_lossy().into_owned(), "en".into()).unwrap();
+        assert_eq!(again.startup_notice(), None);
+        assert_eq!(listed_in_app(&again), expected);
+    }
+
+    /// A database saved by a newer version isn't opened: the app says to
+    /// update it, the database stays as it is.
+    #[test]
+    fn a_database_of_a_newer_version_is_not_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(layout::DATABASE);
+        drop(scout4all_core::db::open(&file).unwrap());
+        let newer = scout4all_core::db::schema_version() + 1;
+        sql(&dir, &format!("PRAGMA user_version = {newer}"));
+        let e = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+            .err()
+            .unwrap();
+        assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
+    }
+
+    fn reason_of(e: MobileError) -> String {
+        match e {
+            MobileError::Failed { reason } => reason,
+            other => format!("{other:?}"),
+        }
+    }
+
+    /// The tutorial seen again the same day: another opponent, numbered,
+    /// as the matches have UUIDs now and wouldn't clash.
+    #[test]
+    fn the_match_of_the_tutorial_seen_again_is_numbered() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let team = app.tutorial_team().unwrap();
+        let date = DateTime::parse_from_rfc3339("2026-11-13T18:00:00+01:00").unwrap();
+        let first = app.tutorial_match_form(team.clone(), date).unwrap();
+        assert_eq!(first.opponent, "Brazil");
+        app.save_match(team.clone(), None, first).unwrap();
+        let second = app.tutorial_match_form(team.clone(), date).unwrap();
+        assert_eq!(second.opponent, "Brazil 2");
+        let next_day = date + chrono::Duration::days(1);
+        assert_eq!(
+            app.tutorial_match_form(team, next_day).unwrap().opponent,
+            "Brazil"
+        );
+    }
+
+    /// A team whose row the code can't read: listed as unreadable, the
+    /// others as they are.
+    #[test]
+    fn a_team_that_cant_be_read_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "xx".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        // the schema doesn't check the spelling of the country, reading does
+        sql(
+            &dir,
+            &format!("UPDATE teams SET country = 'it' WHERE id = '{team}'"),
+        );
         assert_eq!(
             app.teams().unwrap(),
-            vec![TeamListing::Unreadable {
-                folder: "not-a-team".into()
-            }]
+            vec![TeamListing::Unreadable { folder: team }]
+        );
+    }
+
+    /// Changes the database of the app in `dir` behind its back, as a
+    /// broken row would be.
+    fn sql(dir: &tempfile::TempDir, sql: &str) {
+        scout4all_core::db::open(&dir.path().join(layout::DATABASE))
+            .unwrap()
+            .execute_batch(sql)
+            .unwrap();
+    }
+
+    /// Makes the match unreadable: a set 2 without the first, without
+    /// lineup; the cache of the lists forgotten.
+    fn break_match(dir: &tempfile::TempDir, match_id: &str) {
+        sql(
+            dir,
+            &format!(
+                "INSERT INTO sets (match_id, number, serving) VALUES ('{match_id}', 2, 'a');
+                 DELETE FROM match_summary;"
+            ),
         );
     }
 
@@ -4986,14 +5381,16 @@ mod tests {
         assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
 
         let team = app.read_team(&team_id).unwrap();
-        let writer = StoreMatchWriter::new(Arc::new(FsStore::new(dir.path())));
+        let mut ids = vec![];
         for (opponent, date, home) in [
             ("Arezzo", "2026-10-04T18:00:00+02:00", true),
             ("Siena", "2026-10-11T21:00:00+02:00", false),
+            ("Lucca", "2026-10-18T21:00:00+02:00", false),
         ] {
             let date = DateTime::parse_from_rfc3339(date).unwrap();
-            app.runtime
-                .block_on(writer.create(
+            let m = app
+                .runtime
+                .block_on(app.match_writer.create(
                     &team,
                     opponent.into(),
                     date,
@@ -5003,14 +5400,15 @@ mod tests {
                     vec![],
                 ))
                 .unwrap();
+            ids.push(m.id);
         }
-        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        break_match(&dir, &ids[2]);
 
         assert_eq!(
             app.matches(team_id).unwrap(),
             vec![
                 MatchListing::Match {
-                    id: "2026-10-11_siena".into(),
+                    id: ids[1].clone(),
                     opponent: "Siena".into(),
                     home: false,
                     date: "2026-10-11T21:00:00+02:00".into(),
@@ -5019,7 +5417,7 @@ mod tests {
                     finished: false,
                 },
                 MatchListing::Match {
-                    id: "2026-10-04_arezzo".into(),
+                    id: ids[0].clone(),
                     opponent: "Arezzo".into(),
                     home: true,
                     date: "2026-10-04T18:00:00+02:00".into(),
@@ -5028,7 +5426,7 @@ mod tests {
                     finished: false,
                 },
                 MatchListing::Unreadable {
-                    folder: "not-a-match".into(),
+                    folder: ids[2].clone(),
                     reason: None,
                 },
             ]
@@ -5044,18 +5442,26 @@ mod tests {
         let team_id = app.save_team(None, form("Cortona")).unwrap();
         let other = app.save_team(None, form("Arezzo")).unwrap();
         let team = app.read_team(&team_id).unwrap();
-        let writer = StoreMatchWriter::new(Arc::new(FsStore::new(dir.path())));
         let date = DateTime::parse_from_rfc3339("2026-10-04T18:00:00+02:00").unwrap();
-        let m = app
-            .runtime
-            .block_on(writer.create(&team, "Siena".into(), date, true, 6, String::new(), vec![]))
-            .unwrap();
-        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        let create = |opponent: &str| {
+            app.runtime
+                .block_on(app.match_writer.create(
+                    &team,
+                    opponent.into(),
+                    date,
+                    true,
+                    6,
+                    String::new(),
+                    vec![],
+                ))
+                .unwrap()
+        };
+        let (m, broken) = (create("Siena"), create("Lucca"));
+        break_match(&dir, &broken.id);
         assert_eq!(app.matches(team_id.clone()).unwrap().len(), 2);
 
         app.delete_match(team_id.clone(), m.id).unwrap();
-        app.delete_match(team_id.clone(), "not-a-match".into())
-            .unwrap();
+        app.delete_match(team_id.clone(), broken.id).unwrap();
         assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
 
         app.delete_team(team_id.clone()).unwrap();
@@ -5069,7 +5475,6 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, vec![other.clone()]);
-        assert!(!dir.path().join(&team_id).exists());
         let pins = config(&dir)["pinned_teams"].to_string();
         assert!(pins.contains(&other) && !pins.contains(&team_id), "{pins}");
     }
@@ -5133,7 +5538,9 @@ mod tests {
         let id = app
             .save_match(team.clone(), None, match_form(" Arezzo ", date, "8"))
             .unwrap();
-        assert_eq!(id, "2026-10-24_arezzo");
+        // a new id, not the opponent and the day: two matches the same day
+        // against the same opponent are two
+        assert!(Uuid::parse_str(&id).is_ok(), "{id}");
         let edited = match_form("Arezzo Volley", date, "6");
         app.save_match(team.clone(), Some(id.clone()), edited.clone())
             .unwrap();
@@ -5615,10 +6022,15 @@ mod tests {
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Over).unwrap();
         // their freeball after our serve `/`: their reception came back
-        let set = dir.path().join(&team).join(&m).join("set_1.csv");
-        let mut rows = std::fs::read_to_string(&set).unwrap();
-        rows.push_str("2026-10-24T18:00:00Z,OF,,,\n");
-        std::fs::write(&set, rows).unwrap();
+        sql(
+            &dir,
+            &format!(
+                "INSERT INTO events (id, match_id, set_number, seq, side, timestamp, event_type)
+                 VALUES ('{}', '{m}', 1, 1, 'a', '2026-10-24T18:00:00Z', 'OF');
+                 DELETE FROM match_summary;",
+                Uuid::new_v4()
+            ),
+        );
         let listed = app.matches(team).unwrap();
         assert_eq!(
             listed,
@@ -6889,24 +7301,25 @@ mod tests {
             MobileError::Failed { reason } => reason,
             other => format!("{other:?}"),
         };
-        let folder = dir.path().join(&team);
-        let match_folder = std::fs::read_dir(&folder)
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .find(|p| p.is_dir())
-            .unwrap();
         let it = labels(LanguageEnum::It);
-        std::fs::write(match_folder.join("set_1.json"), "").unwrap();
+        // the set without our lineup
+        sql(
+            &dir,
+            &format!("DELETE FROM set_lineups WHERE match_id = '{m}'"),
+        );
         assert_eq!(
             reason(app.scouting(team.clone(), m.clone()).err().unwrap()),
             it.unreadable_match
         );
-        std::fs::write(match_folder.join("match.json"), "{ not json").unwrap();
         assert_eq!(
             reason(app.match_details(team.clone(), m.clone()).unwrap_err()),
             it.unreadable_match
         );
-        std::fs::write(folder.join("team.json"), "{}").unwrap();
+        // the schema doesn't check the spelling of the country, reading does
+        sql(
+            &dir,
+            &format!("UPDATE teams SET country = 'it' WHERE id = '{team}'"),
+        );
         assert_eq!(
             reason(app.team(team.clone()).unwrap_err()),
             it.unreadable_team
@@ -6997,13 +7410,20 @@ mod tests {
         );
         assert_eq!(
             to.import_team(team_zip.bytes.clone(), renamed).unwrap(),
-            team
+            ImportedArchive {
+                id: team.clone(),
+                summary: None
+            }
+        );
+        // again: the same team, nothing to tell
+        assert_eq!(
+            to.import_team(team_zip.bytes, None).unwrap(),
+            ImportedArchive {
+                id: team.clone(),
+                summary: None
+            }
         );
         let it = labels(LanguageEnum::It);
-        assert_eq!(
-            reason(to.preview_archive(team_zip.bytes, None, None)),
-            it.team_already_exists
-        );
         assert_eq!(
             to.preview_archive(match_zip.bytes.clone(), None, None)
                 .unwrap(),
@@ -7022,14 +7442,17 @@ mod tests {
         assert_eq!(
             to.import_match(match_zip.bytes.clone(), team.clone())
                 .unwrap(),
-            m
+            ImportedArchive {
+                id: m.clone(),
+                summary: None
+            }
         );
         assert_eq!(
             to.match_details(team.clone(), m.clone()).unwrap(),
-            from.match_details(team, m).unwrap()
+            from.match_details(team.clone(), m).unwrap()
         );
         assert_eq!(
-            reason(to.preview_archive(match_zip.bytes, None, None)),
+            reason(to.import_match(match_zip.bytes, team)),
             it.match_already_exists
         );
     }
@@ -7052,7 +7475,7 @@ mod tests {
             app.preview_archive(OLD_TEAM.to_vec(), file_name.clone(), None),
             Ok(ArchivePreview::Team { players: 8, .. })
         ));
-        let team = app.import_team(OLD_TEAM.to_vec(), file_name).unwrap();
+        let team = app.import_team(OLD_TEAM.to_vec(), file_name).unwrap().id;
         let Ok(ArchivePreview::Match {
             teams, won, lost, ..
         }) = app.preview_archive(OLD_MATCH.to_vec(), Some("whatever.zip".into()), None)
@@ -7071,7 +7494,8 @@ mod tests {
             Ok(ArchivePreview::Match { .. })
         ));
         let m = app.import_match(OLD_MATCH.to_vec(), team.clone()).unwrap();
-        let details = app.match_details(team, m).unwrap();
+        assert_eq!(m.summary, None);
+        let details = app.match_details(team.clone(), m.id).unwrap();
         assert_eq!(details.opponent, "Club Arezzo");
         assert_eq!(
             details.sets,
@@ -7080,6 +7504,11 @@ mod tests {
                 us: 3,
                 them: 1
             }]
+        );
+        // there already: no team left to take it
+        assert_eq!(
+            reason(app.preview_archive(OLD_MATCH.to_vec(), None, Some(team))),
+            en.match_already_exists
         );
     }
 
@@ -7110,22 +7539,18 @@ mod tests {
         (team, m)
     }
 
+    /// The upload queue in the database of the app in `dir`, in order:
+    /// each match with its attempts.
     fn queued(dir: &tempfile::TempDir) -> Vec<(String, u64)> {
-        std::fs::read(dir.path().join("upload_queue.json"))
-            .map(|bytes| {
-                from_slice::<Value>(&bytes).unwrap()["pending"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|p| {
-                        (
-                            p["match_id"].as_str().unwrap().to_string(),
-                            p["retry_count"].as_u64().unwrap(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        let db = scout4all_core::db::open(&dir.path().join(layout::DATABASE)).unwrap();
+        let mut rows = db
+            .prepare("SELECT match_id, retry_count FROM upload_queue ORDER BY position")
+            .unwrap();
+        rows.query_map([], |row| Ok((row.get(0)?, row.get::<_, i64>(1)?)))
+            .unwrap()
+            .map(|row| row.map(|(id, tries)| (id, u64::try_from(tries).unwrap())))
+            .collect::<Result<_, _>>()
+            .unwrap()
     }
 
     #[test]
@@ -7206,7 +7631,7 @@ mod tests {
         app.accept_terms().unwrap();
         let (team, m) = won_match(&app);
         // sent in the meantime
-        std::fs::remove_file(dir.path().join("upload_queue.json")).unwrap();
+        sql(&dir, "DELETE FROM upload_queue");
         let correction = app.correction(team, m.clone(), 1, 0).unwrap();
         app.save_correction(correction).unwrap();
         assert_eq!(queued(&dir), vec![(m, 0)]);

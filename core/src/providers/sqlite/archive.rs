@@ -52,6 +52,10 @@ use crate::{
     providers::sqlite::{
         Database, matches::replayed, not_found, rows::match_rows, sqlite, summary, teams::read_team,
     },
+    shapes::{
+        r#match::{MatchEntry, MatchStatus},
+        team::TeamEntry,
+    },
 };
 use chrono::{DateTime, Utc};
 use rusqlite::{
@@ -125,6 +129,30 @@ pub struct Imported {
     pub matches: usize,
     /// matches already here, left as they are
     pub matches_here: usize,
+}
+
+impl Imported {
+    /// What to tell of the import, a line each: the matches of a team
+    /// added, those already here, what was here with other data (the local
+    /// kept); nothing when there's nothing to tell (a match added).
+    pub fn summary(&self, labels: &Labels) -> Option<String> {
+        let added = match self.kind {
+            Kind::Team => self.matches,
+            Kind::Match => 0,
+        };
+        let lines: Vec<String> = [
+            (labels.import_matches_added, added),
+            (labels.import_matches_here, self.matches_here),
+            (labels.import_teams_kept, self.teams.kept_local),
+            (labels.import_players_kept, self.persons.kept_local),
+            (labels.import_numbers_kept, self.members.kept_local),
+        ]
+        .into_iter()
+        .filter(|(_, count)| *count > 0)
+        .map(|(label, count)| format!("{label}: {count}"))
+        .collect();
+        (!lines.is_empty()).then(|| lines.join("\n"))
+    }
 }
 
 /// A row of a table, by the names of its columns.
@@ -453,9 +481,53 @@ pub fn manifest(archive: &[u8]) -> Option<Manifest> {
         .and_then(|(_, data)| serde_json::from_slice(&data).ok())
 }
 
+/// What an archive of the database holds, to show it before importing
+/// it.
+#[derive(Debug)]
+pub enum Preview {
+    Team(TeamEntry),
+    Match(Box<MatchPreview>),
+}
+
+/// The match of an archive as its team A sees it, with its status.
+#[derive(Debug)]
+pub struct MatchPreview {
+    pub team: TeamEntry,
+    pub entry: MatchEntry,
+    pub status: MatchStatus,
+}
+
+/// What the archive holds, read as the import would (the same checks):
+/// nothing is written here.
+pub fn preview(archive: &[u8], language: &Language) -> Result<Preview, AppError> {
+    let (manifest, staging) = staged(archive, language.labels())?;
+    let staged = Database::new(staging);
+    let missing = || not_found(&format!("{:?} {}", manifest.kind, manifest.id));
+    staged.read(|tx| match manifest.kind {
+        Kind::Team => read_team(tx, &manifest.id).map(Preview::Team),
+        Kind::Match => {
+            let rows = match_rows(tx, manifest.id)?.ok_or_else(missing)?;
+            let team = read_team(tx, &rows.row.team_a)?;
+            let (entry, status) = replayed(tx, &team, &manifest.id.to_string(), language)?;
+            Ok(Preview::Match(Box::new(MatchPreview {
+                team,
+                entry,
+                status,
+            })))
+        }
+    })
+}
+
 /// Adds what the archive holds that isn't here: see the module.
 pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Imported, AppError> {
-    let labels = language.labels();
+    let (manifest, mut staging) = staged(archive, language.labels())?;
+    merge_staged(db, &mut staging, manifest.kind, manifest.id, language)
+}
+
+/// The rows of the archive in a database in memory with the schema of
+/// today, loaded with the schema of the archive and migrated: see the
+/// module.
+fn staged(archive: &[u8], labels: &Labels) -> Result<(Manifest, Connection), AppError> {
     let files = unzip(archive).map_err(|e| invalid(labels, e))?;
     let file = |name: &str| {
         files
@@ -477,7 +549,7 @@ pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Impo
     let mut staging = db::open_in_memory_with(MIGRATIONS.get(..schema).unwrap_or(MIGRATIONS))?;
     load(&staging, &files, labels)?;
     db::migrate(&mut staging, MIGRATIONS)?;
-    merge_staged(db, &mut staging, manifest.kind, manifest.id, language)
+    Ok((manifest, staging))
 }
 
 /// Adds what `staging` holds that isn't here, as an archive of `kind` of

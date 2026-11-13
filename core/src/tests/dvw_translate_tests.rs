@@ -1851,4 +1851,256 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             assert_eq!(p.queued().len(), 2);
         }
     }
+
+    /// Saving an import into the database (TODO/001 step 17): the ids of
+    /// the matches are UUIDs, the same match is told by where the files
+    /// would keep it (opponent and day) or kept it (`legacy_id`).
+    mod saving_in_the_database {
+        use super::*;
+        use crate::{
+            analytics::finished::FinishedMatches,
+            dvw::import::{MatchPlan, TeamChoice, TeamPlan, match_exists, save_import},
+            errors::{AppError, MatchError},
+            localization::Language,
+            providers::{
+                match_reader::MatchReader,
+                sqlite::{
+                    Database,
+                    matches::{SqliteMatchReader, SqliteMatchWriter},
+                    sets::SqliteSetWriter,
+                    teams::{SqliteTeamReader, SqliteTeamWriter},
+                },
+                team_reader::TeamReader,
+            },
+            shapes::r#match::{MatchEntry, MatchSource},
+        };
+        use std::sync::Mutex;
+
+        #[derive(Default)]
+        struct Queued(Mutex<Vec<(Uuid, String)>>);
+
+        #[async_trait::async_trait]
+        impl FinishedMatches for Queued {
+            async fn finished(&self, team_id: Uuid, match_id: String) {
+                if let Ok(mut queued) = self.0.lock() {
+                    queued.push((team_id, match_id));
+                }
+            }
+        }
+
+        struct Providers {
+            db: Database,
+            team_reader: SqliteTeamReader,
+            team_writer: SqliteTeamWriter,
+            match_reader: SqliteMatchReader,
+            match_writer: SqliteMatchWriter,
+            set_writer: SqliteSetWriter,
+            queued: Queued,
+        }
+
+        impl Providers {
+            fn new() -> Self {
+                let db = Database::new(crate::db::open_in_memory().expect("a database"));
+                Self {
+                    team_reader: SqliteTeamReader::new(db.clone()),
+                    team_writer: SqliteTeamWriter::new(db.clone()),
+                    match_reader: SqliteMatchReader::new(db.clone(), Language::default()),
+                    match_writer: SqliteMatchWriter::new(db.clone()),
+                    set_writer: SqliteSetWriter::new(db.clone(), Language::default()),
+                    queued: Queued::default(),
+                    db,
+                }
+            }
+
+            async fn save(
+                &self,
+                team: &TeamPlan,
+                plan: &MatchPlan,
+                overwrite: bool,
+            ) -> Result<MatchEntry, AppError> {
+                save_import(
+                    team,
+                    plan,
+                    overwrite,
+                    &self.team_writer,
+                    &self.match_reader,
+                    &self.match_writer,
+                    &self.set_writer,
+                    &self.queued,
+                )
+                .await
+            }
+
+            fn queued(&self) -> Vec<(Uuid, String)> {
+                self.queued.0.lock().map(|q| q.clone()).unwrap_or_default()
+            }
+
+            fn matches(&self) -> i64 {
+                self.sql("SELECT count(*) FROM matches WHERE deleted = 0")
+            }
+
+            fn sql(&self, sql: &str) -> i64 {
+                self.db
+                    .read(|tx| Ok(tx.query_row(sql, [], |r| r.get(0)).expect("a row")))
+                    .expect("read")
+            }
+
+            fn execute(&self, sql: &str) {
+                self.db
+                    .write(|tx| Ok(tx.execute(sql, []).expect("written")))
+                    .expect("written");
+            }
+
+            async fn team(&self, id: &Uuid) -> crate::shapes::team::TeamEntry {
+                self.team_reader.read_single(id).await.expect("the team")
+            }
+        }
+
+        fn new_team() -> TeamChoice<'static> {
+            TeamChoice::New {
+                classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
+                gender: Some(crate::shapes::enums::GenderEnum::Women),
+                country: crate::shapes::country::CountryCode::parse("AT"),
+            }
+        }
+
+        fn five_sets() -> File {
+            File::new()
+                .finished()
+                .next_set()
+                .lost()
+                .next_set()
+                .finished()
+                .next_set()
+                .lost()
+                .next_set()
+                .finished()
+        }
+
+        /// The same file again: told as saved, refused unless confirmed,
+        /// nothing saved twice.
+        #[tokio::test]
+        async fn the_same_file_again_is_saved_already() {
+            let p = Providers::new();
+            let text = three_sets_won().text();
+            let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
+            assert!(
+                !match_exists(&plan, &p.match_reader)
+                    .await
+                    .expect("an answer")
+            );
+            let saved = p.save(&team, &plan, false).await.expect("saved");
+            assert!(Uuid::parse_str(&saved.id).is_ok(), "{}", saved.id);
+            assert_ne!(saved.id, plan.entry.id);
+            let saved_team = p.team(&team.team.id).await;
+            let (again, plan) =
+                planned_for(&text, Side::Home, TeamChoice::Existing(&saved_team)).expect("a match");
+            assert!(
+                match_exists(&plan, &p.match_reader)
+                    .await
+                    .expect("an answer")
+            );
+            assert!(matches!(
+                p.save(&again, &plan, false).await,
+                Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
+            ));
+            assert_eq!(p.matches(), 1);
+            assert_eq!(p.queued(), vec![(team.team.id, saved.id)]);
+        }
+
+        /// Confirmed: the saved match takes the import, the same UUID, its
+        /// sets beyond the imported ones removed.
+        #[tokio::test]
+        async fn a_match_overwritten_when_confirmed_keeps_its_id() {
+            let p = Providers::new();
+            let (team, five) =
+                planned_for(&five_sets().text(), Side::Home, new_team()).expect("a match");
+            let saved = p.save(&team, &five, false).await.expect("saved");
+            let saved_team = p.team(&team.team.id).await;
+            let (again, three) = planned_for(
+                &three_sets_won().text(),
+                Side::Home,
+                TeamChoice::Existing(&saved_team),
+            )
+            .expect("a match");
+            let overwritten = p.save(&again, &three, true).await.expect("overwritten");
+            assert_eq!(overwritten.id, saved.id);
+            assert_eq!(p.matches(), 1);
+            let read = p
+                .match_reader
+                .read_single(&p.team(&team.team.id).await, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.sets.len(), 3);
+            let status = read.get_status().expect("a status");
+            assert_eq!((status.us_wins, status.them_wins), (3, 0));
+            assert_eq!(read.source, MatchSource::Dvw);
+            assert_eq!(p.sql("SELECT count(*) FROM sets WHERE deleted = 0"), 3);
+            assert_eq!(
+                p.queued(),
+                vec![(team.team.id, saved.id.clone()), (team.team.id, saved.id)]
+            );
+        }
+
+        /// A match moved from the files keeps where it was (`legacy_id`):
+        /// the same, also when its opponent was renamed since; removed, it
+        /// isn't there.
+        #[tokio::test]
+        async fn a_match_is_found_where_the_files_kept_it() {
+            let p = Providers::new();
+            let text = three_sets_won().text();
+            let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
+            let saved = p.save(&team, &plan, false).await.expect("saved");
+            p.execute(&format!(
+                "UPDATE matches SET team_b_name = 'Renamed', legacy_id = '{}',
+                     legacy_team = team_a WHERE id = '{}'",
+                plan.entry.id, saved.id
+            ));
+            let saved_team = p.team(&team.team.id).await;
+            assert_eq!(
+                p.match_reader
+                    .saved_as(&saved_team, &plan.entry.id)
+                    .await
+                    .expect("an answer"),
+                Some(saved.id.clone())
+            );
+            // in another folder, renamed: no longer the same
+            p.execute("UPDATE matches SET legacy_id = 'elsewhere'");
+            assert_eq!(
+                p.match_reader
+                    .saved_as(&saved_team, &plan.entry.id)
+                    .await
+                    .expect("an answer"),
+                None
+            );
+            p.execute("UPDATE matches SET team_b_name = 'Visiting'");
+            assert_eq!(
+                p.match_reader
+                    .saved_as(&saved_team, &plan.entry.id)
+                    .await
+                    .expect("an answer"),
+                Some(saved.id.clone())
+            );
+            // of another team: not this one's
+            let other = crate::shapes::team::TeamEntry {
+                id: Uuid::new_v4(),
+                ..saved_team.clone()
+            };
+            assert_eq!(
+                p.match_reader
+                    .saved_as(&other, &plan.entry.id)
+                    .await
+                    .expect("an answer"),
+                None
+            );
+            p.execute("UPDATE matches SET deleted = 1");
+            assert_eq!(
+                p.match_reader
+                    .saved_as(&saved_team, &plan.entry.id)
+                    .await
+                    .expect("an answer"),
+                None
+            );
+        }
+    }
 }

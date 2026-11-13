@@ -912,12 +912,12 @@ mod tests {
             importing.key(key!(enter)),
             transfer::Outcome::Import
         ));
-        let Ok(Imported::Team(imported)) = importing.import(&other) else {
+        let Ok(Imported::Team(imported, None)) = importing.import(&other) else {
             unreachable!("the team is imported")
         };
         assert_eq!(imported, team_id);
         let importing = Importing::new(&other, game, None).unwrap();
-        let Ok(Imported::Match(into, m)) = importing.import(&other) else {
+        let Ok(Imported::Match(into, m, None)) = importing.import(&other) else {
             unreachable!("the match is imported")
         };
         assert_eq!((into, m), (team_id.clone(), match_id));

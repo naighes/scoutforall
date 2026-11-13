@@ -9,7 +9,6 @@ import androidx.compose.ui.test.performClick
 import io.github.naighes.scout4all.core.MatchListing
 import io.github.naighes.scout4all.core.TeamListing
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,19 +74,26 @@ class DeletionTest {
 
     @Test
     fun anUnreadableMatchDeletedFromTheList() {
-        val team = saveNationalTeam()
-        val folder = File(app.filesDir, "scout4all").resolve(team).resolve("not-a-match").apply { mkdirs() }
+        // a team of a version before the database, its match with a set
+        // this version doesn't replay (an ace after its end): moved into
+        // the database at the start, unreadable there
+        val team = "15695ad8-cfbc-418f-b7b1-0d3d9860e9be"
+        val legacy = javaClass.classLoader!!.getResource("legacy/v0.18.0/data/$team")!!
+        val folder = File(app.filesDir, "scout4all/$team")
+        File(legacy.toURI()).copyRecursively(folder)
+        folder.resolve("2025-10-25_visiting/set_1.csv")
+            .appendText("2025-10-24T22:01:00Z,S,b5252927-15b5-4df3-8b6b-a6138dbd08af,#,,F,\n")
         rule.setContent {
             Scout4AllTheme {
                 TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
             }
         }
-        rule.waitForText("Alessia Orro")
+        rule.waitForText("Name1 Surname1")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performClick()
         rule.waitForText(string(R.string.unreadable_match))
         rule.onNodeWithText(string(R.string.unreadable_match)).performClick()
         rule.onNodeWithText(string(R.string.delete_forever)).performClick()
         rule.waitForText(string(R.string.no_matches))
-        assertTrue(!folder.exists())
+        assertEquals(emptyList<MatchListing>(), core { it.matches(team) })
     }
 }

@@ -20,7 +20,7 @@ use scout4all_core::{
         technique::{SetTypeEnum, TechniqueEnum},
     },
     trend::Series,
-    video::{EventRef, StoredProfile, read_profile},
+    video::{EventRef, StoredProfile, VideoProfiles},
 };
 use std::collections::HashMap;
 
@@ -222,9 +222,7 @@ impl Scout4All {
             if events.is_empty() {
                 continue;
             }
-            let profile = self
-                .runtime
-                .block_on(read_profile(&*self.store, &m.team.id, &m.id));
+            let profile = self.runtime.block_on(self.videos.read(&m.team.id, &m.id));
             found.push(MatchClips {
                 match_id: m.id.clone(),
                 opponent: m.opponent.clone(),

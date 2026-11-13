@@ -29,4 +29,13 @@ pub trait MatchReader {
     #[allow(dead_code)]
     async fn read_single(&self, team: &TeamEntry, match_id: &str) -> Result<MatchEntry, AppError>;
     async fn exists(&self, team: &TeamEntry, match_id: &str) -> Result<bool, AppError>;
+    /// The id of the match of the team saved where the files would keep
+    /// it, `file_id` (`MatchEntry::id_of`, opponent and day): an import
+    /// telling the same match again (DataVolley). The files keep it there.
+    async fn saved_as(&self, team: &TeamEntry, file_id: &str) -> Result<Option<String>, AppError> {
+        Ok(self
+            .exists(team, file_id)
+            .await?
+            .then(|| file_id.to_string()))
+    }
 }

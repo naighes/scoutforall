@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
                 }
                 PanicDialog(application as Scout4AllApplication)
                 CrashDialog(application as Scout4AllApplication)
+                StartupNoticeDialog(application as Scout4AllApplication)
             }
         }
     }
@@ -383,6 +384,20 @@ private fun CrashDialog(app: Scout4AllApplication) {
                 context.report(title, body)
                 app.forgetCrash()
             }) { Text(stringResource(R.string.report)) }
+        },
+    )
+}
+
+/** What the start has to tell (the data of a version before not all moved
+ * into the database), once. */
+@Composable
+private fun StartupNoticeDialog(app: Scout4AllApplication) {
+    val notice = app.startupNotice.collectAsState().value ?: return
+    AlertDialog(
+        onDismissRequest = app::forgetStartupNotice,
+        text = { Text(notice) },
+        confirmButton = {
+            TextButton(onClick = app::forgetStartupNotice) { Text(stringResource(android.R.string.ok)) }
         },
     )
 }

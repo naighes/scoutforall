@@ -444,7 +444,18 @@ pub async fn match_exists(
     plan: &MatchPlan,
     match_reader: &(impl MatchReader + Sync + ?Sized),
 ) -> Result<bool, AppError> {
-    match_reader.exists(&plan.entry.team, &plan.entry.id).await
+    saved_as(plan, match_reader).await.map(|id| id.is_some())
+}
+
+/// The id of the match saved already that the import tells again, if any
+/// (`MatchReader::saved_as`).
+async fn saved_as(
+    plan: &MatchPlan,
+    match_reader: &(impl MatchReader + Sync + ?Sized),
+) -> Result<Option<String>, AppError> {
+    match_reader
+        .saved_as(&plan.entry.team, &plan.entry.id)
+        .await
 }
 
 /// Saves the import: the team with its new players, then the match and
@@ -462,18 +473,21 @@ pub async fn save_import(
     set_writer: &(impl SetWriter + Sync + ?Sized),
     finished: &(impl FinishedMatches + ?Sized),
 ) -> Result<MatchEntry, AppError> {
-    let entry = &plan.entry;
-    let exists = match_exists(plan, match_reader).await?;
-    if exists && !overwrite {
+    let saved = saved_as(plan, match_reader).await?;
+    if saved.is_some() && !overwrite {
         return Err(AppError::Match(MatchError::MatchAlreadyExists(
-            entry.id.clone(),
+            plan.entry.id.clone(),
         )));
     }
     let saved_team = team_writer
         .save(TeamInput::Existing(team.team.clone()))
         .await?;
-    let m = match exists {
-        true => {
+    let m = match saved {
+        Some(id) => {
+            let entry = &MatchEntry {
+                id,
+                ..plan.entry.clone()
+            };
             match_writer
                 .update(
                     entry,
@@ -490,7 +504,8 @@ pub async fn save_import(
                 ..entry.clone()
             }
         }
-        false => {
+        None => {
+            let entry = &plan.entry;
             let created = match_writer
                 .create(
                     &saved_team,
@@ -508,14 +523,14 @@ pub async fn save_import(
         }
     };
     for set_number in 1..=5u8 {
-        match entry.sets.iter().find(|s| s.set_number == set_number) {
+        match plan.entry.sets.iter().find(|s| s.set_number == set_number) {
             Some(set) => set_writer.update(&m, set).await?,
             None => set_writer.remove(&m, set_number).await?,
         }
     }
     finished.finished(saved_team.id, m.id.clone()).await;
     Ok(MatchEntry {
-        sets: entry.sets.clone(),
+        sets: plan.entry.sets.clone(),
         ..m
     })
 }

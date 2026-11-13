@@ -181,6 +181,41 @@ impl MatchReader for SqliteMatchReader {
             .map(|(entry, _)| entry)
     }
 
+    /// A match of team A `team` not removed that was in that folder
+    /// (`legacy_id`, migrated or imported from an archive of then), or
+    /// whose opponent and day make that id now, the first by start.
+    async fn saved_as(&self, team: &TeamEntry, file_id: &str) -> Result<Option<String>, AppError> {
+        self.db.read(|tx| {
+            let mut statement = tx
+                .prepare(
+                    "SELECT m.id, m.legacy_id = ?2 AND m.legacy_team = ?1,
+                            coalesce(m.team_b_name, b.name), m.start
+                     FROM matches m LEFT JOIN teams b ON b.id = m.team_b
+                     WHERE m.team_a = ?1 AND m.deleted = 0
+                     ORDER BY m.start, m.id",
+                )
+                .map_err(sqlite)?;
+            let rows = statement
+                .query_map(params![Sql(team.id), file_id], |row| {
+                    Ok((
+                        row.get::<_, Sql<Uuid>>(0)?.0,
+                        row.get::<_, Option<bool>>(1)?.unwrap_or(false),
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Sql<DateTime<FixedOffset>>>(3)?.0,
+                    ))
+                })
+                .map_err(sqlite)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sqlite)?;
+            let was_there = rows.iter().find(|(_, legacy, _, _)| *legacy);
+            let same_now = || {
+                rows.iter()
+                    .find(|(_, _, opponent, start)| MatchEntry::id_of(opponent, start) == file_id)
+            };
+            Ok(was_there.or_else(same_now).map(|(id, ..)| id.to_string()))
+        })
+    }
+
     async fn exists(&self, team: &TeamEntry, match_id: &str) -> Result<bool, AppError> {
         let Ok(id) = match_uuid(match_id) else {
             return Ok(false);

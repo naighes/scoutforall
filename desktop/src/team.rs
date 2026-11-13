@@ -724,19 +724,11 @@ mod tests {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
-        use scout4all_core::shapes::{
-            country::CountryCode,
-            enums::{GenderEnum, TeamClassificationEnum},
-        };
-        let form = scout4all_core::team_form::TeamForm {
-            name: "Cortona".into(),
-            classification: Some(TeamClassificationEnum::Regional),
-            gender: Some(GenderEnum::Women),
-            country: CountryCode::known("IT"),
-            year: "2026".into(),
-        };
-        let team_id = core.save_team(None, form).unwrap();
-        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        // the example team, with players enough for a match
+        let team_id = core.tutorial_team().unwrap();
+        let date = chrono::DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").unwrap();
+        let m = core.tutorial_match_form(team_id.clone(), date).unwrap();
+        core.save_match(team_id.clone(), None, m).unwrap();
         let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
         assert_eq!(team.matches.len(), 1);
         team.key(s, key!(right));
@@ -759,12 +751,11 @@ mod tests {
         let Mode::Delete(deletion) = &team.mode else {
             unreachable!("the team to delete")
         };
-        assert!(team.deletion_text(s, deletion).contains("Cortona"));
+        assert!(team.deletion_text(s, deletion).contains("Italia"));
         team.update(s, Message::Cancel);
         assert!(matches!(team.mode, Mode::Browse));
         team.update(s, Message::DeleteTeam);
         assert!(matches!(team.update(s, Message::Confirm), Outcome::Back));
-        assert!(!dir.path().join(&team_id).exists());
         assert!(core.home().unwrap().teams.is_empty());
     }
 

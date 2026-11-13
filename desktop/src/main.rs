@@ -72,6 +72,24 @@ fn data_dir() -> Option<PathBuf> {
         .or_else(|| dirs::home_dir().map(|home| home.join(".scout4all")))
 }
 
+/// A new empty folder for the data when theirs can't be opened, gone at
+/// the next start of the system.
+fn empty_data_dir() -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!("scout4all-{}-{stamp}", std::process::id()))
+}
+
+/// What was done, then what to tell of it, if anything, below.
+fn told(done: &str, summary: Option<String>) -> String {
+    match summary {
+        Some(summary) => format!("{done}\n{summary}"),
+        None => done.to_string(),
+    }
+}
+
 /// What the TUI keeps in `config.json` that the prototype reads: the
 /// language and the keys.
 /// The language, the keys and the theme chosen (dark or light; none:
@@ -309,10 +327,17 @@ impl App {
         let strings = strings::strings(language);
         let core = Scout4All::new(dir.to_string_lossy().into_owned(), language.to_string());
         let (core, error) = match core {
-            Ok(core) => (core, None),
-            // an empty folder in place of the data: the error tells why
+            // what the start has to tell: the data folder of the versions
+            // before not all moved into the database
+            Ok(core) => {
+                let notice = core.startup_notice();
+                (core, notice)
+            }
+            // a new empty folder in place of the data (never one with
+            // something in it: the start moves it into a database): the
+            // error tells why
             Err(e) => match Scout4All::new(
-                std::env::temp_dir().to_string_lossy().into_owned(),
+                empty_data_dir().to_string_lossy().into_owned(),
                 language.to_string(),
             ) {
                 Ok(core) => (core, Some(e.to_string())),
@@ -651,12 +676,12 @@ impl App {
         self.importing = None;
         match imported {
             None => Go::Stay,
-            Some(Ok(transfer::Imported::Team(team))) => {
-                self.notice = Some(s.team_imported.to_string());
+            Some(Ok(transfer::Imported::Team(team, summary))) => {
+                self.notice = Some(told(s.team_imported, summary));
                 Go::Team(team)
             }
-            Some(Ok(transfer::Imported::Match(team, m))) => {
-                self.notice = Some(s.match_imported.to_string());
+            Some(Ok(transfer::Imported::Match(team, m, summary))) => {
+                self.notice = Some(told(s.match_imported, summary));
                 Go::Match(team, m)
             }
             Some(Err(e)) => {

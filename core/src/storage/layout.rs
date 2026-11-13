@@ -8,7 +8,13 @@
 //! config.json
 //! upload_queue.json
 //! .index.json                         derived, see `MATCH_INDEX`
+//! scout4all.db                        the database (TODO/001), and
+//!                                     its -wal and -shm
 //! ```
+//!
+//! Since the database the folders of the teams are only what the
+//! versions before it wrote, moved into it at the start
+//! (`legacy::migrate`).
 
 use crate::constants::{
     MATCH_DESCRIPTOR_FILE_NAME, TEAM_DESCRIPTOR_FILE_NAME, UPLOAD_QUEUE_FILE_NAME,
@@ -30,6 +36,18 @@ pub const UNREADABLE_CONFIG: &str = "config.json.unreadable";
 /// matches, rebuilt when missing, never backed up nor exported. Hidden, as
 /// what `Store::list` leaves out: not a team, nor data.
 pub const MATCH_INDEX: &str = ".index.json";
+
+/// The database of the apps (TODO/001), with its files beside it
+/// (`-wal`, `-shm`, `-journal`): not a team, nor a file of the versions
+/// before it.
+pub const DATABASE: &str = "scout4all.db";
+
+/// Whether the blob `name` of the root is the database or one of its
+/// files.
+pub fn is_database_file(name: &str) -> bool {
+    name.strip_prefix(DATABASE)
+        .is_some_and(|rest| matches!(rest, "" | "-wal" | "-shm" | "-journal"))
+}
 
 /// The matches waiting to be uploaded.
 pub const UPLOAD_QUEUE: &str = UPLOAD_QUEUE_FILE_NAME;

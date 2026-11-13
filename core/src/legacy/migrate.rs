@@ -42,7 +42,7 @@ use crate::{
     },
     errors::{AppError, IOError},
     legacy::{
-        folder::{LegacyTeam, NotRead, read_folder, read_video},
+        folder::{LegacyTeam, NotRead, read_folder, read_video, team_folders},
         format::set_file,
         rows::{FolderRows, folder_rows, video_rows},
     },
@@ -94,6 +94,33 @@ pub struct Migrated {
     pub already: usize,
     /// the folders left in the data folder, with why
     pub left: Vec<NotRead>,
+}
+
+impl Migrated {
+    /// What to tell at the start: what stayed in the data folder, a line
+    /// each with why, and the backup when one was taken; nothing when all
+    /// moved.
+    pub fn notice(&self, labels: &Labels) -> Option<String> {
+        let left = self
+            .left
+            .iter()
+            .map(|n| format!("- {}: {}", n.folder, n.reason));
+        let backup = self.backup.iter().map(|path| {
+            labels
+                .migration_backup
+                .replace("{}", &path.display().to_string())
+        });
+        match self.left.is_empty() {
+            true => None,
+            false => Some(
+                std::iter::once(labels.migration_left.to_string())
+                    .chain(left)
+                    .chain(backup)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+        }
+    }
 }
 
 /// What's done with a match of the folder; then its folder is removed if
@@ -731,10 +758,23 @@ fn free_path(backup: &Backup, date: NaiveDate) -> PathBuf {
         .unwrap_or_else(|| backup.dir.join(name(0)))
 }
 
-/// Every blob of the store (the hidden ones aren't data), by key.
+/// Every blob of the data folder, by key: the hidden ones aren't data,
+/// the database isn't what's moved (nor can it be read whole while open),
+/// a folder of the root that isn't a team isn't of the app (the
+/// recordings of the desktop, when it keeps them there).
 async fn all_blobs(store: &dyn Store) -> Result<Vec<(String, Vec<u8>)>, AppError> {
     let mut blobs = Vec::new();
-    let mut folders = vec![layout::ROOT.to_string()];
+    let mut folders = team_folders(store).await?;
+    for entry in store.list(layout::ROOT).await? {
+        if let StoreEntry::Blob(name) = entry
+            && !layout::is_database_file(&name)
+        {
+            let data = store.read(&name).await?.ok_or_else(|| {
+                AppError::IO(IOError::Msg(format!("{name}: gone while backed up")))
+            })?;
+            blobs.push((name, data));
+        }
+    }
     while let Some(folder) = folders.pop() {
         for entry in store.list(&folder).await? {
             match entry {
