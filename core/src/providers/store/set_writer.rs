@@ -139,7 +139,7 @@ fn has_short_rows(csv: &[u8]) -> Result<bool, AppError> {
 }
 
 /// The rows of the events, as saved.
-fn events_csv(events: &[EventEntry]) -> Result<Vec<u8>, AppError> {
+pub(crate) fn events_csv(events: &[EventEntry]) -> Result<Vec<u8>, AppError> {
     let mut writer = WriterBuilder::new().has_headers(false).from_writer(vec![]);
     events
         .iter()

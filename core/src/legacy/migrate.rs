@@ -21,9 +21,15 @@
 //!   video of a match, TODO/001 step 15): the match moves, its folder
 //!   stays until those files move too.
 //! - The settings (`config.json`, `clips.json`) aren't data of the teams:
-//!   they stay. The queue of the uploads too, for now (step 14).
+//!   they stay.
+//! - The queue of the uploads (`upload_queue.json`) moves after the
+//!   matches, in its order, after the queue of the database: a match
+//!   moved by where it was; a match still in its folder stays in the file,
+//!   for the next run; the others (removed, gone) leave it, as the upload
+//!   would drop them.
 
 use crate::{
+    analytics::queue::UploadQueue,
     constants::{MATCH_DESCRIPTOR_FILE_NAME, TEAM_DESCRIPTOR_FILE_NAME},
     domain::{
         LegacyId, Match,
@@ -38,16 +44,20 @@ use crate::{
     },
     localization::Labels,
     logging::logger::log_info,
-    providers::sqlite::{
-        Database, not_found,
-        rows::{insert_match, match_rows},
-        sqlite, summary,
+    providers::{
+        sqlite::{
+            Database, not_found,
+            rows::{insert_match, match_rows},
+            sqlite, summary,
+        },
+        store::write_json,
     },
     shapes::set::SetEntry,
     storage::{Store, StoreEntry, layout},
 };
 use chrono::{Local, NaiveDate};
 use rusqlite::{OptionalExtension, Transaction, params};
+use serde_json::from_slice;
 use std::{
     io::{Cursor, Read, Write},
     path::PathBuf,
@@ -178,7 +188,8 @@ pub async fn migrate(
         .collect();
     let empty_teams = teams_to_remove(store, &teams, &going).await;
     if to_write.is_empty() && steps.is_empty() && empty_teams.is_empty() {
-        // a run stopped before it removed the index
+        // a run stopped before it moved the queue or removed the index
+        move_queue(store, db, &mut left).await;
         remove_index(store, &mut left).await;
         return Ok(Migrated {
             left,
@@ -229,6 +240,7 @@ pub async fn migrate(
             });
         }
     }
+    move_queue(store, db, &mut left).await;
     remove_index(store, &mut left).await;
     log_info(&format!(
         "data folder migrated: {} teams, {} matches, {} already there, {} left",
@@ -238,6 +250,81 @@ pub async fn migrate(
         left.len()
     ));
     Ok(Migrated { left, ..migrated })
+}
+
+/// Moves the queue of the uploads into the database: see the module. What
+/// fails is told in `left`, the file stays.
+async fn move_queue(store: &dyn Store, db: &Database, left: &mut Vec<NotRead>) {
+    if let Err(e) = try_move_queue(store, db).await {
+        left.push(NotRead {
+            folder: layout::UPLOAD_QUEUE.to_string(),
+            reason: e.to_string(),
+        });
+    }
+}
+
+async fn try_move_queue(store: &dyn Store, db: &Database) -> Result<(), AppError> {
+    let Some(saved) = store.read(layout::UPLOAD_QUEUE).await? else {
+        return Ok(());
+    };
+    let queue: UploadQueue = from_slice(&saved).map_err(|e| AppError::IO(IOError::from(e)))?;
+    let found = db.read(|tx| {
+        queue
+            .pending()
+            .iter()
+            .map(|p| {
+                already(
+                    tx,
+                    &LegacyId {
+                        id: p.match_id.clone(),
+                        team: p.team_id,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+    })?;
+    let mut moving = Vec::new();
+    let mut staying = Vec::new();
+    for (pending, found) in queue.pending().iter().zip(found) {
+        match found {
+            Some((id, false)) => moving.push((id, pending)),
+            Some((_, true)) => log_info(&format!(
+                "upload of match {} dropped: removed",
+                pending.match_id
+            )),
+            None => match store
+                .exists(&layout::match_descriptor(
+                    &pending.team_id,
+                    &pending.match_id,
+                ))
+                .await?
+            {
+                true => staying.push(pending.clone()),
+                false => log_info(&format!(
+                    "upload of match {} dropped: not found",
+                    pending.match_id
+                )),
+            },
+        }
+    }
+    db.write(|tx| {
+        moving.iter().try_for_each(|(id, p)| {
+            tx.execute(
+                "INSERT INTO upload_queue (match_id, position, queued_at, retry_count)
+                 VALUES (?1, (SELECT coalesce(max(position) + 1, 0) FROM upload_queue), ?2, ?3)
+                 ON CONFLICT (match_id) DO NOTHING",
+                params![Sql(*id), p.queued_at, p.retry_count],
+            )
+            .map(|_| ())
+            .map_err(sqlite)
+        })
+    })?;
+    match (staying.is_empty(), staying.len() == queue.pending().len()) {
+        (true, _) => store.remove(layout::UPLOAD_QUEUE).await,
+        // nothing moved: the file as it is
+        (false, true) => Ok(()),
+        (false, false) => write_json(store, layout::UPLOAD_QUEUE, &UploadQueue::of(staying)).await,
+    }
 }
 
 /// Removes the index of the matches of the files, if any: derived from

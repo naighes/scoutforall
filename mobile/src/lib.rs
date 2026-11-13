@@ -11,7 +11,7 @@ use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
         queue_manager::QueueManager,
-        upload::{UploadStep, upload_next, upload_url},
+        upload::{StoreUploads, UploadStep, upload_next, upload_url},
     },
     archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
@@ -4224,13 +4224,14 @@ impl Scout4All {
 
     fn upload_pending_to(&self, url: &str) -> Uploads {
         loop {
-            let step = self.runtime.block_on(upload_next(
-                &*self.store,
-                &self.team_reader,
-                &self.match_reader,
-                &self.queue,
-                url,
-            ));
+            let source = StoreUploads {
+                store: &*self.store,
+                team_reader: &self.team_reader,
+                match_reader: &self.match_reader,
+            };
+            let step = self
+                .runtime
+                .block_on(upload_next(&source, &self.queue, url));
             // each sent or dropped match leaves the queue: it ends
             match step {
                 Ok(UploadStep::Uploaded | UploadStep::Dropped) => continue,

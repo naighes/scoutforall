@@ -210,6 +210,7 @@ mod tests {
             ("sets", "SELECT count(*) FROM sets"),
             ("set_lineups", "SELECT count(*) FROM set_lineups"),
             ("events", "SELECT count(*) FROM events"),
+            ("upload_queue", "SELECT count(*) FROM upload_queue"),
         ]
         .into_iter()
         .map(|(table, sql)| (table, count(db, sql)))
@@ -270,13 +271,13 @@ mod tests {
                 .collect();
             assert_eq!(zipped, before, "{version}");
 
-            // what's left: the settings and the queue, and the match with
-            // the video, whole, in its team
+            // what's left: the settings (the queue moves), and the match
+            // with the video, whole, in its team
             let after = data_files(&device.data());
             let kept: BTreeMap<String, Vec<u8>> = before
                 .iter()
                 .filter(|(key, _)| {
-                    !key.contains('/')
+                    (!key.contains('/') && key.as_str() != "upload_queue.json")
                         || (video && key.contains(VIDEO))
                         || (video
                             && key.ends_with("/team.json")
@@ -855,6 +856,14 @@ mod tests {
         for left in &migrated.left {
             println!("  left {}: {}", left.folder, left.reason);
         }
+        println!(
+            "  {} uploads queued in the database, the file of the queue {}",
+            count(&db, "SELECT count(*) FROM upload_queue"),
+            match data.join("upload_queue.json").exists() {
+                true => "left",
+                false => "gone",
+            }
+        );
         let read = in_database(&db).await;
         assert_eq!(read, expected);
         assert_eq!(scores(&read), scores(&expected));

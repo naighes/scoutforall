@@ -23,6 +23,7 @@ pub(crate) mod rows;
 pub mod sets;
 pub(crate) mod summary;
 pub mod teams;
+pub mod upload;
 
 use crate::errors::{AppError, IOError};
 use rusqlite::{Connection, Transaction, TransactionBehavior};

@@ -51,6 +51,7 @@ mod situation_tests;
 mod snapshot_tests;
 mod sqlite_archive_tests;
 mod sqlite_tests;
+mod sqlite_upload_tests;
 mod stats_tests;
 mod storage_tests;
 mod substitution_tests;

@@ -2,11 +2,11 @@
 //! stands for it, signing the upload and taking the archive.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::{
         analytics::{
             queue_manager::QueueManager,
-            upload::{UploadStep, upload_next},
+            upload::{StoreUploads, UploadStep, upload_next},
         },
         archive::{import_match, import_team},
         localization::Language,
@@ -49,19 +49,19 @@ mod tests {
     /// The API: `POST /sign` answers with the signed URL of the archive,
     /// where `PUT` takes it, and the keys of the match when asked, unless
     /// `old` (before v0.12). It fails while `down`.
-    struct FakeApi {
-        url: String,
+    pub(crate) struct FakeApi {
+        pub(crate) url: String,
         down: Arc<AtomicBool>,
         old: Arc<AtomicBool>,
         /// the bodies of the requests of a signed URL
         signs: Arc<Mutex<Vec<serde_json::Value>>>,
         /// the method and the path of each request, and the archives put
         requests: Arc<Mutex<Vec<String>>>,
-        archives: Arc<Mutex<Vec<Vec<u8>>>>,
+        pub(crate) archives: Arc<Mutex<Vec<Vec<u8>>>>,
     }
 
     impl FakeApi {
-        async fn start() -> Self {
+        pub(crate) async fn start() -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let api = FakeApi {
@@ -90,7 +90,7 @@ mod tests {
             api
         }
 
-        fn requests(&self) -> Vec<String> {
+        pub(crate) fn requests(&self) -> Vec<String> {
             self.requests.lock().unwrap().clone()
         }
     }
@@ -263,15 +263,12 @@ mod tests {
         }
 
         async fn upload_next(&self, api: &FakeApi) -> UploadStep {
-            upload_next(
-                &*self.store,
-                &self.team_reader,
-                &self.match_reader,
-                &self.queue,
-                &api.url,
-            )
-            .await
-            .unwrap()
+            let source = StoreUploads {
+                store: &*self.store,
+                team_reader: &self.team_reader,
+                match_reader: &self.match_reader,
+            };
+            upload_next(&source, &self.queue, &api.url).await.unwrap()
         }
 
         async fn queued(&self) -> Vec<(String, u8)> {
