@@ -20,72 +20,13 @@ mod tests {
         },
         shapes::{r#match::MatchEntry, team::TeamEntry},
         storage::{Store, fs::FsStore, memory::MemoryStore},
-        tests::{EN, LEGACY_VERSIONS as VERSIONS, copy_dir, legacy_fixtures as fixtures},
+        tests::{
+            EN, LEGACY_VERSIONS as VERSIONS, LegacyScores as Scores, copy_dir,
+            legacy_fixtures as fixtures, legacy_scores as expected,
+        },
     };
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::sync::Arc;
     use tempfile::TempDir;
-
-    type Scores = BTreeMap<String, Vec<(u8, u8)>>;
-
-    /// The scores of the sets of every match, by match id, as the version
-    /// of the fixture scouted them (printed by its generator): the finished
-    /// match, the one in progress, the one without sets, then those of the
-    /// later versions (from DataVolley, on the video, of the U19).
-    fn expected(version: &str) -> Scores {
-        let (finished, in_progress, later): (_, _, &[(&str, &[(u8, u8)])]) = match version {
-            "v0.9.0" | "v0.10.1" => (
-                &[(13, 25), (21, 25), (21, 25)][..],
-                &[(24, 26), (3, 4)],
-                &[],
-            ),
-            "v0.11.0" => (
-                &[(13, 25), (17, 25), (26, 24), (16, 25)][..],
-                &[(20, 25), (1, 4)],
-                &[],
-            ),
-            "v0.12.0" => (
-                &[(22, 25), (15, 25), (15, 25)][..],
-                &[(14, 25), (1, 2)],
-                &[DVW],
-            ),
-            "v0.13.0" => (
-                &[(13, 25), (17, 25), (21, 25)][..],
-                &[(20, 25), (3, 1)],
-                &[DVW],
-            ),
-            "v0.15.0" => (
-                &[(13, 25), (17, 25), (21, 25)][..],
-                &[(20, 25), (3, 1)],
-                &[DVW, ("2025-11-08_pallavolo_prato", &[(19, 25), (3, 0)])],
-            ),
-            "v0.16.0" => (
-                &[(12, 25), (25, 27), (20, 25)][..],
-                &[(25, 20), (1, 1)],
-                &[DVW, ("2025-11-08_pallavolo_prato", &[(19, 25), (0, 2)])],
-            ),
-            _ => (
-                &[(12, 25), (25, 27), (20, 25)][..],
-                &[(25, 20), (1, 1)],
-                &[
-                    DVW,
-                    ("2025-11-08_pallavolo_prato", &[(19, 25), (0, 2)]),
-                    ("2025-11-15_rivali_pisa_u19", &[(15, 25)]),
-                ],
-            ),
-        };
-        [
-            ("2025-10-04_rivali_pisa", finished),
-            ("2025-10-11_polisportiva_lucca", in_progress),
-            ("2025-10-18_volley_siena", &[][..]),
-        ]
-        .iter()
-        .chain(later)
-        .map(|(id, scores)| (id.to_string(), scores.to_vec()))
-        .collect()
-    }
-
-    /// The match imported from DataVolley (`three_sets.dvw`).
-    const DVW: (&str, &[(u8, u8)]) = ("2025-10-25_visiting", &[(25, 0), (25, 0), (25, 0)]);
 
     struct Providers {
         team_reader: StoreTeamReader,

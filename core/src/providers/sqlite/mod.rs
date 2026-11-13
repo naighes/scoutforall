@@ -17,7 +17,7 @@
 
 pub mod matches;
 pub mod queue;
-mod rows;
+pub(crate) mod rows;
 pub mod sets;
 mod summary;
 pub mod teams;

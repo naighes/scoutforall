@@ -1,8 +1,9 @@
 use crate::{
-    errors::{AppError, IOError},
+    errors::AppError,
+    legacy::folder::read_team,
     localization::Language,
     logging::logger::log_error,
-    providers::{store::read_json, team_reader::TeamReader},
+    providers::team_reader::TeamReader,
     shapes::{
         listed::{Listed, Unreadable},
         team::TeamEntry,
@@ -26,13 +27,7 @@ impl StoreTeamReader {
 
     /// The team in the folder, named after its id.
     async fn map_entry(&self, folder: &str) -> Result<TeamEntry, AppError> {
-        let id = Uuid::parse_str(folder).map_err(|_| {
-            AppError::IO(IOError::Msg(
-                self.language.labels().invalid_team_folder_name.to_string(),
-            ))
-        })?;
-        let team: TeamEntry = read_json(&*self.store, &layout::team_descriptor(&id)).await?;
-        Ok(TeamEntry { id, ..team })
+        read_team(&*self.store, folder, self.language.labels()).await
     }
 }
 

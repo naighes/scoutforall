@@ -51,7 +51,8 @@ number 13 removed) and, scouted by its generator:
   which has players 1–8 of `Fixture Volley` with their ids (and a 14th of
   its own): the match has only those players, so both teams fit its
   archive (`teams_of_match`). The core never copies players by itself; the
-  case is there for the migration (one person per player entry, D5).
+  case is there for the migration: one person with a membership in each
+  team (`legacy::rows::team_rows`).
 
 The finished matches of v0.12.0+ are in `upload_queue.json`, as with the
 statistics allowed.

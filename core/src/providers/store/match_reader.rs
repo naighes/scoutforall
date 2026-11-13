@@ -3,16 +3,15 @@ use crate::{
     errors::{AppError, IOError, MatchError},
     localization::Language,
     logging::logger::log_error,
+    legacy::format::{fill_lineup_rules, read_descriptor},
     providers::{
         match_reader::MatchReader,
         set_reader::SetReader,
         store::match_index::{Indexed, MatchIndex, TeamIndex, fingerprint},
     },
     shapes::{
-        enums::LineupRulesEnum,
         listed::{Listed, Unreadable},
         r#match::{MatchEntry, MatchStatus, MatchSummary},
-        set::SetEntry,
         team::TeamEntry,
     },
     storage::{Store, StoreEntry, layout},
@@ -20,7 +19,6 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
 use futures::future::join_all;
-use serde_json::{Value, from_slice, from_value};
 use std::{cmp::Ordering, sync::Arc};
 
 pub struct StoreMatchReader {
@@ -224,27 +222,5 @@ pub(crate) fn recent_first<T>(
         (Ok(_), Err(_)) => Ordering::Less,
         (Err(_), Ok(_)) => Ordering::Greater,
         (Err(a), Err(b)) => a.id.cmp(&b.id),
-    }
-}
-
-/// The match of a descriptor, as saved in its folder or in an archive,
-/// without its sets; and the lineup rules of its sets saved without them:
-/// only matches created since v0.3.0 save the substitutions, and v0.3.0
-/// didn't save the rules of its sets, but scouted them with V2.
-pub(crate) fn read_descriptor(
-    content: &[u8],
-) -> Result<(MatchEntry, Option<LineupRulesEnum>), AppError> {
-    let descriptor: Value = from_slice(content).map_err(|e| AppError::IO(IOError::from(e)))?;
-    let rules = descriptor
-        .get("max_substitutions")
-        .map(|_| LineupRulesEnum::V2);
-    let entry: MatchEntry = from_value(descriptor).map_err(|e| AppError::IO(IOError::from(e)))?;
-    Ok((entry, rules))
-}
-
-/// The sets saved without their rules get `rules`, from `read_descriptor`.
-pub(crate) fn fill_lineup_rules(sets: &mut [SetEntry], rules: Option<LineupRulesEnum>) {
-    for set in sets.iter_mut() {
-        set.lineup_rules = set.lineup_rules.or(rules);
     }
 }

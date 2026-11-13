@@ -13,6 +13,7 @@ pub mod dvw;
 pub mod errors;
 pub mod event_edit;
 pub mod example;
+pub mod legacy;
 pub mod localization;
 pub mod logging;
 pub mod match_form;
