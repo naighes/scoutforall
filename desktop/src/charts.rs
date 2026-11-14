@@ -1,11 +1,11 @@
 //! The trend of a figure set by set, as the stats sheet of the app draws
 //! it: a line per set from its first rally, a rally a column (the same
 //! columns as the points of the sets under it), the match so far dashed
-//! across, the band of the level shaded. Drawn with the canvas of iced
+//! across, its direct errors a red line each. Drawn with the canvas of iced
 //! (chosen over iced_aksel and plotters-iced, 027).
 
 use {
-    crate::theme::{Colors, FAIR, LOST, set_color},
+    crate::theme::{Colors, LOST, set_color},
     iced::{
         Color, Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse,
         widget::canvas::{self, Frame, Geometry, LineDash, Path, Stroke, Text},
@@ -23,8 +23,8 @@ pub struct Trend {
     /// split where the value is unknown
     pub sets: Vec<(u8, Vec<Vec<(f64, f64)>>)>,
     pub overall: Option<f64>,
-    pub band: Option<(f64, f64)>,
-    /// the value axis, always with 0 and the band in sight
+    /// the value axis, always with 0 in sight, the same whatever sets are
+    /// shown
     pub low: f64,
     pub high: f64,
     /// the rallies of the longest set, at least 25: a column each
@@ -67,12 +67,10 @@ impl Trend {
             true => line.overall_recent,
             false => line.overall,
         };
-        let band = line.band.as_ref().map(|b| (b.low, b.high));
         let known: Vec<f64> = sets
             .iter()
             .flat_map(|(_, runs)| runs.iter().flatten().map(|(_, v)| *v))
             .chain(overall)
-            .chain(band.into_iter().flat_map(|(l, h)| [l, h]))
             .collect();
         let low = known.iter().copied().fold(0.0_f64, f64::min);
         let high = known.iter().copied().fold(low + 10.0, f64::max);
@@ -83,7 +81,6 @@ impl Trend {
         Trend {
             sets,
             overall,
-            band,
             low,
             high,
             points,
@@ -91,12 +88,23 @@ impl Trend {
         }
     }
 
+    /// Without the lines of the sets hidden: the axes as they were.
+    pub fn without_sets(self, hidden: &[u8]) -> Trend {
+        let sets = self
+            .sets
+            .into_iter()
+            .filter(|(set, _)| !hidden.contains(set))
+            .collect();
+        Trend { sets, ..self }
+    }
+
     /// With the direct (unforced) errors of the figure in each rally, of
-    /// every set.
-    pub fn with_errors(self, line: &TrendLine) -> Trend {
+    /// every set but the hidden ones.
+    pub fn with_errors(self, line: &TrendLine, hidden: &[u8]) -> Trend {
         let errors = line
             .sets
             .iter()
+            .filter(|set| !hidden.contains(&set.set_number))
             .flat_map(|set| {
                 rallies()
                     .zip(set.unforced.iter())
@@ -154,13 +162,6 @@ impl<M> canvas::Program<M> for CanvasTrend {
         // a rally in the middle of its column
         let x = |p: f64| (f64::from(plot.width) * (p - 0.5) / t.points) as f32;
         let y = |v: f64| (f64::from(plot.height) * (1.0 - (v - t.low) / (t.high - t.low))) as f32;
-        if let Some((low, high)) = t.band {
-            frame.fill_rectangle(
-                Point::new(0.0, y(high)),
-                Size::new(plot.width, y(low) - y(high)),
-                Color { a: 0.12, ..FAIR },
-            );
-        }
         let axis = Stroke::default().with_color(c.muted).with_width(1.0);
         frame.stroke(
             &Path::line(Point::new(0.0, y(0.0)), Point::new(plot.width, y(0.0))),
@@ -257,7 +258,6 @@ pub struct MatchesTrend {
     /// with the matches before
     pub moving: Vec<Option<f64>>,
     pub overall: Option<f64>,
-    pub band: Option<(f64, f64)>,
     pub low: f64,
     pub high: f64,
     /// what the hover says of the touches, `{1}` the count
@@ -266,7 +266,6 @@ pub struct MatchesTrend {
 
 impl MatchesTrend {
     pub fn of(line: &MatchTrend, days: Vec<String>, opponents: Vec<String>, touches: &str) -> Self {
-        let band = line.band.as_ref().map(|b| (b.low, b.high));
         let known: Vec<f64> = line
             .values
             .iter()
@@ -274,7 +273,6 @@ impl MatchesTrend {
             .flatten()
             .copied()
             .chain(line.overall)
-            .chain(band.into_iter().flat_map(|(l, h)| [l, h]))
             .collect();
         let low = known.iter().copied().fold(0.0_f64, f64::min);
         let high = known.iter().copied().fold(low + 10.0, f64::max);
@@ -287,7 +285,6 @@ impl MatchesTrend {
                 .collect(),
             moving: line.moving.clone(),
             overall: line.overall,
-            band,
             low,
             high,
             touches: touches.to_string(),
@@ -371,13 +368,6 @@ impl<M> canvas::Program<M> for CanvasMatches {
             ..Text::default()
         };
         use iced::widget::text::Alignment as Align;
-        if let Some((low, high)) = t.band {
-            frame.fill_rectangle(
-                Point::new(AXIS, y(high)),
-                Size::new(width - AXIS, y(low) - y(high)),
-                Color { a: 0.12, ..FAIR },
-            );
-        }
         // the value axis: a line every 20, with its value
         let grid = Stroke::default()
             .with_color(Color { a: 0.25, ..c.muted })

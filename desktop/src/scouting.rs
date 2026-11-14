@@ -669,7 +669,6 @@ impl Trend {
             .unwrap_or(Trend {
                 sets: vec![],
                 overall: None,
-                band: None,
                 low: 0.0,
                 high: 10.0,
                 points: 25.0,

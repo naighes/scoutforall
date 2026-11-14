@@ -115,6 +115,8 @@ pub enum Message {
     Scope(StatsScope),
     Series(usize),
     Recent(bool),
+    /// a set of the trend of a match shown or hidden
+    ToggleSet(u8),
     Event(EventTypeEnum),
     /// the players chosen: none, all of them
     Players(Vec<String>),
@@ -253,6 +255,8 @@ pub struct StatsScreen {
     detail: Option<DetailStats>,
     series: usize,
     recent: bool,
+    /// the sets whose lines the trend of a match leaves out
+    hidden_sets: Vec<u8>,
     trend: Trend,
     event: EventTypeEnum,
     filter: DetailFilter,
@@ -583,56 +587,33 @@ fn points_rows<'a>(
 
 /// On the left of the rows of the points: each set, in its color as in the
 /// chart, beside the names of the two teams.
-/// The band of the level in the legend: what it is under the mouse.
-fn level_band<'a>(s: &'static Strings, c: Colors) -> Element<'a, Message> {
-    ui::tip(
-        text(format!("▮ {}", s.level_band))
+/// A set in the legend of the trend: its line and name in its color when
+/// shown, faint when hidden; a click shows or hides it.
+fn set_toggle<'a>(n: u8, shown: bool, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+    let color = match shown {
+        true => theme::set_color(n),
+        false => Color { a: 0.45, ..c.muted },
+    };
+    let mark = match shown {
+        true => "━",
+        false => "╌",
+    };
+    button(
+        text(format!("{mark} {} {n}", s.set_n))
             .size(SIZE_SMALL)
-            .color(theme::FAIR),
-        s.level_band_tip,
-        c,
+            .color(color),
     )
+    .padding([1, 8])
+    .on_press(Message::ToggleSet(n))
+    .style(move |_, status| button::Style {
+        background: matches!(status, button::Status::Hovered)
+            .then_some(iced::Background::Color(c.button)),
+        text_color: color,
+        border: iced::border::rounded(6).color(color).width(1),
+        ..button::Style::default()
+    })
+    .into()
 }
-
-/// Beside the chart of a match, at the height of the band of the level:
-/// its name and its values, what it is under the mouse. As high as the
-/// chart, empty without a band.
-fn band_label<'a>(
-    trend: &Trend,
-    chart_height: f32,
-    s: &'static Strings,
-    c: Colors,
-) -> Element<'a, Message> {
-    // the chart without the numbers of the rallies under it, as drawn
-    let plot = (chart_height - charts::RALLY_LABELS).max(1.0);
-    let y = |v: f64| plot * (1.0 - ((v - trend.low) / (trend.high - trend.low)) as f32);
-    let label = trend.band.map(|(low, high)| {
-        let middle = (y(low) + y(high)) / 2.0;
-        let top = (middle - BAND_LABEL / 2.0).clamp(0.0, (plot - BAND_LABEL).max(0.0));
-        column![
-            space::vertical().height(top),
-            ui::tip(
-                container(
-                    column![
-                        text(s.level_band).size(SIZE_SMALL).color(theme::FAIR),
-                        small(format!("{}–{}", pct(Some(low)), pct(Some(high))), c),
-                    ]
-                    .spacing(2)
-                )
-                .height(BAND_LABEL)
-                .align_y(Alignment::Center),
-                s.level_band_tip,
-                c,
-            )
-        ]
-    });
-    container(label.map_or_else(|| space::vertical().into(), Element::from))
-        .height(chart_height)
-        .into()
-}
-
-/// How high the name and the values of the band beside the chart are.
-const BAND_LABEL: f32 = 36.0;
 
 fn points_names<'a>(
     sets: &'a [scout4all_mobile::SetPoints],
@@ -733,6 +714,7 @@ impl StatsScreen {
             detail: None,
             series: 0,
             recent: false,
+            hidden_sets: vec![],
             trend: Trend::of_stats(None, 0, false),
             event: EventTypeEnum::S,
             filter: DetailFilter::default(),
@@ -999,9 +981,10 @@ impl StatsScreen {
         let trend = Trend::of_stats(self.live.as_ref(), self.series, self.recent);
         // the direct errors of the figure, a red line each
         self.trend = match self.live.as_ref().and_then(|l| l.trend.get(self.series)) {
-            Some(line) => trend.with_errors(line),
+            Some(line) => trend.with_errors(line, &self.hidden_sets),
             None => trend,
-        };
+        }
+        .without_sets(&self.hidden_sets);
     }
 
     /// Where the column of the filters goes, to keep the row of the arrows
@@ -1014,6 +997,20 @@ impl StatsScreen {
                 self.row as f32 / last as f32,
             )
         })
+    }
+
+    /// The trend of a match: its sets shown or hidden by their number.
+    fn toggles_sets(&self) -> bool {
+        !self.is_team() && self.current() == Page::Trend && !self.set_numbers().is_empty()
+    }
+
+    /// The sets of the trend of a match.
+    fn set_numbers(&self) -> Vec<u8> {
+        self.live
+            .as_ref()
+            .and_then(|l| l.trend.first())
+            .map(|l| l.sets.iter().map(|s| s.set_number).collect())
+            .unwrap_or_default()
     }
 
     fn current(&self) -> Page {
@@ -1205,6 +1202,18 @@ impl StatsScreen {
                 self.recent = recent;
                 self.retrend();
             }
+            Message::ToggleSet(set) => {
+                self.hidden_sets = match self.hidden_sets.contains(&set) {
+                    true => self
+                        .hidden_sets
+                        .iter()
+                        .copied()
+                        .filter(|s| *s != set)
+                        .collect(),
+                    false => self.hidden_sets.iter().copied().chain([set]).collect(),
+                };
+                self.retrend();
+            }
             Message::Event(event) => {
                 self.event = event;
                 self.clear_pick();
@@ -1379,7 +1388,11 @@ impl StatsScreen {
         {
             return outcome;
         }
+        // on the trend of a match, the number of a set shows or hides it
+        let set =
+            keymap::digit(&ck).filter(|n| self.toggles_sets() && self.set_numbers().contains(n));
         match ck {
+            _ if let Some(set) = set => self.update(Message::ToggleSet(set)),
             k if k == BACK_KEY => Outcome::Back,
             k if k == key!(v) => self.watch(),
             k if k == key!(tab) => self.update(Message::Page((self.page + 1) % pages)),
@@ -1430,6 +1443,15 @@ impl StatsScreen {
         ]
         .into_iter()
         .chain(period)
+        .chain(self.toggles_sets().then(|| {
+            let sets = self.set_numbers();
+            let keys = match (sets.first(), sets.last()) {
+                (Some(first), Some(last)) if first != last => format!("{first}–{last}"),
+                (Some(first), _) => first.to_string(),
+                _ => String::new(),
+            };
+            (keys, s.toggle_set.to_string())
+        }))
         .chain(
             self.watchable()
                 .then(|| ("v".to_string(), s.watch_clips.to_string())),
@@ -1949,25 +1971,17 @@ impl StatsScreen {
         s: &'static Strings,
         c: Colors,
     ) -> Element<'a, Message> {
-        let legend = row(live
-            .trend
-            .first()
-            .map(|l| l.sets.iter().map(|s| s.set_number).collect::<Vec<_>>())
-            .unwrap_or_default()
+        // the sets: a toggle each, their line shown or not
+        let legend = row(self
+            .set_numbers()
             .into_iter()
-            .map(|n| {
-                text(format!("━ {} {n}", s.set_n))
-                    .size(SIZE_SMALL)
-                    .color(theme::set_color(n))
-                    .into()
-            }))
+            .map(|n| set_toggle(n, !self.hidden_sets.contains(&n), s, c)))
         .push(small(format!("- - {}", s.whole_match), c))
         .push(
             text(format!("│ {}", s.direct_errors))
                 .size(SIZE_SMALL)
                 .color(theme::LOST),
         )
-        .extend(self.trend.band.map(|_| level_band(s, c)))
         .spacing(14);
         let name = live
             .trend
@@ -2010,7 +2024,7 @@ impl StatsScreen {
                     .into(),
             };
             let left = column![
-                band_label(&trend, chart_height, s, c),
+                space::vertical().height(chart_height),
                 title,
                 points_names(&live.points, (&live.team_name, &live.opponent), s)
             ]
@@ -2078,7 +2092,6 @@ impl StatsScreen {
                 c
             ),
         ]
-        .extend(trend.band.map(|_| level_band(s, c)))
         .spacing(14);
         let chart: Element<'a, Message> = match trend.is_empty() {
             true => small(s.no_rallies, c).into(),
@@ -3648,6 +3661,30 @@ pub(crate) mod tests {
         assert_eq!(screen.trend.error_bins().iter().sum::<u32>(), 0);
         // the serve error is direct
         screen.update(Message::Series(serve));
+        assert_eq!(shown(&screen), 1);
+        // the set hidden by its number: no line, no error, the axes as
+        // they were; a number without a set does nothing
+        let axes =
+            |screen: &StatsScreen| (screen.trend.low, screen.trend.high, screen.trend.points);
+        let before = axes(&screen);
+        assert!(
+            screen
+                .hints(strings(LanguageEnum::It))
+                .iter()
+                .any(|(k, _)| k == "1")
+        );
+        screen.key(key!('1'));
+        assert!(screen.trend.sets.is_empty());
+        assert_eq!(shown(&screen), 0);
+        assert_eq!(axes(&screen), before);
+        // hidden with another figure too
+        screen.update(Message::Series(reception));
+        assert!(screen.trend.sets.is_empty());
+        screen.update(Message::Series(serve));
+        screen.key(key!('2'));
+        assert!(screen.trend.sets.is_empty());
+        screen.update(Message::ToggleSet(1));
+        assert_eq!(screen.trend.sets.len(), 1);
         assert_eq!(shown(&screen), 1);
         // the points of the set in order: ace, serve error, ace
         let points: Vec<(bool, u8)> = screen

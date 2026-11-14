@@ -187,8 +187,6 @@
     <string name="trend_so_far">これまで</string>
     <string name="trend_recent">直近10回のタッチ</string>
     <string name="trend_direct">自滅のミス</string>
-    <string name="level_band">レベルの目安帯</string>
-    <string name="level_band_explained">レベルの目安帯：チームのレベルの中位チームの範囲。帯より上なら良好、下なら改善の余地あり。</string>
     <string name="point_sequence">得点の推移</string>
     <string name="trend_errors_said">自滅のミス %1$d</string>
     <string name="set_team_level">色を表示するにはチームのレベルと性別を設定してください</string>

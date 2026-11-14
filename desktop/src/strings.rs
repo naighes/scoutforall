@@ -229,10 +229,8 @@ pub struct Strings {
     /// in the legend of the trend: the direct (unforced) errors, a red
     /// line each
     pub direct_errors: &'static str,
-    /// the band of the middle teams of the level, in the legend and beside
-    /// it; what it is, under the mouse
-    pub level_band: &'static str,
-    pub level_band_tip: &'static str,
+    /// the key of the numbers of the sets on the trend: show or hide one
+    pub toggle_set: &'static str,
     /// the points of each set in order, under the trend
     pub point_sequence: &'static str,
     pub export_team: &'static str,
@@ -762,8 +760,7 @@ const EN: Strings = Strings {
     series: "Figure",
     mode: "Mode",
     direct_errors: "Unforced errors",
-    level_band: "Level band",
-    level_band_tip: "Where the middle teams of the team's level stand: above the band is good, below it there is work to do.",
+    toggle_set: "show/hide set",
     point_sequence: "Point sequence",
     export_team: "Share team",
     export_match: "Share match",
@@ -1291,8 +1288,7 @@ const IT: Strings = Strings {
     series: "Indice",
     mode: "Modo",
     direct_errors: "Errori diretti",
-    level_band: "Fascia del livello",
-    level_band_tip: "Dove stanno le squadre medie del livello della squadra: sopra la fascia è buono, sotto c'è da lavorare.",
+    toggle_set: "mostra/nascondi set",
     point_sequence: "Successione dei punti",
     export_team: "Condividi squadra",
     export_match: "Condividi partita",
@@ -1820,8 +1816,7 @@ const PT: Strings = Strings {
     series: "Índice",
     mode: "Modo",
     direct_errors: "Erros diretos",
-    level_band: "Faixa do nível",
-    level_band_tip: "Onde ficam as equipes médias do nível da equipe: acima da faixa é bom, abaixo há o que melhorar.",
+    toggle_set: "mostrar/ocultar set",
     point_sequence: "Sequência de pontos",
     export_team: "Compartilhar equipe",
     export_match: "Compartilhar partida",
@@ -2350,8 +2345,7 @@ const PL: Strings = Strings {
     series: "Wskaźnik",
     mode: "Tryb",
     direct_errors: "Błędy własne",
-    level_band: "Przedział poziomu",
-    level_band_tip: "Gdzie są średnie drużyny poziomu drużyny: powyżej przedziału jest dobrze, poniżej jest nad czym pracować.",
+    toggle_set: "pokaż/ukryj set",
     point_sequence: "Kolejność punktów",
     export_team: "Udostępnij drużynę",
     export_match: "Udostępnij mecz",
@@ -2879,8 +2873,7 @@ const JA: Strings = Strings {
     series: "指標",
     mode: "モード",
     direct_errors: "自滅のミス",
-    level_band: "レベルの目安帯",
-    level_band_tip: "チームのレベルの中位チームの範囲：帯より上なら良好、下なら改善の余地あり。",
+    toggle_set: "セットの表示切替",
     point_sequence: "得点の推移",
     export_team: "チームを共有",
     export_match: "試合を共有",

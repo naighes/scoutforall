@@ -366,7 +366,7 @@ internal fun shortDay(day: String): String = try {
 }
 
 /** A figure match by match: each value a dot, the moving average a thick
- * line, the whole period dashed, the band of the level shaded. A touch on
+ * line, the whole period dashed. A touch on
  * a match says it. */
 @Composable
 private fun MatchTrendChart(trend: MatchTrend, matches: List<AnalysedMatch>) = Column(Modifier.semantics(mergeDescendants = true) {}) {
@@ -380,9 +380,8 @@ private fun MatchTrendChart(trend: MatchTrend, matches: List<AnalysedMatch>) = C
             color = trend.overallGrade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurface,
         )
     }
-    val band = trend.band
-    val known = (trend.values + trend.moving).filterNotNull() + listOfNotNull(trend.overall, band?.low, band?.high)
-    // always 0 and the band in sight
+    val known = (trend.values + trend.moving).filterNotNull() + listOfNotNull(trend.overall)
+    // always 0 in sight
     val low = minOf(0.0, known.minOrNull() ?: 0.0)
     val high = maxOf(low + 10.0, known.maxOrNull() ?: 0.0)
     val axis = MaterialTheme.colorScheme.outline
@@ -400,13 +399,6 @@ private fun MatchTrendChart(trend: MatchTrend, matches: List<AnalysedMatch>) = C
         val margin = 8.dp.toPx()
         fun x(i: Int) = if (n > 1) margin + i * (size.width - 2 * margin) / (n - 1) else size.width / 2
         fun y(v: Double) = (size.height * (1 - (v - low) / (high - low))).toFloat()
-        band?.let {
-            drawRect(
-                Fair.copy(alpha = 0.10f),
-                topLeft = Offset(0f, y(it.high)),
-                size = androidx.compose.ui.geometry.Size(size.width, y(it.low) - y(it.high)),
-            )
-        }
         drawLine(axis, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), strokeWidth = 1.dp.toPx())
         trend.overall?.let {
             val dashed = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))
