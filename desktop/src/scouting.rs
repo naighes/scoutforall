@@ -915,7 +915,10 @@ impl ScoutingScreen {
                         Message::Event(e.value),
                     ));
                 }
-                list = group(list, s.options);
+                // the title only over options there are
+                if st.inverted_p1_applies || st.reception_open {
+                    list = group(list, s.options);
+                }
                 let option_key = |o| {
                     self.keys
                         .option_keybindings
