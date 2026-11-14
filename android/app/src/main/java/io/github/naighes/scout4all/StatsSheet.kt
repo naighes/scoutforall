@@ -87,6 +87,7 @@ import io.github.naighes.scout4all.core.ErrorCount
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.FundamentalStats
 import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.SetPoints
 import io.github.naighes.scout4all.core.PhaseStats
 import io.github.naighes.scout4all.core.PossessionStats
 import io.github.naighes.scout4all.core.RotationStats
@@ -736,7 +737,9 @@ private fun Trend(stats: LiveStats) {
         val column = maxOf(narrowest, maxWidth / columns)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             stats.trend.forEach { TrendChart(it, recent, hidden, columns, column, across) }
-            if (stats.points.any { it.points.isNotEmpty() }) PointSequence(stats, column * columns, column, across)
+            // the sets hidden left out of the points too
+            val points = stats.points.filter { it.points.isNotEmpty() && it.setNumber.toInt() !in hidden }
+            if (points.isNotEmpty()) PointSequence(points, column * columns, column, across)
         }
     }
 }
@@ -744,13 +747,13 @@ private fun Trend(stats: LiveStats) {
 /** The points of each set in order, as on the score sheet: two rows, ours
  * and theirs (their colors in the legend), a rally a column of `column`
  * (the columns of the charts over them), the score in the row of the team
- * scoring it; the set over its rows. TalkBack reads the score of each set
- * as it went. */
+ * scoring it; the set over its rows; the sets shown only. TalkBack reads
+ * the score of each set as it went. */
 @Composable
-private fun PointSequence(stats: LiveStats, width: Dp, column: Dp, across: ScrollState) =
+private fun PointSequence(points: List<SetPoints>, width: Dp, column: Dp, across: ScrollState) =
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(stringResource(R.string.point_sequence), Modifier.title(), style = MaterialTheme.typography.titleSmall)
-        stats.points.filter { it.points.isNotEmpty() }.forEach { set ->
+        points.forEach { set ->
             Text(
                 stringResource(R.string.set_n, set.setNumber.toInt()),
                 style = MaterialTheme.typography.labelSmall,

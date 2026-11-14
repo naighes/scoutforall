@@ -208,6 +208,8 @@ class TrendTest {
         rule.onNode(set1).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         rule.onNode(chart("Serve", 0)).assertExists()
+        // nor its points under the charts
+        rule.onNode(hasText("${string(R.string.set_n, 1)}: 0-1, 0-2")).assertDoesNotExist()
         rule.onNode(set1).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         rule.onNode(chart("Serve", 1)).assertExists()

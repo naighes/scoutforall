@@ -255,9 +255,12 @@ pub struct StatsScreen {
     detail: Option<DetailStats>,
     series: usize,
     recent: bool,
-    /// the sets whose lines the trend of a match leaves out
+    /// the sets the trend of a match leaves out, in the chart and in the
+    /// points under it
     hidden_sets: Vec<u8>,
     trend: Trend,
+    /// the points of the sets shown, under the chart
+    points: Vec<scout4all_mobile::SetPoints>,
     event: EventTypeEnum,
     filter: DetailFilter,
     /// the zones of the detail by efficiency, not by how many
@@ -716,6 +719,7 @@ impl StatsScreen {
             recent: false,
             hidden_sets: vec![],
             trend: Trend::of_stats(None, 0, false),
+            points: vec![],
             event: EventTypeEnum::S,
             filter: DetailFilter::default(),
             efficiency: false,
@@ -985,6 +989,13 @@ impl StatsScreen {
             None => trend,
         }
         .without_sets(&self.hidden_sets);
+        self.points = self
+            .live
+            .iter()
+            .flat_map(|l| l.points.iter())
+            .filter(|p| !self.hidden_sets.contains(&p.set_number))
+            .cloned()
+            .collect();
     }
 
     /// Where the column of the filters goes, to keep the row of the arrows
@@ -2005,8 +2016,10 @@ impl StatsScreen {
         c: Colors,
     ) -> Element<'a, Message> {
         let trend = self.trend.clone();
+        // the sets hidden left out here too
+        let points = &self.points;
         responsive(move |size| {
-            let shown = live.points.iter().filter(|p| !p.points.is_empty()).count();
+            let shown = points.iter().filter(|p| !p.points.is_empty()).count();
             let rows = match shown {
                 0 => 0.0,
                 n => n as f32 * SET_ROWS + (n - 1) as f32 * SET_GAP + POINTS_TITLE,
@@ -2026,7 +2039,7 @@ impl StatsScreen {
             let left = column![
                 space::vertical().height(chart_height),
                 title,
-                points_names(&live.points, (&live.team_name, &live.opponent), s)
+                points_names(points, (&live.team_name, &live.opponent), s)
             ]
             .width(TREND_GUTTER)
             .clip(true);
@@ -2041,7 +2054,7 @@ impl StatsScreen {
                     0 => 0.0,
                     _ => POINTS_TITLE,
                 }),
-                points_rows(&live.points, width, c)
+                points_rows(points, width, c)
             ]
             .padding(iced::Padding::default().bottom(14));
             row![
@@ -3677,6 +3690,7 @@ pub(crate) mod tests {
         assert!(screen.trend.sets.is_empty());
         assert_eq!(shown(&screen), 0);
         assert_eq!(axes(&screen), before);
+        assert!(screen.points.is_empty(), "nor its points under the chart");
         // hidden with another figure too
         screen.update(Message::Series(reception));
         assert!(screen.trend.sets.is_empty());
@@ -3685,6 +3699,7 @@ pub(crate) mod tests {
         assert!(screen.trend.sets.is_empty());
         screen.update(Message::ToggleSet(1));
         assert_eq!(screen.trend.sets.len(), 1);
+        assert_eq!(screen.points.len(), 1);
         assert_eq!(shown(&screen), 1);
         // the points of the set in order: ace, serve error, ace
         let points: Vec<(bool, u8)> = screen
