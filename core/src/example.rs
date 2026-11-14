@@ -6,7 +6,10 @@ use crate::{
     errors::AppError,
     localization::Labels,
     match_form::MatchForm,
-    providers::team_writer::{TeamInput, TeamWriter},
+    providers::{
+        sqlite::teams::SqliteTeamReader,
+        team_writer::{TeamInput, TeamWriter},
+    },
     set_start::SetStartForm,
     shapes::{
         country::CountryCode,
@@ -69,16 +72,23 @@ pub fn is_example_team(team: &TeamEntry) -> bool {
 }
 
 /// Whether the data are those of a new installation: no settings and no
-/// team. An update has the settings (the terms of use accepted) or a team.
-pub async fn is_new_installation(store: &dyn Store) -> Result<bool, AppError> {
-    Ok(!store
+/// team, in the folder (a version before the database, its folders not
+/// moved yet) or in the database (`teams`: a team ever saved, a removed
+/// one too). An update has the settings (the terms of use accepted) or a
+/// team.
+pub async fn is_new_installation(
+    store: &dyn Store,
+    teams: &SqliteTeamReader,
+) -> Result<bool, AppError> {
+    let in_folder = store
         .list(layout::ROOT)
         .await?
         .iter()
         .any(|entry| match entry {
             StoreEntry::Folder(_) => true,
             StoreEntry::Blob(name) => name == layout::CONFIG,
-        }))
+        });
+    Ok(!in_folder && !teams.any_team_ever()?)
 }
 
 /// Saves the example team, of this year.
@@ -93,10 +103,11 @@ pub async fn add_example_team(
 /// The example team, saved when the installation is new; nothing otherwise.
 pub async fn add_example_team_if_new(
     store: &dyn Store,
+    teams: &SqliteTeamReader,
     writer: &(dyn TeamWriter + Send + Sync),
     labels: &Labels,
 ) -> Result<Option<TeamEntry>, AppError> {
-    match is_new_installation(store).await? {
+    match is_new_installation(store, teams).await? {
         true => add_example_team(writer, labels).await.map(Some),
         false => Ok(None),
     }

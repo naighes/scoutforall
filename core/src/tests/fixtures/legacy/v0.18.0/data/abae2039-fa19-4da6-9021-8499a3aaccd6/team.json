@@ -1,0 +1,80 @@
+{
+  "name": "Fixture Volley U19",
+  "year": 2025,
+  "players": [
+    {
+      "id": "fde512a9-c2bd-476f-9b07-0eeff1de0ca9",
+      "name": "Giulia Neri",
+      "role": "Setter",
+      "number": 1,
+      "deleted": false,
+      "birth_date": "2004-03-01",
+      "height_cm": 171,
+      "notes": "capitana, mancina"
+    },
+    {
+      "id": "cd0d86ba-00f1-41e5-aea9-5bbb5b566286",
+      "name": "Marta Villa",
+      "role": "OutsideHitter",
+      "number": 2,
+      "deleted": false,
+      "birth_date": "2004-03-02",
+      "height_cm": 172
+    },
+    {
+      "id": "34bad1fa-00f1-4d56-8a7b-8739d1192b4e",
+      "name": "Sara Conti",
+      "role": "MiddleBlocker",
+      "number": 3,
+      "deleted": false,
+      "birth_date": "2004-03-03",
+      "height_cm": 173
+    },
+    {
+      "id": "9a356d0c-751d-46de-824e-cb1bdba5846f",
+      "name": "Elena Ferri",
+      "role": "OppositeHitter",
+      "number": 4,
+      "deleted": false,
+      "height_cm": 174
+    },
+    {
+      "id": "d7e51925-ed3f-4379-b74b-b8e9d781d7cf",
+      "name": "Chiara Galli",
+      "role": "OutsideHitter",
+      "number": 5,
+      "deleted": false
+    },
+    {
+      "id": "bb172468-7b47-45da-96c6-a38e9c341935",
+      "name": "Laura Fabbri",
+      "role": "MiddleBlocker",
+      "number": 6,
+      "deleted": false
+    },
+    {
+      "id": "cd9e84ed-fa26-41bc-80dd-ebae2bbb2861",
+      "name": "Paola Riva",
+      "role": "Libero",
+      "number": 7,
+      "deleted": false
+    },
+    {
+      "id": "aaa40181-6caf-43e3-8c4e-badcdd6024d5",
+      "name": "Anna Longo",
+      "role": "Libero",
+      "number": 8,
+      "deleted": false
+    },
+    {
+      "id": "1a46dc40-3d00-4e15-b89c-3360584cc14f",
+      "name": "Viola Marchi",
+      "role": "OppositeHitter",
+      "number": 14,
+      "deleted": false
+    }
+  ],
+  "classification": null,
+  "gender": null,
+  "country": "IT"
+}

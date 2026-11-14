@@ -41,6 +41,13 @@ pub enum Value {
         highlighted: Option<usize>,
         /// written since the last one taken: the suggestions are shown
         open: bool,
+        /// a drop-down: an arrow on its right opens all it may be, the
+        /// list scrolling (`Field::dropdown`)
+        dropdown: bool,
+        /// opened by its arrow: all of them, whatever is written
+        browsing: bool,
+        /// the first of the rows a drop-down shows, the lit one among them
+        top: usize,
     },
     /// one of `options`, in a menu: ← → change it
     Choice {
@@ -231,8 +238,21 @@ impl Field {
                 suggestions: vec![],
                 highlighted: None,
                 open: false,
+                dropdown: false,
+                browsing: false,
+                top: 0,
             }
         })
+    }
+
+    /// A text with suggestions that is also a drop-down, as a select of
+    /// the web: its arrow opens all it may be, writing narrows them.
+    pub fn dropdown(label: &str, value: impl Into<String>) -> Field {
+        let mut field = Field::search(label, value);
+        if let Value::Search { dropdown, .. } = &mut field.value {
+            *dropdown = true;
+        }
+        field
     }
 
     pub fn choice(label: &str, options: Vec<String>, index: usize) -> Field {
@@ -266,7 +286,14 @@ pub enum Message {
     Choose(usize, usize),
     /// a suggestion of a search taken
     Take(usize, usize),
+    /// the arrow of a drop-down: all it may be shown, or hidden
+    Open(usize),
+    /// the wheel over the list of a drop-down: down (positive) or up
+    Scroll(usize, i32),
     Focus(usize),
+    /// more about a field asked (the number and the role of a player on
+    /// the score sheet): for the screen, the form stays as it is
+    Details(usize),
     Save,
     Cancel,
 }
@@ -299,6 +326,8 @@ pub struct Form {
     pub plain: bool,
     /// the fields shown, and the keys move among: all, if none
     pub shown: Option<std::ops::Range<usize>>,
+    /// the fields left out of the ones shown, until they apply
+    pub hidden: Vec<usize>,
     /// the texts before the changes, to undo them: the field, its value
     undo: Vec<(usize, Value)>,
     /// the changes undone, to make again
@@ -307,6 +336,18 @@ pub struct Form {
 
 /// How many suggestions a search shows.
 const SUGGESTIONS: usize = 6;
+
+/// How many rows of its list a drop-down shows at a time.
+const DROPDOWN_ROWS: usize = 8;
+
+/// The first row shown so that `row` is among the ones shown, from `top`.
+fn in_sight(top: usize, row: usize) -> usize {
+    match row {
+        r if r < top => r,
+        r if r >= top + DROPDOWN_ROWS => r + 1 - DROPDOWN_ROWS,
+        _ => top,
+    }
+}
 
 /// The focus on nothing: on a choice, no text field takes the keys.
 const NO_FIELD: &str = "form-no-field";
@@ -337,7 +378,8 @@ fn written(value: &Value) -> Option<&String> {
 }
 
 /// The suggestions shown: written since the last taken, and not just the
-/// text there is; the one lit, if any.
+/// text there is (unless ↑ ↓ wrote it: it's lit, for Enter to take); the
+/// one lit, if any.
 fn offered(value: &Value) -> Option<(&[Suggestion], Option<usize>)> {
     match value {
         Value::Search {
@@ -345,15 +387,21 @@ fn offered(value: &Value) -> Option<(&[Suggestion], Option<usize>)> {
             suggestions,
             highlighted,
             open: true,
+            dropdown,
+            browsing,
             ..
         } if !suggestions.is_empty()
-            && !(suggestions.len() == 1
-                && suggestions.first().is_some_and(|s| &s.value == text)) =>
+            && (*browsing
+                || !(highlighted.is_none()
+                    && suggestions.len() == 1
+                    && suggestions.first().is_some_and(|s| &s.value == text))) =>
         {
-            Some((
-                &suggestions[..suggestions.len().min(SUGGESTIONS)],
-                *highlighted,
-            ))
+            // a drop-down scrolls through them all
+            let shown = match dropdown {
+                true => suggestions.len(),
+                false => suggestions.len().min(SUGGESTIONS),
+            };
+            Some((&suggestions[..shown], *highlighted))
         }
         _ => None,
     }
@@ -392,6 +440,7 @@ impl Form {
             actions: None,
             plain: false,
             shown: None,
+            hidden: vec![],
             undo: vec![],
             redo: vec![],
         }
@@ -415,11 +464,22 @@ impl Form {
     /// What the search `field` offers, for the text it has: none lit.
     pub fn suggest(&mut self, field: usize, offered: Vec<Suggestion>) {
         if let Some(Value::Search {
+            text,
             suggestions,
             highlighted,
+            browsing,
+            top,
             ..
         }) = self.fields.get_mut(field).map(|f| &mut f.value)
         {
+            // all of them, opened: the one written in sight, a few above it
+            *top = match browsing {
+                true => offered
+                    .iter()
+                    .position(|s| &s.value == text)
+                    .map_or(0, |at| at.saturating_sub(2)),
+                false => 0,
+            };
             *suggestions = offered;
             *highlighted = None;
         }
@@ -450,12 +510,19 @@ impl Form {
                 text: mask.apply(&text),
                 mask,
             },
-            Value::Search { suggestions, .. } => Value::Search {
+            Value::Search {
+                suggestions,
+                dropdown,
+                ..
+            } => Value::Search {
                 typed: text.clone(),
                 text,
                 suggestions,
                 highlighted: None,
                 open: true,
+                dropdown,
+                browsing: false,
+                top: 0,
             },
             _ => Value::Text(text),
         };
@@ -494,6 +561,41 @@ impl Form {
         }
     }
 
+    /// Whether the drop-down `field` was opened by its arrow: all it may be
+    /// to offer, whatever is written.
+    pub fn browsing(&self, field: usize) -> bool {
+        matches!(
+            self.fields.get(field).map(|f| &f.value),
+            Some(Value::Search { browsing: true, .. })
+        )
+    }
+
+    /// The arrow of the drop-down `field`: its list opened with all it may
+    /// be (the screen offers them on the change), or closed.
+    fn open(&mut self, field: usize) -> Outcome {
+        self.focused = field;
+        match self.fields.get_mut(field).map(|f| &mut f.value) {
+            Some(Value::Search {
+                open,
+                browsing,
+                highlighted,
+                text,
+                typed,
+                dropdown: true,
+                ..
+            }) => {
+                let opening = !(*open && *browsing);
+                if highlighted.take().is_some() {
+                    *text = typed.clone();
+                }
+                *open = opening;
+                *browsing = opening;
+                Outcome::Changed(field)
+            }
+            _ => Outcome::Stay,
+        }
+    }
+
     /// The last change undone (`back`), or made again.
     fn undo(&mut self, back: bool) -> Outcome {
         let popped = match back {
@@ -512,12 +614,14 @@ impl Form {
             typed,
             highlighted,
             open,
+            browsing,
             ..
         } = &mut f.value
         {
             *typed = text.clone();
             *highlighted = None;
             *open = false;
+            *browsing = false;
         }
         match back {
             true => self.redo.push((field, now)),
@@ -542,6 +646,7 @@ impl Form {
                 typed,
                 suggestions,
                 highlighted,
+                top,
                 ..
             }),
         ) = (
@@ -552,6 +657,9 @@ impl Form {
             let at = highlighted.unwrap_or(n) as isize;
             let next = usize::try_from((at + step).rem_euclid(n as isize + 1)).unwrap_or(n);
             *highlighted = (next < n).then_some(next);
+            if let Some(lit) = *highlighted {
+                *top = in_sight(*top, lit);
+            }
             *text = highlighted
                 .and_then(|h| suggestions.get(h))
                 .map_or_else(|| typed.clone(), |s| s.value.clone());
@@ -585,6 +693,7 @@ impl Form {
             typed,
             highlighted,
             open,
+            browsing,
             ..
         }) = self.fields.get_mut(self.focused).map(|f| &mut f.value)
         {
@@ -592,6 +701,7 @@ impl Form {
                 *text = typed.clone();
             }
             *open = false;
+            *browsing = false;
         }
     }
 
@@ -616,6 +726,21 @@ impl Form {
         match message {
             Message::Input(field, value) => self.write(field, value),
             Message::Take(field, chosen) => self.take(field, chosen),
+            Message::Open(field) => self.open(field),
+            Message::Scroll(field, step) => {
+                let total = self
+                    .fields
+                    .get(field)
+                    .and_then(|f| offered(&f.value))
+                    .map_or(0, |(all, _)| all.len());
+                if let Some(Value::Search { top, .. }) =
+                    self.fields.get_mut(field).map(|f| &mut f.value)
+                {
+                    let last = total.saturating_sub(DROPDOWN_ROWS);
+                    *top = top.saturating_add_signed(step as isize).min(last);
+                }
+                Outcome::Stay
+            }
             Message::Choose(field, chosen) => {
                 self.focused = field;
                 match self.fields.get_mut(field).map(|f| &mut f.value) {
@@ -636,32 +761,42 @@ impl Form {
                 self.focused = field.min(self.fields.len().saturating_sub(1));
                 Outcome::Stay
             }
+            Message::Details(_) => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
         }
     }
 
-    /// The fields shown.
-    fn range(&self) -> std::ops::Range<usize> {
-        self.shown.clone().unwrap_or(0..self.fields.len())
+    /// The fields shown, in order.
+    pub fn visible(&self) -> Vec<usize> {
+        self.shown
+            .clone()
+            .unwrap_or(0..self.fields.len())
+            .filter(|i| !self.hidden.contains(i))
+            .collect()
     }
 
     /// The field after the one the keys are on, among the ones shown;
-    /// before it, if `back`.
+    /// before it, if `back`. Around at the ends.
     fn step(&self, back: bool) -> usize {
-        let r = self.range();
-        match (back, self.focused) {
-            (true, f) if f <= r.start => r.end.saturating_sub(1),
-            (true, f) => f - 1,
-            (false, f) if f + 1 >= r.end => r.start,
-            (false, f) => f + 1,
-        }
+        let visible = self.visible();
+        let after = visible.iter().position(|f| *f > self.focused);
+        let before = visible.iter().rposition(|f| *f < self.focused);
+        let at = match (back, after, before) {
+            (false, Some(next), _) => visible.get(next),
+            (false, None, _) => visible.first(),
+            (true, _, Some(previous)) => visible.get(previous),
+            (true, _, None) => visible.last(),
+        };
+        at.copied().unwrap_or(self.focused)
     }
 
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
         let (offering, lit) = (self.offering(), self.lit());
         match (ck, offering, lit) {
             (k, _, _) if is_undo(k) => self.undo(true),
+            // Alt ↓ opens a drop-down, as a select of the web
+            (k, _, _) if k == key!(alt - down) => self.open(self.focused),
             (k, _, _) if is_redo(k) => self.undo(false),
             // the suggestions shown: they take the keys
             (k, true, _) if k == BACK_KEY => {
@@ -731,12 +866,12 @@ impl Form {
         on: impl Fn(Message) -> M + Copy + 'a,
         aside: Option<Element<'a, M>>,
     ) -> Element<'a, M> {
-        let range = self.range();
+        let visible = self.visible();
         let fields = self
             .fields
             .iter()
             .enumerate()
-            .filter(move |(i, _)| range.contains(i))
+            .filter(move |(i, _)| visible.contains(i))
             .map(|(i, f)| {
                 let field = self.field(i, f, c, on);
                 match self.sections.iter().find(|(at, _)| *at == i) {
@@ -851,11 +986,25 @@ impl Form {
         let input: Element<'a, M> = match &f.value {
             Value::Text(value) => input(value, field::Follow::Never),
             Value::Masked { text, .. } => input(text, field::Follow::Typing),
-            Value::Search { text: written, .. } => {
+            Value::Search {
+                text: written,
+                dropdown,
+                top,
+                ..
+            } => {
+                let dropdown = *dropdown;
+                // a drop-down shows a window of its rows, from `top`
+                let (first, rows) = match dropdown {
+                    true => (*top, DROPDOWN_ROWS),
+                    false => (0, SUGGESTIONS),
+                };
+                let total = offered(&f.value).map_or(0, |(all, _)| all.len());
                 let shown: Vec<Element<'a, M>> = match offered(&f.value) {
                     Some((suggestions, lit)) if focused => suggestions
                         .iter()
                         .enumerate()
+                        .skip(first)
+                        .take(rows)
                         .map(|(n, s)| {
                             ui::list_row(
                                 ui::body(s.label.clone()).shaping(text::Shaping::Advanced),
@@ -889,9 +1038,65 @@ impl Form {
                 };
                 // the same widgets whether offered or not: the field keeps
                 // the keys as the suggestions come and go
-                let list: Element<'a, M> = match shown.is_empty() {
-                    true => iced::widget::space::vertical().height(0).into(),
-                    false => container(Column::with_children(shown).spacing(2))
+                let list: Element<'a, M> = match (shown.is_empty(), dropdown) {
+                    (true, _) => iced::widget::space::vertical().height(0).into(),
+                    // a drop-down: its window of rows, the wheel moving it,
+                    // a bar on the right telling where it is among them all
+                    (false, true) => {
+                        let portion = |n: usize| u16::try_from(n.max(1)).unwrap_or(u16::MAX);
+                        let after = total.saturating_sub(first + rows);
+                        let thumb = |n: usize, lit: bool| -> Element<'a, M> {
+                            container(iced::widget::space::vertical())
+                                .width(4)
+                                .height(Length::FillPortion(portion(n)))
+                                .style(move |_| container::Style {
+                                    background: lit.then(|| c.muted.into()),
+                                    border: iced::Border {
+                                        radius: 2.0.into(),
+                                        ..iced::Border::default()
+                                    },
+                                    ..container::Style::default()
+                                })
+                                .into()
+                        };
+                        let bar: Element<'a, M> = match total > rows {
+                            true => column![
+                                thumb(first, false),
+                                // never too thin to see: a twelfth at least
+                                thumb(rows.max(total / 12), true),
+                                thumb(after, false)
+                            ]
+                            .height(Length::Fill)
+                            .into(),
+                            false => iced::widget::space::horizontal().width(0).into(),
+                        };
+                        // the bar over the rows, as high as they are
+                        let window = iced::widget::stack![
+                            container(Column::with_children(shown).spacing(2))
+                                .width(Length::Fill)
+                                .padding(Padding::default().right(10)),
+                            container(bar)
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .align_x(iced::alignment::Horizontal::Right)
+                        ];
+                        iced::widget::mouse_area(container(window).padding(4).style(move |_| {
+                            container::Style {
+                                background: Some(c.background.into()),
+                                border: edge(false),
+                                ..container::Style::default()
+                            }
+                        }))
+                        .on_scroll(move |delta| {
+                            let y = match delta {
+                                iced::mouse::ScrollDelta::Lines { y, .. } => y,
+                                iced::mouse::ScrollDelta::Pixels { y, .. } => y / 20.0,
+                            };
+                            on(Message::Scroll(i, if y > 0.0 { -1 } else { 1 }))
+                        })
+                        .into()
+                    }
+                    (false, false) => container(Column::with_children(shown).spacing(2))
                         .padding(4)
                         .style(move |_| container::Style {
                             background: Some(c.background.into()),
@@ -900,8 +1105,28 @@ impl Form {
                         })
                         .into(),
                 };
+                // the arrow of a drop-down, on the right of the field
+                let arrow: Element<'a, M> = match dropdown {
+                    true => container(
+                        button(
+                            text(match offered(&f.value).is_some() {
+                                true => "▲",
+                                false => "▼",
+                            })
+                            .size(SIZE_SMALL)
+                            .color(c.muted),
+                        )
+                        .on_press(on(Message::Open(i)))
+                        .padding(Padding::from([8, 12]))
+                        .style(|_, _| button::Style::default()),
+                    )
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .into(),
+                    false => iced::widget::space::horizontal().width(0).into(),
+                };
                 column![
-                    iced::widget::stack![input(written, field::Follow::Arrows), ghost],
+                    iced::widget::stack![input(written, field::Follow::Arrows), ghost, arrow],
                     list
                 ]
                 .spacing(4)
@@ -1052,6 +1277,55 @@ mod tests {
         )
     }
 
+    fn countries() -> Vec<Suggestion> {
+        (0..30)
+            .map(|n| Suggestion {
+                label: format!("country {n:02}"),
+                value: format!("country {n:02}"),
+            })
+            .collect()
+    }
+
+    /// A drop-down: Alt ↓ (or its arrow) opens all it may be, the window
+    /// of its rows following the one lit, the wheel moving it; Enter takes
+    /// the one lit, Alt ↓ again closes.
+    #[test]
+    fn a_drop_down_opens_on_all_of_them_and_follows_the_one_lit() {
+        let mut f = Form::new("t", vec![Field::dropdown("country", "country 12")]);
+        assert!(!f.offering());
+        assert_eq!(f.key(key!(alt - down)), Outcome::Changed(0));
+        assert!(f.browsing(0));
+        // the screen offers them on the change: all, the one written in
+        // sight with a couple above it
+        f.suggest(0, countries());
+        assert!(f.offering());
+        let top = |f: &Form| match &f.fields[0].value {
+            Value::Search { top, .. } => *top,
+            _ => usize::MAX,
+        };
+        assert_eq!(top(&f), 10);
+        // down past the window: it follows
+        (0..DROPDOWN_ROWS + 3).for_each(|_| {
+            f.key(key!(down));
+        });
+        assert_eq!(f.lit(), Some(DROPDOWN_ROWS + 2));
+        assert_eq!(top(&f), 3);
+        f.update(Message::Scroll(0, 1));
+        assert_eq!(top(&f), 4);
+        f.update(Message::Scroll(0, 100));
+        assert_eq!(top(&f), 30 - DROPDOWN_ROWS);
+        assert_eq!(f.key(key!(enter)), Outcome::Changed(0));
+        assert_eq!(f.text(0), "country 10");
+        assert!(!f.offering() && !f.browsing(0));
+        // written: narrowed again, all no more
+        f.update(Message::Open(0));
+        assert!(f.offering());
+        f.update(Message::Open(0));
+        assert!(!f.offering());
+        f.update(Message::Input(0, "coun".into()));
+        assert!(!f.browsing(0));
+    }
+
     #[test]
     fn the_keys_move_among_the_fields_and_change_the_choices() {
         let mut f = form();
@@ -1168,6 +1442,28 @@ mod tests {
         assert_eq!(f.text(0), "Haiti");
         f.key(key!(ctrl - z));
         assert_eq!(f.text(0), "it");
+    }
+
+    /// The only suggestion, lit by ↓, is still offered though the field
+    /// now has its text: Enter takes it (a person of the registry, whose
+    /// details come with it), it doesn't save.
+    #[test]
+    fn the_only_suggestion_lit_is_taken() {
+        let mut f = Form::new("t", vec![Field::search("name", "")]);
+        f.update(Message::Input(0, "ross".into()));
+        f.suggest(
+            0,
+            vec![Suggestion {
+                label: "Anna Rossi (Cortona 2025)".into(),
+                value: "Anna Rossi".into(),
+            }],
+        );
+        f.key(key!(down));
+        assert_eq!(f.text(0), "Anna Rossi");
+        assert_eq!((f.offering(), f.lit()), (true, Some(0)));
+        assert_eq!(f.key(key!(enter)), Outcome::Changed(0));
+        assert!(!f.offering());
+        assert_eq!(f.key(key!(enter)), Outcome::Save);
     }
 
     #[test]

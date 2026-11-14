@@ -9,9 +9,12 @@ use crate::{
     shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
 };
 use chrono::{Datelike, NaiveDate};
+use uuid::Uuid;
 
 /// What the user filled in: the number, the birth date (YYYY-MM-DD) and the
 /// height (centimetres) are text, as typed; the last three may be empty.
+/// A new player may be a person of the registry already (D5): the same
+/// person, in one more team.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlayerForm {
     pub name: String,
@@ -20,6 +23,8 @@ pub struct PlayerForm {
     pub birth_date: String,
     pub height_cm: String,
     pub notes: String,
+    /// the person of the registry the new player is, chosen by name
+    pub person: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,13 +69,16 @@ impl PlayerForm {
                 .unwrap_or_default(),
             height_cm: player.height_cm.map(|h| h.to_string()).unwrap_or_default(),
             notes: player.notes.clone(),
+            person: None,
         }
     }
 
     /// The input that adds a player to `team`, or updates `existing`,
-    /// keeping its id. The name and the notes are trimmed; a birth date
-    /// after `today` isn't valid. The first error, in the order of the
-    /// fields, when the form isn't valid.
+    /// keeping its id; a new player with a `person` is that person (once
+    /// removed from the team, `existing` is them, back in it). The name
+    /// and the notes are trimmed; a birth date after `today` isn't valid.
+    /// The first error, in the order of the fields, when the form isn't
+    /// valid.
     pub fn validate(
         self,
         team: &TeamEntry,
@@ -81,7 +89,7 @@ impl PlayerForm {
         let number = parse_number(&self.number);
         let birth_date = optional(&self.birth_date, |d| parse_birth_date(d, today));
         let height_cm = optional(&self.height_cm, parse_height);
-        let existing_id = existing.map(|p| p.id);
+        let existing_id = existing.map(|p| p.id).or(self.person);
         let in_use = |number: u8| {
             team.active_players()
                 .iter()
@@ -100,17 +108,29 @@ impl PlayerForm {
                     height_cm,
                     notes: self.notes.trim().to_string(),
                 };
-                Ok(match existing {
-                    Some(player) => PlayerInput::Existing(PlayerEntry {
+                Ok(match (existing, self.person) {
+                    (Some(player), _) => PlayerInput::Existing(PlayerEntry {
                         name,
                         role: Some(role),
                         number,
                         birth_date: details.birth_date,
                         height_cm: details.height_cm,
                         notes: details.notes,
+                        // a player removed from the team comes back
+                        deleted: false,
                         ..player.clone()
                     }),
-                    None => PlayerInput::New {
+                    (None, Some(person)) => PlayerInput::Existing(PlayerEntry {
+                        id: person,
+                        name,
+                        role: Some(role),
+                        number,
+                        deleted: false,
+                        birth_date: details.birth_date,
+                        height_cm: details.height_cm,
+                        notes: details.notes,
+                    }),
+                    (None, None) => PlayerInput::New {
                         name,
                         role,
                         number,
@@ -125,14 +145,15 @@ impl PlayerForm {
 /// Another active player of `team` with the name of `form`, letter case,
 /// accents and punctuation aside: not an error, two players may share a
 /// name, but likely the same one added twice, so the user is asked first.
-/// None for a player edited without changing the name.
+/// None for a player edited without changing the name (the person chosen
+/// isn't the namesake of themselves).
 pub fn namesake<'a>(
     form: &PlayerForm,
     team: &'a TeamEntry,
     existing: Option<&PlayerEntry>,
 ) -> Option<&'a PlayerEntry> {
     let name = normalized(&form.name);
-    let existing_id = existing.map(|p| p.id);
+    let existing_id = existing.map(|p| p.id).or(form.person);
     let unchanged = existing.is_some_and(|p| normalized(&p.name) == name);
     match (name.is_empty(), unchanged) {
         (false, false) => team
@@ -178,7 +199,7 @@ fn parse_height(height: &str) -> Option<u16> {
 }
 
 /// One or two digits, surrounding spaces aside.
-fn parse_number(number: &str) -> Option<u8> {
+pub(crate) fn parse_number(number: &str) -> Option<u8> {
     let number = number.trim();
     match (number.len(), number.chars().all(|c| c.is_ascii_digit())) {
         (1 | 2, true) => number.parse().ok(),
@@ -197,4 +218,14 @@ pub fn removed(player: &PlayerEntry) -> PlayerEntry {
         notes: String::new(),
         ..player.clone()
     }
+}
+
+/// The players whose person was removed from the registry (D16) have no
+/// name left: they read as a removed player, with the number the team or
+/// the match gives them ("#7, removed player").
+pub fn name_the_removed(team: &mut TeamEntry, labels: &Labels) {
+    team.players
+        .iter_mut()
+        .filter(|p| p.name.trim().is_empty())
+        .for_each(|p| p.name = labels.removed_player.to_string());
 }

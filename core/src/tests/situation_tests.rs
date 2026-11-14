@@ -9,7 +9,7 @@ mod tests {
         flags::{EventFlags, ReceptionSchemeEnum},
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
-        stats::{EvalSet, SetTypeSet, SituationFilter, StatsFilter},
+        stats::{EvalSet, RoleSet, RotationSet, SetTypeSet, SituationFilter, StatsFilter},
         technique::{SetTypeEnum, TechniqueEnum},
     };
     use EvalEnum::*;
@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(attacks(&s, false, &quick), 1);
         assert_eq!(s.stats.event_count(A, Some(Perfect), &quick), 1);
         let middles = situation(SituationFilter {
-            role: Some(RoleEnum::MiddleBlocker),
+            roles: RoleSet::of(&[RoleEnum::MiddleBlocker]),
             ..Default::default()
         });
         assert_eq!(
@@ -270,5 +270,32 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(s.stats.rallies_won(&canonical), None);
+    }
+
+    /// The negative group holds `!` with `-` and `/`; the sets of
+    /// rotations and roles keep all when empty, else only theirs.
+    #[test]
+    fn the_groups_and_the_sets_to_filter_by() {
+        assert!(
+            [Exclamative, Negative, Over]
+                .iter()
+                .all(|e| EvalSet::NEGATIVE.contains(*e))
+        );
+        assert!(
+            ![Perfect, Positive, Error]
+                .iter()
+                .any(|e| EvalSet::NEGATIVE.contains(*e))
+        );
+        let all = RotationSet::default();
+        assert!((0..6).all(|r| all.keeps(r)));
+        let two = RotationSet::of(&[1, 4, 9]);
+        assert_eq!(
+            (0..8).filter(|r| two.keeps(*r)).collect::<Vec<_>>(),
+            vec![1, 4]
+        );
+        assert!(RoleSet::default().keeps(None));
+        let middles = RoleSet::of(&[RoleEnum::MiddleBlocker, RoleEnum::Setter]);
+        assert!(middles.keeps(Some(RoleEnum::Setter)));
+        assert!(!middles.keeps(Some(RoleEnum::Libero)) && !middles.keeps(None));
     }
 }

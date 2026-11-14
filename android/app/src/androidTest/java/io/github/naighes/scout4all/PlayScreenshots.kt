@@ -17,7 +17,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
-import org.json.JSONObject
+import io.github.naighes.scout4all.core.TeamListing
+import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -105,13 +106,13 @@ class PlayScreenshots {
 
     private fun text(id: Int, vararg args: Any): String = rule.activity.getString(id, *args)
 
-    /** The name of the only team of the data. */
+    /** The name of the only team of the data, as the core reads it (the
+     * folders pushed moved into its database at the start). */
     private fun teamName(): String {
-        val teams = File(files, "scout4all").listFiles().orEmpty()
-            .map { File(it, "team.json") }
-            .filter { it.exists() }
+        val app = instrumentation.targetContext.applicationContext as Scout4AllApplication
+        val teams = runBlocking { app.core { it.teams() } }.filterIsInstance<TeamListing.Team>()
         check(teams.size == 1) { "${teams.size} teams in the data, one expected" }
-        return JSONObject(teams[0].readText()).getString("name")
+        return teams[0].name
     }
 
     /** A cell of the court, by its label (the zone and the cell, "5C"). */

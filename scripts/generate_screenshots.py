@@ -6,12 +6,17 @@ each language on a copy of the example matches (never `~/.scout4all`), the
 screens opened and the keys pressed by the plan, the window saved as PNG,
 then converted to the WebP the site uses (`web/src/assets/screens/<lang>/`).
 
-The video screen is taken on the match given with `--video-match`: its
-folder in the data (`~/.scout4all/<team>/<match>`), which keeps the video
-and how it lines up with the events (the shared archives leave them out).
+The video screen is taken on the match given with `--video-match`: its id
+in the data (`--video-data`, default `~/.scout4all`), or its id of before
+the database (the name of its folder then), which keeps the video and how
+it lines up with the events (the shared archives leave them out).
 
-    scripts/generate_screenshots.py \\
-        --video-match ~/.scout4all/<team>/2026-11-06_japan
+    scripts/generate_screenshots.py --video-match 2026-11-06_japan
+
+The data are copied (the database with SQLite's backup, safe with the app
+open) and opened once by the app before the plan, so that a folder of
+before the database is migrated: the ids of the plan are then read from
+the database.
 
 With `--video-match` it also makes the video at the top of the site
 (`web/public/media/<lang>/scouting.mp4`, `.webm` and the poster): the
@@ -31,6 +36,7 @@ import argparse
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -66,18 +72,48 @@ def build():
     return app
 
 
+# the files of the database in a data folder (`layout::is_database_file`)
+DATABASE = "scout4all.db"
+DATABASE_FILES = {DATABASE, f"{DATABASE}-wal", f"{DATABASE}-shm", f"{DATABASE}-journal"}
+
+
+def query(data, sql, *params):
+    with sqlite3.connect(data / DATABASE) as db:
+        return db.execute(sql, params).fetchall()
+
+
+def copy_data(source, into):
+    """The data folder in `into`: the database by SQLite's backup (the app
+    may be writing it), the rest as it is but the recordings of the app."""
+    shutil.copytree(source, into, ignore=lambda _, names: [
+        n for n in names if n in DATABASE_FILES or n == "recordings"])
+    if (source / DATABASE).exists():
+        with sqlite3.connect(source / DATABASE) as src, sqlite3.connect(into / DATABASE) as dst:
+            src.backup(dst)
+
+
+def migrated(app, data, work):
+    """The data opened once by the app, a plan without steps: a folder of
+    before the database moves into it."""
+    plan = {"window": WINDOW, "out": str(work / "migrated"), "steps": []}
+    shoot(app, data, plan, work, f"migrate-{data.parent.name}-{data.name}")
+    if not (data / DATABASE).exists():
+        fail(f"{data}: no database after the app opened it")
+
+
 def the_team(data):
-    teams = [d for d in data.iterdir() if (d / "team.json").exists()]
+    teams = query(data, "SELECT id FROM teams WHERE deleted = 0")
     if len(teams) != 1:
         fail(f"{data}: {len(teams)} teams, one expected")
-    return teams[0]
+    return teams[0][0]
 
 
-def match_on(team, day):
-    found = sorted(d.name for d in team.iterdir() if d.is_dir() and d.name.startswith(day))
+def match_on(data, team, day):
+    found = query(data, "SELECT id FROM matches WHERE team_a = ? AND deleted = 0"
+                  " AND substr(start, 1, 10) = ? ORDER BY start, id", team, day)
     if not found:
-        fail(f"{team}: no match on {day}")
-    return found[0]
+        fail(f"{data}: no match of {team} on {day}")
+    return found[0][0]
 
 
 def set_language(data, lang):
@@ -90,10 +126,9 @@ def set_language(data, lang):
 
 def examples_plan(data, out):
     """Home, scouting, statistics and analysis on the example matches."""
-    team = the_team(data)
-    t = team.name
-    live = match_on(team, IN_PROGRESS)
-    over = match_on(team, FINISHED)
+    t = the_team(data)
+    live = match_on(data, t, IN_PROGRESS)
+    over = match_on(data, t, FINISHED)
     return {
         "window": WINDOW,
         "out": str(out),
@@ -126,35 +161,37 @@ def examples_plan(data, out):
     }
 
 
-def video_data(match_dir, video, lang, into):
-    """A folder of data with the match of the video alone, in `lang`."""
-    match_dir = match_dir.expanduser().resolve()
-    team_dir = match_dir.parent
-    if not (match_dir / "match.json").exists() or not (team_dir / "team.json").exists():
-        fail(f"{match_dir}: not the folder of a match in the data")
-    team = into / team_dir.name
-    team.mkdir(parents=True)
-    shutil.copy2(team_dir / "team.json", team / "team.json")
-    shutil.copytree(match_dir, team / match_dir.name)
-    profile_path = team / match_dir.name / "video.json"
-    if not profile_path.exists():
-        fail(f"{match_dir}: no video.json (link the video to the match in the app first)")
-    profile = json.loads(profile_path.read_text())
-    # the paths saved relative to the data: from the data the match is in
-    files = []
-    for f in profile.get("files", []):
-        path = Path(f["path"])
-        path = path if path.is_absolute() else match_dir.parent.parent / path
-        files.append({**f, "path": str(path)})
-    if video:
-        files = [{"path": str(Path(video).expanduser().resolve())}]
-    for f in files:
-        if not Path(f["path"]).exists():
-            fail(f"{f['path']}: the video isn't there")
-    profile["files"] = files
-    profile_path.write_text(json.dumps(profile, indent=2))
+def video_data(app, source, match, video, lang, into, work):
+    """A copy of the data with the match of the video, in `lang`: its team
+    and match ids."""
+    source = source.expanduser().resolve()
+    copy_data(source, into)
     set_language(into, lang)
-    return team_dir.name, match_dir.name
+    migrated(app, into, work)
+    found = query(into, "SELECT team_a, id FROM matches WHERE (id = ? OR legacy_id = ?)"
+                  " AND deleted = 0", match, match)
+    if len(found) != 1:
+        fail(f"{source}: {len(found)} matches {match}, one expected")
+    team, match_id = found[0]
+    files = query(into, "SELECT position, path FROM match_video_files"
+                  " WHERE match_id = ? ORDER BY position", match_id)
+    if not files:
+        fail(f"{match}: no video (link the video to the match in the app first)")
+    # the paths saved relative to the data: from the data the match is in
+    paths = [(position, Path(path) if Path(path).is_absolute() else source / path)
+             for position, path in files]
+    if video:
+        paths = [(0, Path(video).expanduser().resolve())]
+    for _, path in paths:
+        if not path.exists():
+            fail(f"{path}: the video isn't there")
+    with sqlite3.connect(into / DATABASE) as db:
+        db.execute("DELETE FROM match_video_files WHERE match_id = ? AND position >= ?",
+                   (match_id, len(paths)))
+        for position, path in paths:
+            db.execute("UPDATE match_video_files SET path = ? WHERE match_id = ? AND position = ?",
+                       (str(path), match_id, position))
+    return team, match_id
 
 
 def video_plan(team, match, out):
@@ -203,7 +240,7 @@ def scouting_hero_plan(data, out):
     """A rally scouted on the match in progress: a reception with its zone,
     an attack on a super with its zone, a kill, then the serve."""
     team = the_team(data)
-    steps = [{"go": {"scouting": [team.name, match_on(team, IN_PROGRESS)]}}, {"wait": 1000}]
+    steps = [{"go": {"scouting": [team, match_on(data, team, IN_PROGRESS)]}}, {"wait": 1000}]
     steps += [{"record": "hero-scouting"}, {"wait": 900}]
 
     def key(k, wait=700):
@@ -292,7 +329,8 @@ def to_webp(png_dir, names, dest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--video-match", type=Path, help="the folder of the match of the video, in the data")
+    parser.add_argument("--video-match", help="the match of the video: its id in the data, or its id of before the database")
+    parser.add_argument("--video-data", type=Path, default=Path.home() / ".scout4all", help="the data of the match of the video")
     parser.add_argument("--video", type=Path, help="another file for the video of the match")
     parser.add_argument("--examples", type=Path, default=Path.home() / "scout4all-esempi" / "dati")
     parser.add_argument("--langs", default=",".join(LANGS))
@@ -317,12 +355,14 @@ def main():
             if not source.exists():
                 fail(f"{source}: no example matches")
             data = work / lang / "data"
-            shutil.copytree(source, data)
+            copy_data(source, data)
             set_language(data, lang)
+            migrated(app, data, work)
             out = work / lang / "png"
             plan = examples_plan(data, out)
             if args.video_match:
-                team, match = video_data(args.video_match, args.video, lang, work / lang / "video-data")
+                team, match = video_data(app, args.video_data, args.video_match, args.video, lang,
+                                         work / lang / "video-data", work)
                 shoot(app, work / lang / "video-data", video_plan(team, match, out), work, f"{lang}-video")
             shoot(app, data, plan, work, f"{lang}-examples")
             names = sorted(p.stem for p in out.glob("*.png"))
@@ -333,8 +373,9 @@ def main():
                 recordings = work / lang / "hero"
                 shoot(app, work / lang / "video-data", video_hero_plan(team, match, recordings), work, f"{lang}-hero-video")
                 fresh = work / lang / "hero-data"
-                shutil.copytree(source, fresh)
+                copy_data(source, fresh)
                 set_language(fresh, lang)
+                migrated(app, fresh, work)
                 shoot(app, fresh, scouting_hero_plan(fresh, recordings), work, f"{lang}-hero-scouting")
                 media = (args.out / lang) if args.out else ROOT / "web" / "public" / "media" / lang
                 hero(recordings, media)

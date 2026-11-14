@@ -108,9 +108,24 @@ class AnalysisTest {
         rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
         rule.waitForText(string(R.string.rally_reception))
         rule.onNode(hasText(string(R.string.rally_reception)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        rule.waitForText(string(R.string.negative_group) + " -/")
-        rule.onAllNodesWithText(string(R.string.negative_group) + " -/")[0].performSemanticsAction(SemanticsActions.OnClick)
-        rule.waitForText(string(R.string.rally_reception) + " -/")
+        // `!` among the bad ones
+        rule.waitForText(string(R.string.negative_group) + " !-/")
+        rule.onAllNodesWithText(string(R.string.negative_group) + " !-/")[0].performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.rally_reception) + " !-/")
+    }
+
+    /** Two rotations at a time: the menu stays open, the chip names both. */
+    @Test
+    fun twoRotationsAtATime() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona")
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        rule.waitForText(string(R.string.filter_rotation))
+        rule.onNode(hasText(string(R.string.filter_rotation)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText("S1")
+        rule.onNode(hasText("S1") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText("S3") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.filter_rotation) + " S1 S3")
     }
 
     private fun days(from: String, to: String) {

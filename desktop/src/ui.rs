@@ -680,6 +680,20 @@ pub fn confirm_deletion<'a, M: Clone + 'a>(
     on_no: M,
     c: Colors,
 ) -> Element<'a, M> {
+    confirm_deletion_with(s, what, vec![], s.delete_forever, on_yes, on_no, c)
+}
+
+/// As `confirm_deletion`, with other answers before the main one, `yes`
+/// (e.g. to delete a player from the registry, not only from the team).
+pub fn confirm_deletion_with<'a, M: Clone + 'a>(
+    s: &Strings,
+    what: &str,
+    others: Vec<(&'static [u8], &str, M)>,
+    yes: &str,
+    on_yes: M,
+    on_no: M,
+    c: Colors,
+) -> Element<'a, M> {
     let danger = Colors {
         accent: c.danger,
         on_accent: Color::WHITE,
@@ -701,10 +715,11 @@ pub fn confirm_deletion<'a, M: Clone + 'a>(
             body(s.irreversible.to_string())
                 .font(theme::fonts().bold)
                 .color(c.danger),
-            answers(
+            answers_with(
                 Some((theme::icons::CLOSE, s.cancel, on_no)),
+                others,
                 theme::icons::DELETE,
-                s.delete_forever,
+                yes,
                 Some(on_yes),
                 danger
             )
@@ -791,6 +806,27 @@ pub fn choice_line<'a, M: 'a>(
     pills: Vec<Element<'a, M>>,
     c: Colors,
 ) -> Element<'a, M> {
+    labelled_choices(name, on, pills, Length::Fixed(130.0), c)
+}
+
+/// A choice in a bar of a few, beside the others: the name as wide as it
+/// is, the pills after it.
+pub fn choice_inline<'a, M: 'a>(
+    name: &str,
+    on: bool,
+    pills: Vec<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
+    labelled_choices(name, on, pills, Length::Shrink, c)
+}
+
+fn labelled_choices<'a, M: 'a>(
+    name: &str,
+    on: bool,
+    pills: Vec<Element<'a, M>>,
+    width: Length,
+    c: Colors,
+) -> Element<'a, M> {
     let label = text(name.to_string())
         .size(SIZE_SMALL)
         .font(theme::fonts().bold)
@@ -798,7 +834,7 @@ pub fn choice_line<'a, M: 'a>(
             true => c.accent,
             false => c.muted,
         })
-        .width(Length::Fixed(130.0));
+        .width(width);
     row![
         container(
             text(match on {

@@ -12,7 +12,7 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::event_edit::{EventEdit, EventEditError};
-    use crate::providers::store::set_reader::read_events;
+    use crate::legacy::format::read_events;
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
         lineup::Lineup,

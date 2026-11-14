@@ -1,0 +1,108 @@
+{
+  "name": "Fixture Volley",
+  "year": 2025,
+  "players": [
+    {
+      "id": "516d1a63-a2f2-4cb0-b194-13e3b2acdfb0",
+      "name": "Giulia Neri",
+      "role": "Setter",
+      "number": 1,
+      "deleted": false,
+      "birth_date": "2004-03-01",
+      "height_cm": 171,
+      "notes": "capitana, mancina"
+    },
+    {
+      "id": "d46567d9-3655-4de5-9a15-3421d7c9d1af",
+      "name": "Marta Villa",
+      "role": "OutsideHitter",
+      "number": 2,
+      "deleted": false,
+      "birth_date": "2004-03-02",
+      "height_cm": 172
+    },
+    {
+      "id": "82886122-a385-4b26-a0ca-d24bae68f68d",
+      "name": "Sara Conti",
+      "role": "MiddleBlocker",
+      "number": 3,
+      "deleted": false,
+      "birth_date": "2004-03-03",
+      "height_cm": 173
+    },
+    {
+      "id": "6ab6253d-9072-4404-a989-a896eeff4b5e",
+      "name": "Elena Ferri",
+      "role": "OppositeHitter",
+      "number": 4,
+      "deleted": false,
+      "height_cm": 174
+    },
+    {
+      "id": "36192e5b-065a-4632-bce4-e0195c72dd0b",
+      "name": "Chiara Galli",
+      "role": "OutsideHitter",
+      "number": 5,
+      "deleted": false
+    },
+    {
+      "id": "b6bb6b97-3b05-4632-a60b-45beb4b58c2d",
+      "name": "Laura Fabbri",
+      "role": "MiddleBlocker",
+      "number": 6,
+      "deleted": false
+    },
+    {
+      "id": "b61298c0-ffc8-49ef-b360-3350bb3e17d0",
+      "name": "Paola Riva",
+      "role": "Libero",
+      "number": 7,
+      "deleted": false
+    },
+    {
+      "id": "7911dbe4-33f9-4dff-bedb-c4659cd3218b",
+      "name": "Anna Longo",
+      "role": "Libero",
+      "number": 8,
+      "deleted": false
+    },
+    {
+      "id": "2c27dccf-dbcb-48ac-af92-56052cc42a44",
+      "name": "Irene Sala",
+      "role": "Setter",
+      "number": 9,
+      "deleted": false
+    },
+    {
+      "id": "c10a3818-f52c-4672-9c7f-0505fca30507",
+      "name": "Silvia Moro",
+      "role": "OutsideHitter",
+      "number": 10,
+      "deleted": false
+    },
+    {
+      "id": "acff8340-3ea9-4476-b80c-848d9b76440c",
+      "name": "Beatrice Gatti",
+      "role": "MiddleBlocker",
+      "number": 11,
+      "deleted": false
+    },
+    {
+      "id": "c9394822-03bd-43b1-9e28-497362fcc7cd",
+      "name": "Federica Testa",
+      "role": "OppositeHitter",
+      "number": 12,
+      "deleted": false
+    },
+    {
+      "id": "80fb1f13-b6ef-4426-b6c0-4f55846b9fbd",
+      "name": "Noemi Pace",
+      "role": "OutsideHitter",
+      "number": 13,
+      "deleted": true
+    }
+  ],
+  "classification": null,
+  "gender": null,
+  "country": "IT"
+}

@@ -504,14 +504,11 @@ fn stats_values(stats: &Stats, filter: &StatsFilter) -> Vec<String> {
     let count = |event_type, eval| fmt_count(stats.event_count(event_type, eval, filter));
     let pct = |event_type, eval| fmt_num(stats.event_percentage(event_type, eval, filter));
     let metric = |event_type, metric| fmt_num(stats.metric_percentage(event_type, metric, filter));
-    let team_count = |event_type| match filter.player {
-        Some(_) => "-".to_string(),
-        None => count(event_type, None),
+    let team_count = |event_type| match filter.of_players() {
+        true => "-".to_string(),
+        false => count(event_type, None),
     };
-    let break_filter = StatsFilter {
-        phase: Some(PhaseEnum::Break),
-        ..*filter
-    };
+    let break_filter = filter.with_phase(Some(PhaseEnum::Break));
     vec![
         fmt_count(stats.points(filter)),
         fmt_count(stats.points(&break_filter)),
@@ -658,10 +655,7 @@ fn phase_row(label: String, stats: &Stats, filter: StatsFilter, total: bool) -> 
     let won = |phase| {
         fmt_num(
             stats
-                .rallies_won(&StatsFilter {
-                    phase: Some(phase),
-                    ..filter
-                })
+                .rallies_won(&filter.with_phase(Some(phase)))
                 .map(|(v, _, _)| v),
         )
     };
@@ -1105,7 +1099,10 @@ fn points_won_table(labels: &Labels, replay: &Replay) -> Table {
     use EvalEnum::*;
     use EventTypeEnum::*;
     let all = StatsFilter::default();
-    let count = |event_type, eval| move |s: &Stats| s.event_count(event_type, eval, &all);
+    let count = |event_type, eval| {
+        let all = &all;
+        move |s: &Stats| s.event_count(event_type, eval, all)
+    };
     origin_table(
         labels,
         labels.points_won,
@@ -1125,7 +1122,10 @@ fn points_lost_table(labels: &Labels, replay: &Replay) -> Table {
     use EvalEnum::*;
     use EventTypeEnum::*;
     let all = StatsFilter::default();
-    let count = |event_type, eval| move |s: &Stats| s.event_count(event_type, eval, &all);
+    let count = |event_type, eval| {
+        let all = &all;
+        move |s: &Stats| s.event_count(event_type, eval, all)
+    };
     let block = |s: &Stats| count(B, Some(Error))(s) + count(B, Some(Over))(s);
     origin_table(
         labels,

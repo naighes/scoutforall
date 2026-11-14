@@ -38,11 +38,13 @@ import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.MatchDetails
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.NextSetKind
+import io.github.naighes.scout4all.core.ScoutedBy
 import io.github.naighes.scout4all.core.SetScore
 
 private sealed interface MatchState {
     data object Loading : MatchState
-    data class Loaded(val match: MatchDetails) : MatchState
+    /** `team`: the name of the team the match is seen by */
+    data class Loaded(val match: MatchDetails, val team: String) : MatchState
     data class Failed(val message: String) : MatchState
 }
 
@@ -61,11 +63,12 @@ fun MatchScreen(
     onStats: () -> Unit,
     onVideo: () -> Unit = {},
     onDeleted: () -> Unit = {},
+    onOpenAs: (teamId: String) -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<MatchState>(MatchState.Loading, teamId, matchId) {
         value = try {
-            MatchState.Loaded(app.core { it.matchDetails(teamId, matchId) })
+            app.core { MatchState.Loaded(it.matchDetails(teamId, matchId), it.team(teamId).name) }
         } catch (e: MobileException) {
             MatchState.Failed(e.reason)
         }
@@ -76,7 +79,8 @@ fun MatchScreen(
                 title = { Text((state as? MatchState.Loaded)?.match?.opponent ?: "", Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
                 actions = {
-                    if (state is MatchState.Loaded) {
+                    // seen by B, scouted by A: nothing to change from here
+                    if ((state as? MatchState.Loaded)?.match?.scoutedBy == null && state is MatchState.Loaded) {
                         ExportButton(stringResource(R.string.export_match)) { it.exportMatch(teamId, matchId) }
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_match))
@@ -98,7 +102,10 @@ fun MatchScreen(
         when (val s = state) {
             MatchState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is MatchState.Failed -> Centered(modifier) { Text(s.message) }
-            is MatchState.Loaded -> MatchContent(s.match, onStartSet, onResumeSet, onSet, onStats, onVideo, modifier)
+            is MatchState.Loaded -> when (val a = s.match.scoutedBy) {
+                null -> MatchContent(s.match, onStartSet, onResumeSet, onSet, onStats, onVideo, modifier)
+                else -> SeenByB(s.match, a, s.team, onOpenAs, modifier)
+            }
         }
     }
 }
@@ -113,19 +120,7 @@ private fun MatchContent(
     onVideo: () -> Unit,
     modifier: Modifier,
 ) = Column(modifier) {
-    val place = stringResource(if (m.home) R.string.home else R.string.away)
-    Text(
-        "${matchDate(m.date)} · $place",
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-        style = MaterialTheme.typography.bodyLarge,
-    )
-    Text(
-        "${m.won}-${m.lost}",
-        modifier = Modifier.padding(horizontal = 16.dp).readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
-        style = MaterialTheme.typography.displayMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = resultColor(m.finished, m.won.toInt(), m.lost.toInt()),
-    )
+    MatchHeader(m)
     val inProgress = (m.next as? NextSetKind.Resume)?.setNumber
     // the statistics of the match under its score, a button of their own;
     // the ones of a set touching it
@@ -180,6 +175,49 @@ private fun MatchContent(
     }
 }
 
+/** A match of the team as B, scouted by A only: its date, court, result
+ * and sets as B sees them, the notes; the statistics and the scouting are
+ * in the match of A, opened from here. */
+@Composable
+private fun SeenByB(m: MatchDetails, a: ScoutedBy, team: String, onOpenAs: (String) -> Unit, modifier: Modifier) =
+    Column(modifier) {
+        MatchHeader(m)
+        Text(
+            stringResource(R.string.scouted_by_text, a.teamName, team),
+            Modifier.padding(16.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            items(m.sets, key = { it.number.toInt() }) { SetRow(it, inProgress = false, onClick = null) }
+            if (m.notes.isNotEmpty()) {
+                item(key = "notes") { MatchNotes(m.notes) }
+            }
+        }
+        Button(
+            onClick = { onOpenAs(a.teamId) },
+            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
+        ) { Text(stringResource(R.string.open_as_team, a.teamName)) }
+    }
+
+/** The date, the court and the sets won, big. */
+@Composable
+private fun MatchHeader(m: MatchDetails) {
+    val place = stringResource(if (m.home) R.string.home else R.string.away)
+    Text(
+        "${matchDate(m.date)} · $place",
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+        style = MaterialTheme.typography.bodyLarge,
+    )
+    Text(
+        "${m.won}-${m.lost}",
+        modifier = Modifier.padding(horizontal = 16.dp).readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
+        style = MaterialTheme.typography.displayMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = resultColor(m.finished, m.won.toInt(), m.lost.toInt()),
+    )
+}
+
 @Composable
 private fun MatchNotes(notes: String) = Column(Modifier.fillMaxWidth().padding(16.dp)) {
     Text(
@@ -191,7 +229,7 @@ private fun MatchNotes(notes: String) = Column(Modifier.fillMaxWidth().padding(1
 }
 
 @Composable
-private fun SetRow(set: SetScore, inProgress: Boolean, onClick: () -> Unit) = ListItem(
+private fun SetRow(set: SetScore, inProgress: Boolean, onClick: (() -> Unit)?) = ListItem(
     headlineContent = { Text(stringResource(R.string.set_n, set.number.toInt())) },
     supportingContent = if (inProgress) {
         { Text(stringResource(R.string.in_progress), color = MaterialTheme.colorScheme.primary) }
@@ -208,7 +246,7 @@ private fun SetRow(set: SetScore, inProgress: Boolean, onClick: () -> Unit) = Li
             color = resultColor(!inProgress, set.us.toInt(), set.them.toInt()),
         )
     },
-    modifier = Modifier.clickable(onClick = onClick),
+    modifier = onClick?.let { Modifier.clickable(onClick = it) } ?: Modifier,
 )
 
 @Composable

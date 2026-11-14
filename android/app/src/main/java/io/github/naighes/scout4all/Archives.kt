@@ -168,16 +168,16 @@ fun rememberImport(
                 context.report({ state.error = it }) {
                     when (into) {
                         null -> {
-                            val id = app.core { it.importTeam(c.bytes, c.fileName) }
+                            val team = app.core { it.importTeam(c.bytes, c.fileName) }
                             app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
-                            onTeam(id)
-                            R.string.team_imported
+                            onTeam(team.id)
+                            context.imported(R.string.team_imported, team.summary)
                         }
                         else -> {
                             val m = app.core { it.importMatch(c.bytes, into) }
                             app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
-                            onMatch(into, m)
-                            R.string.match_imported
+                            onMatch(into, m.id)
+                            context.imported(R.string.match_imported, m.summary)
                         }
                     }
                 }
@@ -215,7 +215,9 @@ private fun ImportDialog(
     onImport: (into: String?) -> Unit,
 ) {
     val teams = (preview as? ArchivePreview.Match)?.teams.orEmpty()
-    var into by rememberSaveable { mutableStateOf(teamId ?: teams.firstOrNull()?.id) }
+    // the one team it may go into (a match of the database brings its own),
+    // else the team it's imported from, else the first to choose from
+    var into by rememberSaveable { mutableStateOf(teams.singleOrNull()?.id ?: teamId ?: teams.firstOrNull()?.id) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -279,6 +281,16 @@ private suspend fun Context.read(uri: Uri): Pair<ByteArray, String?> = withConte
     }
     // a file of the phone (file://) has no provider to tell it
     bytes to (name ?: uri.lastPathSegment)
+}
+
+/** What was imported: the message alone (shown briefly by `report`), or
+ * with what was found here already, shown longer. */
+private fun Context.imported(message: Int, summary: String?): Int? = when (summary) {
+    null -> message
+    else -> {
+        Toast.makeText(this, "${getString(message)}\n$summary", Toast.LENGTH_LONG).show()
+        null
+    }
 }
 
 /** Runs `action`, then shows the message it returns, briefly; what went

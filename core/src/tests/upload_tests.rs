@@ -2,23 +2,21 @@
 //! stands for it, signing the upload and taking the archive.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::{
         analytics::{
             queue_manager::QueueManager,
-            upload::{UploadStep, upload_next},
+            upload::{UploadStep, upload_next, written_set_files},
         },
-        archive::{import_match, import_team},
         localization::Language,
-        providers::store::{
-            match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-            queue_reader::StoreQueueReader, queue_writer::StoreQueueWriter,
-            set_reader::StoreSetReader, set_writer::StoreSetWriter, team_reader::StoreTeamReader,
-            team_writer::StoreTeamWriter,
-        },
         providers::{
             match_reader::MatchReader,
             match_writer::MatchWriter,
+            sqlite::{
+                legacy_archive::{import_legacy_match, import_legacy_team},
+                queue::SqliteQueue,
+                upload::SqliteUploads,
+            },
             team_reader::TeamReader,
             team_writer::{TeamInput, TeamWriter},
         },
@@ -28,8 +26,7 @@ mod tests {
             r#match::{MatchEntry, MatchSource},
             team::TeamEntry,
         },
-        storage::{Store, layout, memory::MemoryStore},
-        tests::EN,
+        tests::Sqlite,
     };
     use std::{
         io::Cursor,
@@ -49,19 +46,19 @@ mod tests {
     /// The API: `POST /sign` answers with the signed URL of the archive,
     /// where `PUT` takes it, and the keys of the match when asked, unless
     /// `old` (before v0.12). It fails while `down`.
-    struct FakeApi {
-        url: String,
+    pub(crate) struct FakeApi {
+        pub(crate) url: String,
         down: Arc<AtomicBool>,
         old: Arc<AtomicBool>,
         /// the bodies of the requests of a signed URL
         signs: Arc<Mutex<Vec<serde_json::Value>>>,
         /// the method and the path of each request, and the archives put
         requests: Arc<Mutex<Vec<String>>>,
-        archives: Arc<Mutex<Vec<Vec<u8>>>>,
+        pub(crate) archives: Arc<Mutex<Vec<Vec<u8>>>>,
     }
 
     impl FakeApi {
-        async fn start() -> Self {
+        pub(crate) async fn start() -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let api = FakeApi {
@@ -90,7 +87,7 @@ mod tests {
             api
         }
 
-        fn requests(&self) -> Vec<String> {
+        pub(crate) fn requests(&self) -> Vec<String> {
             self.requests.lock().unwrap().clone()
         }
     }
@@ -192,49 +189,42 @@ mod tests {
     }
 
     struct App {
-        store: Arc<dyn Store>,
-        team_reader: StoreTeamReader,
-        match_reader: StoreMatchReader,
-        queue: QueueManager<StoreQueueReader, StoreQueueWriter>,
+        p: Sqlite,
+        queue: QueueManager<SqliteQueue, SqliteQueue>,
     }
 
     impl App {
         /// The team and the match of the archive fixtures, the match queued.
         async fn with_a_finished_match() -> (Self, MatchEntry) {
-            let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-            let language = Language::default;
-            let app = App {
-                team_reader: StoreTeamReader::new(store.clone(), language()),
-                match_reader: StoreMatchReader::new(
-                    store.clone(),
-                    Arc::new(StoreSetReader::new(store.clone(), language())),
-                    language(),
-                ),
-                queue: QueueManager::new(
-                    Arc::new(StoreQueueReader::new(store.clone())),
-                    Arc::new(StoreQueueWriter::new(store.clone())),
-                ),
-                store: store.clone(),
-            };
-            let team = import_team(
+            let p = Sqlite::new();
+            let language = Language::default();
+            let team = import_legacy_team(
+                &p.db,
                 include_bytes!("fixtures/45a589d5-004a-4a50-99f5-6d78fd052a3c.zip"),
                 Uuid::parse_str(TEAM_ID).ok(),
-                &app.team_reader,
-                &StoreTeamWriter::new(store.clone()),
-                EN,
+                &language,
             )
-            .await
             .unwrap();
-            let m = import_match(
+            let imported = import_legacy_match(
+                &p.db,
                 include_bytes!("fixtures/2025-09-20_club_arezzo.zip"),
-                &team,
-                &app.match_reader,
-                &StoreMatchWriter::new(store.clone()),
-                &StoreSetWriter::new(store.clone(), language()),
-                EN,
+                team.id,
+                &language,
             )
-            .await
             .unwrap();
+            let team = p.team_reader.read_single(&team.id).await.unwrap();
+            let m = p
+                .match_reader
+                .read_single(&team, &imported.id.to_string())
+                .await
+                .unwrap();
+            let app = App {
+                queue: QueueManager::new(
+                    Arc::new(SqliteQueue::new(p.db.clone())),
+                    Arc::new(SqliteQueue::new(p.db.clone())),
+                ),
+                p,
+            };
             app.queue.enqueue(team.id, m.id.clone()).await.unwrap();
             (app, m)
         }
@@ -245,13 +235,14 @@ mod tests {
             let team = TeamEntry {
                 gender: Some(GenderEnum::Women),
                 country: CountryCode::parse("IT"),
-                ..self.team_reader.read_single(&m.team.id).await.unwrap()
+                ..self.p.team_reader.read_single(&m.team.id).await.unwrap()
             };
-            StoreTeamWriter::new(self.store.clone())
+            self.p
+                .team_writer
                 .save(TeamInput::Existing(team.clone()))
                 .await
                 .unwrap();
-            self.match_reader.read_single(&team, &m.id).await.unwrap()
+            self.p.match_reader.read_single(&team, &m.id).await.unwrap()
         }
 
         /// The `match.json` of the archive put.
@@ -263,15 +254,8 @@ mod tests {
         }
 
         async fn upload_next(&self, api: &FakeApi) -> UploadStep {
-            upload_next(
-                &*self.store,
-                &self.team_reader,
-                &self.match_reader,
-                &self.queue,
-                &api.url,
-            )
-            .await
-            .unwrap()
+            let source = SqliteUploads::new(self.p.db.clone(), Language::default());
+            upload_next(&source, &self.queue, &api.url).await.unwrap()
         }
 
         async fn queued(&self) -> Vec<(String, u8)> {
@@ -302,13 +286,12 @@ mod tests {
             ["match.json", "set_1_descriptor.json", "set_1_events.csv"]
         );
         let events = std::io::read_to_string(zip.by_name("set_1_events.csv").unwrap()).unwrap();
-        let saved = app
-            .store
-            .read(&layout::set_events(&m.team.id, &m.id, 1))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(events.as_bytes(), saved);
+        let saved = written_set_files(&m).unwrap();
+        let saved = saved
+            .iter()
+            .find(|(name, _)| name == "set_1_events.csv")
+            .map(|(_, csv)| csv.as_slice());
+        assert_eq!(Some(events.as_bytes()), saved);
         // nothing else
         assert_eq!(app.upload_next(&api).await, UploadStep::Empty);
     }
@@ -347,11 +330,7 @@ mod tests {
     async fn a_match_no_longer_there_leaves_the_queue() {
         let api = FakeApi::start().await;
         let (app, m) = App::with_a_finished_match().await;
-        app.queue
-            .enqueue(m.team.id, "2025-01-01_removed".into())
-            .await
-            .unwrap();
-        app.queue.dequeue(&m.team.id, &m.id).await.unwrap();
+        app.p.match_writer.remove(&m.team.id, &m.id).await.unwrap();
         assert_eq!(app.upload_next(&api).await, UploadStep::Dropped);
         assert_eq!(app.queued().await, vec![]);
         assert_eq!(api.requests(), Vec::<String>::new());
@@ -429,7 +408,8 @@ mod tests {
     async fn an_imported_match_is_uploaded_as_such() {
         let api = FakeApi::start().await;
         let (app, m) = App::with_a_finished_match().await;
-        StoreMatchWriter::new(app.store.clone())
+        app.p
+            .match_writer
             .save_source(&m, MatchSource::Dvw, false)
             .await
             .unwrap();

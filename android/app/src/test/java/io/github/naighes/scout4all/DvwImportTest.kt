@@ -85,7 +85,12 @@ class DvwImportTest {
             rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
             fillNewTeam()
             next()
+            // team B: no team like it, only its name to start
+            rule.waitForText(string(R.string.dvw_opponent_question, "Visiting"))
+            next()
             rule.waitForText(string(R.string.dvw_ready, "Home", 3, 7))
+            rule.waitForText(string(R.string.dvw_against_name, "Visiting"))
+            rule.waitForText(string(R.string.dvw_competition, "Test"))
             tap(string(R.string.save))
             rule.waitForText(string(R.string.dvw_imported, "Home"))
             val team = teams().single()
@@ -102,7 +107,10 @@ class DvwImportTest {
     }
 
     /** Both teams, each on its own; the activity made again on the way
-     * keeps where the import is. */
+     * keeps where the import is. The home team against team B made with
+     * the players of the file, back on team B going back to team A; the
+     * visiting team into team B, against the home team proposed first:
+     * two matches, two teams. */
     @Test
     fun bothTeamsImportedAcrossTheActivityMadeAgain() {
         share().use { scenario ->
@@ -116,14 +124,28 @@ class DvwImportTest {
             rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
             fillNewTeam()
             next()
-            tap(string(R.string.save))
-            rule.waitForText(string(R.string.dvw_new_team_of, "Visiting", "2014"))
+            rule.waitForText(string(R.string.dvw_opponent_question, "Visiting"))
+            pressBack()
+            rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
             fillNewTeam()
             next()
+            choose(string(R.string.dvw_opponent_new, "Visiting"))
+            next()
+            rule.waitForText(string(R.string.dvw_against_team, "Visiting", 7))
+            tap(string(R.string.save))
+            // the visiting team: like team B just made
+            rule.waitForText(string(R.string.dvw_similar_found, "Visiting"))
+            next()
+            rule.waitForText(string(R.string.dvw_opponent_question, "Home"))
+            rule.waitForText(string(R.string.dvw_same_name), substring = true)
+            next()
+            rule.waitForText(string(R.string.dvw_against_team, "Home", 0))
             tap(string(R.string.save))
             rule.waitForText(string(R.string.dvw_imported, "Visiting"))
             rule.waitForText(string(R.string.dvw_imported, "Home"))
             assertEquals(listOf("Home", "Visiting"), teams().map { it.name }.sorted())
+            val home = teams().first { it.name == "Home" }
+            assertEquals(2, core { it.matches(home.id) }.size)
         }
     }
 
@@ -139,6 +161,8 @@ class DvwImportTest {
             rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
             fillNewTeam()
             next()
+            rule.waitForText(string(R.string.dvw_opponent_question, "Visiting"))
+            next()
             tap(string(R.string.save))
             rule.waitForText(string(R.string.dvw_imported, "Home"))
         }
@@ -149,6 +173,8 @@ class DvwImportTest {
             next()
             rule.waitForText(string(R.string.dvw_similar_found, "Home"))
             rule.waitForText(string(R.string.dvw_same_name), substring = true)
+            next()
+            rule.waitForText(string(R.string.dvw_opponent_question, "Visiting"))
             next()
             rule.waitForText(string(R.string.dvw_already_saved, "Home"))
             tap(string(R.string.dvw_dont_import))

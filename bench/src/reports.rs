@@ -4,27 +4,28 @@
 //! model of the PDF, as JSON) and live statistics (with the trend), the
 //! analysis of all its matches for each fundamental and of some of them
 //! (the last 3, the last 10, October 2026), why a match can't be read, and
-//! its matches as listed; and the home. The lists come from the
-//! index of the matches, written in the folder if missing: run twice, with
-//! and without it, they must be the same.
+//! its matches as listed; and the home. Everything is read from the
+//! database. The folder is opened as the apps open it: a folder of before
+//! the database is migrated first (its backup zip beside it), so run it on
+//! a copy. The matches migrated are named by their id of before
+//! (`legacy_id`), in the names of the files and in the text, so the reports
+//! compare with those taken before the database (`diff -r`).
 
 use crate::R;
 use scout4all_core::{
+    db,
     localization::Language,
     providers::{
         match_reader::MatchReader,
-        store::{
-            match_reader::StoreMatchReader, set_reader::StoreSetReader,
-            team_reader::StoreTeamReader,
-        },
+        sqlite::{Database, matches::SqliteMatchReader, teams::SqliteTeamReader},
         team_reader::TeamReader,
     },
     reporting::model::build_report,
     shapes::enums::{EventTypeEnum, LanguageEnum},
-    storage::{Store, fs::FsStore},
+    storage::layout,
 };
 use scout4all_mobile::{AnalysisPeriod, DetailFilter, Scout4All, StatsScope};
-use std::{fs, path::Path, sync::Arc};
+use std::{fs, path::Path};
 
 /// The fundamentals of the analysis of a team.
 const FUNDAMENTALS: [EventTypeEnum; 5] = [
@@ -42,15 +43,17 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
         .map_err(|e| e.to_string())?;
     let language = Language::new(LanguageEnum::En);
     let labels = language.labels();
-    let store: Arc<dyn Store> = Arc::new(FsStore::new(dir));
-    let teams = StoreTeamReader::new(store.clone(), language.clone());
-    let matches = StoreMatchReader::new(
-        store.clone(),
-        Arc::new(StoreSetReader::new(store.clone(), language.clone())),
-        language.clone(),
-    );
+    // first: it migrates a folder of before the database
     let app = Scout4All::new(dir.to_string_lossy().into_owned(), "en".to_string())
         .map_err(|e| e.to_string())?;
+    if let Some(notice) = app.startup_notice() {
+        eprintln!("{}: {notice}", dir.display());
+    }
+    let connection = db::open(&dir.join(layout::DATABASE)).map_err(|e| e.to_string())?;
+    let names = Names::read(&connection)?;
+    let database = Database::new(connection);
+    let teams = SqliteTeamReader::new(database.clone());
+    let matches = SqliteMatchReader::new(database, language.clone());
     let all = AnalysisPeriod::Between {
         from: "1900-01-01".to_string(),
         to: "2999-12-31".to_string(),
@@ -71,31 +74,32 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
         {
             match listed {
                 Ok(m) => {
+                    let name = names.of(&m.id);
                     let report = build_report(&m, labels).map_err(|e| e.to_string())?;
                     let json = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
-                    write(&folder.join(format!("{}.report.json", m.id)), &json)?;
+                    names.write(&folder.join(format!("{name}.report.json")), &json)?;
                     let live = app
                         .match_stats(id.clone(), m.id.clone(), StatsScope::Match)
                         .map_err(|e| e.to_string())?;
-                    write(
-                        &folder.join(format!("{}.live.txt", m.id)),
+                    names.write(
+                        &folder.join(format!("{name}.live.txt")),
                         &format!("{live:#?}"),
                     )?;
                     written += 1;
                 }
-                Err(unreadable) => write(
-                    &folder.join(format!("{}.unreadable.txt", unreadable.id)),
+                Err(unreadable) => names.write(
+                    &folder.join(format!("{}.unreadable.txt", names.of(&unreadable.id))),
                     &format!("{:?}", unreadable.reason),
                 )?,
             }
         }
         let listed = app.matches(id.clone()).map_err(|e| e.to_string())?;
-        write(&folder.join("matches.txt"), &format!("{listed:#?}"))?;
+        names.write(&folder.join("matches.txt"), &format!("{listed:#?}"))?;
         for event in FUNDAMENTALS {
             let analysis = app
                 .team_analysis(id.clone(), all.clone(), event, DetailFilter::default())
                 .map_err(|e| e.to_string())?;
-            write(
+            names.write(
                 &folder.join(format!("analysis_{event}.txt")),
                 &format!("{analysis:#?}"),
             )?;
@@ -120,18 +124,52 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                     DetailFilter::default(),
                 )
                 .map_err(|e| e.to_string())?;
-            write(
+            names.write(
                 &folder.join(format!("analysis_{name}.txt")),
                 &format!("{analysis:#?}"),
             )?;
         }
     }
     let home = app.home().map_err(|e| e.to_string())?;
-    write(&out.join("home.txt"), &format!("{home:#?}"))?;
+    names.write(&out.join("home.txt"), &format!("{home:#?}"))?;
     eprintln!("{}: the statistics of {written} matches", out.display());
     Ok(())
 }
 
-fn write(path: &Path, text: &str) -> R<()> {
-    fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+/// The id of before the database of each match migrated (or imported
+/// from an archive of then), by its id.
+struct Names(Vec<(String, String)>);
+
+impl Names {
+    fn read(connection: &rusqlite::Connection) -> R<Self> {
+        let mut statement = connection
+            .prepare("SELECT id, legacy_id FROM matches WHERE legacy_id IS NOT NULL")
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<(String, String)>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(Self(rows))
+    }
+
+    /// The name of the match: its id of before, else its id.
+    fn of(&self, id: &str) -> String {
+        self.0
+            .iter()
+            .find(|(uuid, _)| uuid == id)
+            .map_or_else(|| id.to_string(), |(_, legacy)| legacy.clone())
+    }
+
+    /// `text` with the ids of the matches named as before.
+    fn write(&self, path: &Path, text: &str) -> R<()> {
+        let named = self
+            .0
+            .iter()
+            .filter(|(uuid, _)| text.contains(uuid.as_str()))
+            .fold(text.to_string(), |text, (uuid, legacy)| {
+                text.replace(uuid.as_str(), legacy)
+            });
+        fs::write(path, named).map_err(|e| format!("{}: {e}", path.display()))
+    }
 }

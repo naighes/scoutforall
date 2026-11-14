@@ -25,8 +25,8 @@ pub struct MatchStatus {
     pub last_set: Option<SetEntry>,
 }
 
-/// What a list shows of a match: kept in the index of the matches (see
-/// `providers::store::match_index`), so a list doesn't read nor replay its
+/// What a list shows of a match: kept in the cache of the database (see
+/// `providers::sqlite::summary`), so a list doesn't read nor replay its
 /// sets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchSummary {
@@ -60,9 +60,33 @@ impl MatchSummary {
             next_set_number: status.next_set_number,
         }
     }
+
+    /// The summary of A's side as team B sees it: `opponent` is A, `home`
+    /// whether B plays at home, the sets won the other way; nothing to go
+    /// on with, as B isn't scouted.
+    pub fn seen_by_b(self, opponent: String, home: bool) -> Self {
+        MatchSummary {
+            opponent,
+            home,
+            us_wins: self.them_wins,
+            them_wins: self.us_wins,
+            resume: None,
+            next_set_number: None,
+            ..self
+        }
+    }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// A match a team plays, as its list shows it: from its side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayedMatch {
+    pub summary: MatchSummary,
+    /// team A, when the team is B of a match scouted from A's side only:
+    /// the summary is A's, seen by B
+    pub scouted_by: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MatchEntry {
     pub opponent: String,
     pub date: DateTime<FixedOffset>,
@@ -108,6 +132,8 @@ pub enum MatchSource {
 }
 
 impl MatchSource {
+    pub const ALL: [MatchSource; 2] = [MatchSource::Scout4all, MatchSource::Dvw];
+
     pub fn is_scouted(&self) -> bool {
         *self == MatchSource::Scout4all
     }

@@ -7,6 +7,7 @@ use super::{
     StatsScope, clips_of, detail_of, narrowed, series_name, summary,
 };
 use chrono::{Local, NaiveDate};
+use scout4all_core::player_form::name_the_removed;
 use scout4all_core::providers::match_reader::MatchReader;
 use scout4all_core::{
     analysis::{Analysis, MOVING_WINDOW, Period, Played, day},
@@ -20,7 +21,7 @@ use scout4all_core::{
         technique::{SetTypeEnum, TechniqueEnum},
     },
     trend::Series,
-    video::{EventRef, StoredProfile, read_profile},
+    video::{EventRef, StoredProfile, VideoProfiles},
 };
 use std::collections::HashMap;
 
@@ -222,9 +223,7 @@ impl Scout4All {
             if events.is_empty() {
                 continue;
             }
-            let profile = self
-                .runtime
-                .block_on(read_profile(&*self.store, &m.team.id, &m.id));
+            let profile = self.runtime.block_on(self.videos.read(&m.team.id, &m.id));
             found.push(MatchClips {
                 match_id: m.id.clone(),
                 opponent: m.opponent.clone(),
@@ -263,6 +262,10 @@ impl Scout4All {
             .block_on(self.match_reader.read_some(team, &ids))
             .into_iter()
             .filter_map(Result::ok)
+            .map(|mut m: MatchEntry| {
+                name_the_removed(&mut m.team, self.language.labels());
+                m
+            })
             .collect();
         Ok((all, chosen))
     }
@@ -391,7 +394,7 @@ fn situation_choices(
             name: r.name(gender, labels).to_string(),
         })
         .collect(),
-        groups: [EvalSet::POSITIVE, EvalSet::EXCLAMATIVE, EvalSet::NEGATIVE]
+        groups: [EvalSet::POSITIVE, EvalSet::NEGATIVE]
             .into_iter()
             .map(group)
             .collect(),

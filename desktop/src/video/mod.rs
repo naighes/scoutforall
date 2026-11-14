@@ -6,13 +6,15 @@
 //! in the core: DataVolley, or the start of the file from its name): ↑ ↓
 //! choose one, Enter (or a click) goes a little before it. By hand (when
 //! the clocks differ): `a` ties the event chosen to the moment of the
-//! video, `t` to a time written, `[` `]` shift all by half a second, `r`
+//! video, `t` to a time written (while they don't line up), `[` `]` shift
+//! all by half a second, `r`
 //! goes back to the sync found by itself. With the actions picked, their
 //! clips on a strip under the bar: a click on one plays it (`strip`).
-//! Once tied to an event, another
-//! one can be put alone at its time (`t`, or `e` at the moment of the
-//! video), the others where they are; Backspace puts it back. Only the desktop app has it: the
-//! profile (`video.json`) is saved next to the match.
+//! Once the events line up, an event can be put alone at its time (`t`, or
+//! `e` at the moment of the video), the others where they are; Backspace
+//! puts it back. The commands of the sync and of clip mode are in panels
+//! over the video (`Panel`), opened by their buttons: the video keeps its
+//! size. The profile (`video.json`) is saved next to the match.
 
 mod files;
 mod list;
@@ -67,6 +69,9 @@ const AFTER_FIELD: &str = "video-clip-after";
 /// How far `[` and `]` shift the sync.
 const SHIFT_MS: i64 = 500;
 
+/// The width of a panel over the video.
+const PANEL_WIDTH: f32 = 380.0;
+
 /// The field of the time of the event.
 const TIME_FIELD: &str = "video-anchor-time";
 
@@ -76,6 +81,15 @@ const SPEEDS: [f32; 4] = [0.5, 1.0, 1.5, 2.0];
 /// After a command, the frames of the window keep coming this long: the
 /// frame asked for is decoded meanwhile.
 const AWAKE: Duration = Duration::from_millis(1500);
+
+/// A panel over the video, opened by its button: the video keeps its size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Panel {
+    /// how the events line up with the video, by hand
+    Sync,
+    /// clip mode and the seconds of each clip
+    Clip,
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -87,6 +101,8 @@ pub enum Message {
     Speed(f32),
     /// clip mode on or off
     Clip,
+    /// a panel over the video opened, or closed when it's the one open
+    Panel(Panel),
     /// how the match stands over the video, or not
     Overlay,
     /// the video in its own window, or back in the screen
@@ -288,6 +304,8 @@ pub struct VideoScreen {
     first_ms: Option<i64>,
     /// the video before the first event shown, to tie the events again
     whole: bool,
+    /// the panel open over the video, if any
+    panel: Option<Panel>,
     /// the video of the actions picked being made
     montage: Option<montage::Montage>,
     /// the video of the actions of the team, before making it
@@ -387,6 +405,7 @@ impl VideoScreen {
             margin_text: None,
             first_ms: None,
             whole: false,
+            panel: None,
             montage: None,
             summary: None,
             montage_error: None,
@@ -889,11 +908,17 @@ impl VideoScreen {
         self.save_for_event(|profile, e| profile.corrected(event_ref(e), 0));
     }
 
-    /// What a time for the event chosen does: none without events.
+    /// What a time for the event chosen does: it alone once the events
+    /// line up, the video tied to it while they don't; none without events.
     fn time_effect(&self) -> Option<TimeEffect> {
-        let e = self.events.get(self.selected)?;
-        let profile = self.profile.as_ref()?;
-        Some(profile.time_effect(event_ref(e)))
+        self.events.get(self.selected)?;
+        Some(TimeEffect::of(self.chosen_placed()))
+    }
+
+    /// Where the sync puts the event chosen, its correction aside: none
+    /// while the events don't line up.
+    fn chosen_placed(&self) -> Option<i64> {
+        self.events.get(self.selected).and_then(uncorrected)
     }
 
     /// How far the event chosen was put from where the sync puts it.
@@ -1048,6 +1073,16 @@ impl VideoScreen {
     /// Its window closed: the video back in the screen.
     pub fn attach(&mut self) {
         self.detached = false;
+    }
+
+    fn toggle_panel(&mut self, panel: Panel) {
+        self.panel = match self.panel {
+            Some(open) if open == panel => None,
+            _ => Some(panel),
+        };
+        self.editing = None;
+        self.invalid_time = false;
+        self.margin_text = None;
     }
 
     fn toggle_clip(&mut self) {
@@ -1288,6 +1323,7 @@ impl VideoScreen {
             Message::Seek(ms) => self.seek(ms.max(0.0) as u64),
             Message::Speed(speed) => self.speed(speed),
             Message::Clip => self.toggle_clip(),
+            Message::Panel(panel) => self.toggle_panel(panel),
             Message::Overlay => self.toggle_overlay(),
             Message::Detach => self.detached = !self.detached,
             Message::Choose => return self.choose(),
@@ -1364,6 +1400,13 @@ impl VideoScreen {
             }
             return Outcome::Stay;
         }
+        match (ck, self.panel) {
+            (k, Some(_)) if k == BACK_KEY => {
+                self.panel = None;
+                return Outcome::Stay;
+            }
+            _ => {}
+        }
         match ck {
             k if k == BACK_KEY => return Outcome::Back,
             k if k == key!(space) => self.play_pause(),
@@ -1390,11 +1433,16 @@ impl VideoScreen {
             }
             k if k == key!(enter) => self.go_to_event(self.selected),
             k if k == key!(a) => self.anchor_event(self.position()),
-            k if k == key!(t) => self.edit_time(),
+            k if k == key!(t) => {
+                self.edit_time();
+                if self.editing.is_some() {
+                    self.panel = Some(Panel::Sync);
+                }
+            }
             k if k == key!('[') => self.shift(-SHIFT_MS),
             k if k == key!(']') => self.shift(SHIFT_MS),
             k if k == key!(r) => self.automatic(),
-            k if k == key!(e) && self.time_effect() == Some(TimeEffect::OnlyThis) => {
+            k if k == key!(e) && self.chosen_placed().is_some() => {
                 self.correct_event(self.position());
             }
             k if (k == key!(backspace) || k == key!(delete))
@@ -1521,7 +1569,10 @@ impl VideoScreen {
             .into(),
             false => self.frame_view(s, c),
         };
-        let screen = black(screen);
+        let screen: Element<'a, Message> = match self.panel_view(s, c) {
+            Some(panel) => stack![black(screen), panel].into(),
+            None => black(screen).into(),
+        };
         let files = self.files();
         let add = ui::pill(
             match files.is_empty() {
@@ -1684,7 +1735,6 @@ impl VideoScreen {
         column![
             said,
             list::view(&self.events, self.selected, anchored, duration, s, c),
-            self.sync_view(s, c),
         ]
         .spacing(10)
         .height(Length::Fill)
@@ -1729,8 +1779,92 @@ impl VideoScreen {
         self.profile.as_ref().is_some_and(|p| p.anchor.is_some())
     }
 
-    /// The sync by hand, under the events.
+    /// The panel open over the video, on its right: its title, a button to
+    /// close it, what it holds; none when closed or with nothing to hold.
+    fn panel_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Option<Element<'a, Message>> {
+        let (panel, title, body) = match (self.panel?, self.events.is_empty(), &self.clips) {
+            (Panel::Sync, false, None) => (Panel::Sync, s.sync_title, self.sync_view(s, c)),
+            (Panel::Sync, _, _) => return None,
+            (Panel::Clip, _, _) => (Panel::Clip, s.clip, self.clip_view(s, c)),
+        };
+        let head = row![
+            text(title)
+                .size(theme::SIZE_TITLE)
+                .font(theme::fonts().bold)
+                .width(Length::Fill),
+            ui::tip(
+                ui::pill("×", false, Some(Message::Panel(panel)), c),
+                s.close_panel,
+                c
+            ),
+        ]
+        .align_y(Alignment::Center);
+        let card = ui::panel(
+            None,
+            iced::widget::scrollable(column![head, body].spacing(14).padding([0, 12])),
+            c,
+        );
+        Some(
+            container(iced::widget::opaque(
+                container(card).width(Length::Fixed(PANEL_WIDTH)),
+            ))
+            .padding(12)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::End)
+            .align_y(Alignment::Start)
+            .into(),
+        )
+    }
+
+    /// Clip mode on or off, what it does, the seconds of each clip.
+    fn clip_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let toggle: Element<'a, Message> = match self.clips {
+            // the actions picked play as clips anyway
+            Some(_) => space::vertical().height(0).into(),
+            None => column![
+                ui::pill(s.clip_on, self.clip, Some(Message::Clip), c),
+                text(ui::fill(
+                    s.clip_explained,
+                    &[self.margins.after_s.to_string()]
+                ))
+                .size(SIZE_SMALL)
+                .color(c.muted),
+            ]
+            .spacing(6)
+            .into(),
+        };
+        column![toggle, self.margins_view(s, c)].spacing(14).into()
+    }
+
+    /// The sync by hand: how the events line up, then what moves them all
+    /// and what moves only the event chosen.
     fn sync_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let explained = |what: &str| text(what.to_string()).size(SIZE_SMALL).color(c.muted);
+        let nothing = || -> Element<'a, Message> { space::vertical().height(0).into() };
+        let (said, fine) = self.alignment(s);
+        let automatic: Element<'a, Message> = match self.anchored_by_hand()
+            || self
+                .profile
+                .as_ref()
+                .is_some_and(|p| !p.corrections.is_empty())
+        {
+            true => column![
+                ui::pill(s.automatic_sync, false, Some(Message::Automatic), c),
+                explained(s.automatic_sync_explained),
+            ]
+            .spacing(4)
+            .into(),
+            false => nothing(),
+        };
+        let status = column![
+            text(said).size(SIZE_SMALL).color(match fine {
+                true => c.muted,
+                false => c.danger,
+            }),
+            automatic,
+        ]
+        .spacing(8);
         let time: Element<'a, Message> = match &self.editing {
             Some(written) => column![
                 iced::widget::text_input("m:ss.s", written)
@@ -1767,57 +1901,79 @@ impl VideoScreen {
             .into(),
             None => ui::pill(s.anchor_time, false, Some(Message::EditTime), c),
         };
+        let placed = self.chosen_placed();
+        let lined_up = self
+            .profile
+            .as_ref()
+            .and_then(|p| video::anchor(p, &self.the_match))
+            .is_some();
+        // the whole match: the video tied to the event chosen, all shifted,
+        // the video before the first event to find it again
+        let here: Element<'a, Message> = match self.player {
+            Some(_) => ui::pill(s.anchor_here, true, Some(Message::AnchorHere), c),
+            None => nothing(),
+        };
+        // the time written ties the video while the events don't line up
+        let (time_whole, time_event): (Element<'a, Message>, Element<'a, Message>) = match placed {
+            Some(_) => (nothing(), time),
+            None => (time, nothing()),
+        };
+        let here_explained: Element<'a, Message> = match self.player {
+            Some(_) => explained(s.anchor_here_explained).into(),
+            None => nothing(),
+        };
         let half = SHIFT_MS as f64 / 1000.0;
-        let shift = row![
-            text(s.shift_sync).size(SIZE_SMALL).color(c.muted),
-            ui::pill(
-                &format!("−{half} s"),
-                false,
-                Some(Message::Shift(-SHIFT_MS)),
-                c
-            ),
-            ui::pill(
-                &format!("+{half} s"),
-                false,
-                Some(Message::Shift(SHIFT_MS)),
-                c
-            ),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        let automatic: Element<'a, Message> = match self.anchored_by_hand() {
-            true => ui::tip(
-                ui::pill(s.automatic_sync, false, Some(Message::Automatic), c),
-                s.automatic_sync_explained,
-                c,
-            ),
-            false => space::horizontal().width(0).into(),
+        let shift: Element<'a, Message> = match lined_up {
+            true => column![
+                text(s.shift_sync).size(SIZE_SMALL),
+                row![
+                    ui::pill(
+                        &format!("−{half} s"),
+                        false,
+                        Some(Message::Shift(-SHIFT_MS)),
+                        c
+                    ),
+                    ui::pill(
+                        &format!("+{half} s"),
+                        false,
+                        Some(Message::Shift(SHIFT_MS)),
+                        c
+                    ),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .wrap(),
+                explained(s.shift_sync_explained),
+            ]
+            .spacing(4)
+            .into(),
+            false => nothing(),
         };
         let redo: Element<'a, Message> = match (self.player.is_some(), self.first_ms) {
-            (true, Some(first)) if first > 0 => ui::tip(
+            (true, Some(first)) if first > 0 => column![
                 ui::pill(s.redo_anchor, self.whole, Some(Message::WholeVideo), c),
-                s.redo_anchor_explained,
-                c,
-            ),
-            _ => space::horizontal().width(0).into(),
+                explained(s.redo_anchor_explained),
+            ]
+            .spacing(4)
+            .into(),
+            _ => nothing(),
         };
-        let here: Element<'a, Message> = match self.player {
-            Some(_) => ui::tip(
-                ui::pill(s.anchor_here, true, Some(Message::AnchorHere), c),
-                s.anchor_here_explained,
-                c,
-            ),
-            None => space::horizontal().width(0).into(),
-        };
-        // once tied to another event: the one chosen alone; put there, how
-        // far, and back
-        let only: Element<'a, Message> = match (&self.player, self.time_effect()) {
-            (Some(_), Some(TimeEffect::OnlyThis)) => ui::tip(
-                ui::pill(s.correct_here, false, Some(Message::CorrectHere), c),
-                &format!("{} (e)", s.correct_here_explained),
-                c,
-            ),
-            _ => space::horizontal().width(0).into(),
+        let whole = column![
+            ui::section(s.sync_whole, c),
+            row![here, time_whole]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .wrap(),
+            here_explained,
+            shift,
+            redo,
+        ]
+        .spacing(8);
+        // only the event chosen: put at the moment of the video or at a
+        // time written, and back
+        let only: Element<'a, Message> = match (&self.player, placed) {
+            (Some(_), Some(_)) => ui::pill(s.correct_here, false, Some(Message::CorrectHere), c),
+            _ => nothing(),
         };
         let corrected: Element<'a, Message> = match self.chosen_correction() {
             Some(by) => row![
@@ -1834,17 +1990,23 @@ impl VideoScreen {
             .align_y(Alignment::Center)
             .wrap()
             .into(),
-            None => space::horizontal().width(0).into(),
+            None => nothing(),
         };
-        column![
-            row![here, time].spacing(8).align_y(Alignment::Center),
-            only,
+        let event_explained: Element<'a, Message> = match placed {
+            Some(_) => explained(s.correct_here_explained).into(),
+            None => explained(s.sync_event_unplaced).into(),
+        };
+        let event = column![
+            ui::section(s.sync_event, c),
+            row![only, time_event]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .wrap(),
+            event_explained,
             corrected,
-            shift,
-            row![redo, automatic].spacing(8).align_y(Alignment::Center),
         ]
-        .spacing(8)
-        .into()
+        .spacing(8);
+        column![status, whole, event].spacing(18).into()
     }
 
     fn controls<'a>(
@@ -1928,9 +2090,22 @@ impl VideoScreen {
                     ),
                     None => space::horizontal().width(0).into(),
                 },
-                ui::tip(
-                    ui::pill(s.clip, self.clip, Some(Message::Clip), c),
-                    &ui::fill(s.clip_explained, &[self.margins.after_s.to_string()]),
+                match (self.events.is_empty(), &self.clips) {
+                    (false, None) => ui::pill(
+                        s.sync_title,
+                        self.panel == Some(Panel::Sync),
+                        Some(Message::Panel(Panel::Sync)),
+                        c,
+                    ),
+                    _ => space::horizontal().width(0).into(),
+                },
+                ui::pill(
+                    &match self.clip || self.clips.is_some() {
+                        true => format!("{} ✓", s.clip),
+                        false => s.clip.to_string(),
+                    },
+                    self.panel == Some(Panel::Clip),
+                    Some(Message::Panel(Panel::Clip)),
                     c
                 ),
                 text(s.speed).size(SIZE_SMALL).color(c.muted),
@@ -1938,7 +2113,6 @@ impl VideoScreen {
             .extend(speeds)
             .spacing(10)
             .align_y(Alignment::Center),
-            self.margins_view(s, c),
             self.montage_view(s, c),
         ]
         .spacing(8)
@@ -2057,12 +2231,9 @@ impl VideoScreen {
             .into()
     }
 
-    /// In clip mode, the seconds of each clip before and after its action:
-    /// written, or one more or less.
+    /// The seconds of each clip before and after its action: written, or
+    /// one more or less.
     fn margins_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        if !(self.clip || self.clips.is_some()) {
-            return space::vertical().height(0).into();
-        }
         let field = |margin: Margin, id: &'static str, name: &str| -> Element<'a, Message> {
             let shown = match &self.margin_text {
                 Some((m, text)) if *m == margin => text.clone(),
@@ -2101,17 +2272,13 @@ impl VideoScreen {
             .align_y(Alignment::Center)
             .into()
         };
-        ui::tip(
-            row![
-                text(s.clip).size(SIZE_SMALL).font(theme::fonts().bold),
-                field(Margin::Before, BEFORE_FIELD, s.clip_before),
-                field(Margin::After, AFTER_FIELD, s.clip_after),
-            ]
-            .spacing(16)
-            .align_y(Alignment::Center),
-            s.clip_margins_explained,
-            c,
-        )
+        column![
+            ui::section(s.clip_margins_explained, c),
+            field(Margin::Before, BEFORE_FIELD, s.clip_before),
+            field(Margin::After, AFTER_FIELD, s.clip_after),
+        ]
+        .spacing(8)
+        .into()
     }
 }
 
@@ -2275,7 +2442,7 @@ pub(crate) mod screen_tests {
     use {
         super::*,
         scout4all_core::video::{offset_ms, start_from_name},
-        scout4all_mobile::{DvwChoice, DvwSide},
+        scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide},
     };
 
     /// How long before an event the video goes to it, by default.
@@ -2287,6 +2454,7 @@ pub(crate) mod screen_tests {
         let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
+            opponent: DvwOpponent::Name,
             side: DvwSide::Home,
             day: "2015-01-25".into(),
             max_substitutions: 6,
@@ -2324,7 +2492,8 @@ pub(crate) mod screen_tests {
     /// The case of the user: the serve at 0:00 ties the video; the block
     /// written at 0:06 moves alone, the serve stays at 0:00 (it went to
     /// before the video, the block tied in its place); `e` at the moment of
-    /// the video, Backspace back, automatic without corrections.
+    /// the video, Backspace back; once lined up a time written moves only
+    /// its event, the one tied too; automatic without corrections.
     #[test]
     fn the_first_time_ties_the_video_then_each_event_alone() {
         let dir = tempfile::tempdir().unwrap();
@@ -2364,10 +2533,11 @@ pub(crate) mod screen_tests {
         while screen.selected > 0 {
             screen.key(key!(up));
         }
-        assert_eq!(screen.time_effect(), Some(TimeEffect::AlignAll));
+        assert_eq!(screen.time_effect(), Some(TimeEffect::OnlyThis));
         write_time(&mut screen, "0:01.0");
         assert_eq!(screen.events[0].offset_ms, Some(1_000));
-        assert_eq!(screen.events[block].offset_ms, Some(1_000));
+        assert_eq!(screen.events[block].offset_ms, Some(0), "only the serve");
+        assert_eq!(screen.anchored(), Some(event_ref(&screen.events[0])));
         // back to automatic: no correction (and here not lined up)
         screen.key(key!(r));
         assert!(screen.profile.as_ref().unwrap().corrections.is_empty());
@@ -2427,9 +2597,10 @@ pub(crate) mod screen_tests {
         );
     }
 
-    /// By hand: the event chosen at the time written, the others the same
-    /// distance from it as their times; shifted, then back to the start of
-    /// the file. Kept when the screen opens again.
+    /// By hand: a time written moves only the event chosen; tied to a
+    /// moment of the video, the others the same distance from it as their
+    /// times; shifted, then back to the start of the file. Kept when the
+    /// screen opens again.
     #[test]
     fn the_events_lined_up_by_hand() {
         let dir = tempfile::tempdir().unwrap();
@@ -2454,6 +2625,16 @@ pub(crate) mod screen_tests {
         screen.update(Message::TimeInput("1:00.5".into()));
         screen.update(Message::TimeSubmit);
         assert!(screen.editing.is_none() && !screen.invalid_time);
+        assert_eq!(screen.events[2].offset_ms, Some(60_500));
+        assert_eq!(
+            screen.events[1].offset_ms, automatic[1],
+            "only the one chosen"
+        );
+        assert_eq!(screen.anchored(), None);
+        screen.key(key!(backspace));
+        assert_eq!(screen.events[2].offset_ms, automatic[2]);
+        // tied: all of them move
+        screen.anchor_event(60_500);
         assert_eq!(screen.events[2].offset_ms, Some(60_500));
         assert_eq!(screen.anchored(), Some(event_ref(&screen.events[2])));
         let first = screen.events[0].offset_ms.unwrap();
@@ -2894,6 +3075,7 @@ pub(crate) mod screen_tests {
         let bytes = std::fs::read(downloads.join("&And03 CORTONA V vs POLISPORTIV.dvw")).unwrap();
         let day = core.preview_dvw(bytes.clone()).unwrap().days[0].clone();
         let choice = DvwChoice {
+            opponent: DvwOpponent::Name,
             side: DvwSide::Home,
             day,
             max_substitutions: 6,
@@ -2966,7 +3148,7 @@ pub(crate) mod screen_tests {
                     scope: StatsScope::Match,
                     event: A,
                     filter: DetailFilter {
-                        player: Some(p.player.id.clone()),
+                        players: vec![p.player.id.clone()],
                         ..DetailFilter::default()
                     },
                     evals: vec![],
@@ -3393,6 +3575,49 @@ pub(crate) mod screen_tests {
         );
     }
 
+    /// The events of the list marked: theirs (their point, their error),
+    /// the point each ended won or lost, the direct errors; the score
+    /// from 0–0 at each set.
+    #[test]
+    fn the_events_marked_by_team_point_and_error() {
+        use scout4all_core::shapes::enums::EventTypeEnum::{OE, OS};
+        let dir = tempfile::tempdir().unwrap();
+        let screen = with_file(&dir, "20150125 000000.mp4");
+        let mut before = (0, 0);
+        let mut set = 0;
+        let marks: Vec<(list::Mark, &VideoEvent)> = screen
+            .events
+            .iter()
+            .map(|e| {
+                if e.set_number != set {
+                    (set, before) = (e.set_number, (0, 0));
+                }
+                let mark = list::Mark::of(e, before);
+                before = (e.event.score_us, e.event.score_them);
+                (mark, e)
+            })
+            .collect();
+        assert!(marks.iter().any(|(m, _)| m.point == Some(true)));
+        for (mark, e) in &marks {
+            let event = e.event.event.event;
+            assert_eq!(mark.theirs, matches!(event, OS | OE), "{event:?}");
+            // their point is ours lost, their error ours won
+            match event {
+                OS => assert_eq!(mark.point, Some(false)),
+                OE => assert_eq!((mark.point, mark.error), (Some(true), true)),
+                _ => {}
+            }
+            if e.event.event.symbol.as_deref() == Some("=") {
+                assert!(mark.error && mark.point == Some(false), "{e:?}");
+            }
+        }
+        // the first of the second set from 0–0
+        let second = marks.iter().find(|(_, e)| e.set_number == 2);
+        assert!(second.is_some_and(
+            |(m, e)| m.point.is_none() == (e.event.score_us + e.event.score_them == 0)
+        ));
+    }
+
     /// Over the video, how the match stands at that moment: nothing before
     /// the first event; then after the last event passed: its set, the sets
     /// won before it, the score, the phase and the rotation to come. `i`
@@ -3518,15 +3743,48 @@ pub(crate) mod screen_tests {
         assert!(!screen.detached());
     }
 
-    /// Esc leaves the time being written, not the screen.
+    /// Esc leaves the time being written, then its panel, not the screen.
     #[test]
     fn esc_leaves_the_time_written() {
         let dir = tempfile::tempdir().unwrap();
         let mut screen = with_file(&dir, "20150125 000000.mp4");
         screen.key(key!(t));
+        assert_eq!(screen.panel, Some(Panel::Sync), "the field is in its panel");
         assert!(matches!(screen.key(BACK_KEY), Outcome::Stay));
         assert!(screen.editing.is_none());
+        assert!(matches!(screen.key(BACK_KEY), Outcome::Stay));
+        assert_eq!(screen.panel, None);
         assert!(matches!(screen.key(BACK_KEY), Outcome::Back));
+    }
+
+    /// The panels over the video: one open at a time, its button again or
+    /// Esc closes it; opening another leaves what was being written.
+    /// The sync panel only with the events of the match.
+    #[test]
+    fn the_panels_over_the_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = with_file(&dir, "20150125 000000.mp4");
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let c = theme::colors(false);
+        assert!(screen.panel_view(s, c).is_none());
+        screen.update(Message::Panel(Panel::Sync));
+        assert_eq!(screen.panel, Some(Panel::Sync));
+        assert!(screen.panel_view(s, c).is_some());
+        screen.update(Message::EditTime);
+        screen.update(Message::Panel(Panel::Clip));
+        assert_eq!(screen.panel, Some(Panel::Clip));
+        assert!(screen.editing.is_none());
+        assert!(!screen.clip, "opening the panel doesn't turn clips on");
+        screen.update(Message::Clip);
+        assert!(screen.clip);
+        screen.update(Message::Panel(Panel::Clip));
+        assert_eq!(screen.panel, None);
+        screen.update(Message::Panel(Panel::Clip));
+        assert!(matches!(screen.key(BACK_KEY), Outcome::Stay));
+        assert_eq!(screen.panel, None);
+        screen.events.clear();
+        screen.update(Message::Panel(Panel::Sync));
+        assert!(screen.panel_view(s, c).is_none(), "nothing to line up");
     }
 
     /// The sync found by itself shifted becomes the user's; without any,

@@ -1,5 +1,7 @@
 //! A match: its result, its sets, what comes next. Enter starts or resumes
-//! the set to scout, `e` edits the match, `v` opens its video.
+//! the set to scout, `e` edits the match, `v` opens its video. A match the
+//! team plays as B, scouted by A only, shows only its result as B sees it:
+//! Enter opens it as A.
 
 use {
     crate::{
@@ -14,7 +16,7 @@ use {
         widget::{Column, Id, column, container, row, space, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
-    scout4all_mobile::{MatchDetails, MobileError, NextSetKind, Scout4All},
+    scout4all_mobile::{MatchDetails, MobileError, NextSetKind, Scout4All, ScoutedBy},
     std::sync::Arc,
 };
 
@@ -30,6 +32,8 @@ pub enum Message {
     /// the events of the set, to correct them
     Set(u8),
     Form(form::Message),
+    /// the match seen by B: open it as A, who scouted it
+    OpenAsA,
 }
 
 pub enum Outcome {
@@ -48,6 +52,8 @@ pub enum Outcome {
     Record,
     /// the events of the set, to correct them
     Events(u8),
+    /// the match as this team A sees it, who scouted it
+    OpenAs(String),
 }
 
 pub struct MatchScreen {
@@ -85,6 +91,18 @@ impl MatchScreen {
 
     pub fn focus_id(&self) -> Option<Id> {
         self.editor.as_ref().map(|e| e.focus_id())
+    }
+
+    /// Team A, when the team is B of the match, scouted by A only.
+    fn scouted_by(&self) -> Option<&ScoutedBy> {
+        self.details.scouted_by.as_ref()
+    }
+
+    fn open_as_a(&self) -> Outcome {
+        match self.scouted_by() {
+            Some(a) => Outcome::OpenAs(a.team_id.clone()),
+            None => Outcome::Stay,
+        }
     }
 
     fn next(&self) -> Outcome {
@@ -125,6 +143,7 @@ impl MatchScreen {
     }
 
     pub fn update(&mut self, s: &Strings, message: Message) -> Outcome {
+        let seen_by_b = self.scouted_by().is_some();
         match (message, &mut self.editor) {
             (Message::Form(m), Some(editor)) => {
                 let edited = editor.update(&self.core, s, m);
@@ -132,6 +151,9 @@ impl MatchScreen {
                 Outcome::Stay
             }
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
+            (Message::OpenAsA, None) => self.open_as_a(),
+            // seen by B: only the result
+            (_, None) if seen_by_b => Outcome::Stay,
             (Message::Next, None) => self.next(),
             (Message::Stats, None) => Outcome::Stats,
             (Message::Export, None) => Outcome::Export,
@@ -147,6 +169,7 @@ impl MatchScreen {
     }
 
     pub fn key(&mut self, s: &Strings, ck: KeyCombination) -> Outcome {
+        let seen_by_b = self.scouted_by().is_some();
         match (&mut self.editor, ck) {
             (Some(editor), ck) => {
                 let edited = editor.key(&self.core, s, ck);
@@ -154,6 +177,10 @@ impl MatchScreen {
                 Outcome::Stay
             }
             (None, k) if k == BACK_KEY => Outcome::Back,
+            (None, k) if seen_by_b => match k == key!(enter) {
+                true => self.open_as_a(),
+                false => Outcome::Stay,
+            },
             (None, k) if k == key!(enter) => self.next(),
             (None, k) if k == key!(s) => Outcome::Stats,
             (None, k) if k == key!(x) => Outcome::Export,
@@ -187,9 +214,16 @@ impl MatchScreen {
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        match &self.editor {
-            Some(editor) => editor.hints(s),
-            None => [
+        match (&self.editor, self.scouted_by()) {
+            (Some(editor), _) => editor.hints(s),
+            (None, Some(a)) => vec![
+                (
+                    "Enter".to_string(),
+                    ui::fill(s.open_as_team, std::slice::from_ref(&a.team_name)),
+                ),
+                ("Esc".to_string(), s.back.to_string()),
+            ],
+            (None, None) => [
                 self.next_label(s)
                     .map(|next| ("Enter".to_string(), next))
                     .into_iter()
@@ -275,6 +309,36 @@ impl MatchScreen {
         let action = |icon: &'static [u8], label: &str, message: Message| {
             ui::action(icon, label, message, false, c)
         };
+        let actions: Element<'a, Message> = match self.scouted_by() {
+            // seen by B: why only the result, and A's side to open
+            Some(a) => column![
+                ui::body(ui::fill(
+                    s.scouted_by_text,
+                    &[a.team_name.clone(), self.team.clone()],
+                ))
+                .color(c.muted),
+                ui::action(
+                    theme::icons::VOLLEYBALL,
+                    &ui::fill(s.open_as_team, std::slice::from_ref(&a.team_name)),
+                    Message::OpenAsA,
+                    true,
+                    c,
+                ),
+            ]
+            .spacing(14)
+            .into(),
+            None => ui::action_grid(
+                vec![
+                    action(theme::icons::STATS, s.stats, Message::Stats),
+                    action(theme::icons::EDIT, s.edit_match, Message::Edit),
+                    action(theme::icons::SHARE, s.export_match, Message::Export),
+                    action(theme::icons::PDF, s.match_report, Message::Report),
+                    action(theme::icons::VIDEO, s.video, Message::Video),
+                    action(theme::icons::RECORD, s.record_video, Message::Record),
+                ],
+                3,
+            ),
+        };
         let summary = ui::panel(
             Some(s.a_match),
             column![
@@ -284,17 +348,7 @@ impl MatchScreen {
                 notes,
                 space::vertical(),
                 next,
-                ui::action_grid(
-                    vec![
-                        action(theme::icons::STATS, s.stats, Message::Stats),
-                        action(theme::icons::EDIT, s.edit_match, Message::Edit),
-                        action(theme::icons::SHARE, s.export_match, Message::Export),
-                        action(theme::icons::PDF, s.match_report, Message::Report),
-                        action(theme::icons::VIDEO, s.video, Message::Video),
-                        action(theme::icons::RECORD, s.record_video, Message::Record),
-                    ],
-                    3
-                ),
+                actions,
             ]
             .spacing(18)
             .height(Length::Fill),
@@ -318,7 +372,12 @@ impl MatchScreen {
             ]
             .spacing(10)
             .align_y(Alignment::Center);
-            ui::list_row(line, false, Some(Message::Set(set.number)), c)
+            // seen by B: no events of its side to open
+            let open = match self.scouted_by() {
+                Some(_) => None,
+                None => Some(Message::Set(set.number)),
+            };
+            ui::list_row(line, false, open, c)
         });
         let sets: Element<'a, Message> = match d.sets.is_empty() {
             true => ui::body(s.no_rallies).color(c.muted).into(),

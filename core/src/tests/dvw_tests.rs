@@ -569,20 +569,23 @@ mod tests {
                         };
                         let offset = chrono::FixedOffset::east_opt(0).unwrap();
                         let when = match_date(&file, day, offset);
-                        let outcome = match match_plan(&file, side, &plan, when, 6) {
-                            Ok(_) => "ok".to_string(),
-                            Err(MatchIssue::Set(e)) => {
-                                format!("set {:?}", std::mem::discriminant(&e.issue))
-                            }
-                            Err(e) => {
-                                println!("MATCH\t{name}\t{side:?}\t{e:?}");
-                                format!("{e:?}")
-                                    .split([' ', '(', '{'])
-                                    .next()
-                                    .unwrap_or_default()
-                                    .to_string()
-                            }
-                        };
+                        let opponent = crate::dvw::import::OpponentPlan::Name(String::new());
+                        let labels = crate::localization::Language::default().labels();
+                        let outcome =
+                            match match_plan(&file, side, &plan, &opponent, when, 6, labels) {
+                                Ok(_) => "ok".to_string(),
+                                Err(MatchIssue::Set(e)) => {
+                                    format!("set {:?}", std::mem::discriminant(&e.issue))
+                                }
+                                Err(e) => {
+                                    println!("MATCH\t{name}\t{side:?}\t{e:?}");
+                                    format!("{e:?}")
+                                        .split([' ', '(', '{'])
+                                        .next()
+                                        .unwrap_or_default()
+                                        .to_string()
+                                }
+                            };
                         *matches.entry(outcome).or_default() += 1;
                         teams.push(plan.team);
                     }

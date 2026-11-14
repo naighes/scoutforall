@@ -1,25 +1,16 @@
 package io.github.naighes.scout4all
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Surface
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -36,12 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -61,13 +47,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -76,8 +59,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.MatchField
-import io.github.naighes.scout4all.core.offeredNames
+import io.github.naighes.scout4all.core.CompetitionChoice
+import io.github.naighes.scout4all.core.FormatChoice
 import io.github.naighes.scout4all.core.MatchForm
+import io.github.naighes.scout4all.core.MatchRoster
+import io.github.naighes.scout4all.core.OpponentChoice
+import io.github.naighes.scout4all.core.RoleChoice
+import io.github.naighes.scout4all.core.RoleEnum
+import io.github.naighes.scout4all.core.Stage
+import io.github.naighes.scout4all.core.StageChoice
+import io.github.naighes.scout4all.core.TeamListing
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.RosterPlayer
 import java.time.DateTimeException
@@ -101,6 +92,9 @@ sealed interface MatchFormState {
     data class Failed(val message: String) : MatchFormState
     data class Editing(
         val form: MatchForm,
+        /** team A: the team the match is created from, or another one
+         * chosen for a new match */
+        val teamId: String,
         /** who can be on the score sheet, by number, and who is */
         val players: List<RosterPlayer> = emptyList(),
         /** the field the core rejected, with why */
@@ -112,22 +106,66 @@ sealed interface MatchFormState {
         val loaded: MatchForm = form,
         /** the second step, after the fields: who is on the score sheet */
         val onRoster: Boolean = false,
-        /** the teams and the opponents met, offered as the opponent is
-         * written */
-        val opponents: List<String> = emptyList(),
+        /** the teams team A may be, for a new match */
+        val teams: List<TeamListing.Team> = emptyList(),
+        /** what team B may be, offered as it's written: the other teams,
+         * then the names met */
+        val opponents: List<OpponentChoice> = emptyList(),
+        val competitions: List<CompetitionChoice> = emptyList(),
+        val stages: List<StageChoice> = emptyList(),
+        val formats: List<FormatChoice> = emptyList(),
+        /** the roles of team A, to correct one on the score sheet */
+        val roles: List<RoleChoice> = emptyList(),
+        /** the number and the role of a player on the score sheet being
+         * corrected */
+        val correcting: RosterCorrection? = null,
     ) : MatchFormState {
         val changed: Boolean get() = form != loaded
+
+        /** The form with team B and the competition linked to what's
+         * written, as on the desktop: the one linked while it's still its
+         * name, else the first with that name (the most recent, as
+         * offered); a competition chosen gives its friendly. */
+        fun linked(edited: MatchForm): MatchForm {
+            val team = edited.opponentTeam
+                ?.takeIf { id -> opponents.any { it.team == id && sameName(it.name, edited.opponent) } }
+                ?: opponents.firstOrNull { it.team != null && sameName(it.name, edited.opponent) }?.team
+            val competition = edited.competitionId
+                ?.takeIf { id -> competitions.any { it.id == id && sameName(it.name, edited.competition) } }
+                ?: competitions.firstOrNull { sameName(it.name, edited.competition) }?.id
+            val chosen = competitions.firstOrNull { it.id == competition }?.takeIf { competition != form.competitionId }
+            return edited.copy(
+                opponentTeam = team,
+                competitionId = competition,
+                friendly = chosen?.friendly ?: edited.friendly,
+            )
+        }
     }
-    /** saved, with the id of the match: the screen goes on */
-    data class Saved(val matchId: String) : MatchFormState
+    /** saved, with its team A and its id: the screen goes on */
+    data class Saved(val teamId: String, val matchId: String) : MatchFormState
 }
+
+/** A player of the score sheet whose number and role in this match are
+ * being corrected, as written; why not, when the core says so. */
+data class RosterCorrection(
+    val player: RosterPlayer,
+    val number: String,
+    val role: RoleEnum?,
+    val error: String? = null,
+)
+
+/** As the form offers team B: a team with its year. */
+fun OpponentChoice.label(): String = year?.let { "$name ($it)" } ?: name
+
+/** As the form offers a competition: with its season. */
+fun CompetitionChoice.label(): String = season?.let { "$name ($it)" } ?: name
 
 /** A new match of the team (`matchId` null), today, or one being edited.
  * The core checks the form. The `example` match is the one of the
  * tutorial, ready to save. */
 class MatchFormViewModel(
     private val app: Scout4AllApplication,
-    private val teamId: String,
+    teamId: String,
     private val matchId: String?,
     example: Boolean = false,
 ) : ViewModel() {
@@ -147,8 +185,18 @@ class MatchFormViewModel(
                     }
                     MatchFormState.Editing(
                         form,
+                        teamId,
                         core.matchRoster(teamId, matchId, form, null).players,
-                        opponents = core.opponents(teamId),
+                        // A is chosen only for a new match
+                        teams = when (matchId) {
+                            null -> core.teams().filterIsInstance<TeamListing.Team>()
+                            else -> emptyList()
+                        },
+                        opponents = core.opponentChoices(teamId),
+                        competitions = core.competitions(),
+                        stages = core.stages(),
+                        formats = core.competitionFormats(),
+                        roles = core.roles(teamId),
                     )
                 }
             } catch (e: MobileException) {
@@ -157,18 +205,62 @@ class MatchFormViewModel(
         }
     }
 
-    /** A change of the form: the error of the field changed, if any, goes
-     * away. */
-    fun change(field: MatchField?, edit: (MatchForm) -> MatchForm) = mutableState.update { s ->
+    private fun update(edit: (MatchFormState.Editing) -> MatchFormState.Editing) = mutableState.update { s ->
         when (s) {
-            is MatchFormState.Editing ->
-                s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
+            is MatchFormState.Editing -> edit(s)
             else -> s
         }
     }
 
-    /** One toggle at a time, each on the roster of the one before. */
+    /** A change of the form: the error of the field changed, if any, goes
+     * away; team B and the competition follow what's written. */
+    fun change(field: MatchField?, edit: (MatchForm) -> MatchForm) = update { s ->
+        s.copy(form = s.linked(edit(s.form)), invalid = s.invalid?.takeIf { it.first != field }, error = null)
+    }
+
+    /** Team B picked among the ones offered, by its label. */
+    fun pickOpponent(label: String) {
+        val editing = mutableState.value as? MatchFormState.Editing ?: return
+        val choice = editing.opponents.firstOrNull { it.label() == label } ?: return
+        change(MatchField.OPPONENT) { it.copy(opponent = choice.name, opponentTeam = choice.team) }
+    }
+
+    /** A competition picked among the ones offered, by its label. */
+    fun pickCompetition(label: String) {
+        val editing = mutableState.value as? MatchFormState.Editing ?: return
+        val choice = editing.competitions.firstOrNull { it.label() == label } ?: return
+        change(null) { it.copy(competition = choice.name, competitionId = choice.id) }
+    }
+
+    /** One change of the roster at a time, each on the one before. */
     private val toggling = Mutex()
+
+    /** Another team A for the new match: its players on the score sheet,
+     * the teams it may play. */
+    fun chooseTeam(id: String) {
+        viewModelScope.launch {
+            toggling.withLock {
+                val editing = mutableState.value as? MatchFormState.Editing ?: return@withLock
+                if (editing.teamId == id) return@withLock
+                try {
+                    val (roster, opponents, roles) = app.core { core ->
+                        val form = editing.form.copy(roster = null, numbers = emptyList())
+                        Triple(core.matchRoster(id, matchId, form, null), core.opponentChoices(id), core.roles(id))
+                    }
+                    update { s ->
+                        val chosen = s.copy(teamId = id, opponents = opponents, roles = roles, players = roster.players)
+                        chosen.copy(
+                            form = chosen.linked(s.form.copy(roster = roster.form.roster, numbers = roster.form.numbers)),
+                            invalid = null,
+                            error = null,
+                        )
+                    }
+                } catch (e: MobileException) {
+                    update { it.copy(error = e.reason) }
+                }
+            }
+        }
+    }
 
     /** Puts the player on the score sheet, or takes it off: the core
      * says who is on it then. */
@@ -179,21 +271,47 @@ class MatchFormViewModel(
     private suspend fun toggleNow(player: String) {
         val editing = mutableState.value as? MatchFormState.Editing ?: return
         val roster = try {
-            app.core { it.matchRoster(teamId, matchId, editing.form, player) }
+            app.core { it.matchRoster(editing.teamId, matchId, editing.form, player) }
         } catch (e: MobileException) {
-            mutableState.update { s -> (s as? MatchFormState.Editing)?.copy(error = e.reason) ?: s }
+            update { it.copy(error = e.reason) }
             return
         }
-        mutableState.update { s ->
-            when (s) {
-                // the form as changed meanwhile, the roster as toggled
-                is MatchFormState.Editing -> s.copy(
-                    form = s.form.copy(roster = roster.form.roster),
-                    players = roster.players,
-                    invalid = s.invalid?.takeIf { it.first != MatchField.ROSTER },
-                    error = null,
-                )
-                else -> s
+        update { s -> s.onRoster(roster) }
+    }
+
+    /** The form as changed meanwhile, the roster as the core gave it. */
+    private fun MatchFormState.Editing.onRoster(roster: MatchRoster) = copy(
+        form = form.copy(roster = roster.form.roster, numbers = roster.form.numbers),
+        players = roster.players,
+        invalid = invalid?.takeIf { it.first != MatchField.ROSTER },
+        error = null,
+    )
+
+    /** The number and the role of the player in this match, to correct
+     * them. */
+    fun correcting(player: RosterPlayer?) = update { s ->
+        s.copy(correcting = player?.let { RosterCorrection(it, it.number.toString(), it.roleValue) })
+    }
+
+    fun editCorrection(edit: (RosterCorrection) -> RosterCorrection) = update { s ->
+        s.copy(correcting = s.correcting?.let { edit(it).copy(error = null) })
+    }
+
+    /** The number and the role as corrected, checked by the core: wrong,
+     * the dialog stays with why. */
+    fun correct() {
+        viewModelScope.launch {
+            toggling.withLock {
+                val editing = mutableState.value as? MatchFormState.Editing ?: return@withLock
+                val c = editing.correcting ?: return@withLock
+                try {
+                    val roster = app.core {
+                        it.correctRosterNumber(editing.teamId, matchId, editing.form, c.player.id, c.number.trim(), c.role)
+                    }
+                    update { s -> s.onRoster(roster).copy(correcting = null) }
+                } catch (e: MobileException) {
+                    update { s -> s.copy(correcting = s.correcting?.copy(error = e.reason)) }
+                }
             }
         }
     }
@@ -205,7 +323,7 @@ class MatchFormViewModel(
         mutableState.value = editing.copy(busy = true)
         viewModelScope.launch {
             mutableState.value = try {
-                app.core { it.checkMatchFields(teamId, matchId, editing.form) }
+                app.core { it.checkMatchFields(editing.teamId, matchId, editing.form) }
                 editing.copy(onRoster = true, invalid = null, error = null)
             } catch (e: MobileException.InvalidMatch) {
                 editing.copy(invalid = e.field to e.reason, error = null)
@@ -216,9 +334,7 @@ class MatchFormViewModel(
     }
 
     /** Back from the roster to the fields, the roster as chosen. */
-    fun toFields() = mutableState.update { s ->
-        (s as? MatchFormState.Editing)?.copy(onRoster = false, invalid = null, error = null) ?: s
-    }
+    fun toFields() = update { it.copy(onRoster = false, invalid = null, error = null) }
 
     /** Saves, once at a time. */
     fun save() {
@@ -227,7 +343,7 @@ class MatchFormViewModel(
         mutableState.value = editing.copy(busy = true)
         viewModelScope.launch {
             mutableState.value = try {
-                MatchFormState.Saved(app.core { it.saveMatch(teamId, matchId, editing.form) })
+                MatchFormState.Saved(editing.teamId, app.core { it.saveMatch(editing.teamId, matchId, editing.form) })
             } catch (e: MobileException.InvalidMatch) {
                 // on the step of the field
                 editing.copy(invalid = e.field to e.reason, error = null, onRoster = e.field == MatchField.ROSTER)
@@ -244,7 +360,7 @@ fun MatchFormScreen(
     teamId: String,
     matchId: String?,
     onBack: () -> Unit,
-    onSaved: (String) -> Unit,
+    onSaved: (teamId: String, matchId: String) -> Unit,
     example: Boolean = false,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
@@ -255,7 +371,7 @@ fun MatchFormScreen(
     // from the roster, back to the fields
     BackHandler(enabled = onRoster) { model.toFields() }
     LaunchedEffect(state) {
-        (state as? MatchFormState.Saved)?.let { onSaved(it.matchId) }
+        (state as? MatchFormState.Saved)?.let { onSaved(it.teamId, it.matchId) }
     }
     Scaffold(
         topBar = {
@@ -276,14 +392,28 @@ fun MatchFormScreen(
         when (val s = state) {
             MatchFormState.Loading, is MatchFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
             is MatchFormState.Failed -> Centered(modifier) { Text(s.message) }
-            is MatchFormState.Editing -> when (s.onRoster) {
-                true -> RosterContent(s, model, modifier)
-                false -> MatchFormContent(s, model, modifier)
+            is MatchFormState.Editing -> {
+                when (s.onRoster) {
+                    true -> RosterContent(s, model, modifier)
+                    false -> MatchFormContent(s, model, modifier)
+                }
+                s.correcting?.let { CorrectionDialog(it, s.roles, model) }
             }
         }
     }
 }
 
+/** The title of a part of the form. */
+@Composable
+private fun Section(title: Int) = Text(
+    stringResource(title),
+    Modifier.title(),
+    style = MaterialTheme.typography.titleMedium,
+    color = MaterialTheme.colorScheme.primary,
+)
+
+/** The fields, in two parts as on the desktop: the match (team A for a new
+ * one, team B, date, court), then the competition and the rules. */
 @Composable
 private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormViewModel, modifier: Modifier) =
     Column(modifier) {
@@ -293,28 +423,79 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
             Modifier.weight(1f).verticalScroll(rememberScrollState()).tutorial("match-fields").padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            OpponentField(form.opponent, state.opponents, error(MatchField.OPPONENT)) { opponent ->
-                model.change(MatchField.OPPONENT) { it.copy(opponent = opponent) }
+            Section(R.string.match_section)
+            if (state.teams.size > 1) {
+                ChoiceField(
+                    stringResource(R.string.team_a),
+                    state.teams.map { it.id to "${it.name} (${it.year})" },
+                    state.teamId,
+                    onSelect = model::chooseTeam,
+                )
             }
-            DateField(form.date, error(MatchField.DATE)) { date ->
-                model.change(MatchField.DATE) { it.copy(date = date) }
+            val opponents = remember(state.opponents) { state.opponents.map { it.label() } }
+            SuggestField(
+                form.opponent,
+                stringResource(R.string.opponent),
+                opponents,
+                error(MatchField.OPPONENT),
+                onChange = { opponent -> model.change(MatchField.OPPONENT) { it.copy(opponent = opponent) } },
+                onPick = model::pickOpponent,
+            )
+            // a name, not a team: it may become one
+            if (form.opponent.isNotBlank() && form.opponentTeam == null) {
+                CheckRow(stringResource(R.string.create_opponent), form.createOpponent, onChecked = { create ->
+                    model.change(null) { it.copy(createOpponent = create) }
+                })
             }
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                listOf(true to R.string.home_match, false to R.string.away_match).forEachIndexed { index, (home, name) ->
-                    SegmentedButton(
-                        selected = form.home == home,
-                        onClick = { model.change(null) { it.copy(home = home) } },
-                        shape = SegmentedButtonDefaults.itemShape(index, 2),
-                        // the icon of the team's list, not the check
-                        icon = {
-                            when (home) {
-                                true -> Icon(Icons.Outlined.Home, contentDescription = null)
-                                false -> Icon(painterResource(R.drawable.ic_away), contentDescription = null)
-                            }
-                        },
-                    ) { Text(stringResource(name)) }
-                }
+            // the day of the match: the time of day stays
+            val date = form.date?.let(::parseDate)
+            DayField(
+                stringResource(R.string.date),
+                date?.toLocalDate(),
+                onDay = { day ->
+                    day?.let { d -> model.change(MatchField.DATE) { it.copy(date = rfc3339(onDay(d, date))) } }
+                },
+                otherwise = form.date.orEmpty(),
+                error = error(MatchField.DATE),
+            )
+            CourtChoice(form) { home, neutral -> model.change(null) { it.copy(home = home, neutral = neutral) } }
+            Section(R.string.competition_section)
+            val competitions = remember(state.competitions) { state.competitions.map { it.label() } }
+            SuggestField(
+                form.competition,
+                stringResource(R.string.competition),
+                competitions,
+                error = null,
+                onChange = { name -> model.change(null) { it.copy(competition = name) } },
+                onPick = model::pickCompetition,
+            )
+            // a new one: of what format
+            if (form.competition.isNotBlank() && form.competitionId == null) {
+                ChoiceField(
+                    stringResource(R.string.competition_format),
+                    state.formats.map { it.value to it.name },
+                    form.competitionFormat ?: state.formats.firstOrNull()?.value,
+                    onSelect = { format -> model.change(null) { it.copy(competitionFormat = format) } },
+                )
             }
+            CheckRow(stringResource(R.string.friendly), form.friendly, onChecked = { friendly ->
+                model.change(null) { it.copy(friendly = friendly) }
+            })
+            ChoiceField(
+                stringResource(R.string.stage),
+                listOf<Pair<Stage?, String>>(null to NO_CHOICE) + state.stages.map { it.value to it.name },
+                form.stage,
+                onSelect = { stage -> model.change(null) { it.copy(stage = stage) } },
+            )
+            OutlinedTextField(
+                value = form.round,
+                onValueChange = { round -> model.change(null) { it.copy(round = round) } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.round)) },
+                placeholder = { Text(stringResource(R.string.round_placeholder)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+            )
             OutlinedTextField(
                 value = form.maxSubstitutions,
                 onValueChange = { max ->
@@ -340,56 +521,37 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
         ) { Text(stringResource(R.string.go_on)) }
     }
 
-/** The opponent, with the teams and the opponents met offered below as
- * it's written, as on the desktop: a touch takes one, Done on the keyboard
- * the first. */
+/** Home, away or a neutral court, each with its icon. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OpponentField(value: String, offered: List<String>, error: String?, onChange: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    // the ones that begin as written first, as the core orders them
-    val shown = remember(value, offered) { offeredNames(offered, value).take(6) }
-    val expanded = open && shown.isNotEmpty()
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it }) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = {
-                onChange(it)
-                open = true
-            },
-            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
-            label = { Text(stringResource(R.string.opponent)) },
-            singleLine = true,
-            isError = error != null,
-            supportingText = error?.let { { Text(it) } },
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Words,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(onDone = {
-                if (expanded) shown.firstOrNull()?.let(onChange)
-                open = false
-                defaultKeyboardAction(ImeAction.Done)
-            }),
+private fun CourtChoice(form: MatchForm, onChoose: (home: Boolean, neutral: Boolean) -> Unit) =
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        val courts = listOf(
+            Triple(true, false, R.string.home_match),
+            Triple(false, false, R.string.away_match),
+            Triple(false, true, R.string.neutral_game),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { open = false }) {
-            shown.forEach { name ->
-                DropdownMenuItem(
-                    text = { Text(name) },
-                    onClick = {
-                        onChange(name)
-                        open = false
-                    },
-                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
-                )
-            }
+        courts.forEachIndexed { index, (home, neutral, name) ->
+            SegmentedButton(
+                selected = form.neutral == neutral && (neutral || form.home == home),
+                onClick = { onChoose(home, neutral) },
+                shape = SegmentedButtonDefaults.itemShape(index, courts.size),
+                // the icon of the team's list, not the check
+                icon = {
+                    when {
+                        neutral -> Icon(painterResource(R.drawable.ic_ball), contentDescription = null, Modifier.size(18.dp))
+                        home -> Icon(Icons.Outlined.Home, contentDescription = null)
+                        else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null)
+                    }
+                },
+            ) { Text(stringResource(name), maxLines = 1) }
         }
     }
-}
 
 /** The second step: the players of the team as tiles, by number, the ones
  * on the score sheet lit; a tap puts one on or takes it off, who played in
- * a set stays. Then the match is saved. */
+ * a set stays; the pencil corrects the number and the role in this match.
+ * Then the match is saved. */
 @Composable
 private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewModel, modifier: Modifier) =
     Column(modifier) {
@@ -421,7 +583,16 @@ private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewMod
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(state.players, key = { it.id }) { player -> PlayerTile(player) { model.toggle(player.id) } }
+            items(state.players, key = { it.id }) { player ->
+                PlayerTile(
+                    player.number.toInt(),
+                    player.name,
+                    listOfNotNull(player.role, stringResource(R.string.played).takeIf { player.played }),
+                    chosen = player.chosen,
+                    locked = player.chosen && player.played,
+                    onCorrect = { model.correcting(player) },
+                ) { model.toggle(player.id) }
+            }
         }
         state.error?.let {
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
@@ -433,113 +604,24 @@ private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewMod
         ) { Text(stringResource(R.string.save)) }
     }
 
-/** A player as a tile: the number big, as on the shirt, the name below.
- * On the score sheet it's lit with a tick, or a lock once played. */
+/** The number and the role of a player in this match, checked by the
+ * core. */
 @Composable
-private fun PlayerTile(player: RosterPlayer, onToggle: () -> Unit) {
-    val locked = player.chosen && player.played
-    val colors = MaterialTheme.colorScheme
-    val container by animateColorAsState(if (player.chosen) colors.primaryContainer else colors.surfaceContainerHigh, label = "tile")
-    val content = if (player.chosen) colors.onPrimaryContainer else colors.onSurfaceVariant
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        color = container,
-        contentColor = content,
-        border = if (player.chosen) BorderStroke(2.dp, colors.primary) else null,
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 120.dp)
-            .clip(MaterialTheme.shapes.large)
-            .toggleable(value = player.chosen, enabled = !locked, role = Role.Checkbox, onValueChange = { onToggle() }),
-    ) {
-        Box {
-            Column(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    player.number.toString(),
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    player.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                listOfNotNull(player.role, stringResource(R.string.played).takeIf { player.played })
-                    .takeIf { it.isNotEmpty() }
-                    ?.let {
-                        Text(
-                            it.joinToString(" · "),
-                            style = MaterialTheme.typography.labelSmall,
-                            textAlign = TextAlign.Center,
-                            color = content.copy(alpha = 0.75f),
-                        )
-                    }
-            }
-            if (player.chosen) {
-                Icon(
-                    if (locked) Icons.Filled.Lock else Icons.Filled.CheckCircle,
-                    contentDescription = null,
-                    tint = colors.primary,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(20.dp),
-                )
-            }
-        }
-    }
-}
+private fun CorrectionDialog(correction: RosterCorrection, roles: List<RoleChoice>, model: MatchFormViewModel) =
+    NumberRoleDialog(
+        "${correction.player.number} ${correction.player.name}",
+        correction.number,
+        correction.role,
+        roles,
+        correction.error,
+        onNumber = { number -> model.editCorrection { it.copy(number = number) } },
+        onRole = { role -> model.editCorrection { it.copy(role = role) } },
+        onOk = model::correct,
+        onCancel = { model.correcting(null) },
+    )
 
 /** The players a score sheet takes at most. */
 private const val MAX_ROSTER = 14
-
-/** The day of the match, in the language of the phone; a tap opens the
- * calendar. The time of day stays. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DateField(date: String?, error: String?, onDate: (String) -> Unit) {
-    val parsed = date?.let(::parseDate)
-    var picking by rememberSaveable { mutableStateOf(false) }
-    // a read-only field doesn't take clicks: its presses do
-    val presses = remember { MutableInteractionSource() }
-    LaunchedEffect(presses) {
-        presses.interactions.collect { if (it is PressInteraction.Release) picking = true }
-    }
-    OutlinedTextField(
-        value = parsed?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)) ?: date.orEmpty(),
-        onValueChange = {},
-        modifier = Modifier.fillMaxWidth(),
-        readOnly = true,
-        label = { Text(stringResource(R.string.date)) },
-        trailingIcon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
-        isError = error != null,
-        supportingText = error?.let { { Text(it) } },
-        interactionSource = presses,
-    )
-    if (picking) {
-        // the picker counts days in UTC
-        val picker = rememberDatePickerState(
-            initialSelectedDateMillis = (parsed?.toLocalDate() ?: LocalDate.now())
-                .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-        )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    picker.selectedDateMillis?.let { millis ->
-                        val day = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
-                        onDate(rfc3339(onDay(day, parsed)))
-                    }
-                    picking = false
-                }) { Text(stringResource(R.string.ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        ) { DatePicker(picker) }
-    }
-}
 
 private fun parseDate(date: String): OffsetDateTime? = try {
     OffsetDateTime.parse(date)

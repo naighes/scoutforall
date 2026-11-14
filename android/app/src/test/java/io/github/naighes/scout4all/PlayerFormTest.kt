@@ -37,6 +37,8 @@ class PlayerFormTest {
     fun aPlayerWithoutNumberIsNotSaved() {
         show()
         rule.type(string(R.string.name), "Paola Egonu")
+        // the first number free written: taken away
+        rule.type(string(R.string.number), "")
         rule.onNodeWithText(role(RoleEnum.OPPOSITE_HITTER)).performScrollTo().performClick()
         rule.save()
         rule.assertInvalid(string(R.string.number))
@@ -73,6 +75,20 @@ class PlayerFormTest {
         assertEquals(listOf(18, 81), players().map { it.number.toInt() }.sorted())
     }
 
+    /** A new player starts with the first number free in the team. */
+    @Test
+    fun aNewPlayerStartsWithTheFirstNumberFree() {
+        core { it.savePlayer(team, null, PlayerForm("Alessia Orro", RoleEnum.SETTER, "1")) }
+        core { it.savePlayer(team, null, PlayerForm("Monica De Gennaro", RoleEnum.LIBERO, "2")) }
+        show()
+        rule.field(string(R.string.number)).assertTextContains("3")
+        rule.type(string(R.string.name), "Paola Egonu")
+        rule.onNodeWithText(role(RoleEnum.OPPOSITE_HITTER)).performScrollTo().performClick()
+        rule.save()
+        rule.waitFor { done == 1 }
+        assertEquals(listOf(1, 2, 3), players().map { it.number.toInt() }.sorted())
+    }
+
     @Test
     fun aNewPlayer() {
         show()
@@ -104,7 +120,7 @@ class PlayerFormTest {
         rule.onNodeWithText(string(R.string.cancel)).performClick()
         assertEquals(1, players().size)
         rule.onNodeWithContentDescription(string(R.string.remove_player)).performClick()
-        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.onNodeWithText(string(R.string.remove_from_team)).performClick()
         rule.waitFor { done == 1 }
         assertEquals(0, players().size)
     }

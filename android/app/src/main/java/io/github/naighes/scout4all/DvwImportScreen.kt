@@ -51,6 +51,7 @@ import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.ClassificationChoice
 import io.github.naighes.scout4all.core.CountryChoice
 import io.github.naighes.scout4all.core.DvwChoice
+import io.github.naighes.scout4all.core.DvwOpponent
 import io.github.naighes.scout4all.core.DvwPreview
 import io.github.naighes.scout4all.core.DvwReady
 import io.github.naighes.scout4all.core.DvwSide
@@ -84,7 +85,8 @@ data class DvwResult(val team: String, val message: String, val teamId: String? 
 
 /** The steps of the import, as the TUI: the teams to import, the day when
  * the file can't tell it, the substitutions, then for each team ours (a
- * similar one or a new one), the check, the save. */
+ * similar one or a new one), team B (a similar one, only its name, or a
+ * new one with the players of the file), the check, the save. */
 sealed interface DvwStep {
     data object Loading : DvwStep
     data class Failed(val message: String) : DvwStep
@@ -93,6 +95,9 @@ sealed interface DvwStep {
     data object Substitutions : DvwStep
     data class Team(val similar: List<DvwSimilarTeam>) : DvwStep
     data class NewTeam(val similar: List<DvwSimilarTeam>) : DvwStep
+    /** team B: ours like it, then only its name, then a new team; team A
+     * as chosen */
+    data class Opponent(val similar: List<DvwSimilarTeam>, val choice: DvwChoice) : DvwStep
     data class Ready(val ready: DvwReady, val choice: DvwChoice) : DvwStep
     data object Done : DvwStep
 }
@@ -115,6 +120,8 @@ data class DvwState(
     val country: CountryChoice? = null,
     /** a field of the new team missing, said next to it as in the form */
     val invalid: Pair<TeamField, String>? = null,
+    /** why team B as chosen can't be: another one may do */
+    val opponentError: String? = null,
     val results: List<DvwResult> = emptyList(),
     val working: Boolean = false,
     /** the side like the team the import was chosen from, of the sides */
@@ -156,7 +163,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
         }
     }
 
-    fun select(index: Int) = mutableState.update { it.copy(selected = index) }
+    fun select(index: Int) = mutableState.update { it.copy(selected = index, opponentError = null) }
     fun day(day: String) = mutableState.update { it.copy(day = day) }
     fun substitutions(text: String) = mutableState.update { it.copy(substitutions = text.filter(Char::isDigit).take(2)) }
     fun classification(classification: TeamClassificationEnum) =
@@ -165,7 +172,12 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     fun country(country: CountryChoice) = mutableState.update { it.copy(country = country, invalid = null) }
 
     private fun to(step: DvwStep) = mutableState.update {
-        it.copy(step = step, selected = if (step == DvwStep.Sides) it.fromSide else 0, working = false)
+        it.copy(
+            step = step,
+            selected = if (step == DvwStep.Sides) it.fromSide else 0,
+            working = false,
+            opponentError = null,
+        )
     }
 
     private fun work(action: suspend (DvwState) -> Unit) {
@@ -211,6 +223,19 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
                 else -> plan(s, team.id)
             }
             is DvwStep.NewTeam -> plan(s, null)
+            is DvwStep.Opponent -> {
+                val opponent = when (val team = step.similar.getOrNull(s.selected)) {
+                    null -> if (s.selected == step.similar.size) DvwOpponent.Name else DvwOpponent.NewTeam
+                    else -> DvwOpponent.Team(team.id)
+                }
+                val choice = step.choice.copy(opponent = opponent)
+                try {
+                    val ready = app.core { it.planDvw(bytes, choice) }
+                    to(DvwStep.Ready(ready, choice))
+                } catch (e: MobileException) {
+                    mutableState.update { it.copy(opponentError = e.reason, working = false) }
+                }
+            }
             is DvwStep.Ready -> save(s, step, overwrite = step.ready.savedAlready)
             DvwStep.Done, DvwStep.Loading, is DvwStep.Failed -> mutableState.update { it.copy(working = false) }
         }
@@ -232,6 +257,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
             DvwStep.Substitutions -> to(if (s.preview?.days?.size == 1) DvwStep.Sides else DvwStep.Day)
             is DvwStep.Team -> to(DvwStep.Substitutions)
             is DvwStep.NewTeam -> to(if (step.similar.isEmpty()) DvwStep.Substitutions else DvwStep.Team(step.similar))
+            is DvwStep.Opponent -> work { team(it) }
             is DvwStep.Ready -> skip()
         }
         return true
@@ -272,13 +298,20 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
         classification = s.classification,
         gender = s.gender,
         country = s.country?.value,
+        opponent = DvwOpponent.Name,
     )
 
+    /** Team A as chosen, checked against B only a name: on to team B, ours
+     * like it (team A left out), the team of the side imported before
+     * first, else the one the import was chosen from. */
     private suspend fun plan(s: DvwState, teamId: String?) {
         val choice = choice(s, teamId)
         try {
-            val ready = app.core { it.planDvw(bytes, choice) }
-            to(DvwStep.Ready(ready, choice))
+            app.core { it.planDvw(bytes, choice) }
+            val first = (s.results.lastOrNull { it.teamId != null }?.teamId ?: file?.teamId)
+                ?.takeIf { it != teamId }
+            val similar = app.core { it.dvwSimilarOpponents(bytes, choice.side, teamId, first) }
+            to(DvwStep.Opponent(similar, choice))
         } catch (e: MobileException.InvalidTeam) {
             // the new team still to fill in, as in the form
             mutableState.update { it.copy(invalid = e.field to e.reason, working = false) }
@@ -347,6 +380,11 @@ private fun DvwContent(
         DvwSide.VISITING -> preview.visiting
         null -> ""
     }
+    val opponent = when (state.side) {
+        DvwSide.HOME -> preview.visiting
+        DvwSide.VISITING -> preview.home
+        null -> ""
+    }
     Column(
         Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -372,7 +410,11 @@ private fun DvwContent(
                 }
                 else -> {
                     Question(stringResource(R.string.dvw_no_date))
-                    DayField(state.day, model::day)
+                    DayField(
+                        stringResource(R.string.date),
+                        state.day?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                        onDay = { day -> day?.let { model.day(it.toString()) } },
+                    )
                 }
             }
             DvwStep.Substitutions -> {
@@ -399,11 +441,32 @@ private fun DvwContent(
                 Question(stringResource(R.string.dvw_new_team_of, team, preview.season?.toString().orEmpty()))
                 NewTeamFields(state, model)
             }
+            is DvwStep.Opponent -> {
+                Question(stringResource(R.string.dvw_opponent_question, opponent))
+                Options(
+                    step.similar.map { similar(it) } +
+                        stringResource(R.string.dvw_opponent_name, opponent) +
+                        stringResource(R.string.dvw_opponent_new, opponent),
+                    state.selected,
+                    model::select,
+                )
+                state.opponentError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
             is DvwStep.Ready -> {
                 val ready = step.ready
                 Question(
                     stringResource(R.string.dvw_ready, ready.team, ready.sets.toInt(), ready.newPlayers.toInt()),
                 )
+                Text(
+                    when (val added = ready.opponentNewPlayers) {
+                        null -> stringResource(R.string.dvw_against_name, ready.opponent)
+                        else -> stringResource(R.string.dvw_against_team, ready.opponent, added.toInt())
+                    },
+                )
+                if (ready.matchNumbers > 0u) {
+                    Text(stringResource(R.string.dvw_match_numbers, ready.matchNumbers.toInt()))
+                }
+                ready.competition?.let { Text(stringResource(R.string.dvw_competition, it)) }
                 if (ready.savedAlready) {
                     Text(stringResource(R.string.dvw_already_saved, ready.team), color = MaterialTheme.colorScheme.error)
                 }
@@ -516,40 +579,9 @@ private fun NewTeamFields(state: DvwState, model: DvwImportViewModel) {
     }
 }
 
-/** The day of a match the file has no date of. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DayField(value: String?, onDay: (String) -> Unit) {
-    var picking by rememberSaveable { mutableStateOf(false) }
-    OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-        Text(value?.let(::day) ?: stringResource(R.string.date))
-    }
-    if (picking) {
-        // the picker counts days in UTC
-        val picker = rememberDatePickerState(
-            initialSelectedDateMillis = (value?.let(LocalDate::parse) ?: LocalDate.now())
-                .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-        )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    picker.selectedDateMillis?.let { millis ->
-                        onDay(Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString())
-                    }
-                    picking = false
-                }) { Text(stringResource(R.string.ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        ) { DatePicker(picker) }
-    }
-}
-
 /** A day `YYYY-MM-DD` in the language of the phone. */
 private fun day(day: String): String = try {
-    LocalDate.parse(day).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+    dayText(LocalDate.parse(day))
 } catch (_: java.time.DateTimeException) {
     day
 }

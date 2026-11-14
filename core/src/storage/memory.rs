@@ -3,7 +3,7 @@
 
 use crate::{
     errors::{AppError, IOError},
-    storage::{Stamp, Stamps, Store, StoreEntry},
+    storage::{Store, StoreEntry},
 };
 use async_trait::async_trait;
 use std::{
@@ -11,23 +11,14 @@ use std::{
     sync::{PoisonError, RwLock},
 };
 
-/// The blobs by key, each with the write that left it so (its stamp, see
-/// `stamps`). The lock only guards values written at once: they're still
-/// good after a panic elsewhere.
+/// The blobs by key. The lock only guards values written at once: they're
+/// still good after a panic elsewhere.
 #[derive(Debug, Default)]
 pub struct MemoryStore(RwLock<Blobs>);
 
 #[derive(Debug, Default)]
 struct Blobs {
-    by_key: BTreeMap<String, (Vec<u8>, u64)>,
-    writes: u64,
-}
-
-impl Blobs {
-    fn next_write(&mut self) -> u64 {
-        self.writes += 1;
-        self.writes
-    }
+    by_key: BTreeMap<String, Vec<u8>>,
 }
 
 impl MemoryStore {
@@ -47,22 +38,12 @@ impl MemoryStore {
 impl Store for MemoryStore {
     async fn read(&self, key: &str) -> Result<Option<Vec<u8>>, AppError> {
         let blobs = self.0.read().unwrap_or_else(PoisonError::into_inner);
-        Ok(blobs.by_key.get(key).map(|(data, _)| data.clone()))
+        Ok(blobs.by_key.get(key).cloned())
     }
 
     async fn write(&self, key: &str, data: &[u8]) -> Result<(), AppError> {
         let mut blobs = self.0.write().unwrap_or_else(PoisonError::into_inner);
-        let write = blobs.next_write();
-        blobs.by_key.insert(key.to_string(), (data.to_vec(), write));
-        Ok(())
-    }
-
-    async fn append(&self, key: &str, data: &[u8]) -> Result<(), AppError> {
-        let mut blobs = self.0.write().unwrap_or_else(PoisonError::into_inner);
-        let write = blobs.next_write();
-        let blob = blobs.by_key.entry(key.to_string()).or_default();
-        blob.0.extend_from_slice(data);
-        blob.1 = write;
+        blobs.by_key.insert(key.to_string(), data.to_vec());
         Ok(())
     }
 
@@ -103,40 +84,5 @@ impl Store for MemoryStore {
         let prefix = Self::prefix(folder);
         blobs.by_key.retain(|k, _| !k.starts_with(&prefix));
         Ok(())
-    }
-
-    async fn folder_stamps(&self, folder: &str) -> Result<Vec<(String, Stamps)>, AppError> {
-        let mut folders = Vec::new();
-        for entry in self.list(folder).await? {
-            if let StoreEntry::Folder(name) = entry
-                && !name.starts_with('.')
-            {
-                let stamps = self
-                    .stamps(&format!("{}{}", Self::prefix(folder), name))
-                    .await?;
-                folders.push((name, stamps));
-            }
-        }
-        Ok(folders)
-    }
-
-    async fn stamps(&self, folder: &str) -> Result<Vec<(String, Option<Stamp>)>, AppError> {
-        let blobs = self.0.read().unwrap_or_else(PoisonError::into_inner);
-        let prefix = Self::prefix(folder);
-        Ok(blobs
-            .by_key
-            .iter()
-            .filter_map(|(k, blob)| k.strip_prefix(&prefix).map(|rest| (rest, blob)))
-            .filter(|(rest, _)| !rest.contains('/') && !rest.starts_with('.'))
-            .map(|(name, (data, write))| {
-                (
-                    name.to_string(),
-                    Some(Stamp {
-                        size: data.len() as u64,
-                        modified: *write,
-                    }),
-                )
-            })
-            .collect())
     }
 }

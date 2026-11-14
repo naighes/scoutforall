@@ -3,7 +3,9 @@
 //! made of real matches, from a folder of DataVolley files (both teams of
 //! each, those without mistakes of scouting), imported once and copied into
 //! as many teams and matches as asked: the numbers can be compared from one
-//! change to the next. `scripts/bench.sh` downloads the files.
+//! change to the next. An archive is a data folder with its database, the
+//! rows of the imported matches copied with new ids (`copy`).
+//! `scripts/bench.sh` downloads the files.
 //!
 //! ```text
 //! scout4all-bench DVW                  the archives 1x300 and 10x100 and a
@@ -14,24 +16,28 @@
 //!                                      each (default 1x300) and a match in
 //!                                      progress, kept in DIR
 //! scout4all-bench measure DIR          the times of the reads on DIR (e.g.
-//!                                      ~/.scout4all): nothing is written
+//!                                      a copy of ~/.scout4all): only the
+//!                                      cache of the lists is rebuilt
 //! scout4all-bench reports DIR OUT      the statistics of every match and
 //!                                      team of DIR, as files in OUT, to
 //!                                      compare before and after a change
 //! ```
 
 use chrono::{Duration, NaiveDate};
+use rusqlite::{Connection, ToSql, Transaction};
 use scout4all_core::{
+    db,
     scouting::ScoutingStep,
     shapes::{
         country::CountryCode,
         enums::{EventTypeEnum, GenderEnum, TeamClassificationEnum},
     },
+    storage::layout,
 };
 use scout4all_mobile::{
-    AnalysisPeriod, DetailFilter, DvwChoice, DvwSide, Scout4All, StatsScope, TeamListing,
+    AnalysisPeriod, DetailFilter, DvwChoice, DvwOpponent, DvwSide, Scout4All, StatsScope,
+    TeamListing,
 };
-use serde_json::Value;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -44,9 +50,6 @@ mod reports;
 
 type R<T> = Result<T, String>;
 
-/// The match in progress of a generated archive, in the first team.
-const LIVE_MATCH: &str = "2026-11-07_live";
-
 /// The day of the most recent match; the others a day before each.
 const LAST_DAY: (i32, u32, u32) = (2026, 11, 1);
 
@@ -54,9 +57,6 @@ const LAST_DAY: (i32, u32, u32) = (2026, 11, 1);
 const READS: usize = 3;
 /// Each action of the scouting, quicker.
 const ACTIONS: usize = 20;
-
-/// How long a file written must wait to be indexed, and a little more.
-const SETTLED: std::time::Duration = std::time::Duration::from_millis(3500);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -97,8 +97,6 @@ fn default_run(dvw: &Path) -> R<()> {
     for size in sizes {
         generate(&seeds, &tmp.path().join(size), size)?;
     }
-    // files just written aren't indexed (see `Store::stamps`)
-    std::thread::sleep(SETTLED);
     let mut columns = vec![];
     for size in sizes {
         columns.push(measure_reads(&tmp.path().join(size))?);
@@ -117,22 +115,29 @@ fn generate_kept(dvw: &Path, dir: &Path, size: &str) -> R<()> {
     let seeds = seed(dvw, &tmp.path().join("seed"))?;
     generate(&seeds, dir, size)?;
     println!(
-        "{}: {size}, the match in progress is {LIVE_MATCH}",
+        "{}: {size}, the match in progress in the first team",
         dir.display()
     );
     Ok(())
 }
 
-/// A match imported once, copied into the archives.
+/// The matches imported once, copied into the archives.
+struct Seeds {
+    /// the database they're in
+    database: PathBuf,
+    matches: Vec<Seed>,
+}
+
+/// A match imported once and its team, A.
 struct Seed {
-    team: PathBuf,
-    matches: PathBuf,
-    sets: usize,
+    team: String,
+    id: String,
+    sets: u32,
 }
 
 /// Imports each DataVolley file of the folder, both teams, each into a team
 /// of its own: the files with mistakes of scouting are left out.
-fn seed(dvw: &Path, dir: &Path) -> R<Vec<Seed>> {
+fn seed(dvw: &Path, dir: &Path) -> R<Seeds> {
     let app = open(dir)?;
     let country = CountryCode::parse("IT").ok_or("the country of the teams")?;
     let mut files: Vec<PathBuf> = fs::read_dir(dvw)
@@ -147,6 +152,7 @@ fn seed(dvw: &Path, dir: &Path) -> R<Vec<Seed>> {
         let bytes = read(file)?;
         for side in [DvwSide::Home, DvwSide::Visiting] {
             let choice = DvwChoice {
+                opponent: DvwOpponent::Name,
                 side,
                 day: "2026-01-01".to_string(),
                 max_substitutions: 6,
@@ -156,19 +162,25 @@ fn seed(dvw: &Path, dir: &Path) -> R<Vec<Seed>> {
                 country: Some(country),
             };
             match app.import_dvw(bytes.clone(), choice, false) {
-                Ok(imported) => {
-                    let team = dir.join(&imported.team_id);
-                    let matches = team.join(&imported.match_id);
-                    let sets = set_files(&matches, "csv")?.len();
-                    seeds.push(Seed {
-                        team,
-                        matches,
-                        sets,
-                    });
-                }
+                Ok(imported) => seeds.push(Seed {
+                    team: imported.team_id,
+                    id: imported.match_id,
+                    sets: 0,
+                }),
                 Err(_) => left_out += 1,
             }
         }
+    }
+    let database = dir.join(layout::DATABASE);
+    let connection = db::open(&database).map_err(|e| e.to_string())?;
+    for seed in &mut seeds {
+        seed.sets = connection
+            .query_row(
+                "SELECT count(*) FROM sets WHERE match_id = ?1 AND deleted = 0",
+                [&seed.id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
     }
     eprintln!(
         "{} files of {}: {} matches imported, {left_out} left out",
@@ -178,42 +190,65 @@ fn seed(dvw: &Path, dir: &Path) -> R<Vec<Seed>> {
     );
     match seeds.is_empty() {
         true => Err(format!("{}: no match could be imported", dvw.display())),
-        false => Ok(seeds),
+        false => Ok(Seeds {
+            database,
+            matches: seeds,
+        }),
     }
 }
 
 /// `T` teams of `M` matches each, the seeds in turn from the one with the
 /// most sets (the longest match to scout): the first team, its team, has
 /// also a match in progress, that match with its last set cut halfway.
-fn generate(seeds: &[Seed], dir: &Path, size: &str) -> R<()> {
+fn generate(seeds: &Seeds, dir: &Path, size: &str) -> R<()> {
     let (teams, matches) = parse_size(size)?;
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let last = NaiveDate::from_ymd_opt(LAST_DAY.0, LAST_DAY.1, LAST_DAY.2)
         .ok_or("the last day of the matches")?;
     let longest = seeds
+        .matches
         .iter()
         .enumerate()
         .max_by_key(|(i, s)| (s.sets, std::cmp::Reverse(*i)))
         .map(|(i, _)| i)
         .ok_or("no seed for the match in progress")?;
+    let mut connection = db::open(&dir.join(layout::DATABASE)).map_err(|e| e.to_string())?;
+    sql(connection.execute(
+        "ATTACH DATABASE ?1 AS seed",
+        [seeds.database.to_string_lossy()],
+    ))?;
+    let tx = sql(connection.transaction())?;
+    for table in ["persons", "competitions"] {
+        sql(tx.execute_batch(&format!(
+            "INSERT OR IGNORE INTO main.{table} SELECT * FROM seed.{table}"
+        )))?;
+    }
     for t in 0..teams {
         let seed = seeds
-            .get((longest + t) % seeds.len())
+            .matches
+            .get((longest + t) % seeds.matches.len())
             .ok_or("no seed for the team")?;
-        let team = dir.join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&team).map_err(|e| format!("{}: {e}", team.display()))?;
-        copy(&seed.team.join("team.json"), &team.join("team.json"))?;
+        let team = uuid::Uuid::new_v4().to_string();
+        copy(&tx, "teams", "id = ?1", &[&seed.team], "id = ?1", &[&team])?;
+        copy(
+            &tx,
+            "team_members",
+            "team_id = ?1",
+            &[&seed.team],
+            "team_id = ?1",
+            &[&team],
+        )?;
         for m in 0..matches {
             let day = last - Duration::days(i64::try_from(m).map_err(|e| e.to_string())?);
-            let folder = team.join(format!("{}_bench_{m}", day.format("%Y-%m-%d")));
-            copy_match(&seed.matches, &folder, &day)?;
+            copy_match(&tx, seed, &team, &day)?;
         }
         if t == 0 {
-            let folder = team.join(LIVE_MATCH);
-            copy_match(&seed.matches, &folder, &(last + Duration::days(6)))?;
-            cut_last_set(&folder)?;
+            let live = copy_match(&tx, seed, &team, &(last + Duration::days(6)))?;
+            cut_last_set(&tx, &live)?;
         }
     }
+    sql(tx.commit())?;
+    sql(connection.execute("DETACH DATABASE seed", []))?;
     Ok(())
 }
 
@@ -227,69 +262,109 @@ fn parse_size(size: &str) -> R<(usize, usize)> {
     }
 }
 
-/// The files of the match, on another day.
-fn copy_match(from: &Path, to: &Path, day: &NaiveDate) -> R<()> {
-    fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
-    for entry in fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        let name = path.file_name().ok_or("a file without name")?;
-        match name.to_str() {
-            Some("match.json") => {
-                let mut descriptor: Value = serde_json::from_slice(&read(&path)?)
-                    .map_err(|e| format!("{}: {e}", path.display()))?;
-                descriptor["date"] =
-                    Value::String(format!("{}T20:30:00+02:00", day.format("%Y-%m-%d")));
-                let json = serde_json::to_vec_pretty(&descriptor).map_err(|e| e.to_string())?;
-                write(&to.join(name), &json)?;
-            }
-            _ => copy(&path, &to.join(name))?,
-        }
+/// A new id of the events copied: a UUID v4, as the app makes them.
+const NEW_ID: &str = "lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' \
+    || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + abs(random()) % 4, 1) \
+    || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))";
+
+/// The rows of the match `seed` in `team` (a copy of its team), on another
+/// day, with new ids: its id.
+fn copy_match(tx: &Transaction, seed: &Seed, team: &str, day: &NaiveDate) -> R<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let start = format!("{}T20:30:00+02:00", day.format("%Y-%m-%d"));
+    let of_seed: &[&dyn ToSql] = &[&seed.id];
+    copy(
+        tx,
+        "matches",
+        "id = ?1",
+        of_seed,
+        "id = ?1, team_a = ?2, start = ?3",
+        &[&id, &team, &start],
+    )?;
+    copy(
+        tx,
+        "match_roster",
+        "match_id = ?1",
+        of_seed,
+        "match_id = ?1, team_id = CASE team_id WHEN ?2 THEN ?3 ELSE team_id END",
+        &[&id, &seed.team, &team],
+    )?;
+    for table in ["sets", "set_lineups"] {
+        copy(tx, table, "match_id = ?1", of_seed, "match_id = ?1", &[&id])?;
     }
-    Ok(())
+    copy(
+        tx,
+        "events",
+        "match_id = ?1",
+        of_seed,
+        &format!("match_id = ?1, id = {NEW_ID}"),
+        &[&id],
+    )?;
+    Ok(id)
+}
+
+/// Copies the rows of `table` of the seeds chosen by `filter` into the
+/// archive, changed by `set`: the columns the copy shares with the seed
+/// aren't named, whatever they are.
+fn copy(
+    tx: &Transaction,
+    table: &str,
+    filter: &str,
+    filter_params: &[&dyn ToSql],
+    set: &str,
+    set_params: &[&dyn ToSql],
+) -> R<()> {
+    sql(tx.execute(
+        &format!("CREATE TEMP TABLE copied AS SELECT * FROM seed.{table} WHERE {filter}"),
+        filter_params,
+    ))?;
+    sql(tx.execute(&format!("UPDATE copied SET {set}"), set_params))?;
+    sql(tx.execute_batch(&format!(
+        "INSERT INTO main.{table} SELECT * FROM copied; DROP TABLE copied;"
+    )))
 }
 
 /// The events of the last set cut about halfway, after an event `undo`
 /// takes back to its evaluation: then saving it again is measured.
-fn cut_last_set(folder: &Path) -> R<()> {
-    let last = set_files(folder, "csv")?
-        .into_iter()
-        .max()
-        .ok_or("the match in progress has no events")?;
-    let csv = read(&last)?;
-    let rows: Vec<&[u8]> = csv.split_inclusive(|b| *b == b'\n').collect();
-    let evaluated = |row: &&[u8]| {
-        matches!(
-            row.split(|b| *b == b',').nth(1),
-            Some(b"A" | b"B" | b"D" | b"P" | b"S")
-        )
-    };
-    let keep = (1..=rows.len() / 2)
+fn cut_last_set(tx: &Transaction, id: &str) -> R<()> {
+    let set: u8 = sql(tx.query_row(
+        "SELECT max(number) FROM sets WHERE match_id = ?1 AND deleted = 0",
+        [id],
+        |row| row.get(0),
+    ))?;
+    let mut statement = sql(tx.prepare(
+        "SELECT seq, event_type FROM events
+         WHERE match_id = ?1 AND set_number = ?2 AND deleted = 0 ORDER BY seq",
+    ))?;
+    let events = sql(statement
+        .query_map(rusqlite::params![id, set], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>()))?;
+    let evaluated = |event_type: &str| matches!(event_type, "A" | "B" | "D" | "P" | "S");
+    let keep = events
+        .get(..events.len() / 2)
+        .unwrap_or_default()
+        .iter()
         .rev()
-        .find(|n| rows.get(n - 1).is_some_and(evaluated))
+        .find(|(_, event_type)| evaluated(event_type))
+        .map(|(seq, _)| *seq)
         .ok_or("no evaluated event in the first half of the last set")?;
-    write(&last, &rows.get(..keep).unwrap_or_default().concat())
+    sql(tx.execute(
+        "DELETE FROM events WHERE match_id = ?1 AND set_number = ?2 AND seq > ?3",
+        rusqlite::params![id, set, keep],
+    ))
+    .map(|_| ())
 }
 
-/// The files of the sets of the match with the extension, sorted by name.
-fn set_files(folder: &Path, extension: &str) -> R<Vec<PathBuf>> {
-    let mut files: Vec<PathBuf> = fs::read_dir(folder)
-        .map_err(|e| format!("{}: {e}", folder.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.extension().is_some_and(|e| e == extension)
-                && p.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("set_"))
-        })
-        .collect();
-    files.sort();
-    Ok(files)
+fn sql<T>(result: rusqlite::Result<T>) -> R<T> {
+    result.map_err(|e| format!("database: {e}"))
 }
 
 /// The reads of the archive, as the apps do them.
 fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
     let app = open(dir)?;
-    let team = largest_team(&app, dir)?;
+    let team = largest_team(&app)?;
     let period = AnalysisPeriod::Between {
         from: "1900-01-01".to_string(),
         to: "2999-12-31".to_string(),
@@ -307,18 +382,18 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
     Ok(vec![
         ("matches of the largest team".to_string(), count as f64),
         time("teams()", READS, || app.teams().map(|_| ()))?,
-        // the first time, or after an update of the app: no index
-        time("home(), no index", READS, || {
-            without_index(dir)?;
+        // after an update of the app: the cache of the lists rebuilt
+        time("home(), no cache", READS, || {
+            without_cache(dir)?;
             open(dir)?.home().map_err(|e| e.to_string()).map(|_| ())
         })?,
-        // the app just opened: the index read from its file
-        time("home(), index on disk", READS, || {
+        // the app just opened: the cache in the database
+        time("home(), app opened", READS, || {
             open(dir)?.home().map_err(|e| e.to_string()).map(|_| ())
         })?,
         time("home()", READS, || app.home().map(|_| ()))?,
-        time("matches(team), no index", READS, || {
-            without_index(dir)?;
+        time("matches(team), no cache", READS, || {
+            without_cache(dir)?;
             open(dir)?
                 .matches(team.clone())
                 .map_err(|e| e.to_string())
@@ -348,8 +423,16 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
 /// archive.
 fn measure_scouting(dir: &Path) -> R<Vec<(String, f64)>> {
     let app = open(dir)?;
-    let team = largest_team(&app, dir)?;
-    let open_match = || app.scouting(team.clone(), LIVE_MATCH.to_string());
+    let team = largest_team(&app)?;
+    let live = app
+        .home()
+        .map_err(|e| e.to_string())?
+        .in_progress
+        .into_iter()
+        .find(|m| m.team_id == team)
+        .map(|m| m.id)
+        .ok_or("no match in progress in the largest team")?;
+    let open_match = || app.scouting(team.clone(), live.clone());
     let opened = time("scouting() (open)", ACTIONS, || open_match().map(|_| ()))?;
     let sc = open_match().map_err(|e| e.to_string())?;
     let set = sc.state().set_number;
@@ -389,8 +472,8 @@ fn measure_scouting(dir: &Path) -> R<Vec<(String, f64)>> {
     Ok(rows)
 }
 
-/// The id of the team with the most match folders.
-fn largest_team(app: &Arc<Scout4All>, dir: &Path) -> R<String> {
+/// The id of the team with the most matches.
+fn largest_team(app: &Arc<Scout4All>) -> R<String> {
     app.teams()
         .map_err(|e| e.to_string())?
         .into_iter()
@@ -398,15 +481,8 @@ fn largest_team(app: &Arc<Scout4All>, dir: &Path) -> R<String> {
             TeamListing::Team { id, .. } => Some(id),
             TeamListing::Unreadable { .. } => None,
         })
-        .max_by_key(|id| {
-            fs::read_dir(dir.join(id)).map_or(0, |entries| {
-                entries
-                    .filter_map(Result::ok)
-                    .filter(|e| e.path().is_dir())
-                    .count()
-            })
-        })
-        .ok_or_else(|| format!("{}: no team", dir.display()))
+        .max_by_key(|id| app.matches(id.clone()).map_or(0, |m| m.len()))
+        .ok_or_else(|| "no team".to_string())
 }
 
 fn open(dir: &Path) -> R<Arc<Scout4All>> {
@@ -414,15 +490,12 @@ fn open(dir: &Path) -> R<Arc<Scout4All>> {
     Scout4All::new(dir.to_string_lossy().into_owned(), "en".to_string()).map_err(|e| e.to_string())
 }
 
-/// Removes the index of the matches of the data folder, if any.
-fn without_index(dir: &Path) -> R<()> {
-    let index = dir.join(".index.json");
-    match fs::remove_file(&index) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            Err(format!("{}: {e}", index.display()))
-        }
-        _ => Ok(()),
-    }
+/// Empties the cache of the lists (`match_summary`), as after an update
+/// of the app: it's rebuilt from the events.
+fn without_cache(dir: &Path) -> R<()> {
+    let connection: Connection =
+        db::open(&dir.join(layout::DATABASE)).map_err(|e| e.to_string())?;
+    sql(connection.execute("DELETE FROM match_summary", [])).map(|_| ())
 }
 
 /// The median of `times` runs, in milliseconds.
@@ -507,14 +580,4 @@ impl Values for Vec<f64> {
 
 fn read(path: &Path) -> R<Vec<u8>> {
     fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn write(path: &Path, data: &[u8]) -> R<()> {
-    fs::write(path, data).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn copy(from: &Path, to: &Path) -> R<()> {
-    fs::copy(from, to)
-        .map(|_| ())
-        .map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
 }

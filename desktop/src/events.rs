@@ -565,7 +565,7 @@ mod tests {
         super::*,
         crate::{game, strings::strings},
         scout4all_core::shapes::enums::LanguageEnum,
-        scout4all_mobile::{DvwChoice, DvwSide},
+        scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide},
     };
 
     /// The match of the tests of the TUI, three sets, imported.
@@ -573,6 +573,7 @@ mod tests {
         let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
+            opponent: DvwOpponent::Name,
             side: DvwSide::Home,
             day: "2015-01-25".into(),
             max_substitutions: 6,

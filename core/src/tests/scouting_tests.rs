@@ -10,11 +10,7 @@ mod tests {
             match_reader::MatchReader,
             match_writer::MatchWriter,
             set_writer::SetWriter,
-            store::{
-                match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-                set_reader::StoreSetReader, set_writer::StoreSetWriter,
-                team_writer::StoreTeamWriter,
-            },
+            sqlite::{Database, matches::SqliteMatchReader, sets::SqliteSetWriter},
             team_writer::{TeamInput, TeamWriter},
         },
         scouting::{ChoiceOrder, Progress, ScoutingError, ScoutingSession, ScoutingStep},
@@ -29,8 +25,7 @@ mod tests {
             stats::{Metric, StatsFilter},
             technique::{ServeTypeEnum, TechniqueEnum},
         },
-        storage::{Store, memory::MemoryStore},
-        tests::EN,
+        tests::{EN, Sqlite},
     };
     use EventTypeEnum::*;
     use chrono::Utc;
@@ -39,7 +34,7 @@ mod tests {
 
     struct Scouting {
         session: ScoutingSession,
-        store: Arc<dyn Store>,
+        db: Database,
         /// the starting six, then the libero and a player on the bench
         players: Vec<Uuid>,
     }
@@ -66,7 +61,7 @@ mod tests {
     /// with its first `roster` players on the roster: without a roster for
     /// the whole team.
     async fn scouting_of(roles: &[RoleEnum], roster: usize) -> Scouting {
-        let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
+        let p = Sqlite::new();
         let players: Vec<PlayerEntry> = roles
             .iter()
             .copied()
@@ -83,7 +78,8 @@ mod tests {
             })
             .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
-        let team = StoreTeamWriter::new(Arc::clone(&store))
+        let team = p
+            .team_writer
             .save(TeamInput::New {
                 id: None,
                 name: "Volley Club".into(),
@@ -95,22 +91,25 @@ mod tests {
             })
             .await
             .unwrap();
-        let m = StoreMatchWriter::new(Arc::clone(&store))
+        let m = p
+            .match_writer
             .create(
                 &team,
-                "Cortona Volley".into(),
-                Utc::now().fixed_offset(),
-                true,
-                DEFAULT_MAX_SUBSTITUTIONS,
-                String::new(),
-                match roster == roles.len() {
-                    true => vec![],
-                    false => ids[..roster].to_vec(),
-                },
+                crate::match_form::MatchInput::against(
+                    "Cortona Volley",
+                    Utc::now().fixed_offset(),
+                    true,
+                    DEFAULT_MAX_SUBSTITUTIONS,
+                    "",
+                    match roster == roles.len() {
+                        true => vec![],
+                        false => ids[..roster].to_vec(),
+                    },
+                ),
             )
             .await
             .unwrap();
-        let set_writer = Arc::new(StoreSetWriter::new(Arc::clone(&store), Language::default()));
+        let set_writer = Arc::new(p.set_writer);
         let set = set_writer
             .create(
                 &m,
@@ -127,28 +126,21 @@ mod tests {
         let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
         Scouting {
             session: ScoutingSession::new(m, set, snapshot, set_writer),
-            store,
+            db: p.db,
             players: ids,
         }
     }
 
-    /// The events as they load from the store.
+    /// The events as they load from the database.
     async fn saved_events(s: &Scouting) -> Vec<EventEntry> {
         let m = s.session.current_match();
-        StoreMatchReader::new(
-            Arc::clone(&s.store),
-            Arc::new(StoreSetReader::new(
-                Arc::clone(&s.store),
-                Language::default(),
-            )),
-            Language::default(),
-        )
-        .read_single(&m.team, &m.id)
-        .await
-        .unwrap()
-        .sets
-        .remove(0)
-        .events
+        SqliteMatchReader::new(s.db.clone(), Language::default())
+            .read_single(&m.team, &m.id)
+            .await
+            .unwrap()
+            .sets
+            .remove(0)
+            .events
     }
 
     fn event_types(events: &[EventEntry]) -> Vec<EventTypeEnum> {
@@ -619,10 +611,7 @@ mod tests {
         let mut m = s.session.current_match().clone();
         let set = s.session.set().clone();
         let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
-        let set_writer = Arc::new(StoreSetWriter::new(
-            Arc::clone(&s.store),
-            Language::default(),
-        ));
+        let set_writer = Arc::new(SqliteSetWriter::new(s.db.clone(), Language::default()));
         let mut again = ScoutingSession::new(m.clone(), set.clone(), snapshot, set_writer.clone());
         assert!(again.inverted_p1());
         again.set_inverted_p1(false);
@@ -1196,10 +1185,7 @@ mod tests {
         let mut m = s.session.current_match().clone();
         m.sets.push(s.session.set().clone());
         // set 2, we serve again: a serve error
-        let set_writer = Arc::new(StoreSetWriter::new(
-            Arc::clone(&s.store),
-            Language::default(),
-        ));
+        let set_writer = Arc::new(SqliteSetWriter::new(s.db.clone(), Language::default()));
         let set = set_writer
             .create(
                 &m,

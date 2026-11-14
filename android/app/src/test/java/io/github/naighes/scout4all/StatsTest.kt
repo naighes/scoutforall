@@ -1,8 +1,12 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.ui.semantics.SemanticsActions
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
 import io.github.naighes.scout4all.core.BlockersEnum
@@ -165,5 +169,78 @@ class ZoneAttacksLanguageTest(private val language: String, private val count: S
         rule.waitForText(string(R.string.stats_distribution))
         rule.onNode(hasText(string(R.string.stats_distribution)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(count)
+    }
+}
+
+/** The trend of a match: the direct (unforced) errors of each figure, its
+ * sets shown or hidden, and the points of each set in order, as TalkBack reads them (their
+ * text, `readAs`). */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+class TrendTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun theErrorsAndThePointsOfTheSets() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        core { c ->
+            c.scouting(team, match).use { s ->
+                // our serve error (unforced), then their ace (forced)
+                s.chooseEval(EvalEnum.ERROR)
+                s.chooseEvent(EventTypeEnum.P)
+                s.choosePlayer(s.playerChoices().first().id)
+                s.chooseEval(EvalEnum.ERROR)
+            }
+        }
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.point_sequence))
+        val chart = { name: String, errors: Int ->
+            hasText(name) and hasText(string(R.string.trend_errors_said, errors), substring = true)
+        }
+        // the direct errors only: the ace was forced, the serve error not
+        rule.onNode(chart("Reception", 0)).assertExists()
+        rule.onNode(chart("Serve", 1)).assertExists()
+        // the set hidden by its chip: neither its line nor its errors, then
+        // shown again
+        val set1 = hasText(string(R.string.set_n, 1)) and hasClickAction()
+        rule.onNode(set1).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(chart("Serve", 0)).assertExists()
+        // nor its points under the charts
+        rule.onNode(hasText("${string(R.string.set_n, 1)}: 0-1, 0-2")).assertDoesNotExist()
+        rule.onNode(set1).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(chart("Serve", 1)).assertExists()
+        // two points of theirs: 0-1, 0-2
+        rule.onNode(hasText("${string(R.string.set_n, 1)}: 0-1, 0-2")).assertExists()
+    }
+
+    /** A rally a column, the same in the charts and in the points: on a
+     * phone they go past the screen and scroll across together, the
+     * points moving the charts. */
+    @Test
+    fun theChartsAndThePointsScrollTogether() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        core { c -> c.scouting(team, match).use { s -> s.chooseEval(EvalEnum.ERROR) } }
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.point_sequence))
+        val across = hasTestTag("rallies") and SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange)
+        val where = {
+            rule.onAllNodes(across, useUnmergedTree = true).fetchSemanticsNodes()
+                .map { it.config[SemanticsProperties.HorizontalScrollAxisRange].value() }
+        }
+        // the six charts and the rows of the set
+        assertEquals(7, where().size)
+        assertEquals(List(7) { 0f }, where())
+        rule.onAllNodes(across, useUnmergedTree = true)[6]
+            .performSemanticsAction(SemanticsActions.ScrollBy) { it(200f, 0f) }
+        rule.waitForIdle()
+        val moved = where()
+        assertTrue("$moved", moved.first() > 0f && moved.all { it == moved.first() })
     }
 }

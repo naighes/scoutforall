@@ -3,7 +3,9 @@
 //! ours below, the zones of our end line under it; an arrow from each zone
 //! our serves started from to each zone of their court they went to, the
 //! more the thicker, in the color of their efficiency (grey on too few to
-//! tell). Their zones lightly lit by how many went there. Under the mouse,
+//! tell). The errors, which went nowhere on their court, a red stroke
+//! from their zone ending in a cross, as thick as an arrow as many, with
+//! how many. Their zones lightly lit by how many went there. Under the mouse,
 //! what an arrow tells; a click on a zone of our end line shows only its
 //! arrows, on an arrow picks its serves.
 
@@ -24,6 +26,8 @@ const LENGTH: f32 = 18.0;
 const MARGIN: f32 = 0.5;
 const GAP: f32 = 0.4;
 const STRIP: f32 = 2.6;
+/// How far into our court the stroke of the errors goes, in meters.
+const ERROR_LENGTH: f32 = 2.0;
 
 #[derive(Debug, Clone)]
 pub enum Pick {
@@ -239,6 +243,7 @@ impl canvas::Program<Pick> for PathsChart<'_> {
         self.draw_court(&mut frame, place);
         self.draw_starts(&mut frame, place, *state);
         self.draw_paths(&mut frame, place, *state);
+        self.draw_errors(&mut frame, place);
         self.draw_numbers(&mut frame, place);
         self.draw_told(&mut frame, place, *state);
         vec![frame.into_geometry()]
@@ -339,8 +344,7 @@ impl PathsChart<'_> {
                 (s.count > 0).then(|| (s.count.to_string(), c.text, small, false)),
                 s.efficiency
                     .map(|e| (format!("{e:+.0}%"), efficiency_color(e, c), small, true)),
-                (s.errors > 0)
-                    .then(|| (format!("= {}", s.errors), grade_color(0.0, c), small, false)),
+                (s.errors > 0).then(|| (format!("✕ {}", s.errors), c.danger, small, true)),
             ];
             for (n, (content, color, size, bold)) in lines.into_iter().flatten().enumerate() {
                 frame.fill_text(Text {
@@ -444,6 +448,59 @@ impl PathsChart<'_> {
                 b.close();
             });
             frame.fill(&arrow, color);
+        }
+    }
+
+    /// The errors of each zone of our end line: a red stroke up from it,
+    /// sized as an arrow of as many serves, ending in a cross, how many
+    /// beside it.
+    fn draw_errors(&self, frame: &mut Frame, place: Place) {
+        let c = self.colors;
+        let size = (place.meter * 0.42).clamp(11.0, 15.0);
+        for (i, s) in self.starts.iter().enumerate().filter(|(_, s)| s.errors > 0) {
+            let r = place.start(i, self.starts.len());
+            let share = (f64::from(s.errors) / self.most()).min(1.0) as f32;
+            let width = (0.06 + 0.26 * share) * place.meter;
+            // a little left of the middle, the arrows of the zone start there
+            let x = r.x + r.width * 0.3;
+            let from = Point::new(x, r.y);
+            let to = Point::new(x, place.at(0.0, LENGTH - ERROR_LENGTH).y);
+            frame.stroke(
+                &Path::line(from, to),
+                Stroke::default()
+                    .with_color(Color { a: 0.9, ..c.danger })
+                    .with_width(width.max(3.0)),
+            );
+            let arm = (width * 1.2).max(size * 0.45);
+            let cross = Path::new(|b| {
+                b.move_to(Point::new(to.x - arm, to.y - arm));
+                b.line_to(Point::new(to.x + arm, to.y + arm));
+                b.move_to(Point::new(to.x + arm, to.y - arm));
+                b.line_to(Point::new(to.x - arm, to.y + arm));
+            });
+            frame.stroke(
+                &cross,
+                Stroke::default().with_color(c.danger).with_width(3.0),
+            );
+            let label = s.errors.to_string();
+            let pill = Rectangle::new(
+                Point::new(to.x + arm + 3.0, to.y - size * 0.75),
+                Size::new(label.chars().count() as f32 * size * 0.62 + 8.0, size * 1.5),
+            );
+            frame.fill(
+                &Path::rounded_rectangle(pill.position(), pill.size(), 4.0.into()),
+                c.danger,
+            );
+            frame.fill_text(Text {
+                font: crate::theme::fonts().bold,
+                content: label,
+                position: Point::new(pill.center_x(), pill.center_y()),
+                color: c.background,
+                size: size.into(),
+                align_x: iced::widget::text::Alignment::Center,
+                align_y: iced::alignment::Vertical::Center,
+                ..Text::default()
+            });
         }
     }
 

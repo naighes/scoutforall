@@ -13,40 +13,55 @@ use scout4all_core::{
         queue_manager::QueueManager,
         upload::{UploadStep, upload_next, upload_url},
     },
-    archive::{self, Archive, file_team_id, match_to_import, read_archive, team_to_import},
     benchmark::{Measure, band, grade},
+    competition_form::{CompetitionForm, CompetitionFormError},
+    db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
+    domain::{CompetitionFormat, Stage},
     dvw::{
         self,
         import::{
-            MatchPlan, TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
-            match_date, match_exists, match_plan, save_import, season_year, similar_teams,
-            similarity, team_plan,
+            MatchPlan, OpponentChoice as DvwOpponentChoice, OpponentPlan,
+            TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
+            match_date, match_exists, match_plan, opponent_plan, save_import, season_year,
+            similar_teams, similarity, team_plan,
         },
         model::{DvwFile, MatchDate as DvwDate, Side},
     },
     errors::{AppError, IOError},
     event_edit::{EditField, EventEdit},
     example,
+    legacy::{
+        archive::file_team_id,
+        migrate::{Backup, migrate},
+    },
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error, log_info},
-    match_form::{MatchForm, MatchFormError},
+    match_form::{CompetitionInput, MatchForm, MatchFormError, RosterNumber},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
-    player_form::{self, PlayerForm, PlayerFormError},
+    player_form::{self, PlayerForm, PlayerFormError, name_the_removed},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
         set_writer::SetWriter,
-        store::{
-            match_reader::StoreMatchReader, match_writer::StoreMatchWriter,
-            queue_reader::StoreQueueReader, queue_writer::StoreQueueWriter,
-            set_reader::StoreSetReader, set_writer::StoreSetWriter, team_reader::StoreTeamReader,
-            team_writer::StoreTeamWriter,
+        sqlite::{
+            Database,
+            archive::{self as archives, Imported, Kind, Preview},
+            competitions::SqliteCompetitions,
+            legacy_archive::{self, Opened, import_legacy_match, import_legacy_team},
+            matches::{SqliteMatchReader, SqliteMatchWriter},
+            persons::SqlitePersons,
+            queue::SqliteQueue,
+            sets::SqliteSetWriter,
+            teams::{SqliteTeamReader, SqliteTeamWriter},
+            upload::SqliteUploads,
+            video::SqliteVideoProfiles,
         },
         team_reader::TeamReader,
         team_writer::TeamWriter,
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
+    season::{self, SeasonError, SeasonMember},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
     settings::{Consent, PinnedTeams, TeamDefaults, VideoSeconds},
     shapes::{
@@ -60,31 +75,31 @@ use scout4all_core::{
             TeamClassificationEnum, TeamSideEnum, ZoneEnum,
         },
         flags::{BlockersEnum, ReceptionSchemeEnum},
-        r#match::{MatchEntry, MatchSummary},
+        r#match::{MatchEntry, MatchSummary, PlayedMatch},
         player::PlayerEntry,
         set::SetEntry,
         snapshot::{EventEntry, Formation},
         stats::{
-            AttackSummary, EvalSet, EventPick, Metric, SetTypeSet, SituationFilter, Stats,
+            AttackSummary, EvalSet, EventPick, Metric, RoleSet, SetTypeSet, SituationFilter, Stats,
             StatsFilter,
         },
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
     },
     storage::{
-        Store, StoreEntry,
+        Store,
         fs::FsStore,
         layout::{self, CONFIG, UNREADABLE_CONFIG},
     },
     team_form::{TeamForm, TeamFormError},
     trend::{Replay, Series, TrendPoint},
-    video::{EventRef, StoredProfile, VideoProfile, place, read_profile, write_profile},
+    video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place},
 };
 use sender::{FIRST_RETRY, LAST_RETRY, UploadSender};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, from_slice, to_value, to_vec_pretty};
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{
         Arc, Mutex, MutexGuard,
@@ -308,6 +323,8 @@ pub struct PlayerForm {
     pub height_cm: String,
     #[uniffi(default = "")]
     pub notes: String,
+    #[uniffi(default = None)]
+    pub person: Option<Uuid>,
 }
 
 #[uniffi::remote(Record)]
@@ -329,6 +346,64 @@ pub struct MatchForm {
     pub notes: String,
     #[uniffi(default = None)]
     pub roster: Option<Vec<Uuid>>,
+    #[uniffi(default = None)]
+    pub opponent_team: Option<Uuid>,
+    #[uniffi(default = false)]
+    pub create_opponent: bool,
+    #[uniffi(default = false)]
+    pub neutral: bool,
+    #[uniffi(default = false)]
+    pub friendly: bool,
+    #[uniffi(default = "")]
+    pub competition: String,
+    #[uniffi(default = None)]
+    pub competition_id: Option<Uuid>,
+    #[uniffi(default = None)]
+    pub competition_format: Option<CompetitionFormat>,
+    #[uniffi(default = None)]
+    pub stage: Option<Stage>,
+    #[uniffi(default = "")]
+    pub round: String,
+    #[uniffi(default = [])]
+    pub numbers: Vec<RosterNumber>,
+}
+
+/// The form of a competition: edited in their list, created in the form
+/// of a match.
+#[uniffi::remote(Record)]
+pub struct CompetitionForm {
+    pub name: String,
+    pub format: CompetitionFormat,
+    pub season: String,
+    pub gender: Option<GenderEnum>,
+    pub country: Option<CountryCode>,
+    pub friendly: bool,
+}
+
+#[uniffi::remote(Record)]
+pub struct RosterNumber {
+    pub player: Uuid,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
+}
+
+#[uniffi::remote(Enum)]
+pub enum CompetitionFormat {
+    League,
+    Cup,
+    Tournament,
+}
+
+#[uniffi::remote(Enum)]
+pub enum Stage {
+    Regular,
+    Pool,
+    Qualification,
+    Playoff,
+    Playout,
+    FinalRound,
+    Placement,
+    Other,
 }
 
 // the id of a player, as text for the app
@@ -369,6 +444,12 @@ pub enum MobileError {
     /// a field of the match form
     #[error("{reason}")]
     InvalidMatch { field: MatchField, reason: String },
+    /// a field of the form of a competition
+    #[error("{reason}")]
+    InvalidCompetition {
+        field: CompetitionField,
+        reason: String,
+    },
     /// a choice of the scout that doesn't apply, or an event not saved
     #[error("{reason}")]
     Scouting { reason: String },
@@ -440,6 +521,24 @@ impl From<PlayerFormError> for PlayerField {
     }
 }
 
+/// The fields of the form of a competition an error can be about: the
+/// country is the app's to find among the ones it offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CompetitionField {
+    Name,
+    Country,
+}
+
+impl From<CompetitionFormError> for CompetitionField {
+    fn from(e: CompetitionFormError) -> Self {
+        match e {
+            CompetitionFormError::EmptyName | CompetitionFormError::AlreadyThere => {
+                CompetitionField::Name
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum MatchField {
     Opponent,
@@ -451,7 +550,7 @@ pub enum MatchField {
 impl From<MatchFormError> for MatchField {
     fn from(e: MatchFormError) -> Self {
         match e {
-            MatchFormError::EmptyOpponent => MatchField::Opponent,
+            MatchFormError::EmptyOpponent | MatchFormError::OpponentIsTeamA => MatchField::Opponent,
             MatchFormError::InvalidDate => MatchField::Date,
             MatchFormError::InvalidMaxSubstitutions | MatchFormError::MaxSubstitutionsBelowUsed => {
                 MatchField::MaxSubstitutions
@@ -459,7 +558,9 @@ impl From<MatchFormError> for MatchField {
             MatchFormError::RosterTooSmall
             | MatchFormError::RosterTooLarge
             | MatchFormError::RosterWithoutPlayed
-            | MatchFormError::RosterWithoutLibero => MatchField::Roster,
+            | MatchFormError::RosterWithoutLibero
+            | MatchFormError::InvalidRosterNumber
+            | MatchFormError::RosterNumberInUse => MatchField::Roster,
         }
     }
 }
@@ -472,7 +573,7 @@ pub struct RoleChoice {
 }
 
 /// A player that can be on the score sheet of a match, and whether it is.
-#[derive(Debug, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RosterPlayer {
     pub id: Uuid,
     pub name: String,
@@ -481,6 +582,9 @@ pub struct RosterPlayer {
     pub chosen: bool,
     /// played in a set of the match: on the score sheet for good
     pub played: bool,
+    /// the role named by `role`, to correct it
+    #[uniffi(default = None)]
+    pub role_value: Option<RoleEnum>,
 }
 
 /// The match form with the players of its roster, by number.
@@ -501,6 +605,41 @@ pub struct Player {
     pub form: PlayerForm,
 }
 
+/// A person of the registry that can be added to a team (D5): playing in
+/// another team, in a past season, or in none any more.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ExistingPlayer {
+    pub id: Uuid,
+    pub name: String,
+    /// the name with the teams they play in, to tell namesakes apart:
+    /// "Anna Rossi (Cortona 2025)"
+    pub label: String,
+    /// what the player form starts from once chosen: their details, the
+    /// number and the role of their most recent team
+    pub form: PlayerForm,
+}
+
+/// A player of the team as the new season offers them (D15).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SeasonPlayer {
+    pub id: Uuid,
+    pub name: String,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
+    /// the role as the team shows it
+    pub role_name: Option<String>,
+    /// going on to the new season
+    pub chosen: bool,
+}
+
+/// The new season of a team: the form of the new team, the players to
+/// take there.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct NewSeason {
+    pub form: TeamForm,
+    pub players: Vec<SeasonPlayer>,
+}
+
 /// A classification as the form offers it.
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct ClassificationChoice {
@@ -514,6 +653,51 @@ pub struct ClassificationChoice {
 pub struct CountryChoice {
     pub value: CountryCode,
     pub name: String,
+}
+
+/// A stage of a competition as the form of a match offers it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct StageChoice {
+    pub value: Stage,
+    pub name: String,
+}
+
+/// A format of a competition as the form of a match offers it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct FormatChoice {
+    pub value: CompetitionFormat,
+    pub name: String,
+}
+
+/// What team B of a match may be, as the form offers it: a team (with
+/// its year), or a name met before.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct OpponentChoice {
+    pub team: Option<Uuid>,
+    pub name: String,
+    pub year: Option<u16>,
+}
+
+/// A competition as the form of a match offers it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CompetitionChoice {
+    pub id: Uuid,
+    pub name: String,
+    pub season: Option<String>,
+    pub format: CompetitionFormat,
+    /// the default of its matches
+    pub friendly: bool,
+}
+
+/// A competition in their list: its season and format, how many matches
+/// are played in it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CompetitionListing {
+    pub id: Uuid,
+    pub name: String,
+    pub season: Option<String>,
+    pub format: String,
+    pub matches: u32,
 }
 
 /// A gender as the form offers it.
@@ -569,6 +753,9 @@ pub enum MatchListing {
         won: u8,
         lost: u8,
         finished: bool,
+        /// team A, when the team is B of a match scouted from A's side
+        /// only: the result as B sees it, nothing to scout from here
+        scouted_by: Option<String>,
     },
     Unreadable {
         folder: String,
@@ -631,12 +818,68 @@ pub struct Home {
 /// How many matches over the home lists.
 pub const RECENT_MATCHES: usize = 5;
 
-/// An archive to share or to save: the zip of the CLI, and the name the
-/// CLI gives to its file.
+/// An archive to share or to save, and the name of its file.
 #[derive(Debug, PartialEq, uniffi::Record)]
 pub struct ExportedArchive {
     pub file_name: String,
     pub bytes: Vec<u8>,
+}
+
+/// An archive imported: the team or the match, and what to tell of what
+/// was here already (the data here kept), if anything.
+#[derive(Debug, PartialEq, uniffi::Record)]
+pub struct ImportedArchive {
+    pub id: String,
+    /// a line each, in the language of the app
+    pub summary: Option<String>,
+}
+
+impl ImportedArchive {
+    fn of(imported: &Imported, labels: &Labels) -> Self {
+        ImportedArchive {
+            id: imported.id.to_string(),
+            summary: imported.summary(labels),
+        }
+    }
+}
+
+/// Moves into the database what the versions before left in the data
+/// folder, a copy of the folder beside it first (`<folder>-backup-<day>.zip`):
+/// what to tell at the start, if anything. A migration that can't start
+/// changes nothing, and is tried again at the next start.
+fn migrate_folder(
+    runtime: &Runtime,
+    store: &dyn Store,
+    db: &Database,
+    data_dir: &Path,
+    labels: &Labels,
+) -> Option<String> {
+    let backup = Backup {
+        dir: data_dir
+            .parent()
+            .map_or_else(|| data_dir.to_path_buf(), Path::to_path_buf),
+        prefix: data_dir.file_name().map_or_else(
+            || "scout4all".to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        ),
+    };
+    match runtime.block_on(migrate(store, db, &backup, labels)) {
+        Ok(migrated) => {
+            if migrated.backup.is_some() {
+                log_info(&format!(
+                    "data folder moved into the database: {} teams, {} matches, {} left",
+                    migrated.teams,
+                    migrated.matches,
+                    migrated.left.len()
+                ));
+            }
+            migrated.notice(labels)
+        }
+        Err(e) => {
+            log_error(&format!("could not move the data folder: {e}"));
+            Some(labels.migration_failed.replace("{}", &e.to_string()))
+        }
+    }
 }
 
 /// A team of a DataVolley file: the one playing at home or the visiting.
@@ -701,6 +944,20 @@ pub struct DvwChoice {
     pub classification: Option<TeamClassificationEnum>,
     pub gender: Option<GenderEnum>,
     pub country: Option<CountryCode>,
+    /// Team B: the other team of the file.
+    pub opponent: DvwOpponent,
+}
+
+/// Team B of an imported match, as the user chose (D3).
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum DvwOpponent {
+    /// only its name, as written in the file
+    Name,
+    /// a team of ours, with the players of the file added
+    Team { id: String },
+    /// a new team with the name and the players of the file, of the
+    /// season, level, gender and country of team A
+    NewTeam,
 }
 
 /// The import checked, ready to save.
@@ -711,6 +968,17 @@ pub struct DvwReady {
     pub new_players: u32,
     /// The team has the match already: saved only when the user confirms.
     pub saved_already: bool,
+    /// Team B, its name, and the players of the file added to it when a
+    /// team (none when only a name).
+    pub opponent: String,
+    pub opponent_new_players: Option<u32>,
+    /// The players of team A with another number in the file: the number
+    /// of the match, the team unchanged.
+    pub match_numbers: u32,
+    /// What the file tells of the competition, as saved: "Serie C
+    /// Maschile · Regular season · Andata – giornata 1"; none when
+    /// nothing.
+    pub competition: Option<String>,
 }
 
 /// What an import saved.
@@ -804,6 +1072,24 @@ pub struct MatchDetails {
     pub next: NextSetKind,
     /// what the scout noted about the match, empty if nothing
     pub notes: String,
+    /// as in `MatchListing`: the match seen by team B, scouted by A
+    pub scouted_by: Option<ScoutedBy>,
+}
+
+/// Team A of a match seen by B: the team that scouted it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ScoutedBy {
+    pub team_id: String,
+    pub team_name: String,
+}
+
+/// What removing a team does to its matches (D16), to confirm it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TeamRemovalCounts {
+    /// the matches against another team: they stay to it
+    pub kept: u32,
+    /// the matches against a name: gone with the team
+    pub removed: u32,
 }
 
 /// A player to choose when starting a set.
@@ -1349,6 +1635,25 @@ pub struct SetTrend {
     pub values: Vec<Option<f64>>,
     /// of its last touches in the set (see `RECENT_TOUCHES` in the core)
     pub recent: Vec<Option<f64>>,
+    /// the errors of the figure in each rally: all of them, and only the
+    /// unforced ones (see `Replay::errors` in the core)
+    pub errors: Vec<u32>,
+    pub unforced: Vec<u32>,
+}
+
+/// The points of a set in order, as the score sheet has them under the
+/// trend (and the report).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SetPoints {
+    pub set_number: u8,
+    pub points: Vec<PointScored>,
+}
+
+/// A point: scored by us or by them, and the score it reached.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct PointScored {
+    pub us: bool,
+    pub score: u8,
 }
 
 /// How a figure went in each set, to compare the sets, and where it is in
@@ -1404,6 +1709,11 @@ pub struct LiveStats {
     /// reception, attack, counter-attack, serve, side out, break point, by
     /// set: always of every set so far, whatever the scope
     pub trend: Vec<TrendLine>,
+    /// the points of every set so far, in order, whatever the scope
+    pub points: Vec<SetPoints>,
+    /// our team and theirs, to name the rows of the points
+    pub team_name: String,
+    pub opponent: String,
     /// the six rotations, in order, played or not
     pub rotations: Vec<RotationStats>,
 }
@@ -1427,15 +1737,17 @@ pub struct RotationStats {
 #[serde(default)]
 pub struct DetailFilter {
     pub phase: Option<PhaseEnum>,
-    /// 0 to 5, the setter in position 1 to 6
-    pub rotation: Option<u8>,
-    /// the id of a player
-    pub player: Option<String>,
+    /// 0 to 5, the setter in position 1 to 6: none keeps them all
+    #[uniffi(default)]
+    pub rotations: Vec<u8>,
+    /// the ids of the players: none keeps them all
+    #[uniffi(default)]
+    pub players: Vec<String>,
     // the situation (see `SituationFilter` in the core): empty or none
     // keeps them all
-    /// the role of the player in the rotation
+    /// the roles of the player in the rotation
     #[uniffi(default)]
-    pub role: Option<RoleEnum>,
+    pub roles: Vec<RoleEnum>,
     /// our reception in the rally
     #[uniffi(default)]
     pub reception: Vec<EvalEnum>,
@@ -2084,7 +2396,7 @@ impl Scouting {
             &session.sets(),
             scope,
             current_match.max_substitutions,
-            &current_match.team,
+            (&current_match.team, &current_match.opponent),
             self.labels,
         )
     }
@@ -2117,14 +2429,18 @@ fn live_stats(
     all: &[&SetEntry],
     scope: StatsScope,
     max_substitutions: u8,
-    team: &TeamEntry,
+    (team, opponent): (&TeamEntry, &str),
     labels: &Labels,
 ) -> Result<LiveStats, MobileError> {
     let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
+    let (trend, points) = trend_lines(all, max_substitutions, team, labels)?;
     Ok(LiveStats {
         scope,
         sets: all.iter().map(|s| s.set_number).collect(),
-        trend: trend_lines(all, max_substitutions, team, labels)?,
+        trend,
+        points,
+        team_name: team.name.clone(),
+        opponent: opponent.to_string(),
         ..summary(&stats, &StatsFilter::default(), team, labels)
     })
 }
@@ -2219,6 +2535,9 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
         counter_attack_distribution: zones(Some(true)),
         graded: team.classification.is_some() && team.gender.is_some(),
         trend: vec![],
+        points: vec![],
+        team_name: team.name.clone(),
+        opponent: String::new(),
         rotations: by_rotation_in(stats, filter)
             .into_iter()
             .map(|r| RotationStats {
@@ -2423,13 +2742,13 @@ fn detail_of(
                 }),
             ),
         };
-    // who has the fundamental, and the one chosen even with none (the
-    // filter is shown, to take it off)
+    // who has the fundamental, and the ones chosen even with none (the
+    // filter is shown, to take them off)
     let mut ids = involved(everyone, event);
-    if let Some(chosen) = narrowed.player
-        && !ids.contains(&chosen)
-    {
-        ids.push(chosen);
+    for chosen in &narrowed.players {
+        if !ids.contains(chosen) {
+            ids.push(*chosen);
+        }
     }
     let mut players: Vec<ScoutingPlayer> = ids.into_iter().filter_map(player_of).collect();
     players.sort_by_key(|p| p.number);
@@ -2470,11 +2789,17 @@ fn detail_of(
 
 /// The statistics filter of the app's filter.
 fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
-    let player = filter.player.as_deref().map(parse_id).transpose()?;
+    let players = filter
+        .players
+        .iter()
+        .map(|p| parse_id(p))
+        .collect::<Result<Vec<_>, _>>()?;
     let some = |evals: &[EvalEnum]| (!evals.is_empty()).then(|| EvalSet::of(evals));
-    Ok(
-        StatsFilter::new(filter.phase, filter.rotation, player).with_situation(SituationFilter {
-            role: filter.role,
+    Ok(StatsFilter::new(filter.phase, None, None)
+        .with_rotations(&filter.rotations)
+        .with_players(players)
+        .with_situation(SituationFilter {
+            roles: RoleSet::of(&filter.roles),
             reception: some(&filter.reception),
             previous: some(&filter.previous),
             set_types: (!filter.set_types.is_empty()).then(|| SetTypeSet::of(&filter.set_types)),
@@ -2482,8 +2807,7 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
             inverted_p1: filter.inverted_p1,
             late: filter.late,
             close: filter.close,
-        }),
-    )
+        }))
 }
 
 /// The players with an event of ours of the kind `event` in the
@@ -2607,7 +2931,7 @@ fn trend_lines(
     max_substitutions: u8,
     team: &TeamEntry,
     labels: &Labels,
-) -> Result<Vec<TrendLine>, MobileError> {
+) -> Result<(Vec<TrendLine>, Vec<SetPoints>), MobileError> {
     // replayed once: each set is a part of the match
     let match_replay = Replay::new(sets, max_substitutions)?;
     let set_replays: Vec<(u8, Replay)> = sets
@@ -2618,10 +2942,24 @@ fn trend_lines(
         points.into_iter().map(|p| p.value).collect::<Vec<_>>()
     };
     let last = |points: Vec<TrendPoint<Option<f64>>>| points.last().and_then(|p| p.value);
+    let points = set_replays
+        .iter()
+        .map(|(set_number, replay)| SetPoints {
+            set_number: *set_number,
+            points: replay
+                .point_sequence()
+                .into_iter()
+                .map(|(side, score)| PointScored {
+                    us: side == TeamSideEnum::Us,
+                    score,
+                })
+                .collect(),
+        })
+        .collect();
     let level = |series: Series, value: Option<f64>| {
         value.and_then(|v| grade(team.classification, team.gender, series.measure(), v))
     };
-    Ok(Series::ALL
+    let lines = Series::ALL
         .iter()
         .map(|series| {
             let overall = last(match_replay.series(*series, false));
@@ -2644,6 +2982,8 @@ fn trend_lines(
                         progress: replay.progress(),
                         values: values(replay.series(*series, false)),
                         recent: values(replay.series(*series, true)),
+                        errors: replay.errors(*series, false),
+                        unforced: replay.errors(*series, true),
                     })
                     .collect(),
                 overall,
@@ -2652,7 +2992,8 @@ fn trend_lines(
                 overall_recent_grade: level(*series, overall_recent),
             }
         })
-        .collect())
+        .collect();
+    Ok((lines, points))
 }
 
 fn series_name(series: Series, labels: &Labels) -> String {
@@ -2795,7 +3136,7 @@ impl Scout4All {
         let m = self.read_match(team_id, match_id)?;
         let profile = self
             .runtime
-            .block_on(read_profile(&*self.store, &m.team.id, &m.id))
+            .block_on(self.videos.read(&m.team.id, &m.id))
             .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?;
         Ok((m, profile))
     }
@@ -2859,7 +3200,7 @@ impl Scout4All {
     /// Saves the profile of the video of the match.
     pub fn save_video(&self, m: &MatchEntry, profile: &VideoProfile) -> Result<(), MobileError> {
         self.runtime
-            .block_on(write_profile(&*self.store, &m.team.id, &m.id, profile))
+            .block_on(self.videos.write(&m.team.id, &m.id, profile))
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })
@@ -2961,19 +3302,29 @@ impl Correction {
     }
 }
 
-/// The data of the app, in a folder with the same layout as `~/.scout4all`.
+/// The data of the app, in a folder like `~/.scout4all`: the database
+/// (`scout4all.db`) and the settings (`config.json`, `clips.json`). The
+/// folders of the teams of the versions before the database move into it
+/// when the app starts (`legacy::migrate`).
 #[derive(uniffi::Object)]
 pub struct Scout4All {
     /// shared with the sets being scouted
     runtime: Arc<Runtime>,
     language: Language,
-    team_reader: StoreTeamReader,
-    team_writer: StoreTeamWriter,
-    match_reader: StoreMatchReader,
-    match_writer: StoreMatchWriter,
+    db: Database,
+    team_reader: SqliteTeamReader,
+    team_writer: SqliteTeamWriter,
+    match_reader: SqliteMatchReader,
+    match_writer: SqliteMatchWriter,
+    competitions: SqliteCompetitions,
+    persons: SqlitePersons,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    videos: SqliteVideoProfiles,
     /// for `config.json`
     store: Arc<dyn Store>,
+    /// what the start has to tell (the migration of the data folder),
+    /// until the app asks for it
+    notice: Mutex<Option<String>>,
     /// the matches to upload for the statistics
     queue: Arc<UploadQueueManager>,
     /// whether the user allows the statistics, as in `config.json`
@@ -2982,12 +3333,15 @@ pub struct Scout4All {
     sender: Arc<UploadSender>,
 }
 
-type UploadQueueManager = QueueManager<StoreQueueReader, StoreQueueWriter>;
+type UploadQueueManager = QueueManager<SqliteQueue, SqliteQueue>;
 
 #[uniffi::export]
 impl Scout4All {
-    /// The data in `data_dir`; `language` is a code like `"it"`, English when
-    /// it isn't supported.
+    /// The data in `data_dir`, created if missing; `language` is a code
+    /// like `"it"`, English when it isn't supported. Opens the database
+    /// (an error when it can't be opened, e.g. saved by a newer version)
+    /// and moves into it what the versions before left in the folder,
+    /// after a copy of it beside it (`startup_notice` tells what stayed).
     #[uniffi::constructor]
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
@@ -2995,6 +3349,7 @@ impl Scout4All {
         *ERRORS_LANGUAGE
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language.clone());
+        std::fs::create_dir_all(&data_dir).map_err(|e| failed(AppError::IO(IOError::from(e))))?;
         let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
         let runtime = Builder::new_current_thread()
             .enable_all()
@@ -3002,30 +3357,41 @@ impl Scout4All {
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })?;
+        let db = Database::new(db::open(&data_dir.join(layout::DATABASE))?);
+        let notice = migrate_folder(&runtime, &*store, &db, &data_dir, language.labels());
+        let queue = Arc::new(SqliteQueue::new(db.clone()));
         let app = Self {
             runtime: Arc::new(runtime),
-            queue: Arc::new(QueueManager::new(
-                Arc::new(StoreQueueReader::new(store.clone())),
-                Arc::new(StoreQueueWriter::new(store.clone())),
-            )),
+            queue: Arc::new(QueueManager::new(queue.clone(), queue)),
             uploads_enabled: Arc::new(AtomicBool::new(false)),
             sender: UploadSender::new(FIRST_RETRY, LAST_RETRY),
-            team_reader: StoreTeamReader::new(store.clone(), language.clone()),
-            team_writer: StoreTeamWriter::new(store.clone()),
-            match_writer: StoreMatchWriter::new(store.clone()),
-            set_writer: Arc::new(StoreSetWriter::new(store.clone(), language.clone())),
-            match_reader: StoreMatchReader::new(
-                store.clone(),
-                Arc::new(StoreSetReader::new(store.clone(), language.clone())),
-                language.clone(),
-            ),
+            team_reader: SqliteTeamReader::new(db.clone()),
+            team_writer: SqliteTeamWriter::new(db.clone()),
+            match_writer: SqliteMatchWriter::new(db.clone()),
+            competitions: SqliteCompetitions::new(db.clone()),
+            persons: SqlitePersons::new(db.clone()),
+            set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
+            match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
+            videos: SqliteVideoProfiles(db.clone()),
+            db,
             store,
+            notice: Mutex::new(notice),
             language,
         };
         // unreadable settings: nothing sent until the terms are accepted
         let enabled = app.read_config().is_ok_and(|c| c.consent.uploads_enabled());
         app.uploads_enabled.store(enabled, Ordering::Relaxed);
         Ok(Arc::new(app))
+    }
+
+    /// What the start has to tell, once: what of the data folder of the
+    /// versions before couldn't be moved into the database (with where its
+    /// copy is), or why nothing could. None after the first call.
+    pub fn startup_notice(&self) -> Option<String> {
+        self.notice
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
     /// The teams, the pinned ones at the top, each group by name.
@@ -3084,16 +3450,19 @@ impl Scout4All {
         })
     }
 
-    /// The matches of the team, the most recent first, then the unreadable
-    /// ones.
+    /// The matches the team plays, as A or as B, from its side: the most
+    /// recent first, then the unreadable ones.
     pub fn matches(&self, team_id: String) -> Result<Vec<MatchListing>, MobileError> {
         let team = self.read_team(&team_id)?;
         Ok(self
             .runtime
-            .block_on(self.match_reader.read_summaries(&team))?
+            .block_on(self.match_reader.played(&team))?
             .into_iter()
             .map(|listed| match listed {
-                Ok(m) => MatchListing::Match {
+                Ok(PlayedMatch {
+                    summary: m,
+                    scouted_by,
+                }) => MatchListing::Match {
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
@@ -3101,6 +3470,7 @@ impl Scout4All {
                     won: m.us_wins,
                     lost: m.them_wins,
                     finished: m.finished,
+                    scouted_by: scouted_by.map(|a| a.to_string()),
                 },
                 Err(unreadable) => MatchListing::Unreadable {
                     folder: unreadable.id,
@@ -3131,6 +3501,131 @@ impl Scout4All {
         names.sort_by_key(|name| name.to_lowercase());
         names.dedup_by_key(|name| name.to_lowercase());
         Ok(names)
+    }
+
+    /// What team B of a match of the team may be, offered as it's written:
+    /// the other teams, by name and the most recent year first, then the
+    /// names it met that aren't a team, each once.
+    pub fn opponent_choices(&self, team_id: String) -> Result<Vec<OpponentChoice>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let mut teams: Vec<TeamEntry> = self
+            .runtime
+            .block_on(self.team_reader.read_all())?
+            .into_iter()
+            .flatten()
+            .filter(|t| t.id != team.id)
+            .collect();
+        teams.sort_by(|a, b| (a.name.to_lowercase(), b.year).cmp(&(b.name.to_lowercase(), a.year)));
+        let taken: Vec<String> = teams
+            .iter()
+            .map(|t| t.name.trim().to_lowercase())
+            .chain(std::iter::once(team.name.trim().to_lowercase()))
+            .collect();
+        let mut met: Vec<String> = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(&team))?
+            .into_iter()
+            .flatten()
+            .map(|m| m.opponent.trim().to_string())
+            .filter(|name| !name.is_empty() && !taken.contains(&name.to_lowercase()))
+            .collect();
+        met.sort_by_key(|name| name.to_lowercase());
+        met.dedup_by_key(|name| name.to_lowercase());
+        Ok(teams
+            .into_iter()
+            .map(|t| OpponentChoice {
+                team: Some(t.id),
+                name: t.name,
+                year: Some(t.year),
+            })
+            .chain(met.into_iter().map(|name| OpponentChoice {
+                team: None,
+                name,
+                year: None,
+            }))
+            .collect())
+    }
+
+    /// The competitions to choose for a match, by name, the most recent
+    /// season first.
+    pub fn competitions(&self) -> Result<Vec<CompetitionChoice>, MobileError> {
+        Ok(self
+            .competitions
+            .read_all()?
+            .into_iter()
+            .map(|c| CompetitionChoice {
+                id: c.id,
+                name: c.name,
+                season: c.season,
+                format: c.format,
+                friendly: c.friendly,
+            })
+            .collect())
+    }
+
+    /// The competitions in their list, by name, the most recent season
+    /// first, each with its matches.
+    pub fn competition_listings(&self) -> Result<Vec<CompetitionListing>, MobileError> {
+        let labels = self.language.labels();
+        Ok(self
+            .competitions
+            .read_counted()?
+            .into_iter()
+            .map(|(c, matches)| CompetitionListing {
+                id: c.id,
+                name: c.name,
+                season: c.season,
+                format: c.format.name(labels).to_string(),
+                matches,
+            })
+            .collect())
+    }
+
+    /// The form of the competition, to edit it.
+    pub fn competition_form(&self, id: Uuid) -> Result<CompetitionForm, MobileError> {
+        Ok(CompetitionForm::of(&self.competition(id)?))
+    }
+
+    /// Saves the competition as edited: its matches keep their own
+    /// friendly.
+    pub fn save_competition(&self, id: Uuid, form: CompetitionForm) -> Result<(), MobileError> {
+        let existing = self.competition(id)?;
+        let edited = form
+            .validate(&existing, &self.competitions.read_all()?)
+            .map_err(|e| MobileError::InvalidCompetition {
+                field: e.into(),
+                reason: e.message(self.language.labels()),
+            })?;
+        Ok(self.competitions.update(&edited)?)
+    }
+
+    /// Removes the competition: its matches stay, without it.
+    pub fn delete_competition(&self, id: Uuid) -> Result<(), MobileError> {
+        Ok(self.competitions.remove(id)?)
+    }
+
+    /// The stages of a competition a match may be played in.
+    pub fn stages(&self) -> Vec<StageChoice> {
+        let labels = self.language.labels();
+        Stage::ALL
+            .iter()
+            .map(|s| StageChoice {
+                value: *s,
+                name: s.name(labels).to_string(),
+            })
+            .collect()
+    }
+
+    /// The formats of a new competition.
+    pub fn competition_formats(&self) -> Vec<FormatChoice> {
+        let labels = self.language.labels();
+        CompetitionFormat::ALL
+            .iter()
+            .map(|f| FormatChoice {
+                value: *f,
+                name: f.name(labels).to_string(),
+            })
+            .collect()
     }
 
     /// The home: the matches of every team not over and the last ones
@@ -3166,7 +3661,8 @@ impl Scout4All {
                 )
             }));
         }
-        matches.sort_by(|(a, _), (b, _)| b.cmp(a));
+        // the same time: by team, whatever order the teams were read in
+        matches.sort_by(|(a, x), (b, y)| b.cmp(a).then_with(|| x.team_id.cmp(&y.team_id)));
         let (recent, in_progress): (Vec<HomeMatch>, Vec<HomeMatch>) = matches
             .into_iter()
             .map(|(_, m)| m)
@@ -3178,27 +3674,66 @@ impl Scout4All {
         })
     }
 
-    /// A match of the team, with its sets.
+    /// A match of the team, with its sets; a match it's B of, scouted by A
+    /// only, as B sees it: nothing to scout from its side.
     pub fn match_details(
         &self,
         team_id: String,
         match_id: String,
     ) -> Result<MatchDetails, MobileError> {
-        let m = self.read_match(&team_id, &match_id)?;
+        let team = self.read_team(&team_id)?;
+        let seen_by_b = self.match_reader.played_as_b(&team, &match_id)?;
+        let team_a = seen_by_b
+            .as_ref()
+            .map_or(team_id, |(a, _)| a.id.to_string());
+        let m = self.read_match(&team_a, &match_id)?;
         let status = m.get_status()?;
         let sets = set_scores(&m)?;
-        let next = next_kind(&status, &m.team);
-        Ok(MatchDetails {
+        let details = MatchDetails {
             date: m.date.to_rfc3339(),
-            id: m.id,
-            opponent: m.opponent,
+            id: m.id.clone(),
+            opponent: m.opponent.clone(),
             home: m.home,
             won: status.us_wins,
             lost: status.them_wins,
             finished: status.match_finished,
             sets,
-            next,
-            notes: m.notes,
+            next: next_kind(&status, &m.team),
+            notes: m.notes.clone(),
+            scouted_by: None,
+        };
+        Ok(match seen_by_b {
+            Some((a, home)) => MatchDetails {
+                opponent: a.name.clone(),
+                home,
+                won: details.lost,
+                lost: details.won,
+                sets: details
+                    .sets
+                    .into_iter()
+                    .map(|set| SetScore {
+                        us: set.them,
+                        them: set.us,
+                        ..set
+                    })
+                    .collect(),
+                next: NextSetKind::Over,
+                scouted_by: Some(ScoutedBy {
+                    team_id: a.id.to_string(),
+                    team_name: a.name,
+                }),
+                ..details
+            },
+            None => details,
+        })
+    }
+
+    /// What removing the team does to its matches, to confirm it.
+    pub fn team_removal(&self, team_id: String) -> Result<TeamRemovalCounts, MobileError> {
+        let removal = self.team_reader.removal(&parse_id(&team_id)?)?;
+        Ok(TeamRemovalCounts {
+            kept: u32::try_from(removal.kept).unwrap_or(u32::MAX),
+            removed: u32::try_from(removal.removed).unwrap_or(u32::MAX),
         })
     }
 
@@ -3217,7 +3752,7 @@ impl Scout4All {
             &sets,
             scope,
             m.max_substitutions,
-            &m.team,
+            (&m.team, &m.opponent),
             self.language.labels(),
         )
     }
@@ -3363,15 +3898,14 @@ impl Scout4All {
         team_id: String,
         date: MatchDate,
     ) -> Result<MatchForm, MobileError> {
-        let folder = layout::team_folder(&parse_id(&team_id)?);
+        let team = self.read_team(&team_id)?;
+        // the matches by opponent and day, as the tutorial numbers them
         let taken: Vec<String> = self
             .runtime
-            .block_on(self.store.list(&folder))?
+            .block_on(self.match_reader.read_summaries(&team))?
             .into_iter()
-            .filter_map(|entry| match entry {
-                StoreEntry::Folder(name) => Some(name),
-                StoreEntry::Blob(_) => None,
-            })
+            .filter_map(Result::ok)
+            .map(|m| MatchEntry::id_of(&m.opponent, &m.date))
             .collect();
         Ok(example::tutorial_match(
             self.language.labels(),
@@ -3410,37 +3944,41 @@ impl Scout4All {
         form: MatchForm,
         toggled: Option<Uuid>,
     ) -> Result<MatchRoster, MobileError> {
-        // the team as it is, also with the players not on the roster
-        let team = self.read_team(&team_id)?;
-        let existing = match_id
-            .map(|id| self.read_match(&team_id, &id))
-            .transpose()?;
-        let mut form = form;
-        if let Some(player) = toggled {
-            form.toggle(player, &team, existing.as_ref());
-        }
+        self.roster_after(team_id, match_id, form, |form, team, existing| {
+            if let Some(player) = toggled {
+                form.toggle(player, team, existing);
+            }
+            Ok(())
+        })
+    }
+
+    /// The match form with `player` given `number` and `role` in this
+    /// match (D9), and the players of its roster; an error, for the
+    /// roster, when the number isn't valid or another player on it has it.
+    pub fn correct_roster_number(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+        player: Uuid,
+        number: String,
+        role: Option<RoleEnum>,
+    ) -> Result<MatchRoster, MobileError> {
         let labels = self.language.labels();
-        let players = form
-            .roster_choices(&team, existing.as_ref())
-            .into_iter()
-            .map(|c| RosterPlayer {
-                id: c.player.id,
-                name: c.player.name,
-                number: c.player.number,
-                role: c
-                    .player
-                    .role
-                    .map(|r| r.name(team.gender, labels).to_string()),
-                chosen: c.chosen,
-                played: c.played,
-            })
-            .collect();
-        Ok(MatchRoster { form, players })
+        self.roster_after(team_id, match_id, form, |form, team, existing| {
+            form.correct(player, &number, role, team, existing)
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(labels),
+                })
+        })
     }
 
     /// The form of a match of the team, to edit it.
     pub fn match_form(&self, team_id: String, match_id: String) -> Result<MatchForm, MobileError> {
-        Ok(MatchForm::of(&self.read_match(&team_id, &match_id)?))
+        let m = self.read_match(&team_id, &match_id)?;
+        let (row, competition) = self.match_reader.details(&m.team, &match_id)?;
+        Ok(MatchForm::of(&m, &row, competition.as_ref()))
     }
 
     /// Creates a match of the team (no `match_id`) or updates the one with
@@ -3467,27 +4005,11 @@ impl Scout4All {
         let saved = match existing {
             Some(m) => self
                 .runtime
-                .block_on(self.match_writer.update(
-                    &m,
-                    input.opponent,
-                    input.date,
-                    input.home,
-                    input.max_substitutions,
-                    input.notes,
-                    input.roster,
-                ))
+                .block_on(self.match_writer.update(&m, input))
                 .map(|()| m.id),
             None => self
                 .runtime
-                .block_on(self.match_writer.create(
-                    &team,
-                    input.opponent,
-                    input.date,
-                    input.home,
-                    input.max_substitutions,
-                    input.notes,
-                    input.roster,
-                ))
+                .block_on(self.match_writer.create(&team, input))
                 .map(|m| m.id),
         };
         Ok(saved?)
@@ -3560,8 +4082,9 @@ impl Scout4All {
             .collect()
     }
 
-    /// Adds a player to the team (no `player_id`) or updates the one with
-    /// `player_id`; returns its id.
+    /// Adds a player to the team (no `player_id`), a person of the registry
+    /// when the form has one, or updates the one with `player_id`; returns
+    /// its id.
     #[uniffi::method(default(namesake_confirmed = false))]
     pub fn save_player(
         &self,
@@ -3571,7 +4094,13 @@ impl Scout4All {
         namesake_confirmed: bool,
     ) -> Result<String, MobileError> {
         let mut team = self.read_team(&team_id)?;
-        let existing = player_id.map(|id| find_player(&team, &id)).transpose()?;
+        // a person of the registry chosen: the player they were, removed
+        // from the team, comes back
+        let existing = match (player_id, form.person) {
+            (Some(id), _) => Some(find_player(&team, &id)?),
+            (None, Some(person)) => team.find_player(person).cloned(),
+            (None, None) => None,
+        };
         let labels = self.language.labels();
         let namesake = player_form::namesake(&form, &team, existing.as_ref())
             .filter(|_| !namesake_confirmed)
@@ -3599,6 +4128,134 @@ impl Scout4All {
         self.runtime
             .block_on(self.team_writer.remove_player(player.id, &mut team))?;
         Ok(())
+    }
+
+    /// The form of a new player of the team: the first number no player of
+    /// it has, from 1 (none when they're all taken).
+    pub fn new_player_form(&self, team_id: String) -> Result<PlayerForm, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let taken: Vec<u8> = team.active_players().iter().map(|p| p.number).collect();
+        let free = (1..=99u8).find(|n| !taken.contains(n));
+        Ok(PlayerForm {
+            number: free.map(|n| n.to_string()).unwrap_or_default(),
+            ..PlayerForm::default()
+        })
+    }
+
+    /// The persons of the registry that can be added to the team, by name.
+    pub fn existing_players(&self, team_id: String) -> Result<Vec<ExistingPlayer>, MobileError> {
+        let team = parse_id(&team_id)?;
+        Ok(self
+            .persons
+            .choices(&team)?
+            .into_iter()
+            .map(|c| {
+                let teams: Vec<String> = c
+                    .teams
+                    .iter()
+                    .map(|t| format!("{} {}", t.name, t.year))
+                    .collect();
+                let label = match teams.is_empty() {
+                    true => c.person.name.clone(),
+                    false => format!("{} ({})", c.person.name, teams.join(", ")),
+                };
+                let latest = c.teams.first();
+                ExistingPlayer {
+                    id: c.person.id,
+                    name: c.person.name.clone(),
+                    label,
+                    form: PlayerForm {
+                        name: c.person.name,
+                        role: latest.and_then(|t| t.role),
+                        number: latest.map(|t| t.number.to_string()).unwrap_or_default(),
+                        birth_date: c
+                            .person
+                            .birth_date
+                            .map(|d| d.format(player_form::BIRTH_DATE).to_string())
+                            .unwrap_or_default(),
+                        height_cm: c
+                            .person
+                            .height_cm
+                            .map(|h| h.to_string())
+                            .unwrap_or_default(),
+                        notes: c.person.notes,
+                        person: Some(c.person.id),
+                    },
+                }
+            })
+            .collect())
+    }
+
+    /// The other teams the player plays in, the most recent first:
+    /// "Cortona U19 (2026)". Their details are the same there (D5).
+    pub fn other_teams(
+        &self,
+        team_id: String,
+        player_id: String,
+    ) -> Result<Vec<String>, MobileError> {
+        let team = parse_id(&team_id)?;
+        Ok(self
+            .persons
+            .teams_of(&parse_id(&player_id)?)?
+            .into_iter()
+            .filter(|t| t.team != team)
+            .map(|t| format!("{} ({})", t.name, t.year))
+            .collect())
+    }
+
+    /// Removes the player from the registry (D16), so from every team: in
+    /// the matches played they stay, as a removed player with their number.
+    pub fn delete_person(&self, player_id: String) -> Result<(), MobileError> {
+        Ok(self.persons.remove(&parse_id(&player_id)?)?)
+    }
+
+    /// The new season of the team (D15): its form, the year after, and
+    /// its active players, all chosen.
+    pub fn new_season(&self, team_id: String) -> Result<NewSeason, MobileError> {
+        let team = self.read_team(&team_id)?;
+        Ok(NewSeason {
+            form: season::team_form(&team),
+            players: self.season_players(&team, &season::members(&team)),
+        })
+    }
+
+    /// The players of the new season with `player` given `number` and
+    /// `role`, by number again.
+    pub fn correct_season_player(
+        &self,
+        team_id: String,
+        players: Vec<SeasonPlayer>,
+        player: Uuid,
+        number: String,
+        role: Option<RoleEnum>,
+    ) -> Result<Vec<SeasonPlayer>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let members = season::correct(&season_members(&players), player, &number, role)
+            .map_err(|e| self.season_error(e))?;
+        Ok(self.season_players(&team, &members))
+    }
+
+    /// Creates the team of the new season with the players chosen: the same
+    /// persons, in one more team; returns its id. The old team stays.
+    pub fn save_new_season(
+        &self,
+        team_id: String,
+        form: TeamForm,
+        players: Vec<SeasonPlayer>,
+    ) -> Result<String, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let input = form.validate(None).map_err(|e| MobileError::InvalidTeam {
+            field: e.into(),
+            reason: e.message(self.language.labels()),
+        })?;
+        let input = season::new_team(&team, input, &season_members(&players))
+            .map_err(|e| self.season_error(e))?;
+        let saved = self.runtime.block_on(self.team_writer.save(input))?;
+        // as a team created by hand: at the top of the list
+        if let Err(e) = self.set_pinned(saved.id.to_string(), true) {
+            log_error(&format!("could not pin the new team: {e:?}"));
+        }
+        Ok(saved.id.to_string())
     }
 
     /// Removes the team with its matches, for good; unpinned. The folder
@@ -3642,30 +4299,29 @@ impl Scout4All {
         Ok(team.id.to_string())
     }
 
-    /// The archive of the team, as the CLI exports it.
+    /// The archive of the team, its players without its matches.
     pub fn export_team(&self, team_id: String) -> Result<ExportedArchive, MobileError> {
         let id = parse_id(&team_id)?;
-        let bytes = self
-            .runtime
-            .block_on(archive::export_team(&*self.store, &id))?;
+        // a team removed or not there: not exported
+        self.read_team(&team_id)?;
+        let bytes = archives::export(&self.db, archives::Subject::Team(id))?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
         })
     }
 
-    /// The archive of a match of the team, as the CLI exports it.
+    /// The archive of a match of the team, with its teams.
     pub fn export_match(
         &self,
         team_id: String,
         match_id: String,
     ) -> Result<ExportedArchive, MobileError> {
-        let id = parse_id(&team_id)?;
-        let bytes = self
-            .runtime
-            .block_on(archive::export_match(&*self.store, &id, &match_id))?;
+        let m = self.read_match(&team_id, &match_id)?;
+        let id = Uuid::parse_str(&m.id).map_err(failed)?;
+        let bytes = archives::export(&self.db, archives::Subject::Match(id))?;
         Ok(ExportedArchive {
-            file_name: format!("{match_id}.zip"),
+            file_name: format!("{id}.zip"),
             bytes,
         })
     }
@@ -3680,11 +4336,13 @@ impl Scout4All {
         )?)
     }
 
-    /// What the archive holds, unless it can't be imported: e.g. a team
-    /// already there, or a match of none of the teams, or not of `team_id`
-    /// when it's imported into that team. `file_name` is the name of the
-    /// file it comes from, when known: the archives exported up to v0.9.0
-    /// have the id of the team only there.
+    /// What the archive holds, unless it can't be imported: e.g. a match
+    /// of a version before the database of none of the teams, or not of
+    /// `team_id` when it's imported into that team, or there already.
+    /// `file_name` is the name of the file it comes from, when known: the
+    /// archives exported up to v0.9.0 have the id of the team only there.
+    /// An archive of the database brings its teams with it: the team of a
+    /// match is its own.
     pub fn preview_archive(
         &self,
         bytes: Vec<u8>,
@@ -3692,69 +4350,79 @@ impl Scout4All {
         team_id: Option<String>,
     ) -> Result<ArchivePreview, MobileError> {
         let labels = self.language.labels();
-        match read_archive(&bytes, labels)? {
-            Archive::Team { .. } => {
-                let file_id = file_name.as_deref().and_then(file_team_id);
-                let team = self.runtime.block_on(team_to_import(
-                    &bytes,
-                    file_id,
-                    &self.team_reader,
-                    labels,
-                ))?;
-                Ok(ArchivePreview::Team {
-                    players: count(&team),
-                    name: team.name,
-                    year: team.year,
-                })
+        let team_preview = |team: TeamEntry| ArchivePreview::Team {
+            players: count(&team),
+            name: team.name,
+            year: team.year,
+        };
+        let match_preview =
+            |m: &MatchEntry, won: u8, lost: u8, teams: Vec<TeamChoice>| ArchivePreview::Match {
+                date: m.date.to_rfc3339(),
+                opponent: m.opponent.clone(),
+                home: m.home,
+                won,
+                lost,
+                teams,
+            };
+        let choice = |t: &TeamEntry| TeamChoice {
+            id: t.id.to_string(),
+            name: t.name.clone(),
+        };
+        Ok(match legacy_archive::open(&self.db, &bytes, labels)? {
+            Opened::Database(_) => match archives::preview(&bytes, &self.language)? {
+                Preview::Team(team) => team_preview(team),
+                Preview::Match(m) => match_preview(
+                    &m.entry,
+                    m.status.us_wins,
+                    m.status.them_wins,
+                    vec![choice(&m.team)],
+                ),
+            },
+            // up to v0.9.0 the id only in the name of the file
+            Opened::LegacyTeam { team, id } => {
+                match id.or_else(|| file_name.as_deref().and_then(file_team_id)) {
+                    Some(_) => team_preview(team),
+                    None => return Err(failed(labels.team_archive_without_id)),
+                }
             }
-            Archive::Match(_) => {
-                let teams = match team_id {
-                    Some(id) => vec![self.read_team(&id)?],
-                    None => self.readable_teams()?,
-                };
-                let (m, found) = self.runtime.block_on(match_to_import(
-                    &bytes,
-                    &teams,
-                    &self.match_reader,
-                    labels,
-                ))?;
-                let status = m.get_status()?;
-                let mut choices: Vec<TeamChoice> = found
-                    .into_iter()
-                    .map(|t| TeamChoice {
-                        id: t.id.to_string(),
-                        name: t.name.clone(),
-                    })
+            Opened::LegacyMatch { archived, teams } => {
+                let mut choices: Vec<TeamChoice> = teams
+                    .iter()
+                    .filter(|t| team_id.as_ref().is_none_or(|id| t.id.to_string() == *id))
+                    .map(choice)
                     .collect();
+                if choices.is_empty() {
+                    return Err(failed(labels.match_of_another_team));
+                }
                 choices.sort_by_key(|t| t.name.to_lowercase());
-                Ok(ArchivePreview::Match {
-                    date: m.date.to_rfc3339(),
-                    opponent: m.opponent,
-                    home: m.home,
-                    won: status.us_wins,
-                    lost: status.them_wins,
-                    teams: choices,
-                })
+                let status = archived.get_status()?;
+                match_preview(&archived, status.us_wins, status.them_wins, choices)
             }
-        }
+        })
     }
 
-    /// Adds the team of the archive; its id.
+    /// Adds the team of the archive, or merges it into the one here (the
+    /// data here win): its id and what to tell of it.
     pub fn import_team(
         &self,
         bytes: Vec<u8>,
         file_name: Option<String>,
-    ) -> Result<String, MobileError> {
-        let file_id = file_name.as_deref().and_then(file_team_id);
-        let team = self.runtime.block_on(archive::import_team(
-            &bytes,
-            file_id,
-            &self.team_reader,
-            &self.team_writer,
-            self.language.labels(),
-        ))?;
+    ) -> Result<ImportedArchive, MobileError> {
+        let labels = self.language.labels();
+        let imported = match legacy_archive::open(&self.db, &bytes, labels)? {
+            Opened::Database(manifest) if manifest.kind == Kind::Team => {
+                archives::import(&self.db, &bytes, &self.language)?
+            }
+            Opened::LegacyTeam { .. } => {
+                let file_id = file_name.as_deref().and_then(file_team_id);
+                import_legacy_team(&self.db, &bytes, file_id, &self.language)?
+            }
+            Opened::Database(_) | Opened::LegacyMatch { .. } => {
+                return Err(failed(labels.invalid_archive));
+            }
+        };
         self.sender.request();
-        Ok(team.id.to_string())
+        Ok(ImportedArchive::of(&imported, labels))
     }
 
     /// What the DataVolley file holds.
@@ -3818,18 +4486,56 @@ impl Scout4All {
             .collect())
     }
 
+    /// Our teams like team B of the side, the most alike first, team A
+    /// `team_id` left out; `first`, the team of the side imported before,
+    /// before them all even if not alike.
+    pub fn dvw_similar_opponents(
+        &self,
+        bytes: Vec<u8>,
+        side: DvwSide,
+        team_id: Option<String>,
+        first: Option<String>,
+    ) -> Result<Vec<DvwSimilarTeam>, MobileError> {
+        let other = match side {
+            DvwSide::Home => DvwSide::Visiting,
+            DvwSide::Visiting => DvwSide::Home,
+        };
+        Ok(self
+            .dvw_similar_teams(bytes, other, first)?
+            .into_iter()
+            .filter(|t| team_id.as_ref() != Some(&t.id))
+            .collect())
+    }
+
     /// The import as chosen, checked: what it saves, or why it can't.
     pub fn plan_dvw(&self, bytes: Vec<u8>, choice: DvwChoice) -> Result<DvwReady, MobileError> {
         let file = self.parse_dvw(&bytes)?;
-        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let (team, opponent, plan) = self.dvw_plans(&file, &choice)?;
         let saved_already = self
             .runtime
             .block_on(match_exists(&plan, &self.match_reader))?;
+        let labels = self.language.labels();
+        let competition = [
+            plan.input.competition.as_ref().map(|c| match c {
+                CompetitionInput::New { name, .. } => name.clone(),
+                CompetitionInput::Existing(id) => id.to_string(),
+            }),
+            plan.input.stage.map(|s| s.name(labels).to_string()),
+            plan.input.round.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         Ok(DvwReady {
             team: team.team.name.clone(),
             sets: count_of(plan.entry.sets.len()),
             new_players: count_of(team.new_players.len()),
             saved_already,
+            opponent: opponent.name().to_string(),
+            opponent_new_players: opponent.team().map(|b| count_of(b.new_players.len())),
+            match_numbers: count_of(team.match_numbers.len()),
+            competition: Some(competition).filter(|c| !c.is_empty()),
         })
     }
 
@@ -3842,9 +4548,10 @@ impl Scout4All {
         overwrite: bool,
     ) -> Result<DvwImported, MobileError> {
         let file = self.parse_dvw(&bytes)?;
-        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let (team, opponent, plan) = self.dvw_plans(&file, &choice)?;
         let m = self.runtime.block_on(save_import(
             &team,
+            &opponent,
             &plan,
             overwrite,
             &self.team_writer,
@@ -3860,19 +4567,28 @@ impl Scout4All {
         })
     }
 
-    /// Adds the match of the archive to the team; its id.
-    pub fn import_match(&self, bytes: Vec<u8>, team_id: String) -> Result<String, MobileError> {
-        let team = self.read_team(&team_id)?;
-        let m = self.runtime.block_on(archive::import_match(
-            &bytes,
-            &team,
-            &self.match_reader,
-            &self.match_writer,
-            &*self.set_writer,
-            self.language.labels(),
-        ))?;
+    /// Adds the match of the archive: one of a version before the
+    /// database into the team `team_id` (one of those of its preview), one
+    /// of the database with its own teams. Its id and what to tell of it.
+    pub fn import_match(
+        &self,
+        bytes: Vec<u8>,
+        team_id: String,
+    ) -> Result<ImportedArchive, MobileError> {
+        let labels = self.language.labels();
+        let imported = match legacy_archive::open(&self.db, &bytes, labels)? {
+            Opened::Database(manifest) if manifest.kind == Kind::Match => {
+                archives::import(&self.db, &bytes, &self.language)?
+            }
+            Opened::LegacyMatch { .. } => {
+                import_legacy_match(&self.db, &bytes, parse_id(&team_id)?, &self.language)?
+            }
+            Opened::Database(_) | Opened::LegacyTeam { .. } => {
+                return Err(failed(labels.invalid_archive));
+            }
+        };
         self.sender.request();
-        Ok(m.id)
+        Ok(ImportedArchive::of(&imported, labels))
     }
 
     /// The language of the labels from now on, a code like `"it"` (English
@@ -3917,6 +4633,7 @@ impl Scout4All {
     pub fn add_example_team_if_new(&self) -> Result<bool, MobileError> {
         let added = self.runtime.block_on(example::add_example_team_if_new(
             &*self.store,
+            &self.team_reader,
             &self.team_writer,
             self.language.labels(),
         ))?;
@@ -3988,6 +4705,12 @@ impl Scout4All {
         self.update_team_defaults(|_| TeamDefaults {
             country: Some(country),
         })
+    }
+
+    /// No country for a new team: its field starts empty (the desktop; on
+    /// Android the next start guesses one again).
+    pub fn clear_default_country(&self) -> Result<(), MobileError> {
+        self.update_team_defaults(|_| TeamDefaults { country: None })
     }
 
     /// When the settings have no country for a new team yet, the first of
@@ -4085,7 +4808,7 @@ impl Scout4All {
 
 /// The queue of the core, which then asks the sender to send it.
 struct SentFinishedMatches {
-    queued: QueuedFinishedMatches<StoreQueueReader, StoreQueueWriter>,
+    queued: QueuedFinishedMatches<SqliteQueue, SqliteQueue>,
     sender: Arc<UploadSender>,
 }
 
@@ -4224,13 +4947,10 @@ impl Scout4All {
 
     fn upload_pending_to(&self, url: &str) -> Uploads {
         loop {
-            let step = self.runtime.block_on(upload_next(
-                &*self.store,
-                &self.team_reader,
-                &self.match_reader,
-                &self.queue,
-                url,
-            ));
+            let source = SqliteUploads::new(self.db.clone(), self.language.clone());
+            let step = self
+                .runtime
+                .block_on(upload_next(&source, &self.queue, url));
             // each sent or dropped match leaves the queue: it ends
             match step {
                 Ok(UploadStep::Uploaded | UploadStep::Dropped) => continue,
@@ -4334,7 +5054,7 @@ impl Scout4All {
         &self,
         file: &DvwFile,
         choice: &DvwChoice,
-    ) -> Result<(TeamPlan, MatchPlan), MobileError> {
+    ) -> Result<(TeamPlan, OpponentPlan, MatchPlan), MobileError> {
         let labels = self.language.labels();
         let failed = |reason| MobileError::Failed { reason };
         let day = parse_day(&choice.day)?;
@@ -4360,10 +5080,29 @@ impl Scout4All {
             },
             other => failed(other.describe(labels)),
         })?;
-        let date = match_date(file, day, *Local::now().offset());
-        let plan = match_plan(file, side, &team, date, choice.max_substitutions)
+        let b = match &choice.opponent {
+            DvwOpponent::Team { id } => Some(self.read_team(id)?),
+            DvwOpponent::Name | DvwOpponent::NewTeam => None,
+        };
+        let opponent_choice = match (&choice.opponent, &b) {
+            (DvwOpponent::Team { .. }, Some(b)) => DvwOpponentChoice::Existing(b),
+            (DvwOpponent::NewTeam, _) => DvwOpponentChoice::New,
+            (DvwOpponent::Name | DvwOpponent::Team { .. }, _) => DvwOpponentChoice::Name,
+        };
+        let opponent = opponent_plan(file, side, &team.team, opponent_choice)
             .map_err(|e| failed(e.describe(labels)))?;
-        Ok((team, plan))
+        let date = match_date(file, day, *Local::now().offset());
+        let plan = match_plan(
+            file,
+            side,
+            &team,
+            &opponent,
+            date,
+            choice.max_substitutions,
+            labels,
+        )
+        .map_err(|e| failed(e.describe(labels)))?;
+        Ok((team, opponent, plan))
     }
 
     fn readable_teams(&self) -> Result<Vec<TeamEntry>, MobileError> {
@@ -4375,18 +5114,99 @@ impl Scout4All {
             .collect())
     }
 
-    fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
-        let id = parse_id(id)?;
-        self.runtime
-            .block_on(self.team_reader.read_single(&id))
-            .map_err(|e| unreadable(&e, self.language.labels().unreadable_team))
+    /// The competition not removed.
+    fn competition(&self, id: Uuid) -> Result<scout4all_core::domain::Competition, MobileError> {
+        self.competitions
+            .read(id)?
+            .filter(|c| !c.deleted)
+            .ok_or_else(|| MobileError::Failed {
+                reason: format!("competition {id} not found"),
+            })
     }
 
+    /// The match form changed by `change`, with the players of its roster.
+    fn roster_after(
+        &self,
+        team_id: String,
+        match_id: Option<String>,
+        form: MatchForm,
+        change: impl FnOnce(&mut MatchForm, &TeamEntry, Option<&MatchEntry>) -> Result<(), MobileError>,
+    ) -> Result<MatchRoster, MobileError> {
+        // the team as it is, also with the players not on the roster
+        let team = self.read_team(&team_id)?;
+        let existing = match_id
+            .map(|id| self.read_match(&team_id, &id))
+            .transpose()?;
+        let mut form = form;
+        change(&mut form, &team, existing.as_ref())?;
+        let labels = self.language.labels();
+        let players = form
+            .roster_choices(&team, existing.as_ref())
+            .into_iter()
+            .map(|c| RosterPlayer {
+                id: c.player.id,
+                name: c.player.name,
+                number: c.player.number,
+                role: c
+                    .player
+                    .role
+                    .map(|r| r.name(team.gender, labels).to_string()),
+                chosen: c.chosen,
+                played: c.played,
+                role_value: c.player.role,
+            })
+            .collect();
+        Ok(MatchRoster { form, players })
+    }
+
+    /// The members of the new season as the form shows them.
+    fn season_players(&self, team: &TeamEntry, members: &[SeasonMember]) -> Vec<SeasonPlayer> {
+        let labels = self.language.labels();
+        members
+            .iter()
+            .filter_map(|m| {
+                team.find_player(m.player).map(|p| SeasonPlayer {
+                    id: m.player,
+                    name: p.name.clone(),
+                    number: m.number,
+                    role: m.role,
+                    role_name: m.role.map(|r| r.name(team.gender, labels).to_string()),
+                    chosen: m.chosen,
+                })
+            })
+            .collect()
+    }
+
+    /// An error of the new season, on the number of a player.
+    fn season_error(&self, e: SeasonError) -> MobileError {
+        MobileError::InvalidPlayer {
+            field: PlayerField::Number,
+            reason: e.message(self.language.labels()),
+        }
+    }
+
+    /// The team, a player removed from the registry named as such.
+    fn read_team(&self, id: &str) -> Result<TeamEntry, MobileError> {
+        let id = parse_id(id)?;
+        let labels = self.language.labels();
+        let mut team = self
+            .runtime
+            .block_on(self.team_reader.read_single(&id))
+            .map_err(|e| unreadable(&e, labels.unreadable_team))?;
+        name_the_removed(&mut team, labels);
+        Ok(team)
+    }
+
+    /// The match, a player removed from the registry named as such.
     fn read_match(&self, team_id: &str, match_id: &str) -> Result<MatchEntry, MobileError> {
         let team = self.read_team(team_id)?;
-        self.runtime
+        let labels = self.language.labels();
+        let mut m = self
+            .runtime
             .block_on(self.match_reader.read_single(&team, match_id))
-            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))
+            .map_err(|e| unreadable(&e, labels.unreadable_match))?;
+        name_the_removed(&mut m.team, labels);
+        Ok(m)
     }
 }
 
@@ -4517,6 +5337,19 @@ fn find_player(team: &TeamEntry, id: &str) -> Result<PlayerEntry, MobileError> {
         })
 }
 
+/// The players of the new season as the core keeps them.
+fn season_members(players: &[SeasonPlayer]) -> Vec<SeasonMember> {
+    players
+        .iter()
+        .map(|p| SeasonMember {
+            player: p.id,
+            number: p.number,
+            role: p.role,
+            chosen: p.chosen,
+        })
+        .collect()
+}
+
 fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
     let mut players: Vec<Player> = team
         .active_players()
@@ -4542,7 +5375,7 @@ fn count(team: &TeamEntry) -> u32 {
 #[allow(clippy::unwrap_used, clippy::unreachable)]
 mod tests {
     use super::*;
-    use scout4all_core::{localization::labels, settings::TERMS_VERSION};
+    use scout4all_core::{localization::labels, match_form::MatchInput, settings::TERMS_VERSION};
 
     #[test]
     fn an_empty_folder_has_no_teams() {
@@ -4551,16 +5384,307 @@ mod tests {
         assert_eq!(app.teams().unwrap(), vec![]);
     }
 
+    /// The data folder of the legacy fixtures of the core, as a version
+    /// before the database left it.
+    fn legacy_data(version: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../core/src/tests/fixtures/legacy")
+            .join(version)
+            .join("data")
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            match entry.file_type().unwrap().is_dir() {
+                true => copy_dir(&entry.path(), &target),
+                false => {
+                    std::fs::copy(entry.path(), target).unwrap();
+                }
+            }
+        }
+    }
+
+    /// What the lists show of every match, by team name: as the files
+    /// tell it before and the database after (the ids aside).
+    type Listed = std::collections::BTreeMap<String, Vec<(String, String, u8, u8, bool)>>;
+
+    async fn listed_in_files(dir: &Path) -> Listed {
+        use scout4all_core::legacy::folder::read_folder;
+        let store = FsStore::new(dir);
+        let mut listed = Listed::new();
+        for team in read_folder(&store, Language::default().labels())
+            .await
+            .unwrap()
+        {
+            let team = team.unwrap();
+            let mut matches: Vec<MatchEntry> =
+                team.matches.into_iter().map(|m| m.unwrap()).collect();
+            // the most recent first, as the lists
+            matches.sort_by_key(|m| std::cmp::Reverse(m.date));
+            listed.insert(
+                team.team.name.clone(),
+                matches
+                    .iter()
+                    .map(|m| {
+                        let status = m.get_status().unwrap();
+                        (
+                            m.opponent.clone(),
+                            m.date.to_rfc3339(),
+                            status.us_wins,
+                            status.them_wins,
+                            status.match_finished,
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        listed
+    }
+
+    fn listed_in_app(app: &Scout4All) -> Listed {
+        app.teams()
+            .unwrap()
+            .into_iter()
+            .map(|t| match t {
+                TeamListing::Team { id, name, .. } => (
+                    name,
+                    app.matches(id)
+                        .unwrap()
+                        .into_iter()
+                        .map(|m| match m {
+                            MatchListing::Match {
+                                opponent,
+                                date,
+                                won,
+                                lost,
+                                finished,
+                                ..
+                            } => (opponent, date, won, lost, finished),
+                            other => panic!("{other:?}"),
+                        })
+                        .collect(),
+                ),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    /// The day of the backups, as the migration names them.
+    fn backup_of(dir: &tempfile::TempDir) -> PathBuf {
+        let day = Local::now().date_naive();
+        dir.path().join(format!("data-backup-{day}.zip"))
+    }
+
+    /// TODO/001 step 17: the app opens the database in the data folder and
+    /// moves into it what a version before left there, a copy of the
+    /// folder beside it first; nothing to tell when all moved, nothing to
+    /// do at the next start.
     #[test]
-    fn a_team_folder_that_is_not_an_id_is_unreadable() {
+    fn the_start_moves_the_folder_of_a_version_before_into_the_database() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("not-a-team")).unwrap();
+        let data = dir.path().join("data");
+        copy_dir(&legacy_data("v0.18.0"), &data);
+        let expected = Runtime::new().unwrap().block_on(listed_in_files(&data));
+        assert_eq!(expected.len(), 3);
+        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        assert_eq!(app.startup_notice(), None);
+        assert_eq!(listed_in_app(&app), expected);
+        assert!(data.join(layout::DATABASE).exists());
+        assert!(backup_of(&dir).exists());
+        // only the database and the settings left: no folder
+        let folders: Vec<_> = std::fs::read_dir(&data)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
+            .collect();
+        assert_eq!(folders, Vec::<PathBuf>::new());
+        // the queue of the uploads moved with it
+        assert!(!queued_of(&data).is_empty());
+        drop(app);
+        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        assert_eq!(again.startup_notice(), None);
+        assert_eq!(listed_in_app(&again), expected);
+        let backups = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|x| x == "zip")
+            })
+            .count();
+        assert_eq!(backups, 1);
+    }
+
+    fn queued_of(data: &Path) -> Vec<String> {
+        let db = scout4all_core::db::open(&data.join(layout::DATABASE)).unwrap();
+        let mut rows = db.prepare("SELECT match_id FROM upload_queue").unwrap();
+        rows.query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// What can't be moved stays in the folder and is told once, in the
+    /// language of the app, with where the copy is; the rest moves.
+    #[test]
+    fn what_stays_in_the_folder_is_told_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        copy_dir(&legacy_data("v0.18.0"), &data);
+        // a set cut in two
+        let broken = std::fs::read_dir(&data)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir())
+            .flat_map(|team| std::fs::read_dir(team).unwrap().map(|e| e.unwrap().path()))
+            .find(|p| p.join("set_1.json").exists())
+            .unwrap();
+        std::fs::write(broken.join("set_1.json"), "{\"serving").unwrap();
+        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let it = labels(LanguageEnum::It);
+        let notice = app.startup_notice().unwrap();
+        let lines: Vec<&str> = notice.lines().collect();
+        assert_eq!(lines[0], it.migration_left);
+        let folder = broken
+            .strip_prefix(&data)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(lines[1].starts_with(&format!("- {folder}: ")), "{notice}");
+        assert_eq!(
+            lines[2],
+            it.migration_backup
+                .replace("{}", &backup_of(&dir).display().to_string())
+        );
+        assert_eq!(app.startup_notice(), None);
+        assert!(broken.join("match.json").exists());
+        assert_eq!(app.teams().unwrap().len(), 3);
+        // the next start tells it again, without a new copy
+        drop(app);
+        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        assert_eq!(again.startup_notice().unwrap(), lines[..2].join("\n"));
+    }
+
+    /// No copy of the folder (where it goes can't be written): nothing
+    /// moves, the app says why and opens all the same; the next start
+    /// moves it.
+    #[cfg(unix)]
+    #[test]
+    fn a_migration_that_cant_start_changes_nothing_and_is_told() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        let data = parent.join("data");
+        copy_dir(&legacy_data("v0.18.0"), &data);
+        let expected = Runtime::new().unwrap().block_on(listed_in_files(&data));
+        let mode = |m: u32| {
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(m)).unwrap();
+        };
+        mode(0o555);
+        let app = Scout4All::new(data.to_string_lossy().into_owned(), "en".into());
+        mode(0o755);
+        let app = app.unwrap();
+        let notice = app.startup_notice().unwrap();
+        let en = labels(LanguageEnum::En);
+        let (before, after) = en.migration_failed.split_once("{}").unwrap();
+        assert!(
+            notice.starts_with(before) && notice.ends_with(after),
+            "{notice}"
+        );
+        assert_eq!(app.teams().unwrap(), vec![]);
+        assert_eq!(
+            Runtime::new().unwrap().block_on(listed_in_files(&data)),
+            expected
+        );
+        drop(app);
+        let again = Scout4All::new(data.to_string_lossy().into_owned(), "en".into()).unwrap();
+        assert_eq!(again.startup_notice(), None);
+        assert_eq!(listed_in_app(&again), expected);
+    }
+
+    /// A database saved by a newer version isn't opened: the app says to
+    /// update it, the database stays as it is.
+    #[test]
+    fn a_database_of_a_newer_version_is_not_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(layout::DATABASE);
+        drop(scout4all_core::db::open(&file).unwrap());
+        let newer = scout4all_core::db::schema_version() + 1;
+        sql(&dir, &format!("PRAGMA user_version = {newer}"));
+        let e = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+            .err()
+            .unwrap();
+        assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
+    }
+
+    fn reason_of(e: MobileError) -> String {
+        match e {
+            MobileError::Failed { reason } => reason,
+            other => format!("{other:?}"),
+        }
+    }
+
+    /// The tutorial seen again the same day: another opponent, numbered,
+    /// as the matches have UUIDs now and wouldn't clash.
+    #[test]
+    fn the_match_of_the_tutorial_seen_again_is_numbered() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let team = app.tutorial_team().unwrap();
+        let date = DateTime::parse_from_rfc3339("2026-11-13T18:00:00+01:00").unwrap();
+        let first = app.tutorial_match_form(team.clone(), date).unwrap();
+        assert_eq!(first.opponent, "Brazil");
+        app.save_match(team.clone(), None, first).unwrap();
+        let second = app.tutorial_match_form(team.clone(), date).unwrap();
+        assert_eq!(second.opponent, "Brazil 2");
+        let next_day = date + chrono::Duration::days(1);
+        assert_eq!(
+            app.tutorial_match_form(team, next_day).unwrap().opponent,
+            "Brazil"
+        );
+    }
+
+    /// A team whose row the code can't read: listed as unreadable, the
+    /// others as they are.
+    #[test]
+    fn a_team_that_cant_be_read_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "xx".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        // the schema doesn't check the spelling of the country, reading does
+        sql(
+            &dir,
+            &format!("UPDATE teams SET country = 'it' WHERE id = '{team}'"),
+        );
         assert_eq!(
             app.teams().unwrap(),
-            vec![TeamListing::Unreadable {
-                folder: "not-a-team".into()
-            }]
+            vec![TeamListing::Unreadable { folder: team }]
+        );
+    }
+
+    /// Changes the database of the app in `dir` behind its back, as a
+    /// broken row would be.
+    fn sql(dir: &tempfile::TempDir, sql: &str) {
+        scout4all_core::db::open(&dir.path().join(layout::DATABASE))
+            .unwrap()
+            .execute_batch(sql)
+            .unwrap();
+    }
+
+    /// Makes the match unreadable: a set 2 without the first, without
+    /// lineup; the cache of the lists forgotten.
+    fn break_match(dir: &tempfile::TempDir, match_id: &str) {
+        sql(
+            dir,
+            &format!(
+                "INSERT INTO sets (match_id, number, serving) VALUES ('{match_id}', 2, 'a');
+                 DELETE FROM match_summary;"
+            ),
         );
     }
 
@@ -4921,7 +6045,166 @@ mod tests {
             birth_date: String::new(),
             height_cm: String::new(),
             notes: String::new(),
+            person: None,
         }
+    }
+
+    /// A new player starts with the first number free in the team, from 1;
+    /// none when they're all taken; a player removed frees theirs.
+    #[test]
+    fn a_new_player_starts_with_the_first_number_free() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let number = || app.new_player_form(team.clone()).unwrap().number;
+        assert_eq!(number(), "1");
+        let save = |n: u8| {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap()
+        };
+        let one = save(1);
+        save(2);
+        save(4);
+        assert_eq!(number(), "3");
+        app.remove_player(team.clone(), one).unwrap();
+        assert_eq!(number(), "1");
+        (1..=99).filter(|n| ![2, 4].contains(n)).for_each(|n| {
+            save(n);
+        });
+        assert_eq!(number(), "");
+        assert_eq!(app.new_player_form(team).unwrap().name, "");
+    }
+
+    /// The registry through the app (TODO/001, step 22): a person of
+    /// another team offered with their teams and added; the new season
+    /// with the same persons; a person removed from the registry, named as
+    /// a removed player on the score sheet of the matches played.
+    #[test]
+    fn the_registry_offers_adds_takes_to_a_new_season_and_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let senior = app.save_team(None, form("Cortona")).unwrap();
+        let ids: Vec<String> = (1..=7)
+            .map(|n| {
+                app.save_player(
+                    senior.clone(),
+                    None,
+                    PlayerForm {
+                        height_cm: "180".into(),
+                        ..player(&format!("P{n}"), &n.to_string())
+                    },
+                    false,
+                )
+                .unwrap()
+            })
+            .collect();
+        let under = app.save_team(None, form("Cortona U19")).unwrap();
+        let offered = app.existing_players(under.clone()).unwrap();
+        assert_eq!(offered.len(), 7);
+        let p1 = &offered[0];
+        assert_eq!(p1.label, "P1 (Cortona 2026)");
+        assert_eq!(
+            p1.form,
+            PlayerForm {
+                height_cm: "180".into(),
+                person: Some(p1.id),
+                ..player("P1", "1")
+            }
+        );
+        let added = app
+            .save_player(under.clone(), None, p1.form.clone(), false)
+            .unwrap();
+        assert_eq!(added, ids[0]);
+        assert_eq!(app.existing_players(under.clone()).unwrap().len(), 6);
+        assert_eq!(
+            app.other_teams(under.clone(), added.clone()).unwrap(),
+            ["Cortona (2026)".to_string()]
+        );
+
+        // the new season: P7 left, P2 with the 10
+        let season = app.new_season(senior.clone()).unwrap();
+        assert_eq!(season.form.year, "2027");
+        assert_eq!(season.players.len(), 7);
+        assert!(season.players.iter().all(|p| p.chosen));
+        let mut players = season.players;
+        players[6].chosen = false;
+        let taken = app.correct_season_player(
+            senior.clone(),
+            players.clone(),
+            players[1].id,
+            "3".into(),
+            None,
+        );
+        assert!(matches!(
+            taken,
+            Err(MobileError::InvalidPlayer {
+                field: PlayerField::Number,
+                ..
+            })
+        ));
+        let players = app
+            .correct_season_player(
+                senior.clone(),
+                players.clone(),
+                players[1].id,
+                "10".into(),
+                Some(RoleEnum::Libero),
+            )
+            .unwrap();
+        assert_eq!(
+            players.last().map(|p| (p.number, p.role_name.as_deref())),
+            Some((10, Some("libero")))
+        );
+        let new = app
+            .save_new_season(senior.clone(), season.form, players)
+            .unwrap();
+        let details = app.team(new.clone()).unwrap();
+        assert_eq!(details.year, 2027);
+        let numbers: Vec<(String, u8)> = details
+            .players
+            .iter()
+            .map(|p| (p.id.clone(), p.number))
+            .collect();
+        assert_eq!(numbers.len(), 6);
+        assert!(numbers.contains(&(ids[1].clone(), 10)));
+        assert!(!numbers.iter().any(|(id, _)| *id == ids[6]));
+        // pinned, as a team created by hand
+        assert!(app.teams().unwrap().iter().any(|t| matches!(
+            t,
+            TeamListing::Team { id, pinned: true, .. } if *id == new
+        )));
+
+        // a match played, then P3 removed from the registry: everywhere
+        let m = app
+            .save_match(
+                senior.clone(),
+                None,
+                match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8"),
+            )
+            .unwrap();
+        app.delete_person(ids[2].clone()).unwrap();
+        assert!(
+            app.team(new)
+                .unwrap()
+                .players
+                .iter()
+                .all(|p| p.id != ids[2])
+        );
+        assert_eq!(app.team(senior.clone()).unwrap().players.len(), 6);
+        let read = app.match_form(senior.clone(), m.clone()).unwrap();
+        let roster = app.match_roster(senior, Some(m), read, None).unwrap();
+        let gone = roster
+            .players
+            .iter()
+            .find(|p| p.id.to_string() == ids[2])
+            .map(|p| (p.name.as_str(), p.number));
+        assert_eq!(gone, Some(("giocatore rimosso", 3)));
+        assert!(app.delete_person("not an id".into()).is_err());
     }
 
     #[test]
@@ -4985,49 +6268,49 @@ mod tests {
         assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
 
         let team = app.read_team(&team_id).unwrap();
-        let writer = StoreMatchWriter::new(Arc::new(FsStore::new(dir.path())));
+        let mut ids = vec![];
         for (opponent, date, home) in [
             ("Arezzo", "2026-10-04T18:00:00+02:00", true),
             ("Siena", "2026-10-11T21:00:00+02:00", false),
+            ("Lucca", "2026-10-18T21:00:00+02:00", false),
         ] {
             let date = DateTime::parse_from_rfc3339(date).unwrap();
-            app.runtime
-                .block_on(writer.create(
+            let m = app
+                .runtime
+                .block_on(app.match_writer.create(
                     &team,
-                    opponent.into(),
-                    date,
-                    home,
-                    6,
-                    String::new(),
-                    vec![],
+                    MatchInput::against(opponent, date, home, 6, "", vec![]),
                 ))
                 .unwrap();
+            ids.push(m.id);
         }
-        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        break_match(&dir, &ids[2]);
 
         assert_eq!(
             app.matches(team_id).unwrap(),
             vec![
                 MatchListing::Match {
-                    id: "2026-10-11_siena".into(),
+                    id: ids[1].clone(),
                     opponent: "Siena".into(),
                     home: false,
                     date: "2026-10-11T21:00:00+02:00".into(),
                     won: 0,
                     lost: 0,
                     finished: false,
+                    scouted_by: None,
                 },
                 MatchListing::Match {
-                    id: "2026-10-04_arezzo".into(),
+                    id: ids[0].clone(),
                     opponent: "Arezzo".into(),
                     home: true,
                     date: "2026-10-04T18:00:00+02:00".into(),
                     won: 0,
                     lost: 0,
                     finished: false,
+                    scouted_by: None,
                 },
                 MatchListing::Unreadable {
-                    folder: "not-a-match".into(),
+                    folder: ids[2].clone(),
                     reason: None,
                 },
             ]
@@ -5043,18 +6326,21 @@ mod tests {
         let team_id = app.save_team(None, form("Cortona")).unwrap();
         let other = app.save_team(None, form("Arezzo")).unwrap();
         let team = app.read_team(&team_id).unwrap();
-        let writer = StoreMatchWriter::new(Arc::new(FsStore::new(dir.path())));
         let date = DateTime::parse_from_rfc3339("2026-10-04T18:00:00+02:00").unwrap();
-        let m = app
-            .runtime
-            .block_on(writer.create(&team, "Siena".into(), date, true, 6, String::new(), vec![]))
-            .unwrap();
-        std::fs::create_dir(dir.path().join(&team_id).join("not-a-match")).unwrap();
+        let create = |opponent: &str| {
+            app.runtime
+                .block_on(app.match_writer.create(
+                    &team,
+                    MatchInput::against(opponent, date, true, 6, "", vec![]),
+                ))
+                .unwrap()
+        };
+        let (m, broken) = (create("Siena"), create("Lucca"));
+        break_match(&dir, &broken.id);
         assert_eq!(app.matches(team_id.clone()).unwrap().len(), 2);
 
         app.delete_match(team_id.clone(), m.id).unwrap();
-        app.delete_match(team_id.clone(), "not-a-match".into())
-            .unwrap();
+        app.delete_match(team_id.clone(), broken.id).unwrap();
         assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
 
         app.delete_team(team_id.clone()).unwrap();
@@ -5068,7 +6354,6 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, vec![other.clone()]);
-        assert!(!dir.path().join(&team_id).exists());
         let pins = config(&dir)["pinned_teams"].to_string();
         assert!(pins.contains(&other) && !pins.contains(&team_id), "{pins}");
     }
@@ -5079,9 +6364,251 @@ mod tests {
             date: DateTime::parse_from_rfc3339(date).ok(),
             home: true,
             max_substitutions: max_substitutions.into(),
-            notes: String::new(),
-            roster: None,
+            ..MatchForm::default()
         }
+    }
+
+    /// The teams first, with their ids and years, then the names met that
+    /// aren't a team; team B a team, read back for the form; the
+    /// competition created once, then offered.
+    #[test]
+    fn team_b_and_the_competition_are_offered_and_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let livorno = app.save_team(None, form("Livorno")).unwrap();
+        for n in 1..=7 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let date = "2026-10-24T18:00:00+02:00";
+        for opponent in ["Arezzo", "livorno"] {
+            app.save_match(team.clone(), None, match_form(opponent, date, "8"))
+                .unwrap();
+        }
+        let livorno_id = parse_id(&livorno).unwrap();
+        let offered = app.opponent_choices(team.clone()).unwrap();
+        assert_eq!(
+            offered
+                .iter()
+                .map(|o| (o.name.as_str(), o.team))
+                .collect::<Vec<_>>(),
+            vec![("Livorno", Some(livorno_id)), ("Arezzo", None)]
+        );
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent_team: Some(livorno_id),
+                    neutral: true,
+                    competition: "Serie C".into(),
+                    competition_format: Some(CompetitionFormat::Cup),
+                    stage: Some(Stage::Playoff),
+                    round: "Semifinale".into(),
+                    ..match_form("Livorno", date, "8")
+                },
+            )
+            .unwrap();
+        let read = app.match_form(team.clone(), m.clone()).unwrap();
+        let competitions = app.competitions().unwrap();
+        assert_eq!(
+            competitions
+                .iter()
+                .map(|c| (c.name.as_str(), c.format))
+                .collect::<Vec<_>>(),
+            vec![("Serie C", CompetitionFormat::Cup)]
+        );
+        assert_eq!(
+            (
+                read.opponent.as_str(),
+                read.opponent_team,
+                read.neutral,
+                read.competition_id,
+                read.stage,
+                read.round.as_str()
+            ),
+            (
+                "Livorno",
+                Some(livorno_id),
+                true,
+                competitions.first().map(|c| c.id),
+                Some(Stage::Playoff),
+                "Semifinale"
+            )
+        );
+        // saved as read: the same competition
+        app.save_match(team.clone(), Some(m), read).unwrap();
+        assert_eq!(app.competitions().unwrap().len(), 1);
+        assert_eq!(app.stages().len(), 8);
+        assert_eq!(
+            app.competition_formats()
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Campionato", "Coppa", "Torneo"]
+        );
+    }
+
+    /// The competitions in their list (TODO/001, step 23): counted with
+    /// their matches, edited (a name taken refused on the name), removed
+    /// leaving their matches without one.
+    #[test]
+    fn a_competition_is_listed_edited_and_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        for n in 1..=7 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let date = "2026-10-24T18:00:00+02:00";
+        let mut matches = vec![];
+        for (opponent, competition) in [("Arezzo", "Serie C"), ("Livorno", "Coppa")] {
+            let form = MatchForm {
+                competition: competition.into(),
+                ..match_form(opponent, date, "8")
+            };
+            matches.push(app.save_match(team.clone(), None, form).unwrap());
+        }
+        let listed = app.competition_listings().unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|c| (
+                    c.name.as_str(),
+                    c.season.as_deref(),
+                    c.format.as_str(),
+                    c.matches
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Coppa", Some("2026/2027"), "Campionato", 1),
+                ("Serie C", Some("2026/2027"), "Campionato", 1),
+            ]
+        );
+        let (coppa, serie_c) = (listed[0].id, listed[1].id);
+
+        let form = app.competition_form(coppa).unwrap();
+        let taken = app.save_competition(
+            coppa,
+            CompetitionForm {
+                name: "serie c".into(),
+                ..form.clone()
+            },
+        );
+        assert!(matches!(
+            taken,
+            Err(MobileError::InvalidCompetition { field: CompetitionField::Name, ref reason })
+                if reason.contains("stagione")
+        ));
+        app.save_competition(
+            coppa,
+            CompetitionForm {
+                name: "Coppa Toscana".into(),
+                format: CompetitionFormat::Cup,
+                ..form
+            },
+        )
+        .unwrap();
+        let edited = app.competition_form(coppa).unwrap();
+        assert_eq!(
+            (edited.name.as_str(), edited.format),
+            ("Coppa Toscana", CompetitionFormat::Cup)
+        );
+        let read = app.match_form(team.clone(), matches[1].clone()).unwrap();
+        assert_eq!(read.competition, "Coppa Toscana");
+
+        app.delete_competition(serie_c).unwrap();
+        assert_eq!(app.competition_listings().unwrap().len(), 1);
+        assert!(app.competition_form(serie_c).is_err());
+        assert!(app.delete_competition(serie_c).is_err());
+        let read = app.match_form(team.clone(), matches[0].clone()).unwrap();
+        assert_eq!((read.competition.as_str(), read.competition_id), ("", None));
+        // the match stays, saved again as it is
+        app.save_match(team, Some(matches[0].clone()), read)
+            .unwrap();
+    }
+
+    /// Number and role corrected on the score sheet: a wrong one refused
+    /// with the message of the roster, a good one shown, saved for the
+    /// match and read back.
+    #[test]
+    fn a_number_of_the_score_sheet_is_corrected_and_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let ids: Vec<Uuid> = (1..=7)
+            .map(|n| {
+                let id = app
+                    .save_player(
+                        team.clone(),
+                        None,
+                        player(&format!("P{n}"), &n.to_string()),
+                        false,
+                    )
+                    .unwrap();
+                parse_id(&id).unwrap()
+            })
+            .collect();
+        let two = ids[1];
+        let new = match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8");
+        let taken = app.correct_roster_number(
+            team.clone(),
+            None,
+            new.clone(),
+            two,
+            "3".into(),
+            Some(RoleEnum::Setter),
+        );
+        match taken {
+            Err(MobileError::InvalidMatch { field, reason }) => assert_eq!(
+                (field, reason.as_str()),
+                (
+                    MatchField::Roster,
+                    "un altro giocatore a referto ha questo numero"
+                )
+            ),
+            other => unreachable!("expected the number in use, got {other:?}"),
+        }
+        let corrected = app
+            .correct_roster_number(
+                team.clone(),
+                None,
+                new,
+                two,
+                "12".into(),
+                Some(RoleEnum::Libero),
+            )
+            .unwrap();
+        let shown = corrected.players.last().unwrap();
+        assert_eq!(
+            (
+                shown.id,
+                shown.number,
+                shown.role.as_deref(),
+                shown.role_value
+            ),
+            (two, 12, Some("libero"), Some(RoleEnum::Libero))
+        );
+        let m = app.save_match(team.clone(), None, corrected.form).unwrap();
+        let read = app.match_form(team.clone(), m.clone()).unwrap();
+        let roster = app.match_roster(team.clone(), Some(m), read, None).unwrap();
+        assert_eq!(
+            roster.players.last().map(|p| (p.id, p.number)),
+            Some((two, 12))
+        );
+        assert_eq!(app.team(team).unwrap().players[1].number, 2);
     }
 
     #[test]
@@ -5132,7 +6659,9 @@ mod tests {
         let id = app
             .save_match(team.clone(), None, match_form(" Arezzo ", date, "8"))
             .unwrap();
-        assert_eq!(id, "2026-10-24_arezzo");
+        // a new id, not the opponent and the day: two matches the same day
+        // against the same opponent are two
+        assert!(Uuid::parse_str(&id).is_ok(), "{id}");
         let edited = match_form("Arezzo Volley", date, "6");
         app.save_match(team.clone(), Some(id.clone()), edited.clone())
             .unwrap();
@@ -5291,6 +6820,123 @@ mod tests {
             }]
         );
         assert!(app.set_start(team, m).is_err());
+    }
+
+    /// A match between two teams (TODO/001, step 21): listed by both, B
+    /// seeing it from its side (A the opponent, its court, the sets the
+    /// other way), scouted by A, nothing to scout from B; the removal of
+    /// a team counts the matches that stay to the other one.
+    #[test]
+    fn a_match_between_two_teams_is_seen_by_both() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, _) = match_with_a_set(&app);
+        let livorno = app.save_team(None, form("Livorno")).unwrap();
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent_team: Some(parse_id(&livorno).unwrap()),
+                    home: false,
+                    ..match_form("Livorno", "2026-10-25T18:00:00+02:00", "8")
+                },
+            )
+            .unwrap();
+        let scouting = started_set(&app, &team, &m);
+        for _ in 0..25 {
+            scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        }
+        let of_a = app.match_details(team.clone(), m.clone()).unwrap();
+        assert_eq!(
+            (
+                of_a.opponent.as_str(),
+                of_a.home,
+                of_a.won,
+                of_a.lost,
+                &of_a.next,
+                &of_a.scouted_by
+            ),
+            (
+                "Livorno",
+                false,
+                1,
+                0,
+                &NextSetKind::Start { set_number: 2 },
+                &None
+            )
+        );
+        let of_b = app.match_details(livorno.clone(), m.clone()).unwrap();
+        assert_eq!(
+            of_b,
+            MatchDetails {
+                opponent: "Cortona".into(),
+                home: true,
+                won: 0,
+                lost: 1,
+                sets: vec![SetScore {
+                    number: 1,
+                    us: 0,
+                    them: 25
+                }],
+                next: NextSetKind::Over,
+                scouted_by: Some(ScoutedBy {
+                    team_id: team.clone(),
+                    team_name: "Cortona".into()
+                }),
+                ..of_a
+            }
+        );
+        match app.matches(livorno.clone()).unwrap().as_slice() {
+            [
+                MatchListing::Match {
+                    id,
+                    opponent,
+                    home: true,
+                    won: 0,
+                    lost: 1,
+                    finished: false,
+                    scouted_by: Some(a),
+                    ..
+                },
+            ] => assert_eq!((id, opponent.as_str(), a), (&m, "Cortona", &team)),
+            other => unreachable!("{other:?}"),
+        }
+        // A's list: the match of the set and this one, its own
+        let listed = app.matches(team.clone()).unwrap();
+        assert!(
+            listed.iter().all(|l| matches!(
+                l,
+                MatchListing::Match {
+                    scouted_by: None,
+                    ..
+                }
+            )),
+            "{listed:?}"
+        );
+        assert_eq!(listed.len(), 2);
+        // a match of Livorno not scouted by it: not in its statistics
+        let analysis = app.team_analysis(
+            livorno.clone(),
+            AnalysisPeriod::LastMatches { count: 10 },
+            EventTypeEnum::S,
+            DetailFilter::default(),
+        );
+        assert!(analysis.is_ok_and(|a| a.matches.is_empty()));
+        assert_eq!(
+            app.team_removal(team.clone()).unwrap(),
+            TeamRemovalCounts {
+                kept: 1,
+                removed: 1
+            }
+        );
+        assert_eq!(
+            app.team_removal(livorno.clone()).unwrap(),
+            TeamRemovalCounts {
+                kept: 1,
+                removed: 0
+            }
+        );
     }
 
     /// A team of seven, a match and its first set started, the team serving.
@@ -5614,10 +7260,15 @@ mod tests {
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Over).unwrap();
         // their freeball after our serve `/`: their reception came back
-        let set = dir.path().join(&team).join(&m).join("set_1.csv");
-        let mut rows = std::fs::read_to_string(&set).unwrap();
-        rows.push_str("2026-10-24T18:00:00Z,OF,,,\n");
-        std::fs::write(&set, rows).unwrap();
+        sql(
+            &dir,
+            &format!(
+                "INSERT INTO events (id, match_id, set_number, seq, side, timestamp, event_type)
+                 VALUES ('{}', '{m}', 1, 1, 'a', '2026-10-24T18:00:00Z', 'OF');
+                 DELETE FROM match_summary;",
+                Uuid::new_v4()
+            ),
+        );
         let listed = app.matches(team).unwrap();
         assert_eq!(
             listed,
@@ -6115,6 +7766,38 @@ mod tests {
     }
 
     #[test]
+    fn the_matches_of_the_home_at_the_same_time_are_by_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        // more teams than the recent matches, each a match over on the 1st
+        let mut teams = vec![];
+        for t in 1..=RECENT_MATCHES + 1 {
+            let team = app.save_team(None, form(&format!("Team {t}"))).unwrap();
+            for n in 1..=7 {
+                app.save_player(
+                    team.clone(),
+                    None,
+                    player(&format!("P{n}"), &n.to_string()),
+                    false,
+                )
+                .unwrap();
+            }
+            let m = match_on(&app, &team, "Same day", 1);
+            play(&app, &team, &m, 3);
+            teams.push(team);
+        }
+        teams.sort();
+        let recent: Vec<String> = app
+            .home()
+            .unwrap()
+            .recent
+            .into_iter()
+            .map(|m| m.team_id)
+            .collect();
+        assert_eq!(recent, teams[..RECENT_MATCHES]);
+    }
+
+    #[test]
     fn without_teams_the_home_is_empty() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir, "en");
@@ -6290,6 +7973,25 @@ mod tests {
             (1..=25).map(f64::from).collect::<Vec<_>>()
         );
         assert_eq!(serves.sets[1].recent, vec![Some(-100.0); 3]);
+        // the errors of the serve rally by rally: the two of the second
+        // set, unforced; none in the first
+        assert_eq!(serves.sets[1].errors, vec![1, 0, 1]);
+        assert_eq!(serves.sets[1].unforced, vec![1, 0, 1]);
+        assert_eq!(serves.sets[0].errors, vec![0; 25]);
+        // the points of each set, as on the score sheet
+        let scored = |us, score| PointScored { us, score };
+        assert_eq!(
+            set.points.iter().map(|p| p.set_number).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            set.points[0].points,
+            (1..=25).map(|n| scored(true, n)).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            set.points[1].points,
+            vec![scored(false, 1), scored(true, 1), scored(false, 2)]
+        );
         // the match: (25 aces - 2 errors) / 27 serves; the last 10: 8 aces
         // and 2 errors
         assert_eq!(serves.overall.map(|s| (s * 100.0).round()), Some(8519.0));
@@ -6308,6 +8010,7 @@ mod tests {
         assert_eq!(serve_grade(&first), Some(1.0));
         // the trend is the same whatever the scope
         assert_eq!(first.trend, set.trend);
+        assert_eq!(first.points, set.points);
 
         // the match: the trend goes on across the sets
         let all = scouting.stats(StatsScope::Match).unwrap();
@@ -6643,13 +8346,25 @@ mod tests {
 
         // a player: the rallies have none
         let second = DetailFilter {
-            player: Some(f.players[1].player.id.clone()),
+            players: vec![f.players[1].player.id.clone()],
             ..DetailFilter::default()
         };
         let theirs = detail(StatsScope::Match, EventTypeEnum::S, &second)
             .fundamental
             .unwrap();
         assert_eq!((theirs.total, theirs.phases_per_point), (1, None));
+        // two players: the serves of both
+        let both = DetailFilter {
+            players: vec![
+                f.players[0].player.id.clone(),
+                f.players[1].player.id.clone(),
+            ],
+            ..DetailFilter::default()
+        };
+        let both = detail(StatsScope::Match, EventTypeEnum::S, &both)
+            .fundamental
+            .unwrap();
+        assert_eq!((both.total, both.phases_per_point), (27, None));
         // to choose, only who has the fundamental: no reception, nobody;
         // the one chosen stays, to take the filter off
         let reception = detail(StatsScope::Match, EventTypeEnum::P, &all);
@@ -6674,7 +8389,7 @@ mod tests {
         assert!(none.evals.is_empty() && none.players.is_empty());
         // the first rotation: the aces and the first error
         let first = DetailFilter {
-            rotation: Some(0),
+            rotations: vec![0],
             ..DetailFilter::default()
         };
         assert_eq!(
@@ -6684,6 +8399,23 @@ mod tests {
                 .total,
             26
         );
+        // two rotations: the serves of both
+        let in_rotations = |rotations: Vec<u8>| {
+            let filter = DetailFilter {
+                rotations,
+                ..DetailFilter::default()
+            };
+            detail(StatsScope::Match, EventTypeEnum::S, &filter)
+                .fundamental
+                .map_or(0, |f| f.total)
+        };
+        for other in 1..6 {
+            assert_eq!(
+                in_rotations(vec![0, other]),
+                in_rotations(vec![0]) + in_rotations(vec![other])
+            );
+        }
+        assert_eq!((1..6).map(|r| in_rotations(vec![r])).sum::<u32>(), 1);
 
         let freeballs = detail(StatsScope::Match, EventTypeEnum::FB, &all);
         assert_eq!(freeballs.fundamental, None);
@@ -6702,7 +8434,7 @@ mod tests {
                 StatsScope::Match,
                 EventTypeEnum::S,
                 DetailFilter {
-                    player: Some("not an id".into()),
+                    players: vec!["not an id".into()],
                     ..DetailFilter::default()
                 },
             )
@@ -6888,24 +8620,25 @@ mod tests {
             MobileError::Failed { reason } => reason,
             other => format!("{other:?}"),
         };
-        let folder = dir.path().join(&team);
-        let match_folder = std::fs::read_dir(&folder)
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .find(|p| p.is_dir())
-            .unwrap();
         let it = labels(LanguageEnum::It);
-        std::fs::write(match_folder.join("set_1.json"), "").unwrap();
+        // the set without our lineup
+        sql(
+            &dir,
+            &format!("DELETE FROM set_lineups WHERE match_id = '{m}'"),
+        );
         assert_eq!(
             reason(app.scouting(team.clone(), m.clone()).err().unwrap()),
             it.unreadable_match
         );
-        std::fs::write(match_folder.join("match.json"), "{ not json").unwrap();
         assert_eq!(
             reason(app.match_details(team.clone(), m.clone()).unwrap_err()),
             it.unreadable_match
         );
-        std::fs::write(folder.join("team.json"), "{}").unwrap();
+        // the schema doesn't check the spelling of the country, reading does
+        sql(
+            &dir,
+            &format!("UPDATE teams SET country = 'it' WHERE id = '{team}'"),
+        );
         assert_eq!(
             reason(app.team(team.clone()).unwrap_err()),
             it.unreadable_team
@@ -6996,13 +8729,20 @@ mod tests {
         );
         assert_eq!(
             to.import_team(team_zip.bytes.clone(), renamed).unwrap(),
-            team
+            ImportedArchive {
+                id: team.clone(),
+                summary: None
+            }
+        );
+        // again: the same team, nothing to tell
+        assert_eq!(
+            to.import_team(team_zip.bytes, None).unwrap(),
+            ImportedArchive {
+                id: team.clone(),
+                summary: None
+            }
         );
         let it = labels(LanguageEnum::It);
-        assert_eq!(
-            reason(to.preview_archive(team_zip.bytes, None, None)),
-            it.team_already_exists
-        );
         assert_eq!(
             to.preview_archive(match_zip.bytes.clone(), None, None)
                 .unwrap(),
@@ -7021,14 +8761,17 @@ mod tests {
         assert_eq!(
             to.import_match(match_zip.bytes.clone(), team.clone())
                 .unwrap(),
-            m
+            ImportedArchive {
+                id: m.clone(),
+                summary: None
+            }
         );
         assert_eq!(
             to.match_details(team.clone(), m.clone()).unwrap(),
-            from.match_details(team, m).unwrap()
+            from.match_details(team.clone(), m).unwrap()
         );
         assert_eq!(
-            reason(to.preview_archive(match_zip.bytes, None, None)),
+            reason(to.import_match(match_zip.bytes, team)),
             it.match_already_exists
         );
     }
@@ -7051,7 +8794,7 @@ mod tests {
             app.preview_archive(OLD_TEAM.to_vec(), file_name.clone(), None),
             Ok(ArchivePreview::Team { players: 8, .. })
         ));
-        let team = app.import_team(OLD_TEAM.to_vec(), file_name).unwrap();
+        let team = app.import_team(OLD_TEAM.to_vec(), file_name).unwrap().id;
         let Ok(ArchivePreview::Match {
             teams, won, lost, ..
         }) = app.preview_archive(OLD_MATCH.to_vec(), Some("whatever.zip".into()), None)
@@ -7070,7 +8813,8 @@ mod tests {
             Ok(ArchivePreview::Match { .. })
         ));
         let m = app.import_match(OLD_MATCH.to_vec(), team.clone()).unwrap();
-        let details = app.match_details(team, m).unwrap();
+        assert_eq!(m.summary, None);
+        let details = app.match_details(team.clone(), m.id).unwrap();
         assert_eq!(details.opponent, "Club Arezzo");
         assert_eq!(
             details.sets,
@@ -7079,6 +8823,11 @@ mod tests {
                 us: 3,
                 them: 1
             }]
+        );
+        // there already: no team left to take it
+        assert_eq!(
+            reason(app.preview_archive(OLD_MATCH.to_vec(), None, Some(team))),
+            en.match_already_exists
         );
     }
 
@@ -7109,22 +8858,18 @@ mod tests {
         (team, m)
     }
 
+    /// The upload queue in the database of the app in `dir`, in order:
+    /// each match with its attempts.
     fn queued(dir: &tempfile::TempDir) -> Vec<(String, u64)> {
-        std::fs::read(dir.path().join("upload_queue.json"))
-            .map(|bytes| {
-                from_slice::<Value>(&bytes).unwrap()["pending"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|p| {
-                        (
-                            p["match_id"].as_str().unwrap().to_string(),
-                            p["retry_count"].as_u64().unwrap(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        let db = scout4all_core::db::open(&dir.path().join(layout::DATABASE)).unwrap();
+        let mut rows = db
+            .prepare("SELECT match_id, retry_count FROM upload_queue ORDER BY position")
+            .unwrap();
+        rows.query_map([], |row| Ok((row.get(0)?, row.get::<_, i64>(1)?)))
+            .unwrap()
+            .map(|row| row.map(|(id, tries)| (id, u64::try_from(tries).unwrap())))
+            .collect::<Result<_, _>>()
+            .unwrap()
     }
 
     #[test]
@@ -7205,7 +8950,7 @@ mod tests {
         app.accept_terms().unwrap();
         let (team, m) = won_match(&app);
         // sent in the meantime
-        std::fs::remove_file(dir.path().join("upload_queue.json")).unwrap();
+        sql(&dir, "DELETE FROM upload_queue");
         let correction = app.correction(team, m.clone(), 1, 0).unwrap();
         app.save_correction(correction).unwrap();
         assert_eq!(queued(&dir), vec![(m, 0)]);
@@ -7308,11 +9053,16 @@ mod tests {
     }
 
     fn eventually(what: impl Fn() -> bool) -> bool {
+        // true once seen: not asked again, the state may move on meanwhile
+        // (a second attempt of the upload)
         let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while std::time::Instant::now() < end && !what() {
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        loop {
+            match (what(), std::time::Instant::now() < end) {
+                (true, _) => return true,
+                (false, false) => return false,
+                (false, true) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
         }
-        what()
     }
 
     /// A match imported from DataVolley is sent right away, without waiting
@@ -7351,6 +9101,9 @@ mod tests {
         let api = FakeApi::start();
         api.down.store(true, Ordering::SeqCst);
         sending_to(&app, api.url.clone());
+        // the first attempt over (nothing to send), or it may find the
+        // match too, failing it twice in a row
+        assert!(eventually(|| !app.sender.running()));
         let imported = app
             .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
             .unwrap();
@@ -7383,6 +9136,7 @@ mod tests {
 
     fn dvw_choice(side: DvwSide, team_id: Option<String>) -> DvwChoice {
         DvwChoice {
+            opponent: DvwOpponent::Name,
             side,
             day: "2015-01-25".into(),
             max_substitutions: 6,
@@ -7474,7 +9228,7 @@ mod tests {
             }
             for p in &f.players {
                 let filter = DetailFilter {
-                    player: Some(p.player.id.clone()),
+                    players: vec![p.player.id.clone()],
                     ..DetailFilter::default()
                 };
                 let by_player = ClipPick {
@@ -7525,6 +9279,10 @@ mod tests {
                 sets: 3,
                 new_players: 7,
                 saved_already: false,
+                opponent: "Visiting".into(),
+                opponent_new_players: None,
+                match_numbers: 0,
+                competition: Some("Test".into()),
             }
         );
         assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
@@ -7595,6 +9353,80 @@ mod tests {
                 }]
             ),
             "{matches:?}"
+        );
+    }
+
+    /// Team B: the teams like the other team of the file proposed, team A
+    /// left out, the team of the side imported before first; a new team
+    /// with the players of the file, told in the check; both sides, two
+    /// matches, the second against the team of the first.
+    #[test]
+    fn a_datavolley_match_against_a_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let home = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), home.clone()).unwrap();
+        assert_eq!(
+            (ready.opponent.as_str(), ready.opponent_new_players),
+            ("Visiting", Some(7))
+        );
+        assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
+        let first = app.import_dvw(THREE_SETS.to_vec(), home, false).unwrap();
+        let visiting = app
+            .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting, None)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect::<Vec<_>>();
+        assert_eq!(visiting.len(), 1, "team B saved, like the visiting team");
+        // the visiting side into team B of the first: team A first among
+        // its opponents, itself left out
+        let opponents = |team_id: Option<String>, first: Option<String>| {
+            app.dvw_similar_opponents(THREE_SETS.to_vec(), DvwSide::Visiting, team_id, first)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            opponents(visiting.first().cloned(), Some(first.team_id.clone())),
+            vec![first.team_id.clone()]
+        );
+        assert_eq!(
+            opponents(Some(first.team_id.clone()), None),
+            Vec::<String>::new()
+        );
+        let second = DvwChoice {
+            opponent: DvwOpponent::Team {
+                id: first.team_id.clone(),
+            },
+            ..dvw_choice(DvwSide::Visiting, visiting.first().cloned())
+        };
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), second.clone()).unwrap();
+        assert_eq!(
+            (
+                ready.new_players,
+                ready.opponent_new_players,
+                ready.saved_already
+            ),
+            (0, Some(0), false)
+        );
+        assert_eq!(ready.competition.as_deref(), Some("Test"));
+        app.import_dvw(THREE_SETS.to_vec(), second, false).unwrap();
+        assert_eq!(app.teams().unwrap().len(), 2);
+        // team A as B: refused, said
+        let itself = DvwChoice {
+            opponent: DvwOpponent::Team {
+                id: first.team_id.clone(),
+            },
+            ..dvw_choice(DvwSide::Home, Some(first.team_id.clone()))
+        };
+        assert_eq!(
+            reason(app.plan_dvw(THREE_SETS.to_vec(), itself)),
+            "team B can't be team A"
         );
     }
 

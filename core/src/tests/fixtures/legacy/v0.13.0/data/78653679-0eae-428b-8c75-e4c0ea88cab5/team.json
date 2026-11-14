@@ -1,0 +1,58 @@
+{
+  "name": "Home",
+  "year": 2014,
+  "players": [
+    {
+      "id": "70262921-01cf-4dba-a5b1-7750abc570cc",
+      "name": "Name1 Surname1",
+      "role": "Setter",
+      "number": 1,
+      "deleted": false
+    },
+    {
+      "id": "e22383a6-1fbc-467a-9a49-ed08be7f3722",
+      "name": "Name2 Surname2",
+      "role": "OutsideHitter",
+      "number": 2,
+      "deleted": false
+    },
+    {
+      "id": "d1a276b6-187c-435f-9d50-f22ad659b62d",
+      "name": "Name3 Surname3",
+      "role": "MiddleBlocker",
+      "number": 3,
+      "deleted": false
+    },
+    {
+      "id": "9a398af2-d293-46ed-a311-61434a68205b",
+      "name": "Name4 Surname4",
+      "role": "OppositeHitter",
+      "number": 4,
+      "deleted": false
+    },
+    {
+      "id": "0e733fe0-632e-4acd-9d48-a60a0dcd5c29",
+      "name": "Name5 Surname5",
+      "role": "OutsideHitter",
+      "number": 5,
+      "deleted": false
+    },
+    {
+      "id": "00130440-e521-4b14-9b22-09171e9ffd54",
+      "name": "Name6 Surname6",
+      "role": "MiddleBlocker",
+      "number": 6,
+      "deleted": false
+    },
+    {
+      "id": "87c08dca-396a-486d-b12f-6cf5ff0dd8e9",
+      "name": "Name7 Surname7",
+      "role": "Libero",
+      "number": 7,
+      "deleted": false
+    }
+  ],
+  "classification": "TopInternational",
+  "gender": "Women",
+  "country": "FR"
+}

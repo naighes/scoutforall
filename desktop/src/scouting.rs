@@ -669,10 +669,10 @@ impl Trend {
             .unwrap_or(Trend {
                 sets: vec![],
                 overall: None,
-                band: None,
                 low: 0.0,
                 high: 10.0,
                 points: 25.0,
+                errors: vec![],
             })
     }
 }
@@ -915,7 +915,10 @@ impl ScoutingScreen {
                         Message::Event(e.value),
                     ));
                 }
-                list = group(list, s.options);
+                // the title only over options there are
+                if st.inverted_p1_applies || st.reception_open {
+                    list = group(list, s.options);
+                }
                 let option_key = |o| {
                     self.keys
                         .option_keybindings
@@ -1406,7 +1409,7 @@ impl ScoutingScreen {
         .spacing(10);
         let chart: Element<'a, Message> = match self.trend.is_empty() {
             true => small(s.no_rallies, c).into(),
-            false => charts::canvas_view(self.trend.clone(), c, Length::Fixed(130.0)),
+            false => charts::canvas_view(self.trend.clone(), c, Length::Fill, Length::Fixed(130.0)),
         };
         let content = column![
             scopes,
@@ -1591,8 +1594,7 @@ mod tests {
                     date: chrono::DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").ok(),
                     home: true,
                     max_substitutions: "6".into(),
-                    notes: String::new(),
-                    roster: None,
+                    ..MatchForm::default()
                 },
             )
             .unwrap();

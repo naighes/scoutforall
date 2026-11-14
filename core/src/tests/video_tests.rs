@@ -1,16 +1,17 @@
 //! The video of a match: the start of its files from their names, the
-//! anchor the events line up with, the profile saved next to the match.
+//! anchor the events line up with, the profile the versions before the
+//! database saved next to the match (`video.json`).
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        legacy::folder::{profile_key, read_profile},
         shapes::{r#match::MatchEntry, team::TeamEntry},
         storage::{Store, memory::MemoryStore},
         video::{
             Anchor, AnchorSource, Correction, EventRef, StoredProfile, TimeEffect,
             VIDEO_PROFILE_VERSION, VideoFile, VideoProfile, anchor, anchor_on, anchor_source,
-            in_order, offset_ms, place, profile_key, read_profile, resolved_path, start_from_name,
-            stored_path, write_profile,
+            in_order, offset_ms, place, resolved_path, start_from_name, stored_path,
         },
     };
     use chrono::{DateTime, FixedOffset, TimeDelta, TimeZone, Utc};
@@ -256,13 +257,13 @@ mod tests {
 
     /// The first time written ties the video to the event; then a time
     /// written for another event puts it alone there, the others where
-    /// they were; for the event tied, all move again.
+    /// they were; for the event tied too, it alone.
     #[test]
     fn a_time_written_ties_the_video_then_puts_the_event_alone() {
         let serve = at(18, 0, 0).to_utc();
         let block = serve + TimeDelta::seconds(15);
         let start = profile(vec![file("/media/match.mp4", None)], None);
-        assert_eq!(start.time_effect(event(0)), TimeEffect::AlignAll);
+        assert_eq!(TimeEffect::of(None), TimeEffect::AlignAll);
         // the serve at 0:00: the block 15 s after it, as scouted
         let tied = start.with_time(event(0), serve, None, 0);
         assert_eq!(tied.anchor, Some(anchor_on(event(0), serve, 0)));
@@ -271,7 +272,7 @@ mod tests {
         };
         assert_eq!(placed(&tied, event(1), block), Some(15_000));
         // the block at 0:06: it alone, the serve still at 0:00
-        assert_eq!(tied.time_effect(event(1)), TimeEffect::OnlyThis);
+        assert_eq!(TimeEffect::of(Some(15_000)), TimeEffect::OnlyThis);
         let corrected = tied.with_time(event(1), block, Some(15_000), 6_000);
         assert_eq!(corrected.anchor, tied.anchor);
         assert_eq!(corrected.correction(event(1)), Some(-9_000));
@@ -294,11 +295,11 @@ mod tests {
             ..again.clone()
         };
         assert_eq!(placed(&shifted, event(1), block), Some(9_000));
-        // the time of the event tied: all move
-        assert_eq!(again.time_effect(event(0)), TimeEffect::AlignAll);
+        // the time of the event tied: it alone, the anchor where it was
         let moved = again.with_time(event(0), serve, Some(0), 1_000);
+        assert_eq!(moved.anchor, again.anchor);
         assert_eq!(placed(&moved, event(0), serve), Some(1_000));
-        assert_eq!(placed(&moved, event(1), block), Some(8_000));
+        assert_eq!(placed(&moved, event(1), block), Some(7_000));
         // the video tied to the corrected event: its correction gone, the
         // others moved with it
         let retied = again.tied_to(event(1), block, 7_000);
@@ -307,21 +308,6 @@ mod tests {
         // back to automatic: no anchor, no correction
         let automatic = again.automatic();
         assert_eq!((automatic.anchor, automatic.corrections), (None, vec![]));
-    }
-
-    /// Shifted by hand from the sync found by itself, the video is tied to
-    /// no event: the first time written ties it.
-    #[test]
-    fn shifted_by_hand_the_first_time_still_ties_the_video() {
-        let shifted = profile(
-            vec![file("/media/match.mp4", None)],
-            Some(Anchor {
-                at: at(18, 0, 0).to_utc(),
-                offset_ms: 500,
-                event: None,
-            }),
-        );
-        assert_eq!(shifted.time_effect(event(4)), TimeEffect::AlignAll);
     }
 
     #[test]
@@ -343,8 +329,9 @@ mod tests {
 
     const MATCH_ID: &str = "2026-11-01_polisportiva";
 
+    /// `video.json` as the versions before the database saved it.
     #[tokio::test]
-    async fn the_profile_saved_and_read() {
+    async fn the_profile_saved_is_read() {
         let store = MemoryStore::new();
         let team = Uuid::new_v4();
         assert_eq!(
@@ -366,7 +353,9 @@ mod tests {
             )),
         )
         .corrected(event(7), -2_500);
-        write_profile(&store, &team, MATCH_ID, &saved)
+        let json = serde_json::to_vec_pretty(&saved).unwrap();
+        store
+            .write(&profile_key(&team, MATCH_ID), &json)
             .await
             .unwrap();
         assert_eq!(
@@ -375,7 +364,7 @@ mod tests {
         );
     }
 
-    /// A profile of a newer version: neither read nor overwritten.
+    /// A profile of a newer version: not read.
     #[tokio::test]
     async fn a_newer_profile_is_left_as_it_is() {
         let store = MemoryStore::new();
@@ -388,11 +377,5 @@ mod tests {
             read_profile(&store, &team, MATCH_ID).await.unwrap(),
             StoredProfile::Newer(newer)
         );
-        assert!(
-            write_profile(&store, &team, MATCH_ID, &VideoProfile::default())
-                .await
-                .is_err()
-        );
-        assert_eq!(store.read(&key).await.unwrap(), Some(json.into_bytes()));
     }
 }

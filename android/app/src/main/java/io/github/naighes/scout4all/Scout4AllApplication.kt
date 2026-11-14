@@ -27,11 +27,26 @@ open class Scout4AllApplication : Application() {
     // the language chosen for the app, from the activity
     @Volatile private var language: String = Locale.getDefault().language
 
-    // the same layout as ~/.scout4all, in the sandbox of the app
+    // the same layout as ~/.scout4all, in the sandbox of the app: the
+    // database, and the folders of a version before it, moved into it now
+    // (a copy of them beside, in scout4all-backup-<day>.zip)
     private val lazyCore = lazy {
         val dataDir = File(filesDir, "scout4all").apply { mkdirs() }
         startLog(dataDir.path)
-        Scout4All(dataDir.path, language).also(::addExampleTeam)
+        Scout4All(dataDir.path, language).also {
+            mutableStartupNotice.value = it.startupNotice()
+            addExampleTeam(it)
+        }
+    }
+
+    private val mutableStartupNotice = MutableStateFlow<String?>(null)
+    /** What the start has to tell: the data of a version before not all
+     * moved into the database, or why not; until read. */
+    val startupNotice: StateFlow<String?> = mutableStartupNotice
+
+    /** The notice of the start read: not shown again. */
+    fun forgetStartupNotice() {
+        mutableStartupNotice.value = null
     }
 
     /** The log of the core, one for the process. */
@@ -143,6 +158,7 @@ val MobileException.reason: String
         is MobileException.InvalidTeam -> reason
         is MobileException.InvalidPlayer -> reason
         is MobileException.InvalidMatch -> reason
+        is MobileException.InvalidCompetition -> reason
         is MobileException.Scouting -> reason
         is MobileException.Namesake -> reason
     }.replaceFirstChar { it.titlecase(Locale.getDefault()) }

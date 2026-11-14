@@ -1,0 +1,21 @@
+{
+  "opponent": "Pallavolo Prato",
+  "date": "2025-11-08T18:30:00+01:00",
+  "home": false,
+  "max_substitutions": 6,
+  "roster": [
+    "98a01641-7453-4b7d-bfb1-7072740d5d5b",
+    "b2bee7df-ee3a-469a-ab16-62abc6d089a1",
+    "3de35c64-33ff-435a-9d17-5e0ace55e5f9",
+    "e5977aa6-9f23-49b3-a3cc-99708cdab939",
+    "e823a6ad-2a10-4d3f-b347-78e815478187",
+    "969ab312-53a5-482b-86fd-26c9e15d07d6",
+    "dfbb8fec-3a79-49dd-8431-5536a04658db",
+    "9daf35be-bfd6-48af-a037-1066446cab50",
+    "51748972-e1cf-4248-9050-895bfc088c69",
+    "58a86c5c-87e9-49eb-b2ee-96b158b5cef5",
+    "a1fd0299-c976-4a27-9c81-9bf7cd4f4d3d",
+    "650e3a8c-9e10-4e5a-a344-59395019d82c"
+  ],
+  "video_clock": true
+}

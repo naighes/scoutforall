@@ -1,9 +1,10 @@
 //! The video of a match: its files, played one after the other as a single
 //! video, and where each event is in it.
 //!
-//! The profile is saved in `video.json`, next to the other files of the
-//! match: the older versions don't read it (they read `set_<n>.*` only), and
-//! the exports leave it out, since its paths are of this computer.
+//! The profile is saved in the database (`SqliteVideoProfiles`, TODO/001
+//! step 15); the versions before it saved it in `video.json`, next to the
+//! other files of the match (read by `legacy` for the migration). The
+//! exports leave it out, since its paths are of this computer.
 //!
 //! Where an event is: `offset = event.timestamp − anchor.at +
 //! anchor.offset_ms`. The anchor is chosen by the user (an event and the
@@ -17,24 +18,21 @@
 //!
 //! An event can then be put at its own time, the others where they are: a
 //! correction, saved as how far from where the anchor puts it, so that it
-//! moves with the anchor. The first time written ties the video (an anchor);
-//! once the video is tied to an event, a time written for another one is a
-//! correction (`with_time`).
+//! moves with the anchor. While the events don't line up, a time written
+//! ties the video (an anchor); once they do, a time written moves only its
+//! event, a correction (`with_time`): the anchor moves by tying the video to
+//! an event at a moment of it, or by shifting it.
 
-use crate::{
-    errors::{AppError, IOError},
-    providers::store::{read_json, write_json},
-    shapes::r#match::MatchEntry,
-    storage::{Store, layout},
-};
+use crate::{errors::AppError, shapes::r#match::MatchEntry};
+use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// The version of `video.json` this version writes and reads: a newer one
-/// is left as it is.
+/// The version of the profile this version reads (`video.json` of the
+/// versions before the database): a newer one is left as it is.
 pub const VIDEO_PROFILE_VERSION: u8 = 1;
 
 /// The name of the profile, in the folder of its match.
@@ -82,6 +80,17 @@ pub enum TimeEffect {
     OnlyThis,
 }
 
+impl TimeEffect {
+    /// Of an event the sync puts at `placed_ms` (none: the events don't
+    /// line up): it alone once placed, the video tied to it until then.
+    pub fn of(placed_ms: Option<i64>) -> TimeEffect {
+        match placed_ms {
+            Some(_) => TimeEffect::OnlyThis,
+            None => TimeEffect::AlignAll,
+        }
+    }
+}
+
 impl VideoProfile {
     /// How far the event was put from where the anchor puts it, if at all.
     pub fn correction(&self, event: EventRef) -> Option<i64> {
@@ -91,18 +100,9 @@ impl VideoProfile {
             .map(|c| c.by_ms)
     }
 
-    /// What a time written for the event does: once the video is tied to
-    /// another event, it alone moves.
-    pub fn time_effect(&self, event: EventRef) -> TimeEffect {
-        match self.anchor.as_ref().and_then(|a| a.event) {
-            Some(tied) if tied != event => TimeEffect::OnlyThis,
-            _ => TimeEffect::AlignAll,
-        }
-    }
-
-    /// The event at `at_ms` in the video (`time_effect`): the video tied to
-    /// it, or it alone put there; `placed_ms` is where the anchor puts it
-    /// (none: not lined up, the video tied to it).
+    /// The event at `at_ms` in the video (`TimeEffect::of`): it alone put
+    /// there, `placed_ms` being where the anchor puts it; none (not lined
+    /// up): the video tied to it.
     pub fn with_time(
         &self,
         event: EventRef,
@@ -110,9 +110,9 @@ impl VideoProfile {
         placed_ms: Option<i64>,
         at_ms: i64,
     ) -> VideoProfile {
-        match (self.time_effect(event), placed_ms) {
-            (TimeEffect::OnlyThis, Some(placed)) => self.corrected(event, at_ms - placed),
-            _ => self.tied_to(event, timestamp, at_ms),
+        match placed_ms {
+            Some(placed) => self.corrected(event, at_ms - placed),
+            None => self.tied_to(event, timestamp, at_ms),
         }
     }
 
@@ -177,7 +177,7 @@ pub struct EventRef {
     pub index: usize,
 }
 
-/// What the folder of a match has.
+/// The profile of a match, if any.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoredProfile {
     Missing,
@@ -186,54 +186,19 @@ pub enum StoredProfile {
     Profile(VideoProfile),
 }
 
-#[derive(Deserialize)]
-struct Versioned {
-    version: u8,
-}
+/// Where the profiles of the videos of the matches are kept.
+#[async_trait]
+pub trait VideoProfiles: Send + Sync {
+    /// The profile of the match of team A `team_id`.
+    async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<StoredProfile, AppError>;
 
-pub fn profile_key(team_id: &Uuid, match_id: &str) -> String {
-    layout::child(
-        &layout::match_folder(team_id, match_id),
-        VIDEO_PROFILE_FILE_NAME,
-    )
-}
-
-/// The profile of the match.
-pub async fn read_profile(
-    store: &dyn Store,
-    team_id: &Uuid,
-    match_id: &str,
-) -> Result<StoredProfile, AppError> {
-    let key = profile_key(team_id, match_id);
-    match store.exists(&key).await? {
-        false => Ok(StoredProfile::Missing),
-        true => match read_json::<Versioned>(store, &key).await?.version {
-            v if v > VIDEO_PROFILE_VERSION => Ok(StoredProfile::Newer(v)),
-            _ => read_json(store, &key).await.map(StoredProfile::Profile),
-        },
-    }
-}
-
-/// Saves the profile of the match, unless a newer version wrote it.
-pub async fn write_profile(
-    store: &dyn Store,
-    team_id: &Uuid,
-    match_id: &str,
-    profile: &VideoProfile,
-) -> Result<(), AppError> {
-    match read_profile(store, team_id, match_id).await? {
-        StoredProfile::Newer(v) => Err(AppError::IO(IOError::Msg(format!(
-            "{} written by a newer version ({v})",
-            VIDEO_PROFILE_FILE_NAME
-        )))),
-        _ => {
-            let saved = VideoProfile {
-                version: VIDEO_PROFILE_VERSION,
-                ..profile.clone()
-            };
-            write_json(store, &profile_key(team_id, match_id), &saved).await
-        }
-    }
+    /// Saves the profile of the match of team A `team_id`.
+    async fn write(
+        &self,
+        team_id: &Uuid,
+        match_id: &str,
+        profile: &VideoProfile,
+    ) -> Result<(), AppError>;
 }
 
 /// When the file starts, from its name: the date and the time, as

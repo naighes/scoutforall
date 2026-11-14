@@ -71,6 +71,7 @@ pub(crate) fn match_info(lines: &[Line]) -> Result<MatchInfo, DvwError> {
         season: non_empty(at(&first, 2)),
         league: non_empty(at(&first, 3)),
         phase: non_empty(at(&first, 4)),
+        day_number: non_empty(at(&first, 6)),
         text_encoding: non_empty(at(&first, 8)),
     })
 }

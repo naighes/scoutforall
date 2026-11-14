@@ -198,7 +198,7 @@ impl General {
                         .position(|l| *l == self.language)
                         .unwrap_or(0),
                 ),
-                Field::search(s.default_country, country).hint(s.search_country),
+                Field::dropdown(s.default_country, country),
                 Field::check(s.send_statistics, self.core.analytics_enabled(), false)
                     .hint(s.send_statistics_detail),
                 Field::choice(
@@ -253,18 +253,23 @@ impl General {
                 })
             }
             COUNTRY => {
-                let written = self.form.text(COUNTRY);
+                let (written, all) = (self.form.text(COUNTRY), self.form.browsing(COUNTRY));
                 self.form
-                    .suggest(COUNTRY, countries::suggestions(&self.core, &written));
+                    .suggest(COUNTRY, countries::offered(&self.core, &written, all));
                 // saved once it's a country written whole (or chosen among
                 // the ones offered: their names); while written, not yet,
                 // not even as a code ("Ge" on the way to "Germania")
-                match countries::named(&self.core, &written) {
-                    Some(country) => self
+                // nothing written: no country for new teams
+                match (
+                    written.trim().is_empty(),
+                    countries::named(&self.core, &written),
+                ) {
+                    (true, _) => self.core.clear_default_country().map_err(|e| e.to_string()),
+                    (false, Some(country)) => self
                         .core
                         .set_default_country(country)
                         .map_err(|e| e.to_string()),
-                    None => Ok(()),
+                    (false, None) => Ok(()),
                 }
             }
             STATISTICS => {
@@ -541,6 +546,11 @@ mod tests {
         }
         write(&mut settings, "Alemanha");
         assert_eq!(saved().as_deref(), Some("DE"));
+        // emptied: no country, new teams start without one
+        write(&mut settings, "");
+        assert_eq!(saved(), None);
+        assert_eq!(core.new_team_form(2026).country, None);
+        write(&mut settings, "Alemanha");
         // the countries offered close with Esc, the settings stay
         write(&mut settings, "Alem");
         assert!(settings.general.form.offering());

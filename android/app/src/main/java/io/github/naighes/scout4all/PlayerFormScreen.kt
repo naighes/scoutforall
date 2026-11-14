@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.naighes.scout4all.core.ExistingPlayer
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.PlayerField
 import io.github.naighes.scout4all.core.PlayerForm
@@ -86,7 +87,16 @@ sealed interface PlayerFormState {
         val namesake: String? = null,
         /** the form as it was read: changed, going back asks first */
         val loaded: PlayerForm = form,
+        /** the number as saved, for the removal from the registry */
+        val savedNumber: Int = 0,
+        /** the persons of the registry a new player may be (D5) */
+        val existing: List<ExistingPlayer> = emptyList(),
+        /** the other teams the player plays in, with the same details */
+        val otherTeams: List<String> = emptyList(),
     ) : PlayerFormState {
+        /** the person of the registry chosen, while the name is theirs */
+        val chosen: ExistingPlayer? get() = form.person?.let { p -> existing.firstOrNull { it.id == p } }
+
         val changed: Boolean get() = form != loaded
     }
     /** saved or removed: the screen goes back */
@@ -109,9 +119,13 @@ class PlayerFormViewModel(
                 app.core { core ->
                     val player = playerId?.let { id -> core.team(teamId).players.first { it.id == id } }
                     PlayerFormState.Editing(
-                        form = player?.form ?: PlayerForm(name = "", role = null, number = ""),
+                        // a new one: the first number free
+                        form = player?.form ?: core.newPlayerForm(teamId),
                         roles = core.roles(teamId),
                         savedName = player?.name.orEmpty(),
+                        savedNumber = player?.number?.toInt() ?: 0,
+                        existing = if (playerId == null) core.existingPlayers(teamId) else emptyList(),
+                        otherTeams = playerId?.let { core.otherTeams(teamId, it) }.orEmpty(),
                     )
                 }
             } catch (e: MobileException) {
@@ -133,6 +147,25 @@ class PlayerFormViewModel(
     fun change(field: PlayerField?, edit: (PlayerForm) -> PlayerForm) = update { s ->
         s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
     }
+
+    /** The name written: a person of the registry chosen stays only while
+     * it's their name; another name is a new person. */
+    fun name(name: String) = update { s ->
+        val person = s.chosen?.takeIf { it.name == name }?.id
+        s.copy(form = s.form.copy(name = name, person = person), invalid = s.invalid?.takeIf { it.first != PlayerField.NAME }, error = null)
+    }
+
+    /** A person of the registry picked by their label: the form with their
+     * details, the number and the role of their most recent team. */
+    fun pickExisting(label: String) = update { s ->
+        when (val choice = s.existing.firstOrNull { it.label == label }) {
+            null -> s
+            else -> s.copy(form = choice.form, invalid = null, error = null)
+        }
+    }
+
+    /** Removes the player from the registry, so from every team (D16). */
+    fun deletePerson() = playerId?.let { id -> submit { core -> core.deletePerson(id) } }
 
     fun confirmRemoval(confirming: Boolean) = update { it.copy(confirmingRemoval = confirming) }
 
@@ -195,7 +228,7 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
             is PlayerFormState.Failed -> Centered(modifier) { Text(s.message) }
             is PlayerFormState.Editing -> {
                 PlayerFormContent(s, model, modifier)
-                if (s.confirmingRemoval) RemovalDialog(s.savedName, model)
+                if (s.confirmingRemoval) RemovalDialog(s, model)
                 s.namesake?.let { NamesakeDialog(it, model) }
             }
         }
@@ -211,24 +244,41 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            OutlinedTextField(
-                value = form.name,
-                onValueChange = { name -> model.change(PlayerField.NAME) { it.copy(name = name) } },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.name)) },
-                singleLine = true,
-                isError = error(PlayerField.NAME) != null,
-                supportingText = error(PlayerField.NAME)?.let { { Text(it) } },
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Words,
-                    imeAction = ImeAction.Next,
-                ),
-            )
+            when (state.existing.isEmpty()) {
+                // the details are the person's, the same in every team
+                true -> OutlinedTextField(
+                    value = form.name,
+                    onValueChange = model::name,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.name)) },
+                    singleLine = true,
+                    isError = error(PlayerField.NAME) != null,
+                    supportingText = (error(PlayerField.NAME) ?: playsAlsoIn(state.otherTeams))?.let { { Text(it) } },
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Words,
+                        imeAction = ImeAction.Next,
+                    ),
+                )
+                // a new player may be a person of the registry
+                false -> SuggestField(
+                    form.name,
+                    stringResource(R.string.name),
+                    remember(state.existing) { state.existing.map { it.label } },
+                    error(PlayerField.NAME),
+                    onChange = model::name,
+                    onPick = model::pickExisting,
+                    hint = when (state.chosen) {
+                        null -> stringResource(R.string.name_or_existing)
+                        else -> stringResource(R.string.in_registry)
+                    },
+                )
+            }
             OutlinedTextField(
                 value = form.number,
                 onValueChange = { number -> model.change(PlayerField.NUMBER) { it.copy(number = number) } },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.number)) },
+                placeholder = { Text(stringResource(R.string.number_placeholder)) },
                 singleLine = true,
                 isError = error(PlayerField.NUMBER) != null,
                 supportingText = error(PlayerField.NUMBER)?.let { { Text(it) } },
@@ -246,14 +296,26 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 }
             }
             // optional, after what scouting needs
-            BirthDateField(form.birthDate, error(PlayerField.BIRTH_DATE)) { date ->
-                model.change(PlayerField.BIRTH_DATE) { it.copy(birthDate = date) }
-            }
+            // a player is rarely a child: the calendar opens years back, at
+            // most today
+            val today = remember { LocalDate.now() }
+            DayField(
+                stringResource(R.string.birth_date),
+                runCatching { LocalDate.parse(form.birthDate) }.getOrNull(),
+                onDay = { day -> model.change(PlayerField.BIRTH_DATE) { it.copy(birthDate = day?.toString().orEmpty()) } },
+                otherwise = form.birthDate,
+                error = error(PlayerField.BIRTH_DATE),
+                clear = stringResource(R.string.remove_birth_date),
+                latest = today,
+                opensAt = today.minusYears(BIRTH_YEARS_SHOWN),
+                firstYear = FIRST_BIRTH_YEAR,
+            )
             OutlinedTextField(
                 value = form.heightCm,
                 onValueChange = { height -> model.change(PlayerField.HEIGHT) { it.copy(heightCm = height) } },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.height)) },
+                placeholder = { Text(stringResource(R.string.height_placeholder)) },
                 suffix = { Text(stringResource(R.string.centimetres)) },
                 singleLine = true,
                 isError = error(PlayerField.HEIGHT) != null,
@@ -273,11 +335,23 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
         ) { Text(stringResource(R.string.save)) }
     }
 
+/** "Also plays in: …", when they do. */
 @Composable
-private fun RemovalDialog(name: String, model: PlayerFormViewModel) = DeletionDialog(
-    stringResource(R.string.delete_player_text, name),
+private fun playsAlsoIn(teams: List<String>): String? =
+    teams.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.plays_also_in, it.joinToString(", ")) }
+
+/** Out of the team (they stay in the registry), or out of the registry,
+ * so of every team (D16): one question, two answers. */
+@Composable
+private fun RemovalDialog(state: PlayerFormState.Editing, model: PlayerFormViewModel) = DeletionDialog(
+    listOfNotNull(
+        stringResource(R.string.delete_player_text, state.savedName),
+        playsAlsoIn(state.otherTeams),
+    ).joinToString("\n") + "\n\n" + stringResource(R.string.delete_person_text, state.savedNumber),
     onConfirm = { model.remove() },
     onDismiss = { model.confirmRemoval(false) },
+    confirm = stringResource(R.string.remove_from_team),
+    also = stringResource(R.string.delete_person) to { model.deletePerson() },
 )
 
 /** Another player of the team with the same name: saved all the same, or
@@ -294,65 +368,6 @@ private fun NamesakeDialog(namesake: String, model: PlayerFormViewModel) = Alert
         TextButton(onClick = model::dismissNamesake) { Text(stringResource(R.string.cancel)) }
     },
 )
-
-/** The birth date, in the language of the phone, or nothing; a tap opens
- * the calendar, at most today. The core has it as YYYY-MM-DD. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun BirthDateField(date: String, error: String?, onDate: (String) -> Unit) {
-    val parsed = remember(date) { runCatching { LocalDate.parse(date) }.getOrNull() }
-    var picking by rememberSaveable { mutableStateOf(false) }
-    // a read-only field doesn't take clicks: its presses do
-    val presses = remember { MutableInteractionSource() }
-    LaunchedEffect(presses) {
-        presses.interactions.collect { if (it is PressInteraction.Release) picking = true }
-    }
-    OutlinedTextField(
-        value = parsed?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)) ?: date,
-        onValueChange = {},
-        modifier = Modifier.fillMaxWidth(),
-        readOnly = true,
-        label = { Text(stringResource(R.string.birth_date)) },
-        trailingIcon = {
-            when (date) {
-                "" -> Icon(Icons.Filled.DateRange, contentDescription = null)
-                else -> IconButton(onClick = { onDate("") }) {
-                    Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.remove_birth_date))
-                }
-            }
-        },
-        isError = error != null,
-        supportingText = error?.let { { Text(it) } },
-        interactionSource = presses,
-    )
-    if (picking) {
-        // the picker counts days in UTC; a player is rarely a child
-        val today = LocalDate.now()
-        val millis = { day: LocalDate -> day.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
-        val picker = rememberDatePickerState(
-            initialSelectedDateMillis = parsed?.let(millis),
-            initialDisplayedMonthMillis = millis(parsed ?: today.minusYears(BIRTH_YEARS_SHOWN)),
-            yearRange = FIRST_BIRTH_YEAR..today.year,
-            selectableDates = object : SelectableDates {
-                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= millis(today)
-            },
-        )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    picker.selectedDateMillis?.let { selected ->
-                        onDate(Instant.ofEpochMilli(selected).atZone(ZoneOffset.UTC).toLocalDate().toString())
-                    }
-                    picking = false
-                }) { Text(stringResource(R.string.ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        ) { DatePicker(picker) }
-    }
-}
 
 /** The years back the calendar opens at without a birth date. */
 private const val BIRTH_YEARS_SHOWN = 18L

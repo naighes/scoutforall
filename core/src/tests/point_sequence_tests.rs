@@ -62,6 +62,54 @@ mod tests {
         );
     }
 
+    /// The replay of the trend has the same points, each set from 0-0;
+    /// the errors of a figure rally by rally, all or the unforced ones:
+    /// the serve error is both, of the serve and of the break point (where
+    /// it was made), none of the side out.
+    #[test]
+    fn the_replay_has_the_points_and_the_errors_of_each_rally() {
+        use crate::trend::{Replay, Series};
+        let first = set();
+        let second = SetEntry {
+            set_number: 2,
+            ..set()
+        };
+        let replay =
+            Replay::new(&[&first, &second], DEFAULT_MAX_SUBSTITUTIONS).expect("the sets replay");
+        let one = [(Us, 1), (Them, 1), (Them, 2), (Us, 2)];
+        assert_eq!(replay.point_sequence(), [one, one].concat());
+        assert_eq!(replay.set(2).point_sequence(), one);
+        for unforced in [false, true] {
+            assert_eq!(
+                replay.errors(Series::Serve, unforced),
+                [0, 1, 0, 0, 0, 1, 0, 0]
+            );
+            assert_eq!(
+                replay.set(2).errors(Series::BreakPoint, unforced),
+                [0, 1, 0, 0]
+            );
+            assert_eq!(replay.errors(Series::SideOut, unforced), [0; 8]);
+            assert_eq!(replay.errors(Series::Reception, unforced), [0; 8]);
+        }
+    }
+
+    /// An ace received: an error of the reception and of the side out,
+    /// forced, so none of them unforced.
+    #[test]
+    fn an_ace_received_is_an_error_not_unforced() {
+        use crate::trend::{Replay, Series};
+        let mut received = set();
+        received.serving_team = Them;
+        let player = received.initial_positions[1];
+        received.events = vec![ev(P, Some(player), Some(EvalEnum::Error))];
+        let replay = Replay::new(&[&received], DEFAULT_MAX_SUBSTITUTIONS).expect("the set replays");
+        assert_eq!(replay.point_sequence(), [(Them, 1)]);
+        assert_eq!(replay.errors(Series::Reception, false), [1]);
+        assert_eq!(replay.errors(Series::SideOut, false), [1]);
+        assert_eq!(replay.errors(Series::Reception, true), [0]);
+        assert_eq!(replay.errors(Series::SideOut, true), [0]);
+    }
+
     #[test]
     fn no_points_before_the_first_rally() {
         let mut set = set();

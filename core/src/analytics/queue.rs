@@ -22,6 +22,16 @@ pub struct UploadQueue {
 }
 
 impl UploadQueue {
+    /// The queue of these matches, in this order (as saved).
+    pub fn of(pending: Vec<PendingUpload>) -> Self {
+        Self { pending }
+    }
+
+    /// The matches waiting, in the order they're tried.
+    pub fn pending(&self) -> &[PendingUpload] {
+        &self.pending
+    }
+
     // add match to upload queue
     pub fn enqueue(&mut self, team_id: Uuid, match_id: String) {
         // avoid duplicates

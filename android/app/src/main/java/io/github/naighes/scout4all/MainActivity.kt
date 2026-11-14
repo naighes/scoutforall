@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
                 }
                 PanicDialog(application as Scout4AllApplication)
                 CrashDialog(application as Scout4AllApplication)
+                StartupNoticeDialog(application as Scout4AllApplication)
             }
         }
     }
@@ -191,7 +192,15 @@ private fun Navigation(
                     nav.navigate("team/$team/match/${Uri.encode(match)}/$scouting")
                 },
                 onDvw = { nav.navigate("dvw") },
+                onCompetitions = { nav.navigate("competitions") },
             )
+        }
+        composable("competitions") { entry ->
+            CompetitionsScreen(onBack = { nav.back(entry) }, onCompetition = { nav.navigate("competitions/$it") })
+        }
+        composable("competitions/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            CompetitionFormScreen(id, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
         }
         composable("dvw") { entry ->
             DvwImportScreen(
@@ -236,7 +245,16 @@ private fun Navigation(
                 onDvw = { nav.navigate("dvw") },
                 onAnalysis = { nav.navigate("team/$id/analysis") },
                 onDeleted = { nav.back(entry) },
+                onNewSeason = { nav.navigate("team/$id/new-season") },
             )
+        }
+        composable("team/{id}/new-season") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            // saved, the new team in place of the form; back from it, the
+            // old one
+            NewSeasonScreen(id, onBack = { nav.back(entry) }, onSaved = { created ->
+                nav.navigate("team/$created") { popUpTo("team/{id}/new-season") { inclusive = true } }
+            })
         }
         composable("team/{id}/analysis") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
@@ -257,10 +275,11 @@ private fun Navigation(
         }
         composable("team/{id}/new-match") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            MatchFormScreen(id, null, example = tutorial, onBack = { nav.back(entry) }, onSaved = { m ->
+            MatchFormScreen(id, null, example = tutorial, onBack = { nav.back(entry) }, onSaved = { a, m ->
                 // as the TUI, a new match goes on with its first set; back
-                // from it, the page of the match
-                val match = "team/$id/match/${Uri.encode(m)}"
+                // from it, the page of the match, of its team A (maybe
+                // another team)
+                val match = "team/$a/match/${Uri.encode(m)}"
                 nav.navigate(match) { popUpTo("team/{id}/new-match") { inclusive = true } }
                 nav.navigate("$match/start-set")
             })
@@ -280,6 +299,12 @@ private fun Navigation(
                 onStats = { nav.navigate("$match/stats?set=0") },
                 onVideo = { nav.navigate("$match/video") },
                 onDeleted = { nav.back(entry) },
+                // the same match, from A: in place of this one
+                onOpenAs = { a ->
+                    nav.navigate("team/$a/match/${Uri.encode(m)}") {
+                        popUpTo("team/{id}/match/{match}") { inclusive = true }
+                    }
+                },
             )
         }
         composable("team/{id}/match/{match}/set/{set}") { entry ->
@@ -316,7 +341,7 @@ private fun Navigation(
         composable("team/{id}/match/{match}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
-            MatchFormScreen(id, m, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
+            MatchFormScreen(id, m, onBack = { nav.back(entry) }, onSaved = { _, _ -> nav.back(entry) })
         }
         composable("team/{id}/match/{match}/start-set") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
@@ -383,6 +408,20 @@ private fun CrashDialog(app: Scout4AllApplication) {
                 context.report(title, body)
                 app.forgetCrash()
             }) { Text(stringResource(R.string.report)) }
+        },
+    )
+}
+
+/** What the start has to tell (the data of a version before not all moved
+ * into the database), once. */
+@Composable
+private fun StartupNoticeDialog(app: Scout4AllApplication) {
+    val notice = app.startupNotice.collectAsState().value ?: return
+    AlertDialog(
+        onDismissRequest = app::forgetStartupNotice,
+        text = { Text(notice) },
+        confirmButton = {
+            TextButton(onClick = app::forgetStartupNotice) { Text(stringResource(android.R.string.ok)) }
         },
     )
 }

@@ -182,10 +182,11 @@ pub enum Outcome {
     Import,
 }
 
-/// What was imported: the team, or the match and its team.
+/// What was imported: the team, or the match and its team, with what to
+/// tell of what was here already.
 pub enum Imported {
-    Team(String),
-    Match(String, String),
+    Team(String, Option<String>),
+    Match(String, String, Option<String>),
 }
 
 /// An archive chosen, shown before it's imported: the team a match goes
@@ -230,17 +231,20 @@ impl Importing {
         match &self.preview {
             ArchivePreview::Team { .. } => core
                 .import_team(bytes, Some(self.picked.name.clone()))
-                .map(Imported::Team),
+                .map(|team| Imported::Team(team.id, team.summary)),
             ArchivePreview::Match { .. } => {
+                // the team chosen, the one of the screen it's imported
+                // from, or the one of a match that brings its own
                 let team = self
-                    .team_id
-                    .clone()
-                    .or_else(|| self.teams().get(self.team).map(|t| t.id.clone()))
+                    .teams()
+                    .get(self.team)
+                    .map(|t| t.id.clone())
+                    .or_else(|| self.team_id.clone())
                     .ok_or_else(|| MobileError::Failed {
                         reason: self.picked.name.clone(),
                     })?;
                 core.import_match(bytes, team.clone())
-                    .map(|m| Imported::Match(team, m))
+                    .map(|m| Imported::Match(team, m.id, m.summary))
             }
         }
     }

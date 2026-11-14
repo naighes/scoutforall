@@ -8,6 +8,12 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -68,6 +74,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -80,6 +87,7 @@ import io.github.naighes.scout4all.core.ErrorCount
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.FundamentalStats
 import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.SetPoints
 import io.github.naighes.scout4all.core.PhaseStats
 import io.github.naighes.scout4all.core.PossessionStats
 import io.github.naighes.scout4all.core.RotationStats
@@ -680,12 +688,19 @@ private fun ErrorGroup(
 // --- trend ------------------------------------------------------------
 
 /** How each figure went in each set, a line per set from its first rally,
- * to compare them; the match so far dashed across; the band of the level
- * shaded. So far, or of the last 10 touches. */
+ * to compare them, each set shown or hidden by its chip; the match so far
+ * dashed across; its direct (unforced) errors, a red line each across (as
+ * on the desktop). So far, or of the last 10 touches. Under them, the
+ * points of each set in order. A rally a column, the same in the charts and
+ * in the points, as wide as the screen allows but never narrower than a
+ * score: past the screen they all scroll across together. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Trend(stats: LiveStats) {
     var recent by remember { mutableStateOf(false) }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // the sets whose lines are left out
+    var hidden by remember { mutableStateOf(setOf<Int>()) }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(selected = !recent, onClick = { recent = false }, label = { Text(stringResource(R.string.trend_so_far)) })
         FilterChip(selected = recent, onClick = { recent = true }, label = { Text(stringResource(R.string.trend_recent)) })
     }
@@ -693,39 +708,126 @@ private fun Trend(stats: LiveStats) {
         Text(stringResource(R.string.no_rallies), color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
-    TrendLegend(stats.trend.firstOrNull()?.sets.orEmpty().map { it.setNumber.toInt() })
-    stats.trend.forEach { TrendChart(it, recent) }
-}
-
-@Composable
-private fun TrendLegend(sets: List<Int>) = Row(
-    // each chart says its sets
-    Modifier.notRead(),
-    horizontalArrangement = Arrangement.spacedBy(12.dp),
-    verticalAlignment = Alignment.CenterVertically,
-) {
-    sets.forEach { n ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(width = 12.dp, height = 3.dp).background(setColor(n)))
-            Text(
-                " " + stringResource(R.string.set_n, n),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // the sets: a chip each, in the color of its line
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        stats.trend.firstOrNull()?.sets.orEmpty().map { it.setNumber.toInt() }.forEach { n ->
+            FilterChip(
+                selected = n !in hidden,
+                onClick = { hidden = if (n in hidden) hidden - n else hidden + n },
+                label = { Text(stringResource(R.string.set_n, n)) },
+                leadingIcon = { Box(Modifier.size(width = 12.dp, height = 3.dp).background(setColor(n))) },
             )
         }
     }
+    TrendLegend(stats)
+    // the rallies of the longest set, at least 25: a column each
+    val columns = maxOf(
+        25,
+        stats.trend.flatMap { line -> line.sets.map { it.values.size } }.maxOrNull() ?: 0,
+        stats.points.maxOfOrNull { it.points.size } ?: 0,
+    )
+    // a score whole in its column, whatever the font of the phone
+    val measurer = rememberTextMeasurer()
+    val score = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+    val density = LocalDensity.current
+    val narrowest = with(density) { measurer.measure("88", score).size.width.toDp() } + 8.dp
+    // one scroll for all of them
+    val across = rememberScrollState()
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val column = maxOf(narrowest, maxWidth / columns)
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            stats.trend.forEach { TrendChart(it, recent, hidden, columns, column, across) }
+            // the sets hidden left out of the points too
+            val points = stats.points.filter { it.points.isNotEmpty() && it.setNumber.toInt() !in hidden }
+            if (points.isNotEmpty()) PointSequence(points, column * columns, column, across)
+        }
+    }
+}
+
+/** The points of each set in order, as on the score sheet: two rows, ours
+ * and theirs (their colors in the legend), a rally a column of `column`
+ * (the columns of the charts over them), the score in the row of the team
+ * scoring it; the set over its rows; the sets shown only. TalkBack reads
+ * the score of each set as it went. */
+@Composable
+private fun PointSequence(points: List<SetPoints>, width: Dp, column: Dp, across: ScrollState) =
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(R.string.point_sequence), Modifier.title(), style = MaterialTheme.typography.titleSmall)
+        points.forEach { set ->
+            Text(
+                stringResource(R.string.set_n, set.setNumber.toInt()),
+                style = MaterialTheme.typography.labelSmall,
+                color = setColor(set.setNumber.toInt()),
+            )
+            // the score after each point, ours first
+            val said = set.points.withIndex().joinToString(", ") { (i, p) ->
+                val other = set.points.take(i).count { it.us != p.us }
+                if (p.us) "${p.score}-$other" else "$other-${p.score}"
+            }
+            Column(
+                Modifier.fillMaxWidth().horizontalScroll(across).testTag("rallies")
+                    .readAs(stringResource(R.string.set_n, set.setNumber.toInt()) + ": " + said),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                listOf(true to TeamUs, false to TeamThem).forEach { (us, color) ->
+                    Row(Modifier.width(width)) {
+                        set.points.forEach { p ->
+                            Box(Modifier.width(column).padding(horizontal = 1.dp)) {
+                                // the empty ones as high, their score unseen
+                                Box(
+                                    Modifier.fillMaxWidth().background(
+                                        if (p.us == us) color else Color.Transparent,
+                                        RoundedCornerShape(4.dp),
+                                    ).padding(vertical = 2.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        p.score.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (p.us == us) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TrendLegend(stats: LiveStats) = FlowRow(
+    // each chart says its sets
+    Modifier.notRead(),
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    itemVerticalAlignment = Alignment.CenterVertically,
+) {
     Text(
         "- - " + stringResource(R.string.whole_match),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    Text("│ " + stringResource(R.string.trend_direct), style = MaterialTheme.typography.labelSmall, color = Lost)
+    // the colors of the two teams in the points
+    listOf(stats.teamName to TeamUs, stats.opponent to TeamThem).forEach { (name, color) ->
+        Text("■ $name", style = MaterialTheme.typography.labelSmall, color = color)
+    }
 }
 
 @Composable
-private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.semantics(mergeDescendants = true) {}) {
+private fun TrendChart(
+    line: TrendLine,
+    recent: Boolean,
+    hidden: Set<Int>,
+    columns: Int,
+    column: Dp,
+    across: ScrollState,
+) = Column(Modifier.semantics(mergeDescendants = true) {}) {
     val overall = if (recent) line.overallRecent else line.overall
     val overallGrade = if (recent) line.overallRecentGrade else line.overallGrade
-    val band = line.band
     Row(verticalAlignment = Alignment.Bottom) {
         Text(line.name.replaceFirstChar { it.uppercase() }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
         Text(
@@ -735,41 +837,49 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.seman
             color = overallGrade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurface,
         )
     }
-    // each rally where the set had got to (the points of the team ahead)
-    val sets = line.sets.map { set ->
-        Triple(set.setNumber.toInt(), set.progress, if (recent) set.recent else set.values)
-    }
+    // each set: its number, its values rally by rally (from the first)
+    val all = line.sets.map { set -> set.setNumber.toInt() to if (recent) set.recent else set.values }
+    // the hidden ones left out, the axis as with all of them
+    val sets = all.filter { it.first !in hidden }
     val axis = MaterialTheme.colorScheme.outline
-    val known = sets.flatMap { it.third }.filterNotNull() + listOfNotNull(overall, band?.low, band?.high)
-    // always 0 and the band in sight
+    val known = all.flatMap { it.second }.filterNotNull() + listOfNotNull(overall)
+    // always 0 in sight
     val low = minOf(0.0, known.minOrNull() ?: 0.0)
     val high = maxOf(low + 10.0, known.maxOrNull() ?: 0.0)
-    // a whole set, longer at deuce
-    val points = maxOf(25.0, sets.flatMap { it.second }.maxOrNull() ?: 0.0)
-    Canvas(Modifier.fillMaxWidth().height(88.dp).padding(vertical = 4.dp)) {
-        fun x(p: Double) = (size.width * p / points).toFloat()
+    val points = columns.toDouble()
+    // the direct errors in each rally of the sets, of every set shown
+    val bins = IntArray(columns.coerceAtLeast(1))
+    line.sets.filter { it.setNumber.toInt() !in hidden }.forEach { set ->
+        set.unforced.forEachIndexed { i, n ->
+            bins[i.coerceIn(0, bins.size - 1)] += n.toInt()
+        }
+    }
+    // the chart and its rallies under it, scrolling with the others
+    Column(Modifier.fillMaxWidth().horizontalScroll(across).testTag("rallies")) {
+    Canvas(Modifier.width(column * columns).height(88.dp).padding(vertical = 4.dp)) {
+        // a rally (from 1) in the middle of its column
+        fun x(p: Double) = (size.width * (p - 0.5) / points).toFloat()
         fun y(v: Double) = (size.height * (1 - (v - low) / (high - low))).toFloat()
         val dashed = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))
-        band?.let {
-            drawRect(
-                Fair.copy(alpha = 0.10f),
-                topLeft = Offset(0f, y(it.high)),
-                size = androidx.compose.ui.geometry.Size(size.width, y(it.low) - y(it.high)),
-            )
-        }
         drawLine(axis, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), strokeWidth = 1.dp.toPx())
-        // every 5 points
-        (5..points.toInt() step 5).forEach { p ->
+        // the first rally and every 5
+        (listOf(1) + (5..columns step 5)).forEach { p ->
             drawLine(axis.copy(alpha = 0.3f), Offset(x(p.toDouble()), 0f), Offset(x(p.toDouble()), size.height), 1.dp.toPx())
+        }
+        // the direct errors, a red line across in the column of their rally
+        bins.forEachIndexed { i, n ->
+            if (n > 0) {
+                drawLine(Lost.copy(alpha = 0.8f), Offset(x(i + 1.0), 0f), Offset(x(i + 1.0), size.height), 1.5f.dp.toPx())
+            }
         }
         overall?.let {
             drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f.dp.toPx(), pathEffect = dashed)
         }
-        sets.forEach { (setNumber, xs, values) ->
+        sets.forEach { (setNumber, values) ->
             val path = Path()
             var drawing = false
             values.forEachIndexed { i, v ->
-                val px = x(xs.getOrElse(i) { 0.0 })
+                val px = x(i + 1.0)
                 when {
                     v == null -> drawing = false
                     drawing -> path.lineTo(px, y(v))
@@ -782,26 +892,30 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.seman
             val color = setColor(setNumber)
             drawPath(path, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
             values.withIndex().lastOrNull { it.value != null }?.let { (i, v) ->
-                drawCircle(color, 3.dp.toPx(), Offset(x(xs.getOrElse(i) { 0.0 }), y(v ?: 0.0)))
+                drawCircle(color, 3.dp.toPx(), Offset(x(i + 1.0), y(v ?: 0.0)))
             }
         }
     }
-    // for TalkBack, where each set got to
+    // the rallies: the first and every 5, under their columns
+    Box(Modifier.width(column * columns).notRead()) {
+        (listOf(1) + (5..columns step 5)).forEach { p ->
+            Box(Modifier.offset(x = column * (p - 1)).width(column), contentAlignment = Alignment.Center) {
+                Text(
+                    p.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+    }
+    // for TalkBack, where each set got to, and the errors
     Box(
         Modifier.readAs(
-            sets.mapNotNull { (n, _, values) -> values.lastOrNull { it != null }?.let { stringResource(R.string.set_n, n) + " " + pct(it) } }
+            (sets.mapNotNull { (n, values) -> values.lastOrNull { it != null }?.let { stringResource(R.string.set_n, n) + " " + pct(it) } } +
+                listOf(stringResource(R.string.trend_errors_said, bins.sum())))
                 .joinToString(", "),
         ),
     )
-    // the points: 0, 5, 10, ... under their lines, as high as their text
-    BoxWithConstraints(Modifier.fillMaxWidth().notRead()) {
-        (0..points.toInt() step 5).forEach { p ->
-            Text(
-                p.toString(),
-                Modifier.offset(x = maxWidth * (p / points).toFloat() - if (p == 0) 0.dp else 8.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
 }

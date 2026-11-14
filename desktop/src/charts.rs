@@ -1,10 +1,11 @@
 //! The trend of a figure set by set, as the stats sheet of the app draws
-//! it: a line per set from its first rally, the match so far dashed
-//! across, the band of the level shaded. Drawn with the canvas of iced
+//! it: a line per set from its first rally, a rally a column (the same
+//! columns as the points of the sets under it), the match so far dashed
+//! across, its direct errors a red line each. Drawn with the canvas of iced
 //! (chosen over iced_aksel and plotters-iced, 027).
 
 use {
-    crate::theme::{Colors, FAIR, set_color},
+    crate::theme::{Colors, LOST, set_color},
     iced::{
         Color, Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse,
         widget::canvas::{self, Frame, Geometry, LineDash, Path, Stroke, Text},
@@ -12,19 +13,30 @@ use {
     scout4all_mobile::{MatchTrend, TrendLine},
 };
 
+/// How high the numbers of the rallies under the chart of a match are.
+pub const RALLY_LABELS: f32 = 14.0;
+
 /// The points of a trend, ready to draw.
 #[derive(Debug, Clone)]
 pub struct Trend {
-    /// each set: its number, its rallies (where the set had got to, the
-    /// value), split where the value is unknown
+    /// each set: its number, its rallies (the rally from 1, the value),
+    /// split where the value is unknown
     pub sets: Vec<(u8, Vec<Vec<(f64, f64)>>)>,
     pub overall: Option<f64>,
-    pub band: Option<(f64, f64)>,
-    /// the value axis, always with 0 and the band in sight
+    /// the value axis, always with 0 in sight, the same whatever sets are
+    /// shown
     pub low: f64,
     pub high: f64,
-    /// a whole set, longer at deuce
+    /// the rallies of the longest set, at least 25: a column each
     pub points: f64,
+    /// the direct errors of the figure along the sets, a red line across
+    /// the chart: the rally and how many, of every set
+    pub errors: Vec<(f64, u32)>,
+}
+
+/// The rallies of a set from the first: its columns.
+fn rallies() -> impl Iterator<Item = f64> {
+    (1u32..).map(f64::from)
 }
 
 impl Trend {
@@ -37,11 +49,11 @@ impl Trend {
                     true => &set.recent,
                     false => &set.values,
                 };
-                let runs = values.iter().zip(set.progress.iter()).fold(
+                let runs = values.iter().zip(rallies()).fold(
                     vec![vec![]],
                     |mut runs: Vec<Vec<(f64, f64)>>, (v, x)| {
                         match (v, runs.last_mut()) {
-                            (Some(v), Some(run)) => run.push((*x, *v)),
+                            (Some(v), Some(run)) => run.push((x, *v)),
                             (None, Some(run)) if !run.is_empty() => runs.push(vec![]),
                             _ => {}
                         }
@@ -55,12 +67,10 @@ impl Trend {
             true => line.overall_recent,
             false => line.overall,
         };
-        let band = line.band.as_ref().map(|b| (b.low, b.high));
         let known: Vec<f64> = sets
             .iter()
             .flat_map(|(_, runs)| runs.iter().flatten().map(|(_, v)| *v))
             .chain(overall)
-            .chain(band.into_iter().flat_map(|(l, h)| [l, h]))
             .collect();
         let low = known.iter().copied().fold(0.0_f64, f64::min);
         let high = known.iter().copied().fold(low + 10.0, f64::max);
@@ -71,11 +81,54 @@ impl Trend {
         Trend {
             sets,
             overall,
-            band,
             low,
             high,
             points,
+            errors: vec![],
         }
+    }
+
+    /// Without the lines of the sets hidden: the axes as they were.
+    pub fn without_sets(self, hidden: &[u8]) -> Trend {
+        let sets = self
+            .sets
+            .into_iter()
+            .filter(|(set, _)| !hidden.contains(set))
+            .collect();
+        Trend { sets, ..self }
+    }
+
+    /// With the direct (unforced) errors of the figure in each rally, of
+    /// every set but the hidden ones.
+    pub fn with_errors(self, line: &TrendLine, hidden: &[u8]) -> Trend {
+        let errors = line
+            .sets
+            .iter()
+            .filter(|set| !hidden.contains(&set.set_number))
+            .flat_map(|set| {
+                rallies()
+                    .zip(set.unforced.iter())
+                    .filter(|(_, n)| **n > 0)
+                    .map(|(x, n)| (x, *n))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        Trend { errors, ..self }
+    }
+
+    /// The errors in each rally of the sets, from the first, of every set
+    /// together: how dense they are.
+    pub fn error_bins(&self) -> Vec<u32> {
+        let bins = (self.points.ceil() as usize).max(1);
+        self.errors
+            .iter()
+            .fold(vec![0; bins], |mut counts, (x, n)| {
+                let at = (*x as usize).saturating_sub(1).min(bins - 1);
+                if let Some(bin) = counts.get_mut(at) {
+                    *bin += n;
+                }
+                counts
+            })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -105,46 +158,33 @@ impl<M> canvas::Program<M> for CanvasTrend {
         let t = &self.trend;
         let c = self.colors;
         // room for the labels of the points under the chart
-        let label = 14.0;
-        let plot = Size::new(bounds.width, (bounds.height - label).max(1.0));
-        let x = |p: f64| (f64::from(plot.width) * p / t.points) as f32;
+        let plot = Size::new(bounds.width, (bounds.height - RALLY_LABELS).max(1.0));
+        // a rally in the middle of its column
+        let x = |p: f64| (f64::from(plot.width) * (p - 0.5) / t.points) as f32;
         let y = |v: f64| (f64::from(plot.height) * (1.0 - (v - t.low) / (t.high - t.low))) as f32;
-        if let Some((low, high)) = t.band {
-            frame.fill_rectangle(
-                Point::new(0.0, y(high)),
-                Size::new(plot.width, y(low) - y(high)),
-                Color { a: 0.12, ..FAIR },
-            );
-        }
         let axis = Stroke::default().with_color(c.muted).with_width(1.0);
         frame.stroke(
             &Path::line(Point::new(0.0, y(0.0)), Point::new(plot.width, y(0.0))),
             axis,
         );
-        // every 5 points, with its number below
+        // the first rally and every 5, with its number below, over its
+        // column
         let grid = Stroke::default()
             .with_color(Color { a: 0.3, ..c.muted })
             .with_width(1.0);
-        for p in (0..=t.points as u32).step_by(5) {
+        for p in std::iter::once(1).chain((5..=t.points as u32).step_by(5)) {
             let px = x(f64::from(p));
-            if p > 0 {
-                frame.stroke(
-                    &Path::line(Point::new(px, 0.0), Point::new(px, plot.height)),
-                    grid,
-                );
-            }
+            frame.stroke(
+                &Path::line(Point::new(px, 0.0), Point::new(px, plot.height)),
+                grid,
+            );
             frame.fill_text(Text {
                 font: crate::theme::fonts().regular,
                 content: p.to_string(),
                 position: Point::new(px, plot.height + 1.0),
                 color: c.muted,
                 size: 11.0.into(),
-                // the first and the last inside the chart
-                align_x: match (p, f64::from(p + 5) > t.points) {
-                    (0, _) => iced::widget::text::Alignment::Left,
-                    (_, true) => iced::widget::text::Alignment::Right,
-                    (_, false) => iced::widget::text::Alignment::Center,
-                },
+                align_x: iced::widget::text::Alignment::Center,
                 ..Text::default()
             });
         }
@@ -163,6 +203,18 @@ impl<M> canvas::Program<M> for CanvasTrend {
                         .with_color(Color { a: 0.6, ..c.text })
                         .with_width(1.5)
                 },
+            );
+        }
+        // the direct errors, a red line across the chart in the column of
+        // their rally (from 1), under the lines of the sets
+        let error = Stroke::default()
+            .with_color(Color { a: 0.8, ..LOST })
+            .with_width(2.0);
+        for (i, _) in t.error_bins().iter().enumerate().filter(|(_, n)| **n > 0) {
+            let px = x(i as f64 + 1.0);
+            frame.stroke(
+                &Path::line(Point::new(px, 0.0), Point::new(px, plot.height)),
+                error,
             );
         }
         for (set, runs) in &t.sets {
@@ -186,9 +238,14 @@ impl<M> canvas::Program<M> for CanvasTrend {
     }
 }
 
-pub fn canvas_view<'a, M: 'a>(trend: Trend, colors: Colors, height: Length) -> Element<'a, M> {
+pub fn canvas_view<'a, M: 'a>(
+    trend: Trend,
+    colors: Colors,
+    width: Length,
+    height: Length,
+) -> Element<'a, M> {
     iced::widget::canvas(CanvasTrend { trend, colors })
-        .width(Length::Fill)
+        .width(width)
         .height(height)
         .into()
 }
@@ -201,7 +258,6 @@ pub struct MatchesTrend {
     /// with the matches before
     pub moving: Vec<Option<f64>>,
     pub overall: Option<f64>,
-    pub band: Option<(f64, f64)>,
     pub low: f64,
     pub high: f64,
     /// what the hover says of the touches, `{1}` the count
@@ -210,7 +266,6 @@ pub struct MatchesTrend {
 
 impl MatchesTrend {
     pub fn of(line: &MatchTrend, days: Vec<String>, opponents: Vec<String>, touches: &str) -> Self {
-        let band = line.band.as_ref().map(|b| (b.low, b.high));
         let known: Vec<f64> = line
             .values
             .iter()
@@ -218,7 +273,6 @@ impl MatchesTrend {
             .flatten()
             .copied()
             .chain(line.overall)
-            .chain(band.into_iter().flat_map(|(l, h)| [l, h]))
             .collect();
         let low = known.iter().copied().fold(0.0_f64, f64::min);
         let high = known.iter().copied().fold(low + 10.0, f64::max);
@@ -231,7 +285,6 @@ impl MatchesTrend {
                 .collect(),
             moving: line.moving.clone(),
             overall: line.overall,
-            band,
             low,
             high,
             touches: touches.to_string(),
@@ -315,13 +368,6 @@ impl<M> canvas::Program<M> for CanvasMatches {
             ..Text::default()
         };
         use iced::widget::text::Alignment as Align;
-        if let Some((low, high)) = t.band {
-            frame.fill_rectangle(
-                Point::new(AXIS, y(high)),
-                Size::new(width - AXIS, y(low) - y(high)),
-                Color { a: 0.12, ..FAIR },
-            );
-        }
         // the value axis: a line every 20, with its value
         let grid = Stroke::default()
             .with_color(Color { a: 0.25, ..c.muted })

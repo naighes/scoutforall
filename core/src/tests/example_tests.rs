@@ -7,11 +7,15 @@ mod tests {
             add_example_team_if_new, example_team, is_new_installation, tutorial_lineup,
             tutorial_match,
         },
-        localization::{Language, labels},
+        localization::labels,
         providers::team_writer::TeamInput,
         providers::{
-            store::{team_reader::StoreTeamReader, team_writer::StoreTeamWriter},
+            sqlite::{
+                Database,
+                teams::{SqliteTeamReader, SqliteTeamWriter},
+            },
             team_reader::TeamReader,
+            team_writer::TeamWriter,
         },
         set_start::SetStartForm,
         shapes::enums::TeamSideEnum,
@@ -26,41 +30,64 @@ mod tests {
         Arc::new(MemoryStore::new())
     }
 
+    /// The database of an installation, with its reader and writer of the
+    /// teams.
+    fn database() -> (SqliteTeamReader, SqliteTeamWriter) {
+        let db = Database::new(crate::db::open_in_memory().unwrap());
+        (SqliteTeamReader::new(db.clone()), SqliteTeamWriter::new(db))
+    }
+
     #[tokio::test]
     async fn an_empty_folder_or_one_with_the_log_only_is_new() {
         let store = store();
-        assert!(is_new_installation(store.as_ref()).await.unwrap());
+        let (teams, _) = database();
+        assert!(is_new_installation(store.as_ref(), &teams).await.unwrap());
         store.write("scout4all.log", b"started").await.unwrap();
-        assert!(is_new_installation(store.as_ref()).await.unwrap());
+        // the database beside the data: no team in it
+        store.write(layout::DATABASE, b"").await.unwrap();
+        assert!(is_new_installation(store.as_ref(), &teams).await.unwrap());
     }
 
     #[tokio::test]
     async fn the_settings_or_a_team_make_an_update() {
+        let (teams, writer) = database();
         let with_settings = store();
         with_settings.write(layout::CONFIG, b"{}").await.unwrap();
-        assert!(!is_new_installation(with_settings.as_ref()).await.unwrap());
+        assert!(
+            !is_new_installation(with_settings.as_ref(), &teams)
+                .await
+                .unwrap()
+        );
         let with_team = store();
         with_team.write("some-team/team.json", b"{}").await.unwrap();
-        assert!(!is_new_installation(with_team.as_ref()).await.unwrap());
+        assert!(
+            !is_new_installation(with_team.as_ref(), &teams)
+                .await
+                .unwrap()
+        );
+        // a team in the database, a removed one too: its folder moved
+        // there, the settings never written (the terms not accepted yet)
+        let empty = store();
+        let team = writer.save(example_team(EN, 2026)).await.unwrap();
+        assert!(!is_new_installation(empty.as_ref(), &teams).await.unwrap());
+        writer.remove(&team.id).await.unwrap();
+        assert!(!is_new_installation(empty.as_ref(), &teams).await.unwrap());
     }
 
     #[tokio::test]
     async fn a_new_installation_gets_the_national_team_once() {
         let store = store();
-        let writer = StoreTeamWriter::new(Arc::clone(&store));
-        let added = add_example_team_if_new(store.as_ref(), &writer, EN)
+        let (reader, writer) = database();
+        let added = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
             .await
             .unwrap();
         assert!(added.is_some());
-        let again = add_example_team_if_new(store.as_ref(), &writer, EN)
+        let again = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
             .await
             .unwrap();
         assert!(again.is_none());
 
-        let teams = StoreTeamReader::new(Arc::clone(&store), Language::default())
-            .read_all()
-            .await
-            .unwrap();
+        let teams = reader.read_all().await.unwrap();
         assert_eq!(teams.len(), 1);
         let team = match teams.into_iter().next() {
             Some(Ok(team)) => team,
@@ -93,12 +120,12 @@ mod tests {
     async fn an_update_gets_nothing() {
         let store = store();
         store.write(layout::CONFIG, b"{}").await.unwrap();
-        let writer = StoreTeamWriter::new(Arc::clone(&store));
-        let added = add_example_team_if_new(store.as_ref(), &writer, EN)
+        let (reader, writer) = database();
+        let added = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
             .await
             .unwrap();
         assert!(added.is_none());
-        assert_eq!(store.list(layout::ROOT).await.unwrap().len(), 1);
+        assert!(!reader.any_team_ever().unwrap());
     }
 
     /// The statistics uploaded from two installations don't mix.
@@ -106,8 +133,8 @@ mod tests {
     async fn each_installation_has_its_own_ids() {
         let add = || async {
             let store = store();
-            let writer = StoreTeamWriter::new(Arc::clone(&store));
-            add_example_team_if_new(store.as_ref(), &writer, labels(LanguageEnum::It))
+            let (reader, writer) = database();
+            add_example_team_if_new(store.as_ref(), &reader, &writer, labels(LanguageEnum::It))
                 .await
                 .unwrap()
                 .unwrap()

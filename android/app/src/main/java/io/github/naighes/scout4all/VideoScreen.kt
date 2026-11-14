@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import io.github.naighes.scout4all.core.EventTypeEnum
+
 import android.app.Activity
 import android.content.ClipData
 import android.content.Context
@@ -134,6 +136,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
 
 private enum class VideoTab(val title: Int) {
     Events(R.string.video_events),
@@ -603,13 +608,38 @@ private fun EventsList(model: VideoModel, modifier: Modifier) {
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            EventRow(e, i == model.selected, model.total) { model.goToEvent(i) }
+            // the score before it, from 0-0 at each set
+            val before = events.getOrNull(i - 1)?.takeIf { !newSet }?.event
+            EventRow(e, eventMark(e, before?.scoreUs ?: 0u, before?.scoreThem ?: 0u), i == model.selected, model.total) {
+                model.goToEvent(i)
+            }
         }
     }
 }
 
+/** What an event was for the rally, as on the desktop: of the opponent
+ * (their point, their error), the point it ended (won or lost, none), a
+ * direct error (ours: =, a fault; theirs). */
+internal data class EventMark(val theirs: Boolean, val point: Boolean?, val error: Boolean)
+
+internal fun eventMark(e: VideoEventRow, us: UByte, them: UByte): EventMark {
+    val event = e.event.event.event
+    return EventMark(
+        theirs = event == EventTypeEnum.OS || event == EventTypeEnum.OE,
+        point = when {
+            e.event.scoreUs > us -> true
+            e.event.scoreThem > them -> false
+            else -> null
+        },
+        error = event == EventTypeEnum.F || event == EventTypeEnum.OE || e.event.event.symbol == "=",
+    )
+}
+
+/** An event: a bar of its team on the left (ours light blue, theirs pink),
+ * its symbol red on a direct error, its score green or red on the point it
+ * ended; TalkBack says which. */
 @Composable
-private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: () -> Unit) {
+private fun EventRow(e: VideoEventRow, mark: EventMark, chosen: Boolean, total: Long, onClick: () -> Unit) {
     val muted = !e.inside || !e.event.editable
     val color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
     val s = e.event.event
@@ -623,6 +653,10 @@ private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: ()
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        Box(
+            Modifier.size(width = 4.dp, height = 32.dp)
+                .background(if (mark.theirs) TeamThem else TeamUs, RoundedCornerShape(2.dp)),
+        )
         Text(
             eventTime(e.offsetMs, total),
             Modifier.width(64.dp),
@@ -630,8 +664,15 @@ private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: ()
             color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Column(Modifier.weight(1f)) {
+            val symbol = s.symbol ?: "✕".takeIf { mark.error }
             Text(
-                listOfNotNull(name, s.symbol).joinToString("  "),
+                buildAnnotatedString {
+                    append(name)
+                    symbol?.let {
+                        append("  ")
+                        withStyle(SpanStyle(color = if (mark.error) Lost else color, fontWeight = FontWeight.Bold)) { append(it) }
+                    }
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (chosen) FontWeight.Bold else null,
                 color = color,
@@ -653,7 +694,32 @@ private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: ()
         } else if (e.correctedMs != null) {
             Text("✎", Modifier.readAs(stringResource(R.string.video_corrected)))
         }
-        Text("${e.event.scoreUs}-${e.event.scoreThem}", style = MaterialTheme.typography.labelLarge, color = color)
+        val said = listOfNotNull(
+            when (mark.point) {
+                true -> stringResource(R.string.video_point_won)
+                false -> stringResource(R.string.video_point_lost)
+                null -> null
+            },
+            stringResource(R.string.video_direct_error).takeIf { mark.error },
+        ).joinToString(", ")
+        val score = "${e.event.scoreUs}-${e.event.scoreThem}"
+        Text(
+            score,
+            Modifier
+                .background(
+                    when (mark.point) {
+                        true -> Won
+                        false -> Lost
+                        null -> Color.Transparent
+                    },
+                    RoundedCornerShape(4.dp),
+                )
+                .padding(horizontal = 6.dp, vertical = 1.dp)
+                .then(if (said.isEmpty()) Modifier else Modifier.readAs("$score, $said")),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (mark.point != null) FontWeight.Bold else null,
+            color = if (mark.point != null) MaterialTheme.colorScheme.surface else color,
+        )
     }
 }
 
@@ -693,6 +759,50 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
     if (corrections > 0) {
         Text(stringResource(R.string.video_corrections, corrections), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+    if (model.alignment == VideoAlignment.Chosen || corrections > 0) {
+        OutlinedButton(onClick = model::automatic, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(stringResource(R.string.video_automatic)) }
+        Explained(R.string.video_automatic_explained)
+    }
+    val ready = model.files.isNotEmpty() && model.events.isNotEmpty() && model.missing == null
+    val lined = model.alignment != VideoAlignment.Missing
+    // once the events line up, a time written moves only its event
+    val placed = ready && model.timeOnlyThis()
+    var writing by remember { mutableStateOf<String?>(null) }
+    val writeTime = @Composable {
+        OutlinedButton(onClick = { writing = model.writtenTime() }, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.video_anchor_time))
+        }
+    }
+    writing?.let { TimeDialog(model, it) { writing = null } }
+    // the whole match: the video tied to the event chosen, all shifted, the
+    // video before the first event to find it again
+    Text(stringResource(R.string.video_sync_whole), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+    Button(onClick = model::anchorHere, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+        Text(stringResource(R.string.video_anchor_here))
+    }
+    Explained(R.string.video_anchor_here_explained)
+    if (!placed) writeTime()
+    if (lined) {
+        Text(stringResource(R.string.video_shift), style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { model.shift(-SHIFT_MS) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).readAs(stringResource(R.string.video_earlier_half))) {
+                Text("−0,5 s")
+            }
+            OutlinedButton(onClick = { model.shift(SHIFT_MS) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).readAs(stringResource(R.string.video_later_half))) {
+                Text("+0,5 s")
+            }
+        }
+        Explained(R.string.video_shift_explained)
+        FilterChip(
+            selected = model.whole,
+            onClick = model::toggleWhole,
+            label = { Text(stringResource(R.string.video_redo_anchor)) },
+        )
+        Explained(R.string.video_redo_anchor_explained)
+    }
+    // only the event chosen: put at the moment of the video or at a time
+    // written, and back
+    Text(stringResource(R.string.video_sync_event), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
     model.events.getOrNull(model.selected)?.let { e ->
         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -707,23 +817,14 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
             }
         }
     }
-    val ready = model.files.isNotEmpty() && model.events.isNotEmpty() && model.missing == null
-    Button(onClick = model::anchorHere, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-        Text(stringResource(R.string.video_anchor_here))
-    }
-    Text(stringResource(R.string.video_anchor_here_explained), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    var writing by remember { mutableStateOf<String?>(null) }
-    OutlinedButton(onClick = { writing = model.writtenTime() }, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-        Text(stringResource(R.string.video_anchor_time))
-    }
-    writing?.let { TimeDialog(model, it) { writing = null } }
-    // once tied to another event: the one chosen alone; put there, how far,
-    // and back
-    if (ready && model.timeOnlyThis()) {
+    if (placed) {
         OutlinedButton(onClick = model::correctHere, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
             Text(stringResource(R.string.video_correct_here))
         }
-        Text(stringResource(R.string.video_correct_here_explained), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        writeTime()
+        Explained(R.string.video_correct_here_explained)
+    } else {
+        Explained(R.string.video_sync_event_unplaced)
     }
     model.events.getOrNull(model.selected)?.correctedMs?.let { by ->
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -738,28 +839,12 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
             }
         }
     }
-    val automatic = model.alignment != VideoAlignment.Missing
-    Text(stringResource(R.string.video_shift), style = MaterialTheme.typography.titleSmall)
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(onClick = { model.shift(-SHIFT_MS) }, enabled = automatic, modifier = Modifier.weight(1f).readAs(stringResource(R.string.video_earlier_half))) {
-            Text("−0,5 s")
-        }
-        OutlinedButton(onClick = { model.shift(SHIFT_MS) }, enabled = automatic, modifier = Modifier.weight(1f).readAs(stringResource(R.string.video_later_half))) {
-            Text("+0,5 s")
-        }
-    }
-    if (model.alignment == VideoAlignment.Chosen) {
-        OutlinedButton(onClick = model::automatic, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.video_automatic)) }
-    }
-    if (automatic) {
-        FilterChip(
-            selected = model.whole,
-            onClick = model::toggleWhole,
-            label = { Text(stringResource(R.string.video_redo_anchor)) },
-        )
-        Text(stringResource(R.string.video_redo_anchor_explained), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
 }
+
+/** A line saying what the command above does. */
+@Composable
+private fun Explained(id: Int) =
+    Text(stringResource(id), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /** The time of the event chosen, written: the one there selected, the
  * keyboard open, so that what is typed takes its place. */

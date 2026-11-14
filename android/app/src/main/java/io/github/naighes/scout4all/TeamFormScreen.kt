@@ -168,67 +168,19 @@ fun TeamFormScreen(id: String?, onBack: () -> Unit, onSaved: () -> Unit) {
 @Composable
 private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewModel, modifier: Modifier) =
     Column(modifier) {
-        val form = state.form
-        val error = { field: TeamField -> state.invalid?.takeIf { it.first == field }?.second }
-        var choosingCountry by rememberSaveable { mutableStateOf(false) }
-        val country = stringResource(R.string.country)
-        if (choosingCountry) {
-            CountryDialog(
-                title = country,
-                current = form.country,
-                onPick = {
-                    model.pickCountry(it)
-                    choosingCountry = false
-                },
-                onDismiss = { choosingCountry = false },
-            )
-        }
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            OutlinedTextField(
-                value = form.name,
-                onValueChange = { name -> model.change(TeamField.NAME) { it.copy(name = name) } },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.name)) },
-                singleLine = true,
-                isError = error(TeamField.NAME) != null,
-                supportingText = error(TeamField.NAME)?.let { { Text(it) } },
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Words,
-                    imeAction = ImeAction.Next,
-                ),
+            TeamFields(
+                state.form,
+                state.genders,
+                state.classifications,
+                state.country,
+                error = { field -> state.invalid?.takeIf { it.first == field }?.second },
+                onChange = model::change,
+                onPickCountry = model::pickCountry,
             )
-            OutlinedTextField(
-                value = form.year,
-                onValueChange = { year -> model.change(TeamField.YEAR) { it.copy(year = year) } },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.year)) },
-                singleLine = true,
-                isError = error(TeamField.YEAR) != null,
-                supportingText = error(TeamField.YEAR)?.let { { Text(it) } },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-            )
-            FieldTitle(stringResource(R.string.gender), error(TeamField.GENDER))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                state.genders.forEachIndexed { index, choice ->
-                    SegmentedButton(
-                        selected = form.gender == choice.value,
-                        onClick = { model.change(TeamField.GENDER) { it.copy(gender = choice.value) } },
-                        shape = SegmentedButtonDefaults.itemShape(index, state.genders.size),
-                    ) { Text(choice.name) }
-                }
-            }
-            CountryField(country, state.country, error(TeamField.COUNTRY)) { choosingCountry = true }
-            FieldTitle(stringResource(R.string.classification), error(TeamField.CLASSIFICATION))
-            Column(Modifier.selectableGroup()) {
-                state.classifications.forEach { choice ->
-                    ClassificationRow(choice, form.classification == choice.value) {
-                        model.change(TeamField.CLASSIFICATION) { it.copy(classification = choice.value) }
-                    }
-                }
-            }
         }
         state.error?.let {
             Text(
@@ -244,6 +196,76 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.save)) }
     }
+
+/** The fields of a team (of its form, of a new season), `error` the one
+ * of each as the core tells. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TeamFields(
+    form: TeamForm,
+    genders: List<GenderChoice>,
+    classifications: List<ClassificationChoice>,
+    country: CountryChoice?,
+    error: (TeamField) -> String?,
+    onChange: (TeamField, (TeamForm) -> TeamForm) -> Unit,
+    onPickCountry: (CountryChoice) -> Unit,
+) {
+    var choosingCountry by rememberSaveable { mutableStateOf(false) }
+    val countryLabel = stringResource(R.string.country)
+    if (choosingCountry) {
+        CountryDialog(
+            title = countryLabel,
+            current = form.country,
+            onPick = {
+                onPickCountry(it)
+                choosingCountry = false
+            },
+            onDismiss = { choosingCountry = false },
+        )
+    }
+    OutlinedTextField(
+        value = form.name,
+        onValueChange = { name -> onChange(TeamField.NAME) { it.copy(name = name) } },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(stringResource(R.string.name)) },
+        singleLine = true,
+        isError = error(TeamField.NAME) != null,
+        supportingText = error(TeamField.NAME)?.let { { Text(it) } },
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Words,
+            imeAction = ImeAction.Next,
+        ),
+    )
+    OutlinedTextField(
+        value = form.year,
+        onValueChange = { year -> onChange(TeamField.YEAR) { it.copy(year = year) } },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(stringResource(R.string.year)) },
+        singleLine = true,
+        isError = error(TeamField.YEAR) != null,
+        supportingText = error(TeamField.YEAR)?.let { { Text(it) } },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+    )
+    FieldTitle(stringResource(R.string.gender), error(TeamField.GENDER))
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        genders.forEachIndexed { index, choice ->
+            SegmentedButton(
+                selected = form.gender == choice.value,
+                onClick = { onChange(TeamField.GENDER) { it.copy(gender = choice.value) } },
+                shape = SegmentedButtonDefaults.itemShape(index, genders.size),
+            ) { Text(choice.name) }
+        }
+    }
+    CountryField(countryLabel, country, error(TeamField.COUNTRY)) { choosingCountry = true }
+    FieldTitle(stringResource(R.string.classification), error(TeamField.CLASSIFICATION))
+    Column(Modifier.selectableGroup()) {
+        classifications.forEach { choice ->
+            ClassificationRow(choice, form.classification == choice.value) {
+                onChange(TeamField.CLASSIFICATION) { it.copy(classification = choice.value) }
+            }
+        }
+    }
+}
 
 @Composable
 fun FieldTitle(title: String, error: String?) = Column {
