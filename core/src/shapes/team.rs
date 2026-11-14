@@ -1,7 +1,10 @@
-use crate::shapes::{
-    country::{self, CountryCode},
-    enums::{GenderEnum, TeamClassificationEnum},
-    player::PlayerEntry,
+use crate::{
+    match_form::RosterNumber,
+    shapes::{
+        country::{self, CountryCode},
+        enums::{GenderEnum, TeamClassificationEnum},
+        player::PlayerEntry,
+    },
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -52,6 +55,25 @@ impl TeamEntry {
                     .collect(),
                 ..self.clone()
             },
+        }
+    }
+
+    /// The team with the numbers and roles of a match (D9).
+    pub fn with_match_numbers(&self, numbers: &[RosterNumber]) -> TeamEntry {
+        TeamEntry {
+            players: self
+                .players
+                .iter()
+                .map(|p| match numbers.iter().find(|n| n.player == p.id) {
+                    Some(n) => PlayerEntry {
+                        number: n.number,
+                        role: n.role,
+                        ..p.clone()
+                    },
+                    None => p.clone(),
+                })
+                .collect(),
+            ..self.clone()
         }
     }
 }

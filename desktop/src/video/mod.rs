@@ -2275,7 +2275,7 @@ pub(crate) mod screen_tests {
     use {
         super::*,
         scout4all_core::video::{offset_ms, start_from_name},
-        scout4all_mobile::{DvwChoice, DvwSide},
+        scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide},
     };
 
     /// How long before an event the video goes to it, by default.
@@ -2287,6 +2287,7 @@ pub(crate) mod screen_tests {
         let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
+            opponent: DvwOpponent::Name,
             side: DvwSide::Home,
             day: "2015-01-25".into(),
             max_substitutions: 6,
@@ -2894,6 +2895,7 @@ pub(crate) mod screen_tests {
         let bytes = std::fs::read(downloads.join("&And03 CORTONA V vs POLISPORTIV.dvw")).unwrap();
         let day = core.preview_dvw(bytes.clone()).unwrap().days[0].clone();
         let choice = DvwChoice {
+            opponent: DvwOpponent::Name,
             side: DvwSide::Home,
             day,
             max_substitutions: 6,

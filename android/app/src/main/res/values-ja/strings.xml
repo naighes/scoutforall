@@ -331,6 +331,13 @@
     <string name="dvw_new_team">新しいチームを作成</string>
     <string name="dvw_new_team_of">新しいチーム %1$s %2$s: 性別、国とレベル</string>
     <string name="dvw_ready">%1$s: %2$dセット、新しい選手%3$d人。保存しますか?</string>
+    <string name="dvw_opponent_question">チームB、%1$s: 似たチームを使うか、名前だけにするか、ファイルの選手で作成します</string>
+    <string name="dvw_opponent_name">名前だけ %1$s</string>
+    <string name="dvw_opponent_new">ファイルの選手でチーム %1$s を作成</string>
+    <string name="dvw_against_team">対戦相手 %1$s: 新しい選手%2$d人</string>
+    <string name="dvw_against_name">対戦相手 %1$s(名前だけ)</string>
+    <string name="dvw_match_numbers">この試合で別の番号の選手: %1$d</string>
+    <string name="dvw_competition">大会: %1$s</string>
     <string name="dvw_already_saved">%1$sにはこの試合がすでにあります: 上書きしますか?</string>
     <string name="dvw_overwrite">上書きする</string>
     <string name="dvw_dont_import">インポートしない</string>

@@ -199,7 +199,20 @@ mod tests {
         form.correct(two, "12", None, &team, None).unwrap();
         let m = save(&p, &team, None, form).await;
         assert_eq!(saved(&p.db, &m, eight), None);
-        p.match_writer.replace_details(&m).await.unwrap();
+        p.match_writer
+            .replace_details(
+                &m,
+                crate::match_form::MatchInput::against(
+                    &m.opponent,
+                    m.date,
+                    m.home,
+                    m.max_substitutions,
+                    &m.notes,
+                    m.roster.clone(),
+                ),
+            )
+            .await
+            .unwrap();
         assert_eq!(saved(&p.db, &m, two), Some((12, None)));
         let with_eight = MatchInput::against(
             "Cascina 2",

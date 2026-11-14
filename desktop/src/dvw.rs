@@ -1,7 +1,8 @@
 //! The import of a DataVolley file, in the steps of the TUI and of the
 //! app: the teams to import, the day when the file can't tell it, the
 //! substitutions, then for each team ours (a similar one or a new one),
-//! the check, the save; at the end what was imported. Each step is a form:
+//! team B (a similar one, only its name, or a new one with the players of
+//! the file), the check, the save; at the end what was imported. Each step is a form:
 //! Enter goes on, Esc goes back; on the check Esc leaves the team as it
 //! is.
 
@@ -20,8 +21,8 @@ use {
     scout4all_core::shapes::country::CountryCode,
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        ClassificationChoice, DvwChoice, DvwPreview, DvwReady, DvwSide, DvwSimilarTeam,
-        GenderChoice, MobileError, Scout4All, TeamField,
+        ClassificationChoice, DvwChoice, DvwOpponent, DvwPreview, DvwReady, DvwSide,
+        DvwSimilarTeam, GenderChoice, MobileError, Scout4All, TeamField,
     },
     std::sync::Arc,
 };
@@ -33,6 +34,9 @@ enum Step {
     /// ours like the one of the file, and a new one last
     Team(Vec<DvwSimilarTeam>),
     NewTeam(Vec<DvwSimilarTeam>),
+    /// team B: ours like it, then only its name, then a new team with the
+    /// players of the file; team A as chosen
+    Opponent(Vec<DvwSimilarTeam>, DvwChoice),
     Ready(DvwReady, DvwChoice),
     Done,
 }
@@ -142,6 +146,15 @@ impl DvwScreen {
         }
     }
 
+    /// The other team of the file: team B of the side being imported.
+    fn opponent_name(&self) -> String {
+        match self.sides.get(self.current) {
+            Some(DvwSide::Home) => self.preview.visiting.clone(),
+            Some(DvwSide::Visiting) => self.preview.home.clone(),
+            None => String::new(),
+        }
+    }
+
     /// The step, with the form to answer it.
     fn to(&mut self, s: &Strings, step: Step) {
         let team = self.team_name();
@@ -221,6 +234,24 @@ impl DvwScreen {
                     Some(ui::fill(s.dvw_new_team_of, &[team, season])),
                 )
             }
+            Step::Opponent(similar, _) => {
+                let b = self.opponent_name();
+                (
+                    vec![Field::choice(
+                        &ui::fill(s.dvw_opponent_question, std::slice::from_ref(&b)),
+                        similar
+                            .iter()
+                            .map(|t| similar_label(s, t))
+                            .chain([
+                                ui::fill(s.dvw_opponent_name, std::slice::from_ref(&b)),
+                                ui::fill(s.dvw_opponent_new, std::slice::from_ref(&b)),
+                            ])
+                            .collect(),
+                        0,
+                    )],
+                    None,
+                )
+            }
             Step::Ready(..) | Step::Done => (vec![], None),
         };
         let mut form = Form::new(s.import_dvw, fields);
@@ -263,6 +294,7 @@ impl DvwScreen {
         let new = matches!(self.step, Step::NewTeam(_));
         let f = &self.form;
         DvwChoice {
+            opponent: DvwOpponent::Name,
             side: self
                 .sides
                 .get(self.current)
@@ -348,6 +380,24 @@ impl DvwScreen {
                 self.step = Step::NewTeam(similar);
                 self.plan(s, None);
             }
+            Step::Opponent(similar, choice) => {
+                let opponent = match similar.get(self.form.index(0)) {
+                    Some(team) => DvwOpponent::Team {
+                        id: team.id.clone(),
+                    },
+                    None if self.form.index(0) == similar.len() => DvwOpponent::Name,
+                    None => DvwOpponent::NewTeam,
+                };
+                let choice = DvwChoice { opponent, ..choice };
+                match self.core.plan_dvw(self.bytes.to_vec(), choice.clone()) {
+                    Ok(ready) => self.to(s, Step::Ready(ready, choice)),
+                    // another team B may do
+                    Err(e) => {
+                        self.step = Step::Opponent(similar, choice);
+                        self.form.error = Some(e.to_string());
+                    }
+                }
+            }
             Step::Ready(ready, choice) => self.save(s, &ready, &choice),
             Step::Done => {}
         }
@@ -372,6 +422,7 @@ impl DvwScreen {
                 true => self.to(s, Step::Substitutions),
                 false => self.to(s, Step::Team(similar)),
             },
+            Step::Opponent(..) => self.team(s),
             Step::Ready(ready, _) => {
                 let message = ui::fill(s.dvw_skipped, &[ready.team]);
                 self.next_side(s, message, None);
@@ -427,10 +478,11 @@ impl DvwScreen {
         }
     }
 
+    /// Team A as chosen, checked against B only a name: on to team B.
     fn plan(&mut self, s: &Strings, team_id: Option<String>) {
         let choice = self.choice(team_id);
         match self.core.plan_dvw(self.bytes.to_vec(), choice.clone()) {
-            Ok(ready) => self.to(s, Step::Ready(ready, choice)),
+            Ok(_) => self.opponent(s, choice),
             // the new team still to fill in, as in the form
             Err(MobileError::InvalidTeam { field, reason }) => {
                 self.form.focused = match field {
@@ -445,6 +497,29 @@ impl DvwScreen {
                 self.next_side(s, message, None);
             }
         }
+    }
+
+    /// Team B: ours like the other team of the file, team A left out; the
+    /// team of the side imported before first, else the one the import was
+    /// asked from.
+    fn opponent(&mut self, s: &Strings, choice: DvwChoice) {
+        let first = self
+            .results
+            .iter()
+            .rev()
+            .find_map(|r| r.team_id.clone())
+            .or_else(|| self.from.clone())
+            .filter(|id| choice.team_id.as_ref() != Some(id));
+        let similar = self
+            .core
+            .dvw_similar_opponents(
+                self.bytes.to_vec(),
+                choice.side,
+                choice.team_id.clone(),
+                first,
+            )
+            .unwrap_or_default();
+        self.to(s, Step::Opponent(similar, choice));
     }
 
     fn save(&mut self, s: &Strings, ready: &DvwReady, choice: &DvwChoice) {
@@ -605,6 +680,12 @@ impl DvwScreen {
                                     ready.new_players.to_string()
                                 ]
                             )),
+                            Column::with_children(
+                                ready_details(s, ready)
+                                    .into_iter()
+                                    .map(|line| ui::body(line).color(c.muted).into())
+                            )
+                            .spacing(6),
                             warning,
                             ui::answers(
                                 Some((theme::icons::CLOSE, s.dvw_dont_import, Message::Skip)),
@@ -677,6 +758,27 @@ impl DvwScreen {
             c,
         )
     }
+}
+
+/// What else the import saves: team B, the numbers of the match, the
+/// competition.
+fn ready_details(s: &Strings, ready: &DvwReady) -> Vec<String> {
+    let opponent = std::slice::from_ref(&ready.opponent);
+    [
+        Some(match ready.opponent_new_players {
+            Some(n) => ui::fill(s.dvw_against_team, &[ready.opponent.clone(), n.to_string()]),
+            None => ui::fill(s.dvw_against_name, opponent),
+        }),
+        (ready.match_numbers > 0)
+            .then(|| ui::fill(s.dvw_match_numbers, &[ready.match_numbers.to_string()])),
+        ready
+            .competition
+            .as_ref()
+            .map(|c| ui::fill(s.dvw_competition, std::slice::from_ref(c))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 fn with_empty(names: impl Iterator<Item = String>) -> Vec<String> {
@@ -773,10 +875,24 @@ mod tests {
         assert!(dvw.form.error.is_some());
         new_team(&mut dvw);
         dvw.key(s, key!(enter));
+        // team B: no team like it, only its name to start
+        let Step::Opponent(similar, _) = &dvw.step else {
+            unreachable!("team B to choose: {:?}", dvw.form.error)
+        };
+        assert!(similar.is_empty());
+        assert_eq!(dvw.form.index(0), 0);
+        dvw.key(s, key!(enter));
         let Step::Ready(ready, _) = &dvw.step else {
             unreachable!("the import is checked: {:?}", dvw.form.error)
         };
         assert!(!ready.saved_already);
+        assert_eq!(
+            ready_details(s, ready),
+            vec![
+                "Contro Visiting (solo il nome)".to_string(),
+                "Competizione: Test".to_string()
+            ]
+        );
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Done));
         let Outcome::Team(team_id) = dvw.key(s, key!(enter)) else {
@@ -789,6 +905,8 @@ mod tests {
         dvw.key(s, key!(enter));
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Team(_)));
+        dvw.key(s, key!(enter));
+        assert!(matches!(dvw.step, Step::Opponent(..)));
         dvw.key(s, key!(enter));
         let Step::Ready(ready, _) = &dvw.step else {
             unreachable!("the import is checked")
@@ -840,6 +958,12 @@ mod tests {
         assert_eq!(similar.first().map(|t| t.id.clone()), Some(cortona.clone()));
         assert_eq!(similar_label(s, &similar[0]), "Cortona 2014");
         dvw.key(s, key!(enter));
+        // team B: Cortona left out
+        let Step::Opponent(similar, _) = &dvw.step else {
+            unreachable!("team B to choose")
+        };
+        assert!(similar.is_empty());
+        dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Ready(..)));
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Done));
@@ -879,6 +1003,7 @@ mod tests {
         dvw.key(s, key!(enter));
         dvw.key(s, key!(enter));
         new_team(&mut dvw);
+        dvw.key(s, key!(enter));
         dvw.key(s, key!(enter));
         dvw.key(s, key!(enter));
         let Outcome::Team(team_id) = dvw.key(s, key!(enter)) else {
@@ -924,6 +1049,66 @@ mod tests {
         assert_eq!(other.matches(team_id).unwrap().len(), 1);
         assert!(transfer::is_dvw("Partita.DVW"));
         assert!(!transfer::is_dvw("partita.zip"));
+    }
+
+    /// Both teams: the home one new, B created with the players of the
+    /// file; the visiting one into that team, B the home team proposed
+    /// first; two matches, two teams. Esc on team B goes back to team A.
+    #[test]
+    fn both_teams_the_second_against_the_first() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let mut dvw = screen(&core);
+        dvw.update(s, Message::Form(form::Message::Choose(0, 2)));
+        dvw.key(s, key!(enter));
+        dvw.key(s, key!(enter));
+        new_team(&mut dvw);
+        dvw.key(s, key!(enter));
+        assert!(matches!(dvw.step, Step::Opponent(..)));
+        assert!(matches!(dvw.key(s, BACK_KEY), Outcome::Stay));
+        assert!(matches!(dvw.step, Step::NewTeam(_)));
+        new_team(&mut dvw);
+        dvw.key(s, key!(enter));
+        // a new team with the players of the file: the last option
+        dvw.update(s, Message::Form(form::Message::Choose(0, 1)));
+        dvw.key(s, key!(enter));
+        let Step::Ready(ready, _) = &dvw.step else {
+            unreachable!("the import is checked: {:?}", dvw.form.error)
+        };
+        assert_eq!(
+            ready_details(s, ready)[0],
+            "Contro Visiting: giocatori nuovi 7"
+        );
+        dvw.key(s, key!(enter));
+        // the visiting team: the team B just made is like it
+        let Step::Team(similar) = &dvw.step else {
+            unreachable!("the visiting team is like team B")
+        };
+        assert_eq!(similar.len(), 1);
+        dvw.key(s, key!(enter));
+        let Step::Opponent(similar, _) = &dvw.step else {
+            unreachable!("team B to choose: {:?}", dvw.form.error)
+        };
+        assert_eq!(
+            similar.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            vec!["Home"]
+        );
+        dvw.key(s, key!(enter));
+        let Step::Ready(ready, _) = &dvw.step else {
+            unreachable!("the import is checked: {:?}", dvw.form.error)
+        };
+        assert_eq!(ready_details(s, ready)[0], "Contro Home: giocatori nuovi 0");
+        dvw.key(s, key!(enter));
+        assert!(matches!(dvw.step, Step::Done));
+        let teams = core.teams().unwrap();
+        assert_eq!(teams.len(), 2);
+        let first = dvw.results[0].team_id.clone().unwrap();
+        assert_eq!(
+            core.matches(first).unwrap().len(),
+            2,
+            "its own and the other"
+        );
     }
 
     #[test]

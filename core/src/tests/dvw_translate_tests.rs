@@ -1412,12 +1412,61 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         (crate::dvw::import::TeamPlan, crate::dvw::import::MatchPlan),
         crate::dvw::import::MatchIssue,
     > {
-        use crate::dvw::import::{match_date, match_plan, team_plan};
+        use crate::dvw::import::{
+            OpponentChoice, match_date, match_plan, opponent_plan, team_plan,
+        };
         let dvw = parse(text.as_bytes()).expect("expected a DataVolley file");
         let team = team_plan(&dvw, side, choice).expect("a team");
+        let opponent = opponent_plan(&dvw, side, &team.team, OpponentChoice::Name).expect("team B");
         let day = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
         let offset = chrono::FixedOffset::east_opt(3600).expect("an offset");
-        match_plan(&dvw, side, &team, match_date(&dvw, day, offset), 6).map(|m| (team, m))
+        let labels = crate::localization::Language::default().labels();
+        match_plan(
+            &dvw,
+            side,
+            &team,
+            &opponent,
+            match_date(&dvw, day, offset),
+            6,
+            labels,
+        )
+        .map(|m| (team, m))
+    }
+
+    /// The teams and the match of a side, team B as chosen; the file of
+    /// the league "Serie C Maschile", first leg, day 1.
+    fn planned_against(
+        text: &str,
+        side: Side,
+        choice: crate::dvw::import::TeamChoice,
+        opponent: crate::dvw::import::OpponentChoice,
+    ) -> (
+        crate::dvw::import::TeamPlan,
+        crate::dvw::import::OpponentPlan,
+        crate::dvw::import::MatchPlan,
+    ) {
+        use crate::dvw::import::{match_date, match_plan, opponent_plan, team_plan};
+        let text = text.replace(
+            "01/25/2015;;2014/2015;Test;;;;",
+            "01/25/2015;;2014/2015;Serie C Maschile;Andata;;1;",
+        );
+        let dvw = parse(text.as_bytes()).expect("expected a DataVolley file");
+        let team = team_plan(&dvw, side, choice).expect("a team");
+        let b = opponent_plan(&dvw, side, &team.team, opponent).expect("team B");
+        let day = NaiveDate::from_ymd_opt(2015, 1, 25).expect("a date");
+        let offset = chrono::FixedOffset::east_opt(3600).expect("an offset");
+        let labels = crate::localization::labels(crate::shapes::enums::LanguageEnum::It);
+        let plan = match_plan(
+            &dvw,
+            side,
+            &team,
+            &b,
+            match_date(&dvw, day, offset),
+            6,
+            labels,
+        )
+        .expect("a match");
+        (team, b, plan)
     }
 
     fn three_sets_won() -> File {
@@ -1595,7 +1644,9 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         use super::*;
         use crate::{
             analytics::finished::FinishedMatches,
-            dvw::import::{MatchPlan, TeamChoice, TeamPlan, match_exists, save_import},
+            dvw::import::{
+                MatchPlan, OpponentPlan, TeamChoice, TeamPlan, match_exists, save_import,
+            },
             errors::{AppError, MatchError},
             localization::Language,
             providers::{
@@ -1654,8 +1705,13 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 plan: &MatchPlan,
                 overwrite: bool,
             ) -> Result<MatchEntry, AppError> {
+                let opponent = match plan.input.opponent {
+                    crate::match_form::Opponent::Name(ref name) => OpponentPlan::Name(name.clone()),
+                    _ => panic!("team B a name"),
+                };
                 save_import(
                     team,
+                    &opponent,
                     plan,
                     overwrite,
                     &self.team_writer,
@@ -1665,6 +1721,33 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     &self.queued,
                 )
                 .await
+            }
+
+            async fn save_with(
+                &self,
+                team: &TeamPlan,
+                opponent: &OpponentPlan,
+                plan: &MatchPlan,
+                overwrite: bool,
+            ) -> Result<MatchEntry, AppError> {
+                save_import(
+                    team,
+                    opponent,
+                    plan,
+                    overwrite,
+                    &self.team_writer,
+                    &self.match_reader,
+                    &self.match_writer,
+                    &self.set_writer,
+                    &self.queued,
+                )
+                .await
+            }
+
+            fn text(&self, sql: &str) -> Option<String> {
+                self.db
+                    .read(|tx| Ok(tx.query_row(sql, [], |r| r.get(0)).expect("a row")))
+                    .expect("read")
             }
 
             fn queued(&self) -> Vec<(Uuid, String)> {
@@ -1915,6 +1998,245 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     .expect("an answer"),
                 None
             );
+        }
+
+        /// Team B a new team (D3): saved with the players of the other team
+        /// of the file, the season, level, gender and country of A; its
+        /// roster of the match with the numbers of the file; the
+        /// competition, the stage and the round of `[3MATCH]` (D12); the
+        /// match among those of B too.
+        #[tokio::test]
+        async fn a_new_team_b_with_its_players_and_the_competition() {
+            use crate::dvw::import::OpponentChoice;
+            let p = Providers::new();
+            let (team, b, plan) = planned_against(
+                &three_sets_won().text(),
+                Side::Home,
+                new_team(),
+                OpponentChoice::New,
+            );
+            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let b_id = b.team().expect("a team").team.id;
+            let read_b = p.team(&b_id).await;
+            assert_eq!((read_b.name.as_str(), read_b.year), ("Visiting", 2014));
+            assert_eq!(read_b.players.len(), 8);
+            let read_a = p.team(&team.team.id).await;
+            assert_eq!(
+                (read_b.classification, read_b.gender, read_b.country),
+                (read_a.classification, read_a.gender, read_a.country)
+            );
+            let m = format!("'{}'", saved.id);
+            assert_eq!(
+                p.text(&format!("SELECT team_b FROM matches WHERE id = {m}")),
+                Some(b_id.to_string())
+            );
+            assert_eq!(
+                p.text(&format!("SELECT team_b_name FROM matches WHERE id = {m}")),
+                None
+            );
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM match_roster WHERE match_id = {m} AND team_id = '{b_id}'"
+                )),
+                8
+            );
+            assert_eq!(
+                p.text(&format!(
+                    "SELECT group_concat(number, ',') FROM (SELECT number FROM match_roster
+                     WHERE match_id = {m} AND team_id = '{b_id}' ORDER BY number)"
+                )),
+                Some("11,12,13,14,15,16,17,18".to_string())
+            );
+            assert_eq!(
+                p.text(&format!(
+                    "SELECT c.name || '|' || c.format || '|' || c.season FROM matches m
+                     JOIN competitions c ON c.id = m.competition_id WHERE m.id = {m}"
+                )),
+                Some("Serie C Maschile|league|2014/2015".to_string())
+            );
+            assert_eq!(
+                p.text(&format!(
+                    "SELECT stage || '|' || round FROM matches WHERE id = {m}"
+                )),
+                Some("regular|Andata – giornata 1".to_string())
+            );
+            assert!(
+                p.match_reader
+                    .played_as_b(&read_b, &saved.id)
+                    .expect("an answer")
+                    .is_some()
+            );
+            // the match of A reads as before
+            let read = p
+                .match_reader
+                .read_single(&read_a, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.opponent, "Visiting");
+            assert_eq!(read.roster, team.roster);
+        }
+
+        /// The other side of the same file into team B of the first: a
+        /// second match (no "both" yet), B the team of the first side, the
+        /// competition the same.
+        #[tokio::test]
+        async fn the_other_side_against_the_team_of_the_first() {
+            use crate::dvw::import::OpponentChoice;
+            let p = Providers::new();
+            let text = three_sets_won().text();
+            let (home, b, plan) =
+                planned_against(&text, Side::Home, new_team(), OpponentChoice::New);
+            p.save_with(&home, &b, &plan, false).await.expect("saved");
+            let visiting = p.team(&b.team().expect("a team").team.id).await;
+            let first = p.team(&home.team.id).await;
+            let (team, b, plan) = planned_against(
+                &text,
+                Side::Visiting,
+                TeamChoice::Existing(&visiting),
+                OpponentChoice::Existing(&first),
+            );
+            assert!(team.new_players.is_empty());
+            assert!(b.team().expect("a team").new_players.is_empty());
+            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            assert_eq!(p.matches(), 2);
+            assert_eq!(p.sql("SELECT count(*) FROM teams"), 2);
+            assert_eq!(p.sql("SELECT count(*) FROM competitions"), 1);
+            assert_eq!(p.sql("SELECT count(*) FROM persons"), 16);
+            assert_eq!(
+                p.text(&format!(
+                    "SELECT team_b FROM matches WHERE id = '{}'",
+                    saved.id
+                )),
+                Some(first.id.to_string())
+            );
+        }
+
+        /// A player of A with another number in the file: the number of the
+        /// file in the roster of the match (D9), the team keeps its own.
+        #[tokio::test]
+        async fn the_number_of_the_file_on_the_score_sheet() {
+            use crate::dvw::import::OpponentChoice;
+            let p = Providers::new();
+            let mut ours = crate::shapes::team::TeamEntry {
+                name: "Home".to_string(),
+                year: 2014,
+                id: Uuid::new_v4(),
+                ..Default::default()
+            };
+            let three = crate::shapes::player::PlayerEntry {
+                name: "Name3 Surname3".to_string(),
+                number: 30,
+                ..Default::default()
+            };
+            ours.players.push(three.clone());
+            let (team, b, plan) = planned_against(
+                &three_sets_won().text(),
+                Side::Home,
+                TeamChoice::Existing(&ours),
+                OpponentChoice::Name,
+            );
+            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let read_team = p.team(&ours.id).await;
+            assert_eq!(read_team.find_player(three.id).map(|p| p.number), Some(30));
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT number FROM match_roster WHERE match_id = '{}' AND person_id = '{}'",
+                    saved.id, three.id
+                )),
+                3
+            );
+            let read = p
+                .match_reader
+                .read_single(&read_team, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.team.find_player(three.id).map(|p| p.number), Some(3));
+            // only a name: no roster of B
+            assert_eq!(p.sql("SELECT count(DISTINCT team_id) FROM match_roster"), 1);
+        }
+
+        /// Overwritten with only the name of B and the same file: what the
+        /// user changed and the file doesn't tell stays (B a team, the
+        /// neutral court, the notes); the competition of the file again.
+        #[tokio::test]
+        async fn overwritten_keeps_what_the_file_doesnt_tell() {
+            use crate::dvw::import::OpponentChoice;
+            let p = Providers::new();
+            let text = five_sets().text();
+            let (team, b, plan) =
+                planned_against(&text, Side::Visiting, new_team(), OpponentChoice::New);
+            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let b_id = b.team().expect("a team").team.id;
+            p.execute(&format!(
+                "UPDATE matches SET home = NULL, notes = 'mine', stage = 'playoff',
+                     round = NULL WHERE id = '{}'",
+                saved.id
+            ));
+            let saved_team = p.team(&team.team.id).await;
+            let (again, name, plan) = planned_against(
+                &text,
+                Side::Visiting,
+                TeamChoice::Existing(&saved_team),
+                OpponentChoice::Name,
+            );
+            assert_eq!(plan.entry.opponent, "Home");
+            assert!(
+                match_exists(&plan, &p.match_reader)
+                    .await
+                    .expect("an answer")
+            );
+            let overwritten = p
+                .save_with(&again, &name, &plan, true)
+                .await
+                .expect("overwritten");
+            assert_eq!(overwritten.id, saved.id);
+            assert_eq!(
+                p.text(&format!(
+                    "SELECT team_b || '|' || coalesce(home, 'neutral') || '|' || notes || '|' || stage || '|' || round
+                     FROM matches WHERE id = '{}'",
+                    saved.id
+                )),
+                Some(format!("{b_id}|neutral|mine|regular|Andata – giornata 1"))
+            );
+            // the roster of B stays as it was
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM match_roster WHERE match_id = '{}' AND team_id = '{b_id}'",
+                    saved.id
+                )),
+                8
+            );
+        }
+
+        /// Team B changed by the form to a name: its roster of the match
+        /// goes with it, the one of A stays.
+        #[tokio::test]
+        async fn the_roster_of_b_goes_with_it() {
+            use crate::{dvw::import::OpponentChoice, providers::match_writer::MatchWriter};
+            let p = Providers::new();
+            let (team, b, plan) = planned_against(
+                &three_sets_won().text(),
+                Side::Home,
+                new_team(),
+                OpponentChoice::New,
+            );
+            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            assert_eq!(p.sql("SELECT count(DISTINCT team_id) FROM match_roster"), 2);
+            p.match_writer
+                .update(
+                    &saved,
+                    crate::match_form::MatchInput {
+                        opponent: crate::match_form::Opponent::Name("Visiting".into()),
+                        ..plan.input.clone()
+                    },
+                )
+                .await
+                .expect("updated");
+            assert_eq!(
+                p.text("SELECT DISTINCT team_id FROM match_roster"),
+                Some(team.team.id.to_string())
+            );
+            assert_eq!(p.sql("SELECT count(*) FROM match_roster"), 8);
         }
     }
 }

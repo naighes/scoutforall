@@ -35,7 +35,8 @@ use scout4all_core::{
     storage::layout,
 };
 use scout4all_mobile::{
-    AnalysisPeriod, DetailFilter, DvwChoice, DvwSide, Scout4All, StatsScope, TeamListing,
+    AnalysisPeriod, DetailFilter, DvwChoice, DvwOpponent, DvwSide, Scout4All, StatsScope,
+    TeamListing,
 };
 use std::{
     fs,
@@ -151,6 +152,7 @@ fn seed(dvw: &Path, dir: &Path) -> R<Seeds> {
         let bytes = read(file)?;
         for side in [DvwSide::Home, DvwSide::Visiting] {
             let choice = DvwChoice {
+                opponent: DvwOpponent::Name,
                 side,
                 day: "2026-01-01".to_string(),
                 max_substitutions: 6,

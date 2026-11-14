@@ -21,9 +21,10 @@ use scout4all_core::{
     dvw::{
         self,
         import::{
-            MatchPlan, TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
-            match_date, match_exists, match_plan, save_import, season_year, similar_teams,
-            similarity, team_plan,
+            MatchPlan, OpponentChoice as DvwOpponentChoice, OpponentPlan,
+            TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
+            match_date, match_exists, match_plan, opponent_plan, save_import, season_year,
+            similar_teams, similarity, team_plan,
         },
         model::{DvwFile, MatchDate as DvwDate, Side},
     },
@@ -36,7 +37,7 @@ use scout4all_core::{
     },
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error, log_info},
-    match_form::{MatchForm, MatchFormError, RosterNumber},
+    match_form::{CompetitionInput, MatchForm, MatchFormError, RosterNumber},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
     player_form::{self, PlayerForm, PlayerFormError, name_the_removed},
     providers::{
@@ -943,6 +944,20 @@ pub struct DvwChoice {
     pub classification: Option<TeamClassificationEnum>,
     pub gender: Option<GenderEnum>,
     pub country: Option<CountryCode>,
+    /// Team B: the other team of the file.
+    pub opponent: DvwOpponent,
+}
+
+/// Team B of an imported match, as the user chose (D3).
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum DvwOpponent {
+    /// only its name, as written in the file
+    Name,
+    /// a team of ours, with the players of the file added
+    Team { id: String },
+    /// a new team with the name and the players of the file, of the
+    /// season, level, gender and country of team A
+    NewTeam,
 }
 
 /// The import checked, ready to save.
@@ -953,6 +968,17 @@ pub struct DvwReady {
     pub new_players: u32,
     /// The team has the match already: saved only when the user confirms.
     pub saved_already: bool,
+    /// Team B, its name, and the players of the file added to it when a
+    /// team (none when only a name).
+    pub opponent: String,
+    pub opponent_new_players: Option<u32>,
+    /// The players of team A with another number in the file: the number
+    /// of the match, the team unchanged.
+    pub match_numbers: u32,
+    /// What the file tells of the competition, as saved: "Serie C
+    /// Maschile · Regular season · Andata – giornata 1"; none when
+    /// nothing.
+    pub competition: Option<String>,
 }
 
 /// What an import saved.
@@ -4393,18 +4419,56 @@ impl Scout4All {
             .collect())
     }
 
+    /// Our teams like team B of the side, the most alike first, team A
+    /// `team_id` left out; `first`, the team of the side imported before,
+    /// before them all even if not alike.
+    pub fn dvw_similar_opponents(
+        &self,
+        bytes: Vec<u8>,
+        side: DvwSide,
+        team_id: Option<String>,
+        first: Option<String>,
+    ) -> Result<Vec<DvwSimilarTeam>, MobileError> {
+        let other = match side {
+            DvwSide::Home => DvwSide::Visiting,
+            DvwSide::Visiting => DvwSide::Home,
+        };
+        Ok(self
+            .dvw_similar_teams(bytes, other, first)?
+            .into_iter()
+            .filter(|t| team_id.as_ref() != Some(&t.id))
+            .collect())
+    }
+
     /// The import as chosen, checked: what it saves, or why it can't.
     pub fn plan_dvw(&self, bytes: Vec<u8>, choice: DvwChoice) -> Result<DvwReady, MobileError> {
         let file = self.parse_dvw(&bytes)?;
-        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let (team, opponent, plan) = self.dvw_plans(&file, &choice)?;
         let saved_already = self
             .runtime
             .block_on(match_exists(&plan, &self.match_reader))?;
+        let labels = self.language.labels();
+        let competition = [
+            plan.input.competition.as_ref().map(|c| match c {
+                CompetitionInput::New { name, .. } => name.clone(),
+                CompetitionInput::Existing(id) => id.to_string(),
+            }),
+            plan.input.stage.map(|s| s.name(labels).to_string()),
+            plan.input.round.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         Ok(DvwReady {
             team: team.team.name.clone(),
             sets: count_of(plan.entry.sets.len()),
             new_players: count_of(team.new_players.len()),
             saved_already,
+            opponent: opponent.name().to_string(),
+            opponent_new_players: opponent.team().map(|b| count_of(b.new_players.len())),
+            match_numbers: count_of(team.match_numbers.len()),
+            competition: Some(competition).filter(|c| !c.is_empty()),
         })
     }
 
@@ -4417,9 +4481,10 @@ impl Scout4All {
         overwrite: bool,
     ) -> Result<DvwImported, MobileError> {
         let file = self.parse_dvw(&bytes)?;
-        let (team, plan) = self.dvw_plans(&file, &choice)?;
+        let (team, opponent, plan) = self.dvw_plans(&file, &choice)?;
         let m = self.runtime.block_on(save_import(
             &team,
+            &opponent,
             &plan,
             overwrite,
             &self.team_writer,
@@ -4916,7 +4981,7 @@ impl Scout4All {
         &self,
         file: &DvwFile,
         choice: &DvwChoice,
-    ) -> Result<(TeamPlan, MatchPlan), MobileError> {
+    ) -> Result<(TeamPlan, OpponentPlan, MatchPlan), MobileError> {
         let labels = self.language.labels();
         let failed = |reason| MobileError::Failed { reason };
         let day = parse_day(&choice.day)?;
@@ -4942,10 +5007,29 @@ impl Scout4All {
             },
             other => failed(other.describe(labels)),
         })?;
-        let date = match_date(file, day, *Local::now().offset());
-        let plan = match_plan(file, side, &team, date, choice.max_substitutions)
+        let b = match &choice.opponent {
+            DvwOpponent::Team { id } => Some(self.read_team(id)?),
+            DvwOpponent::Name | DvwOpponent::NewTeam => None,
+        };
+        let opponent_choice = match (&choice.opponent, &b) {
+            (DvwOpponent::Team { .. }, Some(b)) => DvwOpponentChoice::Existing(b),
+            (DvwOpponent::NewTeam, _) => DvwOpponentChoice::New,
+            (DvwOpponent::Name | DvwOpponent::Team { .. }, _) => DvwOpponentChoice::Name,
+        };
+        let opponent = opponent_plan(file, side, &team.team, opponent_choice)
             .map_err(|e| failed(e.describe(labels)))?;
-        Ok((team, plan))
+        let date = match_date(file, day, *Local::now().offset());
+        let plan = match_plan(
+            file,
+            side,
+            &team,
+            &opponent,
+            date,
+            choice.max_substitutions,
+            labels,
+        )
+        .map_err(|e| failed(e.describe(labels)))?;
+        Ok((team, opponent, plan))
     }
 
     fn readable_teams(&self) -> Result<Vec<TeamEntry>, MobileError> {
@@ -6297,7 +6381,12 @@ mod tests {
         assert_eq!(
             listed
                 .iter()
-                .map(|c| (c.name.as_str(), c.season.as_deref(), c.format.as_str(), c.matches))
+                .map(|c| (
+                    c.name.as_str(),
+                    c.season.as_deref(),
+                    c.format.as_str(),
+                    c.matches
+                ))
                 .collect::<Vec<_>>(),
             vec![
                 ("Coppa", Some("2026/2027"), "Campionato", 1),
@@ -6343,7 +6432,8 @@ mod tests {
         let read = app.match_form(team.clone(), matches[0].clone()).unwrap();
         assert_eq!((read.competition.as_str(), read.competition_id), ("", None));
         // the match stays, saved again as it is
-        app.save_match(team, Some(matches[0].clone()), read).unwrap();
+        app.save_match(team, Some(matches[0].clone()), read)
+            .unwrap();
     }
 
     /// Number and role corrected on the score sheet: a wrong one refused
@@ -8885,6 +8975,7 @@ mod tests {
 
     fn dvw_choice(side: DvwSide, team_id: Option<String>) -> DvwChoice {
         DvwChoice {
+            opponent: DvwOpponent::Name,
             side,
             day: "2015-01-25".into(),
             max_substitutions: 6,
@@ -9027,6 +9118,10 @@ mod tests {
                 sets: 3,
                 new_players: 7,
                 saved_already: false,
+                opponent: "Visiting".into(),
+                opponent_new_players: None,
+                match_numbers: 0,
+                competition: Some("Test".into()),
             }
         );
         assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
@@ -9097,6 +9192,80 @@ mod tests {
                 }]
             ),
             "{matches:?}"
+        );
+    }
+
+    /// Team B: the teams like the other team of the file proposed, team A
+    /// left out, the team of the side imported before first; a new team
+    /// with the players of the file, told in the check; both sides, two
+    /// matches, the second against the team of the first.
+    #[test]
+    fn a_datavolley_match_against_a_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let home = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), home.clone()).unwrap();
+        assert_eq!(
+            (ready.opponent.as_str(), ready.opponent_new_players),
+            ("Visiting", Some(7))
+        );
+        assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
+        let first = app.import_dvw(THREE_SETS.to_vec(), home, false).unwrap();
+        let visiting = app
+            .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting, None)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect::<Vec<_>>();
+        assert_eq!(visiting.len(), 1, "team B saved, like the visiting team");
+        // the visiting side into team B of the first: team A first among
+        // its opponents, itself left out
+        let opponents = |team_id: Option<String>, first: Option<String>| {
+            app.dvw_similar_opponents(THREE_SETS.to_vec(), DvwSide::Visiting, team_id, first)
+                .unwrap()
+                .into_iter()
+                .map(|t| t.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            opponents(visiting.first().cloned(), Some(first.team_id.clone())),
+            vec![first.team_id.clone()]
+        );
+        assert_eq!(
+            opponents(Some(first.team_id.clone()), None),
+            Vec::<String>::new()
+        );
+        let second = DvwChoice {
+            opponent: DvwOpponent::Team {
+                id: first.team_id.clone(),
+            },
+            ..dvw_choice(DvwSide::Visiting, visiting.first().cloned())
+        };
+        let ready = app.plan_dvw(THREE_SETS.to_vec(), second.clone()).unwrap();
+        assert_eq!(
+            (
+                ready.new_players,
+                ready.opponent_new_players,
+                ready.saved_already
+            ),
+            (0, Some(0), false)
+        );
+        assert_eq!(ready.competition.as_deref(), Some("Test"));
+        app.import_dvw(THREE_SETS.to_vec(), second, false).unwrap();
+        assert_eq!(app.teams().unwrap().len(), 2);
+        // team A as B: refused, said
+        let itself = DvwChoice {
+            opponent: DvwOpponent::Team {
+                id: first.team_id.clone(),
+            },
+            ..dvw_choice(DvwSide::Home, Some(first.team_id.clone()))
+        };
+        assert_eq!(
+            reason(app.plan_dvw(THREE_SETS.to_vec(), itself)),
+            "team B can't be team A"
         );
     }
 

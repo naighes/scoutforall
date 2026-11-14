@@ -959,13 +959,39 @@ mod tests {
                 ..m.clone()
             },
         );
-        p.match_writer.replace_details(&away).await.unwrap();
+        p.match_writer
+            .replace_details(
+                &away,
+                crate::match_form::MatchInput::against(
+                    &away.opponent,
+                    away.date,
+                    away.home,
+                    away.max_substitutions,
+                    &away.notes,
+                    away.roster.clone(),
+                ),
+            )
+            .await
+            .unwrap();
         assert_eq!(
             count(&db, "SELECT count(*) FROM matches WHERE home IS NULL"),
             1
         );
         assert!(!p.match_reader.read_single(&team, &m.id).await.unwrap().home);
-        p.match_writer.replace_details(&home).await.unwrap();
+        p.match_writer
+            .replace_details(
+                &home,
+                crate::match_form::MatchInput::against(
+                    &home.opponent,
+                    home.date,
+                    home.home,
+                    home.max_substitutions,
+                    &home.notes,
+                    home.roster.clone(),
+                ),
+            )
+            .await
+            .unwrap();
         assert_eq!(
             count(&db, "SELECT count(*) FROM matches WHERE home = 'a'"),
             1

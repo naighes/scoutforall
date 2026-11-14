@@ -333,6 +333,13 @@
     <string name="dvw_new_team">Create a new team</string>
     <string name="dvw_new_team_of">The new team %1$s %2$s: its gender, country and classification</string>
     <string name="dvw_ready">%1$s: sets %2$d, new players %3$d. Save it?</string>
+    <string name="dvw_opponent_question">Team B, %1$s: use a similar team, keep only its name, or create it with the players of the file</string>
+    <string name="dvw_opponent_name">Only the name %1$s</string>
+    <string name="dvw_opponent_new">Create the team %1$s with the players of the file</string>
+    <string name="dvw_against_team">Against %1$s: new players %2$d</string>
+    <string name="dvw_against_name">Against %1$s (only the name)</string>
+    <string name="dvw_match_numbers">Players with another number in this match: %1$d</string>
+    <string name="dvw_competition">Competition: %1$s</string>
     <string name="dvw_already_saved">%1$s has this match already: overwrite it?</string>
     <string name="dvw_overwrite">Overwrite it</string>
     <string name="dvw_dont_import">Don\'t import it</string>

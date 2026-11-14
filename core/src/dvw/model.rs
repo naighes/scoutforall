@@ -12,6 +12,14 @@ pub enum Side {
 }
 
 impl Side {
+    /// The other team of the file.
+    pub fn other(self) -> Side {
+        match self {
+            Side::Home => Side::Visiting,
+            Side::Visiting => Side::Home,
+        }
+    }
+
     pub(crate) fn from_marker(marker: char) -> Option<Side> {
         match marker {
             '*' => Some(Side::Home),
@@ -72,6 +80,8 @@ pub struct MatchInfo {
     pub season: Option<String>,
     pub league: Option<String>,
     pub phase: Option<String>,
+    /// The day of the league, as written (`3`): the sixth field.
+    pub day_number: Option<String>,
     /// The code page declared by the file, e.g. `1250`, or `UTF-8`.
     pub text_encoding: Option<String>,
 }

@@ -5,6 +5,7 @@
 use crate::{
     analytics::finished::FinishedMatches,
     constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
+    domain::{CompetitionFormat, Stage},
     dvw::{
         model::{DvwFile, DvwRole, MatchDate, Player, Side},
         translate::{
@@ -13,7 +14,7 @@ use crate::{
     },
     errors::{AppError, MatchError},
     localization::Labels,
-    match_form::MatchInput,
+    match_form::{CompetitionInput, MatchInput, Opponent, RosterNumber},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -55,6 +56,9 @@ pub enum TeamIssue {
         file: String,
         team: String,
     },
+    /// Team B chosen is team A.
+    #[error("team B is team A")]
+    OpponentIsTeamA,
 }
 
 /// A team of ours like the one of the file, and why: the same season, and
@@ -96,6 +100,9 @@ pub struct TeamPlan {
     pub roster: Vec<Uuid>,
     /// The number of each player of the file.
     pub numbers: HashMap<u8, Uuid>,
+    /// The players of the team with another number in the file: the
+    /// number of the match (D9), the team unchanged.
+    pub match_numbers: Vec<RosterNumber>,
     /// The numbers of the liberos of the file.
     pub liberos: Vec<u8>,
 }
@@ -180,10 +187,11 @@ pub fn similarity<'a>(file: &DvwFile, side: Side, team: &'a TeamEntry) -> Simila
 }
 
 /// The team with the players of the side: those of the team by number and
-/// surname, the others added. A player of the team with the number and
-/// another surname stops the import.
+/// surname, or by the whole name with another number (the number is then
+/// the one of the match, D9), the others added. A player of the team with
+/// the number and another surname stops the import.
 pub fn team_plan(file: &DvwFile, side: Side, choice: TeamChoice) -> Result<TeamPlan, TeamIssue> {
-    let (mut team, new_team) = match choice {
+    let (team, new_team) = match choice {
         TeamChoice::Existing(team) => (team.clone(), false),
         TeamChoice::New {
             classification,
@@ -205,26 +213,121 @@ pub fn team_plan(file: &DvwFile, side: Side, choice: TeamChoice) -> Result<TeamP
             true,
         ),
     };
+    with_players(file, side, team, new_team)
+}
+
+/// Team B of the match of the side, as the user chose it (D3).
+#[derive(Debug, Clone)]
+pub enum OpponentChoice<'a> {
+    /// only its name, as written in the file
+    Name,
+    /// a team of ours, with the players of the file added
+    Existing(&'a TeamEntry),
+    /// a new team with the name and the players of the file, of the
+    /// season, level, gender and country of team A (likely of its league)
+    New,
+}
+
+/// Team B as the import saves it.
+#[derive(Debug, Clone)]
+pub enum OpponentPlan {
+    Name(String),
+    Team(TeamPlan),
+}
+
+impl OpponentPlan {
+    pub fn name(&self) -> &str {
+        match self {
+            OpponentPlan::Name(name) => name,
+            OpponentPlan::Team(plan) => &plan.team.name,
+        }
+    }
+
+    pub fn team(&self) -> Option<&TeamPlan> {
+        match self {
+            OpponentPlan::Name(_) => None,
+            OpponentPlan::Team(plan) => Some(plan),
+        }
+    }
+}
+
+/// Team B of the match of the side for team A `a`: the other team of the
+/// file, as chosen; its players paired as those of A.
+pub fn opponent_plan(
+    file: &DvwFile,
+    side: Side,
+    a: &TeamEntry,
+    choice: OpponentChoice,
+) -> Result<OpponentPlan, TeamIssue> {
+    let other = side.other();
+    match choice {
+        OpponentChoice::Name => Ok(OpponentPlan::Name(file.team(other).name.trim().to_string())),
+        OpponentChoice::Existing(b) if b.id == a.id => Err(TeamIssue::OpponentIsTeamA),
+        OpponentChoice::Existing(b) => {
+            with_players(file, other, b.clone(), false).map(OpponentPlan::Team)
+        }
+        OpponentChoice::New => {
+            let b = TeamEntry {
+                name: file.team(other).name.trim().to_string(),
+                year: a.year,
+                players: vec![],
+                id: Uuid::new_v4(),
+                classification: a.classification,
+                gender: a.gender,
+                country: a.country,
+            };
+            with_players(file, other, b, true).map(OpponentPlan::Team)
+        }
+    }
+}
+
+fn with_players(
+    file: &DvwFile,
+    side: Side,
+    mut team: TeamEntry,
+    new_team: bool,
+) -> Result<TeamPlan, TeamIssue> {
     let mut file_players: Vec<&Player> = file.players(side).iter().collect();
     file_players.sort_by_key(|p| p.number);
     let mut new_players = vec![];
-    let mut numbers = HashMap::new();
+    let mut numbers: HashMap<u8, Uuid> = HashMap::new();
+    let mut match_numbers = vec![];
     for p in file_players {
+        let taken: Vec<Uuid> = numbers.values().copied().collect();
+        let free = |t: &&PlayerEntry| !taken.contains(&t.id);
         let id = match (
-            active_with_number(&team, p.number),
+            active_with_number(&team, p.number).filter(|t| same(t, p)),
+            team.players
+                .iter()
+                .filter(free)
+                .find(|t| !t.deleted && same_name(t, p)),
             removed_with_number(&team, p),
+            team.players
+                .iter()
+                .filter(free)
+                .find(|t| t.deleted && same_name(t, p)),
+            active_with_number(&team, p.number),
         ) {
-            (Some(t), _) if same(t, p) => t.id,
-            (Some(t), _) => {
+            (Some(t), ..) => t.id,
+            // with another number in the file: the one of the match
+            (None, Some(t), ..) | (None, None, None, Some(t), _) => {
+                match_numbers.push(RosterNumber {
+                    player: t.id,
+                    number: p.number,
+                    role: t.role,
+                });
+                t.id
+            }
+            // removed since: the same player, still there for the match
+            (None, None, Some(t), ..) => t.id,
+            (None, None, None, None, Some(t)) => {
                 return Err(TeamIssue::PlayerConflict {
                     number: p.number,
                     file: full_name(p),
                     team: t.name.clone(),
                 });
             }
-            // removed since: the same player, still there for the match
-            (None, Some(t)) => t.id,
-            (None, None) => {
+            (None, None, None, None, None) => {
                 let player = PlayerEntry {
                     name: full_name(p),
                     role: role(p),
@@ -253,6 +356,7 @@ pub fn team_plan(file: &DvwFile, side: Side, choice: TeamChoice) -> Result<TeamP
         new_players,
         roster: by_number.into_iter().map(|(_, id)| id).collect(),
         numbers,
+        match_numbers,
         liberos,
     })
 }
@@ -267,6 +371,16 @@ fn removed_with_number<'a>(team: &'a TeamEntry, p: &Player) -> Option<&'a Player
     team.players
         .iter()
         .find(|t| t.deleted && t.number == p.number && same(t, p))
+}
+
+// the whole name of the file as ours, either way round: the same person
+// with another number
+fn same_name(ours: &PlayerEntry, p: &Player) -> bool {
+    let name = normalized(&ours.name);
+    let (first, surname) = (normalized(&p.name), normalized(&p.surname));
+    !first.is_empty()
+        && !surname.is_empty()
+        && (name == format!("{first} {surname}") || name == format!("{surname} {first}"))
 }
 
 // the surname of the file at the end of the name of ours ("Nome Cognome")
@@ -353,6 +467,128 @@ pub enum MatchIssue {
 pub struct MatchPlan {
     pub entry: MatchEntry,
     pub mappings: Mappings,
+    /// What the match is saved with: team B, the numbers of the match, the
+    /// competition, its stage and round.
+    pub input: MatchInput,
+    /// The players of team B in the file with their numbers, when B is a
+    /// team: its roster of the match.
+    pub roster_b: Vec<RosterNumber>,
+}
+
+/// What `[3MATCH]` tells of the competition (D12): the league a
+/// competition (one of the season of team A with its name, or a new one),
+/// the stage only from words that tell it, the phase and the day of the
+/// league the round.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MatchDetails {
+    pub competition: Option<CompetitionInput>,
+    pub stage: Option<Stage>,
+    pub round: Option<String>,
+}
+
+pub fn match_details(file: &DvwFile, labels: &Labels) -> MatchDetails {
+    let info = &file.match_info;
+    let league = info
+        .league
+        .as_deref()
+        .map(str::trim)
+        .filter(|l| !l.is_empty());
+    let phase = info
+        .phase
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    let day = info
+        .day_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty());
+    MatchDetails {
+        competition: league.map(|name| CompetitionInput::New {
+            name: name.to_string(),
+            format: format_of(name),
+        }),
+        stage: phase
+            .and_then(stage_of)
+            .or_else(|| league.and_then(stage_of)),
+        round: match (phase, day) {
+            (Some(phase), Some(day)) => Some(
+                labels
+                    .dvw_phase_day
+                    .replace("{phase}", phase)
+                    .replace("{day}", day),
+            ),
+            (Some(phase), None) => Some(phase.to_string()),
+            (None, Some(day)) => Some(labels.dvw_day.replace("{day}", day)),
+            (None, None) => None,
+        },
+    }
+}
+
+// the words of a name, normalized, glued where a word is often split
+// ("play off", "final four")
+fn words(text: &str) -> Vec<String> {
+    normalized(text)
+        .replace("play off", "playoff")
+        .replace("play out", "playout")
+        .split(' ')
+        .map(str::to_string)
+        .collect()
+}
+
+fn format_of(league: &str) -> CompetitionFormat {
+    let words = words(league);
+    let any = |prefixes: &[&str]| {
+        words
+            .iter()
+            .any(|w| prefixes.iter().any(|p| w.starts_with(p)))
+    };
+    match (
+        any(&["coppa", "cup", "pokal", "puchar", "copa", "taca"]),
+        any(&[
+            "torneo",
+            "tournament",
+            "turniej",
+            "torneio",
+            "trofeo",
+            "memorial",
+        ]),
+    ) {
+        (true, _) => CompetitionFormat::Cup,
+        (false, true) => CompetitionFormat::Tournament,
+        (false, false) => CompetitionFormat::League,
+    }
+}
+
+/// The stage a phase or a league tells by its words, if any.
+fn stage_of(text: &str) -> Option<Stage> {
+    let words = words(text);
+    let any = |prefixes: &[&str]| {
+        words
+            .iter()
+            .any(|w| prefixes.iter().any(|p| w.starts_with(p)))
+    };
+    [
+        (&["playoff"][..], Stage::Playoff),
+        (&["playout"][..], Stage::Playout),
+        (&["qualif", "kwalif"][..], Stage::Qualification),
+        (
+            &["placement", "piazzament", "classificazion"][..],
+            Stage::Placement,
+        ),
+        (
+            &["final", "semifinal", "quarterfinal", "finale"][..],
+            Stage::FinalRound,
+        ),
+        (&["pool"][..], Stage::Pool),
+        (
+            &["andata", "ritorno", "regular", "regolare"][..],
+            Stage::Regular,
+        ),
+    ]
+    .into_iter()
+    .find(|(prefixes, _)| any(prefixes))
+    .map(|(_, stage)| stage)
 }
 
 /// When the match was played: the day (chosen by the user when the file
@@ -367,24 +603,23 @@ pub fn match_date(file: &DvwFile, day: NaiveDate, offset: FixedOffset) -> DateTi
 
 /// The match of the side: every set of the file translated exactly, with
 /// its final score as `[3SET]` writes it, and the match finished; against
-/// the other team of the file.
+/// team B as chosen, with what the file tells of the competition.
+#[allow(clippy::too_many_arguments)]
 pub fn match_plan(
     file: &DvwFile,
     side: Side,
     team: &TeamPlan,
+    opponent: &OpponentPlan,
     date: DateTime<FixedOffset>,
     max_substitutions: u8,
+    labels: &Labels,
 ) -> Result<MatchPlan, MatchIssue> {
     let us = Us {
         side,
         players: &team.numbers,
         liberos: &team.liberos,
     };
-    let other = match side {
-        Side::Home => Side::Visiting,
-        Side::Visiting => Side::Home,
-    };
-    let opponent = file.team(other).name.trim().to_string();
+    let opponent_name = opponent.name().to_string();
     let mut sets = vec![];
     let mut mappings = Mappings::new();
     for result in &file.sets {
@@ -418,10 +653,13 @@ pub fn match_plan(
         return Err(MatchIssue::NoSets);
     }
     let entry = MatchEntry {
-        id: MatchEntry::id_of(&opponent, &date),
-        opponent,
+        id: MatchEntry::id_of(&opponent_name, &date),
+        opponent: opponent_name.clone(),
         date,
-        team: team.team.with_roster(&team.roster),
+        team: team
+            .team
+            .with_match_numbers(&team.match_numbers)
+            .with_roster(&team.roster),
         home: side == Side::Home,
         max_substitutions,
         notes: String::new(),
@@ -433,13 +671,54 @@ pub fn match_plan(
     if let Some(issue) = entry.replay_issue() {
         return Err(MatchIssue::Replay(issue));
     }
+    let details = match_details(file, labels);
+    let input = MatchInput {
+        opponent: match opponent {
+            OpponentPlan::Name(name) => Opponent::Name(name.clone()),
+            OpponentPlan::Team(b) => Opponent::Team(b.team.id),
+        },
+        numbers: team.match_numbers.clone(),
+        competition: details.competition,
+        stage: details.stage,
+        round: details.round,
+        ..MatchInput::against(
+            &opponent_name,
+            entry.date,
+            entry.home,
+            max_substitutions,
+            "",
+            entry.roster.clone(),
+        )
+    };
+    let roster_b = opponent.team().map(numbers_of).unwrap_or_default();
     match entry.get_status() {
-        Ok(status) if status.match_finished => Ok(MatchPlan { entry, mappings }),
+        Ok(status) if status.match_finished => Ok(MatchPlan {
+            entry,
+            mappings,
+            input,
+            roster_b,
+        }),
         _ => Err(MatchIssue::Unfinished),
     }
 }
 
-/// Whether the team has the match already: the import overwrites it only
+// the players of the file with their numbers in it
+fn numbers_of(plan: &TeamPlan) -> Vec<RosterNumber> {
+    let mut by_number: Vec<(u8, Uuid)> = plan.numbers.iter().map(|(n, id)| (*n, *id)).collect();
+    by_number.sort_by_key(|(n, _)| *n);
+    by_number
+        .into_iter()
+        .filter_map(|(number, id)| {
+            plan.team.find_player(id).map(|p| RosterNumber {
+                player: id,
+                number,
+                role: p.role,
+            })
+        })
+        .collect()
+}
+
+/// Whether team A has the match already: the import overwrites it only
 /// when the user confirms.
 pub async fn match_exists(
     plan: &MatchPlan,
@@ -459,13 +738,16 @@ async fn saved_as(
         .await
 }
 
-/// Saves the import: the team with its new players, then the match and
-/// its sets, in place of the one saved when `overwrite` (its sets beyond
-/// the imported ones removed), and the match queued for the statistics as
-/// any finished match. A match saved and not to overwrite: nothing saved.
+/// Saves the import: team A with its new players, team B with its own when
+/// a team, then the match and its sets, in place of the one saved when
+/// `overwrite` (what the file doesn't tell kept, its sets beyond the
+/// imported ones removed), the roster of B, and the match queued for the
+/// statistics as any finished match. A match saved and not to overwrite:
+/// nothing saved.
 #[allow(clippy::too_many_arguments)]
 pub async fn save_import(
     team: &TeamPlan,
+    opponent: &OpponentPlan,
     plan: &MatchPlan,
     overwrite: bool,
     team_writer: &(impl TeamWriter + Sync + ?Sized),
@@ -483,13 +765,20 @@ pub async fn save_import(
     let saved_team = team_writer
         .save(TeamInput::Existing(team.team.clone()))
         .await?;
+    if let Some(b) = opponent.team() {
+        team_writer
+            .save(TeamInput::Existing(b.team.clone()))
+            .await?;
+    }
     let m = match saved {
         Some(id) => {
             let entry = &MatchEntry {
                 id,
                 ..plan.entry.clone()
             };
-            match_writer.replace_details(entry).await?;
+            match_writer
+                .replace_details(entry, plan.input.clone())
+                .await?;
             MatchEntry {
                 sets: vec![],
                 ..entry.clone()
@@ -497,19 +786,7 @@ pub async fn save_import(
         }
         None => {
             let entry = &plan.entry;
-            let created = match_writer
-                .create(
-                    &saved_team,
-                    MatchInput::against(
-                        &entry.opponent,
-                        entry.date,
-                        entry.home,
-                        entry.max_substitutions,
-                        &entry.notes,
-                        entry.roster.clone(),
-                    ),
-                )
-                .await?;
+            let created = match_writer.create(&saved_team, plan.input.clone()).await?;
             match_writer
                 .save_source(&created, entry.source, entry.video_clock)
                 .await?
@@ -520,6 +797,9 @@ pub async fn save_import(
             Some(set) => set_writer.update(&m, set).await?,
             None => set_writer.remove(&m, set_number).await?,
         }
+    }
+    if opponent.team().is_some() {
+        match_writer.save_roster_of_b(&m, &plan.roster_b).await?;
     }
     finished.finished(saved_team.id, m.id.clone()).await;
     Ok(MatchEntry {
@@ -532,6 +812,7 @@ impl TeamIssue {
     pub fn describe(&self, labels: &Labels) -> String {
         match self {
             TeamIssue::NoYear => labels.dvw_no_year.to_string(),
+            TeamIssue::OpponentIsTeamA => labels.opponent_is_team_a.to_string(),
             TeamIssue::Incomplete(e) => e.message(labels),
             TeamIssue::PlayerConflict { number, file, team } => labels
                 .dvw_player_conflict

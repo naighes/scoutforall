@@ -1028,7 +1028,7 @@ pub fn written(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DetailFilter, DvwChoice, DvwSide, StatsScope};
+    use crate::{DetailFilter, DvwChoice, DvwOpponent, DvwSide, StatsScope};
     use scout4all_core::shapes::{
         country::CountryCode,
         enums::{EventTypeEnum, GenderEnum, TeamClassificationEnum},
@@ -1124,6 +1124,7 @@ mod tests {
     fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let choice = DvwChoice {
+            opponent: DvwOpponent::Name,
             side: DvwSide::Home,
             day: "2015-01-25".into(),
             max_substitutions: 6,

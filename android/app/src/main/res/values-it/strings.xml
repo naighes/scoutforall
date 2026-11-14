@@ -332,6 +332,13 @@
     <string name="dvw_new_team">Crea una squadra nuova</string>
     <string name="dvw_new_team_of">La nuova squadra %1$s %2$s: genere, nazione e classificazione</string>
     <string name="dvw_ready">%1$s: set %2$d, giocatori nuovi %3$d. La salvi?</string>
+    <string name="dvw_opponent_question">L\'avversaria, %1$s: usa una squadra simile, tieni solo il nome, o creala con i giocatori del file</string>
+    <string name="dvw_opponent_name">Solo il nome %1$s</string>
+    <string name="dvw_opponent_new">Crea la squadra %1$s con i giocatori del file</string>
+    <string name="dvw_against_team">Contro %1$s: giocatori nuovi %2$d</string>
+    <string name="dvw_against_name">Contro %1$s (solo il nome)</string>
+    <string name="dvw_match_numbers">Giocatori con un altro numero in questa partita: %1$d</string>
+    <string name="dvw_competition">Competizione: %1$s</string>
     <string name="dvw_already_saved">%1$s ha già questa partita: la sovrascrivi?</string>
     <string name="dvw_overwrite">Sovrascrivila</string>
     <string name="dvw_dont_import">Non importarla</string>
