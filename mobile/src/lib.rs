@@ -8936,9 +8936,15 @@ mod tests {
     }
 
     fn eventually(what: impl Fn() -> bool) -> bool {
+        // true once seen: not asked again, the state may move on meanwhile
+        // (a second attempt of the upload)
         let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while std::time::Instant::now() < end && !what() {
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        loop {
+            match (what(), std::time::Instant::now() < end) {
+                (true, _) => return true,
+                (false, false) => return false,
+                (false, true) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
         }
     }
 
