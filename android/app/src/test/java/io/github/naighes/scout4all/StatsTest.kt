@@ -167,3 +167,41 @@ class ZoneAttacksLanguageTest(private val language: String, private val count: S
         rule.waitForText(count)
     }
 }
+
+/** The trend of a match: the errors of each figure, all or the unforced
+ * only, and the points of each set in order, as TalkBack reads them (their
+ * text, `readAs`). */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+class TrendTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun theErrorsAndThePointsOfTheSets() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        core { c ->
+            c.scouting(team, match).use { s ->
+                // our serve error (unforced), then their ace (forced)
+                s.chooseEval(EvalEnum.ERROR)
+                s.chooseEvent(EventTypeEnum.P)
+                s.choosePlayer(s.playerChoices().first().id)
+                s.chooseEval(EvalEnum.ERROR)
+            }
+        }
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.point_sequence))
+        val chart = { name: String, errors: Int ->
+            hasText(name) and hasText(string(R.string.trend_errors_said, errors), substring = true)
+        }
+        rule.onNode(chart("Reception", 1)).assertExists()
+        rule.onNode(chart("Serve", 1)).assertExists()
+        rule.onNode(hasText(string(R.string.trend_unforced_only)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(chart("Reception", 0)).assertExists()
+        rule.onNode(chart("Serve", 1)).assertExists()
+        // two points of theirs: 0-1, 0-2
+        rule.onNode(hasText("${string(R.string.set_n, 1)}: 0-1, 0-2")).assertExists()
+    }
+}

@@ -1711,6 +1711,9 @@ pub struct LiveStats {
     pub trend: Vec<TrendLine>,
     /// the points of every set so far, in order, whatever the scope
     pub points: Vec<SetPoints>,
+    /// our team and theirs, to name the rows of the points
+    pub team_name: String,
+    pub opponent: String,
     /// the six rotations, in order, played or not
     pub rotations: Vec<RotationStats>,
 }
@@ -2393,7 +2396,7 @@ impl Scouting {
             &session.sets(),
             scope,
             current_match.max_substitutions,
-            &current_match.team,
+            (&current_match.team, &current_match.opponent),
             self.labels,
         )
     }
@@ -2426,7 +2429,7 @@ fn live_stats(
     all: &[&SetEntry],
     scope: StatsScope,
     max_substitutions: u8,
-    team: &TeamEntry,
+    (team, opponent): (&TeamEntry, &str),
     labels: &Labels,
 ) -> Result<LiveStats, MobileError> {
     let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
@@ -2436,6 +2439,8 @@ fn live_stats(
         sets: all.iter().map(|s| s.set_number).collect(),
         trend,
         points,
+        team_name: team.name.clone(),
+        opponent: opponent.to_string(),
         ..summary(&stats, &StatsFilter::default(), team, labels)
     })
 }
@@ -2531,6 +2536,8 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
         graded: team.classification.is_some() && team.gender.is_some(),
         trend: vec![],
         points: vec![],
+        team_name: team.name.clone(),
+        opponent: String::new(),
         rotations: by_rotation_in(stats, filter)
             .into_iter()
             .map(|r| RotationStats {
@@ -3745,7 +3752,7 @@ impl Scout4All {
             &sets,
             scope,
             m.max_substitutions,
-            &m.team,
+            (&m.team, &m.opponent),
             self.language.labels(),
         )
     }

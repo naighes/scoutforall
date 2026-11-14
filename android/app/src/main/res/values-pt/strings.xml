@@ -187,6 +187,12 @@
     <string name="error_dig">Defesa</string>
     <string name="trend_so_far">Até agora</string>
     <string name="trend_recent">Últimos 10 toques</string>
+    <string name="trend_all_errors">Todos os erros em vermelho</string>
+    <string name="trend_unforced_only">Só não forçados</string>
+    <string name="trend_errors">erros</string>
+    <string name="trend_unforced">erros não forçados</string>
+    <string name="point_sequence">Sequência de pontos</string>
+    <string name="trend_errors_said">%1$d erros</string>
     <string name="set_team_level">Defina o nível e o gênero da equipe para ver as cores</string>
     <string name="stats_detail">Detalhe</string>
     <string name="rotations">Rodízios</string>

@@ -251,8 +251,6 @@ pub struct StatsScreen {
     pub team_id: String,
     pub source: Source,
     title: String,
-    /// our team and theirs, for the points in a row under the trend
-    sides: (String, String),
     page: usize,
     scope: StatsScope,
     live: Option<LiveStats>,
@@ -523,7 +521,7 @@ const POINT_WIDTH: f32 = 26.0;
 /// it, in its color; the names on the left stay, the points scroll across.
 fn points_view<'a>(
     sets: &'a [scout4all_mobile::SetPoints],
-    sides: &(String, String),
+    sides: (&String, &String),
     s: &'static Strings,
     c: Colors,
 ) -> Element<'a, Message> {
@@ -636,7 +634,6 @@ impl StatsScreen {
             Source::Match(match_id),
             format!("{team} – {opponent}"),
         );
-        screen.sides = (team, opponent);
         screen.live = Some(live);
         screen.has_video = has_video;
         screen.load();
@@ -663,7 +660,6 @@ impl StatsScreen {
         let today = Local::now().date_naive();
         let choices = core.situation_choices();
         StatsScreen {
-            sides: (String::new(), String::new()),
             core,
             team_id,
             source,
@@ -1945,7 +1941,7 @@ impl StatsScreen {
             true => space::vertical().height(0).into(),
             false => column![
                 ui::section(s.point_sequence, c),
-                points_view(&live.points, &self.sides, s, c)
+                points_view(&live.points, (&live.team_name, &live.opponent), s, c)
             ]
             .spacing(8)
             .into(),
@@ -3572,7 +3568,13 @@ pub(crate) mod tests {
             .map(|p| p.points.iter().map(|p| (p.us, p.score)).collect())
             .unwrap_or_default();
         assert_eq!(points, [(true, 1), (false, 1), (false, 2)]);
-        assert_eq!(screen.sides, ("Cortona".to_string(), "Siena".to_string()));
+        assert_eq!(
+            screen
+                .live
+                .as_ref()
+                .map(|l| (l.team_name.as_str(), l.opponent.as_str())),
+            Some(("Cortona", "Siena"))
+        );
     }
 
     /// The detail of a match has the filters on the situation too.

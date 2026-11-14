@@ -8,6 +8,9 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -681,28 +684,111 @@ private fun ErrorGroup(
 
 /** How each figure went in each set, a line per set from its first rally,
  * to compare them; the match so far dashed across; the band of the level
- * shaded. So far, or of the last 10 touches. */
+ * shaded; its errors in red from the bottom, all or the unforced only (as
+ * on the desktop). So far, or of the last 10 touches. Under them, the
+ * points of each set in order. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Trend(stats: LiveStats) {
     var recent by remember { mutableStateOf(false) }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    var unforced by remember { mutableStateOf(false) }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(selected = !recent, onClick = { recent = false }, label = { Text(stringResource(R.string.trend_so_far)) })
         FilterChip(selected = recent, onClick = { recent = true }, label = { Text(stringResource(R.string.trend_recent)) })
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = !unforced, onClick = { unforced = false }, label = { Text(stringResource(R.string.trend_all_errors)) })
+        FilterChip(selected = unforced, onClick = { unforced = true }, label = { Text(stringResource(R.string.trend_unforced_only)) })
     }
     if (stats.trend.all { line -> line.sets.all { it.values.isEmpty() } }) {
         Text(stringResource(R.string.no_rallies), color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
-    TrendLegend(stats.trend.firstOrNull()?.sets.orEmpty().map { it.setNumber.toInt() })
-    stats.trend.forEach { TrendChart(it, recent) }
+    TrendLegend(stats.trend.firstOrNull()?.sets.orEmpty().map { it.setNumber.toInt() }, unforced)
+    stats.trend.forEach { TrendChart(it, recent, unforced) }
+    if (stats.points.any { it.points.isNotEmpty() }) PointSequence(stats)
 }
 
+/** The width of a point in the rows of the points. */
+private val PointWidth = 24.dp
+
+/** The points of each set in order, as on the score sheet: two rows, ours
+ * and theirs, a point a column, the score in the row of the team scoring
+ * it, in its color; the names stay on the left, the points scroll across.
+ * TalkBack reads the score of each set as it went. */
 @Composable
-private fun TrendLegend(sets: List<Int>) = Row(
+private fun PointSequence(stats: LiveStats) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text(stringResource(R.string.point_sequence), Modifier.title(), style = MaterialTheme.typography.titleSmall)
+    val sets = stats.points.filter { it.points.isNotEmpty() }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            sets.forEach { set ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        stringResource(R.string.set_n, set.setNumber.toInt()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = setColor(set.setNumber.toInt()),
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        listOf(stats.teamName to TeamUs, stats.opponent to TeamThem).forEach { (name, color) ->
+                            // as high as a point, with the same text
+                            Box(Modifier.widthIn(max = 120.dp).padding(vertical = 2.dp), contentAlignment = Alignment.CenterStart) {
+                                Text(name, style = MaterialTheme.typography.labelSmall, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Column(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            sets.forEach { set ->
+                // the score after each point, ours first
+                val said = set.points.withIndex().joinToString(", ") { (i, p) ->
+                    val other = set.points.take(i).count { it.us != p.us }
+                    if (p.us) "${p.score}-$other" else "$other-${p.score}"
+                }
+                Column(
+                    Modifier.readAs(stringResource(R.string.set_n, set.setNumber.toInt()) + ": " + said),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    listOf(true to TeamUs, false to TeamThem).forEach { (us, color) ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            set.points.forEach { p ->
+                                // as large as the font of the phone wants: the
+                                // empty ones too, their score unseen
+                                Box(
+                                    Modifier.widthIn(min = PointWidth).background(
+                                        if (p.us == us) color else Color.Transparent,
+                                        RoundedCornerShape(4.dp),
+                                    ).padding(horizontal = 2.dp, vertical = 2.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        p.score.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (p.us == us) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TrendLegend(sets: List<Int>, unforced: Boolean) = FlowRow(
     // each chart says its sets
     Modifier.notRead(),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
-    verticalAlignment = Alignment.CenterVertically,
+    itemVerticalAlignment = Alignment.CenterVertically,
 ) {
     sets.forEach { n ->
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -719,10 +805,15 @@ private fun TrendLegend(sets: List<Int>) = Row(
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    Text(
+        "▮ " + stringResource(if (unforced) R.string.trend_unforced else R.string.trend_errors),
+        style = MaterialTheme.typography.labelSmall,
+        color = Lost,
+    )
 }
 
 @Composable
-private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.semantics(mergeDescendants = true) {}) {
+private fun TrendChart(line: TrendLine, recent: Boolean, unforced: Boolean) = Column(Modifier.semantics(mergeDescendants = true) {}) {
     val overall = if (recent) line.overallRecent else line.overall
     val overallGrade = if (recent) line.overallRecentGrade else line.overallGrade
     val band = line.band
@@ -746,6 +837,16 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.seman
     val high = maxOf(low + 10.0, known.maxOrNull() ?: 0.0)
     // a whole set, longer at deuce
     val points = maxOf(25.0, sets.flatMap { it.second }.maxOrNull() ?: 0.0)
+    // the errors in each point of the sets, of every set: how dense
+    val bins = IntArray(kotlin.math.ceil(points).toInt().coerceAtLeast(1))
+    line.sets.forEach { set ->
+        val counts = if (unforced) set.unforced else set.errors
+        set.progress.zip(counts).forEach { (x, n) ->
+            val at = (kotlin.math.ceil(x).toInt() - 1).coerceIn(0, bins.size - 1)
+            bins[at] += n.toInt()
+        }
+    }
+    val most = bins.maxOrNull() ?: 0
     Canvas(Modifier.fillMaxWidth().height(88.dp).padding(vertical = 4.dp)) {
         fun x(p: Double) = (size.width * p / points).toFloat()
         fun y(v: Double) = (size.height * (1 - (v - low) / (high - low))).toFloat()
@@ -761,6 +862,17 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.seman
         // every 5 points
         (5..points.toInt() step 5).forEach { p ->
             drawLine(axis.copy(alpha = 0.3f), Offset(x(p.toDouble()), 0f), Offset(x(p.toDouble()), size.height), 1.dp.toPx())
+        }
+        // the errors, from the bottom: at most a third high
+        if (most > 0) bins.forEachIndexed { i, n ->
+            if (n > 0) {
+                val high = size.height / 3 * n / most
+                drawRect(
+                    Lost.copy(alpha = 0.5f),
+                    topLeft = Offset(x(i.toDouble()) + 1f, size.height - high),
+                    size = androidx.compose.ui.geometry.Size((x(1.0) - x(0.0) - 2f).coerceAtLeast(1f), high),
+                )
+            }
         }
         overall?.let {
             drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f.dp.toPx(), pathEffect = dashed)
@@ -786,10 +898,11 @@ private fun TrendChart(line: TrendLine, recent: Boolean) = Column(Modifier.seman
             }
         }
     }
-    // for TalkBack, where each set got to
+    // for TalkBack, where each set got to, and the errors
     Box(
         Modifier.readAs(
-            sets.mapNotNull { (n, _, values) -> values.lastOrNull { it != null }?.let { stringResource(R.string.set_n, n) + " " + pct(it) } }
+            (sets.mapNotNull { (n, _, values) -> values.lastOrNull { it != null }?.let { stringResource(R.string.set_n, n) + " " + pct(it) } } +
+                listOf(stringResource(R.string.trend_errors_said, bins.sum())))
                 .joinToString(", "),
         ),
     )

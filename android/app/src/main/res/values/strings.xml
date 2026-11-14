@@ -188,6 +188,12 @@
     <string name="error_dig">Dig</string>
     <string name="trend_so_far">So far</string>
     <string name="trend_recent">Last 10 touches</string>
+    <string name="trend_all_errors">All errors in red</string>
+    <string name="trend_unforced_only">Unforced only</string>
+    <string name="trend_errors">errors</string>
+    <string name="trend_unforced">unforced errors</string>
+    <string name="point_sequence">Point sequence</string>
+    <string name="trend_errors_said">%1$d errors</string>
     <string name="set_team_level">Set the level and gender of the team to see the colors</string>
     <string name="stats_detail">Detail</string>
     <string name="rotations">Rotations</string>
