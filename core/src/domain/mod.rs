@@ -152,6 +152,14 @@ pub enum Side {
 impl Side {
     pub const ALL: [Side; 2] = [Side::A, Side::B];
 
+    /// The team across the net.
+    pub fn other(self) -> Self {
+        match self {
+            Side::A => Side::B,
+            Side::B => Side::A,
+        }
+    }
+
     /// The side of a team as A sees it: we are A.
     pub fn from_a(side: TeamSideEnum) -> Self {
         match side {

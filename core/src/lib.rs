@@ -21,6 +21,7 @@ pub mod names;
 pub mod overview;
 pub mod player_form;
 pub mod providers;
+pub mod rally;
 pub mod reporting;
 pub mod scouting;
 pub mod season;
