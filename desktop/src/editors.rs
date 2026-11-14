@@ -390,7 +390,7 @@ fn team_fields(
             with_empty(genders.iter().map(|g| g.name.clone())),
             option_of(genders.iter().map(|g| g.value), start.gender),
         ),
-        Field::search(s.country, country).hint(s.search_country),
+        Field::dropdown(s.country, country),
     ];
     (fields, classifications, genders)
 }
@@ -472,7 +472,7 @@ impl Editor {
                 with_empty(genders.iter().map(|g| g.name.clone())),
                 option_of(genders.iter().map(|g| g.value), start.gender),
             ),
-            Field::search(s.country, country).hint(s.search_country),
+            Field::dropdown(s.country, country),
             Field::check(s.friendly_default, start.friendly, false),
         ];
         Ok(Editor {
@@ -1105,14 +1105,20 @@ impl Editor {
                 self.set_season_players(players);
             }
             (Kind::Team(_) | Kind::Season(_), TEAM_COUNTRY) => {
-                let written = self.form.text(TEAM_COUNTRY);
+                let (written, all) = (
+                    self.form.text(TEAM_COUNTRY),
+                    self.form.browsing(TEAM_COUNTRY),
+                );
                 self.form
-                    .suggest(TEAM_COUNTRY, countries::suggestions(core, &written));
+                    .suggest(TEAM_COUNTRY, countries::offered(core, &written, all));
             }
             (Kind::Competition(_), COMPETITION_COUNTRY) => {
-                let written = self.form.text(COMPETITION_COUNTRY);
+                let (written, all) = (
+                    self.form.text(COMPETITION_COUNTRY),
+                    self.form.browsing(COMPETITION_COUNTRY),
+                );
                 self.form
-                    .suggest(COMPETITION_COUNTRY, countries::suggestions(core, &written));
+                    .suggest(COMPETITION_COUNTRY, countries::offered(core, &written, all));
             }
             // another team A: its players, the teams it can meet
             (Kind::Match(m), MATCH_TEAM) => {

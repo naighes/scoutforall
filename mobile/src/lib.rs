@@ -4647,6 +4647,12 @@ impl Scout4All {
         })
     }
 
+    /// No country for a new team: its field starts empty (the desktop; on
+    /// Android the next start guesses one again).
+    pub fn clear_default_country(&self) -> Result<(), MobileError> {
+        self.update_team_defaults(|_| TeamDefaults { country: None })
+    }
+
     /// When the settings have no country for a new team yet, the first of
     /// the `hints` of the system telling one (the SIM, the network, the
     /// locale, in this order), else the one of the language. To call at

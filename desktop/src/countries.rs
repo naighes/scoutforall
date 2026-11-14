@@ -18,6 +18,22 @@ pub fn flag(code: CountryCode) -> String {
         .collect()
 }
 
+/// What a drop-down of the countries offers: all of them, opened by its
+/// arrow (`browsing`), else the ones `written` may be.
+pub fn offered(core: &Scout4All, written: &str, browsing: bool) -> Vec<Suggestion> {
+    match browsing {
+        true => core
+            .countries(String::new())
+            .into_iter()
+            .map(|c| Suggestion {
+                label: format!("{}  {}", flag(c.value), c.name),
+                value: c.name,
+            })
+            .collect(),
+        false => suggestions(core, written),
+    }
+}
+
 /// The countries `written` may be, flag first.
 pub fn suggestions(core: &Scout4All, written: &str) -> Vec<Suggestion> {
     let start = written.trim().to_lowercase();
