@@ -686,10 +686,18 @@ private fun ErrorGroup(
 
 // --- trend ------------------------------------------------------------
 
+/** The errors in red under the trend: their chip, their name in the
+ * legend (none when hidden). */
+private enum class ErrorsShown(val label: Int, val legend: Int?) {
+    HIDDEN(R.string.trend_hide_errors, null),
+    ALL(R.string.trend_all_errors, R.string.trend_errors),
+    DIRECT(R.string.trend_direct_only, R.string.trend_direct),
+}
+
 /** How each figure went in each set, a line per set from its first rally,
  * to compare them; the match so far dashed across; the band of the level
- * shaded; its errors in red from the bottom, all or the unforced only (as
- * on the desktop). So far, or of the last 10 touches. Under them, the
+ * shaded; its errors in red from the bottom: hidden, all or the direct
+ * (unforced) only (as on the desktop). So far, or of the last 10 touches. Under them, the
  * points of each set in order. A rally a column, the same in the charts and
  * in the points, as wide as the screen allows but never narrower than a
  * score: past the screen they all scroll across together. */
@@ -697,20 +705,29 @@ private fun ErrorGroup(
 @Composable
 private fun Trend(stats: LiveStats) {
     var recent by remember { mutableStateOf(false) }
-    var unforced by remember { mutableStateOf(false) }
+    var errors by remember { mutableStateOf(ErrorsShown.ALL) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(selected = !recent, onClick = { recent = false }, label = { Text(stringResource(R.string.trend_so_far)) })
         FilterChip(selected = recent, onClick = { recent = true }, label = { Text(stringResource(R.string.trend_recent)) })
     }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected = !unforced, onClick = { unforced = false }, label = { Text(stringResource(R.string.trend_all_errors)) })
-        FilterChip(selected = unforced, onClick = { unforced = true }, label = { Text(stringResource(R.string.trend_unforced_only)) })
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.trend_errors_filter),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ErrorsShown.entries.forEach { shown ->
+            FilterChip(selected = errors == shown, onClick = { errors = shown }, label = { Text(stringResource(shown.label)) })
+        }
     }
     if (stats.trend.all { line -> line.sets.all { it.values.isEmpty() } }) {
         Text(stringResource(R.string.no_rallies), color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
-    TrendLegend(stats.trend.firstOrNull()?.sets.orEmpty().map { it.setNumber.toInt() }, unforced, stats)
+    TrendLegend(stats.trend.firstOrNull()?.sets.orEmpty().map { it.setNumber.toInt() }, errors, stats)
     // the rallies of the longest set, at least 25: a column each
     val columns = maxOf(
         25,
@@ -727,7 +744,7 @@ private fun Trend(stats: LiveStats) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val column = maxOf(narrowest, maxWidth / columns)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            stats.trend.forEach { TrendChart(it, recent, unforced, columns, column, across) }
+            stats.trend.forEach { TrendChart(it, recent, errors, columns, column, across) }
             if (stats.points.any { it.points.isNotEmpty() }) PointSequence(stats, column * columns, column, across)
         }
     }
@@ -788,7 +805,7 @@ private fun PointSequence(stats: LiveStats, width: Dp, column: Dp, across: Scrol
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TrendLegend(sets: List<Int>, unforced: Boolean, stats: LiveStats) = FlowRow(
+private fun TrendLegend(sets: List<Int>, errors: ErrorsShown, stats: LiveStats) = FlowRow(
     // each chart says its sets
     Modifier.notRead(),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -809,11 +826,9 @@ private fun TrendLegend(sets: List<Int>, unforced: Boolean, stats: LiveStats) = 
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Text(
-        "▮ " + stringResource(if (unforced) R.string.trend_unforced else R.string.trend_errors),
-        style = MaterialTheme.typography.labelSmall,
-        color = Lost,
-    )
+    errors.legend?.let {
+        Text("▮ " + stringResource(it), style = MaterialTheme.typography.labelSmall, color = Lost)
+    }
     // the colors of the two teams in the points
     listOf(stats.teamName to TeamUs, stats.opponent to TeamThem).forEach { (name, color) ->
         Text("■ $name", style = MaterialTheme.typography.labelSmall, color = color)
@@ -824,7 +839,7 @@ private fun TrendLegend(sets: List<Int>, unforced: Boolean, stats: LiveStats) = 
 private fun TrendChart(
     line: TrendLine,
     recent: Boolean,
-    unforced: Boolean,
+    errors: ErrorsShown,
     columns: Int,
     column: Dp,
     across: ScrollState,
@@ -852,7 +867,11 @@ private fun TrendChart(
     // the errors in each rally of the sets, of every set: how dense
     val bins = IntArray(columns.coerceAtLeast(1))
     line.sets.forEach { set ->
-        (if (unforced) set.unforced else set.errors).forEachIndexed { i, n ->
+        when (errors) {
+            ErrorsShown.HIDDEN -> emptyList()
+            ErrorsShown.ALL -> set.errors
+            ErrorsShown.DIRECT -> set.unforced
+        }.forEachIndexed { i, n ->
             bins[i.coerceIn(0, bins.size - 1)] += n.toInt()
         }
     }
@@ -929,7 +948,8 @@ private fun TrendChart(
     Box(
         Modifier.readAs(
             (sets.mapNotNull { (n, values) -> values.lastOrNull { it != null }?.let { stringResource(R.string.set_n, n) + " " + pct(it) } } +
-                listOf(stringResource(R.string.trend_errors_said, bins.sum())))
+                // hidden, not said
+                listOfNotNull(errors.legend?.let { stringResource(R.string.trend_errors_said, bins.sum()) }))
                 .joinToString(", "),
         ),
     )

@@ -189,10 +189,12 @@
     <string name="error_dig">Obrona</string>
     <string name="trend_so_far">Dotąd</string>
     <string name="trend_recent">Ostatnie 10 kontaktów</string>
-    <string name="trend_all_errors">Wszystkie błędy na czerwono</string>
-    <string name="trend_unforced_only">Tylko niewymuszone</string>
+    <string name="trend_errors_filter">Błędy</string>
+    <string name="trend_hide_errors">Ukryj</string>
+    <string name="trend_all_errors">Wszystkie</string>
+    <string name="trend_direct_only">Tylko własne</string>
     <string name="trend_errors">błędy</string>
-    <string name="trend_unforced">błędy niewymuszone</string>
+    <string name="trend_direct">błędy własne</string>
     <string name="point_sequence">Kolejność punktów</string>
     <string name="trend_errors_said">%1$d błędów</string>
     <string name="set_team_level">Ustaw poziom i płeć drużyny, aby zobaczyć kolory</string>

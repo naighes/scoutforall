@@ -806,6 +806,27 @@ pub fn choice_line<'a, M: 'a>(
     pills: Vec<Element<'a, M>>,
     c: Colors,
 ) -> Element<'a, M> {
+    labelled_choices(name, on, pills, Length::Fixed(130.0), c)
+}
+
+/// A choice in a bar of a few, beside the others: the name as wide as it
+/// is, the pills after it.
+pub fn choice_inline<'a, M: 'a>(
+    name: &str,
+    on: bool,
+    pills: Vec<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
+    labelled_choices(name, on, pills, Length::Shrink, c)
+}
+
+fn labelled_choices<'a, M: 'a>(
+    name: &str,
+    on: bool,
+    pills: Vec<Element<'a, M>>,
+    width: Length,
+    c: Colors,
+) -> Element<'a, M> {
     let label = text(name.to_string())
         .size(SIZE_SMALL)
         .font(theme::fonts().bold)
@@ -813,7 +834,7 @@ pub fn choice_line<'a, M: 'a>(
             true => c.accent,
             false => c.muted,
         })
-        .width(Length::Fixed(130.0));
+        .width(width);
     row![
         container(
             text(match on {

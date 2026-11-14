@@ -61,7 +61,7 @@ enum Filter {
     Period,
     Series,
     Mode,
-    /// the errors in red under the trend: all, or the unforced ones
+    /// the errors in red under the trend: hidden, all, or the direct ones
     Errors,
     Event,
     Player,
@@ -77,6 +77,17 @@ enum Filter {
     Close,
     Zones,
 }
+
+/// The errors in red under the trend of a match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorsShown {
+    Hidden,
+    All,
+    /// the direct (unforced) ones only
+    Direct,
+}
+
+const ERRORS_SHOWN: [ErrorsShown; 3] = [ErrorsShown::Hidden, ErrorsShown::All, ErrorsShown::Direct];
 
 /// The filters on the situation, after the player, rotation and phase.
 const SITUATION: [Filter; 8] = [
@@ -117,8 +128,8 @@ pub enum Message {
     Scope(StatsScope),
     Series(usize),
     Recent(bool),
-    /// only the unforced errors under the trend
-    Unforced(bool),
+    /// the errors under the trend: hidden, all, the direct ones
+    Errors(ErrorsShown),
     Event(EventTypeEnum),
     /// the players chosen: none, all of them
     Players(Vec<String>),
@@ -257,8 +268,8 @@ pub struct StatsScreen {
     detail: Option<DetailStats>,
     series: usize,
     recent: bool,
-    /// under the trend, only the unforced errors
-    unforced: bool,
+    /// the errors under the trend: hidden, all, the direct ones
+    errors: ErrorsShown,
     trend: Trend,
     event: EventTypeEnum,
     filter: DetailFilter,
@@ -300,8 +311,9 @@ const FILTERS_WIDTH: f32 = 500.0;
 /// The column of the filters, scrolled to the row of the arrows.
 const FILTERS: &str = "stats-filters";
 
-/// Up to how many filters go in a bar over the page, not in a column.
-const FILTERS_ON_TOP: usize = 2;
+/// Up to how many filters go in a bar over the page, not in a column: the
+/// trend of a match keeps the whole width for its chart.
+const FILTERS_ON_TOP: usize = 3;
 
 /// A day under the trend: day and month.
 fn short_day(s: &Strings, day: &str) -> String {
@@ -687,7 +699,7 @@ impl StatsScreen {
             detail: None,
             series: 0,
             recent: false,
-            unforced: false,
+            errors: ErrorsShown::All,
             trend: Trend::of_stats(None, 0, false),
             event: EventTypeEnum::S,
             filter: DetailFilter::default(),
@@ -953,9 +965,11 @@ impl StatsScreen {
     fn retrend(&mut self) {
         let trend = Trend::of_stats(self.live.as_ref(), self.series, self.recent);
         // the errors of the figure in red under its lines
-        self.trend = match self.live.as_ref().and_then(|l| l.trend.get(self.series)) {
-            Some(line) => trend.with_errors(line, self.unforced),
-            None => trend,
+        let line = self.live.as_ref().and_then(|l| l.trend.get(self.series));
+        self.trend = match (line, self.errors) {
+            (Some(line), ErrorsShown::All) => trend.with_errors(line, false),
+            (Some(line), ErrorsShown::Direct) => trend.with_errors(line, true),
+            (None, _) | (_, ErrorsShown::Hidden) => trend,
         };
     }
 
@@ -1041,7 +1055,7 @@ impl StatsScreen {
                 ui::cycle(&series, &self.series, forward).map(Message::Series)
             }
             Filter::Mode => Some(Message::Recent(!self.recent)),
-            Filter::Errors => Some(Message::Unforced(!self.unforced)),
+            Filter::Errors => ui::cycle(&ERRORS_SHOWN, &self.errors, forward).map(Message::Errors),
             Filter::Zones => Some(Message::Efficiency(!self.efficiency)),
             Filter::Event => {
                 let events: Vec<EventTypeEnum> = detail
@@ -1161,8 +1175,8 @@ impl StatsScreen {
                 self.recent = recent;
                 self.retrend();
             }
-            Message::Unforced(unforced) => {
-                self.unforced = unforced;
+            Message::Errors(errors) => {
+                self.errors = errors;
                 self.retrend();
             }
             Message::Event(event) => {
@@ -1407,14 +1421,14 @@ impl StatsScreen {
             .enumerate()
             .map(|(i, name)| ui::pill(name, i == self.page, Some(Message::Page(i)), c)))
         .spacing(6);
-        let filters: Vec<Element<'a, Message>> = self
-            .filters()
-            .into_iter()
-            .enumerate()
-            .map(|(i, f)| self.filter_row(f, i == self.row, s, c))
-            .collect();
+        let filters = self.filters();
         // a few filters: a bar over the page, the page as wide as the screen
         let few = filters.len() <= FILTERS_ON_TOP;
+        let filters: Vec<Element<'a, Message>> = filters
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| self.filter_row(f, i == self.row, few, s, c))
+            .collect();
         let error: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => space::vertical().height(0).into(),
@@ -1437,15 +1451,15 @@ impl StatsScreen {
         };
         match few {
             true => {
-                let bar = Row::with_children(
-                    filters
-                        .into_iter()
-                        .map(|f| container(f).width(Length::Fill).into()),
-                )
-                .spacing(24);
+                // each as wide as its pills, on the next line when the
+                // window is narrow
+                let bar = Row::with_children(filters)
+                    .spacing(32)
+                    .wrap()
+                    .vertical_spacing(8);
                 column![
                     tabs,
-                    ui::panel(None, bar, c),
+                    ui::panel(None, container(bar).width(Length::Fill), c),
                     error,
                     container(page).height(Length::Fill)
                 ]
@@ -1475,11 +1489,12 @@ impl StatsScreen {
     }
 
     /// A filter: its name, then a pill each choice; the row the arrows are
-    /// on lit.
+    /// on lit. In the bar over the page (`top`) the name as wide as it is.
     fn filter_row<'a>(
         &'a self,
         filter: Filter,
         on: bool,
+        top: bool,
         s: &'static Strings,
         c: Colors,
     ) -> Element<'a, Message> {
@@ -1574,18 +1589,21 @@ impl StatsScreen {
             ),
             Filter::Errors => (
                 s.errors_shown,
-                vec![
-                    pill(
-                        s.all_errors.to_string(),
-                        !self.unforced,
-                        Message::Unforced(false),
-                    ),
-                    pill(
-                        s.only_unforced.to_string(),
-                        self.unforced,
-                        Message::Unforced(true),
-                    ),
-                ],
+                ERRORS_SHOWN
+                    .into_iter()
+                    .map(|errors| {
+                        let label = match errors {
+                            ErrorsShown::Hidden => s.hide_errors,
+                            ErrorsShown::All => s.all_errors,
+                            ErrorsShown::Direct => s.only_direct,
+                        };
+                        pill(
+                            label.to_string(),
+                            errors == self.errors,
+                            Message::Errors(errors),
+                        )
+                    })
+                    .collect(),
             ),
             Filter::Zones => (
                 s.zones_view,
@@ -1769,7 +1787,10 @@ impl StatsScreen {
                 ],
             ),
         };
-        ui::choice_line(name, on, pills, c)
+        match top {
+            true => ui::choice_inline(name, on, pills, c),
+            false => ui::choice_line(name, on, pills, c),
+        }
     }
 
     /// The period: the last month, the last matches (+ −), two days written
@@ -1933,16 +1954,18 @@ impl StatsScreen {
                     .into()
             }))
         .push(small(format!("- - {}", s.whole_match), c))
-        .push(
-            text(format!(
-                "▮ {}",
-                match self.unforced {
-                    true => s.unforced_errors,
-                    false => s.errors,
-                }
-            ))
-            .size(SIZE_SMALL)
-            .color(theme::LOST),
+        .extend(
+            match self.errors {
+                ErrorsShown::Hidden => None,
+                ErrorsShown::All => Some(s.errors),
+                ErrorsShown::Direct => Some(s.direct_errors),
+            }
+            .map(|name| {
+                text(format!("▮ {name}"))
+                    .size(SIZE_SMALL)
+                    .color(theme::LOST)
+                    .into()
+            }),
         )
         .spacing(14);
         let name = live
@@ -3570,8 +3593,9 @@ pub(crate) mod tests {
     }
 
     /// The trend of a match: the errors of the figure in red under its
-    /// lines, all or only the unforced ones (a filter, ← → as the others);
-    /// the points of each set in order under it.
+    /// lines, hidden, all or only the direct ones (a filter, ← → as the
+    /// others, in the bar over the chart); the points of each set in order
+    /// under it.
     #[test]
     fn the_trend_has_the_errors_and_the_points() {
         let dir = tempfile::tempdir().unwrap();
@@ -3605,6 +3629,8 @@ pub(crate) mod tests {
         let mut screen = StatsScreen::new(core, team, siena).unwrap();
         screen.update(Message::Page(1));
         assert!(screen.filters().contains(&Filter::Errors));
+        // a few filters: over the chart, all of its width left to it
+        assert!(screen.filters().len() <= FILTERS_ON_TOP);
         let series = |screen: &StatsScreen, series| {
             screen
                 .live
@@ -3619,16 +3645,27 @@ pub(crate) mod tests {
         screen.update(Message::Series(reception));
         assert_eq!(shown(&screen), 1);
         assert_eq!(screen.trend.error_bins().iter().sum::<u32>(), 1);
+        // hide, all, only the direct ones
+        assert!(matches!(
+            screen.changed(Filter::Errors, false),
+            Some(Message::Errors(ErrorsShown::Hidden))
+        ));
         assert!(matches!(
             screen.changed(Filter::Errors, true),
-            Some(Message::Unforced(true))
+            Some(Message::Errors(ErrorsShown::Direct))
         ));
-        screen.update(Message::Unforced(true));
+        screen.update(Message::Errors(ErrorsShown::Direct));
         assert_eq!(shown(&screen), 0);
         // the serve error is: the choice stays with another figure
         screen.update(Message::Series(serve));
         assert_eq!(shown(&screen), 1);
-        screen.update(Message::Unforced(false));
+        screen.update(Message::Errors(ErrorsShown::Hidden));
+        assert_eq!(shown(&screen), 0);
+        assert_eq!(screen.trend.error_bins().iter().sum::<u32>(), 0);
+        screen.update(Message::Series(reception));
+        assert_eq!(shown(&screen), 0, "hidden with another figure too");
+        screen.update(Message::Series(serve));
+        screen.update(Message::Errors(ErrorsShown::All));
         assert_eq!(shown(&screen), 1);
         // the points of the set in order: ace, serve error, ace
         let points: Vec<(bool, u8)> = screen

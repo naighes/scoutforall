@@ -172,8 +172,8 @@ class ZoneAttacksLanguageTest(private val language: String, private val count: S
     }
 }
 
-/** The trend of a match: the errors of each figure, all or the unforced
- * only, and the points of each set in order, as TalkBack reads them (their
+/** The trend of a match: the errors of each figure, hidden, all or the direct
+ * (unforced) only, and the points of each set in order, as TalkBack reads them (their
  * text, `readAs`). */
 @RunWith(org.robolectric.RobolectricTestRunner::class)
 class TrendTest {
@@ -201,10 +201,16 @@ class TrendTest {
         }
         rule.onNode(chart("Reception", 1)).assertExists()
         rule.onNode(chart("Serve", 1)).assertExists()
-        rule.onNode(hasText(string(R.string.trend_unforced_only)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        // the direct ones only: the ace was forced
+        rule.onNode(hasText(string(R.string.trend_direct_only)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForIdle()
         rule.onNode(chart("Reception", 0)).assertExists()
         rule.onNode(chart("Serve", 1)).assertExists()
+        // hidden: neither drawn nor said
+        rule.onNode(hasText(string(R.string.trend_hide_errors)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(hasText(string(R.string.trend_errors_said, 1), substring = true)).assertDoesNotExist()
+        rule.onNode(hasText(string(R.string.trend_errors_said, 0), substring = true)).assertDoesNotExist()
         // two points of theirs: 0-1, 0-2
         rule.onNode(hasText("${string(R.string.set_n, 1)}: 0-1, 0-2")).assertExists()
     }
