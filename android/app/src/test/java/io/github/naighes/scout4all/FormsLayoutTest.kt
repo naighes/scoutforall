@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.PlayerForm
 import io.github.naighes.scout4all.core.RoleEnum
 import org.junit.Assert.assertEquals
@@ -50,7 +51,38 @@ class FormsLayoutTest(private val screen: Size) {
     @Test
     fun theMatch() {
         val team = saveTeam("Italia")
-        assertFits("match", R.string.opponent, R.string.go_on) { MatchFormScreen(team, null, onBack = {}, onSaved = {}) }
+        assertFits("match", R.string.opponent, R.string.go_on) { MatchFormScreen(team, null, onBack = {}, onSaved = { _, _ -> }) }
+    }
+
+    /** The fields of a new match all shown: team A, a new opponent to
+     * create, a new competition with its format. */
+    @Test
+    fun theMatchWithAllItsFields() {
+        val team = saveTeam("Italia")
+        saveTeam("Pallavolo Femminile Valdichiana")
+        rule.setContent { Scout4AllTheme { MatchFormScreen(team, null, onBack = {}, onSaved = { _, _ -> }) } }
+        rule.waitForText(string(R.string.opponent))
+        rule.type(string(R.string.opponent), "Volley Club Montepulciano")
+        rule.type(string(R.string.competition), "Serie C femminile – girone B")
+        rule.waitForText(string(R.string.create_opponent))
+        rule.shot("form-match-all-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.assertWhole(hasText(string(R.string.go_on)) and hasClickAction())
+    }
+
+    @Test
+    fun theCompetition() {
+        val team = saveNationalTeam()
+        core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6", competition = "Serie A1")) }
+        val id = core { it.competitions() }.single().id
+        rule.setContent { Scout4AllTheme { CompetitionFormScreen(id, onBack = {}, onSaved = {}) } }
+        rule.waitForText(string(R.string.edit_competition))
+        rule.type(string(R.string.name), "")
+        rule.onNode(hasText(string(R.string.save)) and hasClickAction()).performClick()
+        rule.assertInvalid(string(R.string.name))
+        rule.shot("form-competition-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.assertWhole(hasText(string(R.string.save)) and hasClickAction())
     }
 
     /** The roster of a team larger than the score sheet, with its error. */
@@ -58,7 +90,7 @@ class FormsLayoutTest(private val screen: Size) {
     fun theRoster() {
         val team = saveNationalTeam()
         (1..8).forEach { core { c -> c.savePlayer(team, null, PlayerForm("Giocatrice dal nome lunghissimo $it", RoleEnum.OUTSIDE_HITTER, "${30 + it}")) } }
-        rule.setContent { Scout4AllTheme { MatchFormScreen(team, null, onBack = {}, onSaved = {}) } }
+        rule.setContent { Scout4AllTheme { MatchFormScreen(team, null, onBack = {}, onSaved = { _, _ -> }) } }
         rule.waitForText(string(R.string.opponent))
         rule.type(string(R.string.opponent), "Cortona")
         rule.goOn()

@@ -101,6 +101,7 @@ fun TeamsScreen(
     onMatch: (teamId: String, matchId: String) -> Unit,
     onResume: (teamId: String, matchId: String, next: NextSetKind) -> Unit = { _, _, _ -> },
     onDvw: (() -> Unit)? = null,
+    onCompetitions: () -> Unit = {},
 ) {
     val state by teams.state.collectAsState()
     // back from a team, which may have changed
@@ -113,6 +114,9 @@ fun TeamsScreen(
                 title = { Text(stringResource(R.string.app_name), Modifier.title()) },
                 actions = {
                     ImportButton(stringResource(R.string.import_team), teamId = null, onTeam = onTeam, onMatch = onMatch, onDvw = onDvw)
+                    IconButton(onClick = onCompetitions) {
+                        Icon(painterResource(R.drawable.ic_trophy), contentDescription = stringResource(R.string.competitions))
+                    }
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
                     }

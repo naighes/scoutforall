@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.MatchListing
 import io.github.naighes.scout4all.core.TeamListing
 import org.junit.Assert.assertEquals
@@ -42,13 +43,39 @@ class DeletionTest {
         rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
         rule.onNodeWithText(string(R.string.permanent_deletion)).assertExists()
         rule.onNodeWithText(string(R.string.irreversible)).assertExists()
-        rule.onNodeWithText(string(R.string.delete_team_text, "Italia")).assertExists()
+        rule.onNodeWithText(string(R.string.delete_team_text, "Italia", 1)).assertExists()
         rule.onNodeWithText(string(R.string.cancel)).performClick()
         assertEquals(listOf("Italia", "Serbia"), teams())
         rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
         rule.onNodeWithText(string(R.string.delete_forever)).performClick()
         rule.waitFor { deleted == 1 }
         assertEquals(listOf("Serbia"), teams())
+    }
+
+    /** The matches against another team stay to it, as the dialog says:
+     * the other team keeps them. */
+    @Test
+    fun theMatchesAgainstAnotherTeamStayToIt() {
+        val team = saveNationalTeam()
+        val serbia = saveTeam("Serbia")
+        startFirstSet(team)
+        core { it.saveMatch(team, null, MatchForm("Serbia", "2026-10-26T18:00:00+02:00", true, "6", opponentTeam = serbia)) }
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(
+                    team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {},
+                    onDeleted = { deleted++ },
+                )
+            }
+        }
+        rule.waitForText("Alessia Orro")
+        rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
+        val text = string(R.string.delete_team_text, "Italia", 1) + " " + string(R.string.delete_team_kept, 1, "Italia")
+        rule.waitForText(text)
+        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.waitFor { deleted == 1 }
+        assertEquals(listOf("Serbia"), teams())
+        assertEquals(1, core { it.matches(serbia) }.size)
     }
 
     @Test

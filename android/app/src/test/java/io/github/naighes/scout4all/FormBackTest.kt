@@ -65,7 +65,7 @@ class FormBackTest {
     @Test
     fun theChangesOfAMatchAskFirst() {
         val team = saveTeam("Italia")
-        show(R.string.opponent) { MatchFormScreen(team, null, onBack = it, onSaved = {}) }
+        show(R.string.opponent) { MatchFormScreen(team, null, onBack = it, onSaved = { _, _ -> }) }
         rule.type(string(R.string.opponent), "Cortona")
         arrow()
         rule.waitForText(string(R.string.discard_changes))

@@ -104,7 +104,7 @@ class PlayerFormTest {
         rule.onNodeWithText(string(R.string.cancel)).performClick()
         assertEquals(1, players().size)
         rule.onNodeWithContentDescription(string(R.string.remove_player)).performClick()
-        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.onNodeWithText(string(R.string.remove_from_team)).performClick()
         rule.waitFor { done == 1 }
         assertEquals(0, players().size)
     }

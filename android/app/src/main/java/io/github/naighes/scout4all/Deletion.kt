@@ -1,6 +1,8 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
@@ -31,7 +33,14 @@ import kotlinx.coroutines.launch
 /** A deletion to confirm, as loud as it is for good: the warning in red
  * over what goes, the answer red too. */
 @Composable
-fun DeletionDialog(text: String, onConfirm: () -> Unit, onDismiss: () -> Unit) = AlertDialog(
+fun DeletionDialog(
+    text: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    confirm: String = stringResource(R.string.delete_forever),
+    /** another way to delete, with its button over the first */
+    also: Pair<String, () -> Unit>? = null,
+) = AlertDialog(
     onDismissRequest = onDismiss,
     icon = { Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
     title = { Text(stringResource(R.string.permanent_deletion), color = MaterialTheme.colorScheme.error) },
@@ -47,13 +56,14 @@ fun DeletionDialog(text: String, onConfirm: () -> Unit, onDismiss: () -> Unit) =
         }
     },
     confirmButton = {
-        Button(
-            onClick = onConfirm,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.error,
-                contentColor = MaterialTheme.colorScheme.onError,
-            ),
-        ) { Text(stringResource(R.string.delete_forever)) }
+        val colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.error,
+            contentColor = MaterialTheme.colorScheme.onError,
+        )
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            also?.let { (name, onAlso) -> Button(onClick = onAlso, colors = colors) { Text(name) } }
+            Button(onClick = onConfirm, colors = colors) { Text(confirm) }
+        }
     },
     dismissButton = {
         TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }

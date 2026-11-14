@@ -2,6 +2,7 @@ package io.github.naighes.scout4all
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -52,6 +53,11 @@ import io.github.naighes.scout4all.core.MatchListing
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
 import io.github.naighes.scout4all.core.TeamDetails
+import io.github.naighes.scout4all.core.TeamRemovalCounts
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.filled.Delete
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -86,6 +92,7 @@ fun TeamScreen(
     onDvw: () -> Unit = {},
     onAnalysis: () -> Unit = {},
     onDeleted: () -> Unit = {},
+    onNewSeason: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<TeamState>(TeamState.Loading, id) {
@@ -147,12 +154,7 @@ fun TeamScreen(
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_team))
                         }
                         val name = (state as? TeamState.Loaded)?.team?.name.orEmpty()
-                        DeleteButton(
-                            stringResource(R.string.delete_team),
-                            stringResource(R.string.delete_team_text, name),
-                            delete = { it.deleteTeam(id) },
-                            onDeleted = onDeleted,
-                        )
+                        TeamDeleteButton(id, name, onDeleted)
                     }
                 },
             )
@@ -197,7 +199,7 @@ fun TeamScreen(
                 }
                 val content = Modifier.fillMaxSize()
                 when (tab) {
-                    PLAYERS_TAB -> Players(s.team, onPlayer, content)
+                    PLAYERS_TAB -> Players(s.team, onPlayer, onNewSeason, content)
                     else -> Matches(matches, onMatch, onAnalysis, content, onUnreadable = { unreadable = it })
                 }
             }
@@ -205,12 +207,26 @@ fun TeamScreen(
     }
 }
 
+/** The players, then the new season of the team (D15): last, the players
+ * first in sight. */
 @Composable
-private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, modifier: Modifier) = when {
-    team.players.isEmpty() -> Centered(modifier) { Text(stringResource(R.string.no_players)) }
-    // room at the bottom: the button doesn't cover the last player
-    else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
-        items(team.players, key = { it.id }) { PlayerRow(it, onPlayer) }
+private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, onNewSeason: () -> Unit, modifier: Modifier) {
+    val season = @Composable {
+        FilledTonalButton(
+            onClick = onNewSeason,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        ) { Text(stringResource(R.string.new_season)) }
+    }
+    when {
+        team.players.isEmpty() -> Column(modifier, verticalArrangement = Arrangement.Center) {
+            Text(stringResource(R.string.no_players), Modifier.align(Alignment.CenterHorizontally).padding(16.dp))
+            season()
+        }
+        // room at the bottom: the button doesn't cover the last player
+        else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
+            items(team.players, key = { it.id }) { PlayerRow(it, onPlayer) }
+            item(key = "season") { season() }
+        }
     }
 }
 
@@ -255,12 +271,16 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (
         },
         headlineContent = { Text(m.opponent) },
         supportingContent = {
-            Row {
-                Text(matchDate(m.date))
-                if (!m.finished) {
-                    Text(" · ", Modifier.notRead())
-                    Text(stringResource(R.string.in_progress), color = MaterialTheme.colorScheme.primary)
+            Column {
+                Row {
+                    Text(matchDate(m.date))
+                    if (!m.finished) {
+                        Text(" · ", Modifier.notRead())
+                        Text(stringResource(R.string.in_progress), color = MaterialTheme.colorScheme.primary)
+                    }
                 }
+                // B of a match scouted by A: only its result here
+                if (m.scoutedBy != null) Text(stringResource(R.string.scouted_by_opponent))
             }
         },
         // the sets of the team first, green when it won, red when it lost
@@ -342,4 +362,47 @@ fun rememberFormBack(changed: Boolean, onBack: () -> Unit): () -> Unit {
         )
     }
     return { if (changed) asking = true else onBack() }
+}
+
+/** The button that deletes the team, once confirmed with what happens to
+ * its matches (D16): the ones against a name go with it, the ones against
+ * another team stay to that team. */
+@Composable
+private fun TeamDeleteButton(id: String, name: String, onDeleted: () -> Unit) {
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val scope = rememberCoroutineScope()
+    var counts by remember { mutableStateOf<TeamRemovalCounts?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    IconButton(onClick = {
+        scope.launch {
+            try {
+                counts = app.core { it.teamRemoval(id) }
+            } catch (e: MobileException) {
+                error = e.reason
+            }
+        }
+    }) {
+        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete_team))
+    }
+    val text = counts?.let { c ->
+        val removed = stringResource(R.string.delete_team_text, name, c.removed.toInt())
+        when (c.kept) {
+            0u -> removed
+            else -> "$removed ${stringResource(R.string.delete_team_kept, c.kept.toInt(), name)}"
+        }
+    }
+    Deletion(
+        text.orEmpty(),
+        asking = counts != null,
+        onAsking = { if (!it) counts = null },
+        delete = { it.deleteTeam(id) },
+        onDeleted = onDeleted,
+    )
+    error?.let {
+        AlertDialog(
+            onDismissRequest = { error = null },
+            text = { Text(it) },
+            confirmButton = { TextButton(onClick = { error = null }) { Text(stringResource(android.R.string.ok)) } },
+        )
+    }
 }

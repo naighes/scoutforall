@@ -89,6 +89,45 @@ class ScreensLayoutTest(private val screen: Size) {
         rule.assertWhole(hasText(string(R.string.match_stats)) and hasClickAction())
     }
 
+    /** A match of the team as B: the result, why only that, and the button
+     * to open it as A, whole. */
+    @Test
+    fun theMatchSeenByB() {
+        val team = saveNationalTeam()
+        val serbia = saveTeam("Serbia")
+        val match = core {
+            it.saveMatch(team, null, MatchForm("Serbia", "2026-10-25T18:00:00+02:00", true, "6", opponentTeam = serbia))
+        }
+        startNextSet(team, match)
+        serve(team, match, EvalEnum.PERFECT)
+        val open = string(R.string.open_as_team, "Italia")
+        assertFits("match-b", open, open) {
+            MatchScreen(serbia, match, onBack = {}, onEdit = {}, onStartSet = {}, onResumeSet = {}, onSet = {}, onStats = {})
+        }
+    }
+
+    @Test
+    fun theCompetitions() {
+        val team = saveNationalTeam()
+        listOf("Serie A1 femminile – stagione regolare", "Coppa Italia", "CEV Champions League").forEach { name ->
+            core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6", competition = name)) }
+        }
+        assertFits("competitions", "Coppa Italia") { CompetitionsScreen(onBack = {}, onCompetition = {}) }
+    }
+
+    /** The players of the new season as tiles, the button to save whole. */
+    @Test
+    fun theNewSeasonPlayers() {
+        val team = saveNationalTeam()
+        rule.setContent { Scout4AllTheme { NewSeasonScreen(team, onBack = {}, onSaved = {}) } }
+        rule.waitForText(string(R.string.new_season))
+        rule.onNode(hasText(string(R.string.go_on)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.season_count, 7))
+        rule.shot("screen-season-players-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.assertWhole(hasText(string(R.string.save)) and hasClickAction())
+    }
+
     @Test
     fun theMatchWithLongNotes() {
         val team = saveNationalTeam()
