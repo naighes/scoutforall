@@ -80,7 +80,7 @@ use scout4all_core::{
         set::SetEntry,
         snapshot::{EventEntry, Formation},
         stats::{
-            AttackSummary, EvalSet, EventPick, Metric, SetTypeSet, SituationFilter, Stats,
+            AttackSummary, EvalSet, EventPick, Metric, RoleSet, SetTypeSet, SituationFilter, Stats,
             StatsFilter,
         },
         team::TeamEntry,
@@ -1713,15 +1713,17 @@ pub struct RotationStats {
 #[serde(default)]
 pub struct DetailFilter {
     pub phase: Option<PhaseEnum>,
-    /// 0 to 5, the setter in position 1 to 6
-    pub rotation: Option<u8>,
-    /// the id of a player
-    pub player: Option<String>,
+    /// 0 to 5, the setter in position 1 to 6: none keeps them all
+    #[uniffi(default)]
+    pub rotations: Vec<u8>,
+    /// the ids of the players: none keeps them all
+    #[uniffi(default)]
+    pub players: Vec<String>,
     // the situation (see `SituationFilter` in the core): empty or none
     // keeps them all
-    /// the role of the player in the rotation
+    /// the roles of the player in the rotation
     #[uniffi(default)]
-    pub role: Option<RoleEnum>,
+    pub roles: Vec<RoleEnum>,
     /// our reception in the rally
     #[uniffi(default)]
     pub reception: Vec<EvalEnum>,
@@ -2709,13 +2711,13 @@ fn detail_of(
                 }),
             ),
         };
-    // who has the fundamental, and the one chosen even with none (the
-    // filter is shown, to take it off)
+    // who has the fundamental, and the ones chosen even with none (the
+    // filter is shown, to take them off)
     let mut ids = involved(everyone, event);
-    if let Some(chosen) = narrowed.player
-        && !ids.contains(&chosen)
-    {
-        ids.push(chosen);
+    for chosen in &narrowed.players {
+        if !ids.contains(chosen) {
+            ids.push(*chosen);
+        }
     }
     let mut players: Vec<ScoutingPlayer> = ids.into_iter().filter_map(player_of).collect();
     players.sort_by_key(|p| p.number);
@@ -2756,11 +2758,17 @@ fn detail_of(
 
 /// The statistics filter of the app's filter.
 fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
-    let player = filter.player.as_deref().map(parse_id).transpose()?;
+    let players = filter
+        .players
+        .iter()
+        .map(|p| parse_id(p))
+        .collect::<Result<Vec<_>, _>>()?;
     let some = |evals: &[EvalEnum]| (!evals.is_empty()).then(|| EvalSet::of(evals));
-    Ok(
-        StatsFilter::new(filter.phase, filter.rotation, player).with_situation(SituationFilter {
-            role: filter.role,
+    Ok(StatsFilter::new(filter.phase, None, None)
+        .with_rotations(&filter.rotations)
+        .with_players(players)
+        .with_situation(SituationFilter {
+            roles: RoleSet::of(&filter.roles),
             reception: some(&filter.reception),
             previous: some(&filter.previous),
             set_types: (!filter.set_types.is_empty()).then(|| SetTypeSet::of(&filter.set_types)),
@@ -2768,8 +2776,7 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
             inverted_p1: filter.inverted_p1,
             late: filter.late,
             close: filter.close,
-        }),
-    )
+        }))
 }
 
 /// The players with an event of ours of the kind `event` in the
@@ -8222,13 +8229,25 @@ mod tests {
 
         // a player: the rallies have none
         let second = DetailFilter {
-            player: Some(f.players[1].player.id.clone()),
+            players: vec![f.players[1].player.id.clone()],
             ..DetailFilter::default()
         };
         let theirs = detail(StatsScope::Match, EventTypeEnum::S, &second)
             .fundamental
             .unwrap();
         assert_eq!((theirs.total, theirs.phases_per_point), (1, None));
+        // two players: the serves of both
+        let both = DetailFilter {
+            players: vec![
+                f.players[0].player.id.clone(),
+                f.players[1].player.id.clone(),
+            ],
+            ..DetailFilter::default()
+        };
+        let both = detail(StatsScope::Match, EventTypeEnum::S, &both)
+            .fundamental
+            .unwrap();
+        assert_eq!((both.total, both.phases_per_point), (27, None));
         // to choose, only who has the fundamental: no reception, nobody;
         // the one chosen stays, to take the filter off
         let reception = detail(StatsScope::Match, EventTypeEnum::P, &all);
@@ -8253,7 +8272,7 @@ mod tests {
         assert!(none.evals.is_empty() && none.players.is_empty());
         // the first rotation: the aces and the first error
         let first = DetailFilter {
-            rotation: Some(0),
+            rotations: vec![0],
             ..DetailFilter::default()
         };
         assert_eq!(
@@ -8263,6 +8282,23 @@ mod tests {
                 .total,
             26
         );
+        // two rotations: the serves of both
+        let in_rotations = |rotations: Vec<u8>| {
+            let filter = DetailFilter {
+                rotations,
+                ..DetailFilter::default()
+            };
+            detail(StatsScope::Match, EventTypeEnum::S, &filter)
+                .fundamental
+                .map_or(0, |f| f.total)
+        };
+        for other in 1..6 {
+            assert_eq!(
+                in_rotations(vec![0, other]),
+                in_rotations(vec![0]) + in_rotations(vec![other])
+            );
+        }
+        assert_eq!((1..6).map(|r| in_rotations(vec![r])).sum::<u32>(), 1);
 
         let freeballs = detail(StatsScope::Match, EventTypeEnum::FB, &all);
         assert_eq!(freeballs.fundamental, None);
@@ -8281,7 +8317,7 @@ mod tests {
                 StatsScope::Match,
                 EventTypeEnum::S,
                 DetailFilter {
-                    player: Some("not an id".into()),
+                    players: vec!["not an id".into()],
                     ..DetailFilter::default()
                 },
             )
@@ -8904,7 +8940,6 @@ mod tests {
         while std::time::Instant::now() < end && !what() {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        what()
     }
 
     /// A match imported from DataVolley is sent right away, without waiting
@@ -9067,7 +9102,7 @@ mod tests {
             }
             for p in &f.players {
                 let filter = DetailFilter {
-                    player: Some(p.player.id.clone()),
+                    players: vec![p.player.id.clone()],
                     ..DetailFilter::default()
                 };
                 let by_player = ClipPick {

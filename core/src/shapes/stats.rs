@@ -66,13 +66,13 @@ impl Metric {
     }
 }
 
-/// Narrows the statistics to a phase, a rotation, a player and a
-/// situation: `None` keeps them all.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Narrows the statistics to a phase, some rotations, some players and a
+/// situation: `None`, or none of them, keeps them all.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatsFilter {
     pub phase: Option<PhaseEnum>,
-    pub rotation: Option<u8>,
-    pub player: Option<Uuid>,
+    pub rotations: RotationSet,
+    pub players: Vec<Uuid>,
     pub situation: SituationFilter,
 }
 
@@ -80,14 +80,41 @@ impl StatsFilter {
     pub fn new(phase: Option<PhaseEnum>, rotation: Option<u8>, player: Option<Uuid>) -> Self {
         StatsFilter {
             phase,
-            rotation,
-            player,
+            rotations: RotationSet::of(rotation.as_slice()),
+            players: player.into_iter().collect(),
             situation: SituationFilter::default(),
         }
     }
 
     pub fn with_situation(self, situation: SituationFilter) -> Self {
         StatsFilter { situation, ..self }
+    }
+
+    /// Only these rotations (0 to 5); none: all of them.
+    pub fn with_rotations(self, rotations: &[u8]) -> Self {
+        StatsFilter {
+            rotations: RotationSet::of(rotations),
+            ..self
+        }
+    }
+
+    /// Only these players; none: all of them.
+    pub fn with_players(self, players: Vec<Uuid>) -> Self {
+        StatsFilter { players, ..self }
+    }
+
+    /// The same in another phase.
+    pub fn with_phase(&self, phase: Option<PhaseEnum>) -> Self {
+        StatsFilter {
+            phase,
+            ..self.clone()
+        }
+    }
+
+    /// Whether it keeps only some players: the events of the team (with
+    /// no player, theirs) are out.
+    pub fn of_players(&self) -> bool {
+        !self.players.is_empty()
     }
 
     /// Whether an event with this context passes the filter: an event with
@@ -103,8 +130,8 @@ impl StatsFilter {
         touch: Option<&Touch>,
     ) -> bool {
         self.phase.is_none_or(|p| p == phase)
-            && self.rotation.is_none_or(|r| r == rotation)
-            && self.player.is_none_or(|p| player == Some(p))
+            && self.rotations.keeps(rotation)
+            && (self.players.is_empty() || player.is_some_and(|p| self.players.contains(&p)))
             && self.situation.matches(situation, touch)
     }
 }
@@ -115,7 +142,7 @@ impl StatsFilter {
 /// the court (see `CourtTarget::zones`, a conflict zone by
 /// `CourtTarget::conflict`) and, for our serve, started from the zone, when
 /// given.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EventPick {
     pub event_type: EventTypeEnum,
     pub evals: Option<EvalSet>,
@@ -156,8 +183,8 @@ impl EventPick {
 /// only the attacks told with it).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SituationFilter {
-    /// the role of the player in the rotation
-    pub role: Option<RoleEnum>,
+    /// the roles of the player in the rotation: none keeps them all
+    pub roles: RoleSet,
     /// our reception in the rally
     pub reception: Option<EvalSet>,
     /// the touch of ours before, in the rally (for an attack, the one it
@@ -185,7 +212,7 @@ impl SituationFilter {
         let role = touch.and_then(|t| t.role);
         let previous = touch.and_then(|t| t.previous);
         let set_type = touch.and_then(|t| t.set_type);
-        self.role.is_none_or(|r| role == Some(r))
+        self.roles.keeps(role)
             && self
                 .reception
                 .is_none_or(|set| situation.reception.is_some_and(|e| set.contains(e)))
@@ -204,6 +231,66 @@ impl SituationFilter {
     }
 }
 
+/// Some rotations (0 to 5, the setter in position 1 to 6), to filter by:
+/// none keeps them all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct RotationSet(u8);
+
+impl RotationSet {
+    pub fn of(rotations: &[u8]) -> Self {
+        RotationSet(
+            rotations
+                .iter()
+                .filter(|r| **r < 6)
+                .fold(0, |set, r| set | (1 << r)),
+        )
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn contains(&self, rotation: u8) -> bool {
+        rotation < 6 && self.0 & (1 << rotation) != 0
+    }
+
+    /// Whether a rally in `rotation` passes: all do when it's empty.
+    pub fn keeps(&self, rotation: u8) -> bool {
+        self.is_empty() || self.contains(rotation)
+    }
+}
+
+/// Some roles, to filter by: none keeps them all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct RoleSet(u8);
+
+impl RoleSet {
+    pub fn of(roles: &[RoleEnum]) -> Self {
+        RoleSet(roles.iter().fold(0, |set, r| set | Self::bit(*r)))
+    }
+
+    fn bit(role: RoleEnum) -> u8 {
+        RoleEnum::ALL
+            .iter()
+            .position(|r| *r == role)
+            .map_or(0, |i| 1 << i)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn contains(&self, role: RoleEnum) -> bool {
+        self.0 & Self::bit(role) != 0
+    }
+
+    /// Whether a touch by a player in `role` passes: all do when it's
+    /// empty, none without a role otherwise.
+    pub fn keeps(&self, role: Option<RoleEnum>) -> bool {
+        self.is_empty() || role.is_some_and(|r| self.contains(r))
+    }
+}
+
 /// Some evaluations, to filter by.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct EvalSet(u8);
@@ -211,10 +298,9 @@ pub struct EvalSet(u8);
 impl EvalSet {
     /// The good ones: `#` and `+`.
     pub const POSITIVE: EvalSet = EvalSet(0b11);
-    /// `!`
-    pub const EXCLAMATIVE: EvalSet = EvalSet(0b100);
-    /// The bad ones keeping the ball or giving it to them: `-` and `/`.
-    pub const NEGATIVE: EvalSet = EvalSet(0b11000);
+    /// The bad ones keeping the ball or giving it to them: `!`, `-` and
+    /// `/`.
+    pub const NEGATIVE: EvalSet = EvalSet(0b11100);
 
     pub fn of(evals: &[EvalEnum]) -> Self {
         evals.iter().fold(EvalSet(0), |set, e| set.with(*e, true))

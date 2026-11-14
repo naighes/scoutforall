@@ -432,7 +432,7 @@ impl Freeballs {
     /// Team events, ours and theirs: with a player, none given and the
     /// others not told.
     fn of(stats: &Stats, filter: &StatsFilter) -> Self {
-        let team = filter.player.is_none();
+        let team = !filter.of_players();
         Freeballs {
             given: stats.event_count(EventTypeEnum::FB, None, filter),
             received: team.then(|| stats.event_count(EventTypeEnum::OF, None, filter)),
@@ -475,10 +475,7 @@ pub fn by_player(
         .into_iter()
         .map(|player| {
             // the situation too: only the player is theirs
-            let only = StatsFilter {
-                player: Some(player),
-                ..*filter
-            };
+            let only = filter.clone().with_players(vec![player]);
             PlayerLine {
                 player,
                 total: stats.event_count(event_type, None, &only),
@@ -524,10 +521,7 @@ pub fn by_rotation(stats: &Stats) -> Vec<RotationLine> {
 pub fn by_rotation_in(stats: &Stats, filter: &StatsFilter) -> Vec<RotationLine> {
     (0..6)
         .map(|rotation| {
-            let in_rotation = StatsFilter {
-                rotation: Some(rotation),
-                ..*filter
-            };
+            let in_rotation = filter.clone().with_rotations(&[rotation]);
             let phase =
                 |p| crate::overview::in_phase(&in_rotation, p).and_then(|f| stats.rallies_won(&f));
             RotationLine {

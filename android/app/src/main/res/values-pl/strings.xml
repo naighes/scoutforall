@@ -150,7 +150,10 @@
     <string name="serve_starts_told">strefa wyjścia podana w %1$d z %2$d zagrywek</string>
     <string name="serve_paths">Tory zagrywki</string>
     <string name="serve_paths_told">wyjście i kierunek podane w %1$s z %2$d zagrywek</string>
-    <string name="serve_paths_legend">grubsza: więcej zagrywek · kolor: skuteczność · = błędy · dotknij strzałki</string>
+    <string name="serve_paths_legend">dotknij strzałki, aby zobaczyć jej zagrywki</string>
+    <string name="paths_legend_more">więcej zagrywek</string>
+    <string name="paths_legend_color">skuteczność, od czerwonego do zielonego (szary: za mało)</string>
+    <string name="paths_legend_errors">błędy: nie doleciały na ich boisko</string>
     <string name="serve_from">z %1$s</string>
     <string name="reception_zone">Strefa przyjęcia</string>
     <string name="receptions_by_zone">Przyjęcia według stref</string>

@@ -147,7 +147,10 @@
     <string name="serve_starts_told">開始ゾーン指定 %1$d/%2$d本</string>
     <string name="serve_paths">サーブの軌道</string>
     <string name="serve_paths_told">開始とコース指定 %1$s/%2$d本</string>
-    <string name="serve_paths_legend">太さ: 本数 · 色: 効果率 · = ミス · 矢印をタップ</string>
+    <string name="serve_paths_legend">矢印をタップするとそのサーブを表示</string>
+    <string name="paths_legend_more">太いほど本数が多い</string>
+    <string name="paths_legend_color">効率：赤から緑（灰色：本数が少なすぎる）</string>
+    <string name="paths_legend_errors">ミス：相手コートに入らなかったサーブ</string>
     <string name="serve_from">%1$sから</string>
     <string name="reception_zone">レセプションのゾーン</string>
     <string name="receptions_by_zone">ゾーン別レセプション</string>

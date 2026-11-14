@@ -131,8 +131,8 @@ private fun clipsTitle(detail: DetailStats, scope: StatsScope, query: DetailQuer
         f?.evals?.filter { it.eval in choice.evals }?.joinToString(" ") { it.symbol }?.takeIf { it.isNotEmpty() },
         choice.zone?.let { stringResource(R.string.clip_zone, it.toString()) },
         choice.target?.let { t -> f?.targets?.flatten()?.find { it.value == t }?.label?.let { stringResource(R.string.clip_zone, it) } },
-        filter.player?.let { id -> detail.players.find { it.id == id }?.let { "${it.number} ${it.name}" } },
-        filter.rotation?.let { r -> detail.rotations.find { it.value == r }?.name },
+        detail.players.filter { it.id in filter.players }.joinToString(", ") { "${it.number} ${it.name}" }.takeIf { it.isNotEmpty() },
+        detail.rotations.filter { it.value.toByte() in filter.rotations }.joinToString(", ") { it.name }.takeIf { it.isNotEmpty() },
         filter.phase?.let { p -> detail.phases.find { it.value == p }?.name?.replaceFirstChar { it.uppercase() } },
     ).joinToString(" · ")
 }

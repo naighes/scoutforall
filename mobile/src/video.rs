@@ -1047,9 +1047,9 @@ mod tests {
         };
         let filter = DetailFilter {
             phase: Some(PhaseEnum::SideOut),
-            rotation: Some(3),
-            player: Some("p-18".to_string()),
-            role: Some(RoleEnum::OppositeHitter),
+            rotations: vec![3, 4],
+            players: vec!["p-18".to_string(), "p-7".to_string()],
+            roles: vec![RoleEnum::OppositeHitter],
             reception: vec![EvalEnum::Perfect, EvalEnum::Positive],
             previous: vec![EvalEnum::Exclamative],
             set_types: vec![SetTypeEnum::Quick],

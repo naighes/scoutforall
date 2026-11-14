@@ -923,18 +923,18 @@ mod tests {
             serve_start: None,
             filter: StatsFilter::default(),
         };
-        assert_eq!(picked(attacks), vec![1, 2]);
+        assert_eq!(picked(attacks.clone()), vec![1, 2]);
         assert_eq!(
             picked(EventPick {
                 event_type: P,
-                ..attacks
+                ..attacks.clone()
             }),
             vec![0]
         );
         assert_eq!(
             picked(EventPick {
                 evals: Some(EvalSet::of(&[Perfect])),
-                ..attacks
+                ..attacks.clone()
             }),
             vec![2]
         );
@@ -943,21 +943,21 @@ mod tests {
         assert_eq!(
             picked(EventPick {
                 zone: Some(ZoneEnum::Four),
-                ..attacks
+                ..attacks.clone()
             }),
             vec![2]
         );
         assert_eq!(
             picked(EventPick {
                 zone: Some(ZoneEnum::Two),
-                ..attacks
+                ..attacks.clone()
             }),
             vec![1]
         );
         assert_eq!(
             picked(EventPick {
                 filter: StatsFilter::new(None, None, Some(t.opposite)),
-                ..attacks
+                ..attacks.clone()
             }),
             vec![2]
         );
@@ -967,7 +967,7 @@ mod tests {
                     set_types: Some(SetTypeSet::of(&[Five])),
                     ..SituationFilter::default()
                 }),
-                ..attacks
+                ..attacks.clone()
             }),
             vec![1]
         );

@@ -1,6 +1,12 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +59,8 @@ private const val Length = 18f
 private const val Margin = 0.5f
 private const val Gap = 0.4f
 private const val Strip = 2.6f
+/** How far into our court the stroke of the errors goes, in meters. */
+private const val ErrorLength = 2f
 private const val Across = Width + 2 * Margin
 private const val Down = Length + Gap + Strip + 2 * Margin
 
@@ -68,7 +76,8 @@ private class Place(val meter: Float) {
 
 /** Where our serves went from where they started, on the whole court:
  * their half at the top as our server sees it, ours below, the zones of our
- * end line under it with their errors; an arrow from each start to each
+ * end line under it with their errors (a red stroke ending in a cross);
+ * an arrow from each start to each
  * zone of their court, the more the thicker, in the color of their
  * efficiency (grey on too few to tell); their zones lit by how many went
  * there. A zone of our end line touched narrows to its serves, an arrow to
@@ -137,15 +146,75 @@ internal fun ServePaths(
                 val lit = told?.let { it.start == p.start && it.zone == p.zone } == true
                 drawArrow(place, p, most, lit, colors.onSurfaceVariant, colors.onSurface)
             }
+            drawErrors(place, f, most, colors.surface, measurer)
             drawNumbers(place, f, colors.surface, colors.onSurface, measurer)
         }
     }
+    if (told == null) PathsLegend()
     Text(
         told?.let { pathText(it) } ?: stringResource(R.string.serve_paths_legend),
         style = if (told != null) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.labelMedium,
         fontWeight = if (told != null) FontWeight.Bold else null,
         color = if (told != null) colors.onSurface else colors.onSurfaceVariant,
     )
+}
+
+/** What the arrows tell: thicker the more, their color the efficiency,
+ * the red cross the errors (as on the desktop). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PathsLegend() = FlowRow(
+    horizontalArrangement = Arrangement.spacedBy(16.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val swatch = @Composable { width: Int, height: Int, color: Color ->
+        Box(Modifier.size(width.dp, height.dp).background(color, RoundedCornerShape(2.dp)))
+    }
+    val item = @Composable { said: String, marks: @Composable () -> Unit ->
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) { marks() }
+            Text(said, style = MaterialTheme.typography.labelMedium, color = muted)
+        }
+    }
+    item(stringResource(R.string.paths_legend_more)) {
+        swatch(18, 2, muted)
+        swatch(18, 7, muted)
+    }
+    item(stringResource(R.string.paths_legend_color)) {
+        listOf(0.0, 0.5, 1.0).forEach { swatch(14, 10, gradeColor(it)) }
+        swatch(14, 10, muted)
+    }
+    item(stringResource(R.string.paths_legend_errors)) {
+        Text("✕", color = gradeColor(0.0), fontWeight = FontWeight.Bold)
+    }
+}
+
+/** The errors of each zone of our end line, which went nowhere on their
+ * court: a red stroke up from it, sized as an arrow of as many serves,
+ * ending in a cross, how many beside it. */
+private fun DrawScope.drawErrors(place: Place, f: FundamentalDetail, most: Double, ink: Color, measurer: TextMeasurer) {
+    val red = gradeColor(0.0)
+    val size = (place.meter * 0.42f).coerceAtMost(15.sp.toPx()).toSp()
+    val pad = 3.dp.toPx()
+    f.serveStarts.forEachIndexed { i, s ->
+        if (s.errors == 0u) return@forEachIndexed
+        val r = place.start(i, f.serveStarts.size)
+        val share = (s.errors.toDouble() / most).coerceAtMost(1.0).toFloat()
+        val width = ((0.06f + 0.26f * share) * place.meter).coerceAtLeast(3.dp.toPx())
+        // a little left of the middle, the arrows of the zone start there
+        val x = r.left + r.width * 0.3f
+        val from = Offset(x, r.top)
+        val to = Offset(x, place.at(0f, Length - ErrorLength).y)
+        drawLine(red.copy(alpha = 0.9f), from, to, strokeWidth = width)
+        val arm = (width * 1.2f).coerceAtLeast(6.dp.toPx())
+        drawLine(red, Offset(to.x - arm, to.y - arm), Offset(to.x + arm, to.y + arm), strokeWidth = 3.dp.toPx())
+        drawLine(red, Offset(to.x + arm, to.y - arm), Offset(to.x - arm, to.y + arm), strokeWidth = 3.dp.toPx())
+        val label = measurer.measure(s.errors.toString(), TextStyle(color = ink, fontSize = size, fontWeight = FontWeight.Bold))
+        val topLeft = Offset(to.x + arm + pad, to.y - label.size.height / 2 - pad)
+        drawRoundRect(red, topLeft, Size(label.size.width + 2 * pad, label.size.height + 2 * pad), CornerRadius(pad))
+        drawText(label, topLeft = Offset(topLeft.x + pad, topLeft.y + pad))
+    }
 }
 
 /** "1 → 5 · 3 (40%) · +20%". */
@@ -214,7 +283,7 @@ private fun DrawScope.drawStarts(
             line(s.label, text, size, true),
             line(s.count.toString(), text, small, false).takeIf { s.count > 0u },
             s.efficiency?.let { line("%+d%%".format(it.roundToInt()), efficiencyColor(it), small, true) },
-            line("= ${s.errors}", gradeColor(0.0), small, false).takeIf { s.errors > 0u },
+            line("✕ ${s.errors}", gradeColor(0.0), small, true).takeIf { s.errors > 0u },
         )
         lines.forEachIndexed { n, (content, style) ->
             val measured = measurer.measure(content, style)

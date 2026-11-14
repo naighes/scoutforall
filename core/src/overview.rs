@@ -163,10 +163,7 @@ impl Overview {
 pub fn in_phase(filter: &StatsFilter, phase: PhaseEnum) -> Option<StatsFilter> {
     match filter.phase {
         Some(asked) if asked != phase => None,
-        _ => Some(StatsFilter {
-            phase: Some(phase),
-            ..*filter
-        }),
+        _ => Some(filter.with_phase(Some(phase))),
     }
 }
 

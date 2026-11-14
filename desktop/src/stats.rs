@@ -116,8 +116,10 @@ pub enum Message {
     Series(usize),
     Recent(bool),
     Event(EventTypeEnum),
-    Player(Option<String>),
-    Rotation(Option<u8>),
+    /// the players chosen: none, all of them
+    Players(Vec<String>),
+    /// the rotations chosen: none, all of them
+    Rotations(Vec<u8>),
     Phase(Option<PhaseEnum>),
     Efficiency(bool),
     Kind(Kind),
@@ -128,7 +130,8 @@ pub enum Message {
     Month(i32),
     /// the day to write: the last of the period (true) or the first
     Editing(bool),
-    Role(Option<RoleEnum>),
+    /// the roles chosen: none, all of them
+    Roles(Vec<RoleEnum>),
     Reception(Vec<EvalEnum>),
     Previous(Vec<EvalEnum>),
     SetTypes(Vec<SetTypeEnum>),
@@ -300,6 +303,15 @@ fn short_day(s: &Strings, day: &str) -> String {
 }
 
 /// The same evaluations, whatever their order.
+/// The values chosen with `value` taken off when it was there, added
+/// otherwise: the filters choosing more than one.
+fn toggled<T: PartialEq + Clone>(chosen: &[T], value: &T) -> Vec<T> {
+    match chosen.contains(value) {
+        true => chosen.iter().filter(|c| *c != value).cloned().collect(),
+        false => chosen.iter().cloned().chain([value.clone()]).collect(),
+    }
+}
+
 fn same_set(a: &[EvalEnum], b: &[EvalEnum]) -> bool {
     a.len() == b.len() && a.iter().all(|e| b.contains(e))
 }
@@ -359,6 +371,63 @@ fn bar<'a, M: 'a>(share: f64, most: f64, color: Color) -> Element<'a, M> {
     .into()
 }
 
+/// What the arrows of the serves tell: thicker the more, their color the
+/// efficiency, the red cross the errors.
+fn paths_legend<'a>(s: &Strings, c: Colors) -> Element<'a, Message> {
+    let swatch = |width: f32, height: f32, color: Color| -> Element<'a, Message> {
+        container(space::horizontal().width(0))
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(height))
+            .style(move |_| container::Style {
+                background: Some(color.into()),
+                border: iced::border::rounded(2),
+                ..container::Style::default()
+            })
+            .into()
+    };
+    let item = |marks: Vec<Element<'a, Message>>, said: &str| -> Element<'a, Message> {
+        row![
+            Row::with_children(marks)
+                .spacing(3)
+                .align_y(Alignment::Center),
+            small(said, c)
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into()
+    };
+    row![
+        item(
+            vec![swatch(18.0, 2.0, c.muted), swatch(18.0, 7.0, c.muted)],
+            s.paths_legend_more
+        ),
+        item(
+            [0.0, 0.5, 1.0]
+                .into_iter()
+                .map(|g| swatch(14.0, 10.0, grade_color(g, c)))
+                .chain([swatch(14.0, 10.0, c.muted)])
+                .collect(),
+            s.paths_legend_color
+        ),
+        item(
+            vec![
+                text("✕")
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold)
+                    .color(c.danger)
+                    .into()
+            ],
+            s.paths_legend_errors
+        ),
+    ]
+    .spacing(16)
+    .wrap()
+    .into()
+}
+
+/// Between a scroll bar and what it scrolls: beside it, never over it.
+const SCROLLBAR_GAP: f32 = 6.0;
+
 /// A figure in a box: its name, its value, a line under it.
 fn tile<'a, M: 'a>(
     label: &str,
@@ -367,17 +436,74 @@ fn tile<'a, M: 'a>(
     detail: Option<String>,
     c: Colors,
 ) -> Element<'a, M> {
-    let detail: Element<'a, M> = match detail {
-        Some(d) => small(d, c).into(),
-        None => space::vertical().height(0).into(),
-    };
-    container(column![small(label, c), big(value, color), detail].spacing(2))
+    Tile::new(label, value, color, detail).view(Length::Shrink, false, c)
+}
+
+/// A figure of a row of boxes (`tiles`).
+#[derive(Clone)]
+struct Tile {
+    label: String,
+    value: String,
+    color: Color,
+    detail: Option<String>,
+}
+
+impl Tile {
+    fn new(label: &str, value: String, color: Color, detail: Option<String>) -> Self {
+        Tile {
+            label: label.to_string(),
+            value,
+            color,
+            detail,
+        }
+    }
+
+    /// Its box `height` tall; a ghost takes its place unseen.
+    fn view<'a, M: 'a>(self, height: Length, ghost: bool, c: Colors) -> Element<'a, M> {
+        let (muted, color, border) = match ghost {
+            true => (Color::TRANSPARENT, Color::TRANSPARENT, Color::TRANSPARENT),
+            false => (c.muted, self.color, c.border),
+        };
+        let detail: Element<'a, M> = match self.detail {
+            Some(d) => text(d).size(SIZE_SMALL).color(muted).into(),
+            None => space::vertical().height(0).into(),
+        };
+        container(
+            column![
+                text(self.label).size(SIZE_SMALL).color(muted),
+                big(self.value, color),
+                detail
+            ]
+            .spacing(2),
+        )
         .padding(10)
         .width(Length::Fill)
+        .height(height)
         .style(move |_| container::Style {
-            border: iced::border::rounded(8).color(c.border).width(1),
+            border: iced::border::rounded(8).color(border).width(1),
             ..container::Style::default()
         })
+        .into()
+    }
+}
+
+/// Boxes side by side, all as tall as the tallest: the row measured on
+/// their ghosts, then drawn over them filling it (no box shorter than
+/// the others, no empty space under some).
+fn tiles<'a, M: 'a>(tiles: Vec<Tile>, c: Colors) -> Element<'a, M> {
+    let ghosts = Row::with_children(
+        tiles
+            .iter()
+            .cloned()
+            .map(|t| t.view(Length::Shrink, true, c)),
+    )
+    .spacing(8);
+    let seen = Row::with_children(tiles.into_iter().map(|t| t.view(Length::Fill, false, c)))
+        .spacing(8)
+        .height(Length::Fill);
+    iced::widget::stack![ghosts, seen]
+        .width(Length::Fill)
+        .height(Length::Shrink)
         .into()
 }
 
@@ -587,28 +713,36 @@ impl StatsScreen {
             StatsScope::Set { number } => Some(format!("{} {number}", s.set_n)),
             StatsScope::Match => None,
         };
-        let player = self.filter.player.as_ref().and_then(|id| {
+        let joined = |names: Vec<String>| (!names.is_empty()).then(|| names.join(", "));
+        let player = joined(
             detail
-                .and_then(|d| d.players.iter().find(|p| &p.id == id))
+                .iter()
+                .flat_map(|d| d.players.iter())
+                .filter(|p| self.filter.players.contains(&p.id))
                 .map(|p| format!("{} {}", p.number, p.name))
-        });
-        let rotation = self.filter.rotation.and_then(|r| {
+                .collect(),
+        );
+        let rotation = joined(
             detail
-                .and_then(|d| d.rotations.iter().find(|x| x.value == r))
+                .iter()
+                .flat_map(|d| d.rotations.iter())
+                .filter(|x| self.filter.rotations.contains(&x.value))
                 .map(|x| x.name.clone())
-        });
+                .collect(),
+        );
         let phase = self.filter.phase.and_then(|ph| {
             detail
                 .and_then(|d| d.phases.iter().find(|x| x.value == ph))
                 .map(|x| ui::capitalized(&x.name))
         });
-        let role = self.filter.role.and_then(|r| {
+        let role = joined(
             self.choices
                 .roles
                 .iter()
-                .find(|x| x.value == r)
+                .filter(|x| self.filter.roles.contains(&x.value))
                 .map(|x| ui::capitalized(&x.name))
-        });
+                .collect(),
+        );
         let symbols = |evals: &[EvalEnum]| -> Option<String> {
             let found: Vec<String> = self
                 .choices
@@ -789,26 +923,26 @@ impl StatsScreen {
                 ui::cycle(&events, &self.event, forward).map(Message::Event)
             }
             Filter::Player => {
-                let players: Vec<Option<String>> = [None]
+                let players: Vec<Vec<String>> = [vec![]]
                     .into_iter()
                     .chain(
                         detail
                             .into_iter()
-                            .flat_map(|d| d.players.iter().map(|p| Some(p.id.clone()))),
+                            .flat_map(|d| d.players.iter().map(|p| vec![p.id.clone()])),
                     )
                     .collect();
-                ui::cycle(&players, &self.filter.player, forward).map(Message::Player)
+                ui::cycle(&players, &self.filter.players, forward).map(Message::Players)
             }
             Filter::Rotation => {
-                let rotations: Vec<Option<u8>> = [None]
+                let rotations: Vec<Vec<u8>> = [vec![]]
                     .into_iter()
                     .chain(
                         detail
                             .into_iter()
-                            .flat_map(|d| d.rotations.iter().map(|r| Some(r.value))),
+                            .flat_map(|d| d.rotations.iter().map(|r| vec![r.value])),
                     )
                     .collect();
-                ui::cycle(&rotations, &self.filter.rotation, forward).map(Message::Rotation)
+                ui::cycle(&rotations, &self.filter.rotations, forward).map(Message::Rotations)
             }
             Filter::Phase => {
                 let phases: Vec<Option<PhaseEnum>> = [None]
@@ -822,11 +956,11 @@ impl StatsScreen {
                 ui::cycle(&phases, &self.filter.phase, forward).map(Message::Phase)
             }
             Filter::Role => {
-                let roles: Vec<Option<RoleEnum>> = [None]
+                let roles: Vec<Vec<RoleEnum>> = [vec![]]
                     .into_iter()
-                    .chain(self.choices.roles.iter().map(|r| Some(r.value)))
+                    .chain(self.choices.roles.iter().map(|r| vec![r.value]))
                     .collect();
-                ui::cycle(&roles, &self.filter.role, forward).map(Message::Role)
+                ui::cycle(&roles, &self.filter.roles, forward).map(Message::Roles)
             }
             Filter::Reception => {
                 ui::cycle(&evals(true), &self.filter.reception, forward).map(Message::Reception)
@@ -905,12 +1039,12 @@ impl StatsScreen {
                 self.clear_pick();
                 self.load();
             }
-            Message::Player(player) => {
-                self.filter.player = player;
+            Message::Players(players) => {
+                self.filter.players = players;
                 self.load();
             }
-            Message::Rotation(rotation) => {
-                self.filter.rotation = rotation;
+            Message::Rotations(rotations) => {
+                self.filter.rotations = rotations;
                 self.load();
             }
             Message::Phase(phase) => {
@@ -945,8 +1079,8 @@ impl StatsScreen {
             }
             Message::Month(months) => self.days.month = calendar::shift(self.days.month, months),
             Message::Editing(to) => self.days.editing_to = to,
-            Message::Role(role) => {
-                self.filter.role = role;
+            Message::Roles(roles) => {
+                self.filter.roles = roles;
                 self.load();
             }
             Message::Reception(evals) => {
@@ -1191,7 +1325,9 @@ impl StatsScreen {
             false => {
                 let left = container(ui::panel(
                     None,
+                    // the bar beside the pills, not over them
                     scrollable(Column::with_children(filters).spacing(8))
+                        .spacing(SCROLLBAR_GAP)
                         .id(iced::widget::Id::new(FILTERS))
                         .height(Length::Fill)
                         .width(Length::Fill),
@@ -1229,7 +1365,7 @@ impl StatsScreen {
                 }
                 evals
             };
-            let names = [s.positive_group, "!", s.negative_group];
+            let names = [s.positive_group, s.negative_group];
             [all(chosen.is_empty(), message(vec![]))]
                 .into_iter()
                 .chain(
@@ -1336,29 +1472,35 @@ impl StatsScreen {
             ),
             Filter::Player => (
                 s.player,
-                [all(self.filter.player.is_none(), Message::Player(None))]
-                    .into_iter()
-                    .chain(detail.iter().flat_map(|d| d.players.iter()).map(|p| {
-                        pill(
-                            format!("{} {}", p.number, p.name),
-                            self.filter.player.as_ref() == Some(&p.id),
-                            Message::Player(Some(p.id.clone())),
-                        )
-                    }))
-                    .collect(),
+                [all(
+                    self.filter.players.is_empty(),
+                    Message::Players(vec![]),
+                )]
+                .into_iter()
+                .chain(detail.iter().flat_map(|d| d.players.iter()).map(|p| {
+                    pill(
+                        format!("{} {}", p.number, p.name),
+                        self.filter.players.contains(&p.id),
+                        Message::Players(toggled(&self.filter.players, &p.id)),
+                    )
+                }))
+                .collect(),
             ),
             Filter::Rotation => (
                 s.rotation,
-                [all(self.filter.rotation.is_none(), Message::Rotation(None))]
-                    .into_iter()
-                    .chain(detail.iter().flat_map(|d| d.rotations.iter()).map(|r| {
-                        pill(
-                            r.name.clone(),
-                            self.filter.rotation == Some(r.value),
-                            Message::Rotation(Some(r.value)),
-                        )
-                    }))
-                    .collect(),
+                [all(
+                    self.filter.rotations.is_empty(),
+                    Message::Rotations(vec![]),
+                )]
+                .into_iter()
+                .chain(detail.iter().flat_map(|d| d.rotations.iter()).map(|r| {
+                    pill(
+                        r.name.clone(),
+                        self.filter.rotations.contains(&r.value),
+                        Message::Rotations(toggled(&self.filter.rotations, &r.value)),
+                    )
+                }))
+                .collect(),
             ),
             Filter::Phase => (
                 s.phase,
@@ -1375,13 +1517,13 @@ impl StatsScreen {
             ),
             Filter::Role => (
                 s.role,
-                [all(self.filter.role.is_none(), Message::Role(None))]
+                [all(self.filter.roles.is_empty(), Message::Roles(vec![]))]
                     .into_iter()
                     .chain(self.choices.roles.iter().map(|r| {
                         pill(
                             ui::capitalized(&r.name),
-                            self.filter.role == Some(r.value),
-                            Message::Role(Some(r.value)),
+                            self.filter.roles.contains(&r.value),
+                            Message::Roles(toggled(&self.filter.roles, &r.value)),
                         )
                     }))
                     .collect(),
@@ -1769,27 +1911,29 @@ impl StatsScreen {
             (Some(f), _) => self.fundamental(f, s, c),
             (None, Some(fb)) => {
                 let exploited = fb.exploited.as_ref();
-                row![
-                    tile(s.freeballs_given, fb.given.to_string(), c.text, None, c),
-                    tile(
-                        s.freeballs_received,
-                        fb.received.map_or("–".to_string(), |r| r.to_string()),
-                        c.text,
-                        None,
-                        c
-                    ),
-                    tile(
-                        s.freeballs_exploited,
-                        pct(exploited.map(|e| e.percentage)),
-                        c.text,
-                        exploited.map(|e| {
-                            ui::fill(s.of_total, &[e.exploited.to_string(), e.total.to_string()])
-                        }),
-                        c
-                    ),
-                ]
-                .spacing(10)
-                .into()
+                tiles(
+                    vec![
+                        Tile::new(s.freeballs_given, fb.given.to_string(), c.text, None),
+                        Tile::new(
+                            s.freeballs_received,
+                            fb.received.map_or("–".to_string(), |r| r.to_string()),
+                            c.text,
+                            None,
+                        ),
+                        Tile::new(
+                            s.freeballs_exploited,
+                            pct(exploited.map(|e| e.percentage)),
+                            c.text,
+                            exploited.map(|e| {
+                                ui::fill(
+                                    s.of_total,
+                                    &[e.exploited.to_string(), e.total.to_string()],
+                                )
+                            }),
+                        ),
+                    ],
+                    c,
+                )
             }
             (None, None) => space::vertical().into(),
         }
@@ -1828,53 +1972,53 @@ impl StatsScreen {
         });
         let grade = f.grade.map_or(c.text, |g| grade_color(g, c));
         let figures = column![
-            row![
-                tile(
-                    &ui::capitalized(s.efficiency),
-                    pct(f.efficiency),
-                    grade,
-                    None,
-                    c
-                ),
-                tile(s.positiveness, pct(f.positiveness), c.text, None, c),
-                tile(s.total, f.total.to_string(), c.text, None, c),
-            ]
-            .spacing(8),
-            row![
-                tile(
-                    s.errors,
-                    f.errors.to_string(),
-                    match f.unforced_errors > 0 {
-                        true => c.danger,
-                        false => c.text,
-                    },
-                    Some(ui::fill(
-                        s.unforced_detail,
-                        &[f.unforced_errors.to_string()]
-                    )),
-                    c
-                ),
-                tile(
-                    s.points,
-                    f.points.map_or("–".to_string(), |p| p.to_string()),
-                    c.text,
-                    None,
-                    c
-                ),
-                tile(s.faults, f.faults.to_string(), c.text, None, c),
-                tile(
-                    s.rallies_per_point,
-                    f.phases_per_point
-                        .as_ref()
-                        .map_or("–".to_string(), |r| format!("{:.2}", r.per_point)),
-                    c.text,
-                    f.phases_per_point
-                        .as_ref()
-                        .map(|r| ui::fill(s.of_total, &[r.won.to_string(), r.rallies.to_string()])),
-                    c
-                ),
-            ]
-            .spacing(8),
+            tiles(
+                vec![
+                    Tile::new(
+                        &ui::capitalized(s.efficiency),
+                        pct(f.efficiency),
+                        grade,
+                        None
+                    ),
+                    Tile::new(s.positiveness, pct(f.positiveness), c.text, None),
+                    Tile::new(s.total, f.total.to_string(), c.text, None),
+                ],
+                c
+            ),
+            tiles(
+                vec![
+                    Tile::new(
+                        s.errors,
+                        f.errors.to_string(),
+                        match f.unforced_errors > 0 {
+                            true => c.danger,
+                            false => c.text,
+                        },
+                        Some(ui::fill(
+                            s.unforced_detail,
+                            &[f.unforced_errors.to_string()]
+                        )),
+                    ),
+                    Tile::new(
+                        s.points,
+                        f.points.map_or("–".to_string(), |p| p.to_string()),
+                        c.text,
+                        None,
+                    ),
+                    Tile::new(s.faults, f.faults.to_string(), c.text, None),
+                    Tile::new(
+                        s.rallies_per_point,
+                        f.phases_per_point
+                            .as_ref()
+                            .map_or("–".to_string(), |r| format!("{:.2}", r.per_point)),
+                        c.text,
+                        f.phases_per_point.as_ref().map(|r| {
+                            ui::fill(s.of_total, &[r.won.to_string(), r.rallies.to_string()])
+                        }),
+                    ),
+                ],
+                c
+            ),
         ]
         .spacing(8);
         let left = ui::panel(
@@ -1897,6 +2041,7 @@ impl StatsScreen {
         let right = self.players(f, s, c);
         row![
             scrollable(column![left, middle].spacing(12))
+                .spacing(SCROLLBAR_GAP)
                 .height(Length::Fill)
                 .width(Length::FillPortion(1)),
             container(right)
@@ -2073,7 +2218,7 @@ impl StatsScreen {
                     crate::paths::Pick::Start(start) => Message::ServeStart(start),
                     crate::paths::Pick::Path(start, zone) => Message::ServePath(start, zone),
                 }),
-                small(s.serve_paths_legend, c),
+                paths_legend(s, c),
             ]
             .spacing(8),
             c,
@@ -2232,7 +2377,7 @@ impl StatsScreen {
         .spacing(4)
         .padding([0, 10]);
         let rows = f.players.iter().map(|p| {
-            let chosen = self.filter.player.as_ref() == Some(&p.player.id);
+            let chosen = self.filter.players.contains(&p.player.id);
             let body = row![
                 text(p.player.number.to_string())
                     .size(SIZE_BODY)
@@ -2253,10 +2398,7 @@ impl StatsScreen {
             ]
             .spacing(4)
             .align_y(Alignment::Center);
-            let message = match chosen {
-                true => Message::Player(None),
-                false => Message::Player(Some(p.player.id.clone())),
-            };
+            let message = Message::Players(toggled(&self.filter.players, &p.player.id));
             ui::list_row(body, chosen, Some(message), c)
         });
         ui::panel(
@@ -3284,5 +3426,87 @@ pub(crate) mod tests {
             .unwrap_or_else(|| unreachable!("a scroll"));
         assert!((y - screen.row as f32 / last).abs() < f32::EPSILON);
         assert_eq!(screen.take_scroll(), None, "once");
+    }
+
+    /// The players, the rotations and the roles: more than one at a time,
+    /// each click on or off, all of them with none; the arrows one at a
+    /// time, from all. Here only the setter serves.
+    #[test]
+    fn more_players_and_rotations_at_a_time() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let ids: Vec<String> = core
+            .team(team.clone())
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        screen.update(Message::Page(2));
+        let total = |screen: &StatsScreen| {
+            screen
+                .detail
+                .as_ref()
+                .and_then(|d| d.fundamental.as_ref())
+                .map_or(0, |f| f.total)
+        };
+        let named = |screen: &StatsScreen| -> Vec<String> {
+            screen
+                .detail
+                .iter()
+                .flat_map(|d| d.players.iter().map(|p| p.id.clone()))
+                .collect()
+        };
+        let all = total(&screen);
+        assert!(all > 0);
+        let server = named(&screen);
+        assert_eq!(server.len(), 1);
+        let other = ids
+            .iter()
+            .find(|id| **id != server[0])
+            .cloned()
+            .unwrap_or_default();
+        screen.update(Message::Players(toggled(&screen.filter.players, &other)));
+        assert_eq!(total(&screen), 0, "no serve of the other");
+        screen.update(Message::Players(toggled(
+            &screen.filter.players,
+            &server[0],
+        )));
+        assert_eq!(
+            screen.filter.players,
+            vec![other.clone(), server[0].clone()]
+        );
+        assert_eq!(total(&screen), all, "the serves of both");
+        assert_eq!(named(&screen).len(), 2, "both chosen, to take them off");
+        let title = screen.clips_title(s);
+        assert!(title.contains(", "), "both players named: {title}");
+        screen.update(Message::Players(toggled(
+            &screen.filter.players,
+            &server[0],
+        )));
+        assert_eq!(total(&screen), 0);
+        screen.update(Message::Players(vec![]));
+        assert_eq!(total(&screen), all);
+        // rotations: two of them, the sum of each
+        let in_rotations = |screen: &mut StatsScreen, rotations: Vec<u8>| {
+            screen.update(Message::Rotations(rotations));
+            total(screen)
+        };
+        let each: Vec<u32> = (0..6).map(|r| in_rotations(&mut screen, vec![r])).collect();
+        assert_eq!(each.iter().sum::<u32>(), all);
+        assert_eq!(in_rotations(&mut screen, vec![0, 1]), each[0] + each[1]);
+        // the arrows: from two chosen to all, then the first one alone
+        screen.row = screen
+            .filters()
+            .iter()
+            .position(|f| *f == Filter::Rotation)
+            .unwrap_or_default();
+        screen.key(key!(right));
+        assert_eq!(screen.filter.rotations, Vec::<u8>::new());
+        screen.key(key!(right));
+        assert_eq!(screen.filter.rotations, vec![0]);
     }
 }

@@ -93,7 +93,7 @@ data class ClipChoice(
 class Watch(val header: @Composable (detail: DetailStats, query: DetailQuery, choice: ClipChoice, clear: () -> Unit) -> Unit)
 
 /** The detail asked for: a fundamental, narrowed by the filter. */
-data class DetailQuery(val event: EventTypeEnum = EventTypeEnum.S, val filter: DetailFilter = DetailFilter(null, null, null))
+data class DetailQuery(val event: EventTypeEnum = EventTypeEnum.S, val filter: DetailFilter = DetailFilter(null))
 
 /** How good an evaluation is, on the colors of the grades. */
 private fun toneColor(tone: Tone) = gradeColor(
@@ -156,27 +156,34 @@ fun DetailFilters(detail: DetailStats, situation: SituationChoices?, filter: Det
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FilterMenu(
+        ManyFilterMenu(
             stringResource(R.string.filter_player),
-            detail.players.find { it.id == filter.player }?.let { "${it.number} ${it.name}" },
+            filter.players,
+            emptyList(),
             detail.players.map { "${it.number} ${it.name}" to it.id },
-        ) { onFilter(filter.copy(player = it)) }
-        FilterMenu(
+            { chosen -> detail.players.filter { it.id in chosen }.joinToString(", ") { it.number.toString() } },
+        ) { onFilter(filter.copy(players = it)) }
+        ManyFilterMenu(
             stringResource(R.string.filter_rotation),
-            detail.rotations.find { it.value == filter.rotation }?.name,
+            // a byte array in the core's record: the rotations 0 to 5
+            filter.rotations.map { it.toUByte() },
+            emptyList(),
             detail.rotations.map { it.name to it.value },
-        ) { onFilter(filter.copy(rotation = it)) }
+            { chosen -> detail.rotations.filter { it.value in chosen }.joinToString(" ") { it.name } },
+        ) { onFilter(filter.copy(rotations = it.map(UByte::toByte).toByteArray())) }
         FilterMenu(
             stringResource(R.string.filter_phase),
             detail.phases.find { it.value == filter.phase }?.name,
             detail.phases.map { it.name to it.value },
         ) { onFilter(filter.copy(phase = it)) }
         if (situation == null) return@FlowRow
-        FilterMenu(
+        ManyFilterMenu(
             stringResource(R.string.role),
-            situation.roles.find { it.value == filter.role }?.name,
+            filter.roles,
+            emptyList(),
             situation.roles.map { it.name to it.value },
-        ) { onFilter(filter.copy(role = it)) }
+            { chosen -> situation.roles.filter { it.value in chosen }.joinToString(", ") { it.name } },
+        ) { onFilter(filter.copy(roles = it)) }
         val groups = evalGroups(situation)
         val symbols = situation.symbols.map { it.symbol to it.value }
         ManyFilterMenu(stringResource(R.string.rally_reception), filter.reception, groups, symbols, { e -> symbolsOf(situation, e) }) {
@@ -219,7 +226,7 @@ fun DetailFilters(detail: DetailStats, situation: SituationChoices?, filter: Det
         ) { onFilter(filter.copy(close = it)) }
     }
 
-/** The evaluations chosen together: the good ones, `!`, the bad ones. */
+/** The evaluations chosen together: the good ones, the bad ones (`!` with them). */
 @Composable
 private fun evalGroups(situation: SituationChoices): List<Pair<String, List<EvalEnum>>> =
     situation.groups.map { g ->
@@ -438,9 +445,10 @@ private fun FundamentalContent(
         Text(stringResource(R.string.players_title), Modifier.title(), style = MaterialTheme.typography.titleMedium)
         Column {
             f.players.forEach { p ->
-                PlayerRow(p, selected = p.player.id == query.filter.player) {
-                    val player = if (p.player.id == query.filter.player) null else p.player.id
-                    onQuery(query.copy(filter = query.filter.copy(player = player)))
+                PlayerRow(p, selected = p.player.id in query.filter.players) {
+                    val id = p.player.id
+                    val players = if (id in query.filter.players) query.filter.players - id else query.filter.players + id
+                    onQuery(query.copy(filter = query.filter.copy(players = players)))
                 }
             }
         }

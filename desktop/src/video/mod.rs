@@ -3148,7 +3148,7 @@ pub(crate) mod screen_tests {
                     scope: StatsScope::Match,
                     event: A,
                     filter: DetailFilter {
-                        player: Some(p.player.id.clone()),
+                        players: vec![p.player.id.clone()],
                         ..DetailFilter::default()
                     },
                     evals: vec![],

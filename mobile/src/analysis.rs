@@ -394,7 +394,7 @@ fn situation_choices(
             name: r.name(gender, labels).to_string(),
         })
         .collect(),
-        groups: [EvalSet::POSITIVE, EvalSet::EXCLAMATIVE, EvalSet::NEGATIVE]
+        groups: [EvalSet::POSITIVE, EvalSet::NEGATIVE]
             .into_iter()
             .map(group)
             .collect(),
