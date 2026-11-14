@@ -238,3 +238,100 @@ pub fn replay(
         false => Err(Incoherence::Points),
     }
 }
+
+/// The side of the net the touch of the side leaves the ball on, while
+/// the rally goes on (see `EventTypeEnum::ball_side_after`).
+fn ball_after(side: Side, entry: &EventEntry) -> Option<Side> {
+    entry
+        .event_type
+        .ball_side_after(entry.eval)
+        .map(|team| match team {
+            TeamSideEnum::Us => side,
+            TeamSideEnum::Them => side.other(),
+        })
+}
+
+/// Whether the event touches the ball: not a substitution, nor a libero
+/// or setter change.
+fn touches_ball(entry: &EventEntry) -> bool {
+    !matches!(
+        entry.event_type,
+        EventTypeEnum::R
+            | EventTypeEnum::CL
+            | EventTypeEnum::LR
+            | EventTypeEnum::LF
+            | EventTypeEnum::CS
+    )
+}
+
+/// Whether the touch answers the other side's touch, telling the same
+/// transition: the reception of a serve, the dig or the block of an
+/// attack.
+fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
+    matches!(
+        (answered, touch),
+        (EventTypeEnum::S, EventTypeEnum::P)
+            | (EventTypeEnum::A, EventTypeEnum::D | EventTypeEnum::B)
+    )
+}
+
+/// Whether the side can add the touch now, after the touches so far,
+/// replayed as `a` and `b` (see [`replay`]): the stream of the side must
+/// offer it, and
+/// - a touch of the ball must find it on the side's half, where the last
+///   touch left it as its side sees it, or else answer the other side's
+///   last touch (see `answers`), leaving the ball where that touch did
+///   (their serve `/`, our reception `/`), or be the other half of the point the other
+///   side's last touch ended, with the same winner (their ace, our
+///   reception error);
+/// - after a serve in play, only the reception of the other side;
+/// - a fault, a substitution, a libero or setter change need nothing more;
+/// - the other side's point, error or freeball (`OS`, `OE`, `OF`) never:
+///   its touches tell them.
+pub fn admits(
+    touches: &[(Side, EventEntry)],
+    a: &Snapshot,
+    b: &Snapshot,
+    side: Side,
+    entry: &EventEntry,
+) -> bool {
+    use EventTypeEnum::*;
+    let own = match side {
+        Side::A => a,
+        Side::B => b,
+    };
+    // the last touch of the ball, and where it left it: as its side sees
+    // it while the rally goes on, with the serving team before the serve
+    let last = touches.iter().rev().find(|(_, e)| touches_ball(e));
+    let ball = last
+        .and_then(|(s, e)| ball_after(*s, e))
+        .unwrap_or(match a.get_ball_side() {
+            TeamSideEnum::Us => Side::A,
+            TeamSideEnum::Them => Side::B,
+        });
+    let last = last.filter(|(s, _)| *s != side);
+    let after = ball_after(side, entry);
+    // a serve still in play: the reception of the other side comes next
+    let serve_in_play = matches!(
+        touches.iter().rev().find(|(_, e)| touches_ball(e)),
+        Some((_, e)) if e.event_type == S && ball_after(side, e).is_some()
+    );
+    // on the side's half, or answering in play where the last touch left
+    // the ball
+    let in_play = ball == side || after == Some(ball);
+    let touch_admitted = |event_type: EventTypeEnum| match (serve_in_play, last) {
+        (true, Some(_)) => event_type == P && in_play,
+        (true, None) => false,
+        (false, Some((s, e))) if winner(*s, e).is_some() => {
+            ball == side || winner(side, entry) == winner(*s, e)
+        }
+        (false, Some((_, e))) => ball == side || answers(event_type, e.event_type) && in_play,
+        (false, None) => ball == side,
+    };
+    own.get_available_options().contains(&entry.event_type)
+        && match entry.event_type {
+            OS | OE | OF => false,
+            F | R | CL | LR | LF | CS => true,
+            event_type => touch_admitted(event_type),
+        }
+}

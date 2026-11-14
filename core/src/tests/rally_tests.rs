@@ -4,7 +4,7 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::domain::Side;
-    use crate::rally::{Incoherence, Streams, project, replay};
+    use crate::rally::{Incoherence, Streams, admits, project, replay};
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
         flags::EventFlags,
@@ -326,5 +326,115 @@ mod tests {
             DEFAULT_MAX_SUBSTITUTIONS,
         );
         assert!(matches!(refused, Err(Incoherence::Serving)), "{refused:?}");
+    }
+
+    /// Whether the side can add the touch after the touches (A serving).
+    fn admitted(
+        a: &Team,
+        b: &Team,
+        touches: &[(Side, EventEntry)],
+        next: (Side, EventEntry),
+    ) -> bool {
+        match replayed(a, b, touches) {
+            Ok((sa, sb)) => admits(touches, &sa, &sb, next.0, &next.1),
+            Err(e) => panic!("{e:?}"),
+        }
+    }
+
+    #[test]
+    fn after_a_serve_only_the_reception_of_the_other_side() {
+        let (a, b) = (Team::new(), Team::new());
+        let serve = [by(Side::A, S, a.setter(), Exclamative, 0)];
+        assert!(admitted(
+            &a,
+            &b,
+            &serve,
+            by(Side::B, P, b.libero, Exclamative, 1)
+        ));
+        // the server's freeball before it: the reception missing
+        assert!(!admitted(&a, &b, &serve, touch(Side::A, FB, None, 1)));
+        assert!(!admitted(
+            &a,
+            &b,
+            &serve,
+            by(Side::B, A, b.outside_hitter(), Positive, 1)
+        ));
+    }
+
+    #[test]
+    fn a_serve_over_wants_the_reception_over() {
+        // their reception came straight back: the server's half
+        let (a, b) = (Team::new(), Team::new());
+        let serve = [by(Side::A, S, a.setter(), Over, 0)];
+        assert!(admitted(&a, &b, &serve, by(Side::B, P, b.libero, Over, 1)));
+        assert!(!admitted(
+            &a,
+            &b,
+            &serve,
+            by(Side::B, P, b.libero, Positive, 1)
+        ));
+        assert!(!admitted(
+            &a,
+            &b,
+            &serve,
+            by(Side::B, P, b.libero, Error, 1)
+        ));
+        assert!(!admitted(
+            &a,
+            &b,
+            &serve,
+            by(Side::A, A, a.outside_hitter(), Positive, 1)
+        ));
+    }
+
+    #[test]
+    fn an_answer_closing_the_rally_needs_the_ball_on_its_side() {
+        let (a, b) = (Team::new(), Team::new());
+        let rally = [
+            by(Side::A, S, a.setter(), Positive, 0),
+            by(Side::B, P, b.libero, Negative, 1),
+            // the ball back to B (A's dig going over, untold)
+            by(Side::B, A, b.outside_hitter(), Positive, 2),
+        ];
+        assert!(admitted(&a, &b, &rally, by(Side::A, D, a.libero, Over, 3)));
+        assert!(!admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::A, B, a.outside_hitter(), Perfect, 3)
+        ));
+        assert!(!admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::A, D, a.libero, Positive, 3)
+        ));
+        assert!(admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::B, A, b.outside_hitter(), Perfect, 3)
+        ));
+    }
+
+    #[test]
+    fn the_other_half_of_the_point_is_admitted() {
+        let (a, b) = (Team::new(), Team::new());
+        let ace = [by(Side::A, S, a.setter(), Perfect, 0)];
+        assert!(admitted(&a, &b, &ace, by(Side::B, P, b.libero, Error, 1)));
+    }
+
+    #[test]
+    fn what_the_other_side_tells_is_never_scouted() {
+        let (a, b) = (Team::new(), Team::new());
+        let serve = [by(Side::A, S, a.setter(), Positive, 0)];
+        for told in [OS, OE, OF] {
+            assert!(
+                !admitted(&a, &b, &serve, touch(Side::A, told, None, 1)),
+                "{told}"
+            );
+        }
+        assert!(admitted(&a, &b, &serve, touch(Side::A, F, None, 1)));
+        assert!(admitted(&a, &b, &serve, touch(Side::B, F, None, 1)));
     }
 }

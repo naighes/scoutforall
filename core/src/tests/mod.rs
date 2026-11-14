@@ -46,6 +46,7 @@ mod pinned_teams_tests;
 mod player_form_tests;
 mod point_sequence_tests;
 mod provider_tests;
+mod rally_fuzz_tests;
 mod rally_tests;
 mod report_tests;
 mod schema_tests;
