@@ -4,7 +4,7 @@
 //! (chosen over iced_aksel and plotters-iced, 027).
 
 use {
-    crate::theme::{Colors, FAIR, set_color},
+    crate::theme::{Colors, FAIR, LOST, set_color},
     iced::{
         Color, Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse,
         widget::canvas::{self, Frame, Geometry, LineDash, Path, Stroke, Text},
@@ -25,6 +25,9 @@ pub struct Trend {
     pub high: f64,
     /// a whole set, longer at deuce
     pub points: f64,
+    /// the errors of the figure along the sets, in red under the lines:
+    /// where the set had got to and how many, of every set
+    pub errors: Vec<(f64, u32)>,
 }
 
 impl Trend {
@@ -75,7 +78,45 @@ impl Trend {
             low,
             high,
             points,
+            errors: vec![],
         }
+    }
+
+    /// With the errors of the figure in each rally, of every set: all of
+    /// them, or only the unforced ones.
+    pub fn with_errors(self, line: &TrendLine, unforced: bool) -> Trend {
+        let errors = line
+            .sets
+            .iter()
+            .flat_map(|set| {
+                let counts = match unforced {
+                    true => &set.unforced,
+                    false => &set.errors,
+                };
+                set.progress
+                    .iter()
+                    .zip(counts.iter())
+                    .filter(|(_, n)| **n > 0)
+                    .map(|(x, n)| (*x, *n))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        Trend { errors, ..self }
+    }
+
+    /// The errors in each point of the sets, from the first (the rallies
+    /// ending between 0 and 1, then 1 and 2...): how dense they are.
+    pub fn error_bins(&self) -> Vec<u32> {
+        let bins = (self.points.ceil() as usize).max(1);
+        self.errors
+            .iter()
+            .fold(vec![0; bins], |mut counts, (x, n)| {
+                let at = (x.ceil() as usize).saturating_sub(1).min(bins - 1);
+                if let Some(bin) = counts.get_mut(at) {
+                    *bin += n;
+                }
+                counts
+            })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -164,6 +205,21 @@ impl<M> canvas::Program<M> for CanvasTrend {
                         .with_width(1.5)
                 },
             );
+        }
+        // the errors, in red from the bottom: at most a third of the chart
+        // high, the densest point the tallest
+        let bins = t.error_bins();
+        let most = bins.iter().copied().max().unwrap_or(0);
+        if most > 0 {
+            let width = x(1.0) - x(0.0);
+            for (i, n) in bins.iter().enumerate().filter(|(_, n)| **n > 0) {
+                let high = plot.height / 3.0 * *n as f32 / most as f32;
+                frame.fill_rectangle(
+                    Point::new(x(i as f64) + 1.0, plot.height - high),
+                    Size::new((width - 2.0).max(1.0), high),
+                    Color { a: 0.5, ..LOST },
+                );
+            }
         }
         for (set, runs) in &t.sets {
             let color = set_color(*set);

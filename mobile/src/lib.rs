@@ -1635,6 +1635,25 @@ pub struct SetTrend {
     pub values: Vec<Option<f64>>,
     /// of its last touches in the set (see `RECENT_TOUCHES` in the core)
     pub recent: Vec<Option<f64>>,
+    /// the errors of the figure in each rally: all of them, and only the
+    /// unforced ones (see `Replay::errors` in the core)
+    pub errors: Vec<u32>,
+    pub unforced: Vec<u32>,
+}
+
+/// The points of a set in order, as the score sheet has them under the
+/// trend (and the report).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SetPoints {
+    pub set_number: u8,
+    pub points: Vec<PointScored>,
+}
+
+/// A point: scored by us or by them, and the score it reached.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct PointScored {
+    pub us: bool,
+    pub score: u8,
 }
 
 /// How a figure went in each set, to compare the sets, and where it is in
@@ -1690,6 +1709,8 @@ pub struct LiveStats {
     /// reception, attack, counter-attack, serve, side out, break point, by
     /// set: always of every set so far, whatever the scope
     pub trend: Vec<TrendLine>,
+    /// the points of every set so far, in order, whatever the scope
+    pub points: Vec<SetPoints>,
     /// the six rotations, in order, played or not
     pub rotations: Vec<RotationStats>,
 }
@@ -2409,10 +2430,12 @@ fn live_stats(
     labels: &Labels,
 ) -> Result<LiveStats, MobileError> {
     let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
+    let (trend, points) = trend_lines(all, max_substitutions, team, labels)?;
     Ok(LiveStats {
         scope,
         sets: all.iter().map(|s| s.set_number).collect(),
-        trend: trend_lines(all, max_substitutions, team, labels)?,
+        trend,
+        points,
         ..summary(&stats, &StatsFilter::default(), team, labels)
     })
 }
@@ -2507,6 +2530,7 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
         counter_attack_distribution: zones(Some(true)),
         graded: team.classification.is_some() && team.gender.is_some(),
         trend: vec![],
+        points: vec![],
         rotations: by_rotation_in(stats, filter)
             .into_iter()
             .map(|r| RotationStats {
@@ -2900,7 +2924,7 @@ fn trend_lines(
     max_substitutions: u8,
     team: &TeamEntry,
     labels: &Labels,
-) -> Result<Vec<TrendLine>, MobileError> {
+) -> Result<(Vec<TrendLine>, Vec<SetPoints>), MobileError> {
     // replayed once: each set is a part of the match
     let match_replay = Replay::new(sets, max_substitutions)?;
     let set_replays: Vec<(u8, Replay)> = sets
@@ -2911,10 +2935,24 @@ fn trend_lines(
         points.into_iter().map(|p| p.value).collect::<Vec<_>>()
     };
     let last = |points: Vec<TrendPoint<Option<f64>>>| points.last().and_then(|p| p.value);
+    let points = set_replays
+        .iter()
+        .map(|(set_number, replay)| SetPoints {
+            set_number: *set_number,
+            points: replay
+                .point_sequence()
+                .into_iter()
+                .map(|(side, score)| PointScored {
+                    us: side == TeamSideEnum::Us,
+                    score,
+                })
+                .collect(),
+        })
+        .collect();
     let level = |series: Series, value: Option<f64>| {
         value.and_then(|v| grade(team.classification, team.gender, series.measure(), v))
     };
-    Ok(Series::ALL
+    let lines = Series::ALL
         .iter()
         .map(|series| {
             let overall = last(match_replay.series(*series, false));
@@ -2937,6 +2975,8 @@ fn trend_lines(
                         progress: replay.progress(),
                         values: values(replay.series(*series, false)),
                         recent: values(replay.series(*series, true)),
+                        errors: replay.errors(*series, false),
+                        unforced: replay.errors(*series, true),
                     })
                     .collect(),
                 overall,
@@ -2945,7 +2985,8 @@ fn trend_lines(
                 overall_recent_grade: level(*series, overall_recent),
             }
         })
-        .collect())
+        .collect();
+    Ok((lines, points))
 }
 
 fn series_name(series: Series, labels: &Labels) -> String {
@@ -7925,6 +7966,25 @@ mod tests {
             (1..=25).map(f64::from).collect::<Vec<_>>()
         );
         assert_eq!(serves.sets[1].recent, vec![Some(-100.0); 3]);
+        // the errors of the serve rally by rally: the two of the second
+        // set, unforced; none in the first
+        assert_eq!(serves.sets[1].errors, vec![1, 0, 1]);
+        assert_eq!(serves.sets[1].unforced, vec![1, 0, 1]);
+        assert_eq!(serves.sets[0].errors, vec![0; 25]);
+        // the points of each set, as on the score sheet
+        let scored = |us, score| PointScored { us, score };
+        assert_eq!(
+            set.points.iter().map(|p| p.set_number).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            set.points[0].points,
+            (1..=25).map(|n| scored(true, n)).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            set.points[1].points,
+            vec![scored(false, 1), scored(true, 1), scored(false, 2)]
+        );
         // the match: (25 aces - 2 errors) / 27 serves; the last 10: 8 aces
         // and 2 errors
         assert_eq!(serves.overall.map(|s| (s * 100.0).round()), Some(8519.0));
@@ -7943,6 +8003,7 @@ mod tests {
         assert_eq!(serve_grade(&first), Some(1.0));
         // the trend is the same whatever the scope
         assert_eq!(first.trend, set.trend);
+        assert_eq!(first.points, set.points);
 
         // the match: the trend goes on across the sets
         let all = scouting.stats(StatsScope::Match).unwrap();

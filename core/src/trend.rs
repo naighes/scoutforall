@@ -4,7 +4,7 @@
 //! 10 receptions), to see a drop as it comes.
 use crate::benchmark::Measure;
 use crate::errors::AppError;
-use crate::shapes::enums::{EventTypeEnum, PhaseEnum};
+use crate::shapes::enums::{ErrorTypeEnum, EventTypeEnum, PhaseEnum, TeamSideEnum};
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::Snapshot;
 use crate::shapes::stats::{Metric, Stats, StatsFilter, percentage};
@@ -77,6 +77,8 @@ impl Series {
                 score,
                 total,
                 touches: stats.event_count(e, None, filter),
+                errors: stats.errors(e, None, filter),
+                unforced: stats.errors(e, Some(ErrorTypeEnum::Unforced), filter),
             }
         };
         match self {
@@ -89,16 +91,22 @@ impl Series {
                         score: a.kills as i32 - a.errors as i32 - a.blocked as i32,
                         total: a.total,
                         touches: a.total,
+                        // blocked: forced
+                        errors: a.errors + a.blocked,
+                        unforced: a.errors,
                     })
             }
             Series::Serve => efficiency(EventTypeEnum::S),
             Series::SideOut | Series::BreakPoint => self
                 .phase_filter(filter)
-                .and_then(|f| stats.rallies_won(&f))
-                .map_or(Tally::default(), |(_, won, rallies)| Tally {
+                .and_then(|f| stats.rallies_won(&f).map(|r| (f, r)))
+                .map_or(Tally::default(), |(f, (_, won, rallies))| Tally {
                     score: won as i32,
                     total: rallies,
                     touches: rallies,
+                    // every error of the phase, a fault too
+                    errors: stats.total_errors(None, &f),
+                    unforced: stats.total_errors(Some(ErrorTypeEnum::Unforced), &f),
                 }),
         }
     }
@@ -145,6 +153,12 @@ pub struct Tally {
     /// what the score is over: the touches evaluated, or the rallies
     pub total: u32,
     pub touches: u32,
+    /// the errors of the figure: of its fundamental (a reception aced, an
+    /// attack out or blocked), of every fundamental in its phase
+    pub errors: u32,
+    /// the ones unforced (`EventTypeEnum::error_type`): a serve or an
+    /// attack out, a block invasion, a fault
+    pub unforced: u32,
 }
 
 impl Tally {
@@ -158,6 +172,8 @@ impl Tally {
             score: self.score + other.score,
             total: self.total + other.total,
             touches: self.touches + other.touches,
+            errors: self.errors + other.errors,
+            unforced: self.unforced + other.unforced,
         }
     }
 
@@ -167,6 +183,8 @@ impl Tally {
             score: self.score - earlier.score,
             total: self.total.saturating_sub(earlier.total),
             touches: self.touches.saturating_sub(earlier.touches),
+            errors: self.errors.saturating_sub(earlier.errors),
+            unforced: self.unforced.saturating_sub(earlier.unforced),
         }
     }
 }
@@ -359,6 +377,57 @@ impl Replay {
                 let same = leading.iter().filter(|l| *l == at).count();
                 let nth = leading.iter().take(i + 1).filter(|l| *l == at).count();
                 f64::from(at.1) - 1.0 + nth as f64 / same as f64
+            })
+            .collect()
+    }
+
+    /// The errors of the figure made in each rally (only the unforced
+    /// ones, `unforced`): where they pile up along the set.
+    pub fn errors(&self, series: Series, unforced: bool) -> Vec<u32> {
+        let count = |t: Tally| match unforced {
+            true => t.unforced,
+            false => t.errors,
+        };
+        let totals: Vec<u32> = self
+            .rallies
+            .iter()
+            .map(|end| self.tally(end.event, series).map_or(0, count))
+            .collect();
+        // the first rally of the replay from 0, each set from the last
+        // rally of the set before it in a whole match
+        totals
+            .iter()
+            .enumerate()
+            .map(|(i, now)| {
+                let before = i
+                    .checked_sub(1)
+                    .and_then(|b| totals.get(b))
+                    .copied()
+                    .unwrap_or(0);
+                now.saturating_sub(before)
+            })
+            .collect()
+    }
+
+    /// The points in order, as `Snapshot::point_sequence`: the team scoring
+    /// each rally, with the score it reaches.
+    pub fn point_sequence(&self) -> Vec<(TeamSideEnum, u8)> {
+        self.rallies
+            .iter()
+            .scan((0u8, 0u8, 0u8), |(set, us, them), end| {
+                // a new set from 0-0
+                if *set != end.set_number {
+                    *set = end.set_number;
+                    *us = 0;
+                    *them = 0;
+                }
+                let point = match end.score_us > *us {
+                    true => (TeamSideEnum::Us, end.score_us),
+                    false => (TeamSideEnum::Them, end.score_them),
+                };
+                *us = end.score_us;
+                *them = end.score_them;
+                Some(point)
             })
             .collect()
     }

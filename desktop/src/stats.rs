@@ -61,6 +61,8 @@ enum Filter {
     Period,
     Series,
     Mode,
+    /// the errors in red under the trend: all, or the unforced ones
+    Errors,
     Event,
     Player,
     Rotation,
@@ -115,6 +117,8 @@ pub enum Message {
     Scope(StatsScope),
     Series(usize),
     Recent(bool),
+    /// only the unforced errors under the trend
+    Unforced(bool),
     Event(EventTypeEnum),
     /// the players chosen: none, all of them
     Players(Vec<String>),
@@ -247,12 +251,16 @@ pub struct StatsScreen {
     pub team_id: String,
     pub source: Source,
     title: String,
+    /// our team and theirs, for the points in a row under the trend
+    sides: (String, String),
     page: usize,
     scope: StatsScope,
     live: Option<LiveStats>,
     detail: Option<DetailStats>,
     series: usize,
     recent: bool,
+    /// under the trend, only the unforced errors
+    unforced: bool,
     trend: Trend,
     event: EventTypeEnum,
     filter: DetailFilter,
@@ -507,6 +515,103 @@ fn tiles<'a, M: 'a>(tiles: Vec<Tile>, c: Colors) -> Element<'a, M> {
         .into()
 }
 
+/// The width of a point in the rows of the points.
+const POINT_WIDTH: f32 = 26.0;
+
+/// The points of each set in order, as on the score sheet: two rows, ours
+/// and theirs, a point a column, the score in the row of the team scoring
+/// it, in its color; the names on the left stay, the points scroll across.
+fn points_view<'a>(
+    sets: &'a [scout4all_mobile::SetPoints],
+    sides: &(String, String),
+    s: &'static Strings,
+    c: Colors,
+) -> Element<'a, Message> {
+    let cell = |content: String, color: iced::Color, filled: bool| -> Element<'a, Message> {
+        container(
+            text(content)
+                .size(SIZE_SMALL)
+                .font(theme::fonts().bold)
+                .color(match filled {
+                    true => c.background,
+                    false => color,
+                }),
+        )
+        .width(POINT_WIDTH)
+        .height(22)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_| container::Style {
+            background: filled.then(|| color.into()),
+            border: iced::Border {
+                radius: 4.0.into(),
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        })
+        .into()
+    };
+    let row_of = |set: &'a scout4all_mobile::SetPoints, us: bool| {
+        let color = match us {
+            true => theme::TEAM_US,
+            false => theme::TEAM_THEM,
+        };
+        Row::with_children(set.points.iter().map(move |p| match p.us == us {
+            true => cell(p.score.to_string(), color, true),
+            false => cell(String::new(), color, false),
+        }))
+        .spacing(2)
+    };
+    let name = |name: String, color: iced::Color| {
+        container(
+            text(name)
+                .size(SIZE_SMALL)
+                .color(color)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(22)
+        .align_y(Alignment::Center)
+    };
+    // the set beside its two rows, in its color as in the chart
+    let names =
+        Column::with_children(sets.iter().filter(|set| !set.points.is_empty()).map(|set| {
+            row![
+                container(
+                    text(format!("{} {}", s.set_n, set.set_number))
+                        .size(SIZE_SMALL)
+                        .color(theme::set_color(set.set_number))
+                        .wrapping(text::Wrapping::None),
+                )
+                .height(46)
+                .align_y(Alignment::Center),
+                column![
+                    name(sides.0.clone(), theme::TEAM_US),
+                    name(sides.1.clone(), theme::TEAM_THEM),
+                ]
+                .spacing(2)
+            ]
+            .spacing(10)
+            .into()
+        }))
+        .spacing(6);
+    let rows = Column::with_children(sets.iter().filter(|set| !set.points.is_empty()).map(|set| {
+        column![row_of(set, true), row_of(set, false)]
+            .spacing(2)
+            .into()
+    }))
+    .spacing(6);
+    row![
+        names,
+        iced::widget::scrollable(container(rows).padding(iced::Padding::default().bottom(10)))
+            .direction(iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new(),
+            ))
+            .width(Length::Fill)
+    ]
+    .spacing(12)
+    .into()
+}
+
 impl StatsScreen {
     pub fn new(
         core: Arc<Scout4All>,
@@ -531,6 +636,7 @@ impl StatsScreen {
             Source::Match(match_id),
             format!("{team} – {opponent}"),
         );
+        screen.sides = (team, opponent);
         screen.live = Some(live);
         screen.has_video = has_video;
         screen.load();
@@ -557,6 +663,7 @@ impl StatsScreen {
         let today = Local::now().date_naive();
         let choices = core.situation_choices();
         StatsScreen {
+            sides: (String::new(), String::new()),
             core,
             team_id,
             source,
@@ -567,6 +674,7 @@ impl StatsScreen {
             detail: None,
             series: 0,
             recent: false,
+            unforced: false,
             trend: Trend::of_stats(None, 0, false),
             event: EventTypeEnum::S,
             filter: DetailFilter::default(),
@@ -830,7 +938,12 @@ impl StatsScreen {
     }
 
     fn retrend(&mut self) {
-        self.trend = Trend::of_stats(self.live.as_ref(), self.series, self.recent);
+        let trend = Trend::of_stats(self.live.as_ref(), self.series, self.recent);
+        // the errors of the figure in red under its lines
+        self.trend = match self.live.as_ref().and_then(|l| l.trend.get(self.series)) {
+            Some(line) => trend.with_errors(line, self.unforced),
+            None => trend,
+        };
     }
 
     /// Where the column of the filters goes, to keep the row of the arrows
@@ -858,7 +971,7 @@ impl StatsScreen {
         let narrow = [Filter::Player, Filter::Rotation, Filter::Phase];
         let first: Vec<Filter> = match (self.is_team(), self.current()) {
             (false, Page::Summary) => return vec![Filter::Scope],
-            (false, Page::Trend) => return vec![Filter::Series, Filter::Mode],
+            (false, Page::Trend) => return vec![Filter::Series, Filter::Mode, Filter::Errors],
             (false, Page::Detail) => vec![Filter::Scope, Filter::Event],
             (true, Page::Summary) => vec![Filter::Period],
             (true, Page::Trend) => vec![Filter::Period, Filter::Series],
@@ -915,6 +1028,7 @@ impl StatsScreen {
                 ui::cycle(&series, &self.series, forward).map(Message::Series)
             }
             Filter::Mode => Some(Message::Recent(!self.recent)),
+            Filter::Errors => Some(Message::Unforced(!self.unforced)),
             Filter::Zones => Some(Message::Efficiency(!self.efficiency)),
             Filter::Event => {
                 let events: Vec<EventTypeEnum> = detail
@@ -1032,6 +1146,10 @@ impl StatsScreen {
             }
             Message::Recent(recent) => {
                 self.recent = recent;
+                self.retrend();
+            }
+            Message::Unforced(unforced) => {
+                self.unforced = unforced;
                 self.retrend();
             }
             Message::Event(event) => {
@@ -1441,6 +1559,21 @@ impl StatsScreen {
                     ),
                 ],
             ),
+            Filter::Errors => (
+                s.errors_shown,
+                vec![
+                    pill(
+                        s.all_errors.to_string(),
+                        !self.unforced,
+                        Message::Unforced(false),
+                    ),
+                    pill(
+                        s.only_unforced.to_string(),
+                        self.unforced,
+                        Message::Unforced(true),
+                    ),
+                ],
+            ),
             Filter::Zones => (
                 s.zones_view,
                 vec![
@@ -1787,6 +1920,17 @@ impl StatsScreen {
                     .into()
             }))
         .push(small(format!("- - {}", s.whole_match), c))
+        .push(
+            text(format!(
+                "▮ {}",
+                match self.unforced {
+                    true => s.unforced_errors,
+                    false => s.errors,
+                }
+            ))
+            .size(SIZE_SMALL)
+            .color(theme::LOST),
+        )
         .spacing(14);
         let chart: Element<'a, Message> = match self.trend.is_empty() {
             true => small(s.no_rallies, c).into(),
@@ -1796,7 +1940,17 @@ impl StatsScreen {
             .trend
             .get(self.series)
             .map_or(s.trend.to_string(), |l| ui::capitalized(&l.name));
-        ui::panel(Some(&name), column![legend, chart].spacing(10), c)
+        // under the chart, the points of each set in a row
+        let points: Element<'a, Message> = match live.points.iter().all(|p| p.points.is_empty()) {
+            true => space::vertical().height(0).into(),
+            false => column![
+                ui::section(s.point_sequence, c),
+                points_view(&live.points, &self.sides, s, c)
+            ]
+            .spacing(8)
+            .into(),
+        };
+        ui::panel(Some(&name), column![legend, chart, points].spacing(10), c)
     }
 
     /// The figure of the team match by match, with the moving average.
@@ -3347,6 +3501,78 @@ pub(crate) mod tests {
         assert_eq!(serve, Some(vec![Some(100.0), Some(0.0)]));
         assert!(matches!(screen.key(BACK_KEY), Outcome::Back));
         assert_eq!(screen.match_id(), None);
+    }
+
+    /// The trend of a match: the errors of the figure in red under its
+    /// lines, all or only the unforced ones (a filter, ← → as the others);
+    /// the points of each set in order under it.
+    #[test]
+    fn the_trend_has_the_errors_and_the_points() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let siena = core
+            .matches(team.clone())
+            .unwrap()
+            .into_iter()
+            .find_map(|m| match m {
+                scout4all_mobile::MatchListing::Match { id, opponent, .. }
+                    if opponent == "Siena" =>
+                {
+                    Some(id)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        // after our serve error, their ace: an error of the reception,
+        // forced
+        let scouting = core.scouting(team.clone(), siena.clone()).unwrap();
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        let receiver = scouting
+            .player_choices()
+            .into_iter()
+            .next()
+            .map(|p| p.id)
+            .unwrap_or_default();
+        scouting.choose_player(receiver).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let mut screen = StatsScreen::new(core, team, siena).unwrap();
+        screen.update(Message::Page(1));
+        assert!(screen.filters().contains(&Filter::Errors));
+        let series = |screen: &StatsScreen, series| {
+            screen
+                .live
+                .as_ref()
+                .and_then(|l| l.trend.iter().position(|t| t.series == series))
+                .unwrap_or(usize::MAX)
+        };
+        let shown = |screen: &StatsScreen| screen.trend.errors.iter().map(|(_, n)| n).sum::<u32>();
+        // the reception: the ace, not unforced
+        let reception = series(&screen, scout4all_core::trend::Series::Reception);
+        let serve = series(&screen, scout4all_core::trend::Series::Serve);
+        screen.update(Message::Series(reception));
+        assert_eq!(shown(&screen), 1);
+        assert_eq!(screen.trend.error_bins().iter().sum::<u32>(), 1);
+        assert!(matches!(
+            screen.changed(Filter::Errors, true),
+            Some(Message::Unforced(true))
+        ));
+        screen.update(Message::Unforced(true));
+        assert_eq!(shown(&screen), 0);
+        // the serve error is: the choice stays with another figure
+        screen.update(Message::Series(serve));
+        assert_eq!(shown(&screen), 1);
+        screen.update(Message::Unforced(false));
+        assert_eq!(shown(&screen), 1);
+        // the points of the set in order: ace, serve error, ace
+        let points: Vec<(bool, u8)> = screen
+            .live
+            .as_ref()
+            .and_then(|l| l.points.first())
+            .map(|p| p.points.iter().map(|p| (p.us, p.score)).collect())
+            .unwrap_or_default();
+        assert_eq!(points, [(true, 1), (false, 1), (false, 2)]);
+        assert_eq!(screen.sides, ("Cortona".to_string(), "Siena".to_string()));
     }
 
     /// The detail of a match has the filters on the situation too.

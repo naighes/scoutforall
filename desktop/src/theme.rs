@@ -22,6 +22,11 @@ pub const WON: Color = rgb(0x4ADE80);
 pub const LOST: Color = rgb(0xF87171);
 pub const FAIR: Color = rgb(0xFACC15);
 
+/// The two teams wherever they're told apart (the points in a row, the
+/// events of the video): ours light blue, theirs pink.
+pub const TEAM_US: Color = rgb(0x38BDF8);
+pub const TEAM_THEM: Color = rgb(0xF472B6);
+
 // --- fonts ----------------------------------------------------------------
 
 /// The font of the app, embedded (SIL Open Font License, see
