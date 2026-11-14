@@ -393,6 +393,50 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         assert_eq!(times(3600), times(0));
     }
 
+    /// Both teams: their touches fused into one sequence, each side
+    /// replaying it from its point of view with the score of the file.
+    #[test]
+    fn both_teams_are_one_sequence_of_touches() {
+        use crate::domain::Side as Team;
+        use crate::dvw::both::translate_both;
+        use crate::rally::replay;
+        let mut file = File::new();
+        file.received_by(2);
+        file.ace();
+        let dvw = parse(file.finished().text().as_bytes()).expect("expected a DataVolley file");
+        let home: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
+        let visiting: HashMap<u8, Uuid> = (11..=18).map(|n| (n, Uuid::new_v4())).collect();
+        let a = Us {
+            side: Side::Home,
+            players: &home,
+            liberos: &[HOME_LIBERO],
+        };
+        let b = Us {
+            side: Side::Visiting,
+            players: &visiting,
+            liberos: &[17],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
+        let (both, _) = translate_both(&dvw, &a, &b, 1, date, 6).expect("expected the set");
+        let first: Vec<(Team, EventTypeEnum)> = both
+            .touches
+            .iter()
+            .take(4)
+            .map(|(side, e)| (*side, e.event_type))
+            .collect();
+        assert_eq!(
+            first,
+            vec![(Team::B, S), (Team::A, P), (Team::A, A), (Team::A, S)]
+        );
+        let (ours, theirs) = replay(&both.a, &both.b, &both.touches, 6).expect("both sides");
+        assert_eq!((ours.score_us, ours.score_them), (25, 0));
+        assert_eq!((theirs.score_us, theirs.score_them), (0, 25));
+    }
+
     /// The libero touching as it plays: nothing to change.
     #[test]
     fn the_libero_plays_as_ever() {

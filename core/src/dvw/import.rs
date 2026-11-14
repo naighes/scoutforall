@@ -883,6 +883,9 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
             .replace("{file}", &score(*file))
             .replace("{ours}", &score(*ours)),
         Issue::Unfinished => labels.dvw_set_unfinished.to_string(),
+        Issue::Sides(incoherence) => labels
+            .dvw_event
+            .replace("{detail}", &incoherence.to_string()),
     }
 }
 

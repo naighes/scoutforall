@@ -9,6 +9,7 @@ use crate::{
     dvw::model::{
         AttackCombination, Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols,
     },
+    rally::Incoherence,
     shapes::{
         court_zone::{CourtTarget, ServeStartEnum, SubzoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
@@ -59,6 +60,8 @@ pub enum Issue {
     },
     /// The file ends the set before one of the teams wins it.
     Unfinished,
+    /// The touches of the two teams don't replay on both sides.
+    Sides(Incoherence),
 }
 
 /// What the file tells in a way we can't translate exactly.
@@ -114,6 +117,21 @@ pub fn translate_set(
     date: DateTime<FixedOffset>,
     max_substitutions: u8,
 ) -> Result<(SetEntry, Mappings), TranslateError> {
+    translate_lined(file, us, set_number, date, max_substitutions)
+        .map(|(set, mappings, _)| (set, mappings))
+}
+
+/// [`translate_set`], with the line of the file each event comes from: the
+/// touch it translates, the first touch of the rally for what comes before
+/// the touches (a libero change), the point for what ends the rally on the
+/// other side.
+pub(crate) fn translate_lined(
+    file: &DvwFile,
+    us: &Us,
+    set_number: u8,
+    date: DateTime<FixedOffset>,
+    max_substitutions: u8,
+) -> Result<(SetEntry, Mappings, Vec<usize>), TranslateError> {
     let fail = |line: Option<usize>, issue: Issue| TranslateError {
         set_number,
         line,
@@ -130,6 +148,7 @@ pub fn translate_set(
         combinations: &file.attack_combinations,
         snapshot,
         events: vec![],
+        lines: vec![],
         rally_start: 0,
         mappings: Mappings::new(),
         clock: midnight(date, video_clock),
@@ -150,6 +169,7 @@ pub fn translate_set(
                 ..start
             },
             set.mappings,
+            set.lines,
         )),
         None => Err(fail(None, Issue::Unfinished)),
     }
@@ -430,6 +450,8 @@ struct SetTranslator<'a> {
     combinations: &'a [AttackCombination],
     snapshot: Snapshot,
     events: Vec<EventEntry>,
+    // the line of the file of each event
+    lines: Vec<usize>,
     // where the rally being translated starts in `events`
     rally_start: usize,
     mappings: Mappings,
@@ -473,6 +495,8 @@ impl SetTranslator<'_> {
         while let Some(line) = lines.get(index) {
             index += 1;
             let at = Some(line.line);
+            // a substitution, a setter change: at their line
+            self.at = at;
             self.tick(line);
             match &line.code {
                 // the six on court of the file left aside: DataVolley may
@@ -492,7 +516,7 @@ impl SetTranslator<'_> {
                         true => TeamSideEnum::Us,
                         false => TeamSideEnum::Them,
                     };
-                    if let Err(issue) = self.rally(&rally, winner) {
+                    if let Err(issue) = self.rally(&rally, winner, line.line) {
                         // the libero for another player: chosen a rally
                         // earlier, translated again from there
                         let earlier = self.earlier.take();
@@ -587,6 +611,7 @@ impl SetTranslator<'_> {
     fn restore(&mut self, checkpoint: &Checkpoint, rally_number: usize) {
         self.snapshot = checkpoint.snapshot.clone();
         self.events.truncate(checkpoint.events);
+        self.lines.truncate(checkpoint.events);
         self.mappings = checkpoint.mappings.clone();
         self.clock = checkpoint.clock;
         self.inverted_p1 = checkpoint.inverted_p1;
@@ -663,6 +688,7 @@ impl SetTranslator<'_> {
             return Err(Issue::Event(e.to_string()));
         }
         self.events.push(event);
+        self.lines.push(self.at.unwrap_or_default());
         Ok(())
     }
 
@@ -709,6 +735,7 @@ impl SetTranslator<'_> {
         &mut self,
         touches: &[(&ScoutLine, Touch)],
         winner: TeamSideEnum,
+        point: usize,
     ) -> Result<(), Issue> {
         self.rally_start = self.events.len();
         self.inverted_p1 = self.inverted_p1_of(touches).unwrap_or(self.inverted_p1);
@@ -788,7 +815,7 @@ impl SetTranslator<'_> {
                 }
             }
         }
-        self.at = None;
+        self.at = Some(point);
         match (self.rally_over(), winner, last_cause.or(green)) {
             (true, _, _) => Ok(()),
             // their point: their ace, kill or block point, or their point

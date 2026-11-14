@@ -21,6 +21,7 @@ mod config_tests;
 mod country_tests;
 mod db_tests;
 mod domain_tests;
+mod dvw_both_tests;
 mod dvw_import_tests;
 mod dvw_tests;
 mod dvw_translate_tests;
