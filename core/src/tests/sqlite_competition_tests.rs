@@ -54,7 +54,14 @@ mod tests {
                     competition: Some(competition),
                     stage: Some(Stage::Regular),
                     round: Some("Andata – giornata 1".into()),
-                    ..MatchInput::against(opponent, date, true, DEFAULT_MAX_SUBSTITUTIONS, "", vec![])
+                    ..MatchInput::against(
+                        opponent,
+                        date,
+                        true,
+                        DEFAULT_MAX_SUBSTITUTIONS,
+                        "",
+                        vec![],
+                    )
                 },
             )
             .await
@@ -200,7 +207,11 @@ mod tests {
         let (match_row, competition) = p.match_reader.details(&a, &m.id).unwrap();
         let form = MatchForm::of(&m, &match_row, competition.as_ref());
         assert_eq!(
-            (form.competition.as_str(), form.competition_id, form.friendly),
+            (
+                form.competition.as_str(),
+                form.competition_id,
+                form.friendly
+            ),
             ("Serie C maschile – girone A", Some(before.id), false)
         );
     }
@@ -245,7 +256,14 @@ mod tests {
         // a removed one doesn't count
         competitions(&p).remove(serie_c.id).unwrap();
         let all = competitions(&p).read_all().unwrap();
-        let removed_too = [all, vec![Competition { deleted: true, ..serie_c }]].concat();
+        let removed_too = [
+            all,
+            vec![Competition {
+                deleted: true,
+                ..serie_c
+            }],
+        ]
+        .concat();
         assert!(
             CompetitionForm {
                 name: "Serie C".into(),
@@ -300,6 +318,9 @@ mod tests {
 
         assert!(competitions(&p).remove(serie_c.id).is_err());
         assert!(competitions(&p).update(&serie_c).is_err());
-        assert_eq!(competitions(&p).read(serie_c.id).unwrap().map(|c| c.name), Some("Serie C".into()));
+        assert_eq!(
+            competitions(&p).read(serie_c.id).unwrap().map(|c| c.name),
+            Some("Serie C".into())
+        );
     }
 }

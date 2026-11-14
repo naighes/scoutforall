@@ -316,7 +316,12 @@ impl HomeScreen {
             // have no room left for a third action in a small window
             list(
                 s.recent,
-                vec![ui::pill(s.competitions, false, Some(Message::Competitions), c)],
+                vec![ui::pill(
+                    s.competitions,
+                    false,
+                    Some(Message::Competitions),
+                    c
+                )],
                 recent,
                 s.no_matches,
                 c

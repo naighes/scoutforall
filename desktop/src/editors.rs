@@ -25,9 +25,9 @@ use {
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        ClassificationChoice, CompetitionChoice, CompetitionField, ExistingPlayer, FormatChoice, GenderChoice,
-        MatchField, MatchRoster, MobileError, OpponentChoice, PlayerField, RoleChoice,
-        RosterPlayer, Scout4All, SeasonPlayer, StageChoice, TeamField, TeamListing,
+        ClassificationChoice, CompetitionChoice, CompetitionField, ExistingPlayer, FormatChoice,
+        GenderChoice, MatchField, MatchRoster, MobileError, OpponentChoice, PlayerField,
+        RoleChoice, RosterPlayer, Scout4All, SeasonPlayer, StageChoice, TeamField, TeamListing,
     },
 };
 
@@ -1196,21 +1196,20 @@ impl Editor {
                 core.save_new_season(t.team_id.clone(), form, t.players.clone())
             }
             Kind::Competition(c) => {
-                let country = countries::chosen(core, &f.text(COMPETITION_COUNTRY)).map_err(
-                    |()| MobileError::InvalidCompetition {
-                        field: CompetitionField::Country,
-                        reason: s.no_country_found.to_string(),
-                    },
-                )?;
+                let country =
+                    countries::chosen(core, &f.text(COMPETITION_COUNTRY)).map_err(|()| {
+                        MobileError::InvalidCompetition {
+                            field: CompetitionField::Country,
+                            reason: s.no_country_found.to_string(),
+                        }
+                    })?;
                 let form = CompetitionForm {
                     name: f.text(COMPETITION_NAME),
                     season: f.text(COMPETITION_SEASON),
-                    format: c
-                        .formats
-                        .get(f.index(COMPETITION_FORMAT))
-                        .map_or(scout4all_core::domain::CompetitionFormat::League, |format| {
-                            format.value
-                        }),
+                    format: c.formats.get(f.index(COMPETITION_FORMAT)).map_or(
+                        scout4all_core::domain::CompetitionFormat::League,
+                        |format| format.value,
+                    ),
                     gender: f
                         .index(COMPETITION_GENDER)
                         .checked_sub(1)

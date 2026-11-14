@@ -103,7 +103,11 @@ impl CompetitionsScreen {
             Mode::Delete(index) => self.listed.get(index),
             Mode::Browse | Mode::Edit(_) => None,
         } {
-            self.error = self.core.delete_competition(c.id).err().map(|e| e.to_string());
+            self.error = self
+                .core
+                .delete_competition(c.id)
+                .err()
+                .map(|e| e.to_string());
         }
         self.reload();
     }
@@ -305,8 +309,7 @@ mod tests {
 
     /// Cortona with its players, a match in "Serie C" and two in "Coppa".
     fn competitions_played(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, Vec<String>) {
-        let core =
-            Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core
             .save_team(
                 None,
@@ -361,14 +364,22 @@ mod tests {
             home.update(&core, s, home::Message::Competitions),
             home::Outcome::Competitions
         ));
-        assert!(home.hints(s).contains(&("c".to_string(), s.competitions.to_string())));
+        assert!(
+            home.hints(s)
+                .contains(&("c".to_string(), s.competitions.to_string()))
+        );
 
         let mut screen = CompetitionsScreen::new(core.clone()).unwrap();
         assert_eq!(
             screen
                 .listed
                 .iter()
-                .map(|c| (c.name.as_str(), c.season.as_deref(), c.format.as_str(), c.matches))
+                .map(|c| (
+                    c.name.as_str(),
+                    c.season.as_deref(),
+                    c.format.as_str(),
+                    c.matches
+                ))
                 .collect::<Vec<_>>(),
             vec![
                 ("Coppa", Some("2026/2027"), "Campionato", 2),
@@ -385,8 +396,8 @@ mod tests {
 
         // none yet: they're made in the form of a match
         let empty = tempfile::tempdir().unwrap();
-        let none = Scout4All::new(empty.path().to_string_lossy().into_owned(), "it".into())
-            .unwrap();
+        let none =
+            Scout4All::new(empty.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         assert!(CompetitionsScreen::new(none).unwrap().listed.is_empty());
     }
 
