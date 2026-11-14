@@ -61,8 +61,6 @@ enum Filter {
     Period,
     Series,
     Mode,
-    /// the errors in red under the trend: hidden, all, or the direct ones
-    Errors,
     Event,
     Player,
     Rotation,
@@ -77,17 +75,6 @@ enum Filter {
     Close,
     Zones,
 }
-
-/// The errors in red under the trend of a match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorsShown {
-    Hidden,
-    All,
-    /// the direct (unforced) ones only
-    Direct,
-}
-
-const ERRORS_SHOWN: [ErrorsShown; 3] = [ErrorsShown::Hidden, ErrorsShown::All, ErrorsShown::Direct];
 
 /// The filters on the situation, after the player, rotation and phase.
 const SITUATION: [Filter; 8] = [
@@ -128,8 +115,6 @@ pub enum Message {
     Scope(StatsScope),
     Series(usize),
     Recent(bool),
-    /// the errors under the trend: hidden, all, the direct ones
-    Errors(ErrorsShown),
     Event(EventTypeEnum),
     /// the players chosen: none, all of them
     Players(Vec<String>),
@@ -268,8 +253,6 @@ pub struct StatsScreen {
     detail: Option<DetailStats>,
     series: usize,
     recent: bool,
-    /// the errors under the trend: hidden, all, the direct ones
-    errors: ErrorsShown,
     trend: Trend,
     event: EventTypeEnum,
     filter: DetailFilter,
@@ -313,7 +296,7 @@ const FILTERS: &str = "stats-filters";
 
 /// Up to how many filters go in a bar over the page, not in a column: the
 /// trend of a match keeps the whole width for its chart.
-const FILTERS_ON_TOP: usize = 3;
+const FILTERS_ON_TOP: usize = 2;
 
 /// A day under the trend: day and month.
 fn short_day(s: &Strings, day: &str) -> String {
@@ -600,6 +583,57 @@ fn points_rows<'a>(
 
 /// On the left of the rows of the points: each set, in its color as in the
 /// chart, beside the names of the two teams.
+/// The band of the level in the legend: what it is under the mouse.
+fn level_band<'a>(s: &'static Strings, c: Colors) -> Element<'a, Message> {
+    ui::tip(
+        text(format!("▮ {}", s.level_band))
+            .size(SIZE_SMALL)
+            .color(theme::FAIR),
+        s.level_band_tip,
+        c,
+    )
+}
+
+/// Beside the chart of a match, at the height of the band of the level:
+/// its name and its values, what it is under the mouse. As high as the
+/// chart, empty without a band.
+fn band_label<'a>(
+    trend: &Trend,
+    chart_height: f32,
+    s: &'static Strings,
+    c: Colors,
+) -> Element<'a, Message> {
+    // the chart without the numbers of the rallies under it, as drawn
+    let plot = (chart_height - charts::RALLY_LABELS).max(1.0);
+    let y = |v: f64| plot * (1.0 - ((v - trend.low) / (trend.high - trend.low)) as f32);
+    let label = trend.band.map(|(low, high)| {
+        let middle = (y(low) + y(high)) / 2.0;
+        let top = (middle - BAND_LABEL / 2.0).clamp(0.0, (plot - BAND_LABEL).max(0.0));
+        column![
+            space::vertical().height(top),
+            ui::tip(
+                container(
+                    column![
+                        text(s.level_band).size(SIZE_SMALL).color(theme::FAIR),
+                        small(format!("{}–{}", pct(Some(low)), pct(Some(high))), c),
+                    ]
+                    .spacing(2)
+                )
+                .height(BAND_LABEL)
+                .align_y(Alignment::Center),
+                s.level_band_tip,
+                c,
+            )
+        ]
+    });
+    container(label.map_or_else(|| space::vertical().into(), Element::from))
+        .height(chart_height)
+        .into()
+}
+
+/// How high the name and the values of the band beside the chart are.
+const BAND_LABEL: f32 = 36.0;
+
 fn points_names<'a>(
     sets: &'a [scout4all_mobile::SetPoints],
     sides: (&String, &String),
@@ -699,7 +733,6 @@ impl StatsScreen {
             detail: None,
             series: 0,
             recent: false,
-            errors: ErrorsShown::All,
             trend: Trend::of_stats(None, 0, false),
             event: EventTypeEnum::S,
             filter: DetailFilter::default(),
@@ -964,12 +997,10 @@ impl StatsScreen {
 
     fn retrend(&mut self) {
         let trend = Trend::of_stats(self.live.as_ref(), self.series, self.recent);
-        // the errors of the figure in red under its lines
-        let line = self.live.as_ref().and_then(|l| l.trend.get(self.series));
-        self.trend = match (line, self.errors) {
-            (Some(line), ErrorsShown::All) => trend.with_errors(line, false),
-            (Some(line), ErrorsShown::Direct) => trend.with_errors(line, true),
-            (None, _) | (_, ErrorsShown::Hidden) => trend,
+        // the direct errors of the figure, a red line each
+        self.trend = match self.live.as_ref().and_then(|l| l.trend.get(self.series)) {
+            Some(line) => trend.with_errors(line),
+            None => trend,
         };
     }
 
@@ -998,7 +1029,7 @@ impl StatsScreen {
         let narrow = [Filter::Player, Filter::Rotation, Filter::Phase];
         let first: Vec<Filter> = match (self.is_team(), self.current()) {
             (false, Page::Summary) => return vec![Filter::Scope],
-            (false, Page::Trend) => return vec![Filter::Series, Filter::Mode, Filter::Errors],
+            (false, Page::Trend) => return vec![Filter::Series, Filter::Mode],
             (false, Page::Detail) => vec![Filter::Scope, Filter::Event],
             (true, Page::Summary) => vec![Filter::Period],
             (true, Page::Trend) => vec![Filter::Period, Filter::Series],
@@ -1055,7 +1086,6 @@ impl StatsScreen {
                 ui::cycle(&series, &self.series, forward).map(Message::Series)
             }
             Filter::Mode => Some(Message::Recent(!self.recent)),
-            Filter::Errors => ui::cycle(&ERRORS_SHOWN, &self.errors, forward).map(Message::Errors),
             Filter::Zones => Some(Message::Efficiency(!self.efficiency)),
             Filter::Event => {
                 let events: Vec<EventTypeEnum> = detail
@@ -1173,10 +1203,6 @@ impl StatsScreen {
             }
             Message::Recent(recent) => {
                 self.recent = recent;
-                self.retrend();
-            }
-            Message::Errors(errors) => {
-                self.errors = errors;
                 self.retrend();
             }
             Message::Event(event) => {
@@ -1587,24 +1613,6 @@ impl StatsScreen {
                     ),
                 ],
             ),
-            Filter::Errors => (
-                s.errors_shown,
-                ERRORS_SHOWN
-                    .into_iter()
-                    .map(|errors| {
-                        let label = match errors {
-                            ErrorsShown::Hidden => s.hide_errors,
-                            ErrorsShown::All => s.all_errors,
-                            ErrorsShown::Direct => s.only_direct,
-                        };
-                        pill(
-                            label.to_string(),
-                            errors == self.errors,
-                            Message::Errors(errors),
-                        )
-                    })
-                    .collect(),
-            ),
             Filter::Zones => (
                 s.zones_view,
                 vec![
@@ -1954,19 +1962,12 @@ impl StatsScreen {
                     .into()
             }))
         .push(small(format!("- - {}", s.whole_match), c))
-        .extend(
-            match self.errors {
-                ErrorsShown::Hidden => None,
-                ErrorsShown::All => Some(s.errors),
-                ErrorsShown::Direct => Some(s.direct_errors),
-            }
-            .map(|name| {
-                text(format!("▮ {name}"))
-                    .size(SIZE_SMALL)
-                    .color(theme::LOST)
-                    .into()
-            }),
+        .push(
+            text(format!("│ {}", s.direct_errors))
+                .size(SIZE_SMALL)
+                .color(theme::LOST),
         )
+        .extend(self.trend.band.map(|_| level_band(s, c)))
         .spacing(14);
         let name = live
             .trend
@@ -2009,7 +2010,7 @@ impl StatsScreen {
                     .into(),
             };
             let left = column![
-                space::vertical().height(chart_height),
+                band_label(&trend, chart_height, s, c),
                 title,
                 points_names(&live.points, (&live.team_name, &live.opponent), s)
             ]
@@ -2077,6 +2078,7 @@ impl StatsScreen {
                 c
             ),
         ]
+        .extend(trend.band.map(|_| level_band(s, c)))
         .spacing(14);
         let chart: Element<'a, Message> = match trend.is_empty() {
             true => small(s.no_rallies, c).into(),
@@ -3592,10 +3594,9 @@ pub(crate) mod tests {
         assert_eq!(screen.match_id(), None);
     }
 
-    /// The trend of a match: the errors of the figure in red under its
-    /// lines, hidden, all or only the direct ones (a filter, ← → as the
-    /// others, in the bar over the chart); the points of each set in order
-    /// under it.
+    /// The trend of a match: the direct errors of the figure only, a red
+    /// line each, always (no filter on them; the others in the bar over the
+    /// chart); the points of each set in order under it.
     #[test]
     fn the_trend_has_the_errors_and_the_points() {
         let dir = tempfile::tempdir().unwrap();
@@ -3628,7 +3629,7 @@ pub(crate) mod tests {
         scouting.choose_eval(EvalEnum::Error).unwrap();
         let mut screen = StatsScreen::new(core, team, siena).unwrap();
         screen.update(Message::Page(1));
-        assert!(screen.filters().contains(&Filter::Errors));
+        assert_eq!(screen.filters(), [Filter::Series, Filter::Mode]);
         // a few filters: over the chart, all of its width left to it
         assert!(screen.filters().len() <= FILTERS_ON_TOP);
         let series = |screen: &StatsScreen, series| {
@@ -3643,29 +3644,10 @@ pub(crate) mod tests {
         let reception = series(&screen, scout4all_core::trend::Series::Reception);
         let serve = series(&screen, scout4all_core::trend::Series::Serve);
         screen.update(Message::Series(reception));
-        assert_eq!(shown(&screen), 1);
-        assert_eq!(screen.trend.error_bins().iter().sum::<u32>(), 1);
-        // hide, all, only the direct ones
-        assert!(matches!(
-            screen.changed(Filter::Errors, false),
-            Some(Message::Errors(ErrorsShown::Hidden))
-        ));
-        assert!(matches!(
-            screen.changed(Filter::Errors, true),
-            Some(Message::Errors(ErrorsShown::Direct))
-        ));
-        screen.update(Message::Errors(ErrorsShown::Direct));
-        assert_eq!(shown(&screen), 0);
-        // the serve error is: the choice stays with another figure
-        screen.update(Message::Series(serve));
-        assert_eq!(shown(&screen), 1);
-        screen.update(Message::Errors(ErrorsShown::Hidden));
-        assert_eq!(shown(&screen), 0);
+        assert_eq!(shown(&screen), 0, "the ace: an error, but forced");
         assert_eq!(screen.trend.error_bins().iter().sum::<u32>(), 0);
-        screen.update(Message::Series(reception));
-        assert_eq!(shown(&screen), 0, "hidden with another figure too");
+        // the serve error is direct
         screen.update(Message::Series(serve));
-        screen.update(Message::Errors(ErrorsShown::All));
         assert_eq!(shown(&screen), 1);
         // the points of the set in order: ace, serve error, ace
         let points: Vec<(bool, u8)> = screen

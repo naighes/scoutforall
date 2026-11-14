@@ -13,6 +13,9 @@ use {
     scout4all_mobile::{MatchTrend, TrendLine},
 };
 
+/// How high the numbers of the rallies under the chart of a match are.
+pub const RALLY_LABELS: f32 = 14.0;
+
 /// The points of a trend, ready to draw.
 #[derive(Debug, Clone)]
 pub struct Trend {
@@ -26,8 +29,8 @@ pub struct Trend {
     pub high: f64,
     /// the rallies of the longest set, at least 25: a column each
     pub points: f64,
-    /// the errors of the figure along the sets, in red under the lines:
-    /// the rally and how many, of every set
+    /// the direct errors of the figure along the sets, a red line across
+    /// the chart: the rally and how many, of every set
     pub errors: Vec<(f64, u32)>,
 }
 
@@ -88,19 +91,15 @@ impl Trend {
         }
     }
 
-    /// With the errors of the figure in each rally, of every set: all of
-    /// them, or only the unforced ones.
-    pub fn with_errors(self, line: &TrendLine, unforced: bool) -> Trend {
+    /// With the direct (unforced) errors of the figure in each rally, of
+    /// every set.
+    pub fn with_errors(self, line: &TrendLine) -> Trend {
         let errors = line
             .sets
             .iter()
             .flat_map(|set| {
-                let counts = match unforced {
-                    true => &set.unforced,
-                    false => &set.errors,
-                };
                 rallies()
-                    .zip(counts.iter())
+                    .zip(set.unforced.iter())
                     .filter(|(_, n)| **n > 0)
                     .map(|(x, n)| (x, *n))
                     .collect::<Vec<_>>()
@@ -151,8 +150,7 @@ impl<M> canvas::Program<M> for CanvasTrend {
         let t = &self.trend;
         let c = self.colors;
         // room for the labels of the points under the chart
-        let label = 14.0;
-        let plot = Size::new(bounds.width, (bounds.height - label).max(1.0));
+        let plot = Size::new(bounds.width, (bounds.height - RALLY_LABELS).max(1.0));
         // a rally in the middle of its column
         let x = |p: f64| (f64::from(plot.width) * (p - 0.5) / t.points) as f32;
         let y = |v: f64| (f64::from(plot.height) * (1.0 - (v - t.low) / (t.high - t.low))) as f32;
@@ -206,21 +204,17 @@ impl<M> canvas::Program<M> for CanvasTrend {
                 },
             );
         }
-        // the errors, in red from the bottom: at most a third of the chart
-        // high, the densest point the tallest
-        let bins = t.error_bins();
-        let most = bins.iter().copied().max().unwrap_or(0);
-        if most > 0 {
-            let width = x(1.0) - x(0.0);
-            for (i, n) in bins.iter().enumerate().filter(|(_, n)| **n > 0) {
-                let high = plot.height / 3.0 * *n as f32 / most as f32;
-                // the column of the rally (from 1)
-                frame.fill_rectangle(
-                    Point::new(x(i as f64 + 0.5) + 1.0, plot.height - high),
-                    Size::new((width - 2.0).max(1.0), high),
-                    Color { a: 0.5, ..LOST },
-                );
-            }
+        // the direct errors, a red line across the chart in the column of
+        // their rally (from 1), under the lines of the sets
+        let error = Stroke::default()
+            .with_color(Color { a: 0.8, ..LOST })
+            .with_width(2.0);
+        for (i, _) in t.error_bins().iter().enumerate().filter(|(_, n)| **n > 0) {
+            let px = x(i as f64 + 1.0);
+            frame.stroke(
+                &Path::line(Point::new(px, 0.0), Point::new(px, plot.height)),
+                error,
+            );
         }
         for (set, runs) in &t.sets {
             let color = set_color(*set);
