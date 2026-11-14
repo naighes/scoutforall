@@ -18,9 +18,10 @@
 //!
 //! An event can then be put at its own time, the others where they are: a
 //! correction, saved as how far from where the anchor puts it, so that it
-//! moves with the anchor. The first time written ties the video (an anchor);
-//! once the video is tied to an event, a time written for another one is a
-//! correction (`with_time`).
+//! moves with the anchor. While the events don't line up, a time written
+//! ties the video (an anchor); once they do, a time written moves only its
+//! event, a correction (`with_time`): the anchor moves by tying the video to
+//! an event at a moment of it, or by shifting it.
 
 use crate::{errors::AppError, shapes::r#match::MatchEntry};
 use async_trait::async_trait;
@@ -79,6 +80,17 @@ pub enum TimeEffect {
     OnlyThis,
 }
 
+impl TimeEffect {
+    /// Of an event the sync puts at `placed_ms` (none: the events don't
+    /// line up): it alone once placed, the video tied to it until then.
+    pub fn of(placed_ms: Option<i64>) -> TimeEffect {
+        match placed_ms {
+            Some(_) => TimeEffect::OnlyThis,
+            None => TimeEffect::AlignAll,
+        }
+    }
+}
+
 impl VideoProfile {
     /// How far the event was put from where the anchor puts it, if at all.
     pub fn correction(&self, event: EventRef) -> Option<i64> {
@@ -88,18 +100,9 @@ impl VideoProfile {
             .map(|c| c.by_ms)
     }
 
-    /// What a time written for the event does: once the video is tied to
-    /// another event, it alone moves.
-    pub fn time_effect(&self, event: EventRef) -> TimeEffect {
-        match self.anchor.as_ref().and_then(|a| a.event) {
-            Some(tied) if tied != event => TimeEffect::OnlyThis,
-            _ => TimeEffect::AlignAll,
-        }
-    }
-
-    /// The event at `at_ms` in the video (`time_effect`): the video tied to
-    /// it, or it alone put there; `placed_ms` is where the anchor puts it
-    /// (none: not lined up, the video tied to it).
+    /// The event at `at_ms` in the video (`TimeEffect::of`): it alone put
+    /// there, `placed_ms` being where the anchor puts it; none (not lined
+    /// up): the video tied to it.
     pub fn with_time(
         &self,
         event: EventRef,
@@ -107,9 +110,9 @@ impl VideoProfile {
         placed_ms: Option<i64>,
         at_ms: i64,
     ) -> VideoProfile {
-        match (self.time_effect(event), placed_ms) {
-            (TimeEffect::OnlyThis, Some(placed)) => self.corrected(event, at_ms - placed),
-            _ => self.tied_to(event, timestamp, at_ms),
+        match placed_ms {
+            Some(placed) => self.corrected(event, at_ms - placed),
+            None => self.tied_to(event, timestamp, at_ms),
         }
     }
 

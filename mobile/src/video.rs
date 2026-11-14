@@ -456,18 +456,18 @@ impl VideoReview {
     }
 
     /// Whether a time written for the event shown at `index` moves it
-    /// alone (the video tied to another event) rather than all of them.
+    /// alone (the events lined up) rather than all of them.
     pub fn time_only_this(&self, index: u32) -> bool {
         let st = self.state();
-        let profile = st.current_profile();
         st.shown()
             .nth(index as usize)
-            .is_some_and(|e| profile.time_effect(event_ref(e)) == video::TimeEffect::OnlyThis)
+            .is_some_and(|e| video::TimeEffect::of(uncorrected(e)) == video::TimeEffect::OnlyThis)
     }
 
     /// The time written of the event at `index` (`m:ss`, `m:ss.s`,
-    /// `h:mm:ss` or seconds): the first ties the video, then the event
-    /// alone (`VideoProfile::with_time`); false when it isn't a time.
+    /// `h:mm:ss` or seconds): while the events don't line up it ties the
+    /// video, then the event alone (`VideoProfile::with_time`); false when
+    /// it isn't a time.
     pub fn anchor_written(&self, index: u32, written: String) -> Result<bool, MobileError> {
         match parse_time(&written) {
             Some(ms) => self
@@ -1261,8 +1261,8 @@ mod tests {
         assert!(review.anchor_written(0, "1:00".into()).unwrap());
         assert_eq!(at(0), Some(60_000));
         let placed: Vec<Option<i64>> = review.events().iter().map(|e| e.offset_ms).collect();
-        // the video tied to the first: a time for another, it alone
-        assert!(review.time_only_this(1) && !review.time_only_this(0));
+        // lined up: a time for any, it alone
+        assert!(review.time_only_this(1) && review.time_only_this(0));
         assert!(review.anchor_written(1, "1:05".into()).unwrap());
         let events = review.events();
         assert_eq!(events[1].offset_ms, Some(65_000));

@@ -693,6 +693,50 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
     if (corrections > 0) {
         Text(stringResource(R.string.video_corrections, corrections), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+    if (model.alignment == VideoAlignment.Chosen || corrections > 0) {
+        OutlinedButton(onClick = model::automatic, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(stringResource(R.string.video_automatic)) }
+        Explained(R.string.video_automatic_explained)
+    }
+    val ready = model.files.isNotEmpty() && model.events.isNotEmpty() && model.missing == null
+    val lined = model.alignment != VideoAlignment.Missing
+    // once the events line up, a time written moves only its event
+    val placed = ready && model.timeOnlyThis()
+    var writing by remember { mutableStateOf<String?>(null) }
+    val writeTime = @Composable {
+        OutlinedButton(onClick = { writing = model.writtenTime() }, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.video_anchor_time))
+        }
+    }
+    writing?.let { TimeDialog(model, it) { writing = null } }
+    // the whole match: the video tied to the event chosen, all shifted, the
+    // video before the first event to find it again
+    Text(stringResource(R.string.video_sync_whole), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+    Button(onClick = model::anchorHere, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+        Text(stringResource(R.string.video_anchor_here))
+    }
+    Explained(R.string.video_anchor_here_explained)
+    if (!placed) writeTime()
+    if (lined) {
+        Text(stringResource(R.string.video_shift), style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { model.shift(-SHIFT_MS) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).readAs(stringResource(R.string.video_earlier_half))) {
+                Text("−0,5 s")
+            }
+            OutlinedButton(onClick = { model.shift(SHIFT_MS) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).readAs(stringResource(R.string.video_later_half))) {
+                Text("+0,5 s")
+            }
+        }
+        Explained(R.string.video_shift_explained)
+        FilterChip(
+            selected = model.whole,
+            onClick = model::toggleWhole,
+            label = { Text(stringResource(R.string.video_redo_anchor)) },
+        )
+        Explained(R.string.video_redo_anchor_explained)
+    }
+    // only the event chosen: put at the moment of the video or at a time
+    // written, and back
+    Text(stringResource(R.string.video_sync_event), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
     model.events.getOrNull(model.selected)?.let { e ->
         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -707,23 +751,14 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
             }
         }
     }
-    val ready = model.files.isNotEmpty() && model.events.isNotEmpty() && model.missing == null
-    Button(onClick = model::anchorHere, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-        Text(stringResource(R.string.video_anchor_here))
-    }
-    Text(stringResource(R.string.video_anchor_here_explained), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    var writing by remember { mutableStateOf<String?>(null) }
-    OutlinedButton(onClick = { writing = model.writtenTime() }, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-        Text(stringResource(R.string.video_anchor_time))
-    }
-    writing?.let { TimeDialog(model, it) { writing = null } }
-    // once tied to another event: the one chosen alone; put there, how far,
-    // and back
-    if (ready && model.timeOnlyThis()) {
+    if (placed) {
         OutlinedButton(onClick = model::correctHere, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
             Text(stringResource(R.string.video_correct_here))
         }
-        Text(stringResource(R.string.video_correct_here_explained), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        writeTime()
+        Explained(R.string.video_correct_here_explained)
+    } else {
+        Explained(R.string.video_sync_event_unplaced)
     }
     model.events.getOrNull(model.selected)?.correctedMs?.let { by ->
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -738,28 +773,12 @@ private fun SyncPanel(model: VideoModel, modifier: Modifier) = Column(
             }
         }
     }
-    val automatic = model.alignment != VideoAlignment.Missing
-    Text(stringResource(R.string.video_shift), style = MaterialTheme.typography.titleSmall)
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(onClick = { model.shift(-SHIFT_MS) }, enabled = automatic, modifier = Modifier.weight(1f).readAs(stringResource(R.string.video_earlier_half))) {
-            Text("−0,5 s")
-        }
-        OutlinedButton(onClick = { model.shift(SHIFT_MS) }, enabled = automatic, modifier = Modifier.weight(1f).readAs(stringResource(R.string.video_later_half))) {
-            Text("+0,5 s")
-        }
-    }
-    if (model.alignment == VideoAlignment.Chosen) {
-        OutlinedButton(onClick = model::automatic, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.video_automatic)) }
-    }
-    if (automatic) {
-        FilterChip(
-            selected = model.whole,
-            onClick = model::toggleWhole,
-            label = { Text(stringResource(R.string.video_redo_anchor)) },
-        )
-        Text(stringResource(R.string.video_redo_anchor_explained), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
 }
+
+/** A line saying what the command above does. */
+@Composable
+private fun Explained(id: Int) =
+    Text(stringResource(id), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
 /** The time of the event chosen, written: the one there selected, the
  * keyboard open, so that what is typed takes its place. */
