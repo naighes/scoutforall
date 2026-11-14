@@ -267,8 +267,8 @@ private fun PeriodChooser(
 private fun DaysChooser(from: String, to: String, onDays: (String, String) -> Unit) {
     var picking by rememberSaveable { mutableStateOf(false) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        DayField(stringResource(R.string.from_day), from, Modifier.weight(1f)) { onDays(it, to) }
-        DayField(stringResource(R.string.to_day), to, Modifier.weight(1f)) { onDays(from, it) }
+        TypedDayField(stringResource(R.string.from_day), from, Modifier.weight(1f)) { onDays(it, to) }
+        TypedDayField(stringResource(R.string.to_day), to, Modifier.weight(1f)) { onDays(from, it) }
         IconButton(onClick = { picking = true }) {
             Icon(Icons.Filled.DateRange, contentDescription = stringResource(R.string.pick_days))
         }
@@ -302,9 +302,11 @@ private fun DaysChooser(from: String, to: String, onDays: (String, String) -> Un
     }
 }
 
-/** A day typed: digits only, the dashes put in. */
+/** A day typed: digits only, the dashes put in (the period of the
+ * analysis, beside its calendar of a range: not the `DayField` of the
+ * forms). */
 @Composable
-private fun DayField(label: String, digits: String, modifier: Modifier, onDigits: (String) -> Unit) {
+private fun TypedDayField(label: String, digits: String, modifier: Modifier, onDigits: (String) -> Unit) {
     val wrong = digits.length == 8 && dayOf(digits) == null
     OutlinedTextField(
         value = digits,

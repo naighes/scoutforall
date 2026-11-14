@@ -43,6 +43,18 @@ class MatchFormTest {
 
     private fun matches() = core { it.matches(team) }
 
+    /** The day of a new match written as every field of a day: in the
+     * language of the phone, the same style as the birth of a player. */
+    @Test
+    fun theDayIsWrittenAsInEveryForm() {
+        show()
+        // read-only, a tap opens the calendar: found by what it says, whole
+        // (not the weekday before it, as it was)
+        val long = java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.LONG)
+        rule.onAllNodesWithText(java.time.LocalDate.now().format(long)).onFirst().performScrollTo()
+            .assertTextContains(string(R.string.date), substring = true)
+    }
+
     @Test
     fun aMatchWithoutOpponentIsNotSaved() {
         show()

@@ -447,9 +447,17 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                     model.change(null) { it.copy(createOpponent = create) }
                 })
             }
-            DateField(form.date, error(MatchField.DATE)) { date ->
-                model.change(MatchField.DATE) { it.copy(date = date) }
-            }
+            // the day of the match: the time of day stays
+            val date = form.date?.let(::parseDate)
+            DayField(
+                stringResource(R.string.date),
+                date?.toLocalDate(),
+                onDay = { day ->
+                    day?.let { d -> model.change(MatchField.DATE) { it.copy(date = rfc3339(onDay(d, date))) } }
+                },
+                otherwise = form.date.orEmpty(),
+                error = error(MatchField.DATE),
+            )
             CourtChoice(form) { home, neutral -> model.change(null) { it.copy(home = home, neutral = neutral) } }
             Section(R.string.competition_section)
             val competitions = remember(state.competitions) { state.competitions.map { it.label() } }
@@ -614,53 +622,6 @@ private fun CorrectionDialog(correction: RosterCorrection, roles: List<RoleChoic
 
 /** The players a score sheet takes at most. */
 private const val MAX_ROSTER = 14
-
-/** The day of the match, in the language of the phone; a tap opens the
- * calendar. The time of day stays. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DateField(date: String?, error: String?, onDate: (String) -> Unit) {
-    val parsed = date?.let(::parseDate)
-    var picking by rememberSaveable { mutableStateOf(false) }
-    // a read-only field doesn't take clicks: its presses do
-    val presses = remember { MutableInteractionSource() }
-    LaunchedEffect(presses) {
-        presses.interactions.collect { if (it is PressInteraction.Release) picking = true }
-    }
-    OutlinedTextField(
-        value = parsed?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)) ?: date.orEmpty(),
-        onValueChange = {},
-        modifier = Modifier.fillMaxWidth(),
-        readOnly = true,
-        label = { Text(stringResource(R.string.date)) },
-        trailingIcon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
-        isError = error != null,
-        supportingText = error?.let { { Text(it) } },
-        interactionSource = presses,
-    )
-    if (picking) {
-        // the picker counts days in UTC
-        val picker = rememberDatePickerState(
-            initialSelectedDateMillis = (parsed?.toLocalDate() ?: LocalDate.now())
-                .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-        )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    picker.selectedDateMillis?.let { millis ->
-                        val day = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
-                        onDate(rfc3339(onDay(day, parsed)))
-                    }
-                    picking = false
-                }) { Text(stringResource(R.string.ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        ) { DatePicker(picker) }
-    }
-}
 
 private fun parseDate(date: String): OffsetDateTime? = try {
     OffsetDateTime.parse(date)

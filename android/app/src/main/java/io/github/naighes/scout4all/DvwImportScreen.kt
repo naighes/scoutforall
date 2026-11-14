@@ -410,7 +410,11 @@ private fun DvwContent(
                 }
                 else -> {
                     Question(stringResource(R.string.dvw_no_date))
-                    DayField(state.day, model::day)
+                    DayField(
+                        stringResource(R.string.date),
+                        state.day?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                        onDay = { day -> day?.let { model.day(it.toString()) } },
+                    )
                 }
             }
             DvwStep.Substitutions -> {
@@ -575,40 +579,9 @@ private fun NewTeamFields(state: DvwState, model: DvwImportViewModel) {
     }
 }
 
-/** The day of a match the file has no date of. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DayField(value: String?, onDay: (String) -> Unit) {
-    var picking by rememberSaveable { mutableStateOf(false) }
-    OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-        Text(value?.let(::day) ?: stringResource(R.string.date))
-    }
-    if (picking) {
-        // the picker counts days in UTC
-        val picker = rememberDatePickerState(
-            initialSelectedDateMillis = (value?.let(LocalDate::parse) ?: LocalDate.now())
-                .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-        )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    picker.selectedDateMillis?.let { millis ->
-                        onDay(Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString())
-                    }
-                    picking = false
-                }) { Text(stringResource(R.string.ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        ) { DatePicker(picker) }
-    }
-}
-
 /** A day `YYYY-MM-DD` in the language of the phone. */
 private fun day(day: String): String = try {
-    LocalDate.parse(day).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+    dayText(LocalDate.parse(day))
 } catch (_: java.time.DateTimeException) {
     day
 }

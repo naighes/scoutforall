@@ -296,9 +296,20 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 }
             }
             // optional, after what scouting needs
-            BirthDateField(form.birthDate, error(PlayerField.BIRTH_DATE)) { date ->
-                model.change(PlayerField.BIRTH_DATE) { it.copy(birthDate = date) }
-            }
+            // a player is rarely a child: the calendar opens years back, at
+            // most today
+            val today = remember { LocalDate.now() }
+            DayField(
+                stringResource(R.string.birth_date),
+                runCatching { LocalDate.parse(form.birthDate) }.getOrNull(),
+                onDay = { day -> model.change(PlayerField.BIRTH_DATE) { it.copy(birthDate = day?.toString().orEmpty()) } },
+                otherwise = form.birthDate,
+                error = error(PlayerField.BIRTH_DATE),
+                clear = stringResource(R.string.remove_birth_date),
+                latest = today,
+                opensAt = today.minusYears(BIRTH_YEARS_SHOWN),
+                firstYear = FIRST_BIRTH_YEAR,
+            )
             OutlinedTextField(
                 value = form.heightCm,
                 onValueChange = { height -> model.change(PlayerField.HEIGHT) { it.copy(heightCm = height) } },
@@ -357,65 +368,6 @@ private fun NamesakeDialog(namesake: String, model: PlayerFormViewModel) = Alert
         TextButton(onClick = model::dismissNamesake) { Text(stringResource(R.string.cancel)) }
     },
 )
-
-/** The birth date, in the language of the phone, or nothing; a tap opens
- * the calendar, at most today. The core has it as YYYY-MM-DD. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun BirthDateField(date: String, error: String?, onDate: (String) -> Unit) {
-    val parsed = remember(date) { runCatching { LocalDate.parse(date) }.getOrNull() }
-    var picking by rememberSaveable { mutableStateOf(false) }
-    // a read-only field doesn't take clicks: its presses do
-    val presses = remember { MutableInteractionSource() }
-    LaunchedEffect(presses) {
-        presses.interactions.collect { if (it is PressInteraction.Release) picking = true }
-    }
-    OutlinedTextField(
-        value = parsed?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)) ?: date,
-        onValueChange = {},
-        modifier = Modifier.fillMaxWidth(),
-        readOnly = true,
-        label = { Text(stringResource(R.string.birth_date)) },
-        trailingIcon = {
-            when (date) {
-                "" -> Icon(Icons.Filled.DateRange, contentDescription = null)
-                else -> IconButton(onClick = { onDate("") }) {
-                    Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.remove_birth_date))
-                }
-            }
-        },
-        isError = error != null,
-        supportingText = error?.let { { Text(it) } },
-        interactionSource = presses,
-    )
-    if (picking) {
-        // the picker counts days in UTC; a player is rarely a child
-        val today = LocalDate.now()
-        val millis = { day: LocalDate -> day.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
-        val picker = rememberDatePickerState(
-            initialSelectedDateMillis = parsed?.let(millis),
-            initialDisplayedMonthMillis = millis(parsed ?: today.minusYears(BIRTH_YEARS_SHOWN)),
-            yearRange = FIRST_BIRTH_YEAR..today.year,
-            selectableDates = object : SelectableDates {
-                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= millis(today)
-            },
-        )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    picker.selectedDateMillis?.let { selected ->
-                        onDate(Instant.ofEpochMilli(selected).atZone(ZoneOffset.UTC).toLocalDate().toString())
-                    }
-                    picking = false
-                }) { Text(stringResource(R.string.ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
-            },
-        ) { DatePicker(picker) }
-    }
-}
 
 /** The years back the calendar opens at without a birth date. */
 private const val BIRTH_YEARS_SHOWN = 18L
