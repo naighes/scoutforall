@@ -435,6 +435,9 @@
     <string name="video_uncorrect">Togli la correzione</string>
     <string name="video_corrections">Tempi corretti a mano: %1$d</string>
     <string name="video_corrected">tempo corretto a mano</string>
+    <string name="video_point_won">punto vinto</string>
+    <string name="video_point_lost">punto perso</string>
+    <string name="video_direct_error">errore diretto</string>
     <string name="video_add_files">Aggiungi file</string>
     <string name="video_move_earlier">Prima</string>
     <string name="video_move_later">Dopo</string>

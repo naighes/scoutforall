@@ -1,5 +1,7 @@
 //! The events of the match beside its video: set by set, each with its
-//! time in the video, the one chosen lit.
+//! time in the video, the one chosen lit. Each marked by its team (a bar on
+//! the left: ours light blue, theirs pink), the point it ended won or lost
+//! (its score green or red) and a direct error (its symbol red, a cross).
 
 use {
     super::{Message, clock},
@@ -40,9 +42,40 @@ pub fn seconds(ms: i64) -> String {
     format!("{sign}{}.{} s", tenths / 10, tenths % 10)
 }
 
+/// What an event was for the rally: whose, the point it ended, an error.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Mark {
+    /// of the opponent: their point, their error
+    pub theirs: bool,
+    /// the point it ended: won (true) or lost
+    pub point: Option<bool>,
+    /// a direct error: ours (=, a fault) or theirs
+    pub error: bool,
+}
+
+impl Mark {
+    /// The event, after the score `before` (the team's first).
+    pub fn of(e: &VideoEvent, before: (u8, u8)) -> Mark {
+        use scout4all_core::shapes::enums::EventTypeEnum::{F, OE, OS};
+        let event = e.event.event.event;
+        let point = match (e.event.score_us > before.0, e.event.score_them > before.1) {
+            (true, _) => Some(true),
+            (_, true) => Some(false),
+            _ => None,
+        };
+        Mark {
+            theirs: matches!(event, OS | OE),
+            point,
+            error: matches!(event, F | OE) || e.event.event.symbol.as_deref() == Some("="),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn row_of<'a>(
     e: &VideoEvent,
     i: usize,
+    mark: Mark,
     chosen: bool,
     anchored: bool,
     duration_ms: Option<u64>,
@@ -92,18 +125,64 @@ fn row_of<'a>(
             .color(c.muted)
             .into(),
     };
+    let team = match mark.theirs {
+        true => theme::TEAM_THEM,
+        false => theme::TEAM_US,
+    };
+    // a direct error: its symbol (a cross for theirs, a fault) in red
+    let symbol = match (mark.error, e.event.event.symbol.clone()) {
+        (true, Some(symbol)) => (symbol, theme::LOST),
+        (true, None) => ("✕".to_string(), theme::LOST),
+        (false, symbol) => (symbol.unwrap_or_default(), color),
+    };
+    // the point it ended: its score green or red, in a pill
+    let score = text(format!("{}–{}", e.event.score_us, e.event.score_them))
+        .size(SIZE_SMALL)
+        .font(bold);
+    let score: Element<'a, Message> = match mark.point {
+        Some(won) => iced::widget::container(score.color(c.background))
+            .padding([1, 6])
+            .style(move |_| iced::widget::container::Style {
+                background: Some(
+                    match won {
+                        true => theme::WON,
+                        false => theme::LOST,
+                    }
+                    .into(),
+                ),
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    ..iced::Border::default()
+                },
+                ..iced::widget::container::Style::default()
+            })
+            .into(),
+        None => iced::widget::container(score.color(color))
+            .padding([1, 6])
+            .into(),
+    };
+    let bar = iced::widget::container(iced::widget::space::vertical())
+        .width(Length::Fixed(4.0))
+        .height(Length::Fixed(32.0))
+        .style(move |_| iced::widget::container::Style {
+            background: Some(team.into()),
+            border: iced::Border {
+                radius: 2.0.into(),
+                ..iced::Border::default()
+            },
+            ..iced::widget::container::Style::default()
+        });
     let body = row![
+        bar,
         iced::widget::container(at).width(Length::Fixed(72.0)),
-        text(e.event.event.symbol.clone().unwrap_or_default())
+        text(symbol.0)
             .size(SIZE_BODY)
             .font(bold)
-            .color(color)
+            .color(symbol.1)
+            .shaping(text::Shaping::Advanced)
             .width(Length::Fixed(16.0)),
         column![text(name).size(SIZE_BODY).color(color), player].width(Length::Fill),
-        text(format!("{}–{}", e.event.score_us, e.event.score_them))
-            .size(SIZE_SMALL)
-            .font(bold)
-            .color(color),
+        score,
     ]
     .spacing(8)
     .align_y(Alignment::Center);
@@ -121,14 +200,28 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let mut rows: Vec<Element<'a, Message>> = vec![];
     let mut set = None;
+    // the score before each event, from 0–0 at each set
+    let mut before = (0, 0);
     for (i, e) in events.iter().enumerate() {
         if set != Some(e.set_number) {
             set = Some(e.set_number);
+            before = (0, 0);
             rows.push(ui::section(&format!("{} {}", s.set_n, e.set_number), c));
         }
         let is_anchored = anchored
             .is_some_and(|a| a.set_number == e.set_number && a.index == e.event.index as usize);
-        rows.push(row_of(e, i, i == selected, is_anchored, duration_ms, s, c));
+        let mark = Mark::of(e, before);
+        before = (e.event.score_us, e.event.score_them);
+        rows.push(row_of(
+            e,
+            i,
+            mark,
+            i == selected,
+            is_anchored,
+            duration_ms,
+            s,
+            c,
+        ));
     }
     scrollable(Column::with_children(rows).spacing(4).padding([0, 12]))
         .id(Id::new(LIST))

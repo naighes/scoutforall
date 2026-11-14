@@ -434,6 +434,9 @@
     <string name="video_uncorrect">修正を取り消す</string>
     <string name="video_corrections">手動で修正した時間: %1$d</string>
     <string name="video_corrected">手動で修正した時間</string>
+    <string name="video_point_won">得点</string>
+    <string name="video_point_lost">失点</string>
+    <string name="video_direct_error">直接ミス</string>
     <string name="video_add_files">ファイルを追加</string>
     <string name="video_move_earlier">前へ</string>
     <string name="video_move_later">後へ</string>

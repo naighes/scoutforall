@@ -3575,6 +3575,49 @@ pub(crate) mod screen_tests {
         );
     }
 
+    /// The events of the list marked: theirs (their point, their error),
+    /// the point each ended won or lost, the direct errors; the score
+    /// from 0–0 at each set.
+    #[test]
+    fn the_events_marked_by_team_point_and_error() {
+        use scout4all_core::shapes::enums::EventTypeEnum::{OE, OS};
+        let dir = tempfile::tempdir().unwrap();
+        let screen = with_file(&dir, "20150125 000000.mp4");
+        let mut before = (0, 0);
+        let mut set = 0;
+        let marks: Vec<(list::Mark, &VideoEvent)> = screen
+            .events
+            .iter()
+            .map(|e| {
+                if e.set_number != set {
+                    (set, before) = (e.set_number, (0, 0));
+                }
+                let mark = list::Mark::of(e, before);
+                before = (e.event.score_us, e.event.score_them);
+                (mark, e)
+            })
+            .collect();
+        assert!(marks.iter().any(|(m, _)| m.point == Some(true)));
+        for (mark, e) in &marks {
+            let event = e.event.event.event;
+            assert_eq!(mark.theirs, matches!(event, OS | OE), "{event:?}");
+            // their point is ours lost, their error ours won
+            match event {
+                OS => assert_eq!(mark.point, Some(false)),
+                OE => assert_eq!((mark.point, mark.error), (Some(true), true)),
+                _ => {}
+            }
+            if e.event.event.symbol.as_deref() == Some("=") {
+                assert!(mark.error && mark.point == Some(false), "{e:?}");
+            }
+        }
+        // the first of the second set from 0–0
+        let second = marks.iter().find(|(_, e)| e.set_number == 2);
+        assert!(second.is_some_and(
+            |(m, e)| m.point.is_none() == (e.event.score_us + e.event.score_them == 0)
+        ));
+    }
+
     /// Over the video, how the match stands at that moment: nothing before
     /// the first event; then after the last event passed: its set, the sets
     /// won before it, the score, the phase and the rotation to come. `i`

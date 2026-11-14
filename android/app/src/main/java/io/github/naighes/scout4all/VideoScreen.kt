@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import io.github.naighes.scout4all.core.EventTypeEnum
+
 import android.app.Activity
 import android.content.ClipData
 import android.content.Context
@@ -134,6 +136,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
 
 private enum class VideoTab(val title: Int) {
     Events(R.string.video_events),
@@ -603,13 +608,38 @@ private fun EventsList(model: VideoModel, modifier: Modifier) {
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            EventRow(e, i == model.selected, model.total) { model.goToEvent(i) }
+            // the score before it, from 0-0 at each set
+            val before = events.getOrNull(i - 1)?.takeIf { !newSet }?.event
+            EventRow(e, eventMark(e, before?.scoreUs ?: 0u, before?.scoreThem ?: 0u), i == model.selected, model.total) {
+                model.goToEvent(i)
+            }
         }
     }
 }
 
+/** What an event was for the rally, as on the desktop: of the opponent
+ * (their point, their error), the point it ended (won or lost, none), a
+ * direct error (ours: =, a fault; theirs). */
+internal data class EventMark(val theirs: Boolean, val point: Boolean?, val error: Boolean)
+
+internal fun eventMark(e: VideoEventRow, us: UByte, them: UByte): EventMark {
+    val event = e.event.event.event
+    return EventMark(
+        theirs = event == EventTypeEnum.OS || event == EventTypeEnum.OE,
+        point = when {
+            e.event.scoreUs > us -> true
+            e.event.scoreThem > them -> false
+            else -> null
+        },
+        error = event == EventTypeEnum.F || event == EventTypeEnum.OE || e.event.event.symbol == "=",
+    )
+}
+
+/** An event: a bar of its team on the left (ours light blue, theirs pink),
+ * its symbol red on a direct error, its score green or red on the point it
+ * ended; TalkBack says which. */
 @Composable
-private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: () -> Unit) {
+private fun EventRow(e: VideoEventRow, mark: EventMark, chosen: Boolean, total: Long, onClick: () -> Unit) {
     val muted = !e.inside || !e.event.editable
     val color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
     val s = e.event.event
@@ -623,6 +653,10 @@ private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: ()
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        Box(
+            Modifier.size(width = 4.dp, height = 32.dp)
+                .background(if (mark.theirs) TeamThem else TeamUs, RoundedCornerShape(2.dp)),
+        )
         Text(
             eventTime(e.offsetMs, total),
             Modifier.width(64.dp),
@@ -630,8 +664,15 @@ private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: ()
             color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Column(Modifier.weight(1f)) {
+            val symbol = s.symbol ?: "✕".takeIf { mark.error }
             Text(
-                listOfNotNull(name, s.symbol).joinToString("  "),
+                buildAnnotatedString {
+                    append(name)
+                    symbol?.let {
+                        append("  ")
+                        withStyle(SpanStyle(color = if (mark.error) Lost else color, fontWeight = FontWeight.Bold)) { append(it) }
+                    }
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (chosen) FontWeight.Bold else null,
                 color = color,
@@ -653,7 +694,32 @@ private fun EventRow(e: VideoEventRow, chosen: Boolean, total: Long, onClick: ()
         } else if (e.correctedMs != null) {
             Text("✎", Modifier.readAs(stringResource(R.string.video_corrected)))
         }
-        Text("${e.event.scoreUs}-${e.event.scoreThem}", style = MaterialTheme.typography.labelLarge, color = color)
+        val said = listOfNotNull(
+            when (mark.point) {
+                true -> stringResource(R.string.video_point_won)
+                false -> stringResource(R.string.video_point_lost)
+                null -> null
+            },
+            stringResource(R.string.video_direct_error).takeIf { mark.error },
+        ).joinToString(", ")
+        val score = "${e.event.scoreUs}-${e.event.scoreThem}"
+        Text(
+            score,
+            Modifier
+                .background(
+                    when (mark.point) {
+                        true -> Won
+                        false -> Lost
+                        null -> Color.Transparent
+                    },
+                    RoundedCornerShape(4.dp),
+                )
+                .padding(horizontal = 6.dp, vertical = 1.dp)
+                .then(if (said.isEmpty()) Modifier else Modifier.readAs("$score, $said")),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (mark.point != null) FontWeight.Bold else null,
+            color = if (mark.point != null) MaterialTheme.colorScheme.surface else color,
+        )
     }
 }
 

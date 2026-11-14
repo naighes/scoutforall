@@ -125,6 +125,20 @@ class VideoTest {
         rule.onNodeWithText(string(R.string.video_choose)).assertIsEnabled()
     }
 
+    /** The events marked as TalkBack says them: the aces points won, the
+     * serve error a point lost and a direct error. */
+    @Test
+    fun theEventsMarkedByPointAndError() {
+        val (team, match) = servedMatch()
+        linkVideo(team, match)
+        rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, match), onBack = {}) } }
+        rule.waitForText(string(R.string.video_missing, "20261025 175500.mp4"))
+        val won = string(R.string.video_point_won)
+        rule.onNodeWithText("1-0, $won").assertExists()
+        rule.onNodeWithText("3-0, $won").assertExists()
+        rule.onNodeWithText("3-1, ${string(R.string.video_point_lost)}, ${string(R.string.video_direct_error)}").assertExists()
+    }
+
     /** A file moved or deleted: said, with the way to choose it again; the
      * events are there all the same, lined up by the name of the file. */
     @Test

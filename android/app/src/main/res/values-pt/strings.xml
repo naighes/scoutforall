@@ -435,6 +435,9 @@
     <string name="video_uncorrect">Remover a correção</string>
     <string name="video_corrections">Tempos corrigidos manualmente: %1$d</string>
     <string name="video_corrected">tempo corrigido manualmente</string>
+    <string name="video_point_won">ponto ganho</string>
+    <string name="video_point_lost">ponto perdido</string>
+    <string name="video_direct_error">erro direto</string>
     <string name="video_add_files">Adicionar arquivos</string>
     <string name="video_move_earlier">Antes</string>
     <string name="video_move_later">Depois</string>
