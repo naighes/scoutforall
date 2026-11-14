@@ -46,10 +46,12 @@ mod tests {
         }
     }
 
-    /// Six on court in rotation 0, the libero, three on the bench.
+    /// Six on court in rotation 0, the libero, the second libero, three
+    /// on the bench.
     struct Team {
         positions: [Uuid; 6],
         libero: Uuid,
+        fallback_libero: Uuid,
         bench: [Uuid; 3],
     }
 
@@ -58,6 +60,7 @@ mod tests {
             Team {
                 positions: [(); 6].map(|_| Uuid::new_v4()),
                 libero: Uuid::new_v4(),
+                fallback_libero: Uuid::new_v4(),
                 bench: [(); 3].map(|_| Uuid::new_v4()),
             }
         }
@@ -65,7 +68,7 @@ mod tests {
         fn everyone(&self) -> Vec<Uuid> {
             self.positions
                 .iter()
-                .chain([self.libero].iter())
+                .chain([self.libero, self.fallback_libero].iter())
                 .chain(self.bench.iter())
                 .copied()
                 .collect()
@@ -77,7 +80,7 @@ mod tests {
                 serving_team,
                 initial_positions: self.positions,
                 libero: self.libero,
-                fallback_libero: None,
+                fallback_libero: Some(self.fallback_libero),
                 setter: self.positions[0],
                 lineup_rules: Some(LineupRulesEnum::CURRENT),
                 events: vec![],
@@ -117,16 +120,16 @@ mod tests {
     }
 
     /// A touch the side can try now: one of the events its stream offers
-    /// (not the ones the other side's touches tell, nor the libero and
-    /// setter changes), a player able to play it, an evaluation.
+    /// (not the ones the other side's touches tell), a player able to
+    /// play it, an evaluation.  Substitutions, faults, libero and setter
+    /// changes now and then, as in a real set.
     fn propose(rng: &mut Rng, snapshot: &Snapshot, team: &Team, n: usize) -> Option<EventEntry> {
         let offered: Vec<EventTypeEnum> = snapshot
             .get_available_options()
             .iter()
             .copied()
-            .filter(|e| !matches!(e, OS | OE | OF | CL | LR | LF | CS))
-            // substitutions and faults now and then
-            .filter(|e| !matches!(e, R | F) || rng.one_in(8))
+            .filter(|e| !matches!(e, OS | OE | OF))
+            .filter(|e| !matches!(e, R | F | CL | LR | LF | CS) || rng.one_in(8))
             .collect();
         let event_type = rng.pick(&offered)?;
         let players: Vec<Uuid> = team
@@ -237,7 +240,7 @@ mod tests {
             .map(|(side, e)| (*side, e.event_type))
             .collect();
         for side in Side::ALL {
-            for event_type in [S, P, A, D, B, F, FB, R] {
+            for event_type in [S, P, A, D, B, F, FB, R, CL, LR, LF, CS] {
                 assert!(
                     played.contains(&(side, event_type)),
                     "{side:?} {event_type}"
