@@ -61,6 +61,7 @@ mod sqlite_person_tests;
 mod sqlite_played_tests;
 mod sqlite_removal_tests;
 mod sqlite_roster_number_tests;
+mod sqlite_sides_tests;
 mod sqlite_tests;
 mod sqlite_upload_tests;
 mod sqlite_video_tests;

@@ -183,6 +183,23 @@ pub enum Incoherence {
     Points,
 }
 
+impl std::fmt::Display for Incoherence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Incoherence::Serving => write!(f, "the two sides don't start with the same serve"),
+            Incoherence::Refused {
+                side,
+                source,
+                reason,
+            } => write!(
+                f,
+                "touch {source} doesn't follow on side {side:?}: {reason}"
+            ),
+            Incoherence::Points => write!(f, "the two sides don't agree on the points"),
+        }
+    }
+}
+
 /// The snapshot of the side, its stream replayed from its start.
 fn replay_side(
     start: &SetEntry,

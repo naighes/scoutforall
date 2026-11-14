@@ -26,9 +26,17 @@ use crate::{
         Event, Home, LegacyId, Match, MatchSet, MatchVideo, MatchVideoFile, Membership, Person,
         RosterEntry, ScoutingMode, SetLineup, Side, Team, TeamRef, VideoAnchor, VideoCorrection,
     },
-    errors::{AppError, IOError},
+    errors::{AppError, IOError, MatchError},
     player_form::removed,
-    shapes::{r#match::MatchEntry, player::PlayerEntry, set::SetEntry, team::TeamEntry},
+    rally::{Incoherence, replay},
+    shapes::{
+        enums::TeamSideEnum,
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        set::SetEntry,
+        snapshot::{EventEntry, Snapshot},
+        team::TeamEntry,
+    },
     video::{Anchor, Correction, EventRef, VIDEO_PROFILE_VERSION, VideoFile, VideoProfile},
 };
 use std::{collections::BTreeMap, num::NonZeroI64};
@@ -376,6 +384,72 @@ impl SetRows {
         events.sort_by_key(|e| e.seq);
         events
     }
+
+    /// The touches of both sides not undone, in their order: the sequence
+    /// `rally::project` reads.
+    pub fn touches(&self) -> Vec<(Side, EventEntry)> {
+        let mut events: Vec<&Event> = self.events.iter().filter(|e| !e.deleted).collect();
+        events.sort_by_key(|e| e.seq);
+        events
+            .into_iter()
+            .map(|e| (e.side, e.entry.clone()))
+            .collect()
+    }
+
+    /// The start of the set as the side sees it, without its events: its
+    /// lineup, the serving team from its point of view. `None` without the
+    /// lineup of the side (B, scouting only A).
+    pub fn start(&self, side: Side) -> Option<SetEntry> {
+        self.lineups
+            .iter()
+            .find(|l| l.side == side)
+            .map(|lineup| SetEntry {
+                set_number: self.row.number,
+                serving_team: match self.row.serving == side {
+                    true => TeamSideEnum::Us,
+                    false => TeamSideEnum::Them,
+                },
+                initial_positions: lineup.positions,
+                libero: lineup.libero,
+                fallback_libero: lineup.fallback_libero,
+                setter: lineup.setter,
+                lineup_rules: self.row.lineup_rules,
+                events: vec![],
+            })
+    }
+
+    /// The snapshots of the set, A's and B's when B has its lineup (scouted
+    /// on both sides): the touches projected and replayed on each side
+    /// (`rally::replay`). Scouting only A, A's events replayed as today.
+    pub fn sides(&self, max_substitutions: u8) -> Result<Sides, AppError> {
+        let incoherent = |e: Incoherence| {
+            AppError::Match(MatchError::LoadSetError(format!(
+                "set {} of match {}: {e}",
+                self.row.number, self.row.match_id
+            )))
+        };
+        match (self.start(Side::A), self.start(Side::B)) {
+            (Some(a), Some(b)) => replay(&a, &b, &self.touches(), max_substitutions)
+                .map(|(a, b)| Sides { a, b: Some(b) })
+                .map_err(incoherent),
+            (Some(_), None) => self
+                .entry()?
+                .compute_snapshot(max_substitutions)
+                .map(|a| Sides { a, b: None }),
+            (None, _) => Err(not_consistent(format!(
+                "set {} of match {} without the lineup of A",
+                self.row.number, self.row.match_id
+            ))),
+        }
+    }
+}
+
+/// The snapshots of the two sides of a set, each from its point of view;
+/// B's only when scouted on both sides.
+#[derive(Debug, Clone)]
+pub struct Sides {
+    pub a: Snapshot,
+    pub b: Option<Snapshot>,
 }
 
 /// The events of the sets of a match as `SetEntry` has them, by

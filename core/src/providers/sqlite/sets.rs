@@ -1,5 +1,9 @@
 use crate::{
-    domain::{Event, Side, adapters::SetRows, sql::Sql},
+    domain::{
+        Event, Side,
+        adapters::{SetRows, Sides},
+        sql::Sql,
+    },
     errors::{AppError, IOError, MatchError},
     localization::Language,
     providers::{
@@ -64,6 +68,20 @@ impl SetReader for SqliteSetReader {
                 .collect::<Result<Vec<_>, _>>()
         })?;
         numbered(sets, &self.language, &m.id)
+    }
+}
+
+impl SqliteSetReader {
+    /// The snapshots of both sides of each set, in order: B's only for a
+    /// match scouted on both sides (see `SetRows::sides`).
+    pub fn read_sides(&self, m: &MatchEntry) -> Result<Vec<Sides>, AppError> {
+        let id = match_uuid(&m.id)?;
+        self.db.read(|tx| {
+            set_rows(tx, id)?
+                .iter()
+                .map(|set| set.sides(m.max_substitutions))
+                .collect()
+        })
     }
 }
 
