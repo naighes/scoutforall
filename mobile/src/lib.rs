@@ -9101,6 +9101,9 @@ mod tests {
         let api = FakeApi::start();
         api.down.store(true, Ordering::SeqCst);
         sending_to(&app, api.url.clone());
+        // the first attempt over (nothing to send), or it may find the
+        // match too, failing it twice in a row
+        assert!(eventually(|| !app.sender.running()));
         let imported = app
             .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
             .unwrap();
