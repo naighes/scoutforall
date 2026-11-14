@@ -55,6 +55,8 @@
     <string name="max_substitutions">Sostituzioni per set</string>
     <string name="birth_date">Data di nascita</string>
     <string name="height">Altezza</string>
+    <string name="number_placeholder">da 0 a 99</string>
+    <string name="height_placeholder">es. 185</string>
     <string name="notes">Note</string>
     <string name="roster">A referto: %1$d su %2$d</string>
     <string name="played">ha giocato</string>

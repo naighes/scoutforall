@@ -512,7 +512,7 @@ impl Editor {
         };
         let fields = vec![
             name,
-            Field::text(s.number, start.number.clone()),
+            Field::text(s.number, start.number.clone()).placeholder(s.number_placeholder),
             Field::choice(
                 s.role,
                 with_empty(roles.iter().map(|r| r.name.clone())),
@@ -524,7 +524,7 @@ impl Editor {
                 Mask::Date,
                 s.date_placeholder,
             ),
-            Field::text(s.height, start.height_cm.clone()),
+            Field::text(s.height, start.height_cm.clone()).placeholder(s.height_placeholder),
             Field::text(s.notes, start.notes.clone()),
         ];
         let title = match id {

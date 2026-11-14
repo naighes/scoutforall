@@ -4082,6 +4082,18 @@ impl Scout4All {
         Ok(())
     }
 
+    /// The form of a new player of the team: the first number no player of
+    /// it has, from 1 (none when they're all taken).
+    pub fn new_player_form(&self, team_id: String) -> Result<PlayerForm, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let taken: Vec<u8> = team.active_players().iter().map(|p| p.number).collect();
+        let free = (1..=99u8).find(|n| !taken.contains(n));
+        Ok(PlayerForm {
+            number: free.map(|n| n.to_string()).unwrap_or_default(),
+            ..PlayerForm::default()
+        })
+    }
+
     /// The persons of the registry that can be added to the team, by name.
     pub fn existing_players(&self, team_id: String) -> Result<Vec<ExistingPlayer>, MobileError> {
         let team = parse_id(&team_id)?;
@@ -5987,6 +5999,37 @@ mod tests {
             notes: String::new(),
             person: None,
         }
+    }
+
+    /// A new player starts with the first number free in the team, from 1;
+    /// none when they're all taken; a player removed frees theirs.
+    #[test]
+    fn a_new_player_starts_with_the_first_number_free() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let number = || app.new_player_form(team.clone()).unwrap().number;
+        assert_eq!(number(), "1");
+        let save = |n: u8| {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap()
+        };
+        let one = save(1);
+        save(2);
+        save(4);
+        assert_eq!(number(), "3");
+        app.remove_player(team.clone(), one).unwrap();
+        assert_eq!(number(), "1");
+        (1..=99).filter(|n| ![2, 4].contains(n)).for_each(|n| {
+            save(n);
+        });
+        assert_eq!(number(), "");
+        assert_eq!(app.new_player_form(team).unwrap().name, "");
     }
 
     /// The registry through the app (TODO/001, step 22): a person of

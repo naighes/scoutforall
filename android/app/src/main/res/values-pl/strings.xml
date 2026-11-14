@@ -55,6 +55,8 @@
     <string name="max_substitutions">Zmiany w secie</string>
     <string name="birth_date">Data urodzenia</string>
     <string name="height">Wzrost</string>
+    <string name="number_placeholder">od 0 do 99</string>
+    <string name="height_placeholder">np. 185</string>
     <string name="notes">Notatki</string>
     <string name="roster">W protokole: %1$d z %2$d</string>
     <string name="played">grał(a)</string>

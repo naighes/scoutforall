@@ -178,7 +178,12 @@ impl TeamScreen {
             &self.core,
             self.team_id.clone(),
             player.map(|p| p.id.clone()),
-            player.map(|p| p.form.clone()).unwrap_or_default(),
+            // a new one: the first number free
+            player.map(|p| p.form.clone()).unwrap_or_else(|| {
+                self.core
+                    .new_player_form(self.team_id.clone())
+                    .unwrap_or_default()
+            }),
         );
         self.edit(Ok(editor));
     }
@@ -901,6 +906,14 @@ mod tests {
         // a player added, then removed
         let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
         team.update(s, Message::NewPlayer);
+        // the first number free, how to write it and the height said in
+        // the empty fields
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form of the player is open")
+        };
+        assert_eq!(editor.form.text(1), "1");
+        assert_eq!(editor.form.fields[1].placeholder, s.number_placeholder);
+        assert_eq!(editor.form.fields[4].placeholder, s.height_placeholder);
         for m in [
             Input(0, "Anna Rossi".into()),
             Input(1, "9".into()),

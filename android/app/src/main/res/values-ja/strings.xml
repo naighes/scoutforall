@@ -55,6 +55,8 @@
     <string name="max_substitutions">セットごとの交代数</string>
     <string name="birth_date">生年月日</string>
     <string name="height">身長</string>
+    <string name="number_placeholder">0〜99</string>
+    <string name="height_placeholder">例: 185</string>
     <string name="notes">メモ</string>
     <string name="roster">スコアシート: %1$d / %2$d人</string>
     <string name="played">出場済み</string>

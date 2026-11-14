@@ -119,7 +119,8 @@ class PlayerFormViewModel(
                 app.core { core ->
                     val player = playerId?.let { id -> core.team(teamId).players.first { it.id == id } }
                     PlayerFormState.Editing(
-                        form = player?.form ?: PlayerForm(name = "", role = null, number = ""),
+                        // a new one: the first number free
+                        form = player?.form ?: core.newPlayerForm(teamId),
                         roles = core.roles(teamId),
                         savedName = player?.name.orEmpty(),
                         savedNumber = player?.number?.toInt() ?: 0,
@@ -277,6 +278,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 onValueChange = { number -> model.change(PlayerField.NUMBER) { it.copy(number = number) } },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.number)) },
+                placeholder = { Text(stringResource(R.string.number_placeholder)) },
                 singleLine = true,
                 isError = error(PlayerField.NUMBER) != null,
                 supportingText = error(PlayerField.NUMBER)?.let { { Text(it) } },
@@ -302,6 +304,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 onValueChange = { height -> model.change(PlayerField.HEIGHT) { it.copy(heightCm = height) } },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.height)) },
+                placeholder = { Text(stringResource(R.string.height_placeholder)) },
                 suffix = { Text(stringResource(R.string.centimetres)) },
                 singleLine = true,
                 isError = error(PlayerField.HEIGHT) != null,
