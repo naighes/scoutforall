@@ -170,6 +170,25 @@ mod tests {
     }
 
     #[test]
+    fn the_ace_of_the_winner_starts_the_next_rally() {
+        // their attack error, then our ace: our point first, then the ace
+        let streams = project(&[
+            touch(Side::B, S, Some(Positive), 0),
+            touch(Side::A, P, Some(Negative), 1),
+            touch(Side::B, A, Some(Error), 2),
+            touch(Side::A, S, Some(Perfect), 3),
+        ]);
+        assert_eq!(
+            stream(&streams, Side::A),
+            vec![(P, Some(Negative), 1), (OE, None, 2), (S, Some(Perfect), 3)]
+        );
+        assert_eq!(
+            stream(&streams, Side::B),
+            vec![(S, Some(Positive), 0), (A, Some(Error), 2), (OS, None, 3)]
+        );
+    }
+
+    #[test]
     fn a_rally_being_played_tells_nothing_yet() {
         let streams = project(&[
             touch(Side::A, S, Some(Positive), 0),

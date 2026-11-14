@@ -150,9 +150,12 @@ pub fn project(touches: &[(Side, EventEntry)]) -> Streams {
     let (streams, state) = touches.iter().enumerate().fold(
         (Streams::default(), State::Playing),
         |(streams, state), (source, (side, entry))| match state {
-            // the other side of the same point
+            // the other side of the same point: never a serve, starting
+            // the next rally
             State::Told(point)
-                if *side != point.told_by && winner(*side, entry) == Some(point.winner) =>
+                if *side != point.told_by
+                    && entry.event_type != EventTypeEnum::S
+                    && winner(*side, entry) == Some(point.winner) =>
             {
                 (streams.push(*side, entry.clone(), source), State::Playing)
             }
@@ -284,7 +287,7 @@ fn touches_ball(entry: &EventEntry) -> bool {
 /// Whether the touch answers the other side's touch, telling the same
 /// transition: the reception of a serve, the dig or the block of an
 /// attack.
-fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
+pub(crate) fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
     matches!(
         (answered, touch),
         (EventTypeEnum::S, EventTypeEnum::P)
