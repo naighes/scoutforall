@@ -17,9 +17,10 @@
 use crate::{
     domain::Side,
     shapes::{
-        enums::{EventTypeEnum, TeamSideEnum},
+        enums::{EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         flags::EventFlags,
-        snapshot::EventEntry,
+        set::SetEntry,
+        snapshot::{EventEntry, Snapshot},
     },
 };
 use chrono::{DateTime, Utc};
@@ -162,5 +163,78 @@ pub fn project(touches: &[(Side, EventEntry)]) -> Streams {
     match state {
         State::Told(point) => close(streams, &point),
         State::Playing => streams,
+    }
+}
+
+/// Why a set scouted on both sides doesn't replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Incoherence {
+    /// the two sides don't start with the serve of the same team
+    Serving,
+    /// the event of the side, told by the touch at `source` (its own or
+    /// the other side's), can't follow in the side's stream
+    Refused {
+        side: Side,
+        source: usize,
+        reason: String,
+    },
+    /// the two sides don't give the same rallies to the same team: a
+    /// guard, the projection telling each point to both
+    Points,
+}
+
+/// The snapshot of the side, its stream replayed from its start.
+fn replay_side(
+    start: &SetEntry,
+    side: Side,
+    stream: &[Projected],
+    max_substitutions: u8,
+) -> Result<Snapshot, Incoherence> {
+    let refused = |source: usize, reason: String| Incoherence::Refused {
+        side,
+        source,
+        reason,
+    };
+    let rules = start.lineup_rules.unwrap_or(LineupRulesEnum::CURRENT);
+    let snapshot = Snapshot::with_rules(start, max_substitutions, rules)
+        .map_err(|e| refused(stream.first().map_or(0, |p| p.source), e.to_string()))?;
+    stream.iter().try_fold(snapshot, |mut snapshot, projected| {
+        snapshot
+            .add_event(&projected.entry)
+            .map(|_| snapshot)
+            .map_err(|e| refused(projected.source, e.to_string()))
+    })
+}
+
+/// The snapshots of A and B, each from its point of view: their starts
+/// (lineup, serving team as each sees it; their events aside) and the
+/// touches of the set in order. The two streams must replay and give each
+/// rally to the same team.
+pub fn replay(
+    start_a: &SetEntry,
+    start_b: &SetEntry,
+    touches: &[(Side, EventEntry)],
+    max_substitutions: u8,
+) -> Result<(Snapshot, Snapshot), Incoherence> {
+    let streams = project(touches);
+    let same_server = start_a.serving_team != start_b.serving_team;
+    let a = same_server
+        .then_some(())
+        .ok_or(Incoherence::Serving)
+        .and_then(|_| replay_side(start_a, Side::A, &streams.a, max_substitutions))?;
+    let b = replay_side(start_b, Side::B, &streams.b, max_substitutions)?;
+    let points_of = |snapshot: &Snapshot, side: Side| -> Vec<Side> {
+        snapshot
+            .points
+            .iter()
+            .map(|team| match team {
+                TeamSideEnum::Us => side,
+                TeamSideEnum::Them => side.other(),
+            })
+            .collect()
+    };
+    match points_of(&a, Side::A) == points_of(&b, Side::B) {
+        true => Ok((a, b)),
+        false => Err(Incoherence::Points),
     }
 }

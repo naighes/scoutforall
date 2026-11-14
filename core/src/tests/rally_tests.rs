@@ -2,12 +2,14 @@
 //! from the one sequence of touches.
 #[cfg(test)]
 mod tests {
+    use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::domain::Side;
-    use crate::rally::{Streams, project};
+    use crate::rally::{Incoherence, Streams, project, replay};
     use crate::shapes::{
-        enums::{EvalEnum, EventTypeEnum},
+        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
         flags::EventFlags,
-        snapshot::EventEntry,
+        set::SetEntry,
+        snapshot::{EventEntry, Snapshot},
     };
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -175,5 +177,154 @@ mod tests {
         ]);
         assert_eq!(stream(&streams, Side::A), vec![(S, Some(Positive), 0)]);
         assert_eq!(stream(&streams, Side::B), vec![(P, Some(Positive), 1)]);
+    }
+
+    /// A team in rotation 0: the setter in 1, outside hitter 1 in 2,
+    /// middle blocker 2 in 3, opposite in 4, outside hitter 2 in 5, middle
+    /// blocker 1 in 6 (the libero for them).
+    struct Team {
+        positions: [Uuid; 6],
+        libero: Uuid,
+    }
+
+    impl Team {
+        fn new() -> Self {
+            Team {
+                positions: [(); 6].map(|_| Uuid::new_v4()),
+                libero: Uuid::new_v4(),
+            }
+        }
+
+        fn setter(&self) -> Uuid {
+            self.positions[0]
+        }
+
+        fn outside_hitter(&self) -> Uuid {
+            self.positions[1]
+        }
+
+        fn start(&self, serving_team: TeamSideEnum) -> SetEntry {
+            SetEntry {
+                set_number: 1,
+                serving_team,
+                initial_positions: self.positions,
+                libero: self.libero,
+                fallback_libero: None,
+                setter: self.setter(),
+                lineup_rules: Some(LineupRulesEnum::CURRENT),
+                events: vec![],
+            }
+        }
+    }
+
+    fn by(
+        side: Side,
+        event_type: EventTypeEnum,
+        player: Uuid,
+        eval: EvalEnum,
+        n: u32,
+    ) -> (Side, EventEntry) {
+        let (side, entry) = touch(side, event_type, Some(eval), n);
+        (
+            side,
+            EventEntry {
+                player: Some(player),
+                ..entry
+            },
+        )
+    }
+
+    // A serving
+    fn replayed(
+        a: &Team,
+        b: &Team,
+        touches: &[(Side, EventEntry)],
+    ) -> Result<(Snapshot, Snapshot), Incoherence> {
+        replay(
+            &a.start(TeamSideEnum::Us),
+            &b.start(TeamSideEnum::Them),
+            touches,
+            DEFAULT_MAX_SUBSTITUTIONS,
+        )
+    }
+
+    #[test]
+    fn both_sides_replay_a_rally_and_agree_on_the_score() {
+        let (a, b) = (Team::new(), Team::new());
+        let replayed = replayed(
+            &a,
+            &b,
+            &[
+                by(Side::A, S, a.setter(), Positive, 0),
+                by(Side::B, P, b.libero, Negative, 1),
+                by(Side::B, A, b.outside_hitter(), Perfect, 2),
+                // B serves now
+                by(Side::B, S, b.outside_hitter(), Error, 3),
+            ],
+        );
+        let scores = replayed.map(|(a, b)| {
+            (
+                (a.score_us, a.score_them),
+                (b.score_us, b.score_them),
+                a.current_lineup.get_current_phase(),
+            )
+        });
+        assert_eq!(scores, Ok(((1, 1), (1, 1), PhaseEnum::Break)));
+    }
+
+    #[test]
+    fn a_touch_not_following_in_its_side_is_refused_with_its_place() {
+        let (a, b) = (Team::new(), Team::new());
+        // B's reception, then its attack not scouted: A's kill can't be
+        // B's opponent point right after a reception
+        let refused = replayed(
+            &a,
+            &b,
+            &[
+                by(Side::A, S, a.setter(), Positive, 0),
+                by(Side::B, P, b.libero, Positive, 1),
+                by(Side::A, A, a.outside_hitter(), Perfect, 2),
+            ],
+        );
+        assert!(
+            matches!(
+                refused,
+                Err(Incoherence::Refused {
+                    side: Side::B,
+                    source: 2,
+                    ..
+                })
+            ),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn a_player_of_the_other_team_is_refused() {
+        let (a, b) = (Team::new(), Team::new());
+        let refused = replayed(&a, &b, &[by(Side::A, S, b.setter(), Positive, 0)]);
+        assert!(
+            matches!(
+                refused,
+                Err(Incoherence::Refused {
+                    side: Side::A,
+                    source: 0,
+                    ..
+                })
+            ),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn both_sides_must_start_with_the_same_serve() {
+        let (a, b) = (Team::new(), Team::new());
+        let refused = replay(
+            &a.start(TeamSideEnum::Us),
+            &b.start(TeamSideEnum::Us),
+            &[],
+            DEFAULT_MAX_SUBSTITUTIONS,
+        );
+        assert!(matches!(refused, Err(Incoherence::Serving)), "{refused:?}");
     }
 }
