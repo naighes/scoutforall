@@ -1,0 +1,6 @@
+- Nowy zapis danych: wszystko w jednej bazie. Istniejące dane i archiwa migrowane automatycznie, po kopii zapasowej.
+- Przeciwnicy to prawdziwe drużyny: mecz widnieje w obu, z rozgrywkami i boiskiem.
+- Zawodnicy pochodzą z rejestru i z nowego sezonu.
+- Android: formularz meczu, rejestr, nowy sezon, rozgrywki.
+- Przebieg meczu: filtry, bezpośrednie błędy, punkty z rzędu.
+- Import z DataVolley wczytuje drużynę B i rozgrywki.

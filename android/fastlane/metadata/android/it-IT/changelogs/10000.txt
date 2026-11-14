@@ -1,0 +1,6 @@
+- Nuovo archivio: tutto in un unico database. Dati e archivi esistenti migrati in automatico, dopo una copia di sicurezza.
+- Gli avversari sono squadre vere: la partita compare in entrambe, con competizione e campo.
+- I giocatori arrivano dall'anagrafica e dalla nuova stagione.
+- Android: form della partita, anagrafica, nuova stagione, competizioni.
+- Andamento della partita: filtri, errori diretti, punti di fila.
+- L'import DataVolley porta squadra B e competizione.

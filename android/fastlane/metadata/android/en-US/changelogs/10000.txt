@@ -1,0 +1,6 @@
+- New storage: everything lives in one database. Existing data and archives are migrated automatically, after a backup.
+- Opponents are real teams: a match appears in both, with competition and court.
+- Players come from the registry and the new season.
+- Android: match form, registry, new season, competitions.
+- Match trend: filters, direct errors, points in a row.
+- DataVolley import brings team B and the competition.

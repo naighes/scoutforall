@@ -1,0 +1,6 @@
+- Novo armazenamento: tudo em um único banco de dados. Dados e arquivos existentes migrados automaticamente, após um backup.
+- Os adversários são equipes de verdade: a partida aparece nas duas, com competição e quadra.
+- Jogadores vêm do cadastro e da nova temporada.
+- Android: formulário da partida, cadastro, nova temporada, competições.
+- Evolução da partida: filtros, erros diretos, pontos em sequência.
+- A importação do DataVolley traz a equipe B e a competição.
