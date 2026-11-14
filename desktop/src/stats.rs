@@ -513,43 +513,61 @@ fn tiles<'a, M: 'a>(tiles: Vec<Tile>, c: Colors) -> Element<'a, M> {
         .into()
 }
 
-/// The width of a point in the rows of the points.
-const POINT_WIDTH: f32 = 26.0;
+/// The narrowest column of a rally, in the chart and in the rows of the
+/// points: the chart scrolls across beyond it.
+const RALLY_WIDTH: f32 = 26.0;
 
-/// The points of each set in order, as on the score sheet: two rows, ours
-/// and theirs, a point a column, the score in the row of the team scoring
-/// it, in its color; the names on the left stay, the points scroll across.
-fn points_view<'a>(
+/// The room on the left of the trend: the set and the names of the teams
+/// beside the rows of the points.
+const TREND_GUTTER: f32 = 190.0;
+
+/// How high the two rows of a set are, and the room between two sets.
+const SET_ROWS: f32 = 46.0;
+const SET_GAP: f32 = 6.0;
+
+/// The title of the rows of the points, between them and the chart.
+const POINTS_TITLE: f32 = 24.0;
+
+/// The rows of the points of each set in order, as on the score sheet:
+/// two rows, ours and theirs, a rally a column of `width` (the columns of
+/// the chart over them), the score in the row of the team scoring it, in
+/// its color.
+fn points_rows<'a>(
     sets: &'a [scout4all_mobile::SetPoints],
-    sides: (&String, &String),
-    s: &'static Strings,
+    width: f32,
     c: Colors,
 ) -> Element<'a, Message> {
-    let cell = |content: String, color: iced::Color, filled: bool| -> Element<'a, Message> {
+    let cell = move |content: String, color: iced::Color, filled: bool| -> Element<'a, Message> {
         container(
-            text(content)
-                .size(SIZE_SMALL)
-                .font(theme::fonts().bold)
-                .color(match filled {
-                    true => c.background,
-                    false => color,
-                }),
+            container(
+                text(content)
+                    .size(SIZE_SMALL)
+                    .font(theme::fonts().bold)
+                    .color(match filled {
+                        true => c.background,
+                        false => color,
+                    })
+                    .wrapping(text::Wrapping::None),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(move |_| container::Style {
+                background: filled.then(|| color.into()),
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    ..iced::Border::default()
+                },
+                ..container::Style::default()
+            }),
         )
-        .width(POINT_WIDTH)
-        .height(22)
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .style(move |_| container::Style {
-            background: filled.then(|| color.into()),
-            border: iced::Border {
-                radius: 4.0.into(),
-                ..iced::Border::default()
-            },
-            ..container::Style::default()
-        })
+        .width(width)
+        .height((SET_ROWS - 2.0) / 2.0)
+        .padding([0, 1])
         .into()
     };
-    let row_of = |set: &'a scout4all_mobile::SetPoints, us: bool| {
+    let row_of = move |set: &'a scout4all_mobile::SetPoints, us: bool| {
         let color = match us {
             true => theme::TEAM_US,
             false => theme::TEAM_THEM,
@@ -558,8 +576,23 @@ fn points_view<'a>(
             true => cell(p.score.to_string(), color, true),
             false => cell(String::new(), color, false),
         }))
-        .spacing(2)
     };
+    Column::with_children(sets.iter().filter(|set| !set.points.is_empty()).map(|set| {
+        column![row_of(set, true), row_of(set, false)]
+            .spacing(2)
+            .into()
+    }))
+    .spacing(SET_GAP)
+    .into()
+}
+
+/// On the left of the rows of the points: each set, in its color as in the
+/// chart, beside the names of the two teams.
+fn points_names<'a>(
+    sets: &'a [scout4all_mobile::SetPoints],
+    sides: (&String, &String),
+    s: &'static Strings,
+) -> Element<'a, Message> {
     let name = |name: String, color: iced::Color| {
         container(
             text(name)
@@ -567,46 +600,30 @@ fn points_view<'a>(
                 .color(color)
                 .wrapping(text::Wrapping::None),
         )
-        .height(22)
+        .height((SET_ROWS - 2.0) / 2.0)
         .align_y(Alignment::Center)
+        .clip(true)
     };
-    // the set beside its two rows, in its color as in the chart
-    let names =
-        Column::with_children(sets.iter().filter(|set| !set.points.is_empty()).map(|set| {
-            row![
-                container(
-                    text(format!("{} {}", s.set_n, set.set_number))
-                        .size(SIZE_SMALL)
-                        .color(theme::set_color(set.set_number))
-                        .wrapping(text::Wrapping::None),
-                )
-                .height(46)
-                .align_y(Alignment::Center),
-                column![
-                    name(sides.0.clone(), theme::TEAM_US),
-                    name(sides.1.clone(), theme::TEAM_THEM),
-                ]
-                .spacing(2)
+    Column::with_children(sets.iter().filter(|set| !set.points.is_empty()).map(|set| {
+        row![
+            container(
+                text(format!("{} {}", s.set_n, set.set_number))
+                    .size(SIZE_SMALL)
+                    .color(theme::set_color(set.set_number))
+                    .wrapping(text::Wrapping::None),
+            )
+            .height(SET_ROWS)
+            .align_y(Alignment::Center),
+            column![
+                name(sides.0.clone(), theme::TEAM_US),
+                name(sides.1.clone(), theme::TEAM_THEM),
             ]
-            .spacing(10)
-            .into()
-        }))
-        .spacing(6);
-    let rows = Column::with_children(sets.iter().filter(|set| !set.points.is_empty()).map(|set| {
-        column![row_of(set, true), row_of(set, false)]
             .spacing(2)
-            .into()
+        ]
+        .spacing(10)
+        .into()
     }))
-    .spacing(6);
-    row![
-        names,
-        iced::widget::scrollable(container(rows).padding(iced::Padding::default().bottom(10)))
-            .direction(iced::widget::scrollable::Direction::Horizontal(
-                iced::widget::scrollable::Scrollbar::new(),
-            ))
-            .width(Length::Fill)
-    ]
-    .spacing(12)
+    .spacing(SET_GAP)
     .into()
 }
 
@@ -1928,25 +1945,78 @@ impl StatsScreen {
             .color(theme::LOST),
         )
         .spacing(14);
-        let chart: Element<'a, Message> = match self.trend.is_empty() {
-            true => small(s.no_rallies, c).into(),
-            false => charts::canvas_view(self.trend.clone(), c, Length::Fill),
-        };
         let name = live
             .trend
             .get(self.series)
             .map_or(s.trend.to_string(), |l| ui::capitalized(&l.name));
-        // under the chart, the points of each set in a row
-        let points: Element<'a, Message> = match live.points.iter().all(|p| p.points.is_empty()) {
-            true => space::vertical().height(0).into(),
-            false => column![
-                ui::section(s.point_sequence, c),
-                points_view(&live.points, (&live.team_name, &live.opponent), s, c)
-            ]
-            .spacing(8)
-            .into(),
+        let body: Element<'a, Message> = match self.trend.is_empty() {
+            true => small(s.no_rallies, c).into(),
+            false => self.trend_body(live, s, c),
         };
-        ui::panel(Some(&name), column![legend, chart, points].spacing(10), c)
+        ui::panel(Some(&name), column![legend, body].spacing(10), c)
+    }
+
+    /// The chart and, under it, the points of the sets: a rally a column,
+    /// the same in both, as wide as the room allows and never narrower than
+    /// `RALLY_WIDTH`; past the room both scroll across together, the sets
+    /// and the names staying on the left.
+    fn trend_body<'a>(
+        &'a self,
+        live: &'a LiveStats,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let trend = self.trend.clone();
+        responsive(move |size| {
+            let shown = live.points.iter().filter(|p| !p.points.is_empty()).count();
+            let rows = match shown {
+                0 => 0.0,
+                n => n as f32 * SET_ROWS + (n - 1) as f32 * SET_GAP + POINTS_TITLE,
+            };
+            // the scroll bar under the rows
+            let chart_height = (size.height - rows - 14.0).max(160.0);
+            let columns = trend.points as f32;
+            let width = ((size.width - TREND_GUTTER) / columns).max(RALLY_WIDTH);
+            let title: Element<'a, Message> = match shown {
+                0 => space::vertical().height(0).into(),
+                _ => container(small(s.point_sequence, c))
+                    .height(POINTS_TITLE)
+                    .align_y(Alignment::End)
+                    .padding(iced::Padding::default().bottom(4))
+                    .into(),
+            };
+            let left = column![
+                space::vertical().height(chart_height),
+                title,
+                points_names(&live.points, (&live.team_name, &live.opponent), s)
+            ]
+            .width(TREND_GUTTER)
+            .clip(true);
+            let across = column![
+                charts::canvas_view(
+                    trend.clone(),
+                    c,
+                    Length::Fixed(width * columns),
+                    Length::Fixed(chart_height)
+                ),
+                space::vertical().height(match shown {
+                    0 => 0.0,
+                    _ => POINTS_TITLE,
+                }),
+                points_rows(&live.points, width, c)
+            ]
+            .padding(iced::Padding::default().bottom(14));
+            row![
+                left,
+                iced::widget::scrollable(across)
+                    .direction(iced::widget::scrollable::Direction::Horizontal(
+                        iced::widget::scrollable::Scrollbar::new(),
+                    ))
+                    .width(Length::Fill)
+            ]
+            .into()
+        })
+        .into()
     }
 
     /// The figure of the team match by match, with the moving average.
@@ -3568,6 +3638,22 @@ pub(crate) mod tests {
             .map(|p| p.points.iter().map(|p| (p.us, p.score)).collect())
             .unwrap_or_default();
         assert_eq!(points, [(true, 1), (false, 1), (false, 2)]);
+        // a rally a column, in the chart as in the rows of the points: the
+        // serve error in the column of the second point, the line from the
+        // first
+        assert_eq!(screen.trend.errors, [(2.0, 1)]);
+        assert_eq!(screen.trend.error_bins().get(1), Some(&1));
+        let columns: Vec<f64> = screen
+            .trend
+            .sets
+            .iter()
+            .flat_map(|(_, runs)| runs.iter().flatten().map(|(x, _)| *x))
+            .collect();
+        assert_eq!(columns.first(), Some(&1.0));
+        assert!(
+            columns.iter().all(|x| x.fract() == 0.0 && *x <= 3.0),
+            "{columns:?}"
+        );
         assert_eq!(
             screen
                 .live

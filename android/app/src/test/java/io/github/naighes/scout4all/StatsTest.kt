@@ -1,8 +1,12 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.ui.semantics.SemanticsActions
+import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
 import io.github.naighes.scout4all.core.BlockersEnum
@@ -203,5 +207,32 @@ class TrendTest {
         rule.onNode(chart("Serve", 1)).assertExists()
         // two points of theirs: 0-1, 0-2
         rule.onNode(hasText("${string(R.string.set_n, 1)}: 0-1, 0-2")).assertExists()
+    }
+
+    /** A rally a column, the same in the charts and in the points: on a
+     * phone they go past the screen and scroll across together, the
+     * points moving the charts. */
+    @Test
+    fun theChartsAndThePointsScrollTogether() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        core { c -> c.scouting(team, match).use { s -> s.chooseEval(EvalEnum.ERROR) } }
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.point_sequence))
+        val across = hasTestTag("rallies") and SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange)
+        val where = {
+            rule.onAllNodes(across, useUnmergedTree = true).fetchSemanticsNodes()
+                .map { it.config[SemanticsProperties.HorizontalScrollAxisRange].value() }
+        }
+        // the six charts and the rows of the set
+        assertEquals(7, where().size)
+        assertEquals(List(7) { 0f }, where())
+        rule.onAllNodes(across, useUnmergedTree = true)[6]
+            .performSemanticsAction(SemanticsActions.ScrollBy) { it(200f, 0f) }
+        rule.waitForIdle()
+        val moved = where()
+        assertTrue("$moved", moved.first() > 0f && moved.all { it == moved.first() })
     }
 }
