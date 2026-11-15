@@ -3113,11 +3113,12 @@ pub(crate) mod screen_tests {
         };
         core.save_video(&the_match, &profile).unwrap();
         use scout4all_core::shapes::enums::EventTypeEnum::A;
-        use scout4all_mobile::{ClipPick, DetailFilter, StatsScope};
+        use scout4all_mobile::{ClipPick, DetailFilter, MatchSide, StatsScope};
         let detail = core
             .match_detail(
                 team.clone(),
                 m.clone(),
+                MatchSide::A,
                 StatsScope::Match,
                 A,
                 DetailFilter::default(),

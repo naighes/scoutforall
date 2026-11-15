@@ -129,6 +129,8 @@ pub struct Labels {
     /// goes to the log
     pub unreadable_team: &'static str,
     pub unreadable_match: &'static str,
+    /// the side of team B asked of a match scouted only on A's side
+    pub one_side_only: &'static str,
     /// a set saved by a version whose scouting allowed an event no more:
     /// `{set}`, `{row}` (in the file of the set), `{event}`, `{previous}`
     pub set_event_not_valid: &'static str,
@@ -481,6 +483,7 @@ const EN: Labels = Labels {
     invalid_set: "invalid set",
     unreadable_team: "this team can't be read: its files are damaged",
     unreadable_match: "this match can't be read: its files are damaged",
+    one_side_only: "this match is scouted on one side only",
     set_event_not_valid: "set {set}, row {row}: {event} after {previous} isn't valid in this version",
     set_first_event_not_valid: "set {set}, row {row}: {event} isn't valid in this version",
     dvw_unreadable: "the file can't be read as DataVolley ({detail})",
@@ -795,6 +798,7 @@ const IT: Labels = Labels {
     invalid_set: "set non valido",
     unreadable_team: "questa squadra non si può leggere: i suoi file sono rovinati",
     unreadable_match: "questa partita non si può leggere: i suoi file sono rovinati",
+    one_side_only: "questa partita è rilevata da un lato solo",
     set_event_not_valid: "set {set}, riga {row}: {event} dopo {previous} non è valido in questa versione",
     set_first_event_not_valid: "set {set}, riga {row}: {event} non è valido in questa versione",
     dvw_unreadable: "il file non si legge come DataVolley ({detail})",
@@ -1109,6 +1113,7 @@ const PT: Labels = Labels {
     invalid_set: "set inválido",
     unreadable_team: "esta equipe não pode ser lida: seus arquivos estão danificados",
     unreadable_match: "esta partida não pode ser lida: seus arquivos estão danificados",
+    one_side_only: "esta partida foi analisada de um só lado",
     set_event_not_valid: "set {set}, linha {row}: {event} depois de {previous} não é válido nesta versão",
     set_first_event_not_valid: "set {set}, linha {row}: {event} não é válido nesta versão",
     dvw_unreadable: "o arquivo não pode ser lido como DataVolley ({detail})",
@@ -1423,6 +1428,7 @@ const PL: Labels = Labels {
     invalid_set: "nieprawidłowy set",
     unreadable_team: "nie można odczytać tej drużyny: jej pliki są uszkodzone",
     unreadable_match: "nie można odczytać tego meczu: jego pliki są uszkodzone",
+    one_side_only: "ten mecz jest analizowany tylko z jednej strony",
     set_event_not_valid: "set {set}, wiersz {row}: {event} po {previous} jest nieprawidłowe w tej wersji",
     set_first_event_not_valid: "set {set}, wiersz {row}: {event} jest nieprawidłowe w tej wersji",
     dvw_unreadable: "pliku nie można odczytać jako DataVolley ({detail})",
@@ -1737,6 +1743,7 @@ const JA: Labels = Labels {
     invalid_set: "無効なセット",
     unreadable_team: "このチームを読み込めません: ファイルが壊れています",
     unreadable_match: "この試合を読み込めません: ファイルが壊れています",
+    one_side_only: "この試合は片方のチームしか記録されていません",
     set_event_not_valid: "第{set}セット {row}行目: {previous}の後の{event}はこのバージョンでは無効です",
     set_first_event_not_valid: "第{set}セット {row}行目: {event}はこのバージョンでは無効です",
     dvw_unreadable: "ファイルをDataVolleyとして読み込めません ({detail})",

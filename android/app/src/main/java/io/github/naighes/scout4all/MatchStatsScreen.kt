@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.StatsScope
 
@@ -39,7 +40,7 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
     val state by produceState<MatchStatsState>(MatchStatsState.Loading, shown) {
         val scope = if (shown == 0) StatsScope.Match else StatsScope.Set(shown.toUByte())
         value = try {
-            MatchStatsState.Loaded(app.core { it.matchStats(teamId, matchId, scope) })
+            MatchStatsState.Loaded(app.core { it.matchStats(teamId, matchId, MatchSide.A, scope) })
         } catch (e: MobileException) {
             MatchStatsState.Failed(e.reason)
         }
@@ -67,7 +68,7 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
                     },
                     loadDetail = { scope, event, filter ->
                         try {
-                            app.core { it.matchDetail(teamId, matchId, scope, event, filter) }
+                            app.core { it.matchDetail(teamId, matchId, MatchSide.A, scope, event, filter) }
                         } catch (e: MobileException) {
                             null
                         }

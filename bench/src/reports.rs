@@ -24,7 +24,7 @@ use scout4all_core::{
     shapes::enums::{EventTypeEnum, LanguageEnum},
     storage::layout,
 };
-use scout4all_mobile::{AnalysisPeriod, DetailFilter, Scout4All, StatsScope};
+use scout4all_mobile::{AnalysisPeriod, DetailFilter, MatchSide, Scout4All, StatsScope};
 use std::{fs, path::Path};
 
 /// The fundamentals of the analysis of a team.
@@ -79,7 +79,7 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                     let json = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
                     names.write(&folder.join(format!("{name}.report.json")), &json)?;
                     let live = app
-                        .match_stats(id.clone(), m.id.clone(), StatsScope::Match)
+                        .match_stats(id.clone(), m.id.clone(), MatchSide::A, StatsScope::Match)
                         .map_err(|e| e.to_string())?;
                     names.write(
                         &folder.join(format!("{name}.live.txt")),

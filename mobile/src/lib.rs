@@ -17,7 +17,7 @@ use scout4all_core::{
     competition_form::{CompetitionForm, CompetitionFormError},
     db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
-    domain::{CompetitionFormat, Stage},
+    domain::{CompetitionFormat, ScoutingMode, Stage},
     dvw::{
         self,
         import::{
@@ -1074,6 +1074,18 @@ pub struct MatchDetails {
     pub notes: String,
     /// as in `MatchListing`: the match seen by team B, scouted by A
     pub scouted_by: Option<ScoutedBy>,
+    /// scouted on both sides: the statistics of each team can be read
+    /// (`MatchSide`)
+    pub both_sides: bool,
+}
+
+/// The team of a match whose statistics are read: A, the team that
+/// scouted it, or B, only of a match scouted on both sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum MatchSide {
+    #[default]
+    A,
+    B,
 }
 
 /// Team A of a match seen by B: the team that scouted it.
@@ -3687,6 +3699,7 @@ impl Scout4All {
             .as_ref()
             .map_or(team_id, |(a, _)| a.id.to_string());
         let m = self.read_match(&team_a, &match_id)?;
+        let (row, _) = self.match_reader.details(&m.team, &match_id)?;
         let status = m.get_status()?;
         let sets = set_scores(&m)?;
         let details = MatchDetails {
@@ -3701,6 +3714,7 @@ impl Scout4All {
             next: next_kind(&status, &m.team),
             notes: m.notes.clone(),
             scouted_by: None,
+            both_sides: row.scouting == ScoutingMode::Both,
         };
         Ok(match seen_by_b {
             Some((a, home)) => MatchDetails {
@@ -3738,14 +3752,15 @@ impl Scout4All {
     }
 
     /// The statistics of a set of the match, or of all of them, as while
-    /// scouting.
+    /// scouting, of the team of the side.
     pub fn match_stats(
         &self,
         team_id: String,
         match_id: String,
+        side: MatchSide,
         scope: StatsScope,
     ) -> Result<LiveStats, MobileError> {
-        let m = self.read_match(&team_id, &match_id)?;
+        let m = self.read_match_of(&team_id, &match_id, side)?;
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
         sets.sort_by_key(|s| s.set_number);
         live_stats(
@@ -3758,16 +3773,17 @@ impl Scout4All {
     }
 
     /// A fundamental of a set of the match, or of all of them, narrowed by
-    /// the filter, as while scouting.
+    /// the filter, as while scouting, of the team of the side.
     pub fn match_detail(
         &self,
         team_id: String,
         match_id: String,
+        side: MatchSide,
         scope: StatsScope,
         event: EventTypeEnum,
         filter: DetailFilter,
     ) -> Result<DetailStats, MobileError> {
-        let m = self.read_match(&team_id, &match_id)?;
+        let m = self.read_match_of(&team_id, &match_id, side)?;
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
         sets.sort_by_key(|s| s.set_number);
         detail_stats(
@@ -5207,6 +5223,32 @@ impl Scout4All {
             .map_err(|e| unreadable(&e, labels.unreadable_match))?;
         name_the_removed(&mut m.team, labels);
         Ok(m)
+    }
+
+    /// The match of team A `team_id` as the team of the side sees it: B
+    /// only of a match scouted on both sides (`SqliteMatchReader::read_of_b`).
+    fn read_match_of(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        side: MatchSide,
+    ) -> Result<MatchEntry, MobileError> {
+        let labels = self.language.labels();
+        match side {
+            MatchSide::A => self.read_match(team_id, match_id),
+            MatchSide::B => {
+                let team = self.read_team(team_id)?;
+                let mut m = self
+                    .match_reader
+                    .read_of_b(&team, match_id)
+                    .map_err(|e| unreadable(&e, labels.unreadable_match))?
+                    .ok_or_else(|| MobileError::Failed {
+                        reason: labels.one_side_only.to_string(),
+                    })?;
+                name_the_removed(&mut m.team, labels);
+                Ok(m)
+            }
+        }
     }
 }
 
@@ -8031,7 +8073,10 @@ mod tests {
         assert_eq!(none.sets, vec![1, 2]);
 
         // from the page of the match, the same as while scouting
-        let saved = |scope| app.match_stats(team.clone(), m.clone(), scope).unwrap();
+        let saved = |scope| {
+            app.match_stats(team.clone(), m.clone(), MatchSide::A, scope)
+                .unwrap()
+        };
         assert_eq!(saved(StatsScope::Set { number: 2 }), set);
         assert_eq!(saved(StatsScope::Set { number: 1 }), first);
         assert_eq!(saved(StatsScope::Match), all);
@@ -8431,6 +8476,7 @@ mod tests {
             app.match_detail(
                 team.clone(),
                 m.clone(),
+                MatchSide::A,
                 StatsScope::Match,
                 EventTypeEnum::S,
                 DetailFilter {
@@ -8446,6 +8492,7 @@ mod tests {
             app.match_detail(
                 team.clone(),
                 m.clone(),
+                MatchSide::A,
                 StatsScope::Match,
                 EventTypeEnum::S,
                 all
@@ -8601,7 +8648,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
-        let stats = app.match_stats(team, m, StatsScope::Match).unwrap();
+        let stats = app
+            .match_stats(team, m, MatchSide::A, StatsScope::Match)
+            .unwrap();
         assert!(stats.sets.is_empty());
         assert!(stats.fundamentals.iter().all(|f| f.total == 0));
         assert!(stats.trend.iter().all(|t| t.sets.is_empty()));
@@ -9147,6 +9196,79 @@ mod tests {
         }
     }
 
+    /// A match imported on both sides (B a new team): its statistics from
+    /// B's side too, with B's players and A's aces as aces against.
+    #[test]
+    fn the_statistics_of_b_of_a_match_on_both_sides() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice, false).unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        assert!(
+            app.match_details(team.clone(), m.clone())
+                .unwrap()
+                .both_sides
+        );
+        let stats = |side| {
+            app.match_stats(team.clone(), m.clone(), side, StatsScope::Match)
+                .unwrap()
+        };
+        let (a, b) = (stats(MatchSide::A), stats(MatchSide::B));
+        assert_eq!(b.sets, a.sets);
+        assert_eq!((b.aces, b.aces_against), (a.aces_against, a.aces));
+        assert_ne!(a, b);
+        let players = |side| {
+            app.match_detail(
+                team.clone(),
+                m.clone(),
+                side,
+                StatsScope::Match,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>()
+        };
+        let of_a: Vec<String> = app
+            .team(team.clone())
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        let (pa, pb) = (players(MatchSide::A), players(MatchSide::B));
+        assert!(!pa.is_empty() && pa.iter().all(|p| of_a.contains(p)));
+        assert!(!pb.is_empty() && pb.iter().all(|p| !of_a.contains(p)));
+    }
+
+    /// B of a match scouted on A's side only: said so, no panic.
+    #[test]
+    fn no_statistics_of_b_of_a_match_on_one_side() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        assert!(
+            !app.match_details(team.clone(), m.clone())
+                .unwrap()
+                .both_sides
+        );
+        let read = app.match_stats(team, m, MatchSide::B, StatsScope::Match);
+        assert!(
+            matches!(&read, Err(MobileError::Failed { reason }) if reason == "this match is scouted on one side only"),
+            "{read:?}"
+        );
+    }
+
     #[test]
     fn a_datavolley_file_previewed() {
         let dir = tempfile::tempdir().unwrap();
@@ -9196,6 +9318,7 @@ mod tests {
                 .match_detail(
                     team.clone(),
                     m.clone(),
+                    MatchSide::A,
                     scope,
                     event,
                     DetailFilter::default(),
