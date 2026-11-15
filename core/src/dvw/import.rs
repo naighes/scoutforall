@@ -6,8 +6,10 @@ use crate::{
     analytics::finished::FinishedMatches,
     constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
     domain::{CompetitionFormat, Stage},
+    domain::{ScoutingMode, Side as DomainSide},
     dvw::{
-        model::{DvwFile, DvwRole, MatchDate, Player, Side},
+        both::{BothSet, translate_both},
+        model::{DvwFile, DvwRole, MatchDate, Player, SetResult, Side},
         translate::{
             Issue, Mappings, TranslateError, Untranslatable, Us, has_video_clock, translate_set,
         },
@@ -21,13 +23,14 @@ use crate::{
         set_writer::SetWriter,
         team_writer::{TeamInput, TeamWriter},
     },
+    rally::project,
     shapes::{
         country::CountryCode,
         enums::{FriendlyName, GenderEnum, RoleEnum, TeamClassificationEnum},
         r#match::{MatchEntry, MatchSource},
         player::PlayerEntry,
         refusal::Refusal,
-        set::ReplayIssue,
+        set::{ReplayIssue, SetEntry},
         team::TeamEntry,
     },
     team_form::TeamFormError,
@@ -461,12 +464,25 @@ pub enum MatchIssue {
     Replay(ReplayIssue),
 }
 
+/// How the match is imported: on both sides, each set as one sequence of
+/// touches, when B is a team and every set translates and replays on both
+/// sides (TODO/001); otherwise only A's side, with why not both when B is
+/// a team.
+#[derive(Debug, Clone)]
+pub enum ImportedSides {
+    Both(Vec<BothSet>),
+    A(Option<MatchIssue>),
+}
+
 /// The match of the side for the team of the plan, ready to be saved, and
 /// the mappings used by its sets, for the summary.
 #[derive(Debug, Clone)]
 pub struct MatchPlan {
+    /// The match from A's side: on both sides, A's stream projected from
+    /// the touches.
     pub entry: MatchEntry,
     pub mappings: Mappings,
+    pub sides: ImportedSides,
     /// What the match is saved with: team B, the numbers of the match, the
     /// competition, its stage and round.
     pub input: MatchInput,
@@ -625,25 +641,7 @@ pub fn match_plan(
     for result in &file.sets {
         let (set, used) = translate_set(file, &us, result.set_number, date, max_substitutions)
             .map_err(MatchIssue::Set)?;
-        let snapshot = set.compute_snapshot(max_substitutions).map_err(|e| {
-            MatchIssue::Set(TranslateError {
-                set_number: result.set_number,
-                line: None,
-                issue: Issue::Event(e.to_string()),
-            })
-        })?;
-        let ours = (snapshot.score_us, snapshot.score_them);
-        let written = match side {
-            Side::Home => result.final_score,
-            Side::Visiting => (result.final_score.1, result.final_score.0),
-        };
-        if ours != written {
-            return Err(MatchIssue::SetScore {
-                set_number: result.set_number,
-                file: written,
-                ours,
-            });
-        }
+        let set = with_score(set, result, side, max_substitutions)?;
         for (name, count) in used {
             *mappings.entry(name).or_default() += count;
         }
@@ -652,6 +650,18 @@ pub fn match_plan(
     if sets.is_empty() {
         return Err(MatchIssue::NoSets);
     }
+    let sides = match opponent.team() {
+        Some(b) => both_sides(file, &us, b, date, max_substitutions),
+        None => Err(None),
+    };
+    let (sets, mappings, sides) = match sides {
+        Ok((both, used)) => (
+            both.iter().map(stream_of_a).collect(),
+            used,
+            ImportedSides::Both(both),
+        ),
+        Err(why) => (sets, mappings, ImportedSides::A(why)),
+    };
     let entry = MatchEntry {
         id: MatchEntry::id_of(&opponent_name, &date),
         opponent: opponent_name.clone(),
@@ -695,10 +705,86 @@ pub fn match_plan(
         Ok(status) if status.match_finished => Ok(MatchPlan {
             entry,
             mappings,
+            sides,
             input,
             roster_b,
         }),
         _ => Err(MatchIssue::Unfinished),
+    }
+}
+
+/// The set when its final score is the one `[3SET]` writes.
+fn with_score(
+    set: SetEntry,
+    result: &SetResult,
+    side: Side,
+    max_substitutions: u8,
+) -> Result<SetEntry, MatchIssue> {
+    let snapshot = set.compute_snapshot(max_substitutions).map_err(|e| {
+        MatchIssue::Set(TranslateError {
+            set_number: result.set_number,
+            line: None,
+            issue: Issue::Event(e.to_string()),
+        })
+    })?;
+    let ours = (snapshot.score_us, snapshot.score_them);
+    let written = match side {
+        Side::Home => result.final_score,
+        Side::Visiting => (result.final_score.1, result.final_score.0),
+    };
+    match ours == written {
+        true => Ok(set),
+        false => Err(MatchIssue::SetScore {
+            set_number: result.set_number,
+            file: written,
+            ours,
+        }),
+    }
+}
+
+/// Every set of the file on both sides (`translate_both`), A's stream
+/// with the final score of `[3SET]`, and the mappings of both teams; or
+/// why not.
+fn both_sides(
+    file: &DvwFile,
+    a: &Us,
+    b: &TeamPlan,
+    date: DateTime<FixedOffset>,
+    max_substitutions: u8,
+) -> Result<(Vec<BothSet>, Mappings), Option<MatchIssue>> {
+    let b = Us {
+        side: a.side.other(),
+        players: &b.numbers,
+        liberos: &b.liberos,
+    };
+    file.sets
+        .iter()
+        .try_fold(
+            (vec![], Mappings::new()),
+            |(mut sets, mut mappings), result| {
+                let (both, used) =
+                    translate_both(file, a, &b, result.set_number, date, max_substitutions)
+                        .map_err(MatchIssue::Set)?;
+                with_score(stream_of_a(&both), result, a.side, max_substitutions)?;
+                for (name, count) in used {
+                    *mappings.entry(name).or_default() += count;
+                }
+                sets.push(both);
+                Ok((sets, mappings))
+            },
+        )
+        .map_err(Some)
+}
+
+/// The set from A's side: its start and the touches projected on it.
+fn stream_of_a(both: &BothSet) -> SetEntry {
+    SetEntry {
+        events: project(&both.touches)
+            .a
+            .into_iter()
+            .map(|p| p.entry)
+            .collect(),
+        ..both.a.clone()
     }
 }
 
@@ -770,12 +856,20 @@ pub async fn save_import(
             .save(TeamInput::Existing(b.team.clone()))
             .await?;
     }
+    let scouting = match plan.sides {
+        ImportedSides::Both(_) => ScoutingMode::Both,
+        ImportedSides::A(_) => ScoutingMode::A,
+    };
     let m = match saved {
         Some(id) => {
             let entry = &MatchEntry {
                 id,
                 ..plan.entry.clone()
             };
+            // only A first: team B of a match on both sides can't change
+            if scouting == ScoutingMode::A {
+                match_writer.save_scouting(entry, scouting).await?;
+            }
             match_writer
                 .replace_details(entry, plan.input.clone())
                 .await?;
@@ -792,10 +886,28 @@ pub async fn save_import(
                 .await?
         }
     };
+    match_writer.save_scouting(&m, scouting).await?;
     for set_number in 1..=5u8 {
-        match plan.entry.sets.iter().find(|s| s.set_number == set_number) {
-            Some(set) => set_writer.update(&m, set).await?,
-            None => set_writer.remove(&m, set_number).await?,
+        let set = plan.entry.sets.iter().find(|s| s.set_number == set_number);
+        let both = match &plan.sides {
+            ImportedSides::Both(sets) => sets.iter().find(|s| s.a.set_number == set_number),
+            ImportedSides::A(_) => None,
+        };
+        match (set, both) {
+            (_, Some(both)) => {
+                set_writer
+                    .update_sides(&m, &both.a, Some(&both.b), &both.touches)
+                    .await?
+            }
+            (Some(set), None) => {
+                let touches: Vec<_> = set
+                    .events
+                    .iter()
+                    .map(|e| (DomainSide::A, e.clone()))
+                    .collect();
+                set_writer.update_sides(&m, set, None, &touches).await?
+            }
+            (None, None) => set_writer.remove(&m, set_number).await?,
         }
     }
     if opponent.team().is_some() {

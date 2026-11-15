@@ -517,15 +517,22 @@ mod tests {
     }
 
     /// The teams of a folder of files as new teams: the season, the names
-    /// of the players, the conflicts and the similar teams between files:
+    /// of the players, the conflicts and the similar teams between files,
+    /// how each match imports (on both sides, B the other team, or not):
     /// `DVW_DIR=... cargo test -p scout4all-core dvw_import_probe -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn dvw_import_probe() {
         use crate::dvw::import::{
-            MatchIssue, TeamChoice, match_date, match_plan, season_year, similar_teams, team_plan,
+            ImportedSides, MatchIssue, TeamChoice, match_date, match_plan, season_year,
+            similar_teams, team_plan,
         };
         use crate::dvw::model::MatchDate;
+        let new_team = || TeamChoice::New {
+            classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
+            gender: Some(crate::shapes::enums::GenderEnum::Women),
+            country: crate::shapes::country::CountryCode::parse("AT"),
+        };
         let mut matches: std::collections::BTreeMap<String, usize> = Default::default();
         let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
         let mut paths = walk(std::path::Path::new(&dir));
@@ -544,12 +551,7 @@ mod tests {
                         )
                     })
                     .collect();
-                let choice = TeamChoice::New {
-                    classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
-                    gender: Some(crate::shapes::enums::GenderEnum::Women),
-                    country: crate::shapes::country::CountryCode::parse("AT"),
-                };
-                match team_plan(&file, side, choice) {
+                match team_plan(&file, side, new_team()) {
                     Ok(plan) => {
                         println!(
                             "{name}\t{side:?}\t{:?}\t{}\t{}\tliberos {:?}\tsimilar {similar:?}\t{:?}",
@@ -569,11 +571,19 @@ mod tests {
                         };
                         let offset = chrono::FixedOffset::east_opt(0).unwrap();
                         let when = match_date(&file, day, offset);
-                        let opponent = crate::dvw::import::OpponentPlan::Name(String::new());
+                        // B a team, when its side is a team: the match on both sides
+                        let opponent = match team_plan(&file, side.other(), new_team()) {
+                            Ok(b) => crate::dvw::import::OpponentPlan::Team(b),
+                            Err(_) => crate::dvw::import::OpponentPlan::Name(String::new()),
+                        };
                         let labels = crate::localization::Language::default().labels();
                         let outcome =
                             match match_plan(&file, side, &plan, &opponent, when, 6, labels) {
-                                Ok(_) => "ok".to_string(),
+                                Ok(plan) => match plan.sides {
+                                    ImportedSides::Both(_) => "ok both".to_string(),
+                                    ImportedSides::A(None) => "ok a".to_string(),
+                                    ImportedSides::A(Some(_)) => "ok a, not both".to_string(),
+                                },
                                 Err(MatchIssue::Set(e)) => {
                                     format!("set {:?}", std::mem::discriminant(&e.issue))
                                 }

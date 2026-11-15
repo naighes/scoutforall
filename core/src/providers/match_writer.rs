@@ -1,4 +1,5 @@
 use crate::{
+    domain::ScoutingMode,
     errors::AppError,
     match_form::{MatchInput, RosterNumber},
     shapes::{
@@ -41,6 +42,11 @@ pub trait MatchWriter {
         source: MatchSource,
         video_clock: bool,
     ) -> Result<MatchEntry, AppError>;
+
+    /// The match, saved, scouted as `scouting` from now on: on both sides
+    /// only against a team; scouting only A, the lineups and the touches
+    /// of B go.
+    async fn save_scouting(&self, m: &MatchEntry, scouting: ScoutingMode) -> Result<(), AppError>;
 
     /// Removes the match with its sets, for good: by its folder, so that
     /// a match that can't be read goes too.

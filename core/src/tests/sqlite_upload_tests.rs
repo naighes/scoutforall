@@ -565,7 +565,8 @@ mod tests {
     }
 
     /// Team B scouted too (`"both"`), and a neutral venue: the archive is
-    /// A's, as before; `home` is false.
+    /// A's, as before; `home` is false. B's touches, receptions ending no
+    /// rally, leave A's stream as it was.
     #[tokio::test]
     async fn the_side_of_b_and_a_neutral_venue_dont_go() {
         let db = migrated_v018().await;
@@ -612,8 +613,8 @@ mod tests {
                      SELECT lower(printf('%s-%s-%s-%s-%s', hex(randomblob(4)),
                                          hex(randomblob(2)), hex(randomblob(2)),
                                          hex(randomblob(2)), hex(randomblob(6)))),
-                            match_id, set_number, seq + 100000, 'b', timestamp, 'S', '{p0}',
-                            '#', 'F', 0
+                            match_id, set_number, seq + 100000, 'b', timestamp, 'P', '{p0}',
+                            '+', NULL, 0
                      FROM events WHERE match_id = '{m}';",
                 b = b.id,
                 p0 = p(0),

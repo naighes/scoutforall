@@ -2,8 +2,8 @@
 
 use crate::{
     domain::{
-        Event, Home, LegacyId, Match, MatchSet, Membership, Person, RosterEntry, SetLineup, Team,
-        TeamRef,
+        Event, Home, LegacyId, Match, MatchSet, Membership, Person, RosterEntry, SetLineup, Side,
+        Team, TeamRef,
         adapters::{MatchRows, SetRows, TeamRows},
         sql::{Sql, technique_from_db},
     },
@@ -605,12 +605,17 @@ pub(crate) fn insert_event(tx: &Transaction, event: &Event) -> Result<(), AppErr
     .map_err(sqlite)
 }
 
-/// The event as `e` has it now: a correction updates its row (TODO/001,
-/// default choices; append-only comes back with the sync, 030).
-pub(crate) fn update_event(tx: &Transaction, id: Uuid, e: &EventEntry) -> Result<(), AppError> {
+/// The event as `e` has it now, of `side`: a correction updates its row
+/// (TODO/001, default choices; append-only comes back with the sync, 030).
+pub(crate) fn update_event(
+    tx: &Transaction,
+    id: Uuid,
+    side: Side,
+    e: &EventEntry,
+) -> Result<(), AppError> {
     tx.execute(
         "UPDATE events SET timestamp = ?2, event_type = ?3, player = ?4, eval = ?5,
-             target_player = ?6, technique = ?7, flags = ?8
+             target_player = ?6, technique = ?7, flags = ?8, side = ?9
          WHERE id = ?1",
         params![
             Sql(id),
@@ -620,7 +625,8 @@ pub(crate) fn update_event(tx: &Transaction, id: Uuid, e: &EventEntry) -> Result
             e.eval,
             e.target_player.map(Sql),
             e.technique,
-            e.flags
+            e.flags,
+            side
         ],
     )
     .map(|_| ())

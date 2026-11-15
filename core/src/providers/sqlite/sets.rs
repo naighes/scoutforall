@@ -20,6 +20,7 @@ use crate::{
             summary::refresh,
         },
     },
+    rally::replay,
     shapes::{enums::TeamSideEnum, r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
 };
 use async_trait::async_trait;
@@ -147,6 +148,61 @@ fn events_of_a(tx: &Transaction, match_id: Uuid, set_number: u8) -> Result<Vec<E
         .collect())
 }
 
+/// Whether the set has the lineup of B: scouted on both sides.
+fn on_both_sides(tx: &Transaction, match_id: Uuid, set_number: u8) -> Result<bool, AppError> {
+    tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM set_lineups
+             WHERE match_id = ?1 AND set_number = ?2 AND side = ?3)",
+        params![Sql(match_id), set_number, Side::B],
+        |row| row.get(0),
+    )
+    .map_err(sqlite)
+}
+
+/// An error for a set scouted on both sides: the events of A alone would
+/// spoil it (scouting on both sides is TODO/001, phase 3).
+fn of_a_only(tx: &Transaction, match_id: Uuid, set_number: u8) -> Result<(), AppError> {
+    match on_both_sides(tx, match_id, set_number)? {
+        true => Err(AppError::IO(IOError::Msg(format!(
+            "set {set_number} of match {match_id} is scouted on both sides: \
+             the events of A alone can't change it"
+        )))),
+        false => Ok(()),
+    }
+}
+
+/// The set as `rows` has it, in place of the one saved with the events
+/// `saved` (not removed, in order): each event in its place, a changed one
+/// updated in its row, the ones beyond removed, the new ones appended
+/// after the last place of the set.
+fn rewrite(tx: &Transaction, rows: &SetRows, saved: &[Event]) -> Result<(), AppError> {
+    write_set(tx, rows)?;
+    saved
+        .iter()
+        .zip(&rows.events)
+        .filter(|(old, new)| old.side != new.side || old.entry != new.entry)
+        .try_for_each(|(old, new)| update_event(tx, old.id, new.side, &new.entry))?;
+    saved
+        .iter()
+        .skip(rows.events.len())
+        .try_for_each(|old| remove_event(tx, old.id))?;
+    let first = next_seq(tx, rows.row.match_id, rows.row.number)?;
+    rows.events
+        .get(saved.len()..)
+        .unwrap_or_default()
+        .iter()
+        .zip(first..)
+        .try_for_each(|(event, seq)| {
+            insert_event(
+                tx,
+                &Event {
+                    seq,
+                    ..event.clone()
+                },
+            )
+        })
+}
+
 #[async_trait]
 impl SetWriter for SqliteSetWriter {
     /// A removed set with the same number comes back as this one, its old
@@ -197,6 +253,7 @@ impl SetWriter for SqliteSetWriter {
         let id = match_uuid(&m.id)?;
         self.db.write(|tx| {
             played(tx, id, set_number)?;
+            of_a_only(tx, id, set_number)?;
             append(tx, id, set_number, std::slice::from_ref(event))?;
             refresh(tx, id)
         })
@@ -211,6 +268,7 @@ impl SetWriter for SqliteSetWriter {
         let id = match_uuid(&m.id)?;
         self.db.write(|tx| {
             played(tx, id, set_number)?;
+            of_a_only(tx, id, set_number)?;
             let removed = events_of_a(tx, id, set_number)?
                 .pop()
                 .map(|last| remove_event(tx, last.id).map(|()| last.entry))
@@ -226,23 +284,43 @@ impl SetWriter for SqliteSetWriter {
         let id = match_uuid(&m.id)?;
         let rows = SetRows::of(set, id)?;
         self.db.write(|tx| {
+            of_a_only(tx, id, set.set_number)?;
             let saved = events_of_a(tx, id, set.set_number)?;
-            write_set(tx, &rows)?;
-            saved
-                .iter()
-                .zip(&set.events)
-                .filter(|(old, new)| old.entry != **new)
-                .try_for_each(|(old, new)| update_event(tx, old.id, new))?;
-            saved
-                .iter()
-                .skip(set.events.len())
-                .try_for_each(|old| remove_event(tx, old.id))?;
-            append(
-                tx,
+            rewrite(tx, &rows, &saved)?;
+            refresh(tx, id)
+        })
+    }
+
+    async fn update_sides(
+        &self,
+        m: &MatchEntry,
+        a: &SetEntry,
+        b: Option<&SetEntry>,
+        touches: &[(Side, EventEntry)],
+    ) -> Result<(), AppError> {
+        let id = match_uuid(&m.id)?;
+        let not_coherent = |reason: String| {
+            AppError::Match(MatchError::LoadSetError(format!(
+                "set {} of match {}: {reason}",
+                a.set_number, m.id
+            )))
+        };
+        let rows = match (b, touches.iter().all(|(side, _)| *side == Side::A)) {
+            (Some(b), _) => replay(a, b, touches, m.max_substitutions)
+                .map_err(|e| not_coherent(e.to_string()))
+                .and_then(|_| SetRows::of_both(a, b, touches, id)),
+            (None, true) => SetRows::of(
+                &SetEntry {
+                    events: touches.iter().map(|(_, e)| e.clone()).collect(),
+                    ..a.clone()
+                },
                 id,
-                set.set_number,
-                set.events.get(saved.len()..).unwrap_or_default(),
-            )?;
+            ),
+            (None, false) => Err(not_coherent("touches of B without its lineup".into())),
+        }?;
+        self.db.write(|tx| {
+            let saved = events(tx, id, a.set_number)?;
+            rewrite(tx, &rows, &saved)?;
             refresh(tx, id)
         })
     }

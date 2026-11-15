@@ -1,23 +1,27 @@
 //! The two sides of a set read from the database (TODO/001, phase 1): the
 //! touches of A and B, one sequence in `events`, projected and replayed on
-//! each side; scouting only A, B has no side and A replays as today.
+//! each side; scouting only A, B has no side and A replays as today. A set
+//! saved on both sides (phase 2): its touches with their sides, A read as
+//! the stream projected on its side.
 #[cfg(test)]
 mod tests {
     use crate::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
-        domain::{Event, Side, sql::Sql},
+        domain::{Event, ScoutingMode, Side, adapters::EventsOfA, sql::Sql},
         localization::Language,
         match_form::{MatchInput, Opponent},
         providers::{
+            match_reader::MatchReader,
             match_writer::MatchWriter,
             set_writer::SetWriter,
             sqlite::{
-                rows::{insert_event, next_seq},
+                rows::{insert_event, next_seq, set_rows},
                 sets::SqliteSetReader,
                 sqlite,
             },
             team_writer::{TeamInput, TeamWriter},
         },
+        rally::project,
         shapes::{
             country::CountryCode,
             enums::{
@@ -26,10 +30,12 @@ mod tests {
             flags::EventFlags,
             r#match::MatchEntry,
             player::PlayerEntry,
+            set::SetEntry,
             snapshot::EventEntry,
             team::TeamEntry,
         },
         tests::Sqlite,
+        video::EventRef,
     };
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -229,5 +235,196 @@ mod tests {
             matches!(&read, Err(e) if e.to_string().contains("touch 0 doesn't follow")),
             "{read:?}"
         );
+    }
+
+    fn touch(
+        side: Side,
+        event_type: EventTypeEnum,
+        player: Uuid,
+        eval: EvalEnum,
+    ) -> (Side, EventEntry) {
+        let start = Utc.with_ymd_and_hms(2026, 11, 14, 17, 0, 0).unwrap();
+        (
+            side,
+            EventEntry {
+                timestamp: start,
+                event_type,
+                player: Some(player),
+                eval: Some(eval),
+                target_player: None,
+                technique: None,
+                flags: EventFlags::default(),
+            },
+        )
+    }
+
+    /// A against B on both sides, set 1 with A serving: the starts of A
+    /// and B as each sees it.
+    async fn on_both_sides(p: &Sqlite) -> (TeamEntry, TeamEntry, MatchEntry, SetEntry, SetEntry) {
+        let (a, b) = (team(p, "Cortona").await, team(p, "Cascina").await);
+        let m = p
+            .match_writer
+            .create(
+                &a,
+                MatchInput {
+                    opponent: Opponent::Team(b.id),
+                    ..MatchInput::against("", date(), true, DEFAULT_MAX_SUBSTITUTIONS, "", vec![])
+                },
+            )
+            .await
+            .unwrap();
+        p.match_writer
+            .save_scouting(&m, ScoutingMode::Both)
+            .await
+            .unwrap();
+        let start = |t: &TeamEntry, serving| {
+            SetEntry::new(1, serving, positions(t), libero(t), None, t.players[0].id).unwrap()
+        };
+        let (start_a, start_b) = (start(&a, TeamSideEnum::Us), start(&b, TeamSideEnum::Them));
+        (a, b, m, start_a, start_b)
+    }
+
+    /// A rally won by B, then B's serve error.
+    fn rallies(a: &TeamEntry, b: &TeamEntry) -> Vec<(Side, EventEntry)> {
+        vec![
+            touch(Side::A, S, a.players[0].id, Positive),
+            touch(Side::B, P, libero(b), Negative),
+            touch(Side::B, A, b.players[1].id, Perfect),
+            touch(Side::B, S, b.players[1].id, Error),
+        ]
+    }
+
+    fn ids(p: &Sqlite) -> Vec<String> {
+        p.db.read(|tx| {
+            tx.prepare("SELECT id FROM events WHERE deleted = 0 ORDER BY seq")
+                .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+                .map_err(sqlite)
+        })
+        .unwrap()
+    }
+
+    /// Saved on both sides: B with its side, A read as its stream (what
+    /// B's touches tell it), each event of A by the row it comes from;
+    /// saved again, each touch keeps its row.
+    #[tokio::test]
+    async fn a_set_on_both_sides_is_saved_with_its_touches() {
+        let p = Sqlite::new();
+        let (a, b, m, start_a, start_b) = on_both_sides(&p).await;
+        let touches = rallies(&a, &b);
+        p.set_writer
+            .update_sides(&m, &start_a, Some(&start_b), &touches)
+            .await
+            .unwrap();
+        let sides = reader(&p).read_sides(&m).unwrap();
+        let scores: Vec<_> = sides
+            .iter()
+            .map(|s| {
+                (
+                    (s.a.score_us, s.a.score_them),
+                    s.b.as_ref().map(|b| (b.score_us, b.score_them)),
+                )
+            })
+            .collect();
+        assert_eq!(scores, vec![((1, 1), Some((1, 1)))]);
+        let read = p.match_reader.read_single(&a, &m.id).await.unwrap();
+        let stream: Vec<EventEntry> = project(&touches).a.into_iter().map(|p| p.entry).collect();
+        let types: Vec<_> = stream.iter().map(|e| e.event_type).collect();
+        assert_eq!(types, vec![S, OS, OE]);
+        assert_eq!(read.sets[0].events, stream);
+        let saved = ids(&p);
+        let events = EventsOfA::of(
+            &p.db
+                .read(|tx| set_rows(tx, Uuid::parse_str(&m.id).unwrap()))
+                .unwrap(),
+        );
+        let of_a: Vec<_> = (0..3)
+            .map(|index| {
+                events
+                    .id(EventRef {
+                        set_number: 1,
+                        index,
+                    })
+                    .map(|id| id.to_string())
+            })
+            .collect();
+        // B's kill tells A's point, B's serve error A's
+        let told = [&saved[0], &saved[2], &saved[3]].map(|id| Some(id.clone()));
+        assert_eq!(of_a, told);
+        p.set_writer
+            .update_sides(&m, &start_a, Some(&start_b), &touches)
+            .await
+            .unwrap();
+        assert_eq!(ids(&p), saved);
+    }
+
+    /// Touches that don't replay on both sides: an error, nothing saved.
+    #[tokio::test]
+    async fn touches_not_replaying_are_not_saved() {
+        let p = Sqlite::new();
+        let (_, b, m, start_a, start_b) = on_both_sides(&p).await;
+        let touches = [touch(Side::B, A, b.players[1].id, Perfect)];
+        let saved = p
+            .set_writer
+            .update_sides(&m, &start_a, Some(&start_b), &touches)
+            .await;
+        assert!(saved.is_err(), "{saved:?}");
+        assert!(ids(&p).is_empty());
+        let without_b = p
+            .set_writer
+            .update_sides(&m, &start_a, None, &touches)
+            .await;
+        assert!(without_b.is_err(), "{without_b:?}");
+    }
+
+    /// The events of A alone would spoil a set on both sides: changing,
+    /// appending or undoing them is an error.
+    #[tokio::test]
+    async fn the_events_of_a_alone_dont_change_a_set_on_both_sides() {
+        let p = Sqlite::new();
+        let (a, b, m, start_a, start_b) = on_both_sides(&p).await;
+        let touches = rallies(&a, &b);
+        p.set_writer
+            .update_sides(&m, &start_a, Some(&start_b), &touches)
+            .await
+            .unwrap();
+        let read = p.match_reader.read_single(&a, &m.id).await.unwrap();
+        let set = &read.sets[0];
+        assert!(p.set_writer.update(&m, set).await.is_err());
+        assert!(
+            p.set_writer
+                .append_event(&m, 1, &touches[0].1)
+                .await
+                .is_err()
+        );
+        assert!(p.set_writer.remove_last_event(&m, 1).await.is_err());
+        assert_eq!(ids(&p).len(), touches.len());
+    }
+
+    /// Scouting only A from now on: B has no side, its touches go, A
+    /// saved again with its own stream.
+    #[tokio::test]
+    async fn scouting_only_a_drops_side_b() {
+        let p = Sqlite::new();
+        let (a, b, m, start_a, start_b) = on_both_sides(&p).await;
+        p.set_writer
+            .update_sides(&m, &start_a, Some(&start_b), &rallies(&a, &b))
+            .await
+            .unwrap();
+        p.match_writer
+            .save_scouting(&m, ScoutingMode::A)
+            .await
+            .unwrap();
+        assert_eq!(ids(&p).len(), 1);
+        let alone = [touch(Side::A, S, a.players[0].id, Perfect)];
+        p.set_writer
+            .update_sides(&m, &start_a, None, &alone)
+            .await
+            .unwrap();
+        let sides = reader(&p).read_sides(&m).unwrap();
+        let scores: Vec<_> = sides
+            .iter()
+            .map(|s| ((s.a.score_us, s.a.score_them), s.b.is_none()))
+            .collect();
+        assert_eq!(scores, vec![((1, 0), true)]);
     }
 }

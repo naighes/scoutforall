@@ -28,7 +28,7 @@ use crate::{
     },
     errors::{AppError, IOError, MatchError},
     player_form::removed,
-    rally::{Incoherence, replay},
+    rally::{Incoherence, project, replay},
     shapes::{
         enums::TeamSideEnum,
         r#match::MatchEntry,
@@ -349,6 +349,56 @@ impl SetRows {
         })
     }
 
+    /// A set of match `match_id` scouted on both sides: the starts of A
+    /// and B (lineup, serving team as each sees it, their events aside),
+    /// the touches of the two in order, each with an id of its own.
+    pub fn of_both(
+        a: &SetEntry,
+        b: &SetEntry,
+        touches: &[(Side, EventEntry)],
+        match_id: Uuid,
+    ) -> Result<Self, AppError> {
+        let of_a = SetRows::of(
+            &SetEntry {
+                events: vec![],
+                ..a.clone()
+            },
+            match_id,
+        )?;
+        let lineup_b = SetLineup {
+            side: Side::B,
+            positions: b.initial_positions,
+            libero: b.libero,
+            fallback_libero: b.fallback_libero,
+            setter: b.setter,
+            ..of_a.lineups.first().cloned().ok_or_else(|| {
+                not_consistent(format!("set {} without the lineup of A", a.set_number))
+            })?
+        };
+        let events = touches
+            .iter()
+            .enumerate()
+            .map(|(i, (side, e))| {
+                u32::try_from(i)
+                    .map(|seq| Event {
+                        id: Uuid::new_v4(),
+                        match_id,
+                        set_number: a.set_number,
+                        seq,
+                        side: *side,
+                        entry: e.clone(),
+                        deleted: false,
+                    })
+                    .map_err(|_| not_consistent(format!("touch {i} of set {}", a.set_number)))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(SetRows {
+            lineups: [of_a.lineups, vec![lineup_b]].concat(),
+            events,
+            ..of_a
+        })
+    }
+
     /// The set from A's side.
     pub fn entry(&self) -> Result<SetEntry, AppError> {
         let lineup = self
@@ -361,7 +411,6 @@ impl SetRows {
                     self.row.number, self.row.match_id
                 ))
             })?;
-        let events = self.events_of_a();
         Ok(SetEntry {
             set_number: self.row.number,
             serving_team: self.row.serving.to_a(),
@@ -370,30 +419,60 @@ impl SetRows {
             fallback_libero: lineup.fallback_libero,
             setter: lineup.setter,
             lineup_rules: self.row.lineup_rules,
-            events: events.into_iter().map(|e| e.entry.clone()).collect(),
+            events: self.stream_of_a().into_iter().map(|(_, e)| e).collect(),
         })
     }
 
-    /// The events of A not undone, in their order: those of `SetEntry`.
+    /// Whether the set is scouted on both sides: B has its lineup.
+    pub fn on_both_sides(&self) -> bool {
+        self.lineups.iter().any(|l| l.side == Side::B)
+    }
+
+    /// The stream of A, each event with the row it comes from: the events
+    /// of A, or, scouted on both sides, the touches projected on A's side
+    /// (what B's touches tell A from B's rows).
+    pub fn stream_of_a(&self) -> Vec<(&Event, EventEntry)> {
+        let rows = self.rows();
+        match self.on_both_sides() {
+            true => {
+                let touches: Vec<(Side, EventEntry)> =
+                    rows.iter().map(|e| (e.side, e.entry.clone())).collect();
+                project(&touches)
+                    .a
+                    .into_iter()
+                    .filter_map(|p| rows.get(p.source).map(|row| (*row, p.entry)))
+                    .collect()
+            }
+            false => self
+                .events_of_a()
+                .into_iter()
+                .map(|e| (e, e.entry.clone()))
+                .collect(),
+        }
+    }
+
+    /// The events of A not undone, in their order.
     pub fn events_of_a(&self) -> Vec<&Event> {
-        let mut events: Vec<&Event> = self
-            .events
-            .iter()
-            .filter(|e| e.side == Side::A && !e.deleted)
-            .collect();
-        events.sort_by_key(|e| e.seq);
-        events
+        self.rows()
+            .into_iter()
+            .filter(|e| e.side == Side::A)
+            .collect()
     }
 
     /// The touches of both sides not undone, in their order: the sequence
     /// `rally::project` reads.
     pub fn touches(&self) -> Vec<(Side, EventEntry)> {
-        let mut events: Vec<&Event> = self.events.iter().filter(|e| !e.deleted).collect();
-        events.sort_by_key(|e| e.seq);
-        events
+        self.rows()
             .into_iter()
             .map(|e| (e.side, e.entry.clone()))
             .collect()
+    }
+
+    // the rows not undone, in their order
+    fn rows(&self) -> Vec<&Event> {
+        let mut events: Vec<&Event> = self.events.iter().filter(|e| !e.deleted).collect();
+        events.sort_by_key(|e| e.seq);
+        events
     }
 
     /// The start of the set as the side sees it, without its events: its
@@ -453,7 +532,8 @@ pub struct Sides {
 }
 
 /// The events of the sets of a match as `SetEntry` has them, by
-/// `EventRef` and by id.
+/// `EventRef` and by id: an event B's touch tells A by the id of that
+/// touch.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventsOfA {
     by_ref: BTreeMap<(u8, usize), Uuid>,
@@ -466,10 +546,10 @@ impl EventsOfA {
             .iter()
             .filter(|s| !s.row.deleted)
             .flat_map(|s| {
-                s.events_of_a()
+                s.stream_of_a()
                     .into_iter()
                     .enumerate()
-                    .map(|(index, e)| {
+                    .map(|(index, (e, _))| {
                         (
                             EventRef {
                                 set_number: s.row.number,

@@ -2121,8 +2121,8 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         }
 
         /// The other side of the same file into team B of the first: a
-        /// second match (no "both" yet), B the team of the first side, the
-        /// competition the same.
+        /// second match (the first, on both sides, isn't recognized yet), B
+        /// the team of the first side, the competition the same.
         #[tokio::test]
         async fn the_other_side_against_the_team_of_the_first() {
             use crate::dvw::import::OpponentChoice;
@@ -2252,11 +2252,15 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             );
         }
 
-        /// Team B changed by the form to a name: its roster of the match
-        /// goes with it, the one of A stays.
+        /// Team B changed by the form to a name, the match scouted only on
+        /// A's side: its roster of the match goes with it, the one of A
+        /// stays.
         #[tokio::test]
         async fn the_roster_of_b_goes_with_it() {
-            use crate::{dvw::import::OpponentChoice, providers::match_writer::MatchWriter};
+            use crate::{
+                domain::ScoutingMode, dvw::import::OpponentChoice,
+                providers::match_writer::MatchWriter,
+            };
             let p = Providers::new();
             let (team, b, plan) = planned_against(
                 &three_sets_won().text(),
@@ -2266,6 +2270,10 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             );
             let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
             assert_eq!(p.sql("SELECT count(DISTINCT team_id) FROM match_roster"), 2);
+            p.match_writer
+                .save_scouting(&saved, ScoutingMode::A)
+                .await
+                .expect("only A");
             p.match_writer
                 .update(
                     &saved,
@@ -2281,6 +2289,111 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 Some(team.team.id.to_string())
             );
             assert_eq!(p.sql("SELECT count(*) FROM match_roster"), 8);
+        }
+
+        /// Team B a team and every set translating on both sides: one
+        /// match on both sides (TODO/001, phase 2), B's lineups and touches
+        /// saved, A read as the plan has it, each side with the score of
+        /// the file.
+        #[tokio::test]
+        async fn both_teams_in_one_match() {
+            use crate::{
+                dvw::import::{ImportedSides, OpponentChoice},
+                providers::sqlite::sets::SqliteSetReader,
+            };
+            let p = Providers::new();
+            let (team, b, plan) = planned_against(
+                &three_sets_won().text(),
+                Side::Home,
+                new_team(),
+                OpponentChoice::New,
+            );
+            assert!(matches!(&plan.sides, ImportedSides::Both(sets) if sets.len() == 3));
+            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let m = format!("'{}'", saved.id);
+            assert_eq!(
+                p.text(&format!("SELECT scouting FROM matches WHERE id = {m}")),
+                Some("both".to_string())
+            );
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM set_lineups WHERE match_id = {m} AND side = 'b'"
+                )),
+                3
+            );
+            assert!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM events WHERE match_id = {m} AND side = 'b'"
+                )) > 0
+            );
+            let read_team = p.team(&team.team.id).await;
+            let read = p
+                .match_reader
+                .read_single(&read_team, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.sets, plan.entry.sets);
+            let sides = SqliteSetReader::new(p.db.clone(), Language::default())
+                .read_sides(&read)
+                .expect("both sides");
+            let scores: Vec<_> = sides
+                .iter()
+                .map(|s| {
+                    (
+                        (s.a.score_us, s.a.score_them),
+                        s.b.as_ref().map(|b| (b.score_them, b.score_us)),
+                    )
+                })
+                .collect();
+            assert_eq!(scores, vec![((25, 0), Some((25, 0))); 3]);
+        }
+
+        /// Team B only a name: only A's side, nothing to tell why. The same
+        /// match imported on both sides, then again against the name: B's
+        /// lineups and touches go.
+        #[tokio::test]
+        async fn against_a_name_only_a_side() {
+            use crate::dvw::import::{ImportedSides, OpponentChoice};
+            let p = Providers::new();
+            let text = three_sets_won().text();
+            let (team, b, plan) =
+                planned_against(&text, Side::Home, new_team(), OpponentChoice::New);
+            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved_team = p.team(&team.team.id).await;
+            let (again, name, plan) = planned_against(
+                &text,
+                Side::Home,
+                TeamChoice::Existing(&saved_team),
+                OpponentChoice::Name,
+            );
+            assert!(matches!(plan.sides, ImportedSides::A(None)));
+            p.save_with(&again, &name, &plan, true)
+                .await
+                .expect("overwritten");
+            let m = format!("'{}'", saved.id);
+            assert_eq!(
+                p.text(&format!("SELECT scouting FROM matches WHERE id = {m}")),
+                Some("a".to_string())
+            );
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM set_lineups WHERE match_id = {m} AND side = 'b'"
+                )),
+                0
+            );
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM events
+                     WHERE match_id = {m} AND side = 'b' AND deleted = 0"
+                )),
+                0
+            );
+            let read = p
+                .match_reader
+                .read_single(&saved_team, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.sets, plan.entry.sets);
         }
     }
 }

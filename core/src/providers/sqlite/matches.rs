@@ -1,7 +1,7 @@
 use crate::{
     domain::{
-        Competition, Home, Match, RosterEntry, ScoutingMode, Team, TeamRef, adapters::MatchRows,
-        sql::Sql,
+        Competition, Home, Match, RosterEntry, ScoutingMode, Side, Team, TeamRef,
+        adapters::MatchRows, sql::Sql,
     },
     errors::{AppError, IOError, MatchError},
     localization::Language,
@@ -428,6 +428,23 @@ fn saved_competition(
     }
 }
 
+/// The match `id` without the lineups of B, its touches removed: scouted
+/// only on A's side.
+fn without_side_b(tx: &Transaction, id: Uuid) -> Result<(), AppError> {
+    tx.execute(
+        "DELETE FROM set_lineups WHERE match_id = ?1 AND side = ?2",
+        params![Sql(id), Side::B],
+    )
+    .and_then(|_| {
+        tx.execute(
+            "UPDATE events SET deleted = 1 WHERE match_id = ?1 AND side = ?2",
+            params![Sql(id), Side::B],
+        )
+    })
+    .map_err(sqlite)?;
+    refresh(tx, id)
+}
+
 /// Updates the match `id` with `input`: team B changes, unless both teams
 /// are scouted. The roster: the players left out go; number and role as in
 /// `numbers`, else the ones added copy them from the team (D9) and the
@@ -665,6 +682,23 @@ impl MatchWriter for SqliteMatchWriter {
                 ..m.clone()
             }),
         }
+    }
+
+    async fn save_scouting(&self, m: &MatchEntry, scouting: ScoutingMode) -> Result<(), AppError> {
+        let id = match_uuid(&m.id)?;
+        self.0.write(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE matches SET scouting = ?2 WHERE id = ?1 AND deleted = 0",
+                    params![Sql(id), scouting],
+                )
+                .map_err(sqlite)?;
+            match (changed, scouting) {
+                (0, _) => Err(not_found(&format!("match {}", m.id))),
+                (_, ScoutingMode::A) => without_side_b(tx, id),
+                (_, ScoutingMode::Both) => Ok(()),
+            }
+        })
     }
 
     /// Marked removed, with what it has (D7), by either team: one match
