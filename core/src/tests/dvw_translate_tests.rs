@@ -2346,6 +2346,40 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 })
                 .collect();
             assert_eq!(scores, vec![((25, 0), Some((25, 0))); 3]);
+            // B's side: B's team against A, losing every set, B's
+            // statistics the ones its side replays to
+            let of_b = p
+                .match_reader
+                .read_of_b(&read_team, &saved.id)
+                .expect("readable")
+                .expect("B's side");
+            assert_eq!(
+                (Some(of_b.team.id.to_string()), of_b.opponent.as_str()),
+                (
+                    p.text(&format!("SELECT team_b FROM matches WHERE id = {m}")),
+                    read_team.name.as_str()
+                )
+            );
+            let snapshots: Vec<_> = of_b
+                .sets
+                .iter()
+                .map(|s| s.compute_snapshot(of_b.max_substitutions).expect("replays"))
+                .collect();
+            let set_scores: Vec<_> = snapshots
+                .iter()
+                .map(|s| (s.score_us, s.score_them))
+                .collect();
+            assert_eq!(set_scores, vec![(0, 25); 3]);
+            let mut of_sides = crate::shapes::stats::Stats::new();
+            sides
+                .iter()
+                .filter_map(|s| s.b.as_ref())
+                .for_each(|b| of_sides.merge(&b.stats));
+            assert_ne!(of_sides, crate::shapes::stats::Stats::new());
+            assert_eq!(
+                crate::analysis::match_stats(&of_b).expect("stats"),
+                of_sides
+            );
         }
 
         /// Team B only a name: only A's side, nothing to tell why. The same

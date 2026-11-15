@@ -89,6 +89,39 @@ impl SqliteMatchReader {
         replayed(tx, team, match_id, &self.language)
     }
 
+    /// The match of team A `team` from B's side, scouted on both sides
+    /// (`MatchRows::entry_of_b`): its sets first checked to replay alike
+    /// on both sides (`SetRows::sides`), an error naming the touch that
+    /// doesn't. `None` scouting only A.
+    pub fn read_of_b(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<Option<MatchEntry>, AppError> {
+        let id = match_uuid(match_id)?;
+        self.db.read(|tx| {
+            let rows = match_rows(tx, id)?
+                .filter(|rows| rows.row.team_a == team.id)
+                .ok_or_else(|| not_found(&format!("match {match_id} of team {}", team.id)))?;
+            match (rows.row.scouting, &rows.row.team_b) {
+                (ScoutingMode::Both, TeamRef::Team(b)) => {
+                    rows.sets
+                        .iter()
+                        .filter(|s| !s.row.deleted)
+                        .try_for_each(|s| s.sides(rows.row.max_substitutions).map(|_| ()))?;
+                    let team_b = read_team(tx, b)?;
+                    rows.entry_of_b(team, &team_b)?
+                        .map(|entry| {
+                            numbered(entry.sets.clone(), &self.language, match_id)
+                                .map(|sets| MatchEntry { sets, ..entry })
+                        })
+                        .transpose()
+                }
+                _ => Ok(None),
+            }
+        })
+    }
+
     /// The row of the match of team A `team`, for its form, with the
     /// competition it's played in.
     pub fn details(

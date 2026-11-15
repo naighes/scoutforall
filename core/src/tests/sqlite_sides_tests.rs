@@ -6,6 +6,7 @@
 #[cfg(test)]
 mod tests {
     use crate::{
+        analysis::match_stats,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         domain::{Event, ScoutingMode, Side, adapters::EventsOfA, sql::Sql},
         localization::Language,
@@ -32,6 +33,7 @@ mod tests {
             player::PlayerEntry,
             set::SetEntry,
             snapshot::EventEntry,
+            stats::Stats,
             team::TeamEntry,
         },
         tests::Sqlite,
@@ -220,6 +222,66 @@ mod tests {
             .map(|s| ((s.a.score_us, s.a.score_them), s.b.is_none()))
             .collect();
         assert_eq!(scores, vec![((1, 0), true)]);
+    }
+
+    /// The match from B's side (phase 2, step 3): B's team against A, B's
+    /// score, B's statistics the ones its side replays to.
+    #[tokio::test]
+    async fn the_match_from_b_side() {
+        let p = Sqlite::new();
+        let (a, b, m) = set_one(&p, true).await;
+        add(
+            &p,
+            &m,
+            &[
+                (Side::A, S, a.players[0].id, Positive),
+                (Side::B, P, libero(&b), Negative),
+                (Side::B, A, b.players[1].id, Perfect),
+                (Side::B, S, b.players[1].id, Positive),
+                (Side::A, P, libero(&a), Negative),
+                (Side::A, A, a.players[1].id, Error),
+            ],
+        );
+        let of_b = p
+            .match_reader
+            .read_of_b(&a, &m.id)
+            .unwrap()
+            .expect("B's side");
+        assert_eq!(
+            (of_b.team.id, of_b.opponent.as_str(), of_b.home),
+            (b.id, "Cortona", false)
+        );
+        let snapshot = of_b.sets[0]
+            .compute_snapshot(of_b.max_substitutions)
+            .unwrap();
+        assert_eq!((snapshot.score_us, snapshot.score_them), (2, 0));
+        let sides = reader(&p).read_sides(&m).unwrap();
+        let of_sides = sides[0].b.as_ref().map(|b| b.stats.clone());
+        assert_eq!(Some(match_stats(&of_b).unwrap()), of_sides);
+        assert_ne!(of_sides, Some(Stats::new()));
+    }
+
+    /// Scouting only A: no side of B.
+    #[tokio::test]
+    async fn scouting_a_has_no_b_side() {
+        let p = Sqlite::new();
+        let (a, _, m) = set_one(&p, false).await;
+        add(&p, &m, &[(Side::A, S, a.players[0].id, Perfect)]);
+        assert!(p.match_reader.read_of_b(&a, &m.id).unwrap().is_none());
+    }
+
+    /// The sides not replaying alike: no side of B, an error naming the
+    /// touch, no panic.
+    #[tokio::test]
+    async fn b_side_of_a_touch_not_following_is_an_error() {
+        let p = Sqlite::new();
+        let (a, b, m) = set_one(&p, true).await;
+        add(&p, &m, &[(Side::B, A, b.players[1].id, Perfect)]);
+        let read = p.match_reader.read_of_b(&a, &m.id);
+        assert!(
+            matches!(&read, Err(e) if e.to_string().contains("touch 0 doesn't follow")),
+            "{read:?}"
+        );
     }
 
     /// A touch of B not following (its kill tells A a point before the

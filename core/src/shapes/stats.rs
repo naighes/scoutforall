@@ -434,6 +434,13 @@ pub struct Touch {
 #[derive(Debug, Clone)]
 pub struct Counter<K>(FxHashMap<K, u32>);
 
+/// The same counts, whatever the order of the keys.
+impl<K: Eq + Hash> PartialEq for Counter<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
 impl<K> Default for Counter<K> {
     fn default() -> Self {
         Counter(FxHashMap::default())
@@ -682,7 +689,7 @@ pub(crate) fn percentage(count: i32, total: u32) -> f64 {
     count as f64 / total as f64 * 100.0
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Stats {
     pub events: Counter<EventKey>,
     pub attacks: Counter<AttackKey>,

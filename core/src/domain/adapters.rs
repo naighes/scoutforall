@@ -229,25 +229,85 @@ impl MatchRows {
                 self.row.id
             ))),
         }?;
-        let team = self.team_of_a(team_a)?;
-        let mut sets: Vec<&SetRows> = self.sets.iter().filter(|s| !s.row.deleted).collect();
-        sets.sort_by_key(|s| s.row.number);
-        let sets = sets
+        let sets = self
+            .played()
             .into_iter()
             .map(SetRows::entry)
             .collect::<Result<_, _>>()?;
+        self.entry_of(
+            self.row.team_a,
+            team_a,
+            opponent,
+            self.row.home.is_a(),
+            sets,
+        )
+    }
+
+    /// The match from B's side, scouted on both sides: `team_a` its team A
+    /// (the opponent), `team_b` its team B with the numbers and roles of
+    /// the roster, its sets as B sees them (`SetRows::entry_of_b`). `None`
+    /// scouting only A.
+    pub fn entry_of_b(
+        &self,
+        team_a: &TeamEntry,
+        team_b: &TeamEntry,
+    ) -> Result<Option<MatchEntry>, AppError> {
+        match (self.row.scouting, &self.row.team_b) {
+            (ScoutingMode::A, _) => Ok(None),
+            (ScoutingMode::Both, TeamRef::Team(id))
+                if *id == team_b.id && team_a.id == self.row.team_a =>
+            {
+                let sets = self
+                    .played()
+                    .into_iter()
+                    .map(|s| {
+                        s.entry_of_b().ok_or_else(|| {
+                            not_consistent(format!(
+                                "set {} of match {} without the lineup of B",
+                                s.row.number, self.row.id
+                            ))
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
+                self.entry_of(*id, team_b, team_a.name.clone(), self.row.home.is_b(), sets)
+                    .map(Some)
+            }
+            (ScoutingMode::Both, _) => Err(not_consistent(format!(
+                "match {}: teams {} and {} given, not its teams",
+                self.row.id, team_a.id, team_b.id
+            ))),
+        }
+    }
+
+    /// The sets not removed, in order.
+    fn played(&self) -> Vec<&SetRows> {
+        let mut sets: Vec<&SetRows> = self.sets.iter().filter(|s| !s.row.deleted).collect();
+        sets.sort_by_key(|s| s.row.number);
+        sets
+    }
+
+    /// The match as the team `team_id` (`team`) sees it, with its sets.
+    fn entry_of(
+        &self,
+        team_id: Uuid,
+        team: &TeamEntry,
+        opponent: String,
+        home: bool,
+        sets: Vec<SetEntry>,
+    ) -> Result<MatchEntry, AppError> {
+        let team = self.team_of(team_id, team)?;
         let roster = team
             .players
             .iter()
             .map(|p| p.id)
-            .filter(|id| self.in_roster_of_a(*id).is_some())
+            .filter(|id| self.in_roster_of(team_id, *id).is_some())
             .collect::<Vec<_>>();
         Ok(MatchEntry {
             opponent,
             date: self.row.start,
             id: self.row.id.to_string(),
             team: team.with_roster(&roster),
-            home: self.row.home.is_a(),
+            home,
             max_substitutions: self.row.max_substitutions,
             notes: self.row.notes.clone(),
             roster,
@@ -257,33 +317,34 @@ impl MatchRows {
         })
     }
 
-    fn in_roster_of_a(&self, person_id: Uuid) -> Option<&RosterEntry> {
+    fn in_roster_of(&self, team_id: Uuid, person_id: Uuid) -> Option<&RosterEntry> {
         self.roster
             .iter()
-            .find(|r| r.team_id == self.row.team_a && r.person_id == person_id)
+            .find(|r| r.team_id == team_id && r.person_id == person_id)
     }
 
-    /// Team A with the numbers and roles of the roster of the match.
-    fn team_of_a(&self, team_a: &TeamEntry) -> Result<TeamEntry, AppError> {
+    /// The team `team_id` with the numbers and roles of the roster of the
+    /// match.
+    fn team_of(&self, team_id: Uuid, team: &TeamEntry) -> Result<TeamEntry, AppError> {
         let missing = self
             .roster
             .iter()
-            .filter(|r| r.team_id == self.row.team_a)
-            .find(|r| team_a.find_player(r.person_id).is_none());
-        match (team_a.id == self.row.team_a, missing) {
+            .filter(|r| r.team_id == team_id)
+            .find(|r| team.find_player(r.person_id).is_none());
+        match (team.id == team_id, missing) {
             (false, _) => Err(not_consistent(format!(
-                "match {}: team A is {}, not {}",
-                self.row.id, self.row.team_a, team_a.id
+                "match {}: team {team_id} expected, not {}",
+                self.row.id, team.id
             ))),
             (true, Some(r)) => Err(not_consistent(format!(
                 "match {}: player {} of the roster not in team {}",
-                self.row.id, r.person_id, team_a.id
+                self.row.id, r.person_id, team.id
             ))),
             (true, None) => Ok(TeamEntry {
-                players: team_a
+                players: team
                     .players
                     .iter()
-                    .map(|p| match self.in_roster_of_a(p.id) {
+                    .map(|p| match self.in_roster_of(team_id, p.id) {
                         Some(r) => PlayerEntry {
                             number: r.number,
                             role: r.role,
@@ -292,7 +353,7 @@ impl MatchRows {
                         None => p.clone(),
                     })
                     .collect(),
-                ..team_a.clone()
+                ..team.clone()
             }),
         }
     }
@@ -420,6 +481,19 @@ impl SetRows {
             setter: lineup.setter,
             lineup_rules: self.row.lineup_rules,
             events: self.stream_of_a().into_iter().map(|(_, e)| e).collect(),
+        })
+    }
+
+    /// The set from B's side, scouted on both sides: B's lineup and the
+    /// touches projected on B's side. `None` without B's lineup.
+    pub fn entry_of_b(&self) -> Option<SetEntry> {
+        self.start(Side::B).map(|start| SetEntry {
+            events: project(&self.touches())
+                .b
+                .into_iter()
+                .map(|p| p.entry)
+                .collect(),
+            ..start
         })
     }
 
