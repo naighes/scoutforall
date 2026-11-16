@@ -4,7 +4,7 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::domain::Side;
-    use crate::rally::{Incoherence, Streams, admits, project, replay};
+    use crate::rally::{Incoherence, Streams, admits, answer_evals, answers, project, replay};
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
         flags::EventFlags,
@@ -507,7 +507,8 @@ mod tests {
         assert_eq!(answers(Error, B), vec![]);
         assert_eq!(answers(Over, D), vec![]);
         assert_eq!(answers(Over, B), vec![Perfect]);
-        assert_eq!(answers(Negative, D), vec![Perfect, Positive, Negative]);
+        // the attack `-` was dug easily: the dig `+` or `#`, never `-`
+        assert_eq!(answers(Negative, D), vec![Perfect, Positive]);
         assert_eq!(answers(Negative, B), vec![Positive]);
         // the attack `+` opens the roads: the dig `-` or `/`, the block
         // `-`; the attack `!` was blocked and covered: the block `!`
@@ -585,6 +586,77 @@ mod tests {
             admitted_evals(&a, &b, &blocked, Side::B, D, b.libero),
             vec![Exclamative, Negative]
         );
+    }
+
+    /// The block decides the touch after it (TODO/001, §4.2): after the
+    /// block `!` the cover of the side that attacked answers it, `!` or
+    /// `-`; after the block `+` or `-` the ball stays with the blockers,
+    /// whose dig tells what the block left them, and the attackers have
+    /// nothing to answer.
+    #[test]
+    fn the_block_decides_the_touch_after_it() {
+        assert!(answers(D, B));
+        assert_eq!(
+            answer_evals(B, Some(Exclamative), D),
+            &[Exclamative, Negative]
+        );
+        assert_eq!(answer_evals(B, Some(Positive), D), &[] as &[EvalEnum]);
+        assert_eq!(answer_evals(B, Some(Negative), D), &[] as &[EvalEnum]);
+        let (a, b) = (Team::new(), Team::new());
+        let after = |block: EvalEnum, side: Side| {
+            let rally = [
+                by(Side::A, S, a.setter(), Positive, 0),
+                by(Side::B, P, b.libero, Negative, 1),
+                by(Side::B, A, b.outside_hitter(), Exclamative, 2),
+                by(Side::A, B, a.outside_hitter(), block, 3),
+            ];
+            let player = match side {
+                Side::A => a.libero,
+                Side::B => b.libero,
+            };
+            admitted_evals(&a, &b, &rally, side, D, player)
+        };
+        assert_eq!(after(Exclamative, Side::B), vec![Exclamative, Negative]);
+        assert_eq!(after(Exclamative, Side::A), vec![]);
+        assert_eq!(after(Positive, Side::A), vec![Perfect, Positive]);
+        assert_eq!(after(Positive, Side::B), vec![]);
+        assert_eq!(after(Negative, Side::A), vec![Over, Negative]);
+        assert_eq!(after(Negative, Side::B), vec![]);
+    }
+
+    /// The block `/` is an invasion (TODO/001, §4.2): a fault like the
+    /// others, answering nothing, so the attack before it isn't saved.
+    #[test]
+    fn an_invasion_is_a_fault_without_the_attack() {
+        let (a, b) = (Team::new(), Team::new());
+        let rally = [
+            by(Side::A, S, a.setter(), Positive, 0),
+            by(Side::B, P, b.libero, Negative, 1),
+        ];
+        assert!(admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::A, B, a.outside_hitter(), Over, 2)
+        ));
+        let attacked = [
+            rally.to_vec(),
+            vec![by(Side::B, A, b.outside_hitter(), Negative, 2)],
+        ]
+        .concat();
+        assert!(!admitted(
+            &a,
+            &b,
+            &attacked,
+            by(Side::A, B, a.outside_hitter(), Over, 3)
+        ));
+        // never on the half holding the ball
+        assert!(!admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::B, B, b.outside_hitter(), Over, 2)
+        ));
     }
 
     #[test]

@@ -286,12 +286,13 @@ fn touches_ball(entry: &EventEntry) -> bool {
 
 /// Whether the touch answers the other side's touch, telling the same
 /// transition: the reception of a serve, the dig or the block of an
-/// attack.
+/// attack, the cover after a block.
 pub(crate) fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
     matches!(
         (answered, touch),
         (EventTypeEnum::S, EventTypeEnum::P)
             | (EventTypeEnum::A, EventTypeEnum::D | EventTypeEnum::B)
+            | (EventTypeEnum::B, EventTypeEnum::D)
     )
 }
 
@@ -312,9 +313,16 @@ pub(crate) fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
 /// |---|---|---|
 /// | `#` | `=` | `=` (never `/`) |
 /// | `/` | | `#` |
-/// | `-` | `# + -` | `+` |
+/// | `-` | `# +` | `+` |
 /// | `+` | `- /` | `-` |
 /// | `!` | | `!` |
+///
+/// The block `/` (an invasion) answers nothing: a fault.
+///
+/// | block | cover of the attackers |
+/// |---|---|
+/// | `!` | `! -` |
+/// | `+`, `-` | (the ball stays with the blockers) |
 pub fn answer_evals(
     answered: EventTypeEnum,
     eval: Option<EvalEnum>,
@@ -329,11 +337,12 @@ pub fn answer_evals(
         (S, Some(Exclamative), P) => &[Exclamative],
         (S, Some(Negative), P) => &[Perfect, Positive],
         (A, Some(Over), B) => &[Perfect],
-        (A, Some(Negative), D) => &[Perfect, Positive, Negative],
+        (A, Some(Negative), D) => &[Perfect, Positive],
         (A, Some(Negative), B) => &[Positive],
         (A, Some(Positive), D) => &[Negative, Over],
         (A, Some(Positive), B) => &[Negative],
         (A, Some(Exclamative), B) => &[Exclamative],
+        (B, Some(Exclamative), D) => &[Exclamative, Negative],
         _ => &[],
     }
 }
@@ -353,6 +362,8 @@ pub fn answer_evals(
 ///   block or a reception without the other side's attack;
 /// - after a serve in play, only the reception of the other side;
 /// - a fault, a substitution, a libero or setter change need nothing more;
+///   the block `/` (an invasion) is a fault, but never right after the
+///   other side's attack: that attack isn't saved;
 /// - the other side's point, error or freeball (`OS`, `OE`, `OF`) never:
 ///   its touches tell them.
 pub fn admits(
@@ -413,6 +424,9 @@ pub fn admits(
     };
     match (entry.event_type, answered) {
         (OS | OE | OF, _) => false,
+        (B, _) if entry.eval == Some(EvalEnum::Over) => {
+            offered && !last.is_some_and(|(_, e)| e.event_type == A)
+        }
         (F | R | CL | LR | LF | CS, _) => offered,
         // the other half of the point: closed in the stream of the side
         (_, Some((s, e))) if winner(*s, e).is_some() => fits(e),
