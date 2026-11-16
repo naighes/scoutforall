@@ -412,8 +412,8 @@ mod tests {
         let rally = [
             by(Side::A, S, a.setter(), Positive, 0),
             by(Side::B, P, b.libero, Negative, 1),
-            // the ball back to B (A's dig going over, untold)
-            by(Side::B, A, b.outside_hitter(), Positive, 2),
+            // blocked and covered (A's dig going over, untold)
+            by(Side::B, A, b.outside_hitter(), Exclamative, 2),
         ];
         // A's block touched, the ball back to B
         assert!(admitted(
@@ -507,17 +507,84 @@ mod tests {
         assert_eq!(answers(Error, B), vec![]);
         assert_eq!(answers(Over, D), vec![]);
         assert_eq!(answers(Over, B), vec![Perfect]);
-        assert_eq!(
-            answers(Negative, D),
-            vec![Perfect, Positive, Exclamative, Negative]
-        );
+        assert_eq!(answers(Negative, D), vec![Perfect, Positive, Negative]);
         assert_eq!(answers(Negative, B), vec![Positive]);
-        // the block `-` keeps the ball with the blockers: not where an
-        // attack coming back left it
-        for back in [Positive, Exclamative] {
-            assert_eq!(answers(back, D), vec![], "{back}");
-            assert_eq!(answers(back, B), vec![Exclamative], "{back}");
-        }
+        // the attack `+` opens the roads: the dig `-` or `/`, the block
+        // `-`; the attack `!` was blocked and covered: the block `!`
+        assert_eq!(answers(Positive, D), vec![Over, Negative]);
+        assert_eq!(answers(Exclamative, D), vec![]);
+        assert_eq!(answers(Positive, B), vec![Negative]);
+        assert_eq!(answers(Exclamative, B), vec![Exclamative]);
+    }
+
+    /// After A's attack `+` the roads are open: B digs it (`-` or `/`),
+    /// blocks it, or plays on without the dig; A plays again (B's dig `/`
+    /// untold), never digs or receives without B's attack.
+    #[test]
+    fn after_an_attack_positive_both_sides_can_play() {
+        let (a, b) = (Team::new(), Team::new());
+        let rally = [
+            by(Side::A, S, a.setter(), Positive, 0),
+            by(Side::B, P, b.libero, Negative, 1),
+            by(Side::B, A, b.outside_hitter(), Negative, 2),
+            by(Side::A, D, a.libero, Positive, 3),
+            by(Side::A, A, a.outside_hitter(), Positive, 4),
+        ];
+        assert_eq!(
+            admitted_evals(&a, &b, &rally, Side::B, D, b.libero),
+            vec![Over, Negative]
+        );
+        assert!(admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::B, A, b.outside_hitter(), Negative, 5)
+        ));
+        assert!(admitted(&a, &b, &rally, touch(Side::B, FB, None, 5)));
+        assert!(admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::A, A, a.outside_hitter(), Perfect, 5)
+        ));
+        assert!(admitted(&a, &b, &rally, touch(Side::A, FB, None, 5)));
+        assert!(!admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::A, D, a.libero, Positive, 5)
+        ));
+        assert!(!admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::A, B, a.outside_hitter(), Positive, 5)
+        ));
+    }
+
+    /// The cover after the own attack `!`, or after the block `!` of the
+    /// other side: `!` or `-`.
+    #[test]
+    fn the_cover_follows_the_own_attack_exclamative() {
+        let (a, b) = (Team::new(), Team::new());
+        let rally = [
+            by(Side::A, S, a.setter(), Positive, 0),
+            by(Side::B, P, b.libero, Negative, 1),
+            by(Side::B, A, b.outside_hitter(), Exclamative, 2),
+        ];
+        assert_eq!(
+            admitted_evals(&a, &b, &rally, Side::B, D, b.libero),
+            vec![Exclamative, Negative]
+        );
+        let blocked = [
+            rally.to_vec(),
+            vec![by(Side::A, B, a.outside_hitter(), Exclamative, 3)],
+        ]
+        .concat();
+        assert_eq!(
+            admitted_evals(&a, &b, &blocked, Side::B, D, b.libero),
+            vec![Exclamative, Negative]
+        );
     }
 
     #[test]

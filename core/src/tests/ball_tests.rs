@@ -131,6 +131,9 @@ mod tests {
                 ball(&t.replay(Them, vec![act(P, t.oh1, eval)])),
                 (Us, Some((P, Some(t.oh1), Some(eval))))
             );
+        }
+        // the dig `!` is only a cover
+        for eval in [Perfect, Positive, Negative] {
             let events = vec![act(S, t.setter, Positive), act(D, t.libero, eval)];
             assert_eq!(
                 ball(&t.replay(Us, events)),
@@ -143,10 +146,12 @@ mod tests {
         );
     }
 
+    /// Our attack comes back blocked and covered (`!`); defended (`-`, or
+    /// `+` with difficulty, the roads open) the ball is theirs.
     #[test]
-    fn an_attack_comes_back_unless_defended() {
+    fn an_attack_comes_back_blocked_and_covered() {
         let t = Team::new();
-        for (eval, side) in [(Positive, Us), (Exclamative, Us), (Negative, Them)] {
+        for (eval, side) in [(Positive, Them), (Exclamative, Us), (Negative, Them)] {
             let events = vec![act(P, t.oh1, Positive), act(A, t.oh1, eval)];
             assert_eq!(
                 ball(&t.replay(Them, events)),

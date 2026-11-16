@@ -212,6 +212,64 @@ mod tests {
         assert_eq!(options(&snapshot), THEIRS);
     }
 
+    /// Our attack `+`: defended with difficulty, they don't counterattack.
+    /// Open roads: the ball can be theirs (their dig `-`, then they attack
+    /// or send a freeball) or back to us (their dig `/`), the touch after
+    /// tells: the same choices as after our attack `-`.
+    #[test]
+    fn after_our_attack_positive_the_roads_are_open() {
+        let t = Team::new();
+        let snapshot = t.after_our_reception(&[(A, Positive)]);
+        assert_eq!(snapshot.get_ball_side(), Them);
+        assert_eq!(options(&snapshot), THEIRS);
+        // back to us: we play again
+        let again = t.after_our_reception(&[(A, Positive), (A, Perfect)]);
+        assert_eq!(again.score_us, 1);
+        // theirs: our dig of their attack
+        let dug = t.after_our_reception(&[(A, Positive), (D, Positive)]);
+        assert_eq!(dug.get_ball_side(), Us);
+    }
+
+    /// Our attack `!`, blocked and covered: our cover after it is optional,
+    /// `!` (we rebuild) or `-` (we struggle).
+    #[test]
+    fn after_our_attack_exclamative_our_cover_is_optional() {
+        let t = Team::new();
+        let snapshot = t.after_our_reception(&[(A, Exclamative)]);
+        assert_eq!(snapshot.get_ball_side(), Us);
+        assert_eq!(options(&snapshot), vec![OE, F, A, D, FB]);
+        assert_eq!(snapshot.available_evals(D), vec![Exclamative, Negative]);
+        for cover in [Exclamative, Negative] {
+            let covered = t.after_our_reception(&[(A, Exclamative), (D, cover)]);
+            assert_eq!(covered.get_ball_side(), Us, "{cover}");
+            assert_eq!(options(&covered), vec![OE, F, A, FB], "{cover}");
+        }
+        for refused in [Perfect, Positive, Over, Error] {
+            let events = vec![t.act(P, Positive), t.act(A, Exclamative), t.act(D, refused)];
+            assert!(
+                t.set(Them, events)
+                    .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+                    .is_err(),
+                "{refused}"
+            );
+        }
+    }
+
+    /// The dig `!` is only a cover: never the dig of their attack, nor the
+    /// one after our block.
+    #[test]
+    fn a_dig_exclamative_is_only_a_cover() {
+        let t = Team::new();
+        let dig = t.after_our_serve(&[]).available_evals(D);
+        assert_eq!(dig, vec![Perfect, Positive, Over, Negative, Error]);
+        let events = vec![t.act(S, Positive), t.act(D, Exclamative)];
+        assert!(
+            t.set(Us, events)
+                .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+                .is_err()
+        );
+    }
+
     // --- the translation of older rules (`domain::rules`) ---------------
 
     use crate::domain::{Side, rules::translate};
@@ -293,8 +351,62 @@ mod tests {
             (Side::A, B, Some(Positive)),
             (Side::A, OF, None),
         ];
-        assert_eq!(told(Some(ScoutingRulesEnum::V2), &saved), saved);
-        assert_eq!(ScoutingRulesEnum::CURRENT, ScoutingRulesEnum::V2);
+        assert_eq!(told(Some(ScoutingRulesEnum::V3), &saved), saved);
+        assert_eq!(ScoutingRulesEnum::CURRENT, ScoutingRulesEnum::V3);
+    }
+
+    /// v2: the dig `!` was a dig of their attack with few options left,
+    /// `+` now (`!` is only a cover); the attack `+` (we played again) as
+    /// saved, one of the roads it opens now. From v1 both translations.
+    #[test]
+    fn the_digs_of_v2_are_told_with_the_current_rules() {
+        let v2 = [
+            (Side::A, D, Some(Exclamative)),
+            (Side::B, D, Some(Exclamative)),
+            (Side::A, A, Some(Positive)),
+            (Side::A, A, Some(Exclamative)),
+            (Side::A, P, Some(Exclamative)),
+            (Side::A, D, Some(Negative)),
+        ];
+        let expected = [
+            (Side::A, D, Some(Positive)),
+            (Side::B, D, Some(Positive)),
+            (Side::A, A, Some(Positive)),
+            (Side::A, A, Some(Exclamative)),
+            (Side::A, P, Some(Exclamative)),
+            (Side::A, D, Some(Negative)),
+        ];
+        assert_eq!(told(Some(ScoutingRulesEnum::V2), &v2), expected);
+        let v1 = [
+            (Side::A, B, Some(Negative)),
+            (Side::A, D, Some(Exclamative)),
+        ];
+        assert_eq!(
+            told(None, &v1),
+            [
+                (Side::A, B, Some(Exclamative)),
+                (Side::A, D, Some(Positive))
+            ]
+        );
+    }
+
+    /// A set of v2 with the dig `!` replays with the current rules.
+    #[test]
+    fn a_set_of_v2_replays_with_the_current_rules() {
+        let t = Team::new();
+        let saved = [
+            t.act(S, Positive),
+            t.act(D, Exclamative),
+            t.act(A, Positive),
+            t.act(A, Perfect),
+        ];
+        let touches: Vec<(Side, EventEntry)> = saved.into_iter().map(|e| (Side::A, e)).collect();
+        let events = translate(Some(ScoutingRulesEnum::V2), &touches)
+            .into_iter()
+            .map(|(_, e)| e)
+            .collect();
+        let snapshot = t.replay(Us, events);
+        assert_eq!((snapshot.score_us, snapshot.score_them), (1, 0));
     }
 
     /// Both sides: the freeball after the block is the blocking side's.

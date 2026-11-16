@@ -2908,7 +2908,8 @@ mod tests {
         };
         let snapshot = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
         let options = snapshot.get_available_options();
-        assert_eq!(options, vec![OE, F, A, FB]);
+        // our cover after it optional
+        assert_eq!(options, vec![OE, F, A, D, FB]);
         let snapshot = t.serving(vec![
             act(S, t.setter, Negative),
             act(D, t.oh2, Positive),
@@ -2938,15 +2939,21 @@ mod tests {
     fn every_evaluation_has_a_follow_up() {
         let t = Team::new();
         // the events before each action, so that it's available
-        let before = |event_type| match event_type {
-            S => vec![],
-            P => vec![opp(OE), act(S, t.setter, Error)],
-            A | D | B => vec![act(S, t.setter, Negative)],
+        let before = |event_type, eval| match (event_type, eval) {
+            (S, _) => vec![],
+            (P, _) => vec![opp(OE), act(S, t.setter, Error)],
+            // the dig `!`, a cover: after our attack `!`
+            (D, Exclamative) => vec![
+                act(S, t.setter, Negative),
+                act(D, t.oh2, Positive),
+                act(A, t.opposite, Exclamative),
+            ],
+            (A | D | B, _) => vec![act(S, t.setter, Negative)],
             _ => unreachable!(),
         };
         for event_type in [S, P, A, D, B] {
             for eval in event_type.available_evals() {
-                let mut events = before(event_type);
+                let mut events = before(event_type, eval);
                 // the attacker after a serve: a dig first
                 if event_type == A {
                     events.push(act(D, t.oh2, Positive));

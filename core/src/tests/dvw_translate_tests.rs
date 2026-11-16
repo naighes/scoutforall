@@ -1084,7 +1084,8 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
     }
 
     /// Our attack `-` back from their block, our dig: no freeball of
-    /// theirs, the ball back to us without their attack (our `+`).
+    /// theirs, the ball back to us without their attack, blocked and
+    /// covered (our `!`), the cover not scouted.
     #[test]
     fn our_attack_back_from_their_block_is_no_freeball() {
         let mut file = File::new();
@@ -1098,7 +1099,30 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             events.iter().take(3).copied().collect::<Vec<_>>(),
             vec![
                 (P, Some(EvalEnum::Positive)),
-                (A, Some(EvalEnum::Positive)),
+                (A, Some(EvalEnum::Exclamative)),
+                (A, Some(EvalEnum::Perfect))
+            ]
+        );
+    }
+
+    /// Our dig `!` of their attack: the dig `!` is only a cover, DataVolley's
+    /// `!` lets us build: our `+`.
+    #[test]
+    fn our_dig_exclamative_of_their_attack_is_positive() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM+", "*07RM+", "*02AH-", "a12DH+", "a13AH+", "*07DH!", "*04AH#",
+            ],
+            true,
+        );
+        let events = evaluated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            events.iter().take(4).copied().collect::<Vec<_>>(),
+            vec![
+                (P, Some(EvalEnum::Positive)),
+                (A, Some(EvalEnum::Negative)),
+                (D, Some(EvalEnum::Positive)),
                 (A, Some(EvalEnum::Perfect))
             ]
         );

@@ -115,13 +115,20 @@ pub enum ScoutingRulesEnum {
     /// The block `!` (the ball back to the team attacking), `+` and `-`
     /// keeping the ball with the blockers, the dig after the block.
     V2,
+    /// The attack `+` defended with difficulty, the roads open after it;
+    /// the dig `!` only a cover, optional after the own attack `!`.
+    V3,
 }
 
 impl ScoutingRulesEnum {
     /// The rules new sets are scouted with.
-    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V2;
+    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V3;
 
-    pub const ALL: [ScoutingRulesEnum; 2] = [ScoutingRulesEnum::V1, ScoutingRulesEnum::V2];
+    pub const ALL: [ScoutingRulesEnum; 3] = [
+        ScoutingRulesEnum::V1,
+        ScoutingRulesEnum::V2,
+        ScoutingRulesEnum::V3,
+    ];
 }
 
 impl fmt::Display for TeamSideEnum {
@@ -354,13 +361,14 @@ impl EventTypeEnum {
     /// goes on; `None` when it ends the rally (see `rally_winner`) or isn't
     /// a touch (the changes of the lineup).
     ///
-    /// - on our side: our reception or dig (`/` aside), our attack coming
-    ///   back (`+` off their block, `!` blocked and covered), our block `+`
-    ///   or `-` (the ball stays with the blockers), their reception coming
-    ///   straight back (serve `/`), their freeball;
+    /// - on our side: our reception or dig (`/` aside), our attack blocked
+    ///   and covered (`!`), our block `+` or `-` (the ball stays with the
+    ///   blockers), their reception coming straight back (serve `/`), their
+    ///   freeball;
     /// - on their side: our serve, our reception or dig going straight over
-    ///   (`/`), our attack defended (`-`), our block `!` (the ball back to
-    ///   them, who attacked), our freeball.
+    ///   (`/`), our attack defended (`-`, or `+` with difficulty: the roads
+    ///   are open, the ball can come back to us, see `rally::admits`), our
+    ///   block `!` (the ball back to them, who attacked), our freeball.
     pub fn ball_side_after(&self, eval: Option<EvalEnum>) -> Option<TeamSideEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -368,7 +376,7 @@ impl EventTypeEnum {
             (Some(_), _, _) | (None, R | CL | LR | LF | CS | F | OS | OE, _) => None,
             (None, S, Some(Over))
             | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
-            | (None, A, Some(Positive | Exclamative))
+            | (None, A, Some(Exclamative))
             | (None, B, Some(Positive | Negative))
             | (None, OF, _) => Some(TeamSideEnum::Us),
             (None, S | P | D | A | B, _) | (None, FB, _) => Some(TeamSideEnum::Them),
@@ -448,10 +456,10 @@ impl FromStr for EventTypeEnum {
 /// quality or outcome of a play. These evaluations are applied across
 /// all fundamentals (serve, reception, attack, block, dig/defense).
 ///
-/// A rally going on, `+` and `-` of the attack tell who plays the ball
-/// next: `+` us, `-` them (attacking), however hard the touch was; the
-/// block keeps the ball with us on `+` and `-`, `!` sends it back to them
-/// (TODO/001, §4.2). The serve mirrors their
+/// A rally going on (TODO/001, §4.2): after the attack `-` they attack,
+/// after `+` the roads are open (they struggle, or the ball comes back to
+/// us), after `!` we cover; the block keeps the ball with us on `+` and
+/// `-`, `!` sends it back to them. The serve mirrors their
 /// reception: `+` is their `-`, `!` their `!`, `-` their `+` or `#`, `/`
 /// their `/`.
 ///
@@ -470,11 +478,10 @@ impl FromStr for EventTypeEnum {
 ///   - Serve: puts the opponent in trouble, limiting their attack.
 ///   - Reception: accurate pass, but not perfect — still allows
 ///     first-tempo attacks.  
-///   - Attack: does not score, but we play the ball again without their
-///     attack: it rebounds off their block, their dig goes straight over,
-///     or they send a freeball (`OF`, optional).
-///   - Block: does not score, but we play the ball again without their
-///     attack (they can send a freeball, `OF`, optional).
+///   - Attack: defended with difficulty, they don't counterattack: their
+///     dig `-` (a freeball or an easy attack) or `/` (back to us).
+///   - Block: touched, the ball stays with us and we counterattack (our
+///     dig after it, optional, `+` or `#`).
 ///   - Defense: playable ball, but with limited attacking transition.
 ///
 /// - **Exclamative (`!`)**  
@@ -483,8 +490,10 @@ impl FromStr for EventTypeEnum {
 ///   - Reception: between `+` and `-` - pass is neither perfect nor bad.
 ///   - Attack: blocked, but kept alive by our team coverage, allowing a
 ///     possible re-attack (still a positive attack).
-///   - Block: not used.
-///   - Defense: similar to reception - playable, but not perfect.
+///   - Block: touched, the ball goes back to them, who attacked, however
+///     they rebuild.
+///   - Defense: only a cover, after our attack `!`: we rebuild (`-` when
+///     we struggle).
 ///
 /// - **Over (`/`)**  
 ///   The action gives the opponent a direct advantage or results
@@ -510,8 +519,9 @@ impl FromStr for EventTypeEnum {
 ///   A weak action that puts the team at disadvantage, though play continues.
 ///   - Serve: too easy, giving full control to the opponent.
 ///   - Reception: poor pass, only one predictable attack available.
-///   - Attack: defended, they attack again.
-///   - Block: touched, they attack again.
+///   - Attack: defended easily, they counterattack.
+///   - Block: touched, the ball stays with us but we struggle (our dig
+///     after it, optional, `-` or `/`).
 ///   - Defense: keeps the ball in play, but no chance for a strong counter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EvalEnum {

@@ -301,7 +301,9 @@ impl Snapshot {
 
     /// The evaluations the event can have now, after the one before it
     /// (TODO/001, §4.2): our dig after our block tells what the block left
-    /// us, `+` or `#` after a block `+`, `-` or `/` after a block `-`.
+    /// us, `+` or `#` after a block `+`, `-` or `/` after a block `-`; our
+    /// cover after our attack `!` (or their block `!`, untold) rebuilds
+    /// (`!`) or struggles (`-`); `!` is only a cover.
     pub fn available_evals(&self, event_type: EventTypeEnum) -> Vec<EvalEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -309,6 +311,8 @@ impl Snapshot {
         let admitted: &[EvalEnum] = match (event_type, after) {
             (D, Some((B, Some(Positive)))) => &[Perfect, Positive],
             (D, Some((B, Some(Negative)))) => &[Negative, Over],
+            (D, Some((A, Some(Exclamative)))) => &[Exclamative, Negative],
+            (D, _) => &[Perfect, Positive, Negative, Over, Error],
             _ => &EvalEnum::ALL,
         };
         event_type
@@ -896,14 +900,15 @@ impl Snapshot {
         //
         // after our block `+` or `-` the ball stays with us, the blockers:
         // our dig after it is optional, its evaluation the block's (see
-        // `available_evals`).
+        // `available_evals`); after our attack `!` (blocked and covered) our
+        // cover is optional, `!` or `-`.
         //
         // on their side, they attack (our dig or block comes next) or they
-        // don't: after our attack `+` we play the ball again, their
-        // freeball (`OF`) optional; after our serve `/` their reception came
-        // back, not a freeball; after our serve `+`, `!` or `-`, our attack
-        // `-` or our block `!` (back to them, who attacked) they attack or
-        // send a freeball (`OF`): the evaluation
+        // don't: after our serve `/` their reception came back, not a
+        // freeball; after our serve `+`, `!` or `-`, our attack `-` or `+`
+        // (defended with difficulty: the roads are open, the ball back to
+        // us after their dig `/`, untold) or our block `!` (back to them,
+        // who attacked) they attack or send a freeball (`OF`): the evaluation
         // tells their reception or dig, the freeball what they made of it,
         // as our reception or dig and our freeball (`FB`) do: a perfect
         // reception the setter sends over is `#`, then the freeball. A ball
@@ -928,13 +933,11 @@ impl Snapshot {
             (OS | F, None) | (A | B | D | P | S, Some(Error)) | (A | B, Some(Over)) => serve_them(),
             // ours
             (OE, None) | (A | B | S, Some(Perfect)) => serve_us(),
-            (A, Some(Positive)) => vec![OE, F, A, FB, OF],
-            // the ball stays with the blockers: their dig after it optional
-            (B, Some(Positive | Negative)) => vec![OE, F, A, D, FB],
-            (A, Some(Exclamative)) | (D | P, Some(Exclamative | Negative | Positive | Perfect)) => {
-                vec![OE, F, A, FB]
-            }
-            (A, Some(Negative))
+            // the ball stays with the blockers, or comes back to the
+            // attackers: the dig or the cover after it optional
+            (B, Some(Positive | Negative)) | (A, Some(Exclamative)) => vec![OE, F, A, D, FB],
+            (D | P, Some(Exclamative | Negative | Positive | Perfect)) => vec![OE, F, A, FB],
+            (A, Some(Negative | Positive))
             | (B, Some(Exclamative))
             | (D | P, Some(Over))
             | (S, Some(Positive | Exclamative | Negative))

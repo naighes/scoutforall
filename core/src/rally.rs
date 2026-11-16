@@ -312,8 +312,9 @@ pub(crate) fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
 /// |---|---|---|
 /// | `#` | `=` | `=` (never `/`) |
 /// | `/` | | `#` |
-/// | `-` | `# + ! -` | `+` |
-/// | `+` or `!` | | `!` or `-` |
+/// | `-` | `# + -` | `+` |
+/// | `+` | `- /` | `-` |
+/// | `!` | | `!` |
 pub fn answer_evals(
     answered: EventTypeEnum,
     eval: Option<EvalEnum>,
@@ -328,16 +329,18 @@ pub fn answer_evals(
         (S, Some(Exclamative), P) => &[Exclamative],
         (S, Some(Negative), P) => &[Perfect, Positive],
         (A, Some(Over), B) => &[Perfect],
-        (A, Some(Negative), D) => &[Perfect, Positive, Exclamative, Negative],
+        (A, Some(Negative), D) => &[Perfect, Positive, Negative],
         (A, Some(Negative), B) => &[Positive],
-        (A, Some(Positive | Exclamative), B) => &[Exclamative, Negative],
+        (A, Some(Positive), D) => &[Negative, Over],
+        (A, Some(Positive), B) => &[Negative],
+        (A, Some(Exclamative), B) => &[Exclamative],
         _ => &[],
     }
 }
 
 /// Whether the side can add the touch now, after the touches so far,
 /// replayed as `a` and `b` (see [`replay`]): the stream of the side must
-/// offer it, and
+/// offer it, with its evaluation, and
 /// - a touch of the ball must find it on the side's half, where the last
 ///   touch left it as its side sees it, or else answer the other side's
 ///   last touch (see `answers`) with an evaluation `answer_evals` admits:
@@ -345,6 +348,9 @@ pub fn answer_evals(
 ///   reception `/`), or the other half of the point that touch ended
 ///   (their ace, our reception error), which the stream of the side has
 ///   closed already;
+/// - after its own attack `+` (the roads open) the side plays again, the
+///   other side's dig `/` untold: an attack or a freeball, never a dig, a
+///   block or a reception without the other side's attack;
 /// - after a serve in play, only the reception of the other side;
 /// - a fault, a substitution, a libero or setter change need nothing more;
 /// - the other side's point, error or freeball (`OS`, `OE`, `OF`) never:
@@ -380,14 +386,25 @@ pub fn admits(
     // on the side's half, or answering in play where the last touch left
     // the ball
     let in_play = ball == side || after == Some(ball);
+    // the side's own attack `+`, the roads open: back to it
+    let open_roads = touches
+        .iter()
+        .rev()
+        .find(|(_, e)| touches_ball(e))
+        .is_some_and(|(s, e)| {
+            *s == side && e.event_type == A && e.eval == Some(EvalEnum::Positive)
+        });
     let touch_admitted = |event_type: EventTypeEnum| match (serve_in_play, last) {
         (true, Some(_)) => event_type == P && in_play,
         (true, None) => false,
         (false, Some((s, e))) if winner(*s, e).is_some() => ball == side,
         (false, Some((_, e))) => ball == side || answers(event_type, e.event_type) && in_play,
-        (false, None) => ball == side,
+        (false, None) => ball == side || open_roads && matches!(event_type, A | FB),
     };
-    let offered = own.get_available_options().contains(&entry.event_type);
+    let offered = own.get_available_options().contains(&entry.event_type)
+        && entry
+            .eval
+            .is_none_or(|eval| own.available_evals(entry.event_type).contains(&eval));
     let answered = last.filter(|(_, e)| answers(entry.event_type, e.event_type));
     let fits = |answered: &EventEntry| {
         entry.eval.is_some_and(|eval| {

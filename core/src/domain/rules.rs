@@ -8,6 +8,11 @@
 //! - `+` followed by their freeball (`OF`) let the ball go back to them
 //!   too: it's `!`, `+` keeping the ball with the blockers.
 //!
+//! From v2 to v3, the dig `!` was a dig of their attack with few options
+//! left: it's `+` now, `!` being only a cover (after the own attack `!`).
+//! The attack `+` (we played the ball again) stays: one of the roads it
+//! opens now.
+//!
 //! A set the translation can't make follow the current rules doesn't
 //! replay, with the error of the replay: never a guess.
 use crate::{
@@ -25,8 +30,9 @@ pub fn translate(
     touches: &[(Side, EventEntry)],
 ) -> Vec<(Side, EventEntry)> {
     match rules.unwrap_or(ScoutingRulesEnum::V1) {
-        ScoutingRulesEnum::V1 => from_v1(touches),
-        ScoutingRulesEnum::V2 => touches.to_vec(),
+        ScoutingRulesEnum::V1 => from_v2(&from_v1(touches)),
+        ScoutingRulesEnum::V2 => from_v2(touches),
+        ScoutingRulesEnum::V3 => touches.to_vec(),
     }
 }
 
@@ -58,6 +64,25 @@ fn from_v1(touches: &[(Side, EventEntry)]) -> Vec<(Side, EventEntry)> {
             let eval = match (entry.event_type, entry.eval, next) {
                 (B, Some(Negative), _) | (B, Some(Positive), Some(OF)) => Some(Exclamative),
                 (_, eval, _) => eval,
+            };
+            (
+                *side,
+                EventEntry {
+                    eval,
+                    ..entry.clone()
+                },
+            )
+        })
+        .collect()
+}
+
+fn from_v2(touches: &[(Side, EventEntry)]) -> Vec<(Side, EventEntry)> {
+    touches
+        .iter()
+        .map(|(side, entry)| {
+            let eval = match (entry.event_type, entry.eval) {
+                (EventTypeEnum::D, Some(EvalEnum::Exclamative)) => Some(EvalEnum::Positive),
+                (_, eval) => eval,
             };
             (
                 *side,

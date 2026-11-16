@@ -1110,10 +1110,14 @@ impl SetTranslator<'_> {
             .rally_events()
             .iter()
             .any(|e| e.event_type.ball_side_after(e.eval).is_some());
-        let ball_ours =
-            self.snapshot.get_ball_side() == TeamSideEnum::Us && touched && !self.rally_over();
-        let after = self.after(next);
         let last = self.rally_events().last().map(|e| (e.event_type, e.eval));
+        // our attack `+` opens the roads: back to us without their attack
+        // (the import tells it so), our dig after it a cover
+        let back_to_us = last == Some((A, Some(Positive)));
+        let ball_ours = (self.snapshot.get_ball_side() == TeamSideEnum::Us || back_to_us)
+            && touched
+            && !self.rally_over();
+        let after = self.after(next);
         // their reception or dig straight over (`/`): back without their
         // freeball
         let their_first_over = next
@@ -1209,8 +1213,8 @@ impl SetTranslator<'_> {
                 Some((P, Some(Over)))
             }
             // attack and block: they attack, our `-`; the ball back without
-            // their attack, our `+` (`!` blocked and covered), their
-            // freeball after it, unless they dug it (`-`)
+            // their attack, our `+` (`!` blocked and covered, back from
+            // their block), their freeball after it, unless they dug it (`-`)
             (Skill::Attack, Ending::Goes, '!', _, After::Kept | After::OurFreeball) => {
                 Some((A, Some(Exclamative)))
             }
@@ -1232,12 +1236,21 @@ impl SetTranslator<'_> {
                 e,
                 _,
                 After::Kept | After::OurFreeball | After::BackWithoutAttack | After::TheirFreeball,
-            ) => {
-                if e != '+' {
-                    self.mapped("A or B back without their attack as +");
+            ) => match (skill.skill, their_block) {
+                // back from their block: blocked and covered
+                (Skill::Attack, true) => {
+                    if e != '!' {
+                        self.mapped("A back from their block as !");
+                    }
+                    Some((A, Some(Exclamative)))
                 }
-                Some((attack_or_block(skill.skill), Some(Positive)))
-            }
+                _ => {
+                    if e != '+' {
+                        self.mapped("A or B back without their attack as +");
+                    }
+                    Some((attack_or_block(skill.skill), Some(Positive)))
+                }
+            },
             (Skill::Attack | Skill::Block, Ending::Goes, e, _, _) => {
                 if e != '-' {
                     self.mapped("A or B played by them as -");
@@ -1267,6 +1280,11 @@ impl SetTranslator<'_> {
             (Skill::Dig, Ending::Goes, '/', false, After::Kept | After::OurFreeball) => {
                 self.mapped("D/ kept as D-");
                 Some((D, Some(Negative)))
+            }
+            // `!` lets us build: our dig `!` is only a cover
+            (Skill::Dig, Ending::Goes, '!', false, After::Kept | After::OurFreeball) => {
+                self.mapped("D! as D+");
+                Some((D, Some(Positive)))
             }
             (Skill::Dig, Ending::Goes, e, false, After::Kept | After::OurFreeball) => {
                 Some((D, Some(eval(e)?)))

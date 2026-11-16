@@ -185,7 +185,6 @@ mod tests {
         let t = Team::new();
         let ball_ours_to_play = vec![OE, F, A, FB];
         // we play it again, after their freeball or not
-        let ball_ours_or_their_freeball = vec![OE, F, A, FB, OF];
         // sent over without an attack: they attack, or send it back easy
         let ball_theirs = vec![OS, OE, F, A, D, B, FB, OF];
         // after their reception or dig they attack (our dig or block, or
@@ -223,9 +222,14 @@ mod tests {
                 t.serving(vec![t.serve(Negative), act(D, t.libero, Positive)]),
                 ball_ours_to_play.clone(),
             ),
+            // our cover after our attack blocked and covered
             (
                 "D!",
-                t.serving(vec![t.serve(Negative), act(D, t.libero, Exclamative)]),
+                t.receiving(vec![
+                    act(P, t.libero, Perfect),
+                    act(A, t.oh1, Exclamative),
+                    act(D, t.libero, Exclamative),
+                ]),
                 ball_ours_to_play.clone(),
             ),
             (
@@ -265,16 +269,17 @@ mod tests {
                 t.receiving(vec![act(P, t.libero, Over)]),
                 ball_theirs.clone(),
             ),
-            // our attack: they couldn't counter it, it was covered, or they dug it
+            // our attack: dug with difficulty (the roads open), blocked and
+            // covered (our cover optional), or dug
             (
                 "A+",
                 t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Positive)]),
-                ball_ours_or_their_freeball.clone(),
+                ball_theirs_received_or_dug.clone(),
             ),
             (
                 "A!",
                 t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Exclamative)]),
-                ball_ours_to_play.clone(),
+                vec![OE, F, A, D, FB],
             ),
             (
                 "A-",
