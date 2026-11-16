@@ -41,6 +41,9 @@ pub struct UploadSender {
     wake: Condvar,
     first: Duration,
     last: Duration,
+    /// the requests once started (the tests: one per match queued)
+    #[cfg(test)]
+    requests: std::sync::atomic::AtomicU32,
 }
 
 impl UploadSender {
@@ -51,6 +54,8 @@ impl UploadSender {
             wake: Condvar::new(),
             first,
             last,
+            #[cfg(test)]
+            requests: std::sync::atomic::AtomicU32::new(0),
         })
     }
 
@@ -66,6 +71,9 @@ impl UploadSender {
         if self.attempt.get().is_none() {
             return;
         }
+        #[cfg(test)]
+        self.requests
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut state = self.state();
         match state.running {
             true => {
@@ -85,6 +93,12 @@ impl UploadSender {
     #[cfg(test)]
     pub fn running(&self) -> bool {
         self.state().running
+    }
+
+    /// The requests since the start, the start's included.
+    #[cfg(test)]
+    pub fn requests(&self) -> u32 {
+        self.requests.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn state(&self) -> MutexGuard<'_, State> {

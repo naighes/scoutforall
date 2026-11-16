@@ -4556,7 +4556,7 @@ impl Scout4All {
     }
 
     /// Saves the import as chosen; a match saved already only when
-    /// `overwrite`.
+    /// `overwrite`. The match queued asks the sender (`finished_matches`).
     pub fn import_dvw(
         &self,
         bytes: Vec<u8>,
@@ -4576,7 +4576,6 @@ impl Scout4All {
             &*self.set_writer,
             &*self.finished_matches(),
         ))?;
-        self.sender.request();
         Ok(DvwImported {
             team_id: team.team.id.to_string(),
             match_id: m.id,
@@ -9164,6 +9163,22 @@ mod tests {
         api.down.store(false, Ordering::SeqCst);
         app.send_uploads();
         assert!(eventually(|| api.puts() == 1 && queued(&dir).is_empty()));
+    }
+
+    /// An import asks the sender once: a second request while the first
+    /// attempt runs is a second attempt right after it, which with the API
+    /// down fails the match twice in a row.
+    #[test]
+    fn an_import_asks_to_send_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let api = FakeApi::start();
+        sending_to(&app, api.url.clone());
+        assert_eq!(app.sender.requests(), 1);
+        app.import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .unwrap();
+        assert_eq!(app.sender.requests(), 2);
     }
 
     /// Before `send_in_background` (Android, with WorkManager) nothing is
