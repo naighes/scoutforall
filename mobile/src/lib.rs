@@ -462,19 +462,53 @@ pub enum MobileError {
 /// The language of the app, for the errors converted with `?` (see
 /// `From<AppError>`): the one of the last `Scout4All` made, which follows
 /// its `set_language`.
+#[cfg(not(test))]
 static ERRORS_LANGUAGE: std::sync::RwLock<Option<Language>> = std::sync::RwLock::new(None);
+
+#[cfg(not(test))]
+fn set_errors_language(language: Language) {
+    *ERRORS_LANGUAGE
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language);
+}
+
+#[cfg(not(test))]
+fn errors_labels() -> &'static Labels {
+    ERRORS_LANGUAGE
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .map_or_else(|| Language::default().labels(), Language::labels)
+}
+
+// the tests run at the same time, each on its thread, each with its app: one
+// language of the errors per thread, or a test would read another's
+#[cfg(test)]
+thread_local! {
+    static ERRORS_LANGUAGE: std::cell::RefCell<Option<Language>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_errors_language(language: Language) {
+    ERRORS_LANGUAGE.with(|l| *l.borrow_mut() = Some(language));
+}
+
+#[cfg(test)]
+fn errors_labels() -> &'static Labels {
+    ERRORS_LANGUAGE.with(|l| {
+        l.borrow()
+            .as_ref()
+            .map_or_else(|| Language::default().labels(), Language::labels)
+    })
+}
 
 impl From<AppError> for MobileError {
     fn from(e: AppError) -> Self {
         // the messages of the core are in the labels of the domain, for the
         // user as they are; the files and the network in the language
-        let labels = ERRORS_LANGUAGE
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .map_or_else(|| Language::default().labels(), Language::labels);
         MobileError::Failed {
-            reason: e.message(labels),
+            reason: e.message(errors_labels()),
         }
     }
 }
@@ -3358,9 +3392,7 @@ impl Scout4All {
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
         let language = Language::new(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
-        *ERRORS_LANGUAGE
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language.clone());
+        set_errors_language(language.clone());
         std::fs::create_dir_all(&data_dir).map_err(|e| failed(AppError::IO(IOError::from(e))))?;
         let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
         let runtime = Builder::new_current_thread()
@@ -3369,7 +3401,7 @@ impl Scout4All {
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })?;
-        let db = Database::new(db::open(&data_dir.join(layout::DATABASE))?);
+        let db = open_database(&data_dir.join(layout::DATABASE), language.labels())?;
         let notice = migrate_folder(&runtime, &*store, &db, &data_dir, language.labels());
         let queue = Arc::new(SqliteQueue::new(db.clone()));
         let app = Self {
@@ -4941,6 +4973,16 @@ struct Tutorial {
     example_team: Option<String>,
 }
 
+/// The database of the app, its errors in `labels` (not in the global
+/// language of the errors, which another app may change meanwhile).
+fn open_database(file: &Path, labels: &Labels) -> Result<Database, MobileError> {
+    db::open(file)
+        .map(Database::new)
+        .map_err(|e| MobileError::Failed {
+            reason: e.message(labels),
+        })
+}
+
 fn failed(e: impl std::fmt::Display) -> MobileError {
     MobileError::Failed {
         reason: e.to_string(),
@@ -5660,6 +5702,38 @@ mod tests {
         let e = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
             .err()
             .unwrap();
+        assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
+    }
+
+    /// The database that can't be opened is told in the language of the
+    /// app being made, even when another app (another test running at the
+    /// same time) changed the language of the errors meanwhile.
+    #[test]
+    fn the_database_not_opened_is_told_in_the_language_of_its_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(layout::DATABASE);
+        drop(scout4all_core::db::open(&file).unwrap());
+        let newer = scout4all_core::db::schema_version() + 1;
+        sql(&dir, &format!("PRAGMA user_version = {newer}"));
+        set_errors_language(Language::new(LanguageEnum::En));
+        let it = Language::new(LanguageEnum::It);
+        let e = open_database(&file, it.labels()).err().unwrap();
+        assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
+    }
+
+    /// An app made by another test at the same time doesn't change the
+    /// language of this test's errors.
+    #[test]
+    fn the_errors_of_a_test_stay_in_its_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let _app = app(&dir, "it");
+        std::thread::spawn(|| {
+            let other = tempfile::tempdir().unwrap();
+            drop(app(&other, "en"));
+        })
+        .join()
+        .unwrap();
+        let e = MobileError::from(AppError::IO(IOError::DatabaseNewer { found: 2, known: 1 }));
         assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
     }
 
