@@ -156,9 +156,9 @@ mod tests {
     }
 
     #[test]
-    fn a_block_keeps_the_ball_when_positive() {
+    fn a_block_keeps_the_ball_unless_exclamative() {
         let t = Team::new();
-        for (eval, side) in [(Positive, Us), (Negative, Them)] {
+        for (eval, side) in [(Positive, Us), (Negative, Us), (Exclamative, Them)] {
             let events = vec![act(S, t.setter, Positive), act(B, t.mb2, eval)];
             assert_eq!(
                 ball(&t.replay(Us, events)),
@@ -175,10 +175,10 @@ mod tests {
             ball(&t.replay(Them, events)),
             (Them, Some((FB, None, None)))
         );
-        // after our block touch they couldn't counter
+        // after our block touch back to them, who couldn't attack again
         let events = vec![
             act(S, t.setter, Positive),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             ev(OF, None, None),
         ];
         assert_eq!(ball(&t.replay(Us, events)), (Us, Some((OF, None, None))));

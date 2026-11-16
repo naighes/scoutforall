@@ -58,11 +58,13 @@ pub fn evaluations(event_type: EventTypeEnum) -> &'static [(EvalEnum, Tone)] {
             (Over, Poor),
             (Error, Bad),
         ],
+        // `+` and `-` keep the ball with us, `!` sends it back to them;
         // an invasion (`/`) is a point of theirs
         B => &[
             (Perfect, Excellent),
             (Positive, Good),
-            (Negative, Poor),
+            (Negative, Fair),
+            (Exclamative, Poor),
             (Error, Bad),
             (Over, Bad),
         ],

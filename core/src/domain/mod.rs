@@ -12,6 +12,7 @@
 //! those.
 
 pub mod adapters;
+pub mod rules;
 pub mod sql;
 
 use crate::localization::Labels;

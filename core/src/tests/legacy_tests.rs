@@ -12,6 +12,7 @@ mod tests {
         legacy::{
             archive::{Archive, file_team_id, is_match_of, read_archive},
             folder::{LegacyTeam, NotRead, read_folder},
+            format::read_events,
             rows::{FolderRows, SharedTeams, folder_rows, match_rows, team_rows},
         },
         localization::Language,
@@ -545,11 +546,11 @@ mod tests {
         (back, scores)
     }
 
-    /// The sets of a match of the versions before the database keep the
-    /// scouting rules of those versions (v1), never the current ones: also
-    /// written and read back.
+    /// The events of the versions before the database follow their
+    /// scouting rules (v1): read as the current rules tell them, the sets
+    /// say the current rules, also written and read back.
     #[tokio::test]
-    async fn the_sets_before_the_database_keep_their_scouting_rules() {
+    async fn the_sets_before_the_database_follow_the_current_rules() {
         let (team, m) = finished().await;
         let rows = rows(&team, &m);
         assert!(!rows.sets.is_empty());
@@ -558,7 +559,7 @@ mod tests {
         };
         assert_eq!(
             rules(&rows),
-            vec![Some(ScoutingRulesEnum::V1); rows.sets.len()]
+            vec![Some(ScoutingRulesEnum::CURRENT); rows.sets.len()]
         );
         let db = database();
         let shared = team_rows(std::slice::from_ref(&team)).unwrap();
@@ -568,6 +569,34 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(rules(&back), rules(&rows));
+    }
+
+    /// The block `-` of the files is `!` now, the block `+` before their
+    /// freeball too; the rest as saved.
+    #[test]
+    fn the_events_of_the_files_are_read_with_the_current_rules() {
+        let player = Uuid::new_v4();
+        let at = "2025-10-04T10:00:00Z";
+        let csv = format!(
+            "{at},B,{player},-,,\n{at},OS,,,,\n{at},B,{player},+,,\n{at},OF,,,,\n{at},B,{player},+,,\n{at},A,{player},#,,\n"
+        );
+        let told: Vec<_> = read_events(csv.as_bytes())
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.event_type, e.eval))
+            .collect();
+        use crate::shapes::enums::{EvalEnum::*, EventTypeEnum::*};
+        assert_eq!(
+            told,
+            vec![
+                (B, Some(Exclamative)),
+                (OS, None),
+                (B, Some(Exclamative)),
+                (OF, None),
+                (B, Some(Positive)),
+                (A, Some(Perfect)),
+            ]
+        );
     }
 
     #[tokio::test]

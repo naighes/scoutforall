@@ -505,6 +505,37 @@ mod tests {
         );
     }
 
+    /// Our dig after our block: only the evaluations the block leaves us,
+    /// offered and accepted (TODO/001, §4.2).
+    #[tokio::test]
+    async fn the_dig_after_our_block_is_evaluated_as_the_block_left_it() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        s.session.choose_event(B).await.unwrap();
+        let blocker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("a blocker");
+        s.session.choose_player(blocker).await.unwrap();
+        s.session.choose_eval(EvalEnum::Negative).await.unwrap();
+        s.session.choose_event(D).await.unwrap();
+        s.session.choose_player(s.players[6]).await.unwrap();
+        assert_eq!(
+            s.session.available_evals(),
+            vec![EvalEnum::Over, EvalEnum::Negative]
+        );
+        assert_eq!(
+            s.session.choose_eval(EvalEnum::Positive).await,
+            Err(ScoutingError::EvalNotAllowed(D))
+        );
+        s.session.choose_eval(EvalEnum::Over).await.unwrap();
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![S, B, D]);
+    }
+
     /// Undo resumes the serve with where it went; going back from the
     /// evaluation forgets it.
     #[tokio::test]

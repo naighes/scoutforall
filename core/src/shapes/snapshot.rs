@@ -280,7 +280,7 @@ impl Snapshot {
 
     fn event_refusal(&self, event: &EventEntry) -> Option<Refusal> {
         self.sequence_issue(event)
-            .or_else(|| Self::evaluation_issue(event))
+            .or_else(|| self.evaluation_issue(event))
             .or_else(|| self.player_issue(event))
             .or_else(|| Self::technique_issue(event))
             .or_else(|| self.replacement_issue(event))
@@ -299,10 +299,29 @@ impl Snapshot {
         }
     }
 
-    fn evaluation_issue(event: &EventEntry) -> Option<Refusal> {
+    /// The evaluations the event can have now, after the one before it
+    /// (TODO/001, §4.2): our dig after our block tells what the block left
+    /// us, `+` or `#` after a block `+`, `-` or `/` after a block `-`.
+    pub fn available_evals(&self, event_type: EventTypeEnum) -> Vec<EvalEnum> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        let after = self.last_event.as_ref().map(|e| (e.event_type, e.eval));
+        let admitted: &[EvalEnum] = match (event_type, after) {
+            (D, Some((B, Some(Positive)))) => &[Perfect, Positive],
+            (D, Some((B, Some(Negative)))) => &[Negative, Over],
+            _ => &EvalEnum::ALL,
+        };
+        event_type
+            .available_evals()
+            .into_iter()
+            .filter(|eval| admitted.contains(eval))
+            .collect()
+    }
+
+    fn evaluation_issue(&self, event: &EventEntry) -> Option<Refusal> {
         match (event.event_type.requires_evaluation(), event.eval) {
             (true, None) => Some(Refusal::MissingEvaluation),
-            (true, Some(eval)) if !event.event_type.available_evals().contains(&eval) => {
+            (true, Some(eval)) if !self.available_evals(event.event_type).contains(&eval) => {
                 Some(Refusal::EvaluationNotAllowed(eval))
             }
             (false, Some(_)) => Some(Refusal::UnexpectedEvaluation),
@@ -875,11 +894,16 @@ impl Snapshot {
         // attack or our freeball (`FB`). Never a freeball on a first touch:
         // our reception or dig going straight over is `/`.
         //
+        // after our block `+` or `-` the ball stays with us, the blockers:
+        // our dig after it is optional, its evaluation the block's (see
+        // `available_evals`).
+        //
         // on their side, they attack (our dig or block comes next) or they
-        // don't: after our attack or block `+` we play the ball again, their
+        // don't: after our attack `+` we play the ball again, their
         // freeball (`OF`) optional; after our serve `/` their reception came
         // back, not a freeball; after our serve `+`, `!` or `-`, our attack
-        // or block `-` they attack or send a freeball (`OF`): the evaluation
+        // `-` or our block `!` (back to them, who attacked) they attack or
+        // send a freeball (`OF`): the evaluation
         // tells their reception or dig, the freeball what they made of it,
         // as our reception or dig and our freeball (`FB`) do: a perfect
         // reception the setter sends over is `#`, then the freeball. A ball
@@ -904,11 +928,14 @@ impl Snapshot {
             (OS | F, None) | (A | B | D | P | S, Some(Error)) | (A | B, Some(Over)) => serve_them(),
             // ours
             (OE, None) | (A | B | S, Some(Perfect)) => serve_us(),
-            (A | B, Some(Positive)) => vec![OE, F, A, FB, OF],
+            (A, Some(Positive)) => vec![OE, F, A, FB, OF],
+            // the ball stays with the blockers: their dig after it optional
+            (B, Some(Positive | Negative)) => vec![OE, F, A, D, FB],
             (A, Some(Exclamative)) | (D | P, Some(Exclamative | Negative | Positive | Perfect)) => {
                 vec![OE, F, A, FB]
             }
-            (A | B, Some(Negative))
+            (A, Some(Negative))
+            | (B, Some(Exclamative))
             | (D | P, Some(Over))
             | (S, Some(Positive | Exclamative | Negative))
             | (FB, None) => vec![OS, OE, F, A, D, B, FB, OF],

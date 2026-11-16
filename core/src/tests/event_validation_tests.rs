@@ -259,14 +259,21 @@ mod tests {
         );
     }
 
-    /// Serve and block have no `!`.
+    /// An evaluation the event doesn't allow after the one before it: our
+    /// dig after our block `+` is `+` or `#`.
     #[test]
     fn evaluation_not_allowed() {
         let t = Team::new();
         assert_invalid(
-            t.serving(vec![act(S, t.setter, Negative), act(B, t.oh1, Exclamative)]),
-            "evaluation ! not allowed",
+            t.serving(vec![
+                act(S, t.setter, Negative),
+                act(B, t.oh1, Positive),
+                act(D, t.libero, Negative),
+            ]),
+            "evaluation - not allowed",
         );
+        // the block `!`: the ball back to them
+        assert_valid(t.serving(vec![act(S, t.setter, Negative), act(B, t.oh1, Exclamative)]));
         assert_valid(t.receiving(vec![act(P, t.libero, Exclamative)]));
         // the serve mirrors their reception: `!` too
         assert_valid(t.serving(vec![act(S, t.setter, Exclamative)]));
@@ -556,7 +563,11 @@ mod tests {
                     false => vec![None],
                 };
                 let evals: Vec<Option<EvalEnum>> = match event_type.requires_evaluation() {
-                    true => event_type.available_evals().into_iter().map(Some).collect(),
+                    true => snapshot
+                        .available_evals(event_type)
+                        .into_iter()
+                        .map(Some)
+                        .collect(),
                     false => vec![None],
                 };
                 let targets: Vec<Option<Uuid>> = match event_type {

@@ -127,10 +127,11 @@ impl EventEdit {
             .collect()
     }
 
-    /// The evaluations of its type, none for an event having none.
+    /// The evaluations of its type after the events before it, none for an
+    /// event having none.
     pub fn evals(&self) -> Vec<EvalEnum> {
         match self.event.event_type.requires_evaluation() {
-            true => self.event.event_type.available_evals(),
+            true => self.before.available_evals(self.event.event_type),
             false => vec![],
         }
     }
@@ -171,7 +172,7 @@ impl EventEdit {
             return;
         }
         let evals = match event_type.requires_evaluation() {
-            true => event_type.available_evals(),
+            true => self.before.available_evals(event_type),
             false => vec![],
         };
         let techniques = Self::techniques_of(&self.before, event_type, &self.event);

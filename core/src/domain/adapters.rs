@@ -25,6 +25,7 @@ use crate::{
     domain::{
         Event, Home, LegacyId, Match, MatchSet, MatchVideo, MatchVideoFile, Membership, Person,
         RosterEntry, ScoutingMode, SetLineup, Side, Team, TeamRef, VideoAnchor, VideoCorrection,
+        rules::translate,
     },
     errors::{AppError, IOError, MatchError},
     player_form::removed,
@@ -508,21 +509,22 @@ impl SetRows {
     /// of A, or, scouted on both sides, the touches projected on A's side
     /// (what B's touches tell A from B's rows).
     pub fn stream_of_a(&self) -> Vec<(&Event, EventEntry)> {
-        let rows = self.rows();
+        let entries = self.entries();
         match self.on_both_sides() {
             true => {
-                let touches: Vec<(Side, EventEntry)> =
-                    rows.iter().map(|e| (e.side, e.entry.clone())).collect();
+                let touches: Vec<(Side, EventEntry)> = entries
+                    .iter()
+                    .map(|(row, entry)| (row.side, entry.clone()))
+                    .collect();
                 project(&touches)
                     .a
                     .into_iter()
-                    .filter_map(|p| rows.get(p.source).map(|row| (*row, p.entry)))
+                    .filter_map(|p| entries.get(p.source).map(|(row, _)| (*row, p.entry)))
                     .collect()
             }
-            false => self
-                .events_of_a()
+            false => entries
                 .into_iter()
-                .map(|e| (e, e.entry.clone()))
+                .filter(|(row, _)| row.side == Side::A)
                 .collect(),
         }
     }
@@ -538,9 +540,22 @@ impl SetRows {
     /// The touches of both sides not undone, in their order: the sequence
     /// `rally::project` reads.
     pub fn touches(&self) -> Vec<(Side, EventEntry)> {
-        self.rows()
+        self.entries()
             .into_iter()
-            .map(|e| (e.side, e.entry.clone()))
+            .map(|(row, entry)| (row.side, entry))
+            .collect()
+    }
+
+    /// The rows not undone, in their order, each with its event as the
+    /// current scouting rules tell it (`rules::translate`): the rows keep
+    /// the rules they were saved with.
+    pub fn entries(&self) -> Vec<(&Event, EventEntry)> {
+        let rows = self.rows();
+        let touches: Vec<(Side, EventEntry)> =
+            rows.iter().map(|e| (e.side, e.entry.clone())).collect();
+        rows.into_iter()
+            .zip(translate(self.row.scouting_rules, &touches))
+            .map(|(row, (_, entry))| (row, entry))
             .collect()
     }
 

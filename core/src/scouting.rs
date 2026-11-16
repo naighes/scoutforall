@@ -564,9 +564,11 @@ impl ScoutingSession {
         }
     }
 
+    /// The evaluations of the event chosen, after the one before it (see
+    /// `Snapshot::available_evals`).
     pub fn available_evals(&self) -> Vec<EvalEnum> {
         self.event
-            .map(|event| event.available_evals())
+            .map(|event| self.snapshot.available_evals(event))
             .unwrap_or_default()
     }
 
@@ -833,7 +835,7 @@ impl ScoutingSession {
         use EventTypeEnum::*;
         match (self.step, self.event) {
             (ScoutingStep::Eval, Some(event @ (A | B | P | D | S)))
-                if event.available_evals().contains(&eval) =>
+                if self.snapshot.available_evals(event).contains(&eval) =>
             {
                 self.save(EventEntry {
                     timestamp: Utc::now(),

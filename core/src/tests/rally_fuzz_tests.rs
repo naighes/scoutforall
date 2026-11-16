@@ -121,8 +121,10 @@ mod tests {
 
     /// A touch the side can try now: one of the events its stream offers
     /// (not the ones the other side's touches tell), a player able to
-    /// play it, an evaluation.  Substitutions, faults, libero and setter
-    /// changes now and then, as in a real set.
+    /// play it, an evaluation the event can have now.  Substitutions,
+    /// faults, libero and setter changes now and then, as in a real set;
+    /// the new setter the diagonal only, as the scouting offers it (the
+    /// libero follows the setter).
     fn propose(rng: &mut Rng, snapshot: &Snapshot, team: &Team, n: usize) -> Option<EventEntry> {
         let offered: Vec<EventTypeEnum> = snapshot
             .get_available_options()
@@ -136,6 +138,9 @@ mod tests {
             .everyone()
             .into_iter()
             .filter(|p| snapshot.can_play(event_type, p))
+            .filter(|p| {
+                event_type != CS || snapshot.current_lineup.get_setter_diagonal() == Some(*p)
+            })
             .collect();
         let player = match (event_type, event_type.requires_player()) {
             (F, _) => rng.pick(&players).filter(|_| rng.one_in(2)),
@@ -147,7 +152,7 @@ mod tests {
                 + Duration::seconds(n as i64),
             event_type,
             player,
-            eval: rng.pick(&event_type.available_evals()),
+            eval: rng.pick(&snapshot.available_evals(event_type)),
             target_player: (event_type == R).then(|| rng.pick(&team.bench)).flatten(),
             technique: None,
             flags: EventFlags::default(),

@@ -420,7 +420,7 @@ mod tests {
             &a,
             &b,
             &rally,
-            by(Side::A, B, a.outside_hitter(), Negative, 3)
+            by(Side::A, B, a.outside_hitter(), Exclamative, 3)
         ));
         assert!(!admitted(
             &a,
@@ -512,9 +512,11 @@ mod tests {
             vec![Perfect, Positive, Exclamative, Negative]
         );
         assert_eq!(answers(Negative, B), vec![Positive]);
+        // the block `-` keeps the ball with the blockers: not where an
+        // attack coming back left it
         for back in [Positive, Exclamative] {
             assert_eq!(answers(back, D), vec![], "{back}");
-            assert_eq!(answers(back, B), vec![Exclamative, Negative], "{back}");
+            assert_eq!(answers(back, B), vec![Exclamative], "{back}");
         }
     }
 

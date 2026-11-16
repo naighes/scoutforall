@@ -120,6 +120,7 @@ db_text!(LineupRulesEnum, "lineup rules", LineupRulesEnum::ALL, {
 
 db_text!(ScoutingRulesEnum, "scouting rules", ScoutingRulesEnum::ALL, {
     ScoutingRulesEnum::V1 => "v1",
+    ScoutingRulesEnum::V2 => "v2",
 });
 
 db_text!(MatchSource, "source", MatchSource::ALL, {

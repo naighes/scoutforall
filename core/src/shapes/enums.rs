@@ -112,13 +112,16 @@ impl LineupRulesEnum {
 pub enum ScoutingRulesEnum {
     /// Up to v1.0.0, the data of the versions before the database too.
     V1,
+    /// The block `!` (the ball back to the team attacking), `+` and `-`
+    /// keeping the ball with the blockers, the dig after the block.
+    V2,
 }
 
 impl ScoutingRulesEnum {
     /// The rules new sets are scouted with.
-    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V1;
+    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V2;
 
-    pub const ALL: [ScoutingRulesEnum; 1] = [ScoutingRulesEnum::V1];
+    pub const ALL: [ScoutingRulesEnum; 2] = [ScoutingRulesEnum::V1, ScoutingRulesEnum::V2];
 }
 
 impl fmt::Display for TeamSideEnum {
@@ -314,8 +317,7 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match self {
-            B => vec![Perfect, Positive, Over, Negative, Error],
-            S | A | D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
+            S | A | B | D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
             _ => vec![],
         }
     }
@@ -353,11 +355,12 @@ impl EventTypeEnum {
     /// a touch (the changes of the lineup).
     ///
     /// - on our side: our reception or dig (`/` aside), our attack coming
-    ///   back (`+` off their block, `!` blocked and covered), our block `+`,
-    ///   their reception coming straight back (serve `/`), their freeball;
+    ///   back (`+` off their block, `!` blocked and covered), our block `+`
+    ///   or `-` (the ball stays with the blockers), their reception coming
+    ///   straight back (serve `/`), their freeball;
     /// - on their side: our serve, our reception or dig going straight over
-    ///   (`/`), our attack defended (`-`), our block `-` (touched, played by
-    ///   them), our freeball.
+    ///   (`/`), our attack defended (`-`), our block `!` (the ball back to
+    ///   them, who attacked), our freeball.
     pub fn ball_side_after(&self, eval: Option<EvalEnum>) -> Option<TeamSideEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -366,7 +369,7 @@ impl EventTypeEnum {
             (None, S, Some(Over))
             | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
             | (None, A, Some(Positive | Exclamative))
-            | (None, B, Some(Positive))
+            | (None, B, Some(Positive | Negative))
             | (None, OF, _) => Some(TeamSideEnum::Us),
             (None, S | P | D | A | B, _) | (None, FB, _) => Some(TeamSideEnum::Them),
         }
@@ -445,8 +448,10 @@ impl FromStr for EventTypeEnum {
 /// quality or outcome of a play. These evaluations are applied across
 /// all fundamentals (serve, reception, attack, block, dig/defense).
 ///
-/// A rally going on, `+` and `-` tell who plays the ball next: `+` us, `-`
-/// them (attacking), however hard the touch was. The serve mirrors their
+/// A rally going on, `+` and `-` of the attack tell who plays the ball
+/// next: `+` us, `-` them (attacking), however hard the touch was; the
+/// block keeps the ball with us on `+` and `-`, `!` sends it back to them
+/// (TODO/001, §4.2). The serve mirrors their
 /// reception: `+` is their `-`, `!` their `!`, `-` their `+` or `#`, `/`
 /// their `/`.
 ///
@@ -594,7 +599,8 @@ impl EvalEnum {
 
             (Perfect, B) => Some(labels.winning_block.to_string()),
             (Positive, B) => Some(labels.counter_attack_opportunity.to_string()),
-            (Negative, B) => Some(labels.opponent_counter_attack_opportunity.to_string()),
+            (Exclamative, B) => Some(labels.opponent_counter_attack_opportunity.to_string()),
+            (Negative, B) => Some(labels.limited_attack_options.to_string()),
 
             (Positive, D) => Some(labels.first_tempo_still_available.to_string()),
             (Exclamative, D) => Some(labels.few_attack_options_available.to_string()),
@@ -628,6 +634,7 @@ impl EvalEnum {
 
             (Perfect, B) => labels.winning_block.to_string(),
             (Positive, B) => labels.positive.to_string(),
+            (Exclamative, B) => labels.covered.to_string(),
             (Negative, B) => labels.negative.to_string(),
             (Error, B) => labels.error.to_string(),
             (Over, B) => labels.net_fault.to_string(),

@@ -360,6 +360,27 @@ mod tests {
         assert_eq!(attack.event_types(), vec![F, A]);
     }
 
+    /// The dig after our block: the evaluations the block leaves us, also
+    /// when another event becomes the dig.
+    #[test]
+    fn the_dig_after_our_block_offers_what_the_block_left() {
+        let team = Team::new();
+        let set = team.set(
+            TeamSideEnum::Us,
+            vec![
+                event(S, Some(team.setter()), Some(Positive)),
+                event(B, Some(team.outside_hitter()), Some(Positive)),
+                event(A, Some(team.outside_hitter()), Some(Negative)),
+            ],
+        );
+        let mut attack = edit(&set, 2);
+        assert!(attack.event_types().contains(&D));
+        attack.choose_event_type(D);
+        assert_eq!(attack.evals(), vec![Perfect, Positive]);
+        // the attack's `-` doesn't fit: the first evaluation
+        assert_eq!(attack.event().eval, Some(Perfect));
+    }
+
     #[test]
     fn a_correction_applies_if_it_fits() {
         let team = Team::new();

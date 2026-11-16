@@ -281,15 +281,21 @@ mod tests {
                 t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Negative)]),
                 ball_theirs_received_or_dug.clone(),
             ),
-            // our block
+            // our block: `+` and `-` keep the ball with us (our dig after
+            // it optional), `!` sends it back to them
             (
                 "B+",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Positive)]),
-                ball_ours_or_their_freeball.clone(),
+                vec![OE, F, A, D, FB],
             ),
             (
                 "B-",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Negative)]),
+                vec![OE, F, A, D, FB],
+            ),
+            (
+                "B!",
+                t.serving(vec![t.serve(Negative), act(B, t.oh1, Exclamative)]),
                 ball_theirs_received_or_dug.clone(),
             ),
             // our freeball: they play it, and may send one back
@@ -302,7 +308,7 @@ mod tests {
             // their point if it falls untouched
             (
                 "OF",
-                t.serving(vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)]),
+                t.serving(vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)]),
                 vec![OS, OE, F, A, B, FB],
             ),
         ];
@@ -320,18 +326,17 @@ mod tests {
         let t = Team::new();
         let before: [Vec<EventEntry>; 2] = [
             vec![t.serve(Over)],
-            vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)],
+            vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)],
         ];
         for events in before {
             let block = |eval| t.serving([events.clone(), vec![act(B, t.oh1, eval)]].concat());
             let won = block(Perfect);
             assert_eq!(won.score_us, 1, "{events:?}");
+            for kept in [Positive, Negative] {
+                assert_eq!(block(kept).get_available_options(), vec![OE, F, A, D, FB]);
+            }
             assert_eq!(
-                block(Positive).get_available_options(),
-                vec![OE, F, A, FB, OF]
-            );
-            assert_eq!(
-                block(Negative).get_available_options(),
+                block(Exclamative).get_available_options(),
                 vec![OS, OE, F, A, D, B, FB, OF]
             );
             assert_eq!(block(Over).score_them, 1, "{events:?}");
@@ -352,7 +357,7 @@ mod tests {
     #[test]
     fn our_block_on_their_freeball_is_no_attack_of_theirs() {
         let t = Team::new();
-        let freeball = vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)];
+        let freeball = vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)];
         let point = t.serving([freeball.clone(), vec![act(B, t.oh1, Perfect)]].concat());
         assert_eq!(exploited(&point), vec![true]);
         let kept = t.serving(
@@ -366,7 +371,7 @@ mod tests {
         let countered = t.serving(
             [
                 freeball.clone(),
-                vec![act(B, t.oh1, Negative), act(B, t.oh1, Perfect)],
+                vec![act(B, t.oh1, Exclamative), act(B, t.oh1, Perfect)],
             ]
             .concat(),
         );
@@ -391,13 +396,13 @@ mod tests {
             t.serving(vec![t.serve(Perfect)]),
             t.serving(vec![
                 t.serve(Negative),
-                act(B, t.oh1, Positive),
+                act(B, t.oh1, Exclamative),
                 opp(OF),
                 opp(OS),
             ]),
             t.serving(vec![
                 t.serve(Negative),
-                act(B, t.oh1, Positive),
+                act(B, t.oh1, Exclamative),
                 opp(OF),
                 act(A, t.oh1, Perfect),
             ]),
@@ -427,7 +432,12 @@ mod tests {
             ),
             (
                 TeamSideEnum::Us,
-                vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF), opp(OF)],
+                vec![
+                    t.serve(Negative),
+                    act(B, t.oh1, Exclamative),
+                    opp(OF),
+                    opp(OF),
+                ],
             ),
             (
                 TeamSideEnum::Them,
@@ -442,7 +452,7 @@ mod tests {
                 TeamSideEnum::Us,
                 vec![
                     t.serve(Negative),
-                    act(B, t.oh1, Positive),
+                    act(B, t.oh1, Exclamative),
                     opp(OF),
                     act(D, t.libero, Positive),
                 ],
@@ -476,7 +486,7 @@ mod tests {
             let reason = t.rejected(TeamSideEnum::Them, vec![reception.clone(), event]);
             assert!(reason.contains(expected), "{reason}");
         }
-        let block = vec![t.serve(Negative), act(B, t.oh1, Positive)];
+        let block = vec![t.serve(Negative), act(B, t.oh1, Exclamative)];
         let cases = [
             (ev(OF, Some(t.oh1), None), "unexpected player"),
             (ev(OF, None, Some(Positive)), "unexpected evaluation"),
@@ -519,7 +529,7 @@ mod tests {
         }
         let blocked = t.serving(vec![
             t.serve(Negative),
-            act(B, t.oh1, Negative),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             act(A, t.oh1, Perfect),
         ]);
@@ -671,7 +681,7 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Positive),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             opp(OS),
         ]);
@@ -700,7 +710,7 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Negative),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             fb(),
             opp(OF),
@@ -730,7 +740,7 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Negative),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             fb(),
             opp(OF),
@@ -754,7 +764,7 @@ mod tests {
             (
                 t.serving(vec![
                     t.serve(Negative),
-                    act(B, t.oh1, Positive),
+                    act(B, t.oh1, Exclamative),
                     opp(OF),
                     act(A, t.oh1, Perfect),
                 ]),
@@ -920,7 +930,7 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Negative),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             fb(),
             opp(OS),
@@ -970,7 +980,7 @@ mod tests {
         ];
         for (case, after) in cases {
             let events = [
-                vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)],
+                vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)],
                 after,
             ]
             .concat();
@@ -1014,7 +1024,7 @@ mod tests {
         ];
         for (case, after) in cases {
             let events = [
-                vec![t.serve(Negative), act(B, t.oh1, Positive), opp(OF)],
+                vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)],
                 after,
             ]
             .concat();
@@ -1035,7 +1045,7 @@ mod tests {
         let t = Team::new();
         let snapshot = t.serving(vec![
             t.serve(Negative),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             act(A, t.oh1, Positive),
             opp(OF),
@@ -1083,13 +1093,13 @@ mod tests {
         let t = Team::new();
         let won = t.serving(vec![
             t.serve(Negative),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             act(A, t.oh1, Perfect),
         ]);
         let lost = t.serving(vec![
             t.serve(Negative),
-            act(B, t.oh1, Positive),
+            act(B, t.oh1, Exclamative),
             opp(OF),
             opp(OS),
         ]);
@@ -1124,7 +1134,7 @@ mod tests {
             TeamSideEnum::Us,
             vec![
                 t.serve(Negative),
-                act(B, t.oh1, Positive),
+                act(B, t.oh1, Exclamative),
                 opp(OF),
                 act(A, t.oh1, Perfect),
                 t.serve(Negative),

@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn every_migrated_match_uploads_what_its_files_uploaded() {
-        let (mut total, mut padded) = (0, 0);
+        let (mut total, mut translated) = (0, 0);
         for version in VERSIONS {
             let device = Device::of(version);
             let from_files = uploads_of_files(device.store()).await;
@@ -293,16 +293,16 @@ mod tests {
                 let (ours, theirs) = (archive(&upload), archive(file));
                 assert_eq!(told(&ours), told(&theirs), "{at}");
                 // byte for byte, but the rows saved without the flags (up
-                // to v0.10.1): they get the column, empty
+                // to v0.10.1): they get the column, empty; and the events
+                // the current scouting rules tell otherwise (the same once
+                // read, as `told` says)
                 assert_eq!(ours.len(), theirs.len(), "{at}");
                 for ((name, ours), (_, theirs)) in ours.iter().zip(&theirs) {
-                    match (ours == theirs, without_flags(version)) {
+                    match (ours == theirs, name.ends_with(".csv")) {
                         (true, _) => {}
-                        (false, true) => {
-                            assert!(name.ends_with(".csv"), "{at} {name}");
-                            assert_eq!(*ours, with_empty_flags(theirs), "{at} {name}");
-                            padded += 1;
-                        }
+                        (false, true)
+                            if without_flags(version) && *ours == with_empty_flags(theirs) => {}
+                        (false, true) => translated += 1,
                         (false, false) => panic!("{at} {name}: not the same bytes"),
                     }
                 }
@@ -310,7 +310,8 @@ mod tests {
             }
         }
         assert_eq!(total, 33);
-        assert!(padded > 0);
+        // the old sets have blocks `-`, told `!` now
+        assert!(translated > 0);
     }
 
     #[tokio::test]
@@ -494,8 +495,12 @@ mod tests {
         let (db_requests, db_archives) =
             upload_all(&SqliteUploads::new(db.clone(), en()), &queue).await;
         // the same files, by name, in the same order, with the same content
+        // once read: the events as the current scouting rules tell them
         assert_eq!(db_requests, requests);
-        assert_eq!(db_archives, archives);
+        let told_all = |archives: &[Vec<(String, Vec<u8>)>]| {
+            archives.iter().map(|a| told(a)).collect::<Vec<_>>()
+        };
+        assert_eq!(told_all(&db_archives), told_all(&archives));
         assert_eq!(in_database(&db).await, vec![]);
     }
 

@@ -14,6 +14,7 @@ mod tests {
         providers::{
             match_reader::MatchReader,
             match_writer::MatchWriter,
+            set_reader::SetReader,
             set_writer::SetWriter,
             sqlite::{
                 rows::{insert_event, next_seq, set_rows},
@@ -222,6 +223,175 @@ mod tests {
                 .unwrap();
         let rules: Vec<_> = sets.iter().map(|s| s.row.scouting_rules).collect();
         assert_eq!(rules, vec![Some(ScoutingRulesEnum::CURRENT)]);
+    }
+
+    /// The set of match `m` saved before its scouting rules were (v1).
+    fn of_v1(p: &Sqlite, m: &MatchEntry) {
+        p.db.write(|tx| {
+            tx.execute(
+                "UPDATE sets SET scouting_rules = NULL WHERE match_id = ?1",
+                params![Sql(Uuid::parse_str(&m.id).unwrap())],
+            )
+            .map_err(sqlite)
+        })
+        .unwrap();
+    }
+
+    /// The scouting rules of set 1 of `m`, and the evaluations of its rows
+    /// as saved.
+    fn saved_rows(p: &Sqlite, m: &MatchEntry) -> (Option<ScoutingRulesEnum>, Vec<String>) {
+        let sets =
+            p.db.read(|tx| set_rows(tx, Uuid::parse_str(&m.id).unwrap()))
+                .unwrap();
+        let set = sets.first().unwrap();
+        let mut rows: Vec<&Event> = set.events.iter().filter(|e| !e.deleted).collect();
+        rows.sort_by_key(|e| e.seq);
+        (
+            set.row.scouting_rules,
+            rows.iter()
+                .map(|e| {
+                    format!(
+                        "{}{}",
+                        e.entry.event_type,
+                        e.entry.eval.map_or(String::new(), |v| v.to_string())
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    fn told(set: &SetEntry) -> Vec<String> {
+        set.events
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}{}",
+                    e.event_type,
+                    e.eval.map_or(String::new(), |v| v.to_string())
+                )
+            })
+            .collect()
+    }
+
+    /// Our serve, our block touched (v1: the ball back to them, who attack
+    /// again), our dig: a set of v1.
+    async fn block_of_v1(p: &Sqlite) -> (TeamEntry, MatchEntry) {
+        let (a, _, m) = set_one(p, false).await;
+        add(
+            p,
+            &m,
+            &[
+                (Side::A, S, a.players[0].id, Positive),
+                (Side::A, B, a.players[1].id, Negative),
+                (Side::A, D, libero(&a), Positive),
+            ],
+        );
+        of_v1(p, &m);
+        (a, m)
+    }
+
+    /// A set of v1 is read as the current rules tell it, its rows as they
+    /// were.
+    #[tokio::test]
+    async fn a_set_of_v1_is_read_with_the_current_rules() {
+        let p = Sqlite::new();
+        let (_, m) = block_of_v1(&p).await;
+        let sets = reader(&p).read_all(&m).await.unwrap();
+        assert_eq!(told(&sets[0]), vec!["S+", "B!", "D+"]);
+        assert!(sets[0].compute_snapshot(m.max_substitutions).is_ok());
+        assert_eq!(
+            saved_rows(&p, &m),
+            (None, vec!["S+".into(), "B-".into(), "D+".into()])
+        );
+    }
+
+    /// A set with the current rules is read as saved: its block `-` keeps
+    /// the ball with the blockers.
+    #[tokio::test]
+    async fn a_set_of_the_current_rules_is_read_as_saved() {
+        let p = Sqlite::new();
+        let (a, _, m) = set_one(&p, false).await;
+        add(
+            &p,
+            &m,
+            &[
+                (Side::A, S, a.players[0].id, Positive),
+                (Side::A, B, a.players[1].id, Negative),
+                (Side::A, D, libero(&a), Negative),
+            ],
+        );
+        let sets = reader(&p).read_all(&m).await.unwrap();
+        assert_eq!(told(&sets[0]), vec!["S+", "B-", "D-"]);
+        assert!(sets[0].compute_snapshot(m.max_substitutions).is_ok());
+    }
+
+    /// An event joining a set of v1: the set first brought to the current
+    /// rules, its rows translated.
+    #[tokio::test]
+    async fn an_event_appended_to_a_set_of_v1_brings_it_to_the_current_rules() {
+        let p = Sqlite::new();
+        let (a, m) = block_of_v1(&p).await;
+        let attack = EventEntry {
+            timestamp: Utc::now(),
+            event_type: A,
+            player: Some(a.players[1].id),
+            eval: Some(Perfect),
+            target_player: None,
+            technique: None,
+            flags: EventFlags::default(),
+        };
+        p.set_writer.append_event(&m, 1, &attack).await.unwrap();
+        assert_eq!(
+            saved_rows(&p, &m),
+            (
+                Some(ScoutingRulesEnum::CURRENT),
+                vec!["S+".into(), "B!".into(), "D+".into(), "A#".into()]
+            )
+        );
+        let sets = reader(&p).read_all(&m).await.unwrap();
+        assert_eq!(told(&sets[0]), vec!["S+", "B!", "D+", "A#"]);
+    }
+
+    /// Undo in a set of v1: the set brought to the current rules, the last
+    /// event given back as they tell it.
+    #[tokio::test]
+    async fn undo_in_a_set_of_v1_brings_it_to_the_current_rules() {
+        let p = Sqlite::new();
+        let (a, _, m) = set_one(&p, false).await;
+        add(
+            &p,
+            &m,
+            &[
+                (Side::A, S, a.players[0].id, Positive),
+                (Side::A, B, a.players[1].id, Negative),
+            ],
+        );
+        of_v1(&p, &m);
+        let removed = p.set_writer.remove_last_event(&m, 1).await.unwrap();
+        assert_eq!(
+            removed.map(|e| (e.event_type, e.eval)),
+            Some((B, Some(Exclamative)))
+        );
+        assert_eq!(
+            saved_rows(&p, &m),
+            (Some(ScoutingRulesEnum::CURRENT), vec!["S+".into()])
+        );
+    }
+
+    /// A set of v1 rewritten (a correction): saved with the current rules.
+    #[tokio::test]
+    async fn a_set_of_v1_rewritten_is_saved_with_the_current_rules() {
+        let p = Sqlite::new();
+        let (_, m) = block_of_v1(&p).await;
+        let set = reader(&p).read_all(&m).await.unwrap().remove(0);
+        p.set_writer.update(&m, &set).await.unwrap();
+        assert_eq!(
+            saved_rows(&p, &m),
+            (
+                Some(ScoutingRulesEnum::CURRENT),
+                vec!["S+".into(), "B!".into(), "D+".into()]
+            )
+        );
     }
 
     /// Scouting only A: no side for B, A as `compute_snapshot` replays it.

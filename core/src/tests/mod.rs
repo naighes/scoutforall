@@ -50,6 +50,7 @@ mod provider_tests;
 mod rally_fuzz_tests;
 mod rally_tests;
 mod report_tests;
+mod rules_tests;
 mod schema_tests;
 mod scouting_tests;
 mod set_start_tests;

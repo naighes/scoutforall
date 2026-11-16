@@ -3,4 +3,4 @@
 -- before they were (up to v1.0.0, the data of the versions before the
 -- database too); a set read with older rules is translated to the current
 -- ones, the rows stay as they are until the set is written again.
-ALTER TABLE sets ADD COLUMN scouting_rules TEXT CHECK (scouting_rules IN ('v1'));
+ALTER TABLE sets ADD COLUMN scouting_rules TEXT CHECK (scouting_rules IN ('v1', 'v2'));

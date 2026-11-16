@@ -1020,7 +1020,7 @@ mod tests {
         assert_eq!(fundamental(overview.reception), (6, 1, 1));
         assert_eq!(fundamental(overview.attack), (6, 1, 2));
         assert_eq!(fundamental(overview.dig), (6, 1, 1));
-        assert_eq!(fundamental(overview.block), (5, 1, 2));
+        assert_eq!(fundamental(overview.block), (6, 1, 2));
     }
 
     /// With no events: nothing to show, every count 0, the errors still by
@@ -1307,7 +1307,7 @@ mod tests {
         assert_eq!(tones(S), "#Excellent /Excellent +Good !Fair -Poor =Bad");
         assert_eq!(tones(P), "#Excellent +Good !Fair -Poor /Poor =Bad");
         assert_eq!(tones(D), tones(P));
-        assert_eq!(tones(B), "#Excellent +Good -Poor =Bad /Bad");
+        assert_eq!(tones(B), "#Excellent +Good -Fair !Poor =Bad /Bad");
         assert_eq!(tones(A), "#Excellent +Good !Good -Poor /Bad =Bad");
         assert!(evaluations(FB).is_empty());
     }
