@@ -534,6 +534,8 @@ mod tests {
             country: crate::shapes::country::CountryCode::parse("AT"),
         };
         let mut matches: std::collections::BTreeMap<String, usize> = Default::default();
+        // the first pair out of `rally::answer_evals` stopping a match on both sides
+        let mut pairs: std::collections::BTreeMap<String, usize> = Default::default();
         let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
         let mut paths = walk(std::path::Path::new(&dir));
         paths.sort();
@@ -582,6 +584,22 @@ mod tests {
                                 Ok(plan) => match plan.sides {
                                     ImportedSides::Both(_) => "ok both".to_string(),
                                     ImportedSides::A(None) => "ok a".to_string(),
+                                    ImportedSides::A(Some(MatchIssue::Set(e))) => {
+                                        if let crate::dvw::translate::Issue::Answer {
+                                            answered,
+                                            answer,
+                                            ..
+                                        } = &e.issue
+                                        {
+                                            *pairs
+                                                .entry(format!("{answered:?} -> {answer:?}"))
+                                                .or_default() += 1;
+                                        }
+                                        format!(
+                                            "ok a, not both: {:?}",
+                                            std::mem::discriminant(&e.issue)
+                                        )
+                                    }
                                     ImportedSides::A(Some(_)) => "ok a, not both".to_string(),
                                 },
                                 Err(MatchIssue::Set(e)) => {
@@ -604,6 +622,11 @@ mod tests {
             }
         }
         println!("matches: {matches:?}");
+        let mut pairs: Vec<_> = pairs.into_iter().collect();
+        pairs.sort_by_key(|a| std::cmp::Reverse(a.1));
+        for (pair, n) in pairs {
+            println!("PAIR\t{n}\t{pair}");
+        }
     }
 
     /// How the sets of a folder of files translate, for both teams:
