@@ -172,8 +172,8 @@ mod tests {
             .join(" ")
     }
 
-    /// A whole set (or 400 touches), every touch checked on both sides;
-    /// the touches.
+    /// A whole set (or 400 touches), every touch checked on both sides,
+    /// the score of both sides after every touch; the touches.
     fn play_set(seed: u64) -> Vec<(Side, EventEntry)> {
         let mut rng = Rng::new(seed);
         let game = Match {
@@ -188,12 +188,15 @@ mod tests {
                 Ok(snapshots) => snapshots,
                 Err(e) => panic!("seed {seed}: {e:?} after {}", codes(&touches)),
             };
+            // the two sides tell every point at the same touch: the same
+            // points in the same order, not only the same score at the end
+            assert_eq!(
+                (a.score_us, a.score_them),
+                (b.score_them, b.score_us),
+                "seed {seed}: {}",
+                codes(&touches)
+            );
             if a.get_set_winner(1).is_some() || touches.len() >= 400 {
-                assert_eq!(
-                    (a.score_us, a.score_them),
-                    (b.score_them, b.score_us),
-                    "seed {seed}"
-                );
                 return touches;
             }
             // either side tries, the rule of the touches decides
