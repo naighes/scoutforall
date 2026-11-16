@@ -96,7 +96,9 @@ mod tests {
         /// Their serve received by `receiver`, and our kill of the outside
         /// hitter in the front row.
         fn received_by(&mut self, receiver: u8) {
-            let serve = format!("{}SM+", self.server());
+            // a good reception of a weak serve: the two agree (TODO/001,
+            // §4.2)
+            let serve = format!("{}SM-", self.server());
             let reception = format!("*{receiver:02}RM+");
             let hitter = self
                 .home

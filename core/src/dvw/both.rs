@@ -10,9 +10,9 @@ use crate::{
         model::DvwFile,
         translate::{Issue, Mappings, TranslateError, Us, translate_lined},
     },
-    rally::{answers, replay},
+    rally::{answer_evals, answers, replay},
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, TeamSideEnum},
+        enums::{EventTypeEnum, TeamSideEnum},
         set::SetEntry,
         snapshot::EventEntry,
     },
@@ -50,8 +50,11 @@ fn off_the_ball(entry: &EventEntry) -> bool {
     )
 }
 
+/// An event of a side with the line of the file it comes from.
+pub(crate) type Lined = (Side, EventEntry, usize);
+
 /// A touch of the ball by the side, not what it's told.
-fn played_by(touch: &(Side, EventEntry), side: Side) -> bool {
+fn played_by(touch: &Lined, side: Side) -> bool {
     touch.0 == side && !off_the_ball(&touch.1) && !told(&touch.1)
 }
 
@@ -75,12 +78,7 @@ fn ball_after(side: Side, entry: &EventEntry) -> Option<Side> {
 /// The events of the two sides, each with the line it comes from, in the
 /// order of the file: at the same line the changes first, then A's, each
 /// side's in its order.
-fn sorted(
-    a: &[EventEntry],
-    lines_a: &[usize],
-    b: &[EventEntry],
-    lines_b: &[usize],
-) -> Vec<(Side, EventEntry)> {
+fn sorted(a: &[EventEntry], lines_a: &[usize], b: &[EventEntry], lines_b: &[usize]) -> Vec<Lined> {
     let side = |side: Side, events: &[EventEntry], lines: &[usize]| {
         events
             .iter()
@@ -89,7 +87,7 @@ fn sorted(
             .map(|(index, (entry, line))| {
                 (
                     (*line, !off_the_ball(entry), side == Side::B, index),
-                    (side, entry.clone()),
+                    (side, entry.clone(), *line),
                 )
             })
             .collect::<Vec<_>>()
@@ -101,12 +99,12 @@ fn sorted(
     // freeball sent at the same line: the sender's
     let sent: Vec<(usize, Side)> = events
         .iter()
-        .filter(|(_, (_, e))| e.event_type == EventTypeEnum::FB)
-        .map(|((line, ..), (side, _))| (*line, *side))
+        .filter(|(_, (_, e, _))| e.event_type == EventTypeEnum::FB)
+        .map(|(_, (side, _, line))| (*line, *side))
         .collect();
     events
         .into_iter()
-        .filter(|((line, ..), (side, e))| {
+        .filter(|(_, (side, e, line))| {
             e.event_type != EventTypeEnum::D || !sent.contains(&(*line, side.other()))
         })
         .map(|(_, event)| event)
@@ -117,14 +115,14 @@ fn sorted(
 /// left out where the other side's last touch before the side's next one
 /// sends the ball over (its freeball, `FB`, or a reception over);
 /// otherwise it's the other side's freeball, sent before that touch.
-fn freeballs(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
+fn freeballs(events: Vec<Lined>) -> Vec<Lined> {
     let received = events
         .iter()
-        .position(|(_, e)| e.event_type == EventTypeEnum::OF);
+        .position(|(_, e, _)| e.event_type == EventTypeEnum::OF);
     match received {
         None => events,
         Some(index) => {
-            let side = events.get(index).map_or(Side::A, |(s, _)| *s);
+            let side = events.get(index).map_or(Side::A, |(s, ..)| *s);
             let next_touch = events
                 .iter()
                 .enumerate()
@@ -141,17 +139,18 @@ fn freeballs(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
                 .rev()
                 .take_while(|t| !played_by(t, side))
                 .find(|t| played_by(t, side.other()))
-                .is_some_and(|(s, e)| ball_after(*s, e) == Some(side));
-            let freeball = events.get(index).map(|(_, e)| {
+                .is_some_and(|(s, e, _)| ball_after(*s, e) == Some(side));
+            let freeball = events.get(index).map(|(_, e, line)| {
                 (
                     side.other(),
                     EventEntry {
                         event_type: EventTypeEnum::FB,
                         ..e.clone()
                     },
+                    *line,
                 )
             });
-            let mut rest: Vec<(Side, EventEntry)> = events
+            let mut rest: Vec<Lined> = events
                 .into_iter()
                 .enumerate()
                 .filter(|(i, _)| *i != index)
@@ -165,73 +164,62 @@ fn freeballs(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
     }
 }
 
-/// The evaluations to try for a touch answered by the other side's, most
-/// alike first.
-fn preferred(touch: EventTypeEnum, answer: &EventEntry) -> [EvalEnum; 6] {
-    use EvalEnum::*;
-    use EventTypeEnum::*;
-    match (touch, answer.event_type, answer.eval) {
-        (S, _, Some(Exclamative)) => [Exclamative, Positive, Negative, Perfect, Over, Error],
-        (S, _, Some(Positive | Perfect)) => [Negative, Exclamative, Positive, Perfect, Over, Error],
-        (S, _, _) => [Positive, Exclamative, Negative, Perfect, Over, Error],
-        (A, B, _) => [Over, Exclamative, Negative, Positive, Perfect, Error],
-        _ => [Negative, Positive, Exclamative, Perfect, Over, Error],
-    }
+/// The touches of the two sides in the order of the file, each with its
+/// line: the freeballs as the sender's, what's told by the other side left
+/// out. The evaluations are the file's.
+pub(crate) fn fused_lined(
+    a: &[EventEntry],
+    lines_a: &[usize],
+    b: &[EventEntry],
+    lines_b: &[usize],
+) -> Vec<Lined> {
+    points(freeballs(sorted(a, lines_a, b, lines_b)))
 }
 
-/// Whether the touch of `side` tells what its answer by the other side
-/// does: the same winner, or the ball left on the same side.
-fn agrees(side: Side, touch: &EventEntry, answer: &EventEntry) -> bool {
-    let other = side.other();
-    let winner =
-        |s: Side, e: &EventEntry| e.event_type.rally_winner(e.eval).map(|t| absolute(s, t));
-    winner(side, touch) == winner(other, answer)
-        && ball_after(side, touch) == ball_after(other, answer)
-}
-
-/// The evaluation of a touch answered by the other side (a serve by the
-/// reception, an attack by the dig or the block) as the answer tells it:
-/// its own when it agrees, otherwise the most alike that does.
-fn answered(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
-    let next_touch = |from: usize| {
-        events
-            .iter()
-            .skip(from + 1)
-            .find(|(_, e)| !off_the_ball(e) && !told(e))
-    };
-    events
-        .iter()
-        .enumerate()
-        .map(|(index, (side, entry))| match next_touch(index) {
-            Some((other, answer))
-                if *other != *side
-                    && answers(answer.event_type, entry.event_type)
-                    && !agrees(*side, entry, answer) =>
-            {
-                let eval = preferred(entry.event_type, answer)
-                    .into_iter()
-                    .map(|eval| EventEntry {
-                        eval: Some(eval),
-                        ..entry.clone()
-                    })
-                    .find(|e| agrees(*side, e, answer));
-                (*side, eval.unwrap_or_else(|| entry.clone()))
-            }
-            _ => (*side, entry.clone()),
-        })
-        .collect()
-}
-
-/// The touches of the two sides in the order of the file, as both sides
-/// tell them: the freeballs as the sender's, the touches answered as their
-/// answers tell them, what's told by the other side left out.
+/// `fused_lined` without the lines (the tests).
+#[cfg(test)]
 pub(crate) fn fused(
     a: &[EventEntry],
     lines_a: &[usize],
     b: &[EventEntry],
     lines_b: &[usize],
 ) -> Vec<(Side, EventEntry)> {
-    points(answered(freeballs(sorted(a, lines_a, b, lines_b))))
+    fused_lined(a, lines_a, b, lines_b)
+        .into_iter()
+        .map(|(side, entry, _)| (side, entry))
+        .collect()
+}
+
+/// The first answer of a side (a reception, a dig, a block) whose
+/// evaluation the touch it answers doesn't admit (`rally::answer_evals`):
+/// the two teams of the file telling the same transition differently. Its
+/// line, with the issue. Nothing is reconciled: the evaluations saved are
+/// always the file's, so such a pair stops the set on both sides.
+pub(crate) fn disagreeing(touches: &[Lined]) -> Option<(usize, Issue)> {
+    let played: Vec<&Lined> = touches
+        .iter()
+        .filter(|(_, e, _)| !off_the_ball(e) && !told(e))
+        .collect();
+    played.windows(2).find_map(|pair| match pair {
+        [(touched, answered, answered_line), (side, answer, line)]
+            if touched != side
+                && answers(answer.event_type, answered.event_type)
+                && !answer.eval.is_some_and(|eval| {
+                    answer_evals(answered.event_type, answered.eval, answer.event_type)
+                        .contains(&eval)
+                }) =>
+        {
+            Some((
+                *line,
+                Issue::Answer {
+                    answered: (answered.event_type, answered.eval),
+                    answered_line: *answered_line,
+                    answer: (answer.event_type, answer.eval),
+                },
+            ))
+        }
+        _ => None,
+    })
 }
 
 /// What's told by the other side left out, but the point of a rally no
@@ -239,16 +227,16 @@ pub(crate) fn fused(
 /// the projection tells it to the other side. The other side's point
 /// (`OS`) when the side telling it hasn't the ball, otherwise the error
 /// the other side tells (`OE`, the side's fault).
-fn points(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
+fn points(events: Vec<Lined>) -> Vec<Lined> {
     #[derive(Default)]
     struct Rally {
-        kept: Vec<(Side, EventEntry)>,
+        kept: Vec<Lined>,
         // no touch has ended the rally yet
         open: bool,
         // where the last touch left the ball
         ball: Option<Side>,
         // what each side tells of the end, at the end of the rally
-        told: Vec<(Side, EventEntry)>,
+        told: Vec<Lined>,
     }
     impl Rally {
         fn flush(mut self) -> Self {
@@ -256,11 +244,11 @@ fn points(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
             let point = self
                 .told
                 .iter()
-                .find(|(s, e)| e.event_type == EventTypeEnum::OS && ball != Some(*s))
+                .find(|(s, e, _)| e.event_type == EventTypeEnum::OS && ball != Some(*s))
                 .or_else(|| {
                     self.told
                         .iter()
-                        .find(|(_, e)| e.event_type == EventTypeEnum::OE)
+                        .find(|(_, e, _)| e.event_type == EventTypeEnum::OE)
                 })
                 .cloned();
             if let (true, Some(point)) = (self.open, point) {
@@ -273,10 +261,10 @@ fn points(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
     }
     let rally = events
         .into_iter()
-        .fold(Rally::default(), |mut rally, (side, entry)| {
+        .fold(Rally::default(), |mut rally, (side, entry, line)| {
             match (entry.event_type, told(&entry)) {
                 (EventTypeEnum::OS | EventTypeEnum::OE, true) => {
-                    rally.told.push((side, entry));
+                    rally.told.push((side, entry, line));
                     rally
                 }
                 (_, true) => rally,
@@ -292,7 +280,7 @@ fn points(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
                         true => rally.ball,
                         false => ball_after(side, &entry),
                     };
-                    rally.kept.push((side, entry));
+                    rally.kept.push((side, entry, line));
                     rally
                 }
             }
@@ -302,8 +290,9 @@ fn points(events: Vec<(Side, EventEntry)>) -> Vec<(Side, EventEntry)> {
 }
 
 /// The set on both sides, A the team of `a`, B the other one of the file;
-/// the mappings of both translations. A side that doesn't translate, or a
-/// sequence that doesn't replay on both, stops the set.
+/// the mappings of both translations. A side that doesn't translate, an
+/// answer its touch doesn't admit (`disagreeing`), or a sequence that
+/// doesn't replay on both, stops the set.
 pub fn translate_both(
     file: &DvwFile,
     a: &Us,
@@ -315,7 +304,19 @@ pub fn translate_both(
     let (set_a, mut mappings, lines_a) =
         translate_lined(file, a, set_number, date, max_substitutions)?;
     let (set_b, used_b, lines_b) = translate_lined(file, b, set_number, date, max_substitutions)?;
-    let touches = fused(&set_a.events, &lines_a, &set_b.events, &lines_b);
+    let lined = fused_lined(&set_a.events, &lines_a, &set_b.events, &lines_b);
+    match disagreeing(&lined) {
+        Some((line, issue)) => Err(TranslateError {
+            set_number,
+            line: Some(line),
+            issue,
+        }),
+        None => Ok(()),
+    }?;
+    let touches: Vec<(Side, EventEntry)> = lined
+        .into_iter()
+        .map(|(side, entry, _)| (side, entry))
+        .collect();
     replay(&set_a, &set_b, &touches, max_substitutions).map_err(|e| TranslateError {
         set_number,
         line: None,

@@ -4,7 +4,8 @@
 #[cfg(test)]
 mod tests {
     use crate::domain::Side;
-    use crate::dvw::both::fused;
+    use crate::dvw::both::{disagreeing, fused, fused_lined};
+    use crate::dvw::translate::Issue;
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum},
         flags::EventFlags,
@@ -120,8 +121,7 @@ mod tests {
 
     #[test]
     fn a_freeball_received_after_a_reception_over_is_left_out() {
-        // the serve as the reception over tells it, too
-        let a = [(S, Some(Positive), 10), (OF, None, 10), (A, Some(Over), 12)];
+        let a = [(S, Some(Over), 10), (OF, None, 10), (A, Some(Over), 12)];
         let b = [(P, Some(Over), 11)];
         assert_eq!(
             fuse(&a, &b),
@@ -133,37 +133,95 @@ mod tests {
         );
     }
 
+    // the first answer the touch it answers doesn't admit, as (line,
+    // answered, its line, answer)
+    fn disagreement(
+        a: &Translated,
+        b: &Translated,
+    ) -> Option<(
+        usize,
+        (EventTypeEnum, Option<EvalEnum>),
+        usize,
+        (EventTypeEnum, Option<EvalEnum>),
+    )> {
+        let events = |t: &Translated| -> (Vec<EventEntry>, Vec<usize>) {
+            t.iter().map(|(e, v, l)| (event(*e, *v, *l), *l)).unzip()
+        };
+        let (a, lines_a) = events(a);
+        let (b, lines_b) = events(b);
+        match disagreeing(&fused_lined(&a, &lines_a, &b, &lines_b)) {
+            Some((
+                line,
+                Issue::Answer {
+                    answered,
+                    answered_line,
+                    answer,
+                },
+            )) => Some((line, answered, answered_line, answer)),
+            Some((_, issue)) => panic!("{issue:?}"),
+            None => None,
+        }
+    }
+
+    /// Nothing reconciled (TODO/001, §4.2): the evaluations of both teams
+    /// are the file's, even where they disagree.
     #[test]
-    fn a_serve_takes_the_evaluation_its_reception_tells() {
+    fn the_evaluations_are_the_file_s() {
         let a = [(S, Some(Over), 10), (A, Some(Perfect), 13)];
         let b = [(P, Some(Negative), 11), (FB, None, 12)];
         assert_eq!(
             fuse(&a, &b),
             vec![
-                (Side::A, S, Some(Positive)),
+                (Side::A, S, Some(Over)),
                 (Side::B, P, Some(Negative)),
                 (Side::B, FB, None),
                 (Side::A, A, Some(Perfect)),
             ]
         );
-    }
-
-    #[test]
-    fn an_evaluation_agreeing_with_the_answer_is_kept() {
         assert_eq!(
-            fuse(&[(S, Some(Exclamative), 10)], &[(P, Some(Negative), 11)]),
-            vec![
-                (Side::A, S, Some(Exclamative)),
-                (Side::B, P, Some(Negative)),
-            ]
+            fuse(&[(A, Some(Positive), 10)], &[(B, Some(Perfect), 11)]),
+            vec![(Side::A, A, Some(Positive)), (Side::B, B, Some(Perfect))]
         );
     }
 
     #[test]
-    fn an_attack_takes_the_evaluation_its_block_point_tells() {
+    fn an_answer_the_touch_does_not_admit_is_told_with_its_lines() {
+        let a = [(S, Some(Over), 10), (A, Some(Perfect), 13)];
+        let b = [(P, Some(Negative), 11), (FB, None, 12)];
         assert_eq!(
-            fuse(&[(A, Some(Positive), 10)], &[(B, Some(Perfect), 11)]),
-            vec![(Side::A, A, Some(Over)), (Side::B, B, Some(Perfect))]
+            disagreement(&a, &b),
+            Some((11, (S, Some(Over)), 10, (P, Some(Negative))))
+        );
+        // a block point after an attack coming back
+        assert_eq!(
+            disagreement(&[(A, Some(Positive), 20)], &[(B, Some(Perfect), 21)]),
+            Some((21, (A, Some(Positive)), 20, (B, Some(Perfect))))
+        );
+        // an answer to an error
+        assert_eq!(
+            disagreement(&[(S, Some(Error), 30)], &[(P, Some(Error), 31)]),
+            Some((31, (S, Some(Error)), 30, (P, Some(Error))))
+        );
+    }
+
+    #[test]
+    fn answers_the_touch_admits_agree() {
+        assert_eq!(
+            disagreement(&[(S, Some(Exclamative), 10)], &[(P, Some(Exclamative), 11)]),
+            None
+        );
+        // changes between the touch and its answer don't count
+        assert_eq!(
+            disagreement(
+                &[(S, Some(Positive), 10)],
+                &[(R, None, 11), (P, Some(Negative), 11)]
+            ),
+            None
+        );
+        // an attack with no answer
+        assert_eq!(
+            disagreement(&[(A, Some(Perfect), 10), (OS, None, 10)], &[]),
+            None
         );
     }
 
@@ -197,7 +255,7 @@ mod tests {
 
     #[test]
     fn a_point_no_touch_ends_with_the_ball_is_the_error_the_other_side_tells() {
-        let a = [(S, Some(Negative), 10), (OS, None, 14)];
+        let a = [(S, Some(Over), 10), (OS, None, 14)];
         let b = [(P, Some(Over), 11), (OE, None, 14)];
         assert_eq!(
             fuse(&a, &b),

@@ -23,10 +23,12 @@ use crate::{
         set_writer::SetWriter,
         team_writer::{TeamInput, TeamWriter},
     },
-    rally::project,
+    rally::{answer_evals, project},
     shapes::{
         country::CountryCode,
-        enums::{FriendlyName, GenderEnum, RoleEnum, TeamClassificationEnum},
+        enums::{
+            EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, RoleEnum, TeamClassificationEnum,
+        },
         r#match::{MatchEntry, MatchSource},
         player::PlayerEntry,
         refusal::Refusal,
@@ -998,6 +1000,33 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
         Issue::Sides(incoherence) => labels
             .dvw_event
             .replace("{detail}", &incoherence.to_string()),
+        Issue::Answer {
+            answered,
+            answered_line,
+            answer,
+        } => {
+            let allowed = answer_evals(answered.0, answered.1, answer.0)
+                .iter()
+                .map(|eval| touch(labels, answer.0, Some(*eval)))
+                .collect::<Vec<_>>();
+            let template = match allowed.is_empty() {
+                true => labels.dvw_no_answer,
+                false => labels.dvw_answer,
+            };
+            template
+                .replace("{answer}", &touch(labels, answer.0, answer.1))
+                .replace("{answered}", &touch(labels, answered.0, answered.1))
+                .replace("{answered_line}", &answered_line.to_string())
+                .replace("{allowed}", &allowed.join(" / "))
+        }
+    }
+}
+
+// a touch as the messages tell it: the event and its evaluation, "Serve +"
+fn touch(labels: &Labels, event: EventTypeEnum, eval: Option<EvalEnum>) -> String {
+    match eval {
+        Some(eval) => format!("{} {eval}", event.friendly_name(labels)),
+        None => event.friendly_name(labels).to_string(),
     }
 }
 

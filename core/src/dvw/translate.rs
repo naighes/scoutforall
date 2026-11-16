@@ -62,6 +62,14 @@ pub enum Issue {
     Unfinished,
     /// The touches of the two teams don't replay on both sides.
     Sides(Incoherence),
+    /// An answer (a reception, a dig, a block) the touch it answers, at
+    /// `answered_line`, doesn't admit (`rally::answer_evals`): the two
+    /// teams tell the same transition differently.
+    Answer {
+        answered: (EventTypeEnum, Option<EvalEnum>),
+        answered_line: usize,
+        answer: (EventTypeEnum, Option<EvalEnum>),
+    },
 }
 
 /// What the file tells in a way we can't translate exactly.
