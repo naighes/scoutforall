@@ -103,6 +103,24 @@ impl LineupRulesEnum {
     pub const ALL: [LineupRulesEnum; 2] = [LineupRulesEnum::V1, LineupRulesEnum::V2];
 }
 
+/// The rules a set was scouted with: what can follow what, what each
+/// evaluation means (TODO/001, §4.2). A set saved with older rules is
+/// translated to the current ones when it's read (`domain::rules`); the
+/// data saved stays as it was until the set is written again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScoutingRulesEnum {
+    /// Up to v1.0.0, the data of the versions before the database too.
+    V1,
+}
+
+impl ScoutingRulesEnum {
+    /// The rules new sets are scouted with.
+    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V1;
+
+    pub const ALL: [ScoutingRulesEnum; 1] = [ScoutingRulesEnum::V1];
+}
+
 impl fmt::Display for TeamSideEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TeamSideEnum::*;

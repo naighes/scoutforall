@@ -23,7 +23,8 @@ use crate::{
     shapes::{
         country::CountryCode,
         enums::{
-            EvalEnum, EventTypeEnum, GenderEnum, LineupRulesEnum, RoleEnum, TeamClassificationEnum,
+            EvalEnum, EventTypeEnum, GenderEnum, LineupRulesEnum, RoleEnum, ScoutingRulesEnum,
+            TeamClassificationEnum,
         },
         flags::EventFlags,
         r#match::MatchSource,
@@ -115,6 +116,10 @@ db_text!(GenderEnum, "gender", GenderEnum::ALL, {
 db_text!(LineupRulesEnum, "lineup rules", LineupRulesEnum::ALL, {
     LineupRulesEnum::V1 => "v1",
     LineupRulesEnum::V2 => "v2",
+});
+
+db_text!(ScoutingRulesEnum, "scouting rules", ScoutingRulesEnum::ALL, {
+    ScoutingRulesEnum::V1 => "v1",
 });
 
 db_text!(MatchSource, "source", MatchSource::ALL, {

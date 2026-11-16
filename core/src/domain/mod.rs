@@ -17,7 +17,10 @@ pub mod sql;
 use crate::localization::Labels;
 use crate::shapes::{
     country::CountryCode,
-    enums::{GenderEnum, LineupRulesEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
+    enums::{
+        GenderEnum, LineupRulesEnum, RoleEnum, ScoutingRulesEnum, TeamClassificationEnum,
+        TeamSideEnum,
+    },
     r#match::MatchSource,
     snapshot::EventEntry,
 };
@@ -280,6 +283,9 @@ pub struct MatchSet {
     pub serving: Side,
     /// none: v1, the sets saved before the rules were
     pub lineup_rules: Option<LineupRulesEnum>,
+    /// the scouting rules its events were saved with; none: v1, the sets
+    /// saved before they were
+    pub scouting_rules: Option<ScoutingRulesEnum>,
     pub deleted: bool,
 }
 

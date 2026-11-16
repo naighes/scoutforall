@@ -18,6 +18,8 @@ use std::{path::Path, time::Duration};
 pub const MIGRATIONS: &[&str] = &[
     // v1: TODO/001, the data moved from the files
     include_str!("migrations/0001_schema.sql"),
+    // v2: TODO/001, the scouting rules of each set
+    include_str!("migrations/0002_scouting_rules.sql"),
 ];
 
 /// The version of the schema this app writes.

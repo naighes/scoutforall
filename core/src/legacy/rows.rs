@@ -8,7 +8,8 @@
 //!   (a removed player has none left), of the first team by id among
 //!   them; copies that differ are told (`SharedTeams::differing`).
 //! - A match is scouted on the side of the team of its folder (A), against
-//!   its opponent by name; it keeps where it was (`LegacyId`).
+//!   its opponent by name; it keeps where it was (`LegacyId`). Its sets
+//!   keep the scouting rules of those versions (v1), translated when read.
 //! - Its roster copies number and role from the team of today (the best
 //!   one can rebuild), the active team when it has none (up to v0.10.1).
 //!   Numbers are unique in a roster: of two players with the same number
@@ -30,7 +31,7 @@ use crate::{
     errors::{AppError, IOError},
     legacy::folder::{LegacyTeam, NotRead},
     logging::logger::log_info,
-    shapes::{r#match::MatchEntry, player::PlayerEntry, team::TeamEntry},
+    shapes::{enums::ScoutingRulesEnum, r#match::MatchEntry, player::PlayerEntry, team::TeamEntry},
     storage::layout,
     video::{Anchor, VideoProfile},
 };
@@ -133,7 +134,21 @@ pub fn match_rows(
                 roster,
                 ..m.clone()
             };
-            MatchRows::of(&entry, id, TeamRef::Name(m.opponent.clone()), legacy)
+            MatchRows::of(&entry, id, TeamRef::Name(m.opponent.clone()), legacy).map(|rows| {
+                // events of the versions before the database: their rules,
+                // translated when read, never taken for the current ones
+                MatchRows {
+                    sets: rows
+                        .sets
+                        .into_iter()
+                        .map(|mut set| {
+                            set.row.scouting_rules = Some(ScoutingRulesEnum::V1);
+                            set
+                        })
+                        .collect(),
+                    ..rows
+                }
+            })
         }
     }
 }

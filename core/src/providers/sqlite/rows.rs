@@ -346,7 +346,7 @@ pub(crate) fn match_rows(tx: &Transaction, match_id: Uuid) -> Result<Option<Matc
 pub(crate) fn set_rows(tx: &Transaction, match_id: Uuid) -> Result<Vec<SetRows>, AppError> {
     let sets: Vec<MatchSet> = tx
         .prepare(
-            "SELECT number, serving, lineup_rules, deleted FROM sets
+            "SELECT number, serving, lineup_rules, scouting_rules, deleted FROM sets
              WHERE match_id = ?1 AND deleted = 0 ORDER BY number",
         )
         .and_then(|mut statement| {
@@ -357,7 +357,8 @@ pub(crate) fn set_rows(tx: &Transaction, match_id: Uuid) -> Result<Vec<SetRows>,
                         number: r.get(0)?,
                         serving: r.get(1)?,
                         lineup_rules: r.get(2)?,
-                        deleted: r.get(3)?,
+                        scouting_rules: r.get(3)?,
+                        deleted: r.get(4)?,
                     })
                 })?
                 .collect::<Result<_, _>>()
@@ -524,15 +525,17 @@ pub(crate) fn insert_roster_entry(tx: &Transaction, entry: &RosterEntry) -> Resu
 pub(crate) fn write_set(tx: &Transaction, set: &SetRows) -> Result<(), AppError> {
     let row = &set.row;
     tx.execute(
-        "INSERT INTO sets (match_id, number, serving, lineup_rules, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO sets (match_id, number, serving, lineup_rules, scouting_rules, deleted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT (match_id, number) DO UPDATE SET serving = excluded.serving,
-             lineup_rules = excluded.lineup_rules, deleted = excluded.deleted",
+             lineup_rules = excluded.lineup_rules,
+             scouting_rules = excluded.scouting_rules, deleted = excluded.deleted",
         params![
             Sql(row.match_id),
             row.number,
             row.serving,
             row.lineup_rules,
+            row.scouting_rules,
             row.deleted
         ],
     )

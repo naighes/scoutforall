@@ -26,7 +26,8 @@ mod tests {
         shapes::{
             country::CountryCode,
             enums::{
-                EvalEnum, EventTypeEnum, GenderEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum,
+                EvalEnum, EventTypeEnum, GenderEnum, RoleEnum, ScoutingRulesEnum,
+                TeamClassificationEnum, TeamSideEnum,
             },
             flags::EventFlags,
             r#match::MatchEntry,
@@ -208,6 +209,19 @@ mod tests {
             })
             .collect();
         assert_eq!(scores, vec![((1, 1), Some((1, 1)))]);
+    }
+
+    /// A set the app writes follows the current scouting rules, and says
+    /// so.
+    #[tokio::test]
+    async fn a_new_set_is_saved_with_the_current_scouting_rules() {
+        let p = Sqlite::new();
+        let (_, _, m) = set_one(&p, false).await;
+        let sets =
+            p.db.read(|tx| set_rows(tx, Uuid::parse_str(&m.id).unwrap()))
+                .unwrap();
+        let rules: Vec<_> = sets.iter().map(|s| s.row.scouting_rules).collect();
+        assert_eq!(rules, vec![Some(ScoutingRulesEnum::CURRENT)]);
     }
 
     /// Scouting only A: no side for B, A as `compute_snapshot` replays it.

@@ -30,7 +30,7 @@ use crate::{
     player_form::removed,
     rally::{Incoherence, project, replay},
     shapes::{
-        enums::TeamSideEnum,
+        enums::{ScoutingRulesEnum, TeamSideEnum},
         r#match::MatchEntry,
         player::PlayerEntry,
         set::SetEntry,
@@ -395,6 +395,8 @@ impl SetRows {
                 number: set.set_number,
                 serving: Side::from_a(set.serving_team),
                 lineup_rules: set.lineup_rules,
+                // a set in memory follows the current rules
+                scouting_rules: Some(ScoutingRulesEnum::CURRENT),
                 deleted: false,
             },
             lineups: vec![SetLineup {

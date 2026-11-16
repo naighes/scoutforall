@@ -26,7 +26,10 @@ mod tests {
             team_reader::TeamReader,
         },
         shapes::{
-            enums::LineupRulesEnum, r#match::MatchEntry, player::PlayerEntry, snapshot::EventEntry,
+            enums::{LineupRulesEnum, ScoutingRulesEnum},
+            r#match::MatchEntry,
+            player::PlayerEntry,
+            snapshot::EventEntry,
             team::TeamEntry,
         },
         storage::fs::FsStore,
@@ -540,6 +543,31 @@ mod tests {
             .unwrap();
         let scores = back.set_scores().unwrap();
         (back, scores)
+    }
+
+    /// The sets of a match of the versions before the database keep the
+    /// scouting rules of those versions (v1), never the current ones: also
+    /// written and read back.
+    #[tokio::test]
+    async fn the_sets_before_the_database_keep_their_scouting_rules() {
+        let (team, m) = finished().await;
+        let rows = rows(&team, &m);
+        assert!(!rows.sets.is_empty());
+        let rules = |rows: &MatchRows| -> Vec<Option<ScoutingRulesEnum>> {
+            rows.sets.iter().map(|s| s.row.scouting_rules).collect()
+        };
+        assert_eq!(
+            rules(&rows),
+            vec![Some(ScoutingRulesEnum::V1); rows.sets.len()]
+        );
+        let db = database();
+        let shared = team_rows(std::slice::from_ref(&team)).unwrap();
+        write(&db, &shared, &[&rows]);
+        let back = db
+            .read(|tx| crate::providers::sqlite::rows::match_rows(tx, rows.row.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(rules(&back), rules(&rows));
     }
 
     #[tokio::test]
