@@ -415,7 +415,13 @@ mod tests {
             // the ball back to B (A's dig going over, untold)
             by(Side::B, A, b.outside_hitter(), Positive, 2),
         ];
-        assert!(admitted(&a, &b, &rally, by(Side::A, D, a.libero, Over, 3)));
+        // A's block touched, the ball back to B
+        assert!(admitted(
+            &a,
+            &b,
+            &rally,
+            by(Side::A, B, a.outside_hitter(), Negative, 3)
+        ));
         assert!(!admitted(
             &a,
             &b,
@@ -441,6 +447,75 @@ mod tests {
         let (a, b) = (Team::new(), Team::new());
         let ace = [by(Side::A, S, a.setter(), Perfect, 0)];
         assert!(admitted(&a, &b, &ace, by(Side::B, P, b.libero, Error, 1)));
+    }
+
+    /// The evaluations of the touch admitted after the touches, in the
+    /// order of `EvalEnum::ALL`.
+    fn admitted_evals(
+        a: &Team,
+        b: &Team,
+        touches: &[(Side, EventEntry)],
+        side: Side,
+        event_type: EventTypeEnum,
+        player: Uuid,
+    ) -> Vec<EvalEnum> {
+        let n = u32::try_from(touches.len()).unwrap();
+        EvalEnum::ALL
+            .into_iter()
+            .filter(|eval| admitted(a, b, touches, by(side, event_type, player, *eval, n)))
+            .collect()
+    }
+
+    /// The serve decides the reception (TODO/001, §4.2): one value, no
+    /// choice, a choice only where the game leaves one.
+    #[test]
+    fn the_serve_decides_the_reception() {
+        let (a, b) = (Team::new(), Team::new());
+        let receptions = |serve: EvalEnum| {
+            let serve = [by(Side::A, S, a.setter(), serve, 0)];
+            admitted_evals(&a, &b, &serve, Side::B, P, b.libero)
+        };
+        assert_eq!(receptions(Perfect), vec![Error]);
+        assert_eq!(receptions(Error), vec![]);
+        assert_eq!(receptions(Over), vec![Over]);
+        assert_eq!(receptions(Positive), vec![Negative]);
+        assert_eq!(receptions(Exclamative), vec![Exclamative]);
+        assert_eq!(receptions(Negative), vec![Perfect, Positive]);
+    }
+
+    /// The attack decides the dig or the block of the other side (TODO/001,
+    /// §4.2): a kill is never blocked out (`/`), an attack error never a
+    /// block point.
+    #[test]
+    fn the_attack_decides_the_dig_and_the_block() {
+        let (a, b) = (Team::new(), Team::new());
+        let answers = |attack: EvalEnum, answer: EventTypeEnum| {
+            let rally = [
+                by(Side::A, S, a.setter(), Positive, 0),
+                by(Side::B, P, b.libero, Negative, 1),
+                by(Side::B, A, b.outside_hitter(), attack, 2),
+            ];
+            let player = match answer {
+                D => a.libero,
+                _ => a.outside_hitter(),
+            };
+            admitted_evals(&a, &b, &rally, Side::A, answer, player)
+        };
+        assert_eq!(answers(Perfect, D), vec![Error]);
+        assert_eq!(answers(Perfect, B), vec![Error]);
+        assert_eq!(answers(Error, D), vec![]);
+        assert_eq!(answers(Error, B), vec![]);
+        assert_eq!(answers(Over, D), vec![]);
+        assert_eq!(answers(Over, B), vec![Perfect]);
+        assert_eq!(
+            answers(Negative, D),
+            vec![Perfect, Positive, Exclamative, Negative]
+        );
+        assert_eq!(answers(Negative, B), vec![Positive]);
+        for back in [Positive, Exclamative] {
+            assert_eq!(answers(back, D), vec![], "{back}");
+            assert_eq!(answers(back, B), vec![Exclamative, Negative], "{back}");
+        }
     }
 
     #[test]

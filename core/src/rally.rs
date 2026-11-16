@@ -17,7 +17,7 @@
 use crate::{
     domain::Side,
     shapes::{
-        enums::{EventTypeEnum, LineupRulesEnum, TeamSideEnum},
+        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         flags::EventFlags,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
@@ -295,15 +295,56 @@ pub(crate) fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
     )
 }
 
+/// The evaluations of the answer to the other side's touch (see
+/// `answers`): the two touches tell the same transition, so the answered
+/// one decides the answer (TODO/001, §4.2). One value is no choice for the
+/// scout; none, no answer at all (a serve or an attack error).
+///
+/// | serve | reception |
+/// |---|---|
+/// | `#` | `=` |
+/// | `/` | `/` |
+/// | `+` | `-` |
+/// | `!` | `!` |
+/// | `-` | `#` or `+` |
+///
+/// | attack | dig | block |
+/// |---|---|---|
+/// | `#` | `=` | `=` (never `/`) |
+/// | `/` | | `#` |
+/// | `-` | `# + ! -` | `+` |
+/// | `+` or `!` | | `!` or `-` |
+pub fn answer_evals(
+    answered: EventTypeEnum,
+    eval: Option<EvalEnum>,
+    answer: EventTypeEnum,
+) -> &'static [EvalEnum] {
+    use EvalEnum::*;
+    use EventTypeEnum::*;
+    match (answered, eval, answer) {
+        (S, Some(Perfect), P) | (A, Some(Perfect), D | B) => &[Error],
+        (S, Some(Over), P) => &[Over],
+        (S, Some(Positive), P) => &[Negative],
+        (S, Some(Exclamative), P) => &[Exclamative],
+        (S, Some(Negative), P) => &[Perfect, Positive],
+        (A, Some(Over), B) => &[Perfect],
+        (A, Some(Negative), D) => &[Perfect, Positive, Exclamative, Negative],
+        (A, Some(Negative), B) => &[Positive],
+        (A, Some(Positive | Exclamative), B) => &[Exclamative, Negative],
+        _ => &[],
+    }
+}
+
 /// Whether the side can add the touch now, after the touches so far,
 /// replayed as `a` and `b` (see [`replay`]): the stream of the side must
 /// offer it, and
 /// - a touch of the ball must find it on the side's half, where the last
 ///   touch left it as its side sees it, or else answer the other side's
-///   last touch (see `answers`), leaving the ball where that touch did
-///   (their serve `/`, our reception `/`), or be the other half of the point the other
-///   side's last touch ended, with the same winner (their ace, our
-///   reception error);
+///   last touch (see `answers`) with an evaluation `answer_evals` admits:
+///   in play, leaving the ball where that touch did (their serve `/`, our
+///   reception `/`), or the other half of the point that touch ended
+///   (their ace, our reception error), which the stream of the side has
+///   closed already;
 /// - after a serve in play, only the reception of the other side;
 /// - a fault, a substitution, a libero or setter change need nothing more;
 /// - the other side's point, error or freeball (`OS`, `OE`, `OF`) never:
@@ -342,16 +383,23 @@ pub fn admits(
     let touch_admitted = |event_type: EventTypeEnum| match (serve_in_play, last) {
         (true, Some(_)) => event_type == P && in_play,
         (true, None) => false,
-        (false, Some((s, e))) if winner(*s, e).is_some() => {
-            ball == side || winner(side, entry) == winner(*s, e)
-        }
+        (false, Some((s, e))) if winner(*s, e).is_some() => ball == side,
         (false, Some((_, e))) => ball == side || answers(event_type, e.event_type) && in_play,
         (false, None) => ball == side,
     };
-    own.get_available_options().contains(&entry.event_type)
-        && match entry.event_type {
-            OS | OE | OF => false,
-            F | R | CL | LR | LF | CS => true,
-            event_type => touch_admitted(event_type),
-        }
+    let offered = own.get_available_options().contains(&entry.event_type);
+    let answered = last.filter(|(_, e)| answers(entry.event_type, e.event_type));
+    let fits = |answered: &EventEntry| {
+        entry.eval.is_some_and(|eval| {
+            answer_evals(answered.event_type, answered.eval, entry.event_type).contains(&eval)
+        })
+    };
+    match (entry.event_type, answered) {
+        (OS | OE | OF, _) => false,
+        (F | R | CL | LR | LF | CS, _) => offered,
+        // the other half of the point: closed in the stream of the side
+        (_, Some((s, e))) if winner(*s, e).is_some() => fits(e),
+        (event_type, Some((_, e))) => offered && fits(e) && touch_admitted(event_type),
+        (event_type, None) => offered && touch_admitted(event_type),
+    }
 }
