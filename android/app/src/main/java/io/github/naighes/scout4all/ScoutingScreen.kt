@@ -59,6 +59,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -137,6 +138,8 @@ data class ScoutingView(
     val state: ScoutingState,
     /** the events of the opponent, the faults, the changes of the lineup */
     val otherEvents: List<EventChoice>,
+    /** the points without a cause, ours and theirs (`PW`, `PL`) */
+    val noCausePoints: List<EventChoice> = emptyList(),
     /** the events of the player chosen first, if more than one */
     val playerEvents: List<EventChoice>,
     val evals: List<EvalChoice>,
@@ -319,12 +322,12 @@ class ScoutingViewModel(
 
     private fun view(s: Scouting): ScoutingView {
         val state = s.state()
+        val others = s.otherEvents()
         return ScoutingView(
             state = state,
-            // the point without a cause (PW, PL) not on the phone yet: its
-            // buttons come with their icons and place (TODO/001, phase 2,
-            // step 5)
-            otherEvents = s.otherEvents().filter { it.value !in noCause },
+            // the point without a cause has its own row (`NoCausePoints`)
+            otherEvents = others.filter { it.value !in noCause },
+            noCausePoints = others.filter { it.value in noCause },
             playerEvents = state.player
                 ?.takeIf { state.step == ScoutingStep.EVENT }
                 ?.let { s.playerEvents(it.id) }
@@ -920,7 +923,9 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
     when (state.step) {
         ScoutingStep.EVENT -> when (player) {
             null -> {
-                Hint(stringResource(R.string.touch_the_player))
+                // the court above tells to touch a player: in the room of
+                // the hint, the way out of the scout left behind
+                NoCausePoints(view, model)
                 RallyEvents(view.otherEvents, model)
             }
             else -> {
@@ -1108,6 +1113,42 @@ private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel, mod
                     onTextLayout = { if (it.lineCount > lines) lines = it.lineCount },
                 )
             }
+        }
+    }
+}
+
+/** The points without a cause, as the end of the rally of DataVolley
+ * (its buttons by the score, in the colors of the teams): what the scout
+ * left behind falls back on. Each on the side of its team in the score, in
+ * its color, "+1" and the name; the whole name for TalkBack. */
+@Composable
+private fun NoCausePoints(view: ScoutingView, model: ScoutingViewModel) {
+    val state = view.state
+    val ours = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PW }
+    val theirs = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PL }
+    val us = Triple(ours, state.team, TeamUs)
+    val them = Triple(theirs, state.opponent, TeamThem)
+    val sides = if (state.home) listOf(us, them) else listOf(them, us)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        sides.forEach { (event, team, color) ->
+            event?.let {
+                Button(
+                    onClick = { model.event(it) },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).tutorial("event:${it.value}")
+                        .semantics { contentDescription = it.name },
+                    colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color(0xFF121212)),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    // a long name on more lines, as in the score: never cut
+                    Text(
+                        "+1 $team",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } ?: Spacer(Modifier.weight(1f))
         }
     }
 }

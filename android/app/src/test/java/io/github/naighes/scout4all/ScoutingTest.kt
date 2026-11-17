@@ -192,6 +192,35 @@ class ScoutingTest {
         rule.waitFor { chips() == 0 }
     }
 
+    /** The points without a cause, as the end of the rally of DataVolley:
+     * "+1" and the team, on its side of the score; each a point, undone as
+     * any event. */
+    @Test
+    fun thePointsWithoutACauseAreByTheScore() {
+        show()
+        // not while we serve: on the evaluation of the serve
+        assertEquals(0, rule.onAllNodesWithText("+1 ", substring = true).fetchSemanticsNodes().size)
+        touch("+")
+        rule.waitForTheRally()
+        val x = { text: String -> rule.onNode(hasText(text) and hasClickAction()).fetchSemanticsNode().boundsInRoot.left }
+        val home = saved().home
+        assertEquals(home, x("+1 Italia") < x("+1 Cortona"))
+        touch("+1 Cortona")
+        rule.waitFor { score(saved()) == 0 to 1 }
+        assertEquals(EventTypeEnum.PL, saved().events.first().event)
+        undo()
+        rule.waitFor { score(saved()) == 0 to 0 }
+        touch("+1 Italia")
+        rule.waitFor { score(saved()) == 1 to 0 }
+        // the next rally, our serve again: there after it, never with the
+        // player chosen
+        touch("+")
+        rule.waitForTheRally()
+        touch("Paola Egonu")
+        rule.waitForText("18 · Paola Egonu")
+        assertEquals(0, rule.onAllNodesWithText("+1 ", substring = true).fetchSemanticsNodes().size)
+    }
+
     /** The reception, up in the bar, only before their serve: 3, 4, 2,
      * written on their ace, then 3 again. */
     @Test

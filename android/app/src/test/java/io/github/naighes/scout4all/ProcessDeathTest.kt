@@ -41,7 +41,7 @@ class ProcessDeathTest {
         touch(string(R.string.resume_set_n, 1))
         // a serve saved, then a player touched for the next event
         touch("+")
-        rule.waitForText(string(R.string.touch_the_player))
+        rule.waitForTheRally()
         touch("Paola Egonu")
         rule.waitForText("18 · Paola Egonu")
         // the activity saves its state and goes, with its view models: as
@@ -51,7 +51,7 @@ class ProcessDeathTest {
         Robolectric.buildActivity(MainActivity::class.java).setup(saved)
         // the scouting again, with the serve; the player touched is lost
         rule.waitForText("serve +", substring = true)
-        rule.waitForText(string(R.string.touch_the_player))
+        rule.waitForTheRally()
     }
 
     /** The actions picked in the statistics, in their video, when the
