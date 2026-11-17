@@ -142,6 +142,19 @@ pub fn season_year(file: &DvwFile) -> Option<u16> {
     written.or(dated)
 }
 
+/// The name of the team of the side as written, without the year of the
+/// season at its end (TODO/001): our lists add it ("CORTONA VOLLEY 2026"
+/// would be "CORTONA VOLLEY 2026 2026"), and the same team from a file
+/// without it is one. Another year, or only the year, stays.
+pub fn team_name(file: &DvwFile, side: Side) -> String {
+    let name = file.team(side).name.split_whitespace().collect::<Vec<_>>();
+    let year = season_year(file).map(|y| y.to_string());
+    match name.split_last() {
+        Some((last, rest)) if !rest.is_empty() && Some(*last) == year.as_deref() => rest.join(" "),
+        _ => name.join(" "),
+    }
+}
+
 // a run of four digits that is a plausible year
 fn first_year(season: &str) -> Option<u16> {
     season
@@ -179,7 +192,7 @@ pub fn similar_teams<'a>(
 
 /// How much `team` is like the one of the side: the name, the players.
 pub fn similarity<'a>(file: &DvwFile, side: Side, team: &'a TeamEntry) -> SimilarTeam<'a> {
-    let name = normalized(&file.team(side).name);
+    let name = normalized(&team_name(file, side));
     let players = file.players(side);
     SimilarTeam {
         team,
@@ -205,7 +218,7 @@ pub fn team_plan(file: &DvwFile, side: Side, choice: TeamChoice) -> Result<TeamP
             country,
         } => (
             TeamEntry {
-                name: file.team(side).name.trim().to_string(),
+                name: team_name(file, side),
                 year: season_year(file).ok_or(TeamIssue::NoYear)?,
                 players: vec![],
                 id: Uuid::new_v4(),
@@ -267,14 +280,14 @@ pub fn opponent_plan(
 ) -> Result<OpponentPlan, TeamIssue> {
     let other = side.other();
     match choice {
-        OpponentChoice::Name => Ok(OpponentPlan::Name(file.team(other).name.trim().to_string())),
+        OpponentChoice::Name => Ok(OpponentPlan::Name(team_name(file, other))),
         OpponentChoice::Existing(b) if b.id == a.id => Err(TeamIssue::OpponentIsTeamA),
         OpponentChoice::Existing(b) => {
             with_players(file, other, b.clone(), false).map(OpponentPlan::Team)
         }
         OpponentChoice::New => {
             let b = TeamEntry {
-                name: file.team(other).name.trim().to_string(),
+                name: team_name(file, other),
                 year: a.year,
                 players: vec![],
                 id: Uuid::new_v4(),

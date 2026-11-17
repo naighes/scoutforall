@@ -24,7 +24,7 @@ use scout4all_core::{
             ImportedSides, MatchPlan, OpponentChoice as DvwOpponentChoice, OpponentPlan,
             TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
             imported_already, imported_already_message, match_date, match_plan, opponent_plan,
-            save_import, season_year, similar_teams, similarity, team_plan,
+            save_import, season_year, similar_teams, similarity, team_name, team_plan,
         },
         model::{DvwFile, MatchDate as DvwDate, Side},
     },
@@ -4489,13 +4489,14 @@ impl Scout4All {
         Ok(ImportedArchive::of(&imported, labels))
     }
 
-    /// What the DataVolley file holds.
+    /// What the DataVolley file holds: the teams as the import names them,
+    /// without the year of the season.
     pub fn preview_dvw(&self, bytes: Vec<u8>) -> Result<DvwPreview, MobileError> {
         let file = self.parse_dvw(&bytes)?;
         let day = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
         Ok(DvwPreview {
-            home: file.home.name.trim().to_string(),
-            visiting: file.visiting.name.trim().to_string(),
+            home: team_name(&file, Side::Home),
+            visiting: team_name(&file, Side::Visiting),
             days: match file.match_info.date {
                 DvwDate::Known(d) => vec![day(d)],
                 DvwDate::Ambiguous(a, b) => vec![day(a), day(b)],
@@ -9463,6 +9464,10 @@ mod tests {
         let text = String::from_utf8_lossy(THREE_SETS).replacen("01/25/2015", "02/03/2015", 1);
         let preview = app.preview_dvw(text.into_bytes()).unwrap();
         assert_eq!(preview.days, vec!["2015-03-02", "2015-02-03"]);
+        // the year of the season out of the names
+        let text = String::from_utf8_lossy(THREE_SETS).replacen("H;Home;", "H;Home 2014;", 1);
+        let preview = app.preview_dvw(text.into_bytes()).unwrap();
+        assert_eq!(preview.home, "Home");
         assert_eq!(app.dvw_max_substitutions(Some("2025-12-31".into())), 6);
         assert_eq!(app.dvw_max_substitutions(Some("2026-01-01".into())), 8);
         assert_eq!(app.dvw_max_substitutions(None), 8);
