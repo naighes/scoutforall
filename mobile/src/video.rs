@@ -1043,6 +1043,7 @@ mod tests {
             court_zone::{CourtZoneEnum, ServeStartEnum},
             enums::{EvalEnum, RoleEnum},
             flags::ReceptionSchemeEnum,
+            stats::DigsEnum,
             technique::SetTypeEnum,
         };
         let filter = DetailFilter {
@@ -1058,6 +1059,7 @@ mod tests {
             late: Some(false),
             close: Some(true),
             serve_start: Some(ServeStartEnum::Z6),
+            digs: Some(DigsEnum::Cover),
         };
         let clips = SavedClips {
             team_id: "t".to_string(),

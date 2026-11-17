@@ -244,3 +244,57 @@ class TrendTest {
         assertTrue("$moved", moved.first() > 0f && moved.all { it == moved.first() })
     }
 }
+
+/** The digs counted in the detail of the defense: all of them, the digs
+ * that aren't covers, only the covers (our dig after our attack blocked
+ * back); the menu only on the defense. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+class DigsTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun theDefenseByDigs() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        core { c ->
+            c.scouting(team, match).use { s ->
+                // our serve, their attack dug, our attack blocked back and
+                // covered with difficulty, our kill
+                s.chooseEval(EvalEnum.POSITIVE)
+                listOf(
+                    EventTypeEnum.D to EvalEnum.POSITIVE,
+                    EventTypeEnum.A to EvalEnum.EXCLAMATIVE,
+                    EventTypeEnum.D to EvalEnum.NEGATIVE,
+                    EventTypeEnum.A to EvalEnum.PERFECT,
+                ).forEach { (event, eval) ->
+                    s.chooseEvent(event)
+                    s.choosePlayer(s.playerChoices().first().id)
+                    s.chooseEval(eval)
+                }
+            }
+        }
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText("Serve")
+        val digs = hasText(string(R.string.digs)) and hasClickAction()
+        rule.onNode(digs).assertDoesNotExist()
+        rule.onNode(hasText("Defense") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.digs))
+        // the tile of the total (the players have one too)
+        val total = { n: String ->
+            rule.onAllNodes(hasText(string(R.string.total)) and hasText(n)).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(total("2"))
+        rule.onNode(digs).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.digs_all))
+        rule.onNode(hasText(string(R.string.digs_cover)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(hasText(string(R.string.digs_cover)) and hasClickAction()).assertExists()
+        assertTrue(total("1") && !total("2"))
+        rule.onNode(hasText("Attack") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(hasText(string(R.string.digs_cover)) and hasClickAction()).assertDoesNotExist()
+        rule.onNode(digs).assertDoesNotExist()
+    }
+}

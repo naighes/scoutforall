@@ -18,6 +18,7 @@ use crate::shapes::enums::{
 use crate::shapes::flags::{BlockersEnum, ReceptionSchemeEnum};
 use crate::shapes::technique::SetTypeEnum;
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use uuid::Uuid;
 
@@ -66,14 +67,44 @@ impl Metric {
     }
 }
 
+/// Which digs count as defense (TODO/001, §4): the cover is the dig of the
+/// attackers after their attack blocked back (our `A!`, their block `!`),
+/// told by the touch before, not by the evaluation (`-` is of both). As in
+/// DataVolley, the defense counts the cover too (manual p. 55: `-` "dig or
+/// cover", `!` "good cover").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigsEnum {
+    /// the digs and the covers
+    #[default]
+    All,
+    /// the digs that aren't covers
+    Defense,
+    /// only the covers
+    Cover,
+}
+
+impl DigsEnum {
+    pub const ALL: [DigsEnum; 3] = [DigsEnum::All, DigsEnum::Defense, DigsEnum::Cover];
+
+    /// Whether it counts a dig (a cover or not).
+    pub fn keeps(&self, cover: bool) -> bool {
+        matches!(
+            (self, cover),
+            (DigsEnum::All, _) | (DigsEnum::Defense, false) | (DigsEnum::Cover, true)
+        )
+    }
+}
+
 /// Narrows the statistics to a phase, some rotations, some players and a
-/// situation: `None`, or none of them, keeps them all.
+/// situation: `None`, or none of them, keeps them all. The digs narrow only
+/// the defense: the other fundamentals count every event.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatsFilter {
     pub phase: Option<PhaseEnum>,
     pub rotations: RotationSet,
     pub players: Vec<Uuid>,
     pub situation: SituationFilter,
+    pub digs: DigsEnum,
 }
 
 impl StatsFilter {
@@ -83,7 +114,13 @@ impl StatsFilter {
             rotations: RotationSet::of(rotation.as_slice()),
             players: player.into_iter().collect(),
             situation: SituationFilter::default(),
+            digs: DigsEnum::All,
         }
+    }
+
+    /// Only these digs in the defense.
+    pub fn with_digs(self, digs: DigsEnum) -> Self {
+        StatsFilter { digs, ..self }
     }
 
     pub fn with_situation(self, situation: SituationFilter) -> Self {
@@ -134,6 +171,18 @@ impl StatsFilter {
             && (self.players.is_empty() || player.is_some_and(|p| self.players.contains(&p)))
             && self.situation.matches(situation, touch)
     }
+
+    /// Whether an event of ours passes the filter: a dig only if the digs
+    /// asked count it.
+    fn keeps(&self, k: &EventKey) -> bool {
+        self.matches(
+            k.phase,
+            k.rotation,
+            k.player,
+            &k.situation,
+            k.touch.as_ref(),
+        ) && (k.event_type != EventTypeEnum::D || self.digs.keeps(k.touch.is_some_and(|t| t.cover)))
+    }
 }
 
 /// The events behind a statistic of a fundamental, to see them (in the
@@ -161,13 +210,7 @@ impl EventPick {
             })
         };
         k.event_type == self.event_type
-            && self.filter.matches(
-                k.phase,
-                k.rotation,
-                k.player,
-                &k.situation,
-                k.touch.as_ref(),
-            )
+            && self.filter.keeps(k)
             && self
                 .evals
                 .is_none_or(|set| k.eval.is_some_and(|e| set.contains(e)))
@@ -426,6 +469,8 @@ pub struct Touch {
     pub previous: Option<EvalEnum>,
     /// the set of the attack, when told
     pub set_type: Option<SetTypeEnum>,
+    /// a dig of ours after our attack blocked back (`A!`): a cover
+    pub cover: bool,
 }
 
 /// How many times each key occurred. Hashed with Fx: the counters are
@@ -561,6 +606,7 @@ impl AttackKey {
             role: self.role,
             previous: self.prev_eval,
             set_type: self.set_type,
+            cover: false,
         }
     }
 }
@@ -732,16 +778,8 @@ impl Stats {
         event_type: EventTypeEnum,
         filter: &'a StatsFilter,
     ) -> impl Iterator<Item = (&'a EventKey, u32)> {
-        self.events.iter(move |k| {
-            k.event_type == event_type
-                && filter.matches(
-                    k.phase,
-                    k.rotation,
-                    k.player,
-                    &k.situation,
-                    k.touch.as_ref(),
-                )
-        })
+        self.events
+            .iter(move |k| k.event_type == event_type && filter.keeps(k))
     }
 
     /// The events of this type (with this evaluation, when given).

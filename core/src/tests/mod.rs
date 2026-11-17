@@ -19,6 +19,7 @@ mod ball_tests;
 mod benchmark_tests;
 mod config_tests;
 mod country_tests;
+mod cover_tests;
 mod db_tests;
 mod domain_tests;
 mod dvw_both_tests;

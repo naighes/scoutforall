@@ -176,7 +176,12 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                     if (a.matches.isEmpty()) {
                         Text(stringResource(R.string.no_matches_period), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
-                        DetailFilters(a.detail, a.situation, query.filter) { query = query.copy(filter = it) }
+                        DetailFilters(
+                            a.detail,
+                            a.situation,
+                            query.filter,
+                            query.event.takeIf { pages[page] == AnalysisPage.Detail },
+                        ) { query = query.copy(filter = it) }
                         when (pages[page]) {
                             AnalysisPage.Summary -> {
                                 Summary(a.summary)

@@ -476,6 +476,11 @@
     <string name="score_gap">Score</string>
     <string name="close_score">Close (±2)</string>
     <string name="wide_score">Wide</string>
+    <!-- the digs counted in the defense: all, the digs that aren't covers, only the covers -->
+    <string name="digs">Digs</string>
+    <string name="digs_all">All</string>
+    <string name="digs_defense">Defense</string>
+    <string name="digs_cover">Cover</string>
     <string name="video_less">Less</string>
     <string name="video_more">More</string>
     <string name="team_a">Team</string>

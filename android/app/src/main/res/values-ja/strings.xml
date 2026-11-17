@@ -474,6 +474,10 @@
     <string name="score_gap">点差</string>
     <string name="close_score">接戦 (±2)</string>
     <string name="wide_score">大差</string>
+    <string name="digs">守備</string>
+    <string name="digs_all">すべて</string>
+    <string name="digs_defense">ディグ</string>
+    <string name="digs_cover">フォロー</string>
     <string name="video_less">減らす</string>
     <string name="video_more">増やす</string>
     <string name="team_a">チーム</string>

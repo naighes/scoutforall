@@ -475,6 +475,10 @@
     <string name="score_gap">Placar</string>
     <string name="close_score">Apertado (±2)</string>
     <string name="wide_score">Folgado</string>
+    <string name="digs">Defesas</string>
+    <string name="digs_all">Todas</string>
+    <string name="digs_defense">Defesa</string>
+    <string name="digs_cover">Cobertura</string>
     <string name="video_less">Menos</string>
     <string name="video_more">Mais</string>
     <string name="team_a">Equipe</string>

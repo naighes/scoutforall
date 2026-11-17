@@ -475,6 +475,10 @@
     <string name="score_gap">Punteggio</string>
     <string name="close_score">Stretto (±2)</string>
     <string name="wide_score">Ampio</string>
+    <string name="digs">Difese</string>
+    <string name="digs_all">Tutte</string>
+    <string name="digs_defense">Difesa</string>
+    <string name="digs_cover">Copertura</string>
     <string name="video_less">Meno</string>
     <string name="video_more">Più</string>
     <string name="team_a">Squadra</string>

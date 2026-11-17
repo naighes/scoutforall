@@ -80,8 +80,8 @@ use scout4all_core::{
         set::SetEntry,
         snapshot::{EventEntry, Formation},
         stats::{
-            AttackSummary, EvalSet, EventPick, Metric, RoleSet, SetTypeSet, SituationFilter, Stats,
-            StatsFilter,
+            AttackSummary, DigsEnum, EvalSet, EventPick, Metric, RoleSet, SetTypeSet,
+            SituationFilter, Stats, StatsFilter,
         },
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
@@ -281,6 +281,13 @@ pub enum Series {
 pub enum PhaseEnum {
     Break,
     SideOut,
+}
+
+#[uniffi::remote(Enum)]
+pub enum DigsEnum {
+    All,
+    Defense,
+    Cover,
 }
 
 #[uniffi::remote(Enum)]
@@ -1821,6 +1828,10 @@ pub struct DetailFilter {
     /// from there
     #[uniffi(default)]
     pub serve_start: Option<ServeStartEnum>,
+    /// the digs counted as defense: the ones that aren't covers, only the
+    /// covers; none, all of them (the other fundamentals count every event)
+    #[uniffi(default)]
+    pub digs: Option<DigsEnum>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -2855,7 +2866,8 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
             inverted_p1: filter.inverted_p1,
             late: filter.late,
             close: filter.close,
-        }))
+        })
+        .with_digs(filter.digs.unwrap_or_default()))
 }
 
 /// The players with an event of ours of the kind `event` in the
@@ -7097,6 +7109,56 @@ mod tests {
         app.scouting(team.into(), m.into()).unwrap()
     }
 
+    /// The digs of the detail of the defense: all of them with none, the
+    /// ones that aren't covers, only the covers (our dig after our attack
+    /// blocked back, `A!`).
+    #[test]
+    fn the_defense_by_digs() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let player = |n: usize| {
+            scouting
+                .player_choices()
+                .into_iter()
+                .nth(n)
+                .map(|p| p.id)
+                .unwrap_or_default()
+        };
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        for (event, eval) in [
+            (EventTypeEnum::D, EvalEnum::Positive),
+            (EventTypeEnum::A, EvalEnum::Exclamative),
+            (EventTypeEnum::D, EvalEnum::Negative),
+            (EventTypeEnum::A, EvalEnum::Perfect),
+        ] {
+            scouting.choose_event(event).unwrap();
+            scouting.choose_player(player(1)).unwrap();
+            scouting.choose_eval(eval).unwrap();
+        }
+        let total = |digs| {
+            app.match_detail(
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+                EventTypeEnum::D,
+                DetailFilter {
+                    digs,
+                    ..DetailFilter::default()
+                },
+            )
+            .unwrap()
+            .fundamental
+            .map_or(0, |f| f.total)
+        };
+        assert_eq!(total(None), 2);
+        assert_eq!(total(Some(DigsEnum::All)), 2);
+        assert_eq!(total(Some(DigsEnum::Defense)), 1);
+        assert_eq!(total(Some(DigsEnum::Cover)), 1);
+    }
+
     /// How many blocked: on our block from one on, the one chosen saved
     /// with the evaluation and shown on the event; none on the serve.
     #[test]
@@ -7425,11 +7487,7 @@ mod tests {
         if scouting.state().step == ScoutingStep::Event {
             scouting.choose_event(EventTypeEnum::B).unwrap();
         }
-        let evals: Vec<_> = scouting
-            .available_evals()
-            .iter()
-            .map(|e| e.value)
-            .collect();
+        let evals: Vec<_> = scouting.available_evals().iter().map(|e| e.value).collect();
         assert_eq!(evals, vec![EvalEnum::Over]);
         assert!(scouting.choose_eval(EvalEnum::Perfect).is_err());
         assert_eq!(

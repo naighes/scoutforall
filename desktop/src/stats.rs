@@ -32,6 +32,7 @@ use {
         shapes::{
             enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum},
             flags::ReceptionSchemeEnum,
+            stats::DigsEnum,
             technique::SetTypeEnum,
         },
         video::StoredProfile,
@@ -75,6 +76,9 @@ enum Filter {
     InvertedP1,
     Late,
     Close,
+    /// in the detail of the defense, the digs counted: all, the digs that
+    /// aren't covers, only the covers
+    Digs,
     Zones,
 }
 
@@ -147,6 +151,8 @@ pub enum Message {
     Late(Option<bool>),
     /// a close score or not
     Close(Option<bool>),
+    /// the digs counted in the defense: none, all of them
+    Digs(Option<DigsEnum>),
     /// an evaluation of the detail, to watch only those (or all again)
     ClipEval(EvalEnum),
     /// a zone of the net of the attacks, to watch only those
@@ -990,8 +996,15 @@ impl StatsScreen {
                 .map(|z| ui::fill(s.serve_from, &[z.to_string()])),
             _ => None,
         };
+        // the digs asked, of the defense only
+        let digs = match (self.event, self.filter.digs) {
+            (EventTypeEnum::D, Some(DigsEnum::Defense)) => Some(s.digs_defense.to_string()),
+            (EventTypeEnum::D, Some(DigsEnum::Cover)) => Some(s.digs_cover.to_string()),
+            _ => None,
+        };
         [
             fundamental,
+            digs,
             evals,
             player,
             zone,
@@ -1083,11 +1096,14 @@ impl StatsScreen {
             (true, Page::Trend) => vec![Filter::Period, Filter::Series],
             (true, Page::Detail) => vec![Filter::Period, Filter::Event],
         };
-        let zones = (self.current() == Page::Detail && zones).then_some(Filter::Zones);
+        let detail = self.current() == Page::Detail;
+        let digs = (detail && self.event == EventTypeEnum::D).then_some(Filter::Digs);
+        let zones = (detail && zones).then_some(Filter::Zones);
         first
             .into_iter()
             .chain(narrow)
             .chain(SITUATION)
+            .chain(digs)
             .chain(zones)
             .collect()
     }
@@ -1217,6 +1233,12 @@ impl StatsScreen {
                 forward,
             )
             .map(Message::Close),
+            Filter::Digs => ui::cycle(
+                &[None, Some(DigsEnum::Defense), Some(DigsEnum::Cover)],
+                &self.filter.digs,
+                forward,
+            )
+            .map(Message::Digs),
         }
     }
 
@@ -1353,6 +1375,10 @@ impl StatsScreen {
             }
             Message::Close(close) => {
                 self.filter.close = close;
+                self.load();
+            }
+            Message::Digs(digs) => {
+                self.filter.digs = digs;
                 self.load();
             }
             Message::ClipEval(eval) => {
@@ -1887,6 +1913,23 @@ impl StatsScreen {
                         Message::Close(Some(false)),
                     ),
                 ],
+            ),
+            Filter::Digs => (
+                s.digs,
+                [
+                    (s.digs_all, None),
+                    (s.digs_defense, Some(DigsEnum::Defense)),
+                    (s.digs_cover, Some(DigsEnum::Cover)),
+                ]
+                .into_iter()
+                .map(|(label, digs)| {
+                    pill(
+                        label.to_string(),
+                        self.filter.digs == digs,
+                        Message::Digs(digs),
+                    )
+                })
+                .collect(),
             ),
         };
         match top {
@@ -3872,6 +3915,38 @@ pub(crate) mod tests {
             .unwrap_or_else(|| unreachable!("a scroll"));
         assert!((y - screen.row as f32 / last).abs() < f32::EPSILON);
         assert_eq!(screen.take_scroll(), None, "once");
+    }
+
+    /// The digs, only in the detail of the defense: all of them first, then
+    /// the digs that aren't covers and the covers, by the arrows too.
+    #[test]
+    fn the_digs_only_in_the_detail_of_the_defense() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let s = strings(LanguageEnum::It);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        screen.update(Message::Page(2));
+        assert!(!screen.filters().contains(&Filter::Digs));
+        screen.update(Message::Event(EventTypeEnum::D));
+        assert!(screen.filters().contains(&Filter::Digs));
+        assert_eq!(screen.filter.digs, None);
+        screen.row = screen
+            .filters()
+            .iter()
+            .position(|f| *f == Filter::Digs)
+            .unwrap_or_default();
+        screen.key(key!(right));
+        assert_eq!(screen.filter.digs, Some(DigsEnum::Defense));
+        screen.key(key!(right));
+        assert_eq!(screen.filter.digs, Some(DigsEnum::Cover));
+        screen.key(key!(right));
+        assert_eq!(screen.filter.digs, None);
+        screen.update(Message::Digs(Some(DigsEnum::Cover)));
+        assert_eq!(screen.filter.digs, Some(DigsEnum::Cover));
+        assert!(screen.clips_title(s).starts_with("Difesa · Copertura"));
+        screen.update(Message::Event(EventTypeEnum::A));
+        assert!(!screen.filters().contains(&Filter::Digs));
     }
 
     /// The players, the rotations and the roles: more than one at a time,

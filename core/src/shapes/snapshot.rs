@@ -659,6 +659,11 @@ impl Snapshot {
                     .filter(|e| e.event_type.rally_winner(e.eval).is_none())
                     .and_then(|e| e.eval),
                 set_type,
+                // our dig after our attack blocked back
+                cover: event.event_type == D
+                    && self.last_event.as_ref().is_some_and(|e| {
+                        (e.event_type, e.eval) == (A, Some(EvalEnum::Exclamative))
+                    }),
             }),
         });
         if let Some(key) = &self.last_key {

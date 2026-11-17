@@ -477,6 +477,10 @@
     <string name="score_gap">Wynik</string>
     <string name="close_score">Wyrównany (±2)</string>
     <string name="wide_score">Wyraźny</string>
+    <string name="digs">Obrony</string>
+    <string name="digs_all">Wszystkie</string>
+    <string name="digs_defense">Obrona</string>
+    <string name="digs_cover">Asekuracja</string>
     <string name="video_less">Mniej</string>
     <string name="video_more">Więcej</string>
     <string name="team_a">Drużyna</string>
