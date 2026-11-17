@@ -299,7 +299,7 @@
     <string name="tutorial_serve">サーブを評価します:ネガティブ、− をタップ。</string>
     <string name="tutorial_block">相手のアタックをダネージがブロック:名前をタップ。</string>
     <string name="tutorial_block_event">「ブロック」をタップ。</string>
-    <string name="tutorial_block_eval">ブロックは触れたがボールは相手コートに:− をタップ。</string>
+    <string name="tutorial_block_eval">ブロックは触れたがボールは相手コートに:! をタップ。</string>
     <string name="tutorial_dig">再び相手のアタック、ファールがディグ:名前をタップ。</string>
     <string name="tutorial_dig_event">「ディグ」をタップ。</string>
     <string name="tutorial_dig_eval">良いディグ:+ をタップ。</string>

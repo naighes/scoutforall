@@ -300,7 +300,7 @@
     <string name="tutorial_serve">La battuta è già pronta da valutare: negativa, tocca −.</string>
     <string name="tutorial_block">Attaccano loro e mura Danesi: tocca il suo nome.</string>
     <string name="tutorial_block_event">Tocca Muro.</string>
-    <string name="tutorial_block_eval">Il muro la tocca, ma la palla resta nel loro campo: tocca −.</string>
+    <string name="tutorial_block_eval">Il muro la tocca, ma la palla resta nel loro campo: tocca !.</string>
     <string name="tutorial_dig">Attaccano di nuovo, difende Fahr: tocca il suo nome.</string>
     <string name="tutorial_dig_event">Tocca Difesa.</string>
     <string name="tutorial_dig_eval">Una buona difesa: tocca +.</string>

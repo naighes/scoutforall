@@ -93,7 +93,8 @@ private val rallies = listOf(
     touch("eval:NEGATIVE", R.string.tutorial_serve),
     touch("player:11", R.string.tutorial_block),
     touch("event:B", R.string.tutorial_block_event),
-    touch("eval:NEGATIVE", R.string.tutorial_block_eval),
+    // the block `!`: the ball back to them, who attack again
+    touch("eval:EXCLAMATIVE", R.string.tutorial_block_eval),
     touch("player:19", R.string.tutorial_dig),
     touch("event:D", R.string.tutorial_dig_event),
     touch("eval:POSITIVE", R.string.tutorial_dig_eval),

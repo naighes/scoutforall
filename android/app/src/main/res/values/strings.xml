@@ -301,7 +301,7 @@
     <string name="tutorial_serve">The serve is ready to rate: a negative one, tap −.</string>
     <string name="tutorial_block">They attack and Danesi blocks: tap her name.</string>
     <string name="tutorial_block_event">Tap Block.</string>
-    <string name="tutorial_block_eval">The block touches it, but the ball stays on their side: tap −.</string>
+    <string name="tutorial_block_eval">The block touches it, but the ball stays on their side: tap !.</string>
     <string name="tutorial_dig">They attack again, Fahr digs: tap her name.</string>
     <string name="tutorial_dig_event">Tap Defense.</string>
     <string name="tutorial_dig_eval">A good dig: tap +.</string>

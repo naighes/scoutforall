@@ -302,7 +302,7 @@
     <string name="tutorial_serve">Zagrywka czeka na ocenę: negatywna, dotknij −.</string>
     <string name="tutorial_block">Rywal atakuje, blokuje Danesi: dotknij nazwiska.</string>
     <string name="tutorial_block_event">Dotknij Blok.</string>
-    <string name="tutorial_block_eval">Blok dotyka piłki, ale zostaje po ich stronie: dotknij −.</string>
+    <string name="tutorial_block_eval">Blok dotyka piłki, ale zostaje po ich stronie: dotknij !.</string>
     <string name="tutorial_dig">Rywal znowu atakuje, broni Fahr: dotknij nazwiska.</string>
     <string name="tutorial_dig_event">Dotknij Obrona.</string>
     <string name="tutorial_dig_eval">Dobra obrona: dotknij +.</string>

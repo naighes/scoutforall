@@ -321,7 +321,10 @@ class ScoutingViewModel(
         val state = s.state()
         return ScoutingView(
             state = state,
-            otherEvents = s.otherEvents(),
+            // the point without a cause (PW, PL) not on the phone yet: its
+            // buttons come with their icons and place (TODO/001, phase 2,
+            // step 5)
+            otherEvents = s.otherEvents().filter { it.value !in noCause },
             playerEvents = state.player
                 ?.takeIf { state.step == ScoutingStep.EVENT }
                 ?.let { s.playerEvents(it.id) }
@@ -992,6 +995,8 @@ private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.on
 /** The changes of the lineup, rare and at stopped play, each with its icon
  * and a short name; the libero out or in by its own, saying which; the
  * libero for a player of the back row, touched on court. */
+private val noCause = setOf(EventTypeEnum.PW, EventTypeEnum.PL)
+
 private val lineupChanges = mapOf(
     EventTypeEnum.R to (R.drawable.ic_substitution to R.string.substitution_short),
     EventTypeEnum.CL to (R.drawable.ic_libero to R.string.libero),

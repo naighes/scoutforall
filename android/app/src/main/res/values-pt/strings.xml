@@ -300,7 +300,7 @@
     <string name="tutorial_serve">O saque já está pronto para avaliar: negativo, toque em −.</string>
     <string name="tutorial_block">Eles atacam e Danesi bloqueia: toque no seu nome.</string>
     <string name="tutorial_block_event">Toque em Bloqueio.</string>
-    <string name="tutorial_block_eval">O bloqueio toca, mas a bola fica do lado deles: toque em −.</string>
+    <string name="tutorial_block_eval">O bloqueio toca, mas a bola fica do lado deles: toque em !.</string>
     <string name="tutorial_dig">Eles atacam de novo, Fahr defende: toque no seu nome.</string>
     <string name="tutorial_dig_event">Toque em Defesa.</string>
     <string name="tutorial_dig_eval">Uma boa defesa: toque em +.</string>
