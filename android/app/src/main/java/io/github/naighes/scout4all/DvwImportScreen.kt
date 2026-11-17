@@ -191,11 +191,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     fun next() = work { s ->
         when (val step = s.step) {
             DvwStep.Sides -> {
-                val sides = when (s.selected) {
-                    0 -> listOf(DvwSide.HOME)
-                    1 -> listOf(DvwSide.VISITING)
-                    else -> listOf(DvwSide.HOME, DvwSide.VISITING)
-                }
+                val sides = listOf(if (s.selected == 1) DvwSide.VISITING else DvwSide.HOME)
                 val days = s.preview?.days.orEmpty()
                 mutableState.update { it.copy(sides = sides, current = 0, day = days.singleOrNull()) }
                 when (days.size) {
@@ -236,7 +232,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
                     mutableState.update { it.copy(opponentError = e.reason, working = false) }
                 }
             }
-            is DvwStep.Ready -> save(s, step, overwrite = step.ready.savedAlready)
+            is DvwStep.Ready -> save(s, step)
             DvwStep.Done, DvwStep.Loading, is DvwStep.Failed -> mutableState.update { it.copy(working = false) }
         }
     }
@@ -302,14 +298,13 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     )
 
     /** Team A as chosen, checked against B only a name: on to team B, ours
-     * like it (team A left out), the team of the side imported before
-     * first, else the one the import was chosen from. */
+     * like it (team A left out), the one the import was chosen from
+     * first. */
     private suspend fun plan(s: DvwState, teamId: String?) {
         val choice = choice(s, teamId)
         try {
             app.core { it.planDvw(bytes, choice) }
-            val first = (s.results.lastOrNull { it.teamId != null }?.teamId ?: file?.teamId)
-                ?.takeIf { it != teamId }
+            val first = file?.teamId?.takeIf { it != teamId }
             val similar = app.core { it.dvwSimilarOpponents(bytes, choice.side, teamId, first) }
             to(DvwStep.Opponent(similar, choice))
         } catch (e: MobileException.InvalidTeam) {
@@ -320,10 +315,10 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
         }
     }
 
-    private suspend fun save(s: DvwState, step: DvwStep.Ready, overwrite: Boolean) {
+    private suspend fun save(s: DvwState, step: DvwStep.Ready) {
         val team = step.ready.team
         val result = try {
-            val imported = app.core { it.importDvw(bytes, step.choice, overwrite) }
+            val imported = app.core { it.importDvw(bytes, step.choice) }
             // queued for the statistics: sent now, not at the next start
             app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
             DvwResult(team, app.getString(R.string.dvw_imported, team), imported.teamId)
@@ -397,7 +392,6 @@ private fun DvwContent(
                     listOf(
                         stringResource(R.string.dvw_home, preview.home),
                         stringResource(R.string.dvw_visiting, preview.visiting),
-                        stringResource(R.string.dvw_both),
                     ),
                     state.selected,
                     model::select,
@@ -470,9 +464,6 @@ private fun DvwContent(
                 ready.oneSide?.let { why ->
                     Text(why.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.error)
                 }
-                if (ready.savedAlready) {
-                    Text(stringResource(R.string.dvw_already_saved, ready.team), color = MaterialTheme.colorScheme.error)
-                }
             }
             DvwStep.Done -> {
                 Question(stringResource(R.string.dvw_done))
@@ -491,7 +482,7 @@ private fun DvwContent(
     when (val step = state.step) {
         is DvwStep.Ready -> {
             Button(onClick = model::next, enabled = !state.working, modifier = button.padding(top = 16.dp)) {
-                Text(stringResource(if (step.ready.savedAlready) R.string.dvw_overwrite else R.string.save))
+                Text(stringResource(R.string.save))
             }
             OutlinedButton(onClick = { model.skip() }, enabled = !state.working, modifier = button.padding(bottom = 16.dp)) {
                 Text(stringResource(R.string.dvw_dont_import))

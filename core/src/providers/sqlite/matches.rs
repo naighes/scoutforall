@@ -1,14 +1,14 @@
 use crate::{
     domain::{
-        Competition, Home, Match, RosterEntry, ScoutingMode, Side, Team, TeamRef,
-        adapters::MatchRows, sql::Sql,
+        Competition, Match, RosterEntry, ScoutingMode, Side, Team, TeamRef, adapters::MatchRows,
+        sql::Sql,
     },
     errors::{AppError, IOError, MatchError},
     localization::Language,
     logging::logger::log_error,
     match_form::{CompetitionInput, MatchInput, Opponent, RosterNumber},
     providers::{
-        match_reader::MatchReader,
+        match_reader::{MatchReader, PlayedOn},
         match_writer::MatchWriter,
         sqlite::{
             Database,
@@ -32,7 +32,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, NaiveDate};
 use rusqlite::{Transaction, params};
 use std::cmp::Ordering;
 use uuid::Uuid;
@@ -325,38 +325,51 @@ impl MatchReader for SqliteMatchReader {
             .map(|(entry, _)| entry)
     }
 
-    /// A match of team A `team` not removed that was in that folder
-    /// (`legacy_id`, migrated or imported from an archive of then), or
-    /// whose opponent and day make that id now, the first by start.
-    async fn saved_as(&self, team: &TeamEntry, file_id: &str) -> Result<Option<String>, AppError> {
+    async fn played_on(&self, teams: &[Uuid], day: NaiveDate) -> Result<Vec<PlayedOn>, AppError> {
         self.db.read(|tx| {
             let mut statement = tx
                 .prepare(
-                    "SELECT m.id, m.legacy_id = ?2 AND m.legacy_team = ?1,
-                            coalesce(m.team_b_name, b.name), m.start
-                     FROM matches m LEFT JOIN teams b ON b.id = m.team_b
-                     WHERE m.team_a = ?1 AND m.deleted = 0
-                     ORDER BY m.start, m.id",
+                    "SELECT id, team_a, team_b, start FROM matches
+                     WHERE deleted = 0 AND (team_a = ?1 OR team_b = ?1)",
                 )
                 .map_err(sqlite)?;
-            let rows = statement
-                .query_map(params![Sql(team.id), file_id], |row| {
-                    Ok((
-                        row.get::<_, Sql<Uuid>>(0)?.0,
-                        row.get::<_, Option<bool>>(1)?.unwrap_or(false),
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Sql<DateTime<FixedOffset>>>(3)?.0,
-                    ))
+            let mut rows = vec![];
+            for team in teams {
+                let of_team = statement
+                    .query_map(params![Sql(*team)], |row| {
+                        Ok((
+                            row.get::<_, Sql<Uuid>>(0)?.0,
+                            row.get::<_, Sql<Uuid>>(1)?.0,
+                            row.get::<_, Option<Sql<Uuid>>>(2)?.map(|b| b.0),
+                            row.get::<_, Sql<DateTime<FixedOffset>>>(3)?.0,
+                        ))
+                    })
+                    .map_err(sqlite)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sqlite)?;
+                rows.extend(of_team);
+            }
+            rows.sort_by_key(|(id, _, _, start)| (*start, *id));
+            rows.dedup_by_key(|(id, ..)| *id);
+            rows.into_iter()
+                .filter(|(.., start)| start.date_naive() == day)
+                .map(|(id, a, b, _)| {
+                    let team = read_team(tx, &a)?;
+                    Ok(self
+                        .entry(tx, &team, &id.to_string())
+                        .ok()
+                        .and_then(|(m, _)| {
+                            m.set_scores().ok().map(|scores| PlayedOn {
+                                id: m.id.clone(),
+                                team_a: a,
+                                team_b: b,
+                                names: (team.name.clone(), m.opponent.clone()),
+                                scores,
+                            })
+                        }))
                 })
-                .map_err(sqlite)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(sqlite)?;
-            let was_there = rows.iter().find(|(_, legacy, _, _)| *legacy);
-            let same_now = || {
-                rows.iter()
-                    .find(|(_, _, opponent, start)| MatchEntry::id_of(opponent, start) == file_id)
-            };
-            Ok(was_there.or_else(same_now).map(|(id, ..)| id.to_string()))
+                .filter_map(Result::transpose)
+                .collect()
         })
     }
 
@@ -627,35 +640,6 @@ impl MatchWriter for SqliteMatchWriter {
     async fn update(&self, m: &MatchEntry, input: MatchInput) -> Result<(), AppError> {
         let id = match_uuid(&m.id)?;
         self.0.write(|tx| update_match(tx, id, input))
-    }
-
-    /// See `MatchWriter::replace_details`.
-    async fn replace_details(&self, m: &MatchEntry, input: MatchInput) -> Result<(), AppError> {
-        let id = match_uuid(&m.id)?;
-        self.0.write(|tx| {
-            let row = match_rows(tx, id)?
-                .ok_or_else(|| not_found(&format!("match {id}")))?
-                .row;
-            let input = MatchInput {
-                opponent: match (input.opponent, row.team_b) {
-                    (Opponent::Name(_), TeamRef::Team(b)) => Opponent::Team(b),
-                    (opponent, _) => opponent,
-                },
-                home: match (input.home, row.home) {
-                    (Home::B, Home::Neutral) => Home::Neutral,
-                    (home, _) => home,
-                },
-                notes: row.notes,
-                friendly: row.friendly,
-                competition: input
-                    .competition
-                    .or(row.competition_id.map(CompetitionInput::Existing)),
-                stage: input.stage.or(row.stage),
-                round: input.round.or(row.round),
-                ..input
-            };
-            update_match(tx, id, input)
-        })
     }
 
     async fn save_roster_of_b(

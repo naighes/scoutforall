@@ -941,63 +941,6 @@ mod tests {
         );
     }
 
-    /// Saved again as the matches were before the database (an import
-    /// over it), a neutral court stays neutral when "not at home".
-    #[tokio::test]
-    async fn a_neutral_court_stays_neutral() {
-        let db = database();
-        let p = sqlite(&db);
-        let (team, m) = scouted_match(&p).await;
-        execute(&db, "UPDATE matches SET home = NULL");
-        let (away, home) = (
-            MatchEntry {
-                home: false,
-                ..m.clone()
-            },
-            MatchEntry {
-                home: true,
-                ..m.clone()
-            },
-        );
-        p.match_writer
-            .replace_details(
-                &away,
-                crate::match_form::MatchInput::against(
-                    &away.opponent,
-                    away.date,
-                    away.home,
-                    away.max_substitutions,
-                    &away.notes,
-                    away.roster.clone(),
-                ),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            count(&db, "SELECT count(*) FROM matches WHERE home IS NULL"),
-            1
-        );
-        assert!(!p.match_reader.read_single(&team, &m.id).await.unwrap().home);
-        p.match_writer
-            .replace_details(
-                &home,
-                crate::match_form::MatchInput::against(
-                    &home.opponent,
-                    home.date,
-                    home.home,
-                    home.max_substitutions,
-                    &home.notes,
-                    home.roster.clone(),
-                ),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            count(&db, "SELECT count(*) FROM matches WHERE home = 'a'"),
-            1
-        );
-    }
-
     /// The ids of the matches are UUIDs: two matches against the same
     /// opponent on the same day are two matches.
     #[tokio::test]

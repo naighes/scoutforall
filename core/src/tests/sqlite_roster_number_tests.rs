@@ -187,8 +187,8 @@ mod tests {
         assert_eq!(numbers(&m, one), Some((2, None)));
     }
 
-    /// Without numbers given (an import overwriting the match), the ones
-    /// saved stay; a player added copies the team's.
+    /// Without numbers given, the ones saved stay; a player added copies
+    /// the team's.
     #[tokio::test]
     async fn the_numbers_saved_stay_when_not_given() {
         let p = Sqlite::new();
@@ -200,7 +200,7 @@ mod tests {
         let m = save(&p, &team, None, form).await;
         assert_eq!(saved(&p.db, &m, eight), None);
         p.match_writer
-            .replace_details(
+            .update(
                 &m,
                 crate::match_form::MatchInput::against(
                     &m.opponent,

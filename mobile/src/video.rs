@@ -1135,7 +1135,7 @@ mod tests {
             gender: Some(GenderEnum::Women),
             country: CountryCode::known("SI"),
         };
-        let done = app.import_dvw(timed(), choice, false).unwrap();
+        let done = app.import_dvw(timed(), choice).unwrap();
         (app, done.team_id, done.match_id)
     }
 

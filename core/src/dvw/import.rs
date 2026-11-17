@@ -19,7 +19,7 @@ use crate::{
     localization::Labels,
     match_form::{CompetitionInput, MatchInput, Opponent, RosterNumber},
     providers::{
-        match_reader::MatchReader,
+        match_reader::{MatchReader, PlayedOn},
         match_writer::MatchWriter,
         set_writer::SetWriter,
         team_writer::{TeamInput, TeamWriter},
@@ -807,49 +807,56 @@ fn numbers_of(plan: &TeamPlan) -> Vec<RosterNumber> {
         .collect()
 }
 
-/// Whether team A has the match already: the import overwrites it only
-/// when the user confirms.
-pub async fn match_exists(
+/// The match saved already that the import tells again, if any: started
+/// the same day, with the same score in each set, team A or team B (when a
+/// team) playing in it on either side; refused, not overwritten (TODO/001:
+/// to import it again the user deletes it). A team doesn't play the same
+/// match twice in a day: against another team B too it's the same match.
+pub async fn imported_already(
     plan: &MatchPlan,
+    opponent: &OpponentPlan,
     match_reader: &(impl MatchReader + Sync + ?Sized),
-) -> Result<bool, AppError> {
-    saved_as(plan, match_reader).await.map(|id| id.is_some())
+) -> Result<Option<PlayedOn>, AppError> {
+    let a = plan.entry.team.id;
+    let b = opponent.team().map(|b| b.team.id);
+    let teams: Vec<Uuid> = [Some(a), b].into_iter().flatten().collect();
+    let ours = plan.entry.set_scores()?;
+    let mirrored: Vec<(u8, u8)> = ours.iter().map(|(us, them)| (*them, *us)).collect();
+    let saved = match_reader
+        .played_on(&teams, plan.entry.date.date_naive())
+        .await?;
+    Ok(saved.into_iter().find(|m| {
+        let same_way = m.team_a == a || (b.is_some() && m.team_b == b);
+        let other_way = m.team_b == Some(a) || Some(m.team_a) == b;
+        (same_way && m.scores == ours) || (other_way && m.scores == mirrored)
+    }))
 }
 
-/// The id of the match saved already that the import tells again, if any
-/// (`MatchReader::saved_as`).
-async fn saved_as(
-    plan: &MatchPlan,
-    match_reader: &(impl MatchReader + Sync + ?Sized),
-) -> Result<Option<String>, AppError> {
-    match_reader
-        .saved_as(&plan.entry.team, &plan.entry.id)
-        .await
+/// Why the match isn't imported again, in the language of the app.
+pub fn imported_already_message(saved: &PlayedOn, labels: &Labels) -> String {
+    labels
+        .dvw_imported_already
+        .replace("{a}", &saved.names.0)
+        .replace("{b}", &saved.names.1)
 }
 
 /// Saves the import: team A with its new players, team B with its own when
-/// a team, then the match and its sets, in place of the one saved when
-/// `overwrite` (what the file doesn't tell kept, its sets beyond the
-/// imported ones removed), the roster of B, and the match queued for the
-/// statistics as any finished match. A match saved and not to overwrite:
-/// nothing saved.
+/// a team, then the match and its sets, the roster of B, and the match
+/// queued for the statistics as any finished match. A match imported
+/// already (`imported_already`): nothing saved.
 #[allow(clippy::too_many_arguments)]
 pub async fn save_import(
     team: &TeamPlan,
     opponent: &OpponentPlan,
     plan: &MatchPlan,
-    overwrite: bool,
     team_writer: &(impl TeamWriter + Sync + ?Sized),
     match_reader: &(impl MatchReader + Sync + ?Sized),
     match_writer: &(impl MatchWriter + Sync + ?Sized),
     set_writer: &(impl SetWriter + Sync + ?Sized),
     finished: &(impl FinishedMatches + ?Sized),
 ) -> Result<MatchEntry, AppError> {
-    let saved = saved_as(plan, match_reader).await?;
-    if saved.is_some() && !overwrite {
-        return Err(AppError::Match(MatchError::MatchAlreadyExists(
-            plan.entry.id.clone(),
-        )));
+    if let Some(saved) = imported_already(plan, opponent, match_reader).await? {
+        return Err(AppError::Match(MatchError::MatchAlreadyExists(saved.id)));
     }
     let saved_team = team_writer
         .save(TeamInput::Existing(team.team.clone()))
@@ -863,32 +870,11 @@ pub async fn save_import(
         ImportedSides::Both(_) => ScoutingMode::Both,
         ImportedSides::A(_) => ScoutingMode::A,
     };
-    let m = match saved {
-        Some(id) => {
-            let entry = &MatchEntry {
-                id,
-                ..plan.entry.clone()
-            };
-            // only A first: team B of a match on both sides can't change
-            if scouting == ScoutingMode::A {
-                match_writer.save_scouting(entry, scouting).await?;
-            }
-            match_writer
-                .replace_details(entry, plan.input.clone())
-                .await?;
-            MatchEntry {
-                sets: vec![],
-                ..entry.clone()
-            }
-        }
-        None => {
-            let entry = &plan.entry;
-            let created = match_writer.create(&saved_team, plan.input.clone()).await?;
-            match_writer
-                .save_source(&created, entry.source, entry.video_clock)
-                .await?
-        }
-    };
+    let entry = &plan.entry;
+    let created = match_writer.create(&saved_team, plan.input.clone()).await?;
+    let m = match_writer
+        .save_source(&created, entry.source, entry.video_clock)
+        .await?;
     match_writer.save_scouting(&m, scouting).await?;
     for set_number in 1..=5u8 {
         let set = plan.entry.sets.iter().find(|s| s.set_number == set_number);
@@ -910,7 +896,7 @@ pub async fn save_import(
                     .collect();
                 set_writer.update_sides(&m, set, None, &touches).await?
             }
-            (None, None) => set_writer.remove(&m, set_number).await?,
+            (None, None) => {}
         }
     }
     if opponent.team().is_some() {

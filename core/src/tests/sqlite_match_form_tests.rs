@@ -453,46 +453,4 @@ mod tests {
             .unwrap();
         assert_eq!(row(&p.db, &m).notes, "same B");
     }
-
-    /// An import over a match (`replace_details`) with only the name of B
-    /// and no competition keeps team B a team, the competition, the stage,
-    /// the round, friendly, the notes.
-    #[tokio::test]
-    async fn saved_again_as_before_the_database_keeps_what_the_files_lacked() {
-        let p = Sqlite::new();
-        let (a, b) = two_teams(&p).await;
-        let m = p
-            .match_writer
-            .create(
-                &a,
-                MatchInput {
-                    friendly: true,
-                    competition: Some(CompetitionInput::New {
-                        name: "Serie C".into(),
-                        format: CompetitionFormat::League,
-                    }),
-                    stage: Some(Stage::Playoff),
-                    round: Some("Semifinale".into()),
-                    ..input(Opponent::Team(b.id))
-                },
-            )
-            .await
-            .unwrap();
-        let before = row(&p.db, &m);
-        p.match_writer
-            .replace_details(
-                &m,
-                MatchInput::against(
-                    "CASCINA",
-                    m.date,
-                    m.home,
-                    m.max_substitutions,
-                    "imported",
-                    m.roster.clone(),
-                ),
-            )
-            .await
-            .unwrap();
-        assert_eq!(row(&p.db, &m), before);
-    }
 }

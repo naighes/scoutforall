@@ -2463,7 +2463,7 @@ pub(crate) mod screen_tests {
             gender: core.genders().first().map(|g| g.value),
             country: core.countries("Ital".into()).first().map(|c| c.value),
         };
-        let imported = core.import_dvw(bytes, choice, false).unwrap();
+        let imported = core.import_dvw(bytes, choice).unwrap();
         (core, imported.team_id, imported.match_id)
     }
 
@@ -3084,7 +3084,7 @@ pub(crate) mod screen_tests {
             gender: core.genders().first().map(|g| g.value),
             country: core.countries("Ital".into()).first().map(|c| c.value),
         };
-        let imported = core.import_dvw(bytes, choice.clone(), false).unwrap();
+        let imported = core.import_dvw(bytes, choice.clone()).unwrap();
         let (team, m) = (imported.team_id, imported.match_id);
         // another match of the team, without its video
         let cascina = std::fs::read(downloads.join("&And01 CORTONA V vs CASCINA 2.dvw")).unwrap();
@@ -3093,7 +3093,7 @@ pub(crate) mod screen_tests {
             day: core.preview_dvw(cascina.clone()).unwrap().days[0].clone(),
             ..choice
         };
-        if let Err(e) = core.import_dvw(cascina, other, false) {
+        if let Err(e) = core.import_dvw(cascina, other) {
             println!("Cascina not imported: {e}");
         }
         let (the_match, _) = core.video(&team, &m).unwrap();

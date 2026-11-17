@@ -582,7 +582,7 @@ mod tests {
             gender: core.genders().first().map(|g| g.value),
             country: core.countries("Ital".into()).first().map(|c| c.value),
         };
-        let imported = core.import_dvw(bytes, choice, false).unwrap();
+        let imported = core.import_dvw(bytes, choice).unwrap();
         (core, imported.team_id, imported.match_id)
     }
 

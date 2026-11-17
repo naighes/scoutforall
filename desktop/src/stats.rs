@@ -4051,7 +4051,7 @@ pub(crate) mod tests {
                 country: core.countries("Ital".into()).first().map(|c| c.value),
             };
             let bytes = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw").to_vec();
-            core.import_dvw(bytes, choice, true).unwrap()
+            core.import_dvw(bytes, choice).unwrap()
         };
         let one = import(DvwOpponent::Name);
         let screen = StatsScreen::new(core.clone(), one.team_id, one.match_id).unwrap();

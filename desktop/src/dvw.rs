@@ -165,7 +165,6 @@ impl DvwScreen {
                     vec![
                         ui::fill(s.dvw_home, std::slice::from_ref(&self.preview.home)),
                         ui::fill(s.dvw_visiting, std::slice::from_ref(&self.preview.visiting)),
-                        s.dvw_both.to_string(),
                     ],
                     self.side_of_from(),
                 )],
@@ -327,9 +326,8 @@ impl DvwScreen {
         match step {
             Step::Sides => {
                 self.sides = match self.form.index(0) {
-                    0 => vec![DvwSide::Home],
                     1 => vec![DvwSide::Visiting],
-                    _ => vec![DvwSide::Home, DvwSide::Visiting],
+                    _ => vec![DvwSide::Home],
                 };
                 self.current = 0;
                 self.results = vec![];
@@ -500,15 +498,11 @@ impl DvwScreen {
     }
 
     /// Team B: ours like the other team of the file, team A left out; the
-    /// team of the side imported before first, else the one the import was
-    /// asked from.
+    /// one the import was asked from first.
     fn opponent(&mut self, s: &Strings, choice: DvwChoice) {
         let first = self
-            .results
-            .iter()
-            .rev()
-            .find_map(|r| r.team_id.clone())
-            .or_else(|| self.from.clone())
+            .from
+            .clone()
             .filter(|id| choice.team_id.as_ref() != Some(id));
         let similar = self
             .core
@@ -523,9 +517,7 @@ impl DvwScreen {
     }
 
     fn save(&mut self, s: &Strings, ready: &DvwReady, choice: &DvwChoice) {
-        let imported =
-            self.core
-                .import_dvw(self.bytes.to_vec(), choice.clone(), ready.saved_already);
+        let imported = self.core.import_dvw(self.bytes.to_vec(), choice.clone());
         let team = ready.team.clone();
         match imported {
             Ok(imported) => {
@@ -625,15 +617,8 @@ impl DvwScreen {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.step {
-            Step::Ready(ready, _) => vec![
-                (
-                    "Enter".to_string(),
-                    match ready.saved_already {
-                        true => s.dvw_overwrite,
-                        false => s.save,
-                    }
-                    .to_string(),
-                ),
+            Step::Ready(..) => vec![
+                ("Enter".to_string(), s.save.to_string()),
                 ("Esc".to_string(), s.dvw_dont_import.to_string()),
             ],
             Step::Done => vec![
@@ -655,22 +640,9 @@ impl DvwScreen {
         let summary = self.summary(s, c);
         match &self.step {
             Step::Ready(ready, _) => {
-                let warning: Element<'a, Message> = match ready.saved_already {
-                    true => ui::body(ui::fill(
-                        s.dvw_already_saved,
-                        std::slice::from_ref(&ready.team),
-                    ))
-                    .color(c.danger)
-                    .into(),
-                    false => column![].into(),
-                };
                 let one_side: Element<'a, Message> = match &ready.one_side {
                     Some(why) => ui::body(ui::capitalized(why)).color(c.danger).into(),
                     None => column![].into(),
-                };
-                let yes = match ready.saved_already {
-                    true => s.dvw_overwrite,
-                    false => s.save,
                 };
                 side_by_side(
                     ui::panel(
@@ -691,11 +663,10 @@ impl DvwScreen {
                             )
                             .spacing(6),
                             one_side,
-                            warning,
                             ui::answers(
                                 Some((theme::icons::CLOSE, s.dvw_dont_import, Message::Skip)),
                                 theme::icons::IMPORT,
-                                yes,
+                                s.save,
                                 Some(Message::Save),
                                 c
                             ),
@@ -863,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn the_home_team_imported_as_a_new_one_then_its_match_skipped() {
+    fn the_home_team_imported_as_a_new_one_then_refused_again() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
@@ -890,7 +861,6 @@ mod tests {
         let Step::Ready(ready, _) = &dvw.step else {
             unreachable!("the import is checked: {:?}", dvw.form.error)
         };
-        assert!(!ready.saved_already);
         assert_eq!(
             ready_details(s, ready),
             vec![
@@ -905,23 +875,24 @@ mod tests {
         };
         assert_eq!(core.matches(team_id.clone()).unwrap().len(), 1);
 
-        // again: the team is found, the match is there already
+        // again: the team is found, the match is there already: refused
         let mut dvw = screen(&core);
         dvw.key(s, key!(enter));
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Team(_)));
+        // refused as soon as team A is chosen: to delete it first
         dvw.key(s, key!(enter));
-        assert!(matches!(dvw.step, Step::Opponent(..)));
-        dvw.key(s, key!(enter));
-        let Step::Ready(ready, _) = &dvw.step else {
-            unreachable!("the import is checked")
-        };
-        assert!(ready.saved_already);
-        // Esc leaves it as it is
-        dvw.key(s, BACK_KEY);
         assert!(matches!(dvw.step, Step::Done));
-        assert!(matches!(dvw.key(s, key!(enter)), Outcome::Stay));
-        assert!(matches!(dvw.key(s, BACK_KEY), Outcome::Back));
+        assert_eq!(
+            dvw.results
+                .iter()
+                .map(|r| r.message.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Home: non importata, Home – Visiting è già salvata, giocata lo stesso giorno \
+                 con gli stessi set: per importarla di nuovo, eliminala prima"
+            ]
+        );
         assert_eq!(core.matches(team_id).unwrap().len(), 1);
     }
 
@@ -1056,16 +1027,19 @@ mod tests {
         assert!(!transfer::is_dvw("partita.zip"));
     }
 
-    /// Both teams: the home one new, B created with the players of the
-    /// file; the visiting one into that team, B the home team proposed
-    /// first; two matches, two teams. Esc on team B goes back to team A.
+    /// Two sides only, no "both": the home team new, B created with the
+    /// players of the file, one match; Esc on team B goes back to team A.
+    /// Then the visiting side into that team B: the same match, refused.
     #[test]
-    fn both_teams_the_second_against_the_first() {
+    fn the_other_side_after_is_the_same_match() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let mut dvw = screen(&core);
-        dvw.update(s, Message::Form(form::Message::Choose(0, 2)));
+        assert!(matches!(
+            &dvw.form.fields[0].value,
+            form::Value::Choice { options, .. } if options.len() == 2
+        ));
         dvw.key(s, key!(enter));
         dvw.key(s, key!(enter));
         new_team(&mut dvw);
@@ -1086,33 +1060,28 @@ mod tests {
             "Contro Visiting: giocatori nuovi 7"
         );
         dvw.key(s, key!(enter));
-        // the visiting team: the team B just made is like it
+        assert!(matches!(dvw.step, Step::Done));
+        assert_eq!(core.teams().unwrap().len(), 2);
+
+        let mut dvw = screen(&core);
+        dvw.update(s, Message::Form(form::Message::Choose(0, 1)));
+        dvw.key(s, key!(enter));
+        dvw.key(s, key!(enter));
         let Step::Team(similar) = &dvw.step else {
             unreachable!("the visiting team is like team B")
         };
         assert_eq!(similar.len(), 1);
         dvw.key(s, key!(enter));
-        let Step::Opponent(similar, _) = &dvw.step else {
-            unreachable!("team B to choose: {:?}", dvw.form.error)
-        };
-        assert_eq!(
-            similar.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-            vec!["Home"]
-        );
-        dvw.key(s, key!(enter));
-        let Step::Ready(ready, _) = &dvw.step else {
-            unreachable!("the import is checked: {:?}", dvw.form.error)
-        };
-        assert_eq!(ready_details(s, ready)[0], "Contro Home: giocatori nuovi 0");
-        dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Done));
-        let teams = core.teams().unwrap();
-        assert_eq!(teams.len(), 2);
-        let first = dvw.results[0].team_id.clone().unwrap();
         assert_eq!(
-            core.matches(first).unwrap().len(),
-            2,
-            "its own and the other"
+            dvw.results
+                .iter()
+                .map(|r| r.message.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Visiting: non importata, Home – Visiting è già salvata, giocata lo stesso \
+                 giorno con gli stessi set: per importarla di nuovo, eliminala prima"
+            ]
         );
     }
 

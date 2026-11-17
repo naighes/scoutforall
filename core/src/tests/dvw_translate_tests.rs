@@ -2300,7 +2300,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         use crate::{
             analytics::finished::FinishedMatches,
             dvw::import::{
-                MatchPlan, OpponentPlan, TeamChoice, TeamPlan, match_exists, save_import,
+                MatchPlan, OpponentPlan, TeamChoice, TeamPlan, imported_already, save_import,
             },
             errors::{AppError, MatchError},
             localization::Language,
@@ -2358,7 +2358,6 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 &self,
                 team: &TeamPlan,
                 plan: &MatchPlan,
-                overwrite: bool,
             ) -> Result<MatchEntry, AppError> {
                 let opponent = match plan.input.opponent {
                     crate::match_form::Opponent::Name(ref name) => OpponentPlan::Name(name.clone()),
@@ -2368,7 +2367,6 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     team,
                     &opponent,
                     plan,
-                    overwrite,
                     &self.team_writer,
                     &self.match_reader,
                     &self.match_writer,
@@ -2383,13 +2381,11 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 team: &TeamPlan,
                 opponent: &OpponentPlan,
                 plan: &MatchPlan,
-                overwrite: bool,
             ) -> Result<MatchEntry, AppError> {
                 save_import(
                     team,
                     opponent,
                     plan,
-                    overwrite,
                     &self.team_writer,
                     &self.match_reader,
                     &self.match_writer,
@@ -2397,6 +2393,18 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     &self.queued,
                 )
                 .await
+            }
+
+            /// The id of the match the import tells again, if any.
+            async fn imported_already(
+                &self,
+                opponent: &OpponentPlan,
+                plan: &MatchPlan,
+            ) -> Option<String> {
+                imported_already(plan, opponent, &self.match_reader)
+                    .await
+                    .expect("an answer")
+                    .map(|m| m.id)
             }
 
             fn text(&self, sql: &str) -> Option<String> {
@@ -2458,7 +2466,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             let p = Providers::new();
             let (team, plan) =
                 planned_for(&three_sets_won().text(), Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &plan, false).await.expect("saved");
+            let saved = p.save(&team, &plan).await.expect("saved");
             let read_team = p.team(&team.team.id).await;
             assert_eq!(read_team.players.len(), 8);
             let read = p
@@ -2484,7 +2492,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             let p = Providers::new();
             let (team, plan) =
                 planned_for(&three_sets_won().text(), Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &plan, false).await.expect("saved");
+            let saved = p.save(&team, &plan).await.expect("saved");
             let id = Uuid::parse_str(&saved.id).expect("a UUID");
             let archive = crate::providers::sqlite::archive::export(
                 &p.db,
@@ -2502,14 +2510,14 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             assert_eq!(read.source, MatchSource::Dvw);
         }
 
-        /// The match saved already and the user not confirming: the team
-        /// isn't saved either.
+        /// The match imported already: refused, the team isn't saved
+        /// either.
         #[tokio::test]
-        async fn a_match_saved_already_keeps_its_team_unless_confirmed() {
+        async fn a_match_imported_already_keeps_its_team() {
             let p = Providers::new();
             let text = three_sets_won().text();
             let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
-            p.save(&team, &plan, false).await.expect("saved");
+            p.save(&team, &plan).await.expect("saved");
             let saved_team = p.team(&team.team.id).await;
             let dvw = parse(text.as_bytes()).expect("a file");
             let again =
@@ -2522,52 +2530,55 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 ..Default::default()
             });
             assert!(matches!(
-                p.save(&more, &plan, false).await,
+                p.save(&more, &plan).await,
                 Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
             ));
             assert_eq!(p.team(&team.team.id).await.players.len(), 8);
             assert_eq!(p.queued().len(), 1);
         }
 
-        /// The same file again: told as saved, refused unless confirmed,
-        /// nothing saved twice.
+        /// The same file again: told as imported, refused, nothing saved
+        /// twice; deleted, it's imported again.
         #[tokio::test]
-        async fn the_same_file_again_is_saved_already() {
+        async fn the_same_file_again_is_imported_already() {
             let p = Providers::new();
             let text = three_sets_won().text();
+            let name = OpponentPlan::Name("Visiting".to_string());
             let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
-            assert!(
-                !match_exists(&plan, &p.match_reader)
-                    .await
-                    .expect("an answer")
-            );
-            let saved = p.save(&team, &plan, false).await.expect("saved");
+            assert_eq!(p.imported_already(&name, &plan).await, None);
+            let saved = p.save(&team, &plan).await.expect("saved");
             assert!(Uuid::parse_str(&saved.id).is_ok(), "{}", saved.id);
             assert_ne!(saved.id, plan.entry.id);
             let saved_team = p.team(&team.team.id).await;
             let (again, plan) =
                 planned_for(&text, Side::Home, TeamChoice::Existing(&saved_team)).expect("a match");
-            assert!(
-                match_exists(&plan, &p.match_reader)
-                    .await
-                    .expect("an answer")
+            assert_eq!(
+                p.imported_already(&name, &plan).await,
+                Some(saved.id.clone())
             );
             assert!(matches!(
-                p.save(&again, &plan, false).await,
+                p.save(&again, &plan).await,
                 Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
             ));
             assert_eq!(p.matches(), 1);
-            assert_eq!(p.queued(), vec![(team.team.id, saved.id)]);
+            assert_eq!(p.queued(), vec![(team.team.id, saved.id.clone())]);
+            p.execute(&format!(
+                "UPDATE matches SET deleted = 1 WHERE id = '{}'",
+                saved.id
+            ));
+            assert_eq!(p.imported_already(&name, &plan).await, None);
+            p.save(&again, &plan).await.expect("saved again");
         }
 
-        /// Confirmed: the saved match takes the import, the same UUID, its
-        /// sets beyond the imported ones removed.
+        /// Another match of the same day (other scores): not the same, a
+        /// second match; nor the same match on another day.
         #[tokio::test]
-        async fn a_match_overwritten_when_confirmed_keeps_its_id() {
+        async fn other_scores_or_another_day_another_match() {
             let p = Providers::new();
+            let name = OpponentPlan::Name("Visiting".to_string());
             let (team, five) =
                 planned_for(&five_sets().text(), Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &five, false).await.expect("saved");
+            p.save(&team, &five).await.expect("saved");
             let saved_team = p.team(&team.team.id).await;
             let (again, three) = planned_for(
                 &three_sets_won().text(),
@@ -2575,84 +2586,22 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 TeamChoice::Existing(&saved_team),
             )
             .expect("a match");
-            let overwritten = p.save(&again, &three, true).await.expect("overwritten");
-            assert_eq!(overwritten.id, saved.id);
-            assert_eq!(p.matches(), 1);
-            let read = p
-                .match_reader
-                .read_single(&p.team(&team.team.id).await, &saved.id)
-                .await
-                .expect("the match");
-            assert_eq!(read.sets.len(), 3);
-            let status = read.get_status().expect("a status");
-            assert_eq!((status.us_wins, status.them_wins), (3, 0));
-            assert_eq!(read.source, MatchSource::Dvw);
-            assert_eq!(p.sql("SELECT count(*) FROM sets WHERE deleted = 0"), 3);
             assert_eq!(
-                p.queued(),
-                vec![(team.team.id, saved.id.clone()), (team.team.id, saved.id)]
+                five.entry.date.date_naive(),
+                three.entry.date.date_naive(),
+                "the same day"
             );
-        }
-
-        /// A match moved from the files keeps where it was (`legacy_id`):
-        /// the same, also when its opponent was renamed since; removed, it
-        /// isn't there.
-        #[tokio::test]
-        async fn a_match_is_found_where_the_files_kept_it() {
-            let p = Providers::new();
-            let text = three_sets_won().text();
-            let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &plan, false).await.expect("saved");
-            p.execute(&format!(
-                "UPDATE matches SET team_b_name = 'Renamed', legacy_id = '{}',
-                     legacy_team = team_a WHERE id = '{}'",
-                plan.entry.id, saved.id
-            ));
-            let saved_team = p.team(&team.team.id).await;
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                Some(saved.id.clone())
-            );
-            // in another folder, renamed: no longer the same
-            p.execute("UPDATE matches SET legacy_id = 'elsewhere'");
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                None
-            );
-            p.execute("UPDATE matches SET team_b_name = 'Visiting'");
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                Some(saved.id.clone())
-            );
-            // of another team: not this one's
-            let other = crate::shapes::team::TeamEntry {
-                id: Uuid::new_v4(),
-                ..saved_team.clone()
+            assert_eq!(p.imported_already(&name, &three).await, None);
+            p.save(&again, &three).await.expect("saved");
+            assert_eq!(p.matches(), 2);
+            let later = MatchPlan {
+                entry: MatchEntry {
+                    date: three.entry.date + chrono::Duration::days(1),
+                    ..three.entry.clone()
+                },
+                ..three.clone()
             };
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&other, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                None
-            );
-            p.execute("UPDATE matches SET deleted = 1");
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                None
-            );
+            assert_eq!(p.imported_already(&name, &later).await, None);
         }
 
         /// Team B a new team (D3): saved with the players of the other team
@@ -2670,7 +2619,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 new_team(),
                 OpponentChoice::New,
             );
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
             let b_id = b.team().expect("a team").team.id;
             let read_b = p.team(&b_id).await;
             assert_eq!((read_b.name.as_str(), read_b.year), ("Visiting", 2014));
@@ -2731,17 +2680,18 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             assert_eq!(read.roster, team.roster);
         }
 
-        /// The other side of the same file into team B of the first: a
-        /// second match (the first, on both sides, isn't recognized yet), B
-        /// the team of the first side, the competition the same.
+        /// The other side of the same file, into team B of the first and
+        /// against team A: the same match, refused; against another team B
+        /// too (a team doesn't play the same match twice in a day); a new
+        /// team against a name, nothing in common: imported.
         #[tokio::test]
-        async fn the_other_side_against_the_team_of_the_first() {
+        async fn the_other_side_is_the_same_match() {
             use crate::dvw::import::OpponentChoice;
             let p = Providers::new();
             let text = three_sets_won().text();
             let (home, b, plan) =
                 planned_against(&text, Side::Home, new_team(), OpponentChoice::New);
-            p.save_with(&home, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&home, &b, &plan).await.expect("saved");
             let visiting = p.team(&b.team().expect("a team").team.id).await;
             let first = p.team(&home.team.id).await;
             let (team, b, plan) = planned_against(
@@ -2750,20 +2700,35 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 TeamChoice::Existing(&visiting),
                 OpponentChoice::Existing(&first),
             );
-            assert!(team.new_players.is_empty());
-            assert!(b.team().expect("a team").new_players.is_empty());
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
-            assert_eq!(p.matches(), 2);
-            assert_eq!(p.sql("SELECT count(*) FROM teams"), 2);
-            assert_eq!(p.sql("SELECT count(*) FROM competitions"), 1);
-            assert_eq!(p.sql("SELECT count(*) FROM persons"), 16);
-            assert_eq!(
-                p.text(&format!(
-                    "SELECT team_b FROM matches WHERE id = '{}'",
-                    saved.id
-                )),
-                Some(first.id.to_string())
+            assert_eq!(p.imported_already(&b, &plan).await, Some(saved.id.clone()));
+            assert!(matches!(
+                p.save_with(&team, &b, &plan).await,
+                Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
+            ));
+            // B a new team: team A of the side, B of the first, plays it
+            let (_, other, plan) = planned_against(
+                &text,
+                Side::Visiting,
+                TeamChoice::Existing(&visiting),
+                OpponentChoice::New,
             );
+            assert_eq!(
+                p.imported_already(&other, &plan).await,
+                Some(saved.id.clone())
+            );
+            // the home side into team A, against another team B
+            let (_, other, plan) = planned_against(
+                &text,
+                Side::Home,
+                TeamChoice::Existing(&first),
+                OpponentChoice::New,
+            );
+            assert_eq!(p.imported_already(&other, &plan).await, Some(saved.id));
+            let (team, name, plan) =
+                planned_against(&text, Side::Visiting, new_team(), OpponentChoice::Name);
+            assert_eq!(p.imported_already(&name, &plan).await, None);
+            p.save_with(&team, &name, &plan).await.expect("saved");
+            assert_eq!(p.matches(), 2);
         }
 
         /// A player of A with another number in the file: the number of the
@@ -2790,7 +2755,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 TeamChoice::Existing(&ours),
                 OpponentChoice::Name,
             );
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
             let read_team = p.team(&ours.id).await;
             assert_eq!(read_team.find_player(three.id).map(|p| p.number), Some(30));
             assert_eq!(
@@ -2810,59 +2775,6 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             assert_eq!(p.sql("SELECT count(DISTINCT team_id) FROM match_roster"), 1);
         }
 
-        /// Overwritten with only the name of B and the same file: what the
-        /// user changed and the file doesn't tell stays (B a team, the
-        /// neutral court, the notes); the competition of the file again.
-        #[tokio::test]
-        async fn overwritten_keeps_what_the_file_doesnt_tell() {
-            use crate::dvw::import::OpponentChoice;
-            let p = Providers::new();
-            let text = five_sets().text();
-            let (team, b, plan) =
-                planned_against(&text, Side::Visiting, new_team(), OpponentChoice::New);
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
-            let b_id = b.team().expect("a team").team.id;
-            p.execute(&format!(
-                "UPDATE matches SET home = NULL, notes = 'mine', stage = 'playoff',
-                     round = NULL WHERE id = '{}'",
-                saved.id
-            ));
-            let saved_team = p.team(&team.team.id).await;
-            let (again, name, plan) = planned_against(
-                &text,
-                Side::Visiting,
-                TeamChoice::Existing(&saved_team),
-                OpponentChoice::Name,
-            );
-            assert_eq!(plan.entry.opponent, "Home");
-            assert!(
-                match_exists(&plan, &p.match_reader)
-                    .await
-                    .expect("an answer")
-            );
-            let overwritten = p
-                .save_with(&again, &name, &plan, true)
-                .await
-                .expect("overwritten");
-            assert_eq!(overwritten.id, saved.id);
-            assert_eq!(
-                p.text(&format!(
-                    "SELECT team_b || '|' || coalesce(home, 'neutral') || '|' || notes || '|' || stage || '|' || round
-                     FROM matches WHERE id = '{}'",
-                    saved.id
-                )),
-                Some(format!("{b_id}|neutral|mine|regular|Andata – giornata 1"))
-            );
-            // the roster of B stays as it was
-            assert_eq!(
-                p.sql(&format!(
-                    "SELECT count(*) FROM match_roster WHERE match_id = '{}' AND team_id = '{b_id}'",
-                    saved.id
-                )),
-                8
-            );
-        }
-
         /// Team B changed by the form to a name, the match scouted only on
         /// A's side: its roster of the match goes with it, the one of A
         /// stays.
@@ -2879,7 +2791,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 new_team(),
                 OpponentChoice::New,
             );
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
             assert_eq!(p.sql("SELECT count(DISTINCT team_id) FROM match_roster"), 2);
             p.match_writer
                 .save_scouting(&saved, ScoutingMode::A)
@@ -2920,7 +2832,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 OpponentChoice::New,
             );
             assert!(matches!(&plan.sides, ImportedSides::Both(sets) if sets.len() == 3));
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
             let m = format!("'{}'", saved.id);
             assert_eq!(
                 p.text(&format!("SELECT scouting FROM matches WHERE id = {m}")),
@@ -2993,28 +2905,17 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             );
         }
 
-        /// Team B only a name: only A's side, nothing to tell why. The same
-        /// match imported on both sides, then again against the name: B's
-        /// lineups and touches go.
+        /// Team B only a name: only A's side, nothing to tell why; no
+        /// lineup nor touch of B.
         #[tokio::test]
         async fn against_a_name_only_a_side() {
             use crate::dvw::import::{ImportedSides, OpponentChoice};
             let p = Providers::new();
             let text = three_sets_won().text();
-            let (team, b, plan) =
-                planned_against(&text, Side::Home, new_team(), OpponentChoice::New);
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
-            let saved_team = p.team(&team.team.id).await;
-            let (again, name, plan) = planned_against(
-                &text,
-                Side::Home,
-                TeamChoice::Existing(&saved_team),
-                OpponentChoice::Name,
-            );
+            let (team, name, plan) =
+                planned_against(&text, Side::Home, new_team(), OpponentChoice::Name);
             assert!(matches!(plan.sides, ImportedSides::A(None)));
-            p.save_with(&again, &name, &plan, true)
-                .await
-                .expect("overwritten");
+            let saved = p.save_with(&team, &name, &plan).await.expect("saved");
             let m = format!("'{}'", saved.id);
             assert_eq!(
                 p.text(&format!("SELECT scouting FROM matches WHERE id = {m}")),
@@ -3035,7 +2936,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             );
             let read = p
                 .match_reader
-                .read_single(&saved_team, &saved.id)
+                .read_single(&p.team(&team.team.id).await, &saved.id)
                 .await
                 .expect("the match");
             assert_eq!(read.sets, plan.entry.sets);

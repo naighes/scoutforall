@@ -18,13 +18,6 @@ pub trait MatchWriter {
 
     async fn update(&self, m: &MatchEntry, input: MatchInput) -> Result<(), AppError>;
 
-    /// The match `m` imported again with `input`: what the import tells
-    /// replaces what's saved, what it doesn't stays (team B a team when
-    /// the import has only its name, a neutral court when A doesn't play
-    /// at home, the competition, its stage and round when none, friendly
-    /// or not, the notes).
-    async fn replace_details(&self, m: &MatchEntry, input: MatchInput) -> Result<(), AppError>;
-
     /// The roster of team B of the match, a team: these players with
     /// these numbers and roles, in place of the saved one.
     async fn save_roster_of_b(

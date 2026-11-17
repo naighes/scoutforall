@@ -106,16 +106,16 @@ class DvwImportTest {
         }
     }
 
-    /** Both teams, each on its own; the activity made again on the way
+    /** Home or visiting, no "both"; the activity made again on the way
      * keeps where the import is. The home team against team B made with
-     * the players of the file, back on team B going back to team A; the
-     * visiting team into team B, against the home team proposed first:
-     * two matches, two teams. */
+     * the players of the file, back on team B going back to team A: one
+     * match. Then the visiting team into team B: the same match, refused
+     * as soon as the team is chosen. */
     @Test
-    fun bothTeamsImportedAcrossTheActivityMadeAgain() {
+    fun theOtherSideIsTheSameMatchAcrossTheActivityMadeAgain() {
         share().use { scenario ->
-            rule.waitForText(string(R.string.dvw_both))
-            tap(string(R.string.dvw_both))
+            rule.waitForText(string(R.string.dvw_which_team))
+            rule.onAllNodesWithText(string(R.string.dvw_visiting, "Visiting")).assertCountEquals(1)
             next()
             rule.waitForText(string(R.string.dvw_substitutions))
             scenario.recreate()
@@ -133,19 +133,23 @@ class DvwImportTest {
             next()
             rule.waitForText(string(R.string.dvw_against_team, "Visiting", 7))
             tap(string(R.string.save))
-            // the visiting team: like team B just made
+            rule.waitForText(string(R.string.dvw_imported, "Home"))
+        }
+        share().use {
+            rule.waitForText(string(R.string.dvw_which_team))
+            tap(string(R.string.dvw_visiting, "Visiting"))
+            next()
+            rule.waitForText(string(R.string.dvw_substitutions))
+            next()
             rule.waitForText(string(R.string.dvw_similar_found, "Visiting"))
             next()
-            rule.waitForText(string(R.string.dvw_opponent_question, "Home"))
-            rule.waitForText(string(R.string.dvw_same_name), substring = true)
-            next()
-            rule.waitForText(string(R.string.dvw_against_team, "Home", 0))
-            tap(string(R.string.save))
-            rule.waitForText(string(R.string.dvw_imported, "Visiting"))
-            rule.waitForText(string(R.string.dvw_imported, "Home"))
+            rule.waitForText(
+                "Visiting: not imported, Home – Visiting is saved already, played the same day with the same sets",
+                substring = true,
+            )
             assertEquals(listOf("Home", "Visiting"), teams().map { it.name }.sorted())
             val home = teams().first { it.name == "Home" }
-            assertEquals(2, core { it.matches(home.id) }.size)
+            assertEquals(1, core { it.matches(home.id) }.size)
         }
     }
 
@@ -171,8 +175,8 @@ class DvwImportTest {
         }
     }
 
-    /** Imported again: the team like it proposed, the match overwritten
-     * only when the user says so. */
+    /** Imported again: the team like it proposed, the match refused, to
+     * delete first. */
     @Test
     fun aMatchSavedAlready() {
         share().use {
@@ -196,11 +200,10 @@ class DvwImportTest {
             rule.waitForText(string(R.string.dvw_similar_found, "Home"))
             rule.waitForText(string(R.string.dvw_same_name), substring = true)
             next()
-            rule.waitForText(string(R.string.dvw_opponent_question, "Visiting"))
-            next()
-            rule.waitForText(string(R.string.dvw_already_saved, "Home"))
-            tap(string(R.string.dvw_dont_import))
-            rule.waitForText(string(R.string.dvw_skipped, "Home"))
+            rule.waitForText(
+                "Home: not imported, Home – Visiting is saved already, played the same day with the same sets: " +
+                    "to import it again, delete it first",
+            )
             assertEquals(1, teams().size)
         }
     }
