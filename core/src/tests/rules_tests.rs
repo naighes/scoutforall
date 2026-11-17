@@ -270,9 +270,83 @@ mod tests {
         );
     }
 
+    /// Our serve `+` and their freeball (`OF`), or our serve `/` (their
+    /// reception straight back), then the events: the ball coming over
+    /// without an attack.
+    fn after_no_attack(t: &Team, freeball: bool, events: &[(EventTypeEnum, EvalEnum)]) -> SetEntry {
+        let start = match freeball {
+            true => vec![t.act(S, Positive), ev(OF, None)],
+            false => vec![t.act(S, Over)],
+        };
+        let events = start
+            .into_iter()
+            .chain(events.iter().map(|(e, v)| t.act(*e, *v)))
+            .collect();
+        t.set(Us, events)
+    }
+
+    /// The block answers an attack, as in DataVolley (TODO/001, §4.2): on
+    /// a ball coming over without one (their freeball, their reception
+    /// straight back after our serve `/`) only the invasion (`/`), a fault,
+    /// our point there being an attack.
+    #[test]
+    fn the_block_answers_only_an_attack() {
+        let t = Team::new();
+        for freeball in [true, false] {
+            let snapshot = after_no_attack(&t, freeball, &[])
+                .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+                .unwrap();
+            assert!(options(&snapshot).contains(&B), "{freeball}");
+            assert_eq!(snapshot.available_evals(B), vec![Over], "{freeball}");
+            let invasion = after_no_attack(&t, freeball, &[(B, Over)])
+                .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+                .unwrap();
+            assert_eq!((invasion.score_us, invasion.score_them), (0, 1));
+            for eval in [Perfect, Positive, Exclamative, Negative, Error] {
+                assert!(
+                    after_no_attack(&t, freeball, &[(B, eval)])
+                        .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+                        .is_err(),
+                    "{freeball} {eval}"
+                );
+            }
+            // the ball at the net hit to the floor: an attack
+            let attack = after_no_attack(&t, freeball, &[(A, Perfect)])
+                .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+                .unwrap();
+            assert_eq!(attack.score_us, 1, "{freeball}");
+        }
+    }
+
+    /// Scouting one team their attack goes untold: after a touch giving
+    /// them the ball to attack, our block keeps every evaluation.
+    #[test]
+    fn the_block_of_their_untold_attack_keeps_every_evaluation() {
+        let t = Team::new();
+        let every = B.available_evals();
+        let kept = [
+            t.after_our_serve(&[]),
+            t.after_our_reception(&[(A, Negative)]),
+            t.after_our_reception(&[(A, Positive)]),
+            t.replay(Them, vec![t.act(P, Over)]),
+            t.after_our_serve(&[(D, Over)]),
+            t.after_our_serve(&[(B, Exclamative)]),
+            t.replay(
+                Us,
+                vec![t.act(S, Positive), t.act(D, Positive), ev(FB, None)],
+            ),
+        ];
+        for (i, snapshot) in kept.iter().enumerate() {
+            assert_eq!(snapshot.available_evals(B), every, "{i}");
+        }
+    }
+
     // --- the translation of older rules (`domain::rules`) ---------------
 
-    use crate::domain::{Side, rules::translate};
+    use crate::domain::{
+        Side,
+        rules::{translate, translate_rows},
+    };
     use crate::shapes::enums::ScoutingRulesEnum;
 
     fn ev(event_type: EventTypeEnum, eval: Option<EvalEnum>) -> EventEntry {
@@ -326,10 +400,11 @@ mod tests {
             (Us_, D, Some(Positive)),
             (Us_, B, Some(Exclamative)),
             (Us_, OF, None),
-            (Us_, B, Some(Exclamative)),
+            // after their freeball: no attack to block (v4), our freeball
+            (Us_, FB, None),
             (Us_, R, None),
             (Us_, OF, None),
-            (Us_, B, Some(Positive)),
+            // after their freeball, the ball kept: left out (v4)
             (Us_, A, Some(Perfect)),
             (Us_, B, Some(Perfect)),
             (Us_, B, Some(Error)),
@@ -351,8 +426,8 @@ mod tests {
             (Side::A, B, Some(Positive)),
             (Side::A, OF, None),
         ];
-        assert_eq!(told(Some(ScoutingRulesEnum::V3), &saved), saved);
-        assert_eq!(ScoutingRulesEnum::CURRENT, ScoutingRulesEnum::V3);
+        assert_eq!(told(Some(ScoutingRulesEnum::V4), &saved), saved);
+        assert_eq!(ScoutingRulesEnum::CURRENT, ScoutingRulesEnum::V4);
     }
 
     /// v2: the dig `!` was a dig of their attack with few options left,
@@ -427,5 +502,211 @@ mod tests {
         );
         let other = [(Side::A, B, Some(Positive)), (Side::B, OF, None)];
         assert_eq!(told(Some(ScoutingRulesEnum::V1), &other), other);
+    }
+
+    /// v3: the block of a ball coming over without an attack (after their
+    /// freeball, after our serve `/`), on one side, as the current rules
+    /// tell it: `#` an attack point, `=` an attack error, `!` (back to
+    /// them) our freeball, `+` and `-` (the ball kept, like a freeball
+    /// received) left out with the dig after them; the invasion as saved.
+    #[test]
+    fn the_blocks_of_no_attack_of_v3_are_told_with_the_current_rules() {
+        use Side::A as Us_;
+        let freeball = [(Us_, S, Some(Positive)), (Us_, OF, None)];
+        let serve_over = [(Us_, S, Some(Over))];
+        for start in [&freeball[..], &serve_over[..]] {
+            let v3 = |then: &[(Side, EventTypeEnum, Option<EvalEnum>)]| {
+                told(Some(ScoutingRulesEnum::V3), &[start, then].concat())
+            };
+            let now = |then: &[(Side, EventTypeEnum, Option<EvalEnum>)]| [start, then].concat();
+            assert_eq!(
+                v3(&[(Us_, B, Some(Perfect))]),
+                now(&[(Us_, A, Some(Perfect))])
+            );
+            assert_eq!(v3(&[(Us_, B, Some(Error))]), now(&[(Us_, A, Some(Error))]));
+            assert_eq!(v3(&[(Us_, B, Some(Over))]), now(&[(Us_, B, Some(Over))]));
+            assert_eq!(v3(&[(Us_, B, Some(Exclamative))]), now(&[(Us_, FB, None)]));
+            assert_eq!(
+                v3(&[
+                    (Us_, B, Some(Positive)),
+                    (Us_, D, Some(Positive)),
+                    (Us_, A, Some(Negative))
+                ]),
+                now(&[(Us_, A, Some(Negative))])
+            );
+            assert_eq!(
+                v3(&[
+                    (Us_, B, Some(Negative)),
+                    (Us_, R, None),
+                    (Us_, D, Some(Over))
+                ]),
+                now(&[(Us_, R, None)])
+            );
+            // without the dig: the block alone
+            assert_eq!(
+                v3(&[(Us_, B, Some(Positive)), (Us_, A, Some(Perfect))]),
+                now(&[(Us_, A, Some(Perfect))])
+            );
+            // a change of the lineup between the start and the block
+            assert_eq!(
+                v3(&[(Us_, R, None), (Us_, B, Some(Perfect))]),
+                now(&[(Us_, R, None), (Us_, A, Some(Perfect))])
+            );
+        }
+    }
+
+    /// v3, one side: the block after a touch giving them the ball to
+    /// attack (their attack untold) stays as saved.
+    #[test]
+    fn the_blocks_of_their_untold_attack_of_v3_are_told_as_saved() {
+        use Side::A as Us_;
+        for before in [
+            (Us_, S, Some(Positive)),
+            (Us_, A, Some(Negative)),
+            (Us_, A, Some(Positive)),
+            (Us_, P, Some(Over)),
+            (Us_, D, Some(Over)),
+            (Us_, B, Some(Exclamative)),
+            (Us_, FB, None),
+        ] {
+            for eval in B.available_evals() {
+                let saved = [before, (Us_, B, Some(eval)), (Us_, D, Some(Positive))];
+                assert_eq!(
+                    told(Some(ScoutingRulesEnum::V3), &saved),
+                    saved,
+                    "{before:?} {eval}"
+                );
+            }
+        }
+    }
+
+    /// v3, both sides: the block of the other side's freeball, or of its
+    /// reception or dig straight over, told as on one side; the block of
+    /// the other side's attack as saved.
+    #[test]
+    fn the_blocks_of_no_attack_of_v3_on_both_sides() {
+        use Side::{A as A_, B as B_};
+        for over in [(B_, FB, None), (B_, P, Some(Over)), (B_, D, Some(Over))] {
+            let v3 = |then: &[(Side, EventTypeEnum, Option<EvalEnum>)]| {
+                told(Some(ScoutingRulesEnum::V3), &[&[over], then].concat())
+            };
+            let now = |then: &[(Side, EventTypeEnum, Option<EvalEnum>)]| [&[over], then].concat();
+            assert_eq!(
+                v3(&[(A_, B, Some(Perfect))]),
+                now(&[(A_, A, Some(Perfect))])
+            );
+            assert_eq!(v3(&[(A_, B, Some(Error))]), now(&[(A_, A, Some(Error))]));
+            assert_eq!(v3(&[(A_, B, Some(Over))]), now(&[(A_, B, Some(Over))]));
+            assert_eq!(v3(&[(A_, B, Some(Exclamative))]), now(&[(A_, FB, None)]));
+            assert_eq!(
+                v3(&[
+                    (A_, B, Some(Positive)),
+                    (A_, D, Some(Perfect)),
+                    (A_, A, Some(Perfect))
+                ]),
+                now(&[(A_, A, Some(Perfect))])
+            );
+            // the dig after it of the other side isn't the blockers': kept
+            assert_eq!(
+                v3(&[(A_, B, Some(Negative)), (B_, D, Some(Negative))]),
+                now(&[(B_, D, Some(Negative))])
+            );
+        }
+        for eval in B.available_evals() {
+            let saved = [
+                (B_, A, Some(Negative)),
+                (A_, B, Some(eval)),
+                (A_, D, Some(Positive)),
+            ];
+            assert_eq!(told(Some(ScoutingRulesEnum::V3), &saved), saved, "{eval}");
+        }
+    }
+
+    /// The translation keeps the player, the time and the flags of the
+    /// block it tells as an attack or a freeball; the technique of a block
+    /// isn't one of an attack: none.
+    #[test]
+    fn the_block_told_as_an_attack_keeps_its_player_and_time() {
+        let t = Team::new();
+        let block = EventEntry {
+            technique: None,
+            ..t.act(B, Perfect)
+        };
+        let touches = [(Side::A, t.act(S, Over)), (Side::A, block.clone())];
+        let told = translate(Some(ScoutingRulesEnum::V3), &touches);
+        let attack = &told[1].1;
+        assert_eq!(
+            (
+                attack.event_type,
+                attack.eval,
+                attack.player,
+                attack.timestamp,
+                attack.flags
+            ),
+            (A, Some(Perfect), block.player, block.timestamp, block.flags)
+        );
+        assert_eq!(attack.technique, None);
+    }
+
+    /// Each touch translated in its place: the ones left out are `None`,
+    /// so the rows of the database keep their events.
+    #[test]
+    fn the_touches_left_out_keep_their_place() {
+        let touches: Vec<(Side, EventEntry)> = [
+            (S, Some(Positive)),
+            (OF, None),
+            (B, Some(Positive)),
+            (D, Some(Positive)),
+            (A, Some(Perfect)),
+        ]
+        .into_iter()
+        .map(|(t, e)| (Side::A, ev(t, e)))
+        .collect();
+        let rows: Vec<Option<(EventTypeEnum, Option<EvalEnum>)>> =
+            translate_rows(Some(ScoutingRulesEnum::V3), &touches)
+                .into_iter()
+                .map(|r| r.map(|(_, e)| (e.event_type, e.eval)))
+                .collect();
+        assert_eq!(
+            rows,
+            vec![
+                Some((S, Some(Positive))),
+                Some((OF, None)),
+                None,
+                None,
+                Some((A, Some(Perfect))),
+            ]
+        );
+    }
+
+    /// A set of v3 with a block of their freeball doesn't replay with the
+    /// current rules as saved; translated, it does.
+    #[test]
+    fn a_set_of_v3_replays_with_the_current_rules() {
+        let t = Team::new();
+        for (block, score) in [
+            (
+                vec![t.act(B, Positive), t.act(D, Positive), t.act(A, Perfect)],
+                (1, 0),
+            ),
+            (vec![t.act(B, Perfect)], (1, 0)),
+            (vec![t.act(B, Error)], (0, 1)),
+            (vec![t.act(B, Exclamative), ev(OS, None)], (0, 1)),
+        ] {
+            let saved: Vec<EventEntry> = [vec![t.act(S, Positive), ev(OF, None)], block].concat();
+            assert!(
+                t.set(Us, saved.clone())
+                    .compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS)
+                    .is_err()
+            );
+            let touches: Vec<(Side, EventEntry)> =
+                saved.into_iter().map(|e| (Side::A, e)).collect();
+            let events = translate(Some(ScoutingRulesEnum::V3), &touches)
+                .into_iter()
+                .map(|(_, e)| e)
+                .collect();
+            let snapshot = t.replay(Us, events);
+            assert_eq!((snapshot.score_us, snapshot.score_them), score);
+        }
     }
 }

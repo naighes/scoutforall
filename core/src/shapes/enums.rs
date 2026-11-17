@@ -118,16 +118,21 @@ pub enum ScoutingRulesEnum {
     /// The attack `+` defended with difficulty, the roads open after it;
     /// the dig `!` only a cover, optional after the own attack `!`.
     V3,
+    /// The block only of an attack, as in DataVolley: on a ball coming
+    /// over without one (their freeball, their reception straight back
+    /// after our serve `/`) only the invasion.
+    V4,
 }
 
 impl ScoutingRulesEnum {
     /// The rules new sets are scouted with.
-    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V3;
+    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V4;
 
-    pub const ALL: [ScoutingRulesEnum; 3] = [
+    pub const ALL: [ScoutingRulesEnum; 4] = [
         ScoutingRulesEnum::V1,
         ScoutingRulesEnum::V2,
         ScoutingRulesEnum::V3,
+        ScoutingRulesEnum::V4,
     ];
 }
 

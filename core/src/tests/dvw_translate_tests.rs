@@ -1192,7 +1192,8 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
     }
 
     /// Our block on their reception straight over and on their freeball:
-    /// a block, as the file tells, not an attack.
+    /// the block answers an attack (scouting rules v4), so the point is an
+    /// attack point, the error an attack error.
     #[test]
     fn our_block_on_a_ball_not_attacked() {
         let mut file = File::new();
@@ -1208,10 +1209,36 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             vec![
                 (OE, None),
                 (S, Some(EvalEnum::Over)),
-                (B, Some(EvalEnum::Perfect)),
+                (A, Some(EvalEnum::Perfect)),
                 (S, Some(EvalEnum::Negative)),
                 (OF, None),
-                (B, Some(EvalEnum::Error))
+                (A, Some(EvalEnum::Error))
+            ]
+        );
+    }
+
+    /// Our block `+` of their freeball and our dig after it: the ball
+    /// kept, like a freeball received, which isn't told (scouting rules
+    /// v4): both left out, our attack after their freeball.
+    #[test]
+    fn our_block_kept_on_their_freeball_is_left_out_with_our_dig() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM-", file.server());
+        file.rally(
+            &[
+                &serve, "a11RM+", "a13EH+", "a14FH+", "*03BH+", "*05DH+", "*04AH#",
+            ],
+            true,
+        );
+        let events = evaluated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            events.iter().take(4).copied().collect::<Vec<_>>(),
+            vec![
+                (OE, None),
+                (S, Some(EvalEnum::Negative)),
+                (OF, None),
+                (A, Some(EvalEnum::Perfect)),
             ]
         );
     }

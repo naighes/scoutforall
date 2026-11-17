@@ -8,13 +8,14 @@ mod tests {
     use crate::domain::Side;
     use crate::rally::{Incoherence, admits, replay};
     use crate::shapes::{
-        enums::{EventTypeEnum, LineupRulesEnum, TeamSideEnum},
+        enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         flags::EventFlags,
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
     };
     use EventTypeEnum::*;
     use chrono::{Duration, TimeZone, Utc};
+    use std::collections::BTreeSet;
     use uuid::Uuid;
 
     /// xorshift64*: the same sets on every run, no dependency.
@@ -172,6 +173,47 @@ mod tests {
             .join(" ")
     }
 
+    /// The touches missing in the set, where the ball was in play: each
+    /// touch of the ball followed by one not completing it, as `A+ > same
+    /// A` (A's attack `+`, then A's attack again: B's dig untold). Complete
+    /// after a serve is the reception of the other side; after an attack
+    /// the dig or the block of the other side; after a block `+` or `-` the
+    /// dig of the blockers, after a block `!` the cover of the attackers;
+    /// after any other touch, a touch of the ball (attack, dig, block,
+    /// freeball) of the side it left the ball to. A fault, the block `/`
+    /// (an invasion) and the touches after a point miss nothing.
+    fn holes(touches: &[(Side, EventEntry)]) -> BTreeSet<String> {
+        use EvalEnum::*;
+        let ball: Vec<&(Side, EventEntry)> = touches
+            .iter()
+            .filter(|(_, e)| !matches!(e.event_type, R | CL | LR | LF | CS))
+            .collect();
+        ball.windows(2)
+            .filter_map(|pair| {
+                let [(side, prev), (next_side, next)] = pair else {
+                    return None;
+                };
+                let held = prev.event_type.ball_side_after(prev.eval)?;
+                let same = side == next_side;
+                let to_ball_side = same == (held == TeamSideEnum::Us);
+                let complete = match (prev.event_type, prev.eval, same, next.event_type) {
+                    (_, _, _, F) => true,
+                    (_, _, _, B) if next.eval == Some(Over) => true,
+                    (S, _, other, P) | (A, _, other, D | B) => !other,
+                    (B, Some(Positive | Negative), same, D) => same,
+                    (B, Some(Exclamative), other, D) => !other,
+                    (S | A | B, _, _, _) => false,
+                    (_, _, _, A | D | B | FB) => to_ball_side,
+                    _ => false,
+                };
+                let eval = prev.eval.map(|v| v.to_string()).unwrap_or_default();
+                let who = if same { "same" } else { "other" };
+                (!complete)
+                    .then(|| format!("{}{eval} > {who} {}", prev.event_type, next.event_type))
+            })
+            .collect()
+    }
+
     /// A whole set (or 400 touches), every touch checked on both sides,
     /// the score of both sides after every touch; the touches.
     fn play_set(seed: u64) -> Vec<(Side, EventEntry)> {
@@ -247,6 +289,32 @@ mod tests {
             .flatten()
             .map(|(side, e)| (*side, e.event_type))
             .collect();
+        // the touches that can go untold (TODO/001, §4): the dig or the
+        // block of the attack, the dig `/` after the attack `+` (the
+        // roads open), the touch after the block, the block `!` and the
+        // cover after the attack `!`; any other hole is a new one
+        let found: BTreeSet<String> = sets.iter().flat_map(|touches| holes(touches)).collect();
+        let expected: BTreeSet<String> = [
+            "A- > other A",
+            "A- > other FB",
+            "A+ > other A",
+            "A+ > other FB",
+            "A+ > same A",
+            "A+ > same FB",
+            "A! > same D",
+            "A! > same A",
+            "A! > same FB",
+            "B+ > same A",
+            "B+ > same FB",
+            "B- > same A",
+            "B- > same FB",
+            "B! > other A",
+            "B! > other FB",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        assert_eq!(found, expected);
         for side in Side::ALL {
             for event_type in [S, P, A, D, B, F, FB, R, CL, LR, LF, CS] {
                 assert!(

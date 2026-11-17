@@ -536,6 +536,41 @@ mod tests {
         assert_eq!(event_types(&saved), vec![S, B, D]);
     }
 
+    /// Our block after our serve `/` (their reception straight back): the
+    /// block answers an attack (scouting rules v4), so only the invasion
+    /// is offered and accepted.
+    #[tokio::test]
+    async fn the_block_of_no_attack_is_only_the_invasion() {
+        let mut s = scouting().await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Over).await.unwrap();
+        s.session.choose_event(B).await.unwrap();
+        let blocker = s
+            .session
+            .player_choices()
+            .first()
+            .map(|c| c.id)
+            .expect("a blocker");
+        s.session.choose_player(blocker).await.unwrap();
+        assert_eq!(s.session.available_evals(), vec![EvalEnum::Over]);
+        for eval in [
+            EvalEnum::Perfect,
+            EvalEnum::Positive,
+            EvalEnum::Exclamative,
+            EvalEnum::Negative,
+            EvalEnum::Error,
+        ] {
+            assert_eq!(
+                s.session.choose_eval(eval).await,
+                Err(ScoutingError::EvalNotAllowed(B)),
+                "{eval}"
+            );
+        }
+        s.session.choose_eval(EvalEnum::Over).await.unwrap();
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![S, B]);
+    }
+
     /// Undo resumes the serve with where it went; going back from the
     /// evaluation forgets it.
     #[tokio::test]

@@ -364,6 +364,8 @@ pub fn answer_evals(
 /// - a fault, a substitution, a libero or setter change need nothing more;
 ///   the block `/` (an invasion) is a fault, but never right after the
 ///   other side's attack: that attack isn't saved;
+/// - any other block answers the other side's attack, never a ball coming
+///   over without one;
 /// - the other side's point, error or freeball (`OS`, `OE`, `OF`) never:
 ///   its touches tell them.
 pub fn admits(
@@ -427,6 +429,8 @@ pub fn admits(
         (B, _) if entry.eval == Some(EvalEnum::Over) => {
             offered && !last.is_some_and(|(_, e)| e.event_type == A)
         }
+        // a block answers the other side's attack, nothing else
+        (B, None) => false,
         (F | R | CL | LR | LF | CS, _) => offered,
         // the other half of the point: closed in the stream of the side
         (_, Some((s, e))) if winner(*s, e).is_some() => fits(e),

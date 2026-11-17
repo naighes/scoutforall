@@ -659,6 +659,64 @@ mod tests {
         ));
     }
 
+    /// The block answers the other side's attack, as in DataVolley
+    /// (TODO/001, §4.2): after its freeball, its reception or its dig
+    /// straight over, only the invasion (`/`), a fault.
+    #[test]
+    fn the_block_answers_only_the_other_side_s_attack() {
+        let (a, b) = (Team::new(), Team::new());
+        let rallies = [
+            // B's freeball: A blocks it
+            (
+                vec![
+                    by(Side::A, S, a.setter(), Positive, 0),
+                    by(Side::B, P, b.libero, Negative, 1),
+                    touch(Side::B, FB, None, 2),
+                ],
+                Side::A,
+            ),
+            // B's reception straight back after A's serve `/`
+            (
+                vec![
+                    by(Side::A, S, a.setter(), Over, 0),
+                    by(Side::B, P, b.libero, Over, 1),
+                ],
+                Side::A,
+            ),
+            // A's dig straight over after B's attack `+`: B blocks it
+            (
+                vec![
+                    by(Side::A, S, a.setter(), Positive, 0),
+                    by(Side::B, P, b.libero, Negative, 1),
+                    by(Side::B, A, b.outside_hitter(), Positive, 2),
+                    by(Side::A, D, a.libero, Over, 3),
+                ],
+                Side::B,
+            ),
+        ];
+        for (i, (rally, side)) in rallies.iter().enumerate() {
+            let blocker = match side {
+                Side::A => a.outside_hitter(),
+                Side::B => b.outside_hitter(),
+            };
+            assert_eq!(
+                admitted_evals(&a, &b, rally, *side, B, blocker),
+                vec![Over],
+                "{i}"
+            );
+        }
+        // the other side's attack: blocked
+        let attacked = [
+            by(Side::A, S, a.setter(), Positive, 0),
+            by(Side::B, P, b.libero, Negative, 1),
+            by(Side::B, A, b.outside_hitter(), Negative, 2),
+        ];
+        assert_eq!(
+            admitted_evals(&a, &b, &attacked, Side::A, B, a.outside_hitter()),
+            vec![Positive]
+        );
+    }
+
     #[test]
     fn what_the_other_side_tells_is_never_scouted() {
         let (a, b) = (Team::new(), Team::new());

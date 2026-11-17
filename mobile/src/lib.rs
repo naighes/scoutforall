@@ -7395,7 +7395,8 @@ mod tests {
     }
 
     /// Our serve `/`, their reception straight over: our block among the
-    /// events of the players in the front row, saved with its evaluation.
+    /// events of the players in the front row, only as the invasion (the
+    /// block answers an attack, scouting rules v4), saved.
     #[test]
     fn our_block_on_their_reception_straight_over() {
         let dir = tempfile::tempdir().unwrap();
@@ -7422,8 +7423,15 @@ mod tests {
         if scouting.state().step == ScoutingStep::Event {
             scouting.choose_event(EventTypeEnum::B).unwrap();
         }
+        let evals: Vec<_> = scouting
+            .available_evals()
+            .iter()
+            .map(|e| e.value)
+            .collect();
+        assert_eq!(evals, vec![EvalEnum::Over]);
+        assert!(scouting.choose_eval(EvalEnum::Perfect).is_err());
         assert_eq!(
-            scouting.choose_eval(EvalEnum::Perfect).unwrap(),
+            scouting.choose_eval(EvalEnum::Over).unwrap(),
             Progress::Saved
         );
         match scouting.state().events.as_slice() {

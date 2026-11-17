@@ -394,6 +394,96 @@ mod tests {
         );
     }
 
+    /// Our serve `/` (their reception straight back), our block `+` of it
+    /// and our dig after the block, our attack: a set of v3, the block of
+    /// no attack.
+    async fn block_of_v3(p: &Sqlite) -> (TeamEntry, MatchEntry) {
+        let (a, _, m) = set_one(p, false).await;
+        add(
+            p,
+            &m,
+            &[
+                (Side::A, S, a.players[0].id, Over),
+                (Side::A, B, a.players[1].id, Positive),
+                (Side::A, D, libero(&a), Positive),
+                (Side::A, A, a.players[1].id, Perfect),
+            ],
+        );
+        p.db.write(|tx| {
+            tx.execute(
+                "UPDATE sets SET scouting_rules = 'v3' WHERE match_id = ?1",
+                params![Sql(Uuid::parse_str(&m.id).unwrap())],
+            )
+            .map_err(sqlite)
+        })
+        .unwrap();
+        (a, m)
+    }
+
+    /// A set of v3 is read without the touches the current rules leave
+    /// out (the block of no attack kept by the blockers, the dig after
+    /// it), its rows as they were.
+    #[tokio::test]
+    async fn a_set_of_v3_is_read_without_the_touches_left_out() {
+        let p = Sqlite::new();
+        let (_, m) = block_of_v3(&p).await;
+        let sets = reader(&p).read_all(&m).await.unwrap();
+        assert_eq!(told(&sets[0]), vec!["S/", "A#"]);
+        let snapshot = sets[0].compute_snapshot(m.max_substitutions).unwrap();
+        assert_eq!((snapshot.score_us, snapshot.score_them), (1, 0));
+        assert_eq!(
+            saved_rows(&p, &m),
+            (
+                Some(ScoutingRulesEnum::V3),
+                vec!["S/".into(), "B+".into(), "D+".into(), "A#".into()]
+            )
+        );
+    }
+
+    /// An event joining a set of v3: the rows the current rules leave out
+    /// are undone, the set brought to the current rules.
+    #[tokio::test]
+    async fn an_event_appended_to_a_set_of_v3_undoes_the_touches_left_out() {
+        let p = Sqlite::new();
+        let (a, m) = block_of_v3(&p).await;
+        let serve = EventEntry {
+            timestamp: Utc::now(),
+            event_type: S,
+            player: Some(a.players[0].id),
+            eval: Some(Perfect),
+            target_player: None,
+            technique: None,
+            flags: EventFlags::default(),
+        };
+        p.set_writer.append_event(&m, 1, &serve).await.unwrap();
+        assert_eq!(
+            saved_rows(&p, &m),
+            (
+                Some(ScoutingRulesEnum::CURRENT),
+                vec!["S/".into(), "A#".into(), "S#".into()]
+            )
+        );
+        let sets = reader(&p).read_all(&m).await.unwrap();
+        assert_eq!(told(&sets[0]), vec!["S/", "A#", "S#"]);
+    }
+
+    /// Undo in a set of v3: the touches left out undone first, then the
+    /// last event the current rules tell.
+    #[tokio::test]
+    async fn undo_in_a_set_of_v3_skips_the_touches_left_out() {
+        let p = Sqlite::new();
+        let (_, m) = block_of_v3(&p).await;
+        let removed = p.set_writer.remove_last_event(&m, 1).await.unwrap();
+        assert_eq!(
+            removed.map(|e| (e.event_type, e.eval)),
+            Some((A, Some(Perfect)))
+        );
+        assert_eq!(
+            saved_rows(&p, &m),
+            (Some(ScoutingRulesEnum::CURRENT), vec!["S/".into()])
+        );
+    }
+
     /// Scouting only A: no side for B, A as `compute_snapshot` replays it.
     #[tokio::test]
     async fn scouting_a_reads_only_a_as_today() {

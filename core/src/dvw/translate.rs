@@ -167,6 +167,7 @@ pub(crate) fn translate_lined(
         earlier: None,
         at: None,
         inverted_p1: false,
+        block_left_out: false,
     };
     set.translate(lines)
         .map_err(|(line, issue)| fail(line, issue))?;
@@ -482,6 +483,9 @@ struct SetTranslator<'a> {
     // or outside hitter attacked from in P1 in side out (see
     // `inverted_p1_of`), the last one told going on; canonical until then
     inverted_p1: bool,
+    // our block of no attack keeping the ball left out (see `apply_flagged`):
+    // our dig after it too
+    block_left_out: bool,
 }
 
 /// Where a rally starts (the dead ball before it): to translate again from
@@ -624,6 +628,7 @@ impl SetTranslator<'_> {
         self.clock = checkpoint.clock;
         self.inverted_p1 = checkpoint.inverted_p1;
         self.rally_number = rally_number;
+        self.block_left_out = false;
     }
 
     // the time of the line (in the video, when linked to it), or a second
@@ -677,6 +682,45 @@ impl SetTranslator<'_> {
         technique: Option<TechniqueEnum>,
         flags: EventFlags,
     ) -> Result<(), Issue> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        // the block answers an attack (scouting rules v4): our block of a
+        // ball coming over without one (their freeball, their reception
+        // back after our serve `/`) told as the translation of v3 tells it
+        // (`domain::rules`): `#` an attack point, `=` an attack error, `!`
+        // our freeball, `+` and `-` (the ball kept) left out with our dig
+        // after them
+        let no_attack = matches!(
+            self.snapshot
+                .last_event
+                .as_ref()
+                .map(|e| (e.event_type, e.eval)),
+            Some((OF, _) | (S, Some(Over)))
+        );
+        let told = match (event_type, eval, no_attack, self.block_left_out) {
+            (D, _, _, true) => None,
+            (B, Some(Perfect), true, _) => Some((A, Some(Perfect), None)),
+            (B, Some(Error), true, _) => Some((A, Some(Error), None)),
+            (B, Some(Exclamative), true, _) => Some((FB, None, None)),
+            (B, Some(Positive | Negative), true, _) => None,
+            _ => Some((event_type, eval, technique)),
+        };
+        // a change of the lineup between the block and the dig keeps it
+        self.block_left_out = match event_type {
+            R | CL | LR | LF | CS => self.block_left_out,
+            _ => matches!(
+                (event_type, eval, no_attack),
+                (B, Some(Positive | Negative), true)
+            ),
+        };
+        let Some((told_type, eval, technique)) = told else {
+            self.mapped("B of no attack kept, or the dig after it: left out");
+            return Ok(());
+        };
+        if told_type != event_type {
+            self.mapped("B of no attack as A or FB");
+        }
+        let event_type = told_type;
         let event = EventEntry {
             timestamp: self.clock,
             event_type,

@@ -303,7 +303,9 @@ impl Snapshot {
     /// (TODO/001, §4.2): our dig after our block tells what the block left
     /// us, `+` or `#` after a block `+`, `-` or `/` after a block `-`; our
     /// cover after our attack `!` (or their block `!`, untold) rebuilds
-    /// (`!`) or struggles (`-`); `!` is only a cover.
+    /// (`!`) or struggles (`-`); `!` is only a cover. The block answers an
+    /// attack, as in DataVolley: on their freeball or their reception
+    /// straight back after our serve `/`, only the invasion (`/`).
     pub fn available_evals(&self, event_type: EventTypeEnum) -> Vec<EvalEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
@@ -312,6 +314,7 @@ impl Snapshot {
             (D, Some((B, Some(Positive)))) => &[Perfect, Positive],
             (D, Some((B, Some(Negative)))) => &[Negative, Over],
             (D, Some((A, Some(Exclamative)))) => &[Exclamative, Negative],
+            (B, Some((OF, _) | (S, Some(Over)))) => &[Over],
             (D, _) => &[Perfect, Positive, Negative, Over, Error],
             _ => &EvalEnum::ALL,
         };
@@ -741,27 +744,24 @@ impl Snapshot {
 
     /// Their freeball (`OF`) is exploited when we win the rally before they
     /// attack again, whoever scores the point (our kill, their error, their
-    /// fault, our block on the freeball itself). It isn't when they win the
-    /// rally, when they attack again (our dig or block comes next, even a
-    /// block point) or when they send us another freeball, which is counted
-    /// on its own. Their error after
+    /// fault). It isn't when they win the rally, when they attack again (our
+    /// dig or block comes next, even a block point: the block answers an
+    /// attack, on the freeball itself only the invasion) or when they send
+    /// us another freeball, which is counted on its own. Their error after
     /// digging our attack (`A-`, `OE`) counts as exploited: the scouting
     /// doesn't tell whether they attacked.
     fn record_freeball(&mut self, event: &EventEntry, phase: PhaseEnum, rotation: u8) {
         use EventTypeEnum::*;
-        // our block on their freeball itself, not on an attack after it
-        let on_the_freeball = self.last_event.as_ref().is_some_and(|e| e.event_type == OF);
         let exploited = match (
             self.pending_freeball,
             event.event_type,
             event.event_type.rally_winner(event.eval),
-            on_the_freeball,
         ) {
-            (false, _, _, _) => None,
+            (false, _, _) => None,
             // even our block point comes after their attack
-            (true, D | OF, _, _) | (true, B, _, false) => Some(false),
-            (true, _, Some(winner), _) => Some(winner == TeamSideEnum::Us),
-            (true, _, None, _) => None,
+            (true, D | OF | B, _) => Some(false),
+            (true, _, Some(winner)) => Some(winner == TeamSideEnum::Us),
+            (true, _, None) => None,
         };
         if let Some(exploited) = exploited {
             self.stats.freeballs.add(FreeballKey {

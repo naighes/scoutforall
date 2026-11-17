@@ -25,7 +25,7 @@ use crate::{
     domain::{
         Event, Home, LegacyId, Match, MatchSet, MatchVideo, MatchVideoFile, Membership, Person,
         RosterEntry, ScoutingMode, SetLineup, Side, Team, TeamRef, VideoAnchor, VideoCorrection,
-        rules::translate,
+        rules::translate_rows,
     },
     errors::{AppError, IOError, MatchError},
     player_form::removed,
@@ -550,12 +550,22 @@ impl SetRows {
     /// current scouting rules tell it (`rules::translate`): the rows keep
     /// the rules they were saved with.
     pub fn entries(&self) -> Vec<(&Event, EventEntry)> {
+        self.translated()
+            .into_iter()
+            .filter_map(|(row, entry)| entry.map(|entry| (row, entry)))
+            .collect()
+    }
+
+    /// Every row not undone, in their order, with its event as the current
+    /// scouting rules tell it, `None` when they leave it out
+    /// (`rules::translate_rows`).
+    pub fn translated(&self) -> Vec<(&Event, Option<EventEntry>)> {
         let rows = self.rows();
         let touches: Vec<(Side, EventEntry)> =
             rows.iter().map(|e| (e.side, e.entry.clone())).collect();
         rows.into_iter()
-            .zip(translate(self.row.scouting_rules, &touches))
-            .map(|(row, (_, entry))| (row, entry))
+            .zip(translate_rows(self.row.scouting_rules, &touches))
+            .map(|(row, told)| (row, told.map(|(_, entry)| entry)))
             .collect()
     }
 

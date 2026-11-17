@@ -147,8 +147,8 @@ fn append(
 
 /// The set saved with older scouting rules brought to the current ones,
 /// before an event of the current rules joins its events or leaves them:
-/// each event translated in its row (`SetRows::entries`), the set saying
-/// the current rules. A set with the current rules stays as it is.
+/// each event translated in its row (`SetRows::translated`), the rows the
+/// current rules leave out undone, the set saying the current rules. A set with the current rules stays as it is.
 fn upgrade(tx: &Transaction, match_id: Uuid, set_number: u8) -> Result<(), AppError> {
     let sets = set_rows(tx, match_id)?;
     let set = sets
@@ -158,10 +158,13 @@ fn upgrade(tx: &Transaction, match_id: Uuid, set_number: u8) -> Result<(), AppEr
     match set {
         None => Ok(()),
         Some(set) => {
-            set.entries()
+            set.translated()
                 .into_iter()
-                .filter(|(row, entry)| row.entry != *entry)
-                .try_for_each(|(row, entry)| update_event(tx, row.id, row.side, &entry))?;
+                .try_for_each(|(row, told)| match told {
+                    None => remove_event(tx, row.id),
+                    Some(entry) if entry != row.entry => update_event(tx, row.id, row.side, &entry),
+                    Some(_) => Ok(()),
+                })?;
             tx.execute(
                 "UPDATE sets SET scouting_rules = ?3 WHERE match_id = ?1 AND number = ?2",
                 params![Sql(match_id), set_number, ScoutingRulesEnum::CURRENT],

@@ -323,9 +323,9 @@ mod tests {
     }
 
     /// Our block on a ball crossing the net without their attack: their
-    /// reception straight over (our serve `/`) or their freeball. Each
-    /// evaluation tells what comes next, as after their attack: our point,
-    /// the ball ours, theirs to counter, their point.
+    /// reception straight over (our serve `/`) or their freeball. The block
+    /// answers an attack (scouting rules v4): there only the invasion, their
+    /// point; our point there is an attack.
     #[test]
     fn our_block_on_a_ball_not_attacked() {
         let t = Team::new();
@@ -334,53 +334,33 @@ mod tests {
             vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)],
         ];
         for events in before {
-            let block = |eval| t.serving([events.clone(), vec![act(B, t.oh1, eval)]].concat());
-            let won = block(Perfect);
-            assert_eq!(won.score_us, 1, "{events:?}");
-            for kept in [Positive, Negative] {
-                assert_eq!(block(kept).get_available_options(), vec![OE, F, A, D, FB]);
+            let with = |event: EventEntry| [events.clone(), vec![event]].concat();
+            let invasion = t.serving(with(act(B, t.oh1, Over)));
+            assert_eq!(invasion.score_them, 1, "{events:?}");
+            for eval in [Perfect, Positive, Exclamative, Negative, Error] {
+                let reason = t.rejected(TeamSideEnum::Us, with(act(B, t.oh1, eval)));
+                assert!(reason.contains("not allowed"), "{eval}: {reason}");
             }
-            assert_eq!(
-                block(Exclamative).get_available_options(),
-                vec![OS, OE, F, A, D, B, FB, OF]
-            );
-            assert_eq!(block(Over).score_them, 1, "{events:?}");
-            assert_eq!(block(Error).score_them, 1, "{events:?}");
-            // in the back row, not on court: no block
+            assert_eq!(t.serving(with(act(A, t.oh1, Perfect))).score_us, 1);
+            // in the back row, not on court: no invasion either
             for player in [t.setter, t.mb1] {
-                let reason = t.rejected(
-                    TeamSideEnum::Us,
-                    [events.clone(), vec![act(B, player, Positive)]].concat(),
-                );
+                let reason = t.rejected(TeamSideEnum::Us, with(act(B, player, Over)));
                 assert!(reason.contains("can't play it"), "{reason}");
             }
         }
     }
 
-    /// Our block on their freeball itself: exploited when we win the rally
-    /// (our block point too); on an attack after their freeball, it isn't.
+    /// Their freeball: exploited when we win the rally with our attack on
+    /// it, or with their error; our invasion on it is their point; on our
+    /// block of their attack after it, it isn't.
     #[test]
-    fn our_block_on_their_freeball_is_no_attack_of_theirs() {
+    fn our_touch_on_their_freeball_tells_its_exploitation() {
         let t = Team::new();
         let freeball = vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)];
-        let point = t.serving([freeball.clone(), vec![act(B, t.oh1, Perfect)]].concat());
+        let point = t.serving([freeball.clone(), vec![act(A, t.oh1, Perfect)]].concat());
         assert_eq!(exploited(&point), vec![true]);
-        let kept = t.serving(
-            [
-                freeball.clone(),
-                vec![act(B, t.oh1, Positive), act(A, t.opposite, Perfect)],
-            ]
-            .concat(),
-        );
-        assert_eq!(exploited(&kept), vec![true]);
-        let countered = t.serving(
-            [
-                freeball.clone(),
-                vec![act(B, t.oh1, Exclamative), act(B, t.oh1, Perfect)],
-            ]
-            .concat(),
-        );
-        assert_eq!(exploited(&countered), vec![false]);
+        let invasion = t.serving([freeball.clone(), vec![act(B, t.oh1, Over)]].concat());
+        assert_eq!(exploited(&invasion), vec![false]);
         let attacked = t.serving(
             [
                 freeball,

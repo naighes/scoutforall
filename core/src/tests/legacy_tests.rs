@@ -572,7 +572,9 @@ mod tests {
     }
 
     /// The block `-` of the files is `!` now, the block `+` before their
-    /// freeball too; the rest as saved.
+    /// freeball too; the block `+` of their freeball kept the ball, like a
+    /// freeball received, which isn't told: left out (scouting rules v4);
+    /// the rest as saved.
     #[test]
     fn the_events_of_the_files_are_read_with_the_current_rules() {
         let player = Uuid::new_v4();
@@ -593,7 +595,6 @@ mod tests {
                 (OS, None),
                 (B, Some(Exclamative)),
                 (OF, None),
-                (B, Some(Positive)),
                 (A, Some(Perfect)),
             ]
         );
