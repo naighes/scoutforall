@@ -628,7 +628,7 @@ impl EvalEnum {
         use EventTypeEnum::*;
         match (self, event) {
             (Perfect, A) => Some(labels.winning_attack.to_string()),
-            (Positive, A) => Some(labels.attack_continuation.to_string()),
+            (Positive, A) => Some(labels.attack_dug_with_difficulty.to_string()),
             (Exclamative, A) => Some(labels.kept_alive_by_our_coverage.to_string()),
             (Negative, A) => Some(labels.opponent_counter_attack_opportunity.to_string()),
 
