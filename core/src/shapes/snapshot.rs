@@ -786,7 +786,7 @@ impl Snapshot {
     /// The possessions of a side out: the first comes with their serve,
     /// unless they miss it or we fault before it; another one each time the
     /// ball comes back to our side to play: our dig keeping it (also over
-    /// the net, `/`), our block keeping it (`+`), their freeball (`OF`), or
+    /// the net, `/`), our block keeping it (`+`, `-`), their freeball (`OF`), or
     /// our touch after an attack of ours they couldn't counter (`+`) or
     /// blocked but covered (`!`), or after a block of theirs. The rally's
     /// point goes to the last possession, also when scored on their side
@@ -810,7 +810,7 @@ impl Snapshot {
             (_, 0, _, P | OS, _) => (1, true),
             (_, 0, _, _, _) => (0, false),
             (_, n, false, D, Some(Perfect | Positive | Exclamative | Negative | Over))
-            | (_, n, false, B, Some(Positive))
+            | (_, n, false, B, Some(Positive | Negative))
             | (_, n, false, OF | A | FB, _) => (n.saturating_add(1), true),
             (_, n, _, _, _) => (n, false),
         };
@@ -837,7 +837,7 @@ impl Snapshot {
                 self.possession = possession;
                 self.ball_ours = match (event.event_type, event.eval) {
                     (P | D, eval) => kept(eval),
-                    (B, Some(Positive)) | (OF, _) => true,
+                    (B, Some(Positive | Negative)) | (OF, _) => true,
                     (A | FB | B, _) => false,
                     _ => self.ball_ours,
                 };

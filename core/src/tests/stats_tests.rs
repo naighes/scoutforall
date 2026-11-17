@@ -2637,6 +2637,39 @@ mod tests {
                 ],
                 [(1, 0), (1, 0), (1, 1)],
             ),
+            // our block `-` keeps the ball too (the blockers struggle):
+            // the second one, also with the dig of the blockers after it
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Negative),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Negative),
+                    act(D, t.libero, Negative),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
+            // our block `!` sends it back to them, who attacked: our dig
+            // of their attack again, the second one
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Exclamative),
+                    act(D, t.libero, Positive),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
             // the fourth one counts with the third
             (
                 vec![

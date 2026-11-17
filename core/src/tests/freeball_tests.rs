@@ -354,6 +354,36 @@ mod tests {
         }
     }
 
+    /// The invasion on a ball not attacked counts as DataVolley codes it, a
+    /// block `/`: among the blocks, bad for their efficiency, an unforced
+    /// error of the blocker, their point (TODO/001, §4).
+    #[test]
+    fn the_invasion_on_a_ball_not_attacked_is_a_block() {
+        use crate::shapes::enums::ErrorTypeEnum;
+        use crate::shapes::stats::Metric;
+        let t = Team::new();
+        let before: [Vec<EventEntry>; 2] = [
+            vec![t.serve(Over)],
+            vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)],
+        ];
+        for events in before {
+            let s = t.serving([events.clone(), vec![act(B, t.mb2, Over)]].concat());
+            let blocks = s.stats.event_count(B, Some(Over), &by(t.mb2));
+            assert_eq!(blocks, 1, "{events:?}");
+            assert_eq!(
+                s.stats.metric_percentage(B, Metric::Efficiency, &by(t.mb2)),
+                Some(-100.0),
+                "{events:?}"
+            );
+            assert_eq!(
+                s.stats.errors(B, Some(ErrorTypeEnum::Unforced), &by(t.mb2)),
+                1,
+                "{events:?}"
+            );
+            assert_eq!(s.stats.rallies_won(&all()).map(|(_, won, _)| won), Some(0));
+        }
+    }
+
     /// Their freeball: exploited when we win the rally with our attack on
     /// it, or with their error; our invasion on it is their point; on our
     /// block of their attack after it, it isn't.
