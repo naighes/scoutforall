@@ -634,24 +634,24 @@ impl EvalEnum {
 
             (Perfect, B) => Some(labels.winning_block.to_string()),
             (Positive, B) => Some(labels.counter_attack_opportunity.to_string()),
-            (Exclamative, B) => Some(labels.opponent_counter_attack_opportunity.to_string()),
+            (Exclamative, B) => Some(labels.kept_alive_by_their_coverage.to_string()),
             (Negative, B) => Some(labels.limited_attack_options.to_string()),
 
             (Positive, D) => Some(labels.first_tempo_still_available.to_string()),
-            (Exclamative, D) => Some(labels.few_attack_options_available.to_string()),
+            (Exclamative, D) => Some(labels.rebuilt_after_the_block.to_string()),
             (Negative, D) => Some(labels.limited_attack_options.to_string()),
             (Over, D) => Some(labels.ball_goes_straight_over_the_net.to_string()),
 
             (Positive, P) => Some(labels.first_tempo_still_available.to_string()),
             (Exclamative, P) => Some(labels.few_attack_options_available.to_string()),
             (Negative, P) => Some(labels.limited_attack_options.to_string()),
-            (Over, P) => Some(labels.ball_goes_straight_over_the_net.to_string()),
+            (Over, P) => Some(labels.ball_over_or_forced_freeball.to_string()),
 
             (Perfect, S) => None,
             (Positive, S) => Some(labels.opponent_with_limited_attack_options.to_string()),
             (Exclamative, S) => Some(labels.opponent_with_few_attack_options.to_string()),
             (Negative, S) => Some(labels.opponent_with_full_attack_options.to_string()),
-            (Over, S) => Some(labels.ball_goes_straight_back_to_our_court.to_string()),
+            (Over, S) => Some(labels.ball_back_or_forced_freeball.to_string()),
             _ => None,
         }
     }
@@ -676,7 +676,7 @@ impl EvalEnum {
 
             (Perfect, D) => labels.perfect.to_string(),
             (Positive, D) => labels.positive.to_string(),
-            (Exclamative, D) => labels.subpositive.to_string(),
+            (Exclamative, D) => labels.good_cover.to_string(),
             (Negative, D) => labels.negative.to_string(),
             (Error, D) => labels.error.to_string(),
             (Over, D) => labels.overpass.to_string(),

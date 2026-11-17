@@ -198,11 +198,17 @@ impl Snapshot {
     }
 
     /// The name of the event to choose next: the libero replacement says
-    /// what it does now, the libero going out or coming back in.
+    /// what it does now, the libero going out or coming back in; the dig
+    /// after our attack blocked back is a cover.
     pub fn next_event_name(&self, event: EventTypeEnum, labels: &Labels) -> &'static str {
-        match (event, self.current_lineup.is_libero_out()) {
-            (EventTypeEnum::LR, false) => labels.libero_out,
-            (EventTypeEnum::LR, true) => labels.libero_in,
+        let after = self.last_event.as_ref().map(|e| (e.event_type, e.eval));
+        match (event, self.current_lineup.is_libero_out(), after) {
+            (EventTypeEnum::LR, false, _) => labels.libero_out,
+            (EventTypeEnum::LR, true, _) => labels.libero_in,
+            // the dig after our attack blocked back: a cover (rules v3)
+            (EventTypeEnum::D, _, Some((EventTypeEnum::A, Some(EvalEnum::Exclamative)))) => {
+                labels.cover
+            }
             _ => event.friendly_name(labels),
         }
     }

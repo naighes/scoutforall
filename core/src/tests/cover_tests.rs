@@ -11,6 +11,7 @@ mod tests {
         snapshot::{EventEntry, Snapshot},
         stats::{DigsEnum, EvalSet, EventPick, Metric, StatsFilter},
     };
+    use crate::tests::EN;
     use EvalEnum::*;
     use EventTypeEnum::*;
     use chrono::Utc;
@@ -34,9 +35,14 @@ mod tests {
     /// (`!`). The second: our block `+` keeps the ball and our dig after it
     /// (`+`) is defense, not cover.
     fn replay() -> Snapshot {
+        replay_of(usize::MAX)
+    }
+
+    /// The set of `replay`, up to its first `count` events.
+    fn replay_of(count: usize) -> Snapshot {
         let p: Vec<Uuid> = (0..7).map(|_| Uuid::new_v4()).collect();
         let (setter, oh1, mb2, opposite, oh2) = (p[0], p[1], p[2], p[3], p[4]);
-        let events = vec![
+        let events: Vec<EventEntry> = vec![
             act(S, setter, Positive),
             act(D, oh2, Positive),
             act(A, oh1, Exclamative),
@@ -48,7 +54,10 @@ mod tests {
             act(B, mb2, Positive),
             act(D, oh2, Positive),
             act(A, oh1, Perfect),
-        ];
+        ]
+        .into_iter()
+        .take(count)
+        .collect();
         SetEntry {
             set_number: 1,
             serving_team: TeamSideEnum::Us,
@@ -121,5 +130,45 @@ mod tests {
         assert_eq!(picked(DigsEnum::Cover, None), 2);
         assert_eq!(picked(DigsEnum::Defense, Some(EvalSet::of(&[Negative]))), 0);
         assert_eq!(picked(DigsEnum::Cover, Some(EvalSet::of(&[Negative]))), 1);
+    }
+
+    /// To choose it, the dig after our attack blocked back says it's a
+    /// cover; after our block it's a dig as any other.
+    #[test]
+    fn the_cover_is_named_when_chosen() {
+        let name = |count| replay_of(count).next_event_name(D, EN);
+        // after our attack `!`
+        assert_eq!(name(3), EN.cover);
+        assert_eq!(name(5), EN.cover);
+        // after the serve, after our block `+`
+        assert_eq!(name(1), EN.defense);
+        assert_eq!(name(9), EN.defense);
+    }
+
+    /// The dig `!` is only a cover (rules v3): its name and description say
+    /// so; the block `!` is the attack covered by the other team; the
+    /// reception `/` sends the ball over or forces a freeball, as the serve
+    /// `/` gets it back.
+    #[test]
+    fn the_evaluations_say_what_they_mean() {
+        assert_eq!(Exclamative.friendly_name(D, EN), EN.good_cover);
+        assert_eq!(
+            Exclamative.friendly_description(D, EN).as_deref(),
+            Some(EN.rebuilt_after_the_block)
+        );
+        assert_eq!(
+            Exclamative.friendly_description(B, EN).as_deref(),
+            Some(EN.kept_alive_by_their_coverage)
+        );
+        assert_eq!(
+            Over.friendly_description(P, EN).as_deref(),
+            Some(EN.ball_over_or_forced_freeball)
+        );
+        assert_eq!(
+            Over.friendly_description(S, EN).as_deref(),
+            Some(EN.ball_back_or_forced_freeball)
+        );
+        // the reception `!` is still subpositive
+        assert_eq!(Exclamative.friendly_name(P, EN), EN.subpositive);
     }
 }

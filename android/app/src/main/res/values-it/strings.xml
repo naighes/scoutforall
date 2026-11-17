@@ -305,7 +305,7 @@
     <string name="tutorial_dig_event">Tocca Difesa.</string>
     <string name="tutorial_dig_eval">Una buona difesa: tocca +.</string>
     <string name="tutorial_opposite">Attacca Egonu: tocca il suo nome.</string>
-    <string name="tutorial_attack_kept">La difendono, ma non riescono ad attaccare: la palla torna a noi, tocca +.</string>
+    <string name="tutorial_attack_kept">La difendono a fatica, senza contrattaccare: tocca +.</string>
     <string name="tutorial_attack_dug">La difendono e attaccano: tocca −.</string>
     <string name="tutorial_their_freeball">La rimandano facile, una freeball: tocca Free loro.</string>
     <string name="tutorial_opposite_again">Attacca ancora Egonu: tocca il suo nome.</string>

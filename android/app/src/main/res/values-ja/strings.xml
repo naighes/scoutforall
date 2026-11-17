@@ -304,7 +304,7 @@
     <string name="tutorial_dig_event">「ディグ」をタップ。</string>
     <string name="tutorial_dig_eval">良いディグ:+ をタップ。</string>
     <string name="tutorial_opposite">エゴヌがアタック:名前をタップ。</string>
-    <string name="tutorial_attack_kept">相手は拾ったが攻撃できない:ボールはこちらに戻る。+ をタップ。</string>
+    <string name="tutorial_attack_kept">相手はなんとか拾うが反撃できない:+ をタップ。</string>
     <string name="tutorial_attack_dug">相手が拾って攻撃:− をタップ。</string>
     <string name="tutorial_their_freeball">相手がフリーボールで返球:「相手のフリー」をタップ。</string>
     <string name="tutorial_opposite_again">再びエゴヌがアタック:名前をタップ。</string>

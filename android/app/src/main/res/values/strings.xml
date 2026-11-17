@@ -306,7 +306,7 @@
     <string name="tutorial_dig_event">Tap Defense.</string>
     <string name="tutorial_dig_eval">A good dig: tap +.</string>
     <string name="tutorial_opposite">Egonu attacks: tap her name.</string>
-    <string name="tutorial_attack_kept">They dig it, but can\'t attack: the ball is ours again, tap +.</string>
+    <string name="tutorial_attack_kept">They dig it with difficulty, they can\'t counterattack: tap +.</string>
     <string name="tutorial_attack_dug">They dig it and attack: tap −.</string>
     <string name="tutorial_their_freeball">They send it back easy, a freeball: tap Their free.</string>
     <string name="tutorial_opposite_again">Egonu attacks again: tap her name.</string>

@@ -98,8 +98,8 @@ private val rallies = listOf(
     touch("player:19", R.string.tutorial_dig),
     touch("event:D", R.string.tutorial_dig_event),
     touch("eval:POSITIVE", R.string.tutorial_dig_eval),
-    // the evaluation tells who plays the ball next: + us (their freeball),
-    // − them (they attack)
+    // + dug with difficulty, no counterattack: they send a freeball (or
+    // the ball falls back to us); − dug well, they attack
     touch("player:18", R.string.tutorial_opposite),
     touch("eval:POSITIVE", R.string.tutorial_attack_kept),
     touch("event:OF", R.string.tutorial_their_freeball),
