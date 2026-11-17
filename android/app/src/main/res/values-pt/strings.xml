@@ -493,6 +493,7 @@
     <string name="delete_team_kept">As partidas contra outras equipes (%1$d) ficam com elas, sem o scout de %2$s.</string>
     <string name="scouted_by_opponent">Scout do adversário</string>
     <string name="scouted_by_text">%1$s fez o scout desta partida: aqui só o resultado, visto por %2$s. Estatísticas e scout estão na partida de %1$s.</string>
+    <string name="scouted_both_text">%1$s fez o scout desta partida dos dois lados: aqui o resultado e as estatísticas, vistos por %2$s. O scout está na partida de %1$s.</string>
     <string name="open_as_team">Abrir como %1$s</string>
     <string name="name_or_existing">Digite o nome: quem já está no cadastro é sugerido</string>
     <string name="in_registry">Já no cadastro: a mesma pessoa, com os mesmos dados</string>

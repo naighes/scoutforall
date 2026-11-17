@@ -63,6 +63,8 @@ fun MatchScreen(
     onStats: () -> Unit,
     onVideo: () -> Unit = {},
     onDeleted: () -> Unit = {},
+    // the statistics of B, a match on both sides: from the match of A
+    onStatsOfB: (teamIdOfA: String) -> Unit = {},
     onOpenAs: (teamId: String) -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
@@ -104,7 +106,7 @@ fun MatchScreen(
             is MatchState.Failed -> Centered(modifier) { Text(s.message) }
             is MatchState.Loaded -> when (val a = s.match.scoutedBy) {
                 null -> MatchContent(s.match, onStartSet, onResumeSet, onSet, onStats, onVideo, modifier)
-                else -> SeenByB(s.match, a, s.team, onOpenAs, modifier)
+                else -> SeenByB(s.match, a, s.team, onStatsOfB, onOpenAs, modifier)
             }
         }
     }
@@ -125,16 +127,7 @@ private fun MatchContent(
     // the statistics of the match under its score, a button of their own;
     // the ones of a set touching it
     if (m.sets.isNotEmpty()) {
-        OutlinedButton(
-            onClick = onStats,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-        ) {
-            Icon(painterResource(R.drawable.ic_stats), contentDescription = null, Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.match_stats), Modifier.weight(1f, fill = false))
-        }
+        StatsButton(onStats)
     }
     // the video of the match, to watch it with its events (never while
     // scouting)
@@ -175,19 +168,29 @@ private fun MatchContent(
     }
 }
 
-/** A match of the team as B, scouted by A only: its date, court, result
- * and sets as B sees them, the notes; the statistics and the scouting are
- * in the match of A, opened from here. */
+/** A match of the team as B, scouted by A: its date, court, result and
+ * sets as B sees them, the notes; the scouting is in the match of A,
+ * opened from here, the statistics too unless scouted on both sides. */
 @Composable
-private fun SeenByB(m: MatchDetails, a: ScoutedBy, team: String, onOpenAs: (String) -> Unit, modifier: Modifier) =
+private fun SeenByB(
+    m: MatchDetails,
+    a: ScoutedBy,
+    team: String,
+    onStats: (String) -> Unit,
+    onOpenAs: (String) -> Unit,
+    modifier: Modifier,
+) =
     Column(modifier) {
         MatchHeader(m)
         Text(
-            stringResource(R.string.scouted_by_text, a.teamName, team),
+            stringResource(if (m.bothSides) R.string.scouted_both_text else R.string.scouted_by_text, a.teamName, team),
             Modifier.padding(16.dp),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (m.bothSides) {
+            StatsButton { onStats(a.teamId) }
+        }
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             items(m.sets, key = { it.number.toInt() }) { SetRow(it, inProgress = false, onClick = null) }
             if (m.notes.isNotEmpty()) {
@@ -198,6 +201,20 @@ private fun SeenByB(m: MatchDetails, a: ScoutedBy, team: String, onOpenAs: (Stri
             onClick = { onOpenAs(a.teamId) },
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.open_as_team, a.teamName)) }
+    }
+
+/** The statistics of the match, a button of their own. */
+@Composable
+private fun StatsButton(onClick: () -> Unit) =
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+    ) {
+        Icon(painterResource(R.drawable.ic_stats), contentDescription = null, Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.match_stats), Modifier.weight(1f, fill = false))
     }
 
 /** The date, the court and the sets won, big. */

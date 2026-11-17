@@ -29,10 +29,17 @@ private sealed interface MatchStatsState {
 }
 
 /** The statistics of a match, the same pages as while scouting: of a set,
- * `set` at first, or of the whole match with no `set`. */
+ * `set` at first, or of the whole match with no `set`; of the team of
+ * `side`, B for a match scouted on both sides. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> Unit, onWatch: (VideoRequest.Clips) -> Unit = {}) {
+fun MatchStatsScreen(
+    teamId: String,
+    matchId: String,
+    set: Int?,
+    side: MatchSide = MatchSide.A,
+    onBack: () -> Unit, onWatch: (VideoRequest.Clips) -> Unit = {},
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     // the set shown, 0 for the match: saved as a number on rotation
     var shown by rememberSaveable { mutableIntStateOf(set ?: 0) }
@@ -40,7 +47,7 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
     val state by produceState<MatchStatsState>(MatchStatsState.Loading, shown) {
         val scope = if (shown == 0) StatsScope.Match else StatsScope.Set(shown.toUByte())
         value = try {
-            MatchStatsState.Loaded(app.core { it.matchStats(teamId, matchId, MatchSide.A, scope) })
+            MatchStatsState.Loaded(app.core { it.matchStats(teamId, matchId, side, scope) })
         } catch (e: MobileException) {
             MatchStatsState.Failed(e.reason)
         }
@@ -68,12 +75,13 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
                     },
                     loadDetail = { scope, event, filter ->
                         try {
-                            app.core { it.matchDetail(teamId, matchId, MatchSide.A, scope, event, filter) }
+                            app.core { it.matchDetail(teamId, matchId, side, scope, event, filter) }
                         } catch (e: MobileException) {
                             null
                         }
                     },
-                    watch = { scope -> matchWatch(teamId, matchId, scope, onWatch) },
+                    // the clips are of A only, for now
+                    watch = { scope: StatsScope -> matchWatch(teamId, matchId, scope, onWatch) }.takeIf { side == MatchSide.A },
                 )
             }
         }

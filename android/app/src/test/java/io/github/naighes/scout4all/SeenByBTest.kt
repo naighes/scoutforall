@@ -5,9 +5,18 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import io.github.naighes.scout4all.core.DvwChoice
+import io.github.naighes.scout4all.core.DvwOpponent
+import io.github.naighes.scout4all.core.DvwSide
 import io.github.naighes.scout4all.core.MatchForm
+import io.github.naighes.scout4all.core.MatchSide
+import io.github.naighes.scout4all.core.TeamListing
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -66,5 +75,52 @@ class SeenByBTest {
         rule.onNode(hasText(string(R.string.match_stats))).assertDoesNotExist()
         rule.onNode(hasText(string(R.string.open_as_team, "Italia")) and hasClickAction()).performClick()
         assertEquals(italia, openedAs)
+    }
+
+    /** "Home"–"Visiting" of the TUI fixture, imported into "Home" on both
+     * sides, "Visiting" a new team: the match of A and the team B. */
+    private fun bothSides(): Triple<String, String, String> {
+        val home = saveTeam("Home")
+        val bytes = javaClass.classLoader!!.getResourceAsStream("three_sets.dvw")!!.use { it.readBytes() }
+        val choice = DvwChoice(
+            side = DvwSide.HOME,
+            day = "2015-01-25",
+            maxSubstitutions = 6u,
+            teamId = home,
+            classification = null,
+            gender = null,
+            country = null,
+            opponent = DvwOpponent.NewTeam,
+        )
+        val m = core { it.importDvw(bytes, choice) }.matchId
+        val b = core { it.teams() }.firstNotNullOf { t -> (t as? TeamListing.Team)?.takeIf { it.name == "Visiting" }?.id }
+        return Triple(home, m, b)
+    }
+
+    @Test
+    fun theMatchOfBOnBothSidesOpensItsStatistics() {
+        val (home, m, b) = bothSides()
+        var statsOf: String? = null
+        rule.setContent {
+            Scout4AllTheme {
+                MatchScreen(b, m, onBack = {}, onEdit = {}, onStartSet = {}, onResumeSet = {}, onSet = {}, onStats = {}, onStatsOfB = { statsOf = it })
+            }
+        }
+        rule.waitForText(string(R.string.scouted_both_text, "Home", "Visiting"))
+        rule.onNode(hasText(string(R.string.match_stats)) and hasClickAction()).performClick()
+        assertEquals(home, statsOf)
+    }
+
+    @Test
+    fun theStatisticsOfBAreOfItsSide() {
+        val (home, m, _) = bothSides()
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(home, m, null, MatchSide.B, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        // B's color first in the legend of the points
+        val legend = rule.onAllNodesWithText("■ ", substring = true, useUnmergedTree = true).fetchSemanticsNodes()
+            .map { it.config[SemanticsProperties.Text].joinToString() }
+        assertEquals(listOf("■ Visiting", "■ Home"), legend)
     }
 }

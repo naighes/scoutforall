@@ -492,6 +492,7 @@
     <string name="delete_team_kept">他チームとの試合（%1$d）は相手チームに残りますが、%2$sのスカウティングは削除されます。</string>
     <string name="scouted_by_opponent">相手チームのスカウティング</string>
     <string name="scouted_by_text">この試合は%1$sがスカウティングしました。ここでは%2$sから見た結果のみを表示します。統計とスカウティングは%1$sの試合にあります。</string>
+    <string name="scouted_both_text">この試合は%1$sが両チームをスカウティングしました。ここでは%2$sから見た結果と統計を表示します。スカウティングは%1$sの試合にあります。</string>
     <string name="open_as_team">%1$sとして開く</string>
     <string name="name_or_existing">名前を入力すると、登録済みの人が候補に出ます</string>
     <string name="in_registry">登録済み：同じ人物で、データも共通です</string>

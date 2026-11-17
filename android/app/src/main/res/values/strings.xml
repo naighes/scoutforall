@@ -495,6 +495,7 @@
     <string name="delete_team_kept">The matches against other teams (%1$d) stay to them, without what was scouted of %2$s.</string>
     <string name="scouted_by_opponent">Scouted by the opponent</string>
     <string name="scouted_by_text">%1$s scouted this match: here only its result, as %2$s sees it. Statistics and scouting are in the match of %1$s.</string>
+    <string name="scouted_both_text">%1$s scouted this match on both sides: here its result and statistics, as %2$s sees it. Scouting is in the match of %1$s.</string>
     <string name="open_as_team">Open as %1$s</string>
     <string name="name_or_existing">Type the name: people already in the registry are offered</string>
     <string name="in_registry">Already in the registry: the same person, with the same details</string>

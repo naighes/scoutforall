@@ -495,6 +495,7 @@
     <string name="delete_team_kept">Mecze z innymi drużynami (%1$d) zostają przy nich, bez scoutingu drużyny %2$s.</string>
     <string name="scouted_by_opponent">Scouting rywala</string>
     <string name="scouted_by_text">Ten mecz scoutowała drużyna %1$s: tutaj tylko wynik z perspektywy drużyny %2$s. Statystyki i scouting są w meczu drużyny %1$s.</string>
+    <string name="scouted_both_text">Ten mecz scoutowała drużyna %1$s z obu stron: tutaj wynik i statystyki z perspektywy drużyny %2$s. Scouting jest w meczu drużyny %1$s.</string>
     <string name="open_as_team">Otwórz jako %1$s</string>
     <string name="name_or_existing">Wpisz imię: osoby z rejestru zostaną podpowiedziane</string>
     <string name="in_registry">Już w rejestrze: ta sama osoba, z tymi samymi danymi</string>

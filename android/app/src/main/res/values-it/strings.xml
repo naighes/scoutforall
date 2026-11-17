@@ -493,6 +493,7 @@
     <string name="delete_team_kept">Le partite contro altre squadre (%1$d) restano a loro, senza lo scouting di %2$s.</string>
     <string name="scouted_by_opponent">Scoutizzata dall\'avversaria</string>
     <string name="scouted_by_text">Questa partita l\'ha scoutizzata %1$s: qui solo il risultato, visto da %2$s. Statistiche e scouting sono nella partita di %1$s.</string>
+    <string name="scouted_both_text">Questa partita l\'ha scoutizzata %1$s dai due lati: qui il risultato e le statistiche, visti da %2$s. Lo scouting è nella partita di %1$s.</string>
     <string name="open_as_team">Apri come %1$s</string>
     <string name="name_or_existing">Scrivi il nome: chi è già nell\'anagrafica viene proposto</string>
     <string name="in_registry">Già nell\'anagrafica: la stessa persona, con gli stessi dati</string>
