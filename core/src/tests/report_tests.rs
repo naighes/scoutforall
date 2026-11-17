@@ -288,6 +288,27 @@ mod tests {
         assert_eq!(row_of(lost, labels.serve)[1], "1");
         assert_eq!(row_of(lost, labels.attack_blocked)[1], "1");
         assert_eq!(row_of(lost, labels.total)[1], "3");
+        // no point without a cause, no row for it
+        let no_cause = |rows: &[Vec<String>]| rows.iter().any(|r| r[0] == labels.no_cause);
+        assert!(!no_cause(won) && !no_cause(lost));
+    }
+
+    /// The points without a cause (`PW`, `PL`) have their row, so that the
+    /// points still add up to the score.
+    #[test]
+    fn the_points_without_a_cause() {
+        let labels = EN;
+        let t = Team::new();
+        let mut set = t.rallies();
+        set.events.extend([opp(PL), opp(PW)]);
+        let m = match_entry(t.team("us"), "them", false, vec![set]);
+        let report = build_report(&m, EN).expect("expected the report");
+        let won = &report.points_won.rows;
+        assert_eq!(row_of(won, labels.no_cause)[1..], ["1", "33", "1"]);
+        assert_eq!(row_of(won, labels.total)[1], "3");
+        let lost = &report.points_lost.rows;
+        assert_eq!(row_of(lost, labels.no_cause)[1..], ["1", "25", "1"]);
+        assert_eq!(row_of(lost, labels.total)[1], "4");
         assert!(report.points_lost.total);
     }
 

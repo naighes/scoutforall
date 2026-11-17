@@ -1047,19 +1047,31 @@ fn freeballs_table(labels: &Labels, stats: &Stats) -> Table {
 
 /// A table of where the points come from: a row per source, with its
 /// count and share in the match, then its count in each set, as
-/// DataVolley's points won by set; then the total.
+/// DataVolley's points won by set; then the total. The points without a
+/// cause (`PW`, `PL`) come last, only when the match has some: the reports
+/// of the matches with none stay as they were.
 fn origin_table(
     labels: &Labels,
     title: &str,
     replay: &Replay,
     sources: Vec<(&str, &dyn Fn(&Stats) -> u32)>,
+    no_cause: EventTypeEnum,
 ) -> Table {
     let stats = once(&replay.stats)
         .chain(replay.sets.iter().map(|(_, snapshot)| &snapshot.stats))
         .collect::<Vec<_>>();
+    let all = StatsFilter::default();
+    let no_cause_count = |s: &Stats| s.event_count(no_cause, None, &all);
     let counts: Vec<(&str, Vec<u32>)> = sources
         .iter()
         .map(|(label, count)| (*label, stats.iter().map(|s| count(s)).collect()))
+        .chain(
+            Some((
+                labels.no_cause,
+                stats.iter().map(|s| no_cause_count(s)).collect::<Vec<_>>(),
+            ))
+            .filter(|(_, c)| c.first().is_some_and(|n| *n > 0)),
+        )
         .collect();
     let totals: Vec<u32> = (0..stats.len())
         .map(|i| counts.iter().map(|(_, c)| c[i]).sum())
@@ -1094,7 +1106,7 @@ fn origin_table(
     }
 }
 
-/// Our points: aces, kills, block points, their errors.
+/// Our points: aces, kills, block points, their errors, without a cause.
 fn points_won_table(labels: &Labels, replay: &Replay) -> Table {
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -1113,11 +1125,12 @@ fn points_won_table(labels: &Labels, replay: &Replay) -> Table {
             (labels.block, &count(B, Some(Perfect))),
             (labels.opponent_errors, &count(OE, None)),
         ],
+        PW,
     )
 }
 
 /// Their points: their own ones, then our errors by fundamental and our
-/// faults (see `EventTypeEnum::rally_winner`).
+/// faults, without a cause (see `EventTypeEnum::rally_winner`).
 fn points_lost_table(labels: &Labels, replay: &Replay) -> Table {
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -1141,6 +1154,7 @@ fn points_lost_table(labels: &Labels, replay: &Replay) -> Table {
             (labels.defense, &count(D, Some(Error))),
             (labels.faults, &count(F, None)),
         ],
+        PL,
     )
 }
 
