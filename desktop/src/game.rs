@@ -54,6 +54,9 @@ pub enum Outcome {
     Events(u8),
     /// the match as this team A sees it, who scouted it
     OpenAs(String),
+    /// the statistics as this team B sees them, of the match of team A
+    /// scouted on both sides
+    StatsOfB(String),
 }
 
 pub struct MatchScreen {
@@ -105,6 +108,15 @@ impl MatchScreen {
         }
     }
 
+    /// Seen by B, the statistics only of a match scouted on both sides.
+    fn stats(&self) -> Outcome {
+        match (self.scouted_by(), self.details.both_sides) {
+            (None, _) => Outcome::Stats,
+            (Some(a), true) => Outcome::StatsOfB(a.team_id.clone()),
+            (Some(_), false) => Outcome::Stay,
+        }
+    }
+
     fn next(&self) -> Outcome {
         match self.details.next {
             NextSetKind::Start { .. } => Outcome::Scout(true),
@@ -152,10 +164,10 @@ impl MatchScreen {
             }
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
             (Message::OpenAsA, None) => self.open_as_a(),
-            // seen by B: only the result
+            (Message::Stats, None) => self.stats(),
+            // seen by B: only the result (and the statistics, of both sides)
             (_, None) if seen_by_b => Outcome::Stay,
             (Message::Next, None) => self.next(),
-            (Message::Stats, None) => Outcome::Stats,
             (Message::Export, None) => Outcome::Export,
             (Message::Report, None) => Outcome::Report,
             (Message::Video, None) => Outcome::Video,
@@ -177,12 +189,10 @@ impl MatchScreen {
                 Outcome::Stay
             }
             (None, k) if k == BACK_KEY => Outcome::Back,
-            (None, k) if seen_by_b => match k == key!(enter) {
-                true => self.open_as_a(),
-                false => Outcome::Stay,
-            },
+            (None, k) if seen_by_b && k == key!(enter) => self.open_as_a(),
+            (None, k) if k == key!(s) => self.stats(),
+            (None, _) if seen_by_b => Outcome::Stay,
             (None, k) if k == key!(enter) => self.next(),
-            (None, k) if k == key!(s) => Outcome::Stats,
             (None, k) if k == key!(x) => Outcome::Export,
             (None, k) if k == key!(p) => Outcome::Report,
             (None, k) if k == key!(v) => Outcome::Video,
@@ -216,13 +226,18 @@ impl MatchScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match (&self.editor, self.scouted_by()) {
             (Some(editor), _) => editor.hints(s),
-            (None, Some(a)) => vec![
-                (
-                    "Enter".to_string(),
-                    ui::fill(s.open_as_team, std::slice::from_ref(&a.team_name)),
-                ),
-                ("Esc".to_string(), s.back.to_string()),
-            ],
+            (None, Some(a)) => [(
+                "Enter".to_string(),
+                ui::fill(s.open_as_team, std::slice::from_ref(&a.team_name)),
+            )]
+            .into_iter()
+            .chain(
+                self.details
+                    .both_sides
+                    .then(|| ("s".to_string(), s.stats.to_string())),
+            )
+            .chain([("Esc".to_string(), s.back.to_string())])
+            .collect(),
             (None, None) => [
                 self.next_label(s)
                     .map(|next| ("Enter".to_string(), next))
@@ -313,10 +328,17 @@ impl MatchScreen {
             // seen by B: why only the result, and A's side to open
             Some(a) => column![
                 ui::body(ui::fill(
-                    s.scouted_by_text,
+                    match d.both_sides {
+                        true => s.scouted_both_text,
+                        false => s.scouted_by_text,
+                    },
                     &[a.team_name.clone(), self.team.clone()],
                 ))
                 .color(c.muted),
+                match d.both_sides {
+                    true => Element::from(action(theme::icons::STATS, s.stats, Message::Stats)),
+                    false => space::vertical().height(0).into(),
+                },
                 ui::action(
                     theme::icons::VOLLEYBALL,
                     &ui::fill(s.open_as_team, std::slice::from_ref(&a.team_name)),

@@ -266,6 +266,8 @@ pub struct StatsScreen {
     /// of a match scouted on both sides, the names of team A and team B:
     /// the statistics of either can be shown
     sides: Option<(String, String)>,
+    /// team B, when opened from its page: its side first, back to it
+    pub of_b: Option<String>,
     live: Option<LiveStats>,
     detail: Option<DetailStats>,
     series: usize,
@@ -735,6 +737,7 @@ impl StatsScreen {
             scope: StatsScope::Match,
             side: MatchSide::A,
             sides: None,
+            of_b: None,
             live: None,
             detail: None,
             series: 0,
@@ -775,6 +778,24 @@ impl StatsScreen {
     }
 
     /// The match the statistics are of, if of a match.
+    /// Opened from the page of team B `team_b`: the statistics of B.
+    pub fn of_b(mut self, team_b: String) -> Self {
+        self.of_b = Some(team_b);
+        self.sided(MatchSide::B);
+        self
+    }
+
+    fn sided(&mut self, side: MatchSide) {
+        // the players and the actions picked are of the other team
+        self.side = side;
+        self.filter.players.clear();
+        self.clip_evals.clear();
+        self.clip_zone = None;
+        self.clip_target = None;
+        self.title = self.titled();
+        self.load();
+    }
+
     pub fn match_id(&self) -> Option<String> {
         match &self.source {
             Source::Match(m) => Some(m.clone()),
@@ -1266,16 +1287,7 @@ impl StatsScreen {
                 self.page = page.min(PAGES.len() - 1);
                 self.row = 0;
             }
-            Message::Side(side) => {
-                // the players and the actions picked are of the other team
-                self.side = side;
-                self.filter.players.clear();
-                self.clip_evals.clear();
-                self.clip_zone = None;
-                self.clip_target = None;
-                self.title = self.titled();
-                self.load();
-            }
+            Message::Side(side) => self.sided(side),
             Message::Scope(scope) => {
                 self.scope = scope;
                 self.load();
@@ -4058,7 +4070,8 @@ pub(crate) mod tests {
         assert_eq!(screen.filters(), [Filter::Scope]);
 
         let both = import(DvwOpponent::NewTeam);
-        let mut screen = StatsScreen::new(core.clone(), both.team_id, both.match_id).unwrap();
+        let mut screen =
+            StatsScreen::new(core.clone(), both.team_id.clone(), both.match_id.clone()).unwrap();
         assert_eq!(screen.filters(), [Filter::Side, Filter::Scope]);
         assert_eq!(screen.title(), "Home – Visiting");
         let aces = |screen: &StatsScreen| screen.live.as_ref().map(|l| (l.aces, l.aces_against));
@@ -4089,5 +4102,37 @@ pub(crate) mod tests {
             (screen.side, screen.title().as_str()),
             (MatchSide::A, "Home – Visiting")
         );
+
+        // from the page of B: Statistics opens B's side, back to B
+        let b = core
+            .teams()
+            .unwrap()
+            .into_iter()
+            .find_map(|t| match t {
+                scout4all_mobile::TeamListing::Team { id, name, .. } if name == "Visiting" => {
+                    Some(id)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let mut page =
+            crate::game::MatchScreen::new(core.clone(), b.clone(), both.match_id.clone()).unwrap();
+        assert!(matches!(
+            page.key(s, key!(s)),
+            crate::game::Outcome::StatsOfB(a) if a == both.team_id
+        ));
+        assert!(matches!(
+            page.update(s, crate::game::Message::Stats),
+            crate::game::Outcome::StatsOfB(a) if a == both.team_id
+        ));
+        let screen = StatsScreen::new(core.clone(), both.team_id, both.match_id)
+            .unwrap()
+            .of_b(b.clone());
+        assert_eq!(
+            (screen.side, screen.title().as_str(), screen.of_b.as_deref()),
+            (MatchSide::B, "Visiting – Home", Some(b.as_str()))
+        );
+        assert_eq!(aces(&screen), Some((a_against, a_aces)));
     }
 }

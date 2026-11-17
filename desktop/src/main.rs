@@ -142,7 +142,8 @@ enum Go {
     Competitions,
     Team(String),
     Match(String, String),
-    Stats(String, String),
+    /// the statistics of the match of team A, from the page of team B
+    Stats(String, String, Option<String>),
     /// the statistics of the team over its matches
     Analysis(String),
     /// the events of a set of the match, to correct them
@@ -315,7 +316,7 @@ impl shots::Open {
                 match_id,
                 start: false,
             }),
-            shots::Open::Stats(team, m) => Go::Stats(team, m),
+            shots::Open::Stats(team, m) => Go::Stats(team, m, None),
             shots::Open::Analysis(team) => Go::Analysis(team),
             shots::Open::Video(team, m) => Go::Video(team, m),
         }
@@ -529,9 +530,12 @@ impl App {
                     Message::Video(video::Message::Chosen(path))
                 });
             }
-            Go::Stats(team, m) => {
-                stats::StatsScreen::new(core, team, m).map(|screen| Screen::Stats(Box::new(screen)))
-            }
+            Go::Stats(team, m, of_b) => stats::StatsScreen::new(core, team, m).map(|screen| {
+                Screen::Stats(Box::new(match of_b {
+                    Some(b) => screen.of_b(b),
+                    None => screen,
+                }))
+            }),
             Go::Analysis(team) => stats::StatsScreen::team(core, team, self.strings)
                 .map(|screen| Screen::Stats(Box::new(screen))),
             Go::Scout(open) if open.start => core
@@ -741,7 +745,7 @@ impl App {
             Screen::Team(t) => Go::Team(t.team_id.clone()),
             Screen::Match(m) => Go::Match(m.team_id.clone(), m.match_id.clone()),
             Screen::Stats(st) => match st.match_id() {
-                Some(m) => Go::Stats(st.team_id.clone(), m),
+                Some(m) => Go::Stats(st.team_id.clone(), m, st.of_b.clone()),
                 None => Go::Analysis(st.team_id.clone()),
             },
             Screen::Events(e) => Go::Events(e.team_id.clone(), e.match_id.clone(), e.set_number()),
@@ -1714,7 +1718,7 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
             Go::TeamClips(screen.team_id.clone(), matches, screen.clips_title(s))
         }
         stats::Outcome::Back => match screen.match_id() {
-            Some(m) => Go::Match(screen.team_id.clone(), m),
+            Some(m) => Go::Match(screen.of_b.clone().unwrap_or(screen.team_id.clone()), m),
             None => Go::Team(screen.team_id.clone()),
         },
     }
@@ -1724,7 +1728,10 @@ fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
     match outcome {
         game::Outcome::Stay => Go::Stay,
         game::Outcome::Back => Go::Team(screen.team_id.clone()),
-        game::Outcome::Stats => Go::Stats(screen.team_id.clone(), screen.match_id.clone()),
+        game::Outcome::Stats => Go::Stats(screen.team_id.clone(), screen.match_id.clone(), None),
+        game::Outcome::StatsOfB(a) => {
+            Go::Stats(a, screen.match_id.clone(), Some(screen.team_id.clone()))
+        }
         game::Outcome::Events(set) => {
             Go::Events(screen.team_id.clone(), screen.match_id.clone(), set)
         }
