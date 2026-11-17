@@ -467,6 +467,9 @@ private fun DvwContent(
                     Text(stringResource(R.string.dvw_match_numbers, ready.matchNumbers.toInt()))
                 }
                 ready.competition?.let { Text(stringResource(R.string.dvw_competition, it)) }
+                ready.oneSide?.let { why ->
+                    Text(why.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.error)
+                }
                 if (ready.savedAlready) {
                     Text(stringResource(R.string.dvw_already_saved, ready.team), color = MaterialTheme.colorScheme.error)
                 }

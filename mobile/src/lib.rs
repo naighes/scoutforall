@@ -21,7 +21,7 @@ use scout4all_core::{
     dvw::{
         self,
         import::{
-            MatchPlan, OpponentChoice as DvwOpponentChoice, OpponentPlan,
+            ImportedSides, MatchPlan, OpponentChoice as DvwOpponentChoice, OpponentPlan,
             TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
             match_date, match_exists, match_plan, opponent_plan, save_import, season_year,
             similar_teams, similarity, team_plan,
@@ -1022,6 +1022,10 @@ pub struct DvwReady {
     /// Maschile · Regular season · Andata – giornata 1"; none when
     /// nothing.
     pub competition: Option<String>,
+    /// Why the match goes in only from the side of team A when team B is a
+    /// team: the touches of B left out (TODO/001); none on both sides or
+    /// against a name.
+    pub one_side: Option<String>,
 }
 
 /// What an import saved.
@@ -4598,6 +4602,16 @@ impl Scout4All {
             opponent_new_players: opponent.team().map(|b| count_of(b.new_players.len())),
             match_numbers: count_of(team.match_numbers.len()),
             competition: Some(competition).filter(|c| !c.is_empty()),
+            one_side: match &plan.sides {
+                ImportedSides::A(Some(issue)) => Some(
+                    labels
+                        .dvw_one_side
+                        .replace("{team}", &team.team.name)
+                        .replace("{opponent}", opponent.name())
+                        .replace("{reason}", &issue.describe(labels)),
+                ),
+                ImportedSides::A(None) | ImportedSides::Both(_) => None,
+            },
         })
     }
 
@@ -9563,6 +9577,7 @@ mod tests {
                 opponent_new_players: None,
                 match_numbers: 0,
                 competition: Some("Test".into()),
+                one_side: None,
             }
         );
         assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
@@ -9708,6 +9723,35 @@ mod tests {
             reason(app.plan_dvw(THREE_SETS.to_vec(), itself)),
             "team B can't be team A"
         );
+    }
+
+    /// Team B a team whose side doesn't translate: the match only from
+    /// A's side, the check telling why; against a name, nothing to tell.
+    #[test]
+    fn a_datavolley_match_on_one_side_tells_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        // the serve of B by a player not on the court
+        let text = String::from_utf8(THREE_SETS.to_vec())
+            .unwrap()
+            .replacen("a11SM-", "a12SM-", 1);
+        let bytes = text.into_bytes();
+        let home = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let ready = app.plan_dvw(bytes.clone(), home).unwrap();
+        let told = ready.one_side.unwrap_or_default();
+        assert!(
+            told.starts_with(
+                "only the side of Home, without the touches of Visiting: set 1, line "
+            ),
+            "{told}"
+        );
+        let name = app
+            .plan_dvw(bytes, dvw_choice(DvwSide::Home, None))
+            .unwrap();
+        assert_eq!(name.one_side, None);
     }
 
     /// Asked from a team, the import offers it first: before the alike

@@ -149,6 +149,28 @@ class DvwImportTest {
         }
     }
 
+    /** Team B a team whose side doesn't translate: the check says the
+     * match goes in only from the side of team A, and why. */
+    @Test
+    fun aMatchOnOneSideSaysWhy() {
+        share(threeSets.replaceFirst("a11SM-", "a12SM-")).use {
+            rule.waitForText(string(R.string.dvw_which_team))
+            next()
+            rule.waitForText(string(R.string.dvw_substitutions))
+            next()
+            rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
+            fillNewTeam()
+            next()
+            choose(string(R.string.dvw_opponent_new, "Visiting"))
+            next()
+            rule.waitForText(string(R.string.dvw_against_team, "Visiting", 7))
+            rule.waitForText(
+                "Only the side of Home, without the touches of Visiting: set 1, line 34",
+                substring = true,
+            )
+        }
+    }
+
     /** Imported again: the team like it proposed, the match overwritten
      * only when the user says so. */
     @Test

@@ -664,6 +664,10 @@ impl DvwScreen {
                     .into(),
                     false => column![].into(),
                 };
+                let one_side: Element<'a, Message> = match &ready.one_side {
+                    Some(why) => ui::body(ui::capitalized(why)).color(c.danger).into(),
+                    None => column![].into(),
+                };
                 let yes = match ready.saved_already {
                     true => s.dvw_overwrite,
                     false => s.save,
@@ -686,6 +690,7 @@ impl DvwScreen {
                                     .map(|line| ui::body(line).color(c.muted).into())
                             )
                             .spacing(6),
+                            one_side,
                             warning,
                             ui::answers(
                                 Some((theme::icons::CLOSE, s.dvw_dont_import, Message::Skip)),
