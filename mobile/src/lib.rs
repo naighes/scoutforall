@@ -193,6 +193,8 @@ pub enum EventTypeEnum {
     LR,
     LF,
     CS,
+    PW,
+    PL,
 }
 
 #[uniffi::remote(Enum)]

@@ -708,7 +708,7 @@ impl ScoutingSession {
                 self.step = ScoutingStep::Player;
                 Ok(Progress::Choosing)
             }
-            (ScoutingStep::Event, true, OE | OS | OF | FB | CL | LR) => {
+            (ScoutingStep::Event, true, OE | OS | OF | FB | PW | PL | CL | LR) => {
                 self.save(EventEntry {
                     timestamp: Utc::now(),
                     event_type: event,

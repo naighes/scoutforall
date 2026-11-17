@@ -189,6 +189,20 @@ mod tests {
     }
 
     #[test]
+    fn a_point_without_a_cause_is_the_other_side_s_the_other_way_round() {
+        for (side, event, told) in [
+            (Side::A, PW, PL),
+            (Side::A, PL, PW),
+            (Side::B, PW, PL),
+            (Side::B, PL, PW),
+        ] {
+            let streams = project(&[touch(side, event, None, 0)]);
+            assert_eq!(stream(&streams, side), vec![(event, None, 0)]);
+            assert_eq!(stream(&streams, side.other()), vec![(told, None, 0)]);
+        }
+    }
+
+    #[test]
     fn a_rally_being_played_tells_nothing_yet() {
         let streams = project(&[
             touch(Side::A, S, Some(Positive), 0),
@@ -729,5 +743,58 @@ mod tests {
         }
         assert!(admitted(&a, &b, &serve, touch(Side::A, F, None, 1)));
         assert!(admitted(&a, &b, &serve, touch(Side::B, F, None, 1)));
+    }
+
+    /// Our serve `/`, their reception came back and we let it fall: their
+    /// point, nobody's, told by either side.
+    #[test]
+    fn the_ball_back_after_the_serve_over_falls_untouched() {
+        let (a, b) = (Team::new(), Team::new());
+        for told in [touch(Side::A, PL, None, 2), touch(Side::B, PW, None, 2)] {
+            let replayed = replayed(
+                &a,
+                &b,
+                &[
+                    by(Side::A, S, a.setter(), Over, 0),
+                    by(Side::B, P, b.libero, Over, 1),
+                    told,
+                ],
+            );
+            let scores = replayed.map(|(a, b)| {
+                (
+                    (a.score_us, a.score_them),
+                    (b.score_us, b.score_them),
+                    a.current_lineup.get_current_phase(),
+                )
+            });
+            assert_eq!(scores, Ok(((0, 1), (1, 0), PhaseEnum::SideOut)));
+        }
+    }
+
+    /// Always admitted, for either side: before the serve, with the serve
+    /// waiting for its reception, the attack for its dig or block.
+    #[test]
+    fn the_point_without_a_cause_is_always_admitted() {
+        let (a, b) = (Team::new(), Team::new());
+        let moments = [
+            vec![],
+            vec![by(Side::A, S, a.setter(), Positive, 0)],
+            vec![
+                by(Side::A, S, a.setter(), Positive, 0),
+                by(Side::B, P, b.libero, Negative, 1),
+                by(Side::B, A, b.outside_hitter(), Positive, 2),
+            ],
+        ];
+        for touches in moments {
+            for side in [Side::A, Side::B] {
+                for event in [PW, PL] {
+                    assert!(
+                        admitted(&a, &b, &touches, touch(side, event, None, 3)),
+                        "{side:?} {event} after {} touches",
+                        touches.len()
+                    );
+                }
+            }
+        }
     }
 }

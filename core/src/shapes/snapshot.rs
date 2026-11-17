@@ -878,8 +878,8 @@ impl Snapshot {
         use EventTypeEnum::*;
         let mut options = match phase {
             // the libero for a player last: the rarest
-            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, LR, CS, LF],
-            PhaseEnum::Break => vec![OE, F, S, R, CL, LR, CS, LF],
+            PhaseEnum::SideOut => vec![OS, OE, F, P, PW, PL, R, CL, LR, CS, LF],
+            PhaseEnum::Break => vec![OE, F, S, PW, PL, R, CL, LR, CS, LF],
         };
         if self.current_lineup.get_fallback_libero().is_none() {
             options.retain(|o| *o != CL);
@@ -892,7 +892,10 @@ impl Snapshot {
         use EventTypeEnum::*;
         let serve_them = || self.get_rally_start_options(PhaseEnum::SideOut);
         let serve_us = || self.get_rally_start_options(PhaseEnum::Break);
-        // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS, LF
+        // order: OS, OE, F, A, S, P, D, B, FB, OF, PW, PL, R, CL, LR, CS, LF
+        //
+        // the point without a cause, ours or theirs (`PW`, `PL`), always:
+        // the referee's, or a ball nobody touched as the scout tells it.
         //
         // the ball on our side, to play on our second or third touch: our
         // attack or our freeball (`FB`). Never a freeball on a first touch:
@@ -930,20 +933,26 @@ impl Snapshot {
         match (event.event_type, event.eval) {
             (R | CL | LR | LF | CS, _) => self.available_options.clone(),
             // their point
-            (OS | F, None) | (A | B | D | P | S, Some(Error)) | (A | B, Some(Over)) => serve_them(),
+            (OS | F | PL, None) | (A | B | D | P | S, Some(Error)) | (A | B, Some(Over)) => {
+                serve_them()
+            }
             // ours
-            (OE, None) | (A | B | S, Some(Perfect)) => serve_us(),
+            (OE | PW, None) | (A | B | S, Some(Perfect)) => serve_us(),
             // the ball stays with the blockers, or comes back to the
             // attackers: the dig or the cover after it optional
-            (B, Some(Positive | Negative)) | (A, Some(Exclamative)) => vec![OE, F, A, D, FB],
-            (D | P, Some(Exclamative | Negative | Positive | Perfect)) => vec![OE, F, A, FB],
+            (B, Some(Positive | Negative)) | (A, Some(Exclamative)) => {
+                vec![OE, F, A, D, FB, PW, PL]
+            }
+            (D | P, Some(Exclamative | Negative | Positive | Perfect)) => {
+                vec![OE, F, A, FB, PW, PL]
+            }
             (A, Some(Negative | Positive))
             | (B, Some(Exclamative))
             | (D | P, Some(Over))
             | (S, Some(Positive | Exclamative | Negative))
-            | (FB, None) => vec![OS, OE, F, A, D, B, FB, OF],
-            (S, Some(Over)) => vec![OE, A, F, B, FB],
-            (OF, None) => vec![OS, OE, F, A, B, FB],
+            | (FB, None) => vec![OS, OE, F, A, D, B, FB, OF, PW, PL],
+            (S, Some(Over)) => vec![OE, A, F, B, FB, PW, PL],
+            (OF, None) => vec![OS, OE, F, A, B, FB, PW, PL],
             _ => vec![],
         }
     }

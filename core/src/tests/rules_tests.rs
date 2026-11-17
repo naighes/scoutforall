@@ -110,7 +110,7 @@ mod tests {
     }
 
     /// What follows a touch giving them the ball to attack.
-    const THEIRS: [EventTypeEnum; 8] = [OS, OE, F, A, D, B, FB, OF];
+    const THEIRS: [EventTypeEnum; 10] = [OS, OE, F, A, D, B, FB, OF, PW, PL];
 
     #[test]
     fn a_block_can_be_exclamative() {
@@ -140,7 +140,7 @@ mod tests {
         for eval in [Positive, Negative] {
             let snapshot = t.after_our_serve(&[(B, eval)]);
             assert_eq!(snapshot.get_ball_side(), Us, "{eval}");
-            assert_eq!(options(&snapshot), vec![OE, F, A, D, FB], "{eval}");
+            assert_eq!(options(&snapshot), vec![OE, F, A, D, FB, PW, PL], "{eval}");
         }
     }
 
@@ -184,7 +184,7 @@ mod tests {
         let t = Team::new();
         let kept = t.after_our_serve(&[(B, Positive), (D, Positive)]);
         assert_eq!(kept.get_ball_side(), Us);
-        assert_eq!(options(&kept), vec![OE, F, A, FB]);
+        assert_eq!(options(&kept), vec![OE, F, A, FB, PW, PL]);
         let over = t.after_our_serve(&[(B, Negative), (D, Over)]);
         assert_eq!(over.get_ball_side(), Them);
         assert_eq!(options(&over), THEIRS);
@@ -237,12 +237,12 @@ mod tests {
         let t = Team::new();
         let snapshot = t.after_our_reception(&[(A, Exclamative)]);
         assert_eq!(snapshot.get_ball_side(), Us);
-        assert_eq!(options(&snapshot), vec![OE, F, A, D, FB]);
+        assert_eq!(options(&snapshot), vec![OE, F, A, D, FB, PW, PL]);
         assert_eq!(snapshot.available_evals(D), vec![Exclamative, Negative]);
         for cover in [Exclamative, Negative] {
             let covered = t.after_our_reception(&[(A, Exclamative), (D, cover)]);
             assert_eq!(covered.get_ball_side(), Us, "{cover}");
-            assert_eq!(options(&covered), vec![OE, F, A, FB], "{cover}");
+            assert_eq!(options(&covered), vec![OE, F, A, FB, PW, PL], "{cover}");
         }
         for refused in [Perfect, Positive, Over, Error] {
             let events = vec![t.act(P, Positive), t.act(A, Exclamative), t.act(D, refused)];

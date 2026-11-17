@@ -132,8 +132,8 @@ impl Lineup {
         use EventTypeEnum::*;
         use PhaseEnum::*;
         match (event.event_type, event.eval, self.get_current_phase()) {
-            (OS | F, _, Break) => Some(SideOut),
-            (OE, _, SideOut) => Some(Break),
+            (OS | F | PL, _, Break) => Some(SideOut),
+            (OE | PW, _, SideOut) => Some(Break),
             (S, Some(Error), _) => Some(SideOut),
             (B | A, Some(Perfect), SideOut) => Some(Break),
             (B | A, Some(Error | Over), Break) => Some(SideOut),

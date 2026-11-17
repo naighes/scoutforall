@@ -10,7 +10,8 @@
 //! - a rally ended by the other side, without a touch of the side ending
 //!   it too, is closed at the end of the point: the side's `OE` when it
 //!   won it, `OS` when it lost it, or its fault (`F`, the team's) when the
-//!   other side told its error without a touch (`OE`).
+//!   other side told its error without a touch (`OE`); a point without a
+//!   cause (`PW`, `PL`) is the other one's, the other way round.
 //!
 //! The other side of the same point (an ace, then the reception error)
 //! comes right after the touch ending it, with the same winner.
@@ -104,6 +105,8 @@ fn told(event_type: EventTypeEnum, timestamp: DateTime<Utc>) -> EventEntry {
 fn close(streams: Streams, point: &Point) -> Streams {
     let side = point.told_by.other();
     let event_type = match (side == point.winner, point.event_type) {
+        (_, EventTypeEnum::PW) => EventTypeEnum::PL,
+        (_, EventTypeEnum::PL) => EventTypeEnum::PW,
         (true, _) => EventTypeEnum::OE,
         (false, EventTypeEnum::OE) => EventTypeEnum::F,
         (false, _) => EventTypeEnum::OS,
@@ -361,7 +364,8 @@ pub fn answer_evals(
 ///   other side's dig `/` untold: an attack or a freeball, never a dig, a
 ///   block or a reception without the other side's attack;
 /// - after a serve in play, only the reception of the other side;
-/// - a fault, a substitution, a libero or setter change need nothing more;
+/// - a fault, a point without a cause, a substitution, a libero or setter
+///   change need nothing more;
 ///   the block `/` (an invasion) is a fault, but never right after the
 ///   other side's attack: that attack isn't saved;
 /// - any other block answers the other side's attack, never a ball coming
@@ -431,7 +435,7 @@ pub fn admits(
         }
         // a block answers the other side's attack, nothing else
         (B, None) => false,
-        (F | R | CL | LR | LF | CS, _) => offered,
+        (F | PW | PL | R | CL | LR | LF | CS, _) => offered,
         // the other half of the point: closed in the stream of the side
         (_, Some((s, e))) if winner(*s, e).is_some() => fits(e),
         (event_type, Some((_, e))) => offered && fits(e) && touch_admitted(event_type),

@@ -790,6 +790,31 @@ mod tests {
         assert!(!s.session.team_choice());
     }
 
+    /// The point without a cause, ours or theirs: no player, no
+    /// evaluation, saved at once and read back as it was, in any state of
+    /// the rally.
+    #[tokio::test]
+    async fn the_point_without_a_cause_is_saved_at_once() {
+        let mut s = scouting().await;
+        // before our serve: theirs; before theirs: ours
+        assert_eq!(s.session.choose_event(PL).await, Ok(Progress::Saved));
+        assert_eq!(s.session.choose_event(PW).await, Ok(Progress::Saved));
+        // our serve in play: theirs
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        assert_eq!(s.session.choose_event(PL).await, Ok(Progress::Saved));
+        let saved = saved_events(&s).await;
+        assert_eq!(event_types(&saved), vec![PL, PW, S, PL]);
+        assert!(
+            saved
+                .iter()
+                .filter(|e| e.event_type != S)
+                .all(|e| e.player.is_none() && e.eval.is_none())
+        );
+        let snapshot = s.session.snapshot();
+        assert_eq!((snapshot.score_us, snapshot.score_them), (1, 2));
+    }
+
     /// With the player first, the fault comes before its player: the team
     /// can make it too.
     #[tokio::test]
@@ -1037,7 +1062,7 @@ mod tests {
             (s.session.step(), s.session.event(), s.session.player()),
             (ScoutingStep::Eval, Some(S), Some(s.players[0]))
         );
-        assert_eq!(s.session.other_events(), vec![OE, F, R, LR, CS, LF]);
+        assert_eq!(s.session.other_events(), vec![OE, F, PW, PL, R, LR, CS, LF]);
         assert_eq!(s.session.player_events(&s.players[0]), vec![]);
         assert_eq!(
             s.session.choose_eval(EvalEnum::Perfect).await,
@@ -1172,7 +1197,7 @@ mod tests {
         assert_eq!(s.session.player_events(&setter), vec![A, D]);
         assert_eq!(s.session.player_events(&blocker), vec![A, D, B]);
         assert_eq!(s.session.player_events(&libero), vec![D]);
-        assert_eq!(s.session.other_events(), vec![OS, OE, F, FB, OF]);
+        assert_eq!(s.session.other_events(), vec![OS, OE, F, FB, OF, PW, PL]);
 
         assert_eq!(
             s.session.choose_player_first(blocker).await,
@@ -1222,7 +1247,7 @@ mod tests {
         // the setter can attack; our freeball is a team event, among the
         // other events, saved at once with no player
         assert_eq!(s.session.player_events(&setter), vec![A]);
-        assert_eq!(s.session.other_events(), vec![OE, F, FB]);
+        assert_eq!(s.session.other_events(), vec![OE, F, FB, PW, PL]);
         assert_eq!(s.session.choose_event(FB).await, Ok(Progress::Saved));
         let saved = saved_events(&s).await;
         assert_eq!(event_types(&saved), vec![S, D, FB]);

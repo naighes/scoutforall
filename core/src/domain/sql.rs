@@ -174,6 +174,8 @@ db_text!(EventTypeEnum, "event type", EventTypeEnum::ALL, {
     EventTypeEnum::LR => "LR",
     EventTypeEnum::LF => "LF",
     EventTypeEnum::CS => "CS",
+    EventTypeEnum::PW => "PW",
+    EventTypeEnum::PL => "PL",
 });
 
 db_text!(EvalEnum, "evaluation", EvalEnum::ALL, {

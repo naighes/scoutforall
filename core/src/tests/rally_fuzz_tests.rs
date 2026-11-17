@@ -132,7 +132,12 @@ mod tests {
             .iter()
             .copied()
             .filter(|e| !matches!(e, OS | OE | OF))
-            .filter(|e| !matches!(e, R | F | CL | LR | LF | CS) || rng.one_in(8))
+            // the point without a cause, offered always, is rare
+            .filter(|e| match e {
+                PW | PL => rng.one_in(40),
+                R | F | CL | LR | LF | CS => rng.one_in(8),
+                _ => true,
+            })
             .collect();
         let event_type = rng.pick(&offered)?;
         let players: Vec<Uuid> = team
@@ -180,8 +185,9 @@ mod tests {
     /// the dig or the block of the other side; after a block `+` or `-` the
     /// dig of the blockers, after a block `!` the cover of the attackers;
     /// after any other touch, a touch of the ball (attack, dig, block,
-    /// freeball) of the side it left the ball to. A fault, the block `/`
-    /// (an invasion) and the touches after a point miss nothing.
+    /// freeball) of the side it left the ball to. A fault, a point without
+    /// a cause, the block `/` (an invasion) and the touches after a point
+    /// miss nothing.
     fn holes(touches: &[(Side, EventEntry)]) -> BTreeSet<String> {
         use EvalEnum::*;
         let ball: Vec<&(Side, EventEntry)> = touches
@@ -197,7 +203,7 @@ mod tests {
                 let same = side == next_side;
                 let to_ball_side = same == (held == TeamSideEnum::Us);
                 let complete = match (prev.event_type, prev.eval, same, next.event_type) {
-                    (_, _, _, F) => true,
+                    (_, _, _, F | PW | PL) => true,
                     (_, _, _, B) if next.eval == Some(Over) => true,
                     (S, _, other, P) | (A, _, other, D | B) => !other,
                     (B, Some(Positive | Negative), same, D) => same,
@@ -279,7 +285,7 @@ mod tests {
 
     #[test]
     fn random_sets_replay_on_both_sides() {
-        let sets: Vec<Vec<(Side, EventEntry)>> = (0..100).map(play_set).collect();
+        let sets: Vec<Vec<(Side, EventEntry)>> = (0..200).map(play_set).collect();
         // the sets get played to their end, with every kind of touch, of
         // both sides
         let unfinished = sets.iter().filter(|touches| touches.len() >= 400).count();
@@ -316,7 +322,7 @@ mod tests {
         .collect();
         assert_eq!(found, expected);
         for side in Side::ALL {
-            for event_type in [S, P, A, D, B, F, FB, R, CL, LR, LF, CS] {
+            for event_type in [S, P, A, D, B, F, FB, PW, PL, R, CL, LR, LF, CS] {
                 assert!(
                     played.contains(&(side, event_type)),
                     "{side:?} {event_type}"

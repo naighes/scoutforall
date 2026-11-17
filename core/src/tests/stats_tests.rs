@@ -2909,7 +2909,7 @@ mod tests {
         let snapshot = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
         let options = snapshot.get_available_options();
         // our cover after it optional
-        assert_eq!(options, vec![OE, F, A, D, FB]);
+        assert_eq!(options, vec![OE, F, A, D, FB, PW, PL]);
         let snapshot = t.serving(vec![
             act(S, t.setter, Negative),
             act(D, t.oh2, Positive),

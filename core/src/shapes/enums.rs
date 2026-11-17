@@ -210,6 +210,16 @@ impl FromStr for TeamSideEnum {
 ///   point when it falls on our court untouched (`OS`). An attack on it is
 ///   a counter-attack.
 ///
+/// - **PW**: Point Won (no cause)
+///   Our point, no touch telling why and nobody's (DataVolley's green
+///   code `$$&`): e.g. their reception came back on our serve `/` and
+///   they let it fall on their court. Always possible; only the score and
+///   its own count.
+///
+/// - **PL**: Point Lost (no cause)
+///   Their point, no touch telling why and nobody's: e.g. their reception
+///   came back on our serve `/` and we let it fall. Always possible.
+///
 /// - **R**: Substitution  
 ///   A player change performed by either team.
 ///
@@ -246,6 +256,8 @@ pub enum EventTypeEnum {
     LR,
     LF,
     CS,
+    PW,
+    PL,
 }
 
 impl fmt::Display for EventTypeEnum {
@@ -267,6 +279,8 @@ impl fmt::Display for EventTypeEnum {
             LR => "LR",
             LF => "LF",
             CS => "CS",
+            PW => "PW",
+            PL => "PL",
         };
         write!(f, "{}", label)
     }
@@ -280,7 +294,7 @@ impl WithDesc<EventTypeEnum> for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub const ALL: [EventTypeEnum; 15] = [
+    pub const ALL: [EventTypeEnum; 17] = [
         EventTypeEnum::S,  // serve
         EventTypeEnum::P,  // pass/reception
         EventTypeEnum::A,  // attack
@@ -296,6 +310,8 @@ impl EventTypeEnum {
         EventTypeEnum::LR, // libero replacement, in or out
         EventTypeEnum::LF, // the libero for a player of the back row
         EventTypeEnum::CS, // change setter
+        EventTypeEnum::PW, // our point, no cause
+        EventTypeEnum::PL, // their point, no cause
     ];
 
     pub fn requires_evaluation(&self) -> bool {
@@ -354,8 +370,8 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self, eval) {
-            (OE, _) | (B | A | S, Some(Perfect)) => Some(TeamSideEnum::Us),
-            (B | A, Some(Error | Over)) | (D | P | S, Some(Error)) | (F | OS, _) => {
+            (OE | PW, _) | (B | A | S, Some(Perfect)) => Some(TeamSideEnum::Us),
+            (B | A, Some(Error | Over)) | (D | P | S, Some(Error)) | (F | OS | PL, _) => {
                 Some(TeamSideEnum::Them)
             }
             _ => None,
@@ -378,7 +394,7 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self.rally_winner(eval), self, eval) {
-            (Some(_), _, _) | (None, R | CL | LR | LF | CS | F | OS | OE, _) => None,
+            (Some(_), _, _) | (None, R | CL | LR | LF | CS | F | OS | OE | PW | PL, _) => None,
             (None, S, Some(Over))
             | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
             | (None, A, Some(Exclamative))
@@ -422,6 +438,8 @@ impl FriendlyName for EventTypeEnum {
             LR => labels.libero_in_out,
             LF => labels.libero_for,
             CS => labels.change_setter,
+            PW => labels.point_won,
+            PL => labels.point_lost,
         }
     }
 }
@@ -446,6 +464,8 @@ impl FromStr for EventTypeEnum {
             "LR" => Ok(LR),
             "LF" => Ok(LF),
             "CS" => Ok(CS),
+            "PW" => Ok(PW),
+            "PL" => Ok(PL),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",
                 s

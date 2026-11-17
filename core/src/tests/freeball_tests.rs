@@ -183,14 +183,14 @@ mod tests {
     #[test]
     fn available_events_within_the_rally() {
         let t = Team::new();
-        let ball_ours_to_play = vec![OE, F, A, FB];
+        let ball_ours_to_play = vec![OE, F, A, FB, PW, PL];
         // we play it again, after their freeball or not
         // sent over without an attack: they attack, or send it back easy
-        let ball_theirs = vec![OS, OE, F, A, D, B, FB, OF];
+        let ball_theirs = vec![OS, OE, F, A, D, B, FB, OF, PW, PL];
         // after their reception or dig they attack (our dig or block, or
         // our attack or freeball after our dig not scouted) or send a
         // freeball: the evaluation tells their reception or dig
-        let ball_theirs_received_or_dug = vec![OS, OE, F, A, D, B, FB, OF];
+        let ball_theirs_received_or_dug = vec![OS, OE, F, A, D, B, FB, OF, PW, PL];
         let cases: Vec<(&str, Snapshot, Vec<EventTypeEnum>)> = vec![
             // our serve: they receive and attack
             (
@@ -210,7 +210,11 @@ mod tests {
             ),
             // their reception comes back: our first touch isn't scouted
             // or our block as it crosses the net, as on their freeball
-            ("S/", t.serving(vec![t.serve(Over)]), vec![OE, A, F, B, FB]),
+            (
+                "S/",
+                t.serving(vec![t.serve(Over)]),
+                vec![OE, A, F, B, FB, PW, PL],
+            ),
             // our dig keeping the ball
             (
                 "D#",
@@ -279,7 +283,7 @@ mod tests {
             (
                 "A!",
                 t.receiving(vec![act(P, t.libero, Perfect), act(A, t.oh1, Exclamative)]),
-                vec![OE, F, A, D, FB],
+                vec![OE, F, A, D, FB, PW, PL],
             ),
             (
                 "A-",
@@ -291,12 +295,12 @@ mod tests {
             (
                 "B+",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Positive)]),
-                vec![OE, F, A, D, FB],
+                vec![OE, F, A, D, FB, PW, PL],
             ),
             (
                 "B-",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Negative)]),
-                vec![OE, F, A, D, FB],
+                vec![OE, F, A, D, FB, PW, PL],
             ),
             (
                 "B!",
@@ -314,7 +318,7 @@ mod tests {
             (
                 "OF",
                 t.serving(vec![t.serve(Negative), act(B, t.oh1, Exclamative), opp(OF)]),
-                vec![OS, OE, F, A, B, FB],
+                vec![OS, OE, F, A, B, FB, PW, PL],
             ),
         ];
         for (case, snapshot, expected) in cases {
