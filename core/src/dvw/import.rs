@@ -9,9 +9,10 @@ use crate::{
     domain::{ScoutingMode, Side as DomainSide},
     dvw::{
         both::{BothSet, translate_both},
-        model::{DvwFile, DvwRole, MatchDate, Player, SetResult, Side},
+        model::{DvwFile, DvwRole, MatchDate, Player, SetResult, Side, Skill},
         translate::{
-            Issue, Mappings, TranslateError, Untranslatable, Us, has_video_clock, translate_set,
+            Impossible, Issue, Mappings, TranslateError, Untranslatable, Us, has_video_clock,
+            translate_set,
         },
     },
     errors::{AppError, MatchError},
@@ -985,7 +986,7 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
         Issue::UnknownCode(code) => labels.dvw_unknown_code.replace("{code}", code),
         Issue::Ending { skill, evaluation } => labels
             .dvw_ending
-            .replace("{code}", &format!("{}{evaluation}", skill.code())),
+            .replace("{code}", &code((*skill, *evaluation))),
         Issue::Untranslatable(what) => untranslatable(what, labels),
         Issue::Refused { event, refusal } => labels
             .dvw_refused
@@ -1000,6 +1001,24 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
         Issue::Sides(incoherence) => labels
             .dvw_event
             .replace("{detail}", &incoherence.to_string()),
+        Issue::Impossible(Impossible::TouchAfterOver {
+            over,
+            over_line,
+            touch,
+        }) => labels
+            .dvw_touch_after_over
+            .replace("{touch}", &code(*touch))
+            .replace("{over}", &code(*over))
+            .replace("{over_line}", &over_line.to_string()),
+        Issue::Impossible(Impossible::MissingAttack {
+            before,
+            before_line,
+            touch,
+        }) => labels
+            .dvw_missing_attack
+            .replace("{touch}", &code(*touch))
+            .replace("{before}", &code(*before))
+            .replace("{before_line}", &before_line.to_string()),
         Issue::Answer {
             answered,
             answered_line,
@@ -1020,6 +1039,11 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
                 .replace("{allowed}", &allowed.join(" / "))
         }
     }
+}
+
+// a touch of the file as DataVolley writes it, "R/"
+fn code((skill, evaluation): (Skill, char)) -> String {
+    format!("{}{evaluation}", skill.code())
 }
 
 // a touch as the messages tell it: the event and its evaluation, "Serve +"
@@ -1049,10 +1073,6 @@ fn untranslatable(what: &Untranslatable, labels: &Labels) -> String {
                 .join(labels.dvw_or),
         ),
         OurTouchWithoutPlayer => labels.dvw_our_touch_without_player.to_string(),
-        TheirAttackBackWithoutOurBlock => labels.dvw_their_attack_back_without_block.to_string(),
-        TheirAttackBlockedWithoutOurBlock => {
-            labels.dvw_their_attack_blocked_without_block.to_string()
-        }
         UnknownEvaluation(code) => labels
             .dvw_unknown_evaluation
             .replace("{code}", &code.to_string()),

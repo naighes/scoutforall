@@ -5,6 +5,7 @@
 //! (`datavolley`, R).
 
 pub mod both;
+pub(crate) mod decide;
 pub mod import;
 pub mod model;
 pub mod translate;

@@ -40,8 +40,10 @@ mod tests {
     // the touches fused from the events of A and B with their lines, as
     // (side, event, evaluation)
     fn fuse(a: &Translated, b: &Translated) -> Vec<(Side, EventTypeEnum, Option<EvalEnum>)> {
-        let events = |t: &Translated| -> (Vec<EventEntry>, Vec<usize>) {
-            t.iter().map(|(e, v, l)| (event(*e, *v, *l), *l)).unzip()
+        let events = |t: &Translated| -> (Vec<EventEntry>, Vec<(usize, usize)>) {
+            t.iter()
+                .map(|(e, v, l)| (event(*e, *v, *l), (*l, 0)))
+                .unzip()
         };
         let (a, lines_a) = events(a);
         let (b, lines_b) = events(b);
@@ -144,8 +146,10 @@ mod tests {
         usize,
         (EventTypeEnum, Option<EvalEnum>),
     )> {
-        let events = |t: &Translated| -> (Vec<EventEntry>, Vec<usize>) {
-            t.iter().map(|(e, v, l)| (event(*e, *v, *l), *l)).unzip()
+        let events = |t: &Translated| -> (Vec<EventEntry>, Vec<(usize, usize)>) {
+            t.iter()
+                .map(|(e, v, l)| (event(*e, *v, *l), (*l, 0)))
+                .unzip()
         };
         let (a, lines_a) = events(a);
         let (b, lines_b) = events(b);

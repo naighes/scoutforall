@@ -602,9 +602,24 @@ mod tests {
                                     }
                                     ImportedSides::A(Some(_)) => "ok a, not both".to_string(),
                                 },
-                                Err(MatchIssue::Set(e)) => {
-                                    format!("set {:?}", std::mem::discriminant(&e.issue))
-                                }
+                                Err(MatchIssue::Set(e)) => match &e.issue {
+                                    // an error of the scout: which one
+                                    crate::dvw::translate::Issue::Impossible(
+                                        crate::dvw::translate::Impossible::TouchAfterOver {
+                                            over,
+                                            touch,
+                                            ..
+                                        },
+                                    ) => format!("refused: {over:?} then {touch:?}"),
+                                    crate::dvw::translate::Issue::Impossible(
+                                        crate::dvw::translate::Impossible::MissingAttack {
+                                            before,
+                                            touch,
+                                            ..
+                                        },
+                                    ) => format!("refused: no attack {before:?} then {touch:?}"),
+                                    issue => format!("set {:?}", std::mem::discriminant(issue)),
+                                },
                                 Err(e) => {
                                     println!("MATCH\t{name}\t{side:?}\t{e:?}");
                                     format!("{e:?}")
@@ -711,6 +726,20 @@ mod tests {
                                 }
                                 Issue::Score { .. } => "Score".to_string(),
                                 Issue::UnknownPlayer(_) => "UnknownPlayer".to_string(),
+                                Issue::Impossible(
+                                    crate::dvw::translate::Impossible::MissingAttack {
+                                        before,
+                                        touch,
+                                        ..
+                                    },
+                                ) => format!("MissingAttack {before:?} {touch:?}"),
+                                Issue::Impossible(
+                                    crate::dvw::translate::Impossible::TouchAfterOver {
+                                        over,
+                                        touch,
+                                        ..
+                                    },
+                                ) => format!("TouchAfterOver {over:?} {touch:?}"),
                                 other => format!("{other:?}"),
                             };
                             let example = format!(
@@ -863,7 +892,7 @@ mod tests {
                                 [("A", &sa.events, &la), ("B", &sb.events, &lb)]
                             {
                                 for (e, l) in own.iter().zip(lines) {
-                                    println!("{tag} line {l} {}", short(e));
+                                    println!("{tag} line {l:?} {}", short(e));
                                 }
                             }
                         }
