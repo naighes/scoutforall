@@ -940,6 +940,24 @@ impl ScoutingSession {
         }
     }
 
+    /// Where the ball goes before the scout tells it, scouting both sides:
+    /// where the touch just before sent it, for the reception of a serve and
+    /// the dig of an attack (the scout can change it).
+    fn preselected_target(&self) -> Option<CourtTarget> {
+        let (side, last) = self.theirs.as_ref()?.touches.last()?;
+        match (self.event, last.event_type) {
+            (Some(EventTypeEnum::P), EventTypeEnum::S)
+            | (Some(EventTypeEnum::D), EventTypeEnum::A)
+                if *side != self.side =>
+            {
+                last.flags
+                    .target()
+                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)))
+            }
+            _ => None,
+        }
+    }
+
     /// Where the server starts from before the scout tells it: where they
     /// served from last in the match, if told.
     fn preselected_serve_start(&self) -> Option<ServeStartEnum> {
@@ -1061,6 +1079,7 @@ impl ScoutingSession {
                 self.step = ScoutingStep::Eval;
                 self.technique = self.preselected_technique();
                 self.serve_start = self.preselected_serve_start();
+                self.target = self.preselected_target();
                 Ok(Progress::Choosing)
             }
             (ScoutingStep::Player, true, Some(EventTypeEnum::R)) => {
@@ -1319,7 +1338,8 @@ impl ScoutingSession {
                 self.target = removed
                     .flags
                     .target()
-                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)));
+                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)))
+                    .or_else(|| self.preselected_target());
                 // and how many blocked
                 self.blockers = removed
                     .flags

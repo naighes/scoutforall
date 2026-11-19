@@ -751,6 +751,54 @@ mod tests {
         assert_eq!(serving, "b");
     }
 
+    /// The reception of B starts where A's serve fell, and the dig of A where
+    /// the attack of B fell: the scout can change it or take it back.
+    #[tokio::test]
+    async fn the_reception_starts_where_the_serve_fell() {
+        let p = Sqlite::new();
+        let (_, team_b, m, start_a, start_b) = on_both_sides(&p).await;
+        let side = |s: &SetEntry| crate::set_start::SideInput {
+            positions: s.initial_positions,
+            setter: s.setter,
+            libero: s.libero,
+            fallback_libero: None,
+        };
+        let input = crate::set_start::SetStartInput {
+            set_number: 1,
+            serving_team: TeamSideEnum::Us,
+            positions: start_a.initial_positions,
+            setter: start_a.setter,
+            libero: start_a.libero,
+            fallback_libero: None,
+            opponent: Some(side(&start_b)),
+        };
+        let writer: std::sync::Arc<dyn SetWriter + Send + Sync> =
+            std::sync::Arc::new(crate::providers::sqlite::sets::SqliteSetWriter::new(
+                p.db.clone(),
+                crate::localization::Language::default(),
+            ));
+        let mut session = crate::set_start::start(m, input, writer, Some(team_b))
+            .await
+            .unwrap();
+        let fell = crate::shapes::court_zone::CourtTarget::Zone(5);
+        session.choose_event_of(Side::A, S).await.unwrap();
+        session.choose_target(Some(fell)).unwrap();
+        session.choose_eval(Positive).await.unwrap();
+        // B receives: the zone of the serve is already there
+        session.choose_event_of(Side::B, P).await.unwrap();
+        let player = session.player_choices()[0].id;
+        session.choose_player(player).await.unwrap();
+        assert_eq!(session.target(), Some(fell));
+        // taken back, or changed
+        session.choose_target(None).unwrap();
+        assert_eq!(session.target(), None);
+        session.choose_target(Some(fell)).unwrap();
+        session.choose_eval(Negative).await.unwrap();
+        // undo: the evaluation of the reception again, the zone told
+        session.undo().await.unwrap();
+        assert_eq!(session.target(), Some(fell));
+    }
+
     /// A session on both sides: the ball decides the side to choose for,
     /// the evaluation of the answer is the one the serve admits, F5 swaps
     /// the side, undo removes the last touch of whichever side, and the
