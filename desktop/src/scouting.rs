@@ -66,6 +66,8 @@ pub enum Message {
     Court(Touch),
     Undo,
     Scope(bool),
+    /// the statistics of both sides side by side, or of one
+    StatsView(StatsView),
     Recent(bool),
     Series(usize),
     Dismiss,
@@ -95,7 +97,19 @@ struct Snapshot {
     /// for our serve, the zones it starts from, below their court
     starts: Vec<ServeStartChoice>,
     stats: Option<LiveStats>,
+    /// B's, to compare with `stats`
+    versus: Option<LiveStats>,
 }
+
+/// What the statistics show, of a match scouted on both sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatsView {
+    Compare,
+    A,
+    B,
+}
+
+const STATS_VIEWS: [StatsView; 3] = [StatsView::Compare, StatsView::A, StatsView::B];
 
 pub struct ScoutingScreen {
     /// the team and the match, to go back to the match
@@ -118,6 +132,7 @@ pub struct ScoutingScreen {
     set_over: bool,
     show_stats: bool,
     match_scope: bool,
+    stats_view: StatsView,
     recent: bool,
     series: usize,
     /// the trend of the series chosen, as the snapshot has it
@@ -133,7 +148,11 @@ impl ScoutingScreen {
         team_id: String,
         match_id: String,
     ) -> Self {
-        let snapshot = read(&scouting, false);
+        let stats_view = match scouting.state().both {
+            true => StatsView::Compare,
+            false => StatsView::A,
+        };
+        let snapshot = read(&scouting, false, stats_view);
         let trend = Trend::of_stats(snapshot.stats.as_ref(), 0, false);
         Self {
             team_id,
@@ -149,6 +168,7 @@ impl ScoutingScreen {
             set_over: false,
             show_stats: true,
             match_scope: false,
+            stats_view,
             recent: false,
             series: 0,
             trend,
@@ -163,7 +183,7 @@ impl ScoutingScreen {
 
     fn refresh(&mut self) {
         let started = std::time::Instant::now();
-        self.snapshot = read(&self.scouting, self.match_scope);
+        self.snapshot = read(&self.scouting, self.match_scope, self.stats_view);
         // the digits typed are for the players of this step only
         if !matches!(
             self.snapshot.state.step,
@@ -287,6 +307,11 @@ impl ScoutingScreen {
                 self.match_scope = m;
                 Outcome::Stay
             }
+            Message::StatsView(v) => {
+                self.stats_view = v;
+                self.refresh();
+                Outcome::Stay
+            }
             Message::Recent(r) => {
                 self.recent = r;
                 Outcome::Stay
@@ -338,6 +363,17 @@ impl ScoutingScreen {
             (k, _) if k == UNDO_KEY => return self.update(Message::Undo),
             (k, _) if k == STATS_KEY => self.show_stats = !self.show_stats,
             (k, _) if k == SWAP_SIDE_KEY => self.swap(),
+            // ← → change what the statistics show, unless they move on the
+            // court
+            (k, step)
+                if (k == key!(left) || k == key!(right))
+                    && self.snapshot.state.both
+                    && self.show_stats
+                    && !(step == ScoutingStep::Eval && self.with(|s, _| s.targets_apply())) =>
+            {
+                self.stats_view = ui::cycle(&STATS_VIEWS, &self.stats_view, k == key!(right))
+                    .unwrap_or(self.stats_view);
+            }
             (_, ScoutingStep::Event) => self.event_key(ck),
             (_, ScoutingStep::Player) => self.player_key(ck),
             (_, ScoutingStep::Eval) => self.eval_key(ck),
@@ -665,7 +701,7 @@ fn replacement_key(index: u8) -> String {
     }
 }
 
-fn read(scouting: &Scouting, match_scope: bool) -> Snapshot {
+fn read(scouting: &Scouting, match_scope: bool, view: StatsView) -> Snapshot {
     let state = scouting.state();
     let (players, replacements) =
         scouting.with_session(|s, _| (s.player_choices(), s.replacement_choices()));
@@ -686,7 +722,14 @@ fn read(scouting: &Scouting, match_scope: bool) -> Snapshot {
         target_ours: scouting.target_ours(),
         target_told: scouting.target_told(),
         starts: scouting.serve_starts(),
-        stats: scouting.stats(scope).ok(),
+        stats: match view {
+            StatsView::B => scouting.stats_of_b(scope).ok().flatten(),
+            StatsView::Compare | StatsView::A => scouting.stats(scope).ok(),
+        },
+        versus: match view {
+            StatsView::Compare => scouting.stats_of_b(scope).ok().flatten(),
+            StatsView::A | StatsView::B => None,
+        },
         state,
     }
 }
@@ -1397,6 +1440,38 @@ impl ScoutingScreen {
         )
     }
 
+    /// What the statistics show, of a match scouted on both sides: the
+    /// names of the teams, ← → change it.
+    fn views<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        // the team on screen and the other: A and B as the ball is on
+        let state = &self.snapshot.state;
+        let (a, b) = match state.side_b {
+            true => (&state.opponent, &state.team),
+            false => (&state.team, &state.opponent),
+        };
+        let name = |view: StatsView| match view {
+            StatsView::Compare => s.compare.to_string(),
+            StatsView::A => a.clone(),
+            StatsView::B => b.clone(),
+        };
+        container(
+            row(STATS_VIEWS.iter().map(|v| {
+                ui::pill(
+                    &name(*v),
+                    *v == self.stats_view,
+                    Some(Message::StatsView(*v)),
+                    c,
+                )
+            }))
+            .spacing(6)
+            .wrap()
+            .vertical_spacing(4),
+        )
+        .width(Length::Fill)
+        .align_x(Alignment::Center)
+        .into()
+    }
+
     fn stats<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let scopes = container(
             row![
@@ -1417,9 +1492,21 @@ impl ScoutingScreen {
         )
         .width(Length::Fill)
         .align_x(Alignment::Center);
+        let scopes: Element<'a, Message> = match self.snapshot.state.both {
+            true => column![scopes, self.views(s, c)].spacing(6).into(),
+            false => scopes.into(),
+        };
         let Some(stats) = &self.snapshot.stats else {
             return ui::panel(Some(s.stats), scopes, c);
         };
+        if let (StatsView::Compare, Some(versus)) = (self.stats_view, &self.snapshot.versus) {
+            return ui::panel(
+                Some(s.stats),
+                scrollable(column![scopes, crate::compare::comparison(stats, versus, s, c)].spacing(8))
+                    .height(Length::Fill),
+                c,
+            );
+        }
         let graded = |v: Option<f64>, g: Option<f64>| {
             text(pct(v))
                 .size(SIZE_BODY)
@@ -1849,6 +1936,41 @@ pub(crate) mod tests {
             .unwrap();
         screen.update(Message::Event(side_b, event));
         assert!(screen.snapshot.state.step != ScoutingStep::Event);
+    }
+
+    /// The statistics of a match on both sides: A | B side by side first,
+    /// ← → go on to A and B (B's own figures), back to the comparison.
+    #[test]
+    fn the_statistics_compare_both_sides_and_the_arrows_change_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = both_sides_started(&core);
+        let scouting = core
+            .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
+            .unwrap();
+        let mut screen = ScoutingScreen::new(scouting, ScoutingKeys::default(), team, m);
+        assert_eq!(screen.stats_view, StatsView::Compare);
+        let names = |screen: &ScoutingScreen| {
+            (
+                screen.snapshot.stats.as_ref().map(|s| s.team_name.clone()),
+                screen.snapshot.versus.as_ref().map(|s| s.team_name.clone()),
+            )
+        };
+        assert_eq!(
+            names(&screen),
+            (Some("Cortona".to_string()), Some("Arezzo".to_string()))
+        );
+        screen.key(key!(right));
+        assert_eq!(screen.stats_view, StatsView::A);
+        assert_eq!(names(&screen), (Some("Cortona".to_string()), None));
+        screen.key(key!(right));
+        assert_eq!(screen.stats_view, StatsView::B);
+        assert_eq!(names(&screen), (Some("Arezzo".to_string()), None));
+        screen.key(key!(right));
+        assert_eq!(screen.stats_view, StatsView::Compare);
+        // the mouse too
+        screen.update(Message::StatsView(StatsView::B));
+        assert_eq!(names(&screen).0, Some("Arezzo".to_string()));
     }
 
     /// The change of the lineup while the ball is still: its key makes it

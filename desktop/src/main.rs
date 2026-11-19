@@ -9,6 +9,7 @@
 
 mod calendar;
 mod charts;
+mod compare;
 mod competitions;
 mod countries;
 mod court;

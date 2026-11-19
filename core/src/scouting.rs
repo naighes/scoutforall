@@ -130,6 +130,8 @@ struct Theirs {
     snapshot: Snapshot,
     /// the statistics of B in the sets before this one
     earlier_stats: Stats,
+    /// the sets of B before this one, from B's side
+    earlier: Vec<SetEntry>,
     /// the inverted P1 of B, written on every touch of B saved
     inverted_p1: bool,
 }
@@ -251,6 +253,7 @@ impl ScoutingSession {
             touches,
             snapshot: snapshot_b,
             earlier_stats: Stats::new(),
+            earlier: vec![],
             inverted_p1,
         });
         self.start_next();
@@ -271,6 +274,11 @@ impl ScoutingSession {
                     stats.merge(&s.stats);
                     stats
                 });
+            theirs.earlier = earlier
+                .iter()
+                .filter(|s| s.set_number < self.set.set_number)
+                .cloned()
+                .collect();
             let started = theirs.touches.iter().any(|(side, _)| *side == Side::B);
             if !started {
                 let b_set = theirs.start_b.clone();
@@ -388,6 +396,24 @@ impl ScoutingSession {
         sets.sort_by_key(|s| s.set_number);
         sets.push(&self.set);
         sets
+    }
+
+    /// The sets of B up to this one, from B's side: the ones before, and
+    /// this one as scouted so far. `None` scouting only A.
+    pub fn sets_of_b(&self) -> Option<Vec<SetEntry>> {
+        self.theirs.as_ref().map(|theirs| {
+            let mut sets = theirs.earlier.clone();
+            sets.sort_by_key(|s| s.set_number);
+            sets.push(SetEntry {
+                events: rally::project(&theirs.touches)
+                    .b
+                    .into_iter()
+                    .map(|p| p.entry)
+                    .collect(),
+                ..theirs.start_b.clone()
+            });
+            sets
+        })
     }
 
     pub fn step(&self) -> ScoutingStep {

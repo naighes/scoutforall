@@ -120,8 +120,9 @@ pub enum Source {
 #[derive(Debug, Clone)]
 pub enum Message {
     Page(usize),
-    /// the statistics of the other team of a match scouted on both sides
-    Side(MatchSide),
+    /// the statistics of a team of a match scouted on both sides, or of
+    /// both side by side (none)
+    Side(Option<MatchSide>),
     Scope(StatsScope),
     Competition(Option<uuid::Uuid>),
     Series(usize),
@@ -269,6 +270,10 @@ pub struct StatsScreen {
     /// of a match scouted on both sides, the names of team A and team B:
     /// the statistics of either can be shown
     sides: Option<(String, String)>,
+    /// the two sides side by side (the default of such a match), not one
+    compare: bool,
+    /// B's statistics, to compare with `live`
+    versus: Option<LiveStats>,
     /// team B, when opened from its page: its side first, back to it
     pub of_b: Option<String>,
     live: Option<LiveStats>,
@@ -710,6 +715,7 @@ impl StatsScreen {
         screen.live = Some(live);
         screen.has_video = has_video;
         screen.sides = details.both_sides.then_some((team, opponent));
+        screen.compare = screen.sides.is_some();
         screen.load();
         Ok(screen)
     }
@@ -742,6 +748,8 @@ impl StatsScreen {
             scope: StatsScope::Match,
             side: MatchSide::A,
             sides: None,
+            compare: false,
+            versus: None,
             of_b: None,
             live: None,
             detail: None,
@@ -787,13 +795,14 @@ impl StatsScreen {
     /// Opened from the page of team B `team_b`: the statistics of B.
     pub fn of_b(mut self, team_b: String) -> Self {
         self.of_b = Some(team_b);
-        self.sided(MatchSide::B);
+        self.sided(MatchSide::B, false);
         self
     }
 
-    fn sided(&mut self, side: MatchSide) {
+    fn sided(&mut self, side: MatchSide, compare: bool) {
         // the players and the actions picked are of the other team
         self.side = side;
+        self.compare = compare;
         self.filter.players.clear();
         self.clip_evals.clear();
         self.clip_zone = None;
@@ -837,6 +846,7 @@ impl StatsScreen {
                 let live = self
                     .core
                     .match_stats(team.clone(), m.clone(), self.side, self.scope);
+                let m_id = m.clone();
                 let detail = self.core.match_detail(
                     team,
                     m,
@@ -849,6 +859,13 @@ impl StatsScreen {
                     Ok(live) => self.live = Some(live),
                     Err(e) => self.error = Some(e.to_string()),
                 }
+                self.versus = match self.compare {
+                    true => self
+                        .core
+                        .match_stats(self.team_id.clone(), m_id, MatchSide::B, self.scope)
+                        .ok(),
+                    false => None,
+                };
                 match detail {
                     Ok(detail) => self.detail = Some(detail),
                     Err(e) => self.error = Some(e.to_string()),
@@ -1185,7 +1202,9 @@ impl StatsScreen {
         };
         match filter {
             Filter::Side => {
-                ui::cycle(&[MatchSide::A, MatchSide::B], &self.side, forward).map(Message::Side)
+                let now = (!self.compare).then_some(self.side);
+                ui::cycle(&[None, Some(MatchSide::A), Some(MatchSide::B)], &now, forward)
+                    .map(Message::Side)
             }
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
             Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),
@@ -1315,10 +1334,15 @@ impl StatsScreen {
     pub fn update(&mut self, message: Message) -> Outcome {
         match message {
             Message::Page(page) => {
+                // the trend and the detail are of one team
+                if page > 0 && self.compare {
+                    self.sided(MatchSide::A, false);
+                }
                 self.page = page.min(PAGES.len() - 1);
                 self.row = 0;
             }
-            Message::Side(side) => self.sided(side),
+            Message::Side(Some(side)) => self.sided(side, false),
+            Message::Side(None) => self.sided(MatchSide::A, true),
             Message::Scope(scope) => {
                 self.scope = scope;
                 self.load();
@@ -1625,6 +1649,12 @@ impl StatsScreen {
         let page: Element<'a, Message> = match (self.current(), &self.live, empty) {
             (_, _, true) => ui::panel(None, small(s.no_matches_period, c), c),
             (_, None, _) => space::vertical().into(),
+            (Page::Summary, Some(live), _) if self.compare && self.versus.is_some() => {
+                match &self.versus {
+                    Some(versus) => crate::compare::comparison(live, versus, s, c),
+                    None => space::vertical().into(),
+                }
+            }
             (Page::Summary, Some(live), _) => {
                 responsive(move |size| summary(live, s, c, size.height >= SUMMARY_TALL)).into()
             }
@@ -1732,8 +1762,20 @@ impl StatsScreen {
                 s.stats_team,
                 self.sides
                     .iter()
-                    .flat_map(|(a, b)| [(a, MatchSide::A), (b, MatchSide::B)])
-                    .map(|(name, side)| pill(name.clone(), side == self.side, Message::Side(side)))
+                    .flat_map(|(a, b)| {
+                        [
+                            (s.compare.to_string(), None),
+                            (a.clone(), Some(MatchSide::A)),
+                            (b.clone(), Some(MatchSide::B)),
+                        ]
+                    })
+                    .map(|(name, side)| {
+                        let chosen = match side {
+                            None => self.compare,
+                            Some(side) => !self.compare && side == self.side,
+                        };
+                        pill(name, chosen, Message::Side(side))
+                    })
                     .collect(),
             ),
             Filter::Competition => (
@@ -4182,7 +4224,21 @@ pub(crate) mod tests {
         assert_eq!(screen.title(), "Home – Visiting");
         let aces = |screen: &StatsScreen| screen.live.as_ref().map(|l| (l.aces, l.aces_against));
         let (a_aces, a_against) = aces(&screen).unwrap_or_default();
+        // the two sides side by side first, B's figures the mirror of A's
+        assert!(screen.compare);
+        assert_eq!(
+            screen.versus.as_ref().map(|v| (v.aces, v.aces_against)),
+            Some((a_against, a_aces))
+        );
+        // ← from the first row goes round to B, → on to the comparison
+        screen.key(key!(left));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::B));
+        screen.key(key!(right));
+        assert!(screen.compare && screen.versus.is_some());
+        // a page of one team leaves the comparison for A
         screen.update(Message::Page(2));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::A));
+        assert!(screen.versus.is_none());
         assert_eq!(screen.filters().first(), Some(&Filter::Side));
         screen.update(Message::Event(EventTypeEnum::S));
         let players = |screen: &StatsScreen| -> Vec<String> {

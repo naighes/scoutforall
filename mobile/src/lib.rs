@@ -2540,6 +2540,27 @@ impl Scouting {
         )
     }
 
+    /// The same for B of a match scouted on both sides: its sets as B sees
+    /// them, B's team first. `None` scouting only A.
+    pub fn stats_of_b(&self, scope: StatsScope) -> Result<Option<LiveStats>, MobileError> {
+        let session = self.session();
+        let Some(sets) = session.sets_of_b() else {
+            return Ok(None);
+        };
+        let current_match = session.current_match();
+        let team = session.team_of(ScoutSide::B);
+        let Some(team) = team else { return Ok(None) };
+        let sets: Vec<&SetEntry> = sets.iter().collect();
+        live_stats(
+            &sets,
+            scope,
+            current_match.max_substitutions,
+            (team, &current_match.team.name),
+            self.labels,
+        )
+        .map(Some)
+    }
+
     /// A fundamental of a set of the match so far, or of all of them,
     /// narrowed by the filter.
     pub fn detail(

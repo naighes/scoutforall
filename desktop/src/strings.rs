@@ -177,6 +177,8 @@ pub struct Strings {
     /// the row of the statistics choosing the team of a match scouted on
     /// both sides
     pub stats_team: &'static str,
+    /// the statistics of the two sides side by side
+    pub compare: &'static str,
     pub summary: &'static str,
     pub distribution: &'static str,
     pub errors: &'static str,
@@ -721,6 +723,7 @@ const EN: Strings = Strings {
     a_match: "Match",
     sets: "Sets",
     stats_team: "Team",
+    compare: "Compare",
     summary: "Summary",
     distribution: "Distribution",
     errors: "Errors",
@@ -1260,6 +1263,7 @@ const IT: Strings = Strings {
     a_match: "Partita",
     sets: "Set",
     stats_team: "Squadra",
+    compare: "Confronto",
     summary: "Sintesi",
     distribution: "Distribuzione",
     errors: "Errori",
@@ -1799,6 +1803,7 @@ const PT: Strings = Strings {
     a_match: "Partida",
     sets: "Sets",
     stats_team: "Equipe",
+    compare: "Comparar",
     summary: "Resumo",
     distribution: "Distribuição",
     errors: "Erros",
@@ -2339,6 +2344,7 @@ const PL: Strings = Strings {
     a_match: "Mecz",
     sets: "Sety",
     stats_team: "Drużyna",
+    compare: "Porównanie",
     summary: "Podsumowanie",
     distribution: "Rozegranie",
     errors: "Błędy",
@@ -2878,6 +2884,7 @@ const JA: Strings = Strings {
     a_match: "試合",
     sets: "セット",
     stats_team: "チーム",
+    compare: "比較",
     summary: "概要",
     distribution: "トス配分",
     errors: "ミス",
