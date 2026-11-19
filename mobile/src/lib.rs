@@ -4084,6 +4084,66 @@ impl Scout4All {
         })
     }
 
+    /// The roster of team B of a match of team A scouted on both sides: its
+    /// players, with `toggled` put on the score sheet or taken off. As the
+    /// roster of A, with the form of the roster only (`MatchForm::default`
+    /// the first time).
+    pub fn roster_of_b(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+        toggled: Option<Uuid>,
+    ) -> Result<MatchRoster, MobileError> {
+        self.roster_of_b_after(team_id, match_id, form, |form, team, existing| {
+            if let Some(player) = toggled {
+                form.toggle(player, team, existing);
+            }
+            Ok(())
+        })
+    }
+
+    /// `correct_roster_number` for team B.
+    pub fn correct_roster_of_b_number(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+        player: Uuid,
+        number: String,
+        role: Option<RoleEnum>,
+    ) -> Result<MatchRoster, MobileError> {
+        let labels = self.language.labels();
+        self.roster_of_b_after(team_id, match_id, form, |form, team, existing| {
+            form.correct(player, &number, role, team, existing)
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(labels),
+                })
+        })
+    }
+
+    /// Saves the roster of team B as the form has it: as for A, from
+    /// `MIN_ROSTER` to `MAX_ROSTER` players with a number each.
+    pub fn save_roster_of_b(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+    ) -> Result<(), MobileError> {
+        let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+        let numbers = form
+            .roster_of_b_numbers(&m.team, Some(&m))
+            .map_err(|e| MobileError::InvalidMatch {
+                field: e.into(),
+                reason: e.message(self.language.labels()),
+            })?;
+        let a = self.read_match(&team_id, &match_id)?;
+        self.runtime
+            .block_on(self.match_writer.save_roster_of_b(&a, &numbers))?;
+        Ok(())
+    }
+
     /// The form of a match of the team, to edit it.
     pub fn match_form(&self, team_id: String, match_id: String) -> Result<MatchForm, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
@@ -5268,6 +5328,18 @@ impl Scout4All {
         let existing = match_id
             .map(|id| self.read_match(&team_id, &id))
             .transpose()?;
+        self.roster_with(team, existing, form, change)
+    }
+
+    /// `roster_after` for the team and the match as given: the match of
+    /// team A, or the one seen by B.
+    fn roster_with(
+        &self,
+        team: TeamEntry,
+        existing: Option<MatchEntry>,
+        form: MatchForm,
+        change: impl FnOnce(&mut MatchForm, &TeamEntry, Option<&MatchEntry>) -> Result<(), MobileError>,
+    ) -> Result<MatchRoster, MobileError> {
         let mut form = form;
         change(&mut form, &team, existing.as_ref())?;
         let labels = self.language.labels();
@@ -5288,6 +5360,19 @@ impl Scout4All {
             })
             .collect();
         Ok(MatchRoster { form, players })
+    }
+
+    /// The roster of B for a match of team A `team_id` scouted on both
+    /// sides: B as a team, the match as B sees it.
+    fn roster_of_b_after(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+        change: impl FnOnce(&mut MatchForm, &TeamEntry, Option<&MatchEntry>) -> Result<(), MobileError>,
+    ) -> Result<MatchRoster, MobileError> {
+        let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+        self.roster_with(m.team.clone(), Some(m), form, change)
     }
 
     /// The members of the new season as the form shows them.

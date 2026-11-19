@@ -397,6 +397,24 @@ impl MatchForm {
         }
     }
 
+    /// The numbers of the roster of team B, as chosen: every player with a
+    /// roster the form hasn't one for yet, and the same rules as for A.
+    pub fn roster_of_b_numbers(
+        &self,
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) -> Result<Vec<RosterNumber>, MatchFormError> {
+        let mut form = self.clone();
+        form.roster.get_or_insert_with(|| {
+            self.roster_choices(team, existing)
+                .iter()
+                .filter(|c| c.chosen)
+                .map(|c| c.player.id)
+                .collect()
+        });
+        form.valid_roster(team, existing).map(|(_, numbers)| numbers)
+    }
+
     /// The players chosen, by `roster_choices`.
     fn chosen(&self, team: &TeamEntry, existing: Option<&MatchEntry>) -> HashSet<Uuid> {
         match (&self.roster, existing) {
