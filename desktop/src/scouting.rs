@@ -747,6 +747,7 @@ impl Trend {
                 high: 10.0,
                 points: 25.0,
                 errors: vec![],
+                versus: None,
             })
     }
 }

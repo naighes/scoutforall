@@ -1116,6 +1116,11 @@ impl StatsScreen {
             None => trend,
         }
         .without_sets(&self.hidden_sets);
+        // the other team of a match scouted on both sides, on the same chart
+        if let (true, Some(versus)) = (self.compare, self.versus.as_ref()) {
+            let other = Trend::of_stats(Some(versus), self.series, self.recent);
+            self.trend = self.trend.clone().against(other, &self.hidden_sets);
+        }
         self.points = self
             .live
             .iter()
@@ -1247,8 +1252,8 @@ impl StatsScreen {
             Filter::Side => {
                 let now = (!self.compare).then_some(self.side);
                 let all: &[Option<MatchSide>] = match self.current() {
-                    Page::Summary => &[None, Some(MatchSide::A), Some(MatchSide::B)],
-                    _ => &[Some(MatchSide::A), Some(MatchSide::B)],
+                    Page::Detail => &[Some(MatchSide::A), Some(MatchSide::B)],
+                    _ => &[None, Some(MatchSide::A), Some(MatchSide::B)],
                 };
                 ui::cycle(all, &now, forward).map(Message::Side)
             }
@@ -1387,8 +1392,8 @@ impl StatsScreen {
     pub fn update(&mut self, message: Message) -> Outcome {
         match message {
             Message::Page(page) => {
-                // the trend and the detail are of one team
-                if page > 0 && self.compare {
+                // the detail is of one team
+                if self.compare && PAGES.get(page) == Some(&Page::Detail) {
                     self.sided(MatchSide::A, false);
                 }
                 self.page = page.min(PAGES.len() - 1);
@@ -1832,7 +1837,7 @@ impl StatsScreen {
             // no name, no marker: the teams speak for themselves; "compare"
             // only where the page has a comparison (the summary)
             Filter::Side => {
-                let compare = self.current() == Page::Summary;
+                let compare = self.current() != Page::Detail;
                 let pills: Vec<Element<'a, Message>> = self
                     .sides
                     .iter()
@@ -2306,12 +2311,27 @@ impl StatsScreen {
             .into_iter()
             .map(|n| set_toggle(n, !self.hidden_sets.contains(&n), s, c)))
         .push(small(format!("- - {}", s.whole_match), c))
-        .push(
-            text(format!("│ {}", s.direct_errors))
-                .size(SIZE_SMALL)
-                .color(theme::LOST),
-        )
         .spacing(14);
+        // two teams: the solid lines are the first's, the dashed the other's,
+        // the match across in their colours; else the direct errors
+        let legend = match self.versus.as_ref().filter(|_| self.compare) {
+            Some(versus) => legend
+                .push(
+                    text(format!("── {}", live.team_name))
+                        .size(SIZE_SMALL)
+                        .color(theme::TEAM_US),
+                )
+                .push(
+                    text(format!("╌╌ {}", versus.team_name))
+                        .size(SIZE_SMALL)
+                        .color(theme::TEAM_THEM),
+                ),
+            None => legend.push(
+                text(format!("│ {}", s.direct_errors))
+                    .size(SIZE_SMALL)
+                    .color(theme::LOST),
+            ),
+        };
         let name = live
             .trend
             .get(self.series)
@@ -4398,27 +4418,26 @@ pub(crate) mod tests {
         assert_eq!((screen.compare, screen.side), (false, MatchSide::A));
         assert!(screen.versus.is_none());
         assert_eq!(screen.filters().first(), Some(&Filter::Side));
-        // the trend: the bar over the page as in a match of one side, no
-        // "compare" (nothing to compare there), B's own trend and names
+        // the trend: the bar over the page as in a match of one side, the
+        // two teams on the one chart for "compare", B's own trend and names
         screen.update(Message::Page(1));
         assert!(screen.filters_on_top());
         assert_eq!(
             screen.filters(),
             [Filter::Side, Filter::Series, Filter::Mode]
         );
+        assert!(screen.trend.versus.is_none());
+        screen.update(Message::Side(None));
+        assert!(screen.compare && screen.trend.versus.is_some());
         let name_a = screen.live.as_ref().map(|l| l.team_name.clone());
         screen.key(key!(left));
         assert_eq!((screen.compare, screen.side), (false, MatchSide::B));
         assert_ne!(screen.live.as_ref().map(|l| l.team_name.clone()), name_a);
+        assert!(screen.trend.versus.is_none());
+        screen.key(key!(right));
+        assert!(screen.compare && screen.trend.versus.is_some());
         screen.key(key!(right));
         assert_eq!((screen.compare, screen.side), (false, MatchSide::A));
-        screen.key(key!(left));
-        screen.key(key!(left));
-        assert_eq!(
-            (screen.compare, screen.side),
-            (false, MatchSide::A),
-            "round A, B: no comparison on the way"
-        );
         screen.key(key!(left));
         screen.update(Message::Page(2));
         screen.update(Message::Side(Some(MatchSide::A)));
