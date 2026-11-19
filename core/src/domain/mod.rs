@@ -223,8 +223,9 @@ impl Home {
 
 /// Who is scouted in a match (D3): team A, or both teams (only when B is a
 /// team, with its players).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ScoutingMode {
+    #[default]
     A,
     Both,
 }

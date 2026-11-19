@@ -97,6 +97,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_match_is_created_scouted_on_both_sides_and_stays_so() {
+        let p = Sqlite::new();
+        let (a, b) = two_teams(&p).await;
+        let both = MatchInput {
+            scouting: ScoutingMode::Both,
+            ..input(Opponent::Team(b.id))
+        };
+        let m = p.match_writer.create(&a, both.clone()).await.unwrap();
+        assert_eq!(row(&p.db, &m).scouting, ScoutingMode::Both);
+        // an edit can't change it
+        let one = MatchInput {
+            scouting: ScoutingMode::A,
+            ..both
+        };
+        p.match_writer.update(&m, one).await.unwrap();
+        assert_eq!(row(&p.db, &m).scouting, ScoutingMode::Both);
+        assert!(form_of(&p, &a, &m).both);
+    }
+
+    #[tokio::test]
     async fn team_b_can_be_a_team() {
         let p = Sqlite::new();
         let (a, b) = two_teams(&p).await;

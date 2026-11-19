@@ -526,6 +526,8 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
         competition,
         stage,
         round,
+        // chosen at the creation, never changed
+        scouting: _,
     } = input;
     let rows = match_rows(tx, id)?.ok_or_else(|| not_found(&format!("match {id}")))?;
     let team = read_team(tx, &rows.row.team_a)?;
@@ -644,6 +646,7 @@ impl MatchWriter for SqliteMatchWriter {
                     competition_id,
                     stage: input.stage,
                     round: input.round,
+                    scouting: input.scouting,
                     ..rows.row
                 },
                 ..rows

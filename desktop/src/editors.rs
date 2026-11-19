@@ -902,6 +902,7 @@ impl Editor {
                 .map(|st| st.value),
             round: f.text(MATCH_ROUND),
             numbers: m.data.numbers.clone(),
+            both: m.data.both,
         }
     }
 

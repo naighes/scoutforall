@@ -131,6 +131,38 @@ mod tests {
     }
 
     #[test]
+    fn both_teams_are_scouted_only_against_a_team() {
+        let both = |opponent_team, create_opponent| MatchForm {
+            both: true,
+            opponent_team,
+            create_opponent,
+            ..form("6")
+        };
+        assert_eq!(
+            error(both(None, false)),
+            MatchFormError::ScoutingBothNeedsTeam
+        );
+        let scouting = |f: MatchForm| f.validate(&team(), None).map(|i| i.scouting);
+        assert_eq!(scouting(both(None, true)), Ok(ScoutingMode::Both));
+        assert_eq!(
+            scouting(both(Some(Uuid::new_v4()), false)),
+            Ok(ScoutingMode::Both)
+        );
+        assert_eq!(scouting(form("6")), Ok(ScoutingMode::A));
+    }
+
+    #[test]
+    fn the_form_of_a_match_keeps_how_it_is_scouted() {
+        let m = played();
+        let row = Match {
+            scouting: ScoutingMode::Both,
+            ..row_of(&m)
+        };
+        assert!(MatchForm::of(&m, &row, None).both);
+        assert!(!of(&m).both);
+    }
+
+    #[test]
     fn a_valid_form_has_the_opponent_trimmed() {
         assert_eq!(
             form("6").validate(&team(), None),

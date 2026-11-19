@@ -4,7 +4,7 @@
 
 use crate::{
     constants::{DEFAULT_MAX_SUBSTITUTIONS, MAX_ROSTER, MAX_ROSTER_WITHOUT_LIBERO, MIN_ROSTER},
-    domain::{Competition, CompetitionFormat, Home, Match, Stage, TeamRef},
+    domain::{Competition, CompetitionFormat, Home, Match, ScoutingMode, Stage, TeamRef},
     localization::Labels,
     player_form::parse_number,
     shapes::{
@@ -51,6 +51,9 @@ pub struct MatchForm {
     pub stage: Option<Stage>,
     pub round: String,
     pub numbers: Vec<RosterNumber>,
+    /// scouting both teams, not only A: chosen when the match is created,
+    /// never changed
+    pub both: bool,
 }
 
 /// The number and the role of a player on the score sheet of a match:
@@ -108,6 +111,8 @@ pub struct MatchInput {
     pub competition: Option<CompetitionInput>,
     pub stage: Option<Stage>,
     pub round: Option<String>,
+    /// `Both` only against a team: B has a roster to scout
+    pub scouting: ScoutingMode,
 }
 
 impl MatchInput {
@@ -133,6 +138,7 @@ impl MatchInput {
             competition: None,
             stage: None,
             round: None,
+            scouting: ScoutingMode::A,
         }
     }
 }
@@ -142,6 +148,8 @@ pub enum MatchFormError {
     EmptyOpponent,
     /// team B is team A
     OpponentIsTeamA,
+    /// both teams scouted against a name, which has no players
+    ScoutingBothNeedsTeam,
     InvalidDate,
     /// not a number from 1 to 99
     InvalidMaxSubstitutions,
@@ -181,6 +189,7 @@ impl MatchFormError {
         match self {
             EmptyOpponent => labels.opponent_cannot_be_empty,
             OpponentIsTeamA => labels.opponent_is_team_a,
+            ScoutingBothNeedsTeam => labels.scouting_both_needs_team,
             InvalidDate => labels.invalid_date,
             InvalidMaxSubstitutions => labels.invalid_max_substitutions,
             MaxSubstitutionsBelowUsed => labels.max_substitutions_below_existing_substitutions,
@@ -228,6 +237,7 @@ impl MatchForm {
             stage: row.stage,
             round: row.round.clone().unwrap_or_default(),
             numbers: vec![],
+            both: row.scouting == ScoutingMode::Both,
         }
     }
 
@@ -419,6 +429,9 @@ impl MatchForm {
             (Some(Opponent::Team(b)), _, _, _) if b == team.id => {
                 Err(MatchFormError::OpponentIsTeamA)
             }
+            (Some(Opponent::Name(_)), _, _, _) if self.both => {
+                Err(MatchFormError::ScoutingBothNeedsTeam)
+            }
             (_, None, _, _) => Err(MatchFormError::InvalidDate),
             (_, _, None, _) => Err(MatchFormError::InvalidMaxSubstitutions),
             (_, _, Some(max), _) if max < used => Err(MatchFormError::MaxSubstitutionsBelowUsed),
@@ -436,6 +449,10 @@ impl MatchForm {
                     competition: self.competition_input(),
                     stage: self.stage,
                     round: Some(self.round.trim().to_string()).filter(|r| !r.is_empty()),
+                    scouting: match self.both {
+                        true => ScoutingMode::Both,
+                        false => ScoutingMode::A,
+                    },
                 })
             }
         }

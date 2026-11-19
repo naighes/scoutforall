@@ -375,6 +375,8 @@ pub struct MatchForm {
     pub round: String,
     #[uniffi(default = [])]
     pub numbers: Vec<RosterNumber>,
+    #[uniffi(default = false)]
+    pub both: bool,
 }
 
 /// The form of a competition: edited in their list, created in the form
@@ -593,7 +595,9 @@ pub enum MatchField {
 impl From<MatchFormError> for MatchField {
     fn from(e: MatchFormError) -> Self {
         match e {
-            MatchFormError::EmptyOpponent | MatchFormError::OpponentIsTeamA => MatchField::Opponent,
+            MatchFormError::EmptyOpponent
+            | MatchFormError::OpponentIsTeamA
+            | MatchFormError::ScoutingBothNeedsTeam => MatchField::Opponent,
             MatchFormError::InvalidDate => MatchField::Date,
             MatchFormError::InvalidMaxSubstitutions | MatchFormError::MaxSubstitutionsBelowUsed => {
                 MatchField::MaxSubstitutions
