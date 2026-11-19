@@ -669,6 +669,81 @@ mod tests {
         .unwrap()
     }
 
+    /// The start of a set on both sides: both lineups saved, no touches;
+    /// a set already started can't be started again, a removed one can.
+    #[tokio::test]
+    async fn a_set_on_both_sides_starts_with_both_lineups() {
+        let p = Sqlite::new();
+        let (_, _, m, start_a, start_b) = on_both_sides(&p).await;
+        p.set_writer
+            .create_both(&m, &start_a, &start_b)
+            .await
+            .unwrap();
+        let sides = reader(&p).read_sides(&m).unwrap();
+        assert_eq!(sides.len(), 1);
+        assert_eq!(
+            sides[0]
+                .b
+                .as_ref()
+                .map(|s| s.current_lineup.get_positions_without_libero()),
+            Some(start_b.initial_positions)
+        );
+        assert!(ids(&p).is_empty());
+        assert!(
+            p.set_writer
+                .create_both(&m, &start_a, &start_b)
+                .await
+                .is_err()
+        );
+        p.set_writer.remove(&m, 1).await.unwrap();
+        assert!(
+            p.set_writer
+                .create_both(&m, &start_a, &start_b)
+                .await
+                .is_ok()
+        );
+    }
+
+    /// Starting with the start of B saves both lineups, B serving as the
+    /// other one, and scouts the set.
+    #[tokio::test]
+    async fn starting_with_the_start_of_b_saves_both_sides() {
+        let p = Sqlite::new();
+        let (_, _, m, start_a, start_b) = on_both_sides(&p).await;
+        let side = |s: &SetEntry| crate::set_start::SideInput {
+            positions: s.initial_positions,
+            setter: s.setter,
+            libero: s.libero,
+            fallback_libero: None,
+        };
+        let input = crate::set_start::SetStartInput {
+            set_number: 1,
+            serving_team: TeamSideEnum::Them,
+            positions: start_a.initial_positions,
+            setter: start_a.setter,
+            libero: start_a.libero,
+            fallback_libero: None,
+            opponent: Some(side(&start_b)),
+        };
+        let writer: std::sync::Arc<dyn SetWriter + Send + Sync> =
+            std::sync::Arc::new(crate::providers::sqlite::sets::SqliteSetWriter::new(
+                p.db.clone(),
+                crate::localization::Language::default(),
+            ));
+        crate::set_start::start(m.clone(), input, writer)
+            .await
+            .unwrap();
+        let sides = reader(&p).read_sides(&m).unwrap();
+        assert!(sides[0].b.is_some());
+        let serving =
+            p.db.read(|tx| {
+                tx.query_row("SELECT serving FROM sets", [], |r| r.get::<_, String>(0))
+                    .map_err(sqlite)
+            })
+            .unwrap();
+        assert_eq!(serving, "b");
+    }
+
     /// Saved on both sides: B with its side, A read as its stream (what
     /// B's touches tell it), each event of A by the row it comes from;
     /// saved again, each touch keeps its row.
@@ -1059,7 +1134,11 @@ mod tests {
             .unwrap();
         assert_eq!(previous(&first), None, "before itself");
         assert_eq!(previous(&second), sorted(written.clone()));
-        assert_eq!(previous(&third), sorted(written.clone()), "skips the second");
+        assert_eq!(
+            previous(&third),
+            sorted(written.clone()),
+            "skips the second"
+        );
         // a closer one with another roster wins
         p.match_writer
             .save_scouting(&second, ScoutingMode::Both)

@@ -20,6 +20,12 @@ pub trait SetWriter {
         events: Vec<EventEntry>,
     ) -> Result<SetEntry, AppError>;
 
+    /// Starts a set scouted on both sides, with no touches: `a` and `b` the
+    /// starts of the sides (lineup, serving team as each sees it). A set
+    /// saved and not removed: an error; a removed one comes back as this one.
+    async fn create_both(&self, m: &MatchEntry, a: &SetEntry, b: &SetEntry)
+    -> Result<(), AppError>;
+
     async fn append_event(
         &self,
         m: &MatchEntry,

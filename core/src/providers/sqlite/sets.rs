@@ -279,6 +279,25 @@ impl SetWriter for SqliteSetWriter {
         Ok(set)
     }
 
+    async fn create_both(
+        &self,
+        m: &MatchEntry,
+        a: &SetEntry,
+        b: &SetEntry,
+    ) -> Result<(), AppError> {
+        let id = match_uuid(&m.id)?;
+        let rows = SetRows::of_both(a, b, &[], id)?;
+        self.db.write(|tx| match saved(tx, id, a.set_number)? {
+            Some(false) => Err(AppError::IO(IOError::Msg(
+                self.language.labels().match_already_exists.to_string(),
+            ))),
+            _ => {
+                write_set(tx, &rows)?;
+                refresh(tx, id)
+            }
+        })
+    }
+
     async fn append_event(
         &self,
         m: &MatchEntry,

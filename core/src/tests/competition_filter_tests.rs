@@ -97,10 +97,7 @@ mod tests {
             ids(month.select_in(&all, today(), Some(league))),
             ["l1", "l2", "l3"]
         );
-        assert_eq!(
-            ids(month.select_in(&all, today(), Some(cup))),
-            ["c1", "c2"]
-        );
+        assert_eq!(ids(month.select_in(&all, today(), Some(cup))), ["c1", "c2"]);
         // a competition with no matches: none, not all
         assert!(
             month
@@ -159,10 +156,7 @@ mod tests {
             from: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap_or_default(),
             to: NaiveDate::from_ymd_opt(2026, 12, 31).unwrap_or_default(),
         };
-        assert_eq!(
-            ids(year.select_in(&all, today(), Some(league))),
-            ["done"]
-        );
+        assert_eq!(ids(year.select_in(&all, today(), Some(league))), ["done"]);
     }
 
     #[test]

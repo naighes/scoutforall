@@ -429,7 +429,8 @@ impl MatchForm {
         let others: Vec<Uuid> = played.into_iter().filter(|p| !roster.contains(p)).collect();
         roster.extend(others);
         self.roster = Some(roster);
-        self.numbers.retain(|n| !numbers.iter().any(|p| p.player == n.player));
+        self.numbers
+            .retain(|n| !numbers.iter().any(|p| p.player == n.player));
         self.numbers.extend(numbers);
     }
 

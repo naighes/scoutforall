@@ -83,10 +83,7 @@ pub(crate) fn save(
 }
 
 /// The competition the match is played in, read from the match.
-pub(crate) fn competition_of(
-    tx: &Transaction,
-    match_id: Uuid,
-) -> Result<Option<Uuid>, AppError> {
+pub(crate) fn competition_of(tx: &Transaction, match_id: Uuid) -> Result<Option<Uuid>, AppError> {
     tx.query_row(
         "SELECT competition_id FROM matches WHERE id = ?1",
         [Sql(match_id)],

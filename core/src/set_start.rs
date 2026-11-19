@@ -306,30 +306,56 @@ impl SetStartForm {
     }
 }
 
-/// Saves the set that `input` starts, and scouts it. The start of B isn't
-/// written yet (`SetWriter` comes with the session on both sides): an
-/// input with one is refused, nothing saved.
+/// Saves the set that `input` starts, and scouts it. With the start of B
+/// the set is scouted on both sides: B's serving team is the other one.
 pub async fn start(
     current_match: MatchEntry,
     input: SetStartInput,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
 ) -> Result<ScoutingSession, SetStartError> {
-    if input.opponent.is_some() {
-        return Err(SetStartError::CouldNotStartSet);
-    }
-    let set = set_writer
-        .create(
-            &current_match,
-            input.set_number,
-            input.serving_team,
-            input.positions,
-            input.libero,
-            input.fallback_libero,
-            input.setter,
-            vec![], // no events at the start of the set
-        )
-        .await
-        .map_err(|_| SetStartError::CouldNotStartSet)?;
+    let set = match &input.opponent {
+        None => set_writer
+            .create(
+                &current_match,
+                input.set_number,
+                input.serving_team,
+                input.positions,
+                input.libero,
+                input.fallback_libero,
+                input.setter,
+                vec![], // no events at the start of the set
+            )
+            .await
+            .map_err(|_| SetStartError::CouldNotStartSet)?,
+        Some(b) => {
+            let a = SetEntry::new(
+                input.set_number,
+                input.serving_team,
+                input.positions,
+                input.libero,
+                input.fallback_libero,
+                input.setter,
+            )
+            .map_err(|_| SetStartError::CouldNotStartSet)?;
+            let b = SetEntry::new(
+                input.set_number,
+                match input.serving_team {
+                    TeamSideEnum::Us => TeamSideEnum::Them,
+                    TeamSideEnum::Them => TeamSideEnum::Us,
+                },
+                b.positions,
+                b.libero,
+                b.fallback_libero,
+                b.setter,
+            )
+            .map_err(|_| SetStartError::CouldNotStartSet)?;
+            set_writer
+                .create_both(&current_match, &a, &b)
+                .await
+                .map_err(|_| SetStartError::CouldNotStartSet)?;
+            a
+        }
+    };
     resume(current_match, set, set_writer)
 }
 

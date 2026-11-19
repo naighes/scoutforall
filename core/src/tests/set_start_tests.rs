@@ -410,7 +410,9 @@ mod tests {
     fn a_player_of_a_is_not_valid_in_b() {
         let (a, b) = (team(8), team(8));
         assert_eq!(
-            complete(&a).validate_both(&a, Some((&complete(&a), &b))).err(),
+            complete(&a)
+                .validate_both(&a, Some((&complete(&a), &b)))
+                .err(),
             Some(SetStartError::InvalidPlayer)
         );
     }
