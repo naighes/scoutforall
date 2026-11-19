@@ -1098,14 +1098,7 @@ mod tests {
                 .unwrap(),
         );
         let of_a: Vec<_> = (0..3)
-            .map(|index| {
-                events
-                    .id(EventRef {
-                        set_number: 1,
-                        index,
-                    })
-                    .map(|id| id.to_string())
-            })
+            .map(|index| events.id(EventRef::of_a(1, index)).map(|id| id.to_string()))
             .collect();
         // B's kill tells A's point, B's serve error A's
         let told = [&saved[0], &saved[2], &saved[3]].map(|id| Some(id.clone()));
@@ -1115,6 +1108,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ids(&p), saved);
+    }
+
+    /// The corrections of the video are kept by the touch: an event of B
+    /// from a touch of A's stream is told by A's event, the others of B by
+    /// their own (side B); the profile of one side, written before, reads
+    /// as it was.
+    #[tokio::test]
+    async fn the_events_of_b_are_told_by_the_touch_of_the_video() {
+        let p = Sqlite::new();
+        let (a, b, m, start_a, start_b) = on_both_sides(&p).await;
+        let touches = rallies(&a, &b);
+        p.set_writer
+            .update_sides(&m, &start_a, Some(&start_b), &touches)
+            .await
+            .unwrap();
+        let rows =
+            p.db.read(|tx| set_rows(tx, Uuid::parse_str(&m.id).unwrap()))
+                .unwrap();
+        let events = EventsOfA::of(&rows);
+        let of_b = project(&touches).b.len();
+        assert!(of_b > 0);
+        let ids_of_a: Vec<_> = (0..3)
+            .filter_map(|i| events.id(EventRef::of_a(1, i)))
+            .collect();
+        for index in 0..of_b {
+            let id = events.id(EventRef::of_b(1, index)).unwrap();
+            let told = events.event_ref(id).unwrap();
+            match ids_of_a.contains(&id) {
+                true => assert_eq!(told.side, Side::A, "B's event {index}"),
+                false => assert_eq!(told, EventRef::of_b(1, index)),
+            }
+        }
+        assert_eq!(events.id(EventRef::of_b(1, of_b)), None);
+        let old = r#"{"set_number":1,"index":2}"#;
+        let read: EventRef = serde_json::from_str(old).unwrap();
+        assert_eq!(read, EventRef::of_a(1, 2));
+        assert_eq!(serde_json::to_string(&read).unwrap(), old);
+        let b_ref = serde_json::to_string(&EventRef::of_b(1, 2)).unwrap();
+        assert_eq!(b_ref, r#"{"set_number":1,"index":2,"side":"B"}"#);
     }
 
     /// Touches that don't replay on both sides: an error, nothing saved.

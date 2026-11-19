@@ -981,10 +981,7 @@ mod tests {
             .iter()
             .flat_map(|set| {
                 set.events.iter().enumerate().map(move |(index, e)| {
-                    let correction = profile.correction(EventRef {
-                        set_number: set.set_number,
-                        index,
-                    });
+                    let correction = profile.correction(EventRef::of_a(set.set_number, index));
                     place(profile, m, &durations, e.timestamp)
                         .map(|ms| ms + correction.unwrap_or(0))
                 })

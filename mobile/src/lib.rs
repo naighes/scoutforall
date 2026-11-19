@@ -3234,6 +3234,9 @@ pub struct VideoEvent {
     /// put at its own time by the user: how far from where the anchor puts
     /// it (`VideoProfile::correction`)
     pub corrected_ms: Option<i64>,
+    /// what the profile keeps it by: its own place in the stream of its
+    /// side, or, of B's, the event of A of the same touch (`stored_ref`)
+    pub stored: EventRef,
     /// after it, for the rally to come: our rotation ("-" without the
     /// setter on the court) and the phase, to show over the video (the
     /// score is the event's)
@@ -3370,14 +3373,8 @@ impl Scout4All {
                     .zip(rows)
                     .zip(states)
                     .map(|((e, row), state)| {
-                        let corrected_ms = corrected_ref(
-                            origins,
-                            EventRef {
-                                set_number: set.set_number,
-                                index: row.index as usize,
-                            },
-                        )
-                        .and_then(|r| profile.correction(r));
+                        let stored = stored_ref(origins, set.set_number, row.index as usize);
+                        let corrected_ms = profile.correction(stored);
                         VideoEvent {
                             set_number: set.set_number,
                             event: row,
@@ -3385,6 +3382,7 @@ impl Scout4All {
                             offset_ms: place(profile, m, durations_ms, e.timestamp)
                                 .map(|ms| ms + corrected_ms.unwrap_or(0)),
                             corrected_ms,
+                            stored,
                             rotation: state
                                 .rotation
                                 .map_or_else(|| "-".to_string(), |r| rotation_name(r, labels)),
@@ -3431,8 +3429,22 @@ impl Scout4All {
 
     /// Saves the profile of the video of the match.
     pub fn save_video(&self, m: &MatchEntry, profile: &VideoProfile) -> Result<(), MobileError> {
+        self.save_video_of(&m.team.id.to_string(), m, profile)
+    }
+
+    /// The same for the match of team A `team_id`, as either side sees it
+    /// (the profile is A's: the match of B has B's team).
+    pub fn save_video_of(
+        &self,
+        team_id: &str,
+        m: &MatchEntry,
+        profile: &VideoProfile,
+    ) -> Result<(), MobileError> {
         self.runtime
-            .block_on(self.videos.write(&m.team.id, &m.id, profile))
+            .block_on(
+                self.videos
+                    .write(&self.read_team(team_id)?.id, &m.id, profile),
+            )
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })
@@ -5858,20 +5870,19 @@ fn touch_rows(
 /// born from the same touch (`origins_of_b`).
 pub type Origins = Vec<(u8, Vec<Option<usize>>)>;
 
-/// The event of A the correction of `event` is read from: itself, or, of B
-/// (`origins`), the one of the same touch, none without it.
-fn corrected_ref(origins: Option<&Origins>, event: EventRef) -> Option<EventRef> {
-    match origins {
-        None => Some(event),
-        Some(origins) => origins
+/// What the profile keeps the event `index` of a side by (`EventRef`):
+/// A's, itself; B's (`origins`), the event of A of the same touch, or, with
+/// none, its own with the side B.
+fn stored_ref(origins: Option<&Origins>, set_number: u8, index: usize) -> EventRef {
+    origins.map_or(EventRef::of_a(set_number, index), |origins| {
+        origins
             .iter()
-            .find(|(set, _)| *set == event.set_number)
-            .and_then(|(_, of_a)| of_a.get(event.index).copied().flatten())
-            .map(|index| EventRef {
-                set_number: event.set_number,
-                index,
-            }),
-    }
+            .find(|(set, _)| *set == set_number)
+            .and_then(|(_, of_a)| of_a.get(index).copied().flatten())
+            .map_or(EventRef::of_b(set_number, index), |a| {
+                EventRef::of_a(set_number, a)
+            })
+    })
 }
 
 /// The events of the match the statistics counted for the pick, set by
@@ -5902,10 +5913,7 @@ fn clips_of(m: &MatchEntry, pick: &ClipPick) -> Result<Vec<EventRef>, MobileErro
             keys.iter()
                 .enumerate()
                 .filter(|(_, k)| k.as_ref().is_some_and(|k| picked.keeps(k)))
-                .map(|(index, _)| EventRef {
-                    set_number: set.set_number,
-                    index,
-                }),
+                .map(|(index, _)| EventRef::of_a(set.set_number, index)),
         );
     }
     Ok(refs)

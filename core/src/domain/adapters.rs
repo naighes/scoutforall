@@ -526,6 +526,27 @@ impl SetRows {
             .collect()
     }
 
+    /// The ids of the touches B's stream (`entry_of_b`) comes from, one
+    /// per event: what the corrections of the video are kept by. Nothing
+    /// without B's lineup.
+    pub fn ids_of_b(&self) -> Vec<Uuid> {
+        match self.on_both_sides() {
+            false => vec![],
+            true => {
+                let entries = self.entries();
+                let touches: Vec<(Side, EventEntry)> = entries
+                    .iter()
+                    .map(|(row, entry)| (row.side, entry.clone()))
+                    .collect();
+                project(&touches)
+                    .b
+                    .into_iter()
+                    .filter_map(|p| entries.get(p.source).map(|(row, _)| row.id))
+                    .collect()
+            }
+        }
+    }
+
     /// Whether the set is scouted on both sides: B has its lineup.
     pub fn on_both_sides(&self) -> bool {
         self.lineups.iter().any(|l| l.side == Side::B)
@@ -672,42 +693,46 @@ pub struct Sides {
 /// touch.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventsOfA {
-    by_ref: BTreeMap<(u8, usize), Uuid>,
+    by_ref: BTreeMap<(Side, u8, usize), Uuid>,
     by_id: BTreeMap<Uuid, EventRef>,
 }
 
 impl EventsOfA {
     pub fn of(sets: &[SetRows]) -> Self {
-        let pairs: Vec<(EventRef, Uuid)> = sets
-            .iter()
-            .filter(|s| !s.row.deleted)
+        let played = || sets.iter().filter(|s| !s.row.deleted);
+        let of_a: Vec<(EventRef, Uuid)> = played()
             .flat_map(|s| {
                 s.stream_of_a()
                     .into_iter()
                     .enumerate()
-                    .map(|(index, (e, _))| {
-                        (
-                            EventRef {
-                                set_number: s.row.number,
-                                index,
-                            },
-                            e.id,
-                        )
-                    })
+                    .map(|(index, (e, _))| (EventRef::of_a(s.row.number, index), e.id))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let of_b: Vec<(EventRef, Uuid)> = played()
+            .flat_map(|s| {
+                s.ids_of_b()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, id)| (EventRef::of_b(s.row.number, index), id))
                     .collect::<Vec<_>>()
             })
             .collect();
         EventsOfA {
-            by_ref: pairs
+            by_ref: of_a
                 .iter()
-                .map(|(r, id)| ((r.set_number, r.index), *id))
+                .chain(&of_b)
+                .map(|(r, id)| ((r.side, r.set_number, r.index), *id))
                 .collect(),
-            by_id: pairs.into_iter().map(|(r, id)| (id, r)).collect(),
+            // the touch of both streams is told by A's event
+            by_id: of_b.iter().chain(&of_a).map(|(r, id)| (*id, *r)).collect(),
         }
     }
 
     pub fn id(&self, event: EventRef) -> Option<Uuid> {
-        self.by_ref.get(&(event.set_number, event.index)).copied()
+        self.by_ref
+            .get(&(event.side, event.set_number, event.index))
+            .copied()
     }
 
     pub fn event_ref(&self, id: Uuid) -> Option<EventRef> {

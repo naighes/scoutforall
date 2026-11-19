@@ -147,8 +147,21 @@ impl Stage {
 }
 
 /// One of the two teams of a match: A, the team one starts from, or B.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum Side {
+    #[default]
     A,
     B,
 }

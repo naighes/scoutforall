@@ -1502,8 +1502,10 @@ impl ScoutingScreen {
         if let (StatsView::Compare, Some(versus)) = (self.stats_view, &self.snapshot.versus) {
             return ui::panel(
                 Some(s.stats),
-                scrollable(column![scopes, crate::compare::comparison(stats, versus, s, c)].spacing(8))
-                    .height(Length::Fill),
+                scrollable(
+                    column![scopes, crate::compare::comparison(stats, versus, s, c)].spacing(8),
+                )
+                .height(Length::Fill),
                 c,
             );
         }

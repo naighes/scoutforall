@@ -169,10 +169,7 @@ mod tests {
     }
 
     fn event(index: usize) -> EventRef {
-        EventRef {
-            set_number: 1,
-            index,
-        }
+        EventRef::of_a(1, index)
     }
 
     /// Two files (one in the data folder, from its name; one elsewhere),
@@ -393,26 +390,13 @@ mod tests {
         let rows = video_rows(&db);
         for wrong in [
             profile().corrected(event(8), 100),
-            profile().corrected(
-                EventRef {
-                    set_number: 2,
-                    index: 0,
-                },
-                100,
-            ),
+            profile().corrected(EventRef::of_a(2, 0), 100),
             VideoProfile {
                 anchor: Some(anchor_on(event(8), start(), 0)),
                 ..VideoProfile::default()
             },
             VideoProfile {
-                anchor: Some(anchor_on(
-                    EventRef {
-                        set_number: 0,
-                        index: 0,
-                    },
-                    start(),
-                    0,
-                )),
+                anchor: Some(anchor_on(EventRef::of_a(0, 0), start(), 0)),
                 ..VideoProfile::default()
             },
         ] {

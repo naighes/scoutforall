@@ -247,13 +247,7 @@ mod tests {
             }],
             ..Default::default()
         }
-        .corrected(
-            EventRef {
-                set_number: 1,
-                index: 1,
-            },
-            500,
-        )
+        .corrected(EventRef::of_a(1, 1), 500)
     }
 
     fn video_rows(db: &Database) -> (i64, i64, i64) {

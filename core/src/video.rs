@@ -23,7 +23,7 @@
 //! event, a correction (`with_time`): the anchor moves by tying the video to
 //! an event at a moment of it, or by shifting it.
 
-use crate::{errors::AppError, shapes::r#match::MatchEntry};
+use crate::{domain::Side, errors::AppError, shapes::r#match::MatchEntry};
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
@@ -170,11 +170,45 @@ pub struct Anchor {
     pub event: Option<EventRef>,
 }
 
-/// An event of the match: the set and its index among the events.
+/// An event of the match: the set and its index among the events of the
+/// stream of its side.
+///
+/// A touch of a match scouted on both sides gives an event to each side.
+/// The correction of the video is kept by the touch: an event of B born
+/// from a touch that A's stream has too is asked and written by A's event
+/// (`side` A), the other ones of B (its attack, its dig) by their own
+/// (`side` B).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventRef {
     pub set_number: u8,
     pub index: usize,
+    /// A when not written: the profiles of the matches on one side.
+    #[serde(default, skip_serializing_if = "is_a")]
+    pub side: Side,
+}
+
+fn is_a(side: &Side) -> bool {
+    *side == Side::A
+}
+
+impl EventRef {
+    /// The event `index` of the stream of A.
+    pub fn of_a(set_number: u8, index: usize) -> Self {
+        EventRef {
+            set_number,
+            index,
+            side: Side::A,
+        }
+    }
+
+    /// The event `index` of the stream of B.
+    pub fn of_b(set_number: u8, index: usize) -> Self {
+        EventRef {
+            set_number,
+            index,
+            side: Side::B,
+        }
+    }
 }
 
 /// The profile of a match, if any.

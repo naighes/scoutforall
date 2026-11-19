@@ -1203,8 +1203,12 @@ impl StatsScreen {
         match filter {
             Filter::Side => {
                 let now = (!self.compare).then_some(self.side);
-                ui::cycle(&[None, Some(MatchSide::A), Some(MatchSide::B)], &now, forward)
-                    .map(Message::Side)
+                ui::cycle(
+                    &[None, Some(MatchSide::A), Some(MatchSide::B)],
+                    &now,
+                    forward,
+                )
+                .map(Message::Side)
             }
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
             Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),

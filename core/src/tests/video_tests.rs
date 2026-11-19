@@ -185,14 +185,7 @@ mod tests {
         assert_eq!(place(&p, &a_match(true), &DURATIONS, t), Some(3_864_000));
         let chosen = profile(
             p.files.clone(),
-            Some(anchor_on(
-                EventRef {
-                    set_number: 1,
-                    index: 0,
-                },
-                at(18, 0, 0).to_utc(),
-                1000,
-            )),
+            Some(anchor_on(EventRef::of_a(1, 0), at(18, 0, 0).to_utc(), 1000)),
         );
         let later = at(19, 0, 0).to_utc();
         assert_eq!(
@@ -227,10 +220,7 @@ mod tests {
     #[test]
     fn the_anchor_chosen_wins() {
         let serve = at(18, 0, 0).to_utc();
-        let event = EventRef {
-            set_number: 1,
-            index: 3,
-        };
+        let event = EventRef::of_a(1, 3);
         let chosen = anchor_on(event, serve, 95_500);
         let p = profile(
             vec![file("20261101 175252.mp4", Some(at(17, 52, 52)))],
@@ -249,10 +239,7 @@ mod tests {
     }
 
     fn event(index: usize) -> EventRef {
-        EventRef {
-            set_number: 1,
-            index,
-        }
+        EventRef::of_a(1, index)
     }
 
     /// The first time written ties the video to the event; then a time
@@ -344,10 +331,7 @@ mod tests {
                 file("/media/second.mp4", None),
             ],
             Some(anchor_on(
-                EventRef {
-                    set_number: 2,
-                    index: 0,
-                },
+                EventRef::of_a(2, 0),
                 at(19, 0, 0).to_utc(),
                 3_600_000,
             )),

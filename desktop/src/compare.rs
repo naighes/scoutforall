@@ -104,18 +104,14 @@ pub fn comparison<'a, M: 'a>(
         .align_x(Alignment::Center)
         .into()
     };
-    let fundamentals = a
-        .fundamentals
-        .iter()
-        .zip(&b.fundamentals)
-        .map(|(fa, fb)| {
-            line(
-                ui::capitalized(&fa.name),
-                fundamental(fa),
-                fundamental(fb),
-                c,
-            )
-        });
+    let fundamentals = a.fundamentals.iter().zip(&b.fundamentals).map(|(fa, fb)| {
+        line(
+            ui::capitalized(&fa.name),
+            fundamental(fa),
+            fundamental(fb),
+            c,
+        )
+    });
     let content = column![
         head,
         Column::with_children(fundamentals).spacing(8),

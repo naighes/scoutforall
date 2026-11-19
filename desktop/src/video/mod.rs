@@ -51,8 +51,8 @@ use {
         MatchClips, MatchSide, MobileError, Origins, Scout4All, VideoEvent,
         strip::{ClipSpan, StripClick, clip_spans},
         video::{
-            Piece, VideoStanding as Standing, current, event_ref, inside, parse_time, pieces,
-            standing, target, uncorrected, written,
+            Piece, VideoStanding as Standing, current, event_ref, inside, own_ref, parse_time,
+            pieces, standing, target, uncorrected, written,
         },
     },
     std::{
@@ -250,8 +250,8 @@ pub struct VideoScreen {
     pub team_id: String,
     pub match_id: String,
     the_match: MatchEntry,
-    /// the match of B: its events placed by the touches (`Scout4All::
-    /// origins_of_b`), the video only to see
+    /// the match of B: its events told by the touches (`Scout4All::
+    /// origins_of_b`) the profile of A keeps them by
     of_b: Option<Origins>,
     /// none: written by a newer version, left as it is
     profile: Option<VideoProfile>,
@@ -542,7 +542,7 @@ impl VideoScreen {
         self.first_ms = self.events.iter().filter_map(|e| e.offset_ms).min();
         self.all_events = self.events.clone();
         if let Some(clips) = &self.clips {
-            self.events.retain(|e| clips.events.contains(&event_ref(e)));
+            self.events.retain(|e| clips.events.contains(&own_ref(e)));
         }
         self.selected = self.selected.min(self.events.len().saturating_sub(1));
         Ok(())
@@ -698,7 +698,7 @@ impl VideoScreen {
             .map_err(|_| LeftOut::Unreadable)?;
         let picked = all
             .iter()
-            .filter(|e| m.events.contains(&event_ref(e)))
+            .filter(|e| m.events.contains(&own_ref(e)))
             .cloned()
             .collect();
         Ok(TourMatch {
@@ -884,11 +884,14 @@ impl VideoScreen {
 
     /// The profile changed saved: the events lined up again.
     fn save_profile(&mut self, change: impl FnOnce(&VideoProfile) -> VideoProfile) {
-        let (Some(profile), None) = (&self.profile, &self.of_b) else {
+        let Some(profile) = &self.profile else {
             return;
         };
         let profile = change(profile);
-        match self.core.save_video(&self.the_match, &profile) {
+        match self
+            .core
+            .save_video_of(&self.team_id, &self.the_match, &profile)
+        {
             Ok(()) => {
                 self.profile = Some(profile);
                 if let Err(e) = self.load_events() {
@@ -1288,14 +1291,17 @@ impl VideoScreen {
     /// The files saved in place of the ones there: played, the events
     /// lined up with them.
     fn save_files(&mut self, files: Vec<VideoFile>) {
-        let (Some(profile), None) = (&self.profile, &self.of_b) else {
+        let Some(profile) = &self.profile else {
             return;
         };
         let profile = VideoProfile {
             files,
             ..profile.clone()
         };
-        match self.core.save_video(&self.the_match, &profile) {
+        match self
+            .core
+            .save_video_of(&self.team_id, &self.the_match, &profile)
+        {
             Ok(()) => {
                 self.profile = Some(profile);
                 self.open_player();
@@ -2535,6 +2541,45 @@ pub(crate) mod screen_tests {
         .unwrap();
         assert!(screen.is_clips());
         assert_eq!(screen.events.len(), refs.len());
+    }
+
+    /// The video seen from B is changed too: the profile is A's, so it's
+    /// saved under A's team and the event of B told by its own touch.
+    #[test]
+    fn the_video_from_b_saves_the_profile_of_a() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            side: DvwSide::Home,
+            day: "2015-01-25".into(),
+            max_substitutions: 6,
+            team_id: None,
+            classification: core.classifications().first().map(|c| c.value),
+            gender: core.genders().first().map(|g| g.value),
+            country: core.countries("Ital".into()).first().map(|c| c.value),
+        };
+        let done = core.import_dvw(bytes, choice).unwrap();
+        let (team, m) = (done.team_id, done.match_id);
+        let mut screen = VideoScreen::new(
+            core.clone(),
+            dir.path().to_path_buf(),
+            team.clone(),
+            m.clone(),
+            MatchSide::B,
+        )
+        .unwrap();
+        let origins = core.origins_of_b(&team, &m).unwrap();
+        let alone = origins[0].1.iter().position(Option::is_none).unwrap();
+        let event = EventRef::of_b(1, alone);
+        screen.save_profile(|p| p.corrected(event, 5_000));
+        assert_eq!(screen.error, None);
+        let (_, stored) = core.video(&team, &m).unwrap();
+        let StoredProfile::Profile(saved) = stored else {
+            panic!("no profile saved");
+        };
+        assert_eq!(saved.correction(event), Some(5_000));
     }
 
     fn with_file(dir: &tempfile::TempDir, name: &str) -> VideoScreen {

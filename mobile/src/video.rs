@@ -185,7 +185,10 @@ pub struct VideoReview {
 
 struct Review {
     the_match: MatchEntry,
-    /// B's, seen by the events of B: shown, not changed
+    /// team A: the profile is its, whichever side is shown
+    team_id: String,
+    /// B's, seen by the events of B, each told by the event of A of its
+    /// touch when A's has one
     of_b: Option<Origins>,
     /// none: written by a newer version, left as it is
     profile: Option<VideoProfile>,
@@ -203,7 +206,7 @@ struct Review {
 impl Scout4All {
     /// The video of the match: all its events, or only the ones the pick
     /// keeps (the actions of a statistic). Of the side B, as it is told by
-    /// its events, only to see: the changes are left to A's.
+    /// its events, the corrections kept by their touches (`EventRef`).
     pub fn video_review(
         self: Arc<Self>,
         team_id: String,
@@ -223,6 +226,7 @@ impl Scout4All {
         let picked = pick.map(|p| clips_of(&the_match, &p)).transpose()?;
         let mut review = Review {
             the_match,
+            team_id,
             of_b,
             profile,
             names: vec![],
@@ -671,12 +675,8 @@ impl VideoReview {
     }
 
     fn save(&self, st: &mut Review, profile: VideoProfile) -> Result<(), MobileError> {
-        if st.of_b.is_some() {
-            return Err(MobileError::Failed {
-                reason: "the video is changed from the side of A".to_string(),
-            });
-        }
-        self.core.save_video(&st.the_match, &profile)?;
+        self.core
+            .save_video_of(&st.team_id, &st.the_match, &profile)?;
         st.profile = Some(profile);
         self.reload(st)
     }
@@ -702,7 +702,7 @@ impl Review {
         self.all.iter().filter(|e| {
             self.picked
                 .as_ref()
-                .is_none_or(|picked| picked.contains(&event_ref(e)))
+                .is_none_or(|picked| picked.contains(&own_ref(e)))
         })
     }
 
@@ -781,11 +781,15 @@ fn millis(ms: u64) -> i64 {
     i64::try_from(ms).unwrap_or(i64::MAX)
 }
 
+/// What the profile keeps the event by (`VideoEvent::stored`).
 pub fn event_ref(e: &VideoEvent) -> EventRef {
-    EventRef {
-        set_number: e.set_number,
-        index: e.event.index as usize,
-    }
+    e.stored
+}
+
+/// The event by its own place in the stream of the side shown: what the
+/// clips (`ClipPick`) are told by.
+pub fn own_ref(e: &VideoEvent) -> EventRef {
+    EventRef::of_a(e.set_number, e.event.index as usize)
 }
 
 /// Where the video goes for the event: `lead_ms` before it, not before the
@@ -1334,11 +1338,12 @@ mod tests {
         assert!(review.events().iter().all(|e| e.corrected_ms.is_none()));
     }
 
-    /// The video of B's side (a match imported on both sides): only to
-    /// see, its events placed by their touches, the ones born from a touch
-    /// of A with the correction of A's event of the same touch.
+    /// The video of B's side (a match imported on both sides): its events
+    /// placed by their touches, the ones born from a touch of A with the
+    /// correction of A's event of the same touch, corrected the same way;
+    /// the others with a correction of their own.
     #[test]
-    fn the_video_of_b_is_seen_with_the_corrections_of_a() {
+    fn the_video_of_b_is_corrected_by_the_touches() {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let choice = DvwChoice {
@@ -1391,9 +1396,27 @@ mod tests {
         // an event of B with no event of A at its touch: not the one of
         // A at the same index
         assert_ne!(b_events[alone].offset_ms, Some(300_000));
-        // only to see
-        assert!(of_b.anchor_here(0, 1_000).is_err());
-        assert!(of_b.correct_here(1, 1_000).is_err());
+        // B's events are corrected too: the one born from A's touch by A's
+        // event, the other one by its own (side B)
+        let b_index_u32 = u32::try_from(b_index).unwrap();
+        let alone_u32 = u32::try_from(alone).unwrap();
+        of_b.correct_here(b_index_u32, 250_000).unwrap();
+        of_b.correct_here(alone_u32, 50_000).unwrap();
+        let fresh = |side| {
+            let review = app
+                .clone()
+                .video_review(team.clone(), m.clone(), side, None)
+                .unwrap();
+            review.set_durations(vec![9_000_000]).unwrap();
+            review.events()
+        };
+        let (a_after, b_after) = (fresh(MatchSide::A), fresh(MatchSide::B));
+        assert_eq!(a_after[a_index].offset_ms, Some(250_000));
+        assert_eq!(b_after[b_index].offset_ms, Some(250_000));
+        assert_eq!(b_after[alone].offset_ms, Some(50_000));
+        assert!(b_after[alone].corrected_ms.is_some());
+        // A's event at the same index is not the one of B
+        assert_eq!(a_after[alone].offset_ms, Some(300_000));
         // the clips of B are B's own
         let pick = ClipPick {
             scope: StatsScope::Match,
