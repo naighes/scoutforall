@@ -900,7 +900,7 @@ impl ScoutingSession {
     pub fn available_techniques(&self) -> Vec<TechniqueEnum> {
         match (self.event, self.player) {
             (Some(EventTypeEnum::A), Some(attacker)) => self
-                .snapshot
+                .active()
                 .available_set_types(&attacker)
                 .into_iter()
                 .map(TechniqueEnum::Set)
@@ -930,7 +930,7 @@ impl ScoutingSession {
     fn preselected_technique(&self) -> Option<TechniqueEnum> {
         match (self.event, self.player) {
             (Some(EventTypeEnum::A), Some(attacker)) => self
-                .snapshot
+                .active()
                 .preselected_set_type(&attacker)
                 .map(TechniqueEnum::Set),
             (Some(EventTypeEnum::S), Some(server)) => Some(TechniqueEnum::Serve(

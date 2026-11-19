@@ -834,6 +834,18 @@ mod tests {
         assert_eq!(again.touches().len(), 2);
         assert_eq!(again.side(), session.side());
         assert_eq!(again.event_choices(), session.event_choices());
+        // B attacks after its reception: its attacker's sets are offered
+        // (and one chosen), as for A
+        session.choose_event_of(Side::B, A).await.unwrap();
+        let theirs = session.snapshot_of(Side::B).unwrap().clone();
+        let attacker = session
+            .player_choices()
+            .iter()
+            .map(|c| c.id)
+            .find(|id| !theirs.available_set_types(id).is_empty())
+            .unwrap();
+        session.choose_player(attacker).await.unwrap();
+        assert!(!session.available_techniques().is_empty());
     }
 
     /// With the player first (the phone), the events before their player

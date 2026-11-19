@@ -1763,10 +1763,13 @@ impl StatsScreen {
                 ))
                 .height(Length::Fill)
                 .width(Length::Fixed(FILTERS_WIDTH));
-                let right = column![tabs, error, container(page).height(Length::Fill)]
+                let right = column![error, container(page).height(Length::Fill)]
                     .spacing(12)
                     .width(Length::Fill);
-                row![left, right].spacing(14).into()
+                // the tabs where they are on the other pages: over everything
+                column![tabs, row![left, right].spacing(14).height(Length::Fill)]
+                    .spacing(12)
+                    .into()
             }
         }
     }
@@ -2137,9 +2140,15 @@ impl StatsScreen {
                 .collect(),
             ),
         };
-        match top {
-            true => ui::choice_inline(name, on, pills, c),
-            false => ui::choice_line(name, on, pills, c),
+        match (filter, top) {
+            // the grouping says what they are: no name
+            (Filter::Series | Filter::Mode, _) => iced::widget::Row::with_children(pills)
+                .spacing(4)
+                .wrap()
+                .vertical_spacing(4)
+                .into(),
+            (_, true) => ui::choice_inline(name, on, pills, c),
+            (_, false) => ui::choice_line(name, on, pills, c),
         }
     }
 

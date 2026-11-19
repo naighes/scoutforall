@@ -1012,34 +1012,60 @@ impl ScoutingScreen {
         };
         match st.step {
             ScoutingStep::Event => {
-                for e in &snap.events {
-                    // the first choice of an event has the key of the event, the
-                    // same event of the other side its shift
+                // the first choice of an event has the key of the event, the
+                // same event of the other side its shift
+                let key_of = |e: &EventChoice| {
                     let key = self.keys.scouting_keybindings.key_for(&e.value);
-                    let key = match other_side_choice(&snap.events, e.value) {
+                    match other_side_choice(&snap.events, e.value) {
                         Some(other) if std::ptr::eq(other, e) => {
                             key.as_ref().and_then(scout4all_keys::shifted)
                         }
                         Some(_) | None => key,
-                    };
-                    // scouting both sides, the team of the event in its colour
-                    let label: Element<'a, Message> = match st.both {
-                        true => row![
-                            ui::body(self.side_name(e.side_b).to_string())
-                                .color(side_color(e.side_b)),
-                            ui::body(e.name.clone()),
-                        ]
-                        .spacing(8)
-                        .into(),
-                        false => ui::body(e.name.clone()).into(),
-                    };
-                    list = list.push(ui::choice(
-                        key.as_ref().map(|k| keymap::label(k, s)),
-                        label,
-                        false,
-                        Some(Message::Event(e.side_b, e.value)),
-                        c,
-                    ));
+                    }
+                    .map(|k| keymap::label(&k, s))
+                };
+                match st.both {
+                    // both sides: the teams side by side, in their colours,
+                    // so that all the events are seen without scrolling
+                    true => {
+                        let side_column = |side_b: bool| -> Element<'a, Message> {
+                            let mut column = Column::new().spacing(2).width(Length::FillPortion(1));
+                            column = column.push(
+                                container(
+                                    ui::body(self.side_name(side_b).to_string())
+                                        .color(side_color(side_b)),
+                                )
+                                .padding(Padding::from([2, 6])),
+                            );
+                            for e in snap.events.iter().filter(|e| e.side_b == side_b) {
+                                column = column.push(half(
+                                    key_of(e),
+                                    e.name.clone(),
+                                    false,
+                                    Message::Event(e.side_b, e.value),
+                                ));
+                            }
+                            column.into()
+                        };
+                        list = list.push(
+                            iced::widget::Row::with_children(vec![
+                                side_column(false),
+                                side_column(true),
+                            ])
+                            .spacing(2),
+                        );
+                    }
+                    false => {
+                        for e in &snap.events {
+                            list = list.push(ui::choice(
+                                key_of(e),
+                                ui::body(e.name.clone()),
+                                false,
+                                Some(Message::Event(e.side_b, e.value)),
+                                c,
+                            ));
+                        }
+                    }
                 }
                 // the title only over options there are
                 if st.inverted_p1_applies || st.reception_open {
