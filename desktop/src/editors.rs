@@ -1101,7 +1101,14 @@ impl Editor {
                 let mut data = self.match_data_of_roster();
                 let mut chosen: Vec<uuid::Uuid> = self
                     .sheet()
-                    .map(|sheet| sheet.tiles.iter().filter(|p| p.chosen).map(|p| p.id).collect())
+                    .map(|sheet| {
+                        sheet
+                            .tiles
+                            .iter()
+                            .filter(|p| p.chosen)
+                            .map(|p| p.id)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 chosen.push(player);
                 data.roster = Some(chosen);
@@ -1164,11 +1171,13 @@ impl Editor {
     /// of a new season.
     fn sheet(&self) -> Option<Sheet<'_>> {
         match &self.kind {
-            Kind::Match(m) if matches!(m.step, MatchStep::Roster | MatchStep::RosterB) => Some(Sheet {
-                first: MATCH_ROSTER,
-                tiles: &m.roster,
-                columns: &m.columns,
-            }),
+            Kind::Match(m) if matches!(m.step, MatchStep::Roster | MatchStep::RosterB) => {
+                Some(Sheet {
+                    first: MATCH_ROSTER,
+                    tiles: &m.roster,
+                    columns: &m.columns,
+                })
+            }
             Kind::Season(t) if t.on_players => Some(Sheet {
                 first: SEASON_PLAYERS,
                 tiles: &t.tiles,
@@ -1732,11 +1741,19 @@ impl Editor {
         }
     }
 
-    /// A new match just saved, to be scouted on both sides: the players of B
-    /// come next.
+    /// A match just saved, to be scouted on both sides, new or edited: the
+    /// players of B come next.
     fn both_to_scout(&self) -> bool {
-        matches!(&self.kind, Kind::Match(m) if m.id.is_none() && m.created.is_none())
-            && self.form.index(MATCH_SCOUTING) == SCOUTING_BOTH
+        match &self.kind {
+            // a new match, as the form chose it
+            Kind::Match(m) if m.id.is_none() && m.created.is_none() => {
+                self.form.index(MATCH_SCOUTING) == SCOUTING_BOTH
+            }
+            // a match saved on both sides, edited: its details, then the
+            // players of B, always (the way to write them later)
+            Kind::Match(m) => m.id.is_some() && m.created.is_none() && m.data.both,
+            _ => false,
+        }
     }
 
     /// A match not saved yet: once saved, it opens.
@@ -2174,6 +2191,145 @@ mod tests {
             .roster_of_b(cortona, id, MatchForm::default(), None)
             .unwrap();
         assert_eq!(roster.players.iter().filter(|p| p.chosen).count(), 7);
+    }
+
+    /// Eight players of B written, the first one then left off the
+    /// score sheet: seven chosen, which a roster never saved can't be.
+    fn write_players_of_b(e: &mut Editor, core: &Scout4All) {
+        for n in 1..=8u8 {
+            send(
+                e,
+                core,
+                form::Message::Details(MATCH_ROSTER + usize::from(n) - 1),
+            );
+            send(e, core, Input(ADDING_NAME, format!("Player {n}")));
+            send(e, core, Input(ADDING_NUMBER, n.to_string()));
+            send(e, core, form::Message::Save);
+            assert!(e.correcting().is_none(), "{:?}", e.form.error);
+        }
+        send(e, core, form::Message::Focus(MATCH_ROSTER));
+        press(e, core, key!(space));
+    }
+
+    /// A match of Cortona on both sides, saved with no players of B (Esc
+    /// on their score sheet); its id.
+    fn both_without_players_of_b(core: &Scout4All, cortona: &str) -> String {
+        let mut e = new_match(core, cortona);
+        send(&mut e, core, Input(MATCH_OPPONENT, "Cascina 2".into()));
+        send(&mut e, core, Choose(MATCH_SCOUTING, SCOUTING_BOTH));
+        for _ in 0..3 {
+            press(&mut e, core, key!(enter));
+        }
+        assert_eq!(step(&e), MatchStep::RosterB);
+        match press(&mut e, core, BACK_KEY) {
+            Edited::Saved(id) => id,
+            _ => unreachable!("saved, without the players of B"),
+        }
+    }
+
+    fn edit_match(core: &Scout4All, team_id: &str, id: &str) -> Editor {
+        Editor::a_match(
+            strings(LanguageEnum::It),
+            core,
+            team_id.into(),
+            Some(id.into()),
+        )
+        .unwrap()
+    }
+
+    /// The players of B chosen on the score sheet: all of the team while
+    /// it was never saved.
+    fn chosen_of_b(core: &Scout4All, team: &str, id: &str) -> usize {
+        core.roster_of_b(team.into(), id.into(), MatchForm::default(), None)
+            .unwrap()
+            .players
+            .iter()
+            .filter(|p| p.chosen)
+            .count()
+    }
+
+    /// A match left without the players of B (Esc on their score sheet)
+    /// gets them from its edit: the details, then the score sheet of B.
+    #[test]
+    fn the_players_of_b_are_written_from_the_edit_of_the_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        team(&core, "Cascina 2", 0);
+        let id = both_without_players_of_b(&core, &cortona);
+        assert_eq!(chosen_of_b(&core, &cortona, &id), 0);
+        let mut e = edit_match(&core, &cortona, &id);
+        assert!(!e.is_new_match());
+        for _ in 0..3 {
+            assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        }
+        assert_eq!(step(&e), MatchStep::RosterB);
+        // seven at least, as when the match is created
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        assert!(e.form.error.is_some());
+        write_players_of_b(&mut e, &core);
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Saved(s) if s == id));
+        assert_eq!(chosen_of_b(&core, &cortona, &id), 7);
+    }
+
+    /// Esc on the players of B leaves them as they are: the details are
+    /// saved, the players of B not touched, with or without any.
+    #[test]
+    fn leaving_the_players_of_b_in_the_edit_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        team(&core, "Cascina 2", 0);
+        let id = both_without_players_of_b(&core, &cortona);
+        let mut e = edit_match(&core, &cortona, &id);
+        for _ in 0..3 {
+            press(&mut e, &core, key!(enter));
+        }
+        write_players_of_b(&mut e, &core);
+        // written but not saved: Esc, the score sheet never saved (the
+        // eight are in the team, all of them what it would get)
+        assert!(matches!(press(&mut e, &core, BACK_KEY), Edited::Saved(s) if s == id));
+        assert_eq!(chosen_of_b(&core, &cortona, &id), 8);
+        // one left off and saved, then edited again: Esc and Enter keep it
+        let mut e = edit_match(&core, &cortona, &id);
+        for _ in 0..3 {
+            press(&mut e, &core, key!(enter));
+        }
+        send(&mut e, &core, form::Message::Focus(MATCH_ROSTER));
+        press(&mut e, &core, key!(space));
+        assert!(matches!(
+            press(&mut e, &core, key!(enter)),
+            Edited::Saved(_)
+        ));
+        assert_eq!(chosen_of_b(&core, &cortona, &id), 7);
+        for back in [true, false] {
+            let mut e = edit_match(&core, &cortona, &id);
+            for _ in 0..3 {
+                press(&mut e, &core, key!(enter));
+            }
+            assert_eq!(step(&e), MatchStep::RosterB);
+            let key = if back { BACK_KEY } else { key!(enter) };
+            assert!(matches!(press(&mut e, &core, key), Edited::Saved(s) if s == id));
+            assert_eq!(chosen_of_b(&core, &cortona, &id), 7);
+        }
+    }
+
+    /// A match of one team has no players of B: its edit ends with the
+    /// players of A.
+    #[test]
+    fn the_edit_of_a_match_of_one_team_has_no_players_of_b() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        let Edited::Saved(id) = (0..3).fold(Edited::Stay, |_, _| press(&mut e, &core, key!(enter)))
+        else {
+            unreachable!("saved");
+        };
+        let mut e = edit_match(&core, &cortona, &id);
+        let last = (0..3).fold(Edited::Stay, |_, _| press(&mut e, &core, key!(enter)));
+        assert!(matches!(last, Edited::Saved(s) if s == id));
     }
 
     /// The name of a team links it as team B: nothing to create; a new

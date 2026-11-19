@@ -35,6 +35,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use rusqlite::{Transaction, params};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// The id of a match, its UUID as text.
@@ -670,14 +671,48 @@ impl MatchWriter for SqliteMatchWriter {
     ) -> Result<(), AppError> {
         let id = match_uuid(&m.id)?;
         self.0.write(|tx| {
-            let row = match_rows(tx, id)?
-                .ok_or_else(|| not_found(&format!("match {id}")))?
-                .row;
-            let TeamRef::Team(b) = row.team_b else {
+            let rows = match_rows(tx, id)?.ok_or_else(|| not_found(&format!("match {id}")))?;
+            let TeamRef::Team(b) = rows.row.team_b else {
                 return Err(AppError::IO(IOError::Msg(format!(
                     "match {id}: team B is a name, without a roster"
                 ))));
             };
+            // whoever B has put on court, on the bench as libero or in a
+            // touch stays on the roster: the check is made here, in the
+            // transaction, whatever asks for it
+            let used: HashSet<Uuid> = rows
+                .sets
+                .iter()
+                .filter(|s| !s.row.deleted)
+                .flat_map(|s| {
+                    s.lineups
+                        .iter()
+                        .filter(|l| l.side == Side::B)
+                        .flat_map(|l| {
+                            l.positions
+                                .iter()
+                                .copied()
+                                .chain([l.libero, l.setter])
+                                .chain(l.fallback_libero)
+                        })
+                        .chain(
+                            s.events
+                                .iter()
+                                .filter(|e| e.side == Side::B && !e.deleted)
+                                .flat_map(|e| {
+                                    e.entry.player.into_iter().chain(e.entry.target_player)
+                                }),
+                        )
+                })
+                .collect();
+            if let Some(missing) = used
+                .iter()
+                .find(|p| !numbers.iter().any(|n| n.player == **p))
+            {
+                return Err(AppError::IO(IOError::Msg(format!(
+                    "match {id}: player {missing} of team B played, it stays on the roster"
+                ))));
+            }
             tx.execute(
                 "DELETE FROM match_roster WHERE match_id = ?1 AND team_id = ?2",
                 params![Sql(id), Sql(b)],

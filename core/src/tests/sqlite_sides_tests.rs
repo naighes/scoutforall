@@ -793,4 +793,209 @@ mod tests {
             .collect();
         assert_eq!(scores, vec![((1, 0), true)]);
     }
+
+    fn numbers(t: &TeamEntry, except: &[usize]) -> Vec<crate::match_form::RosterNumber> {
+        t.players
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !except.contains(i))
+            .map(|(_, pl)| crate::match_form::RosterNumber {
+                player: pl.id,
+                number: pl.number,
+                role: pl.role,
+            })
+            .collect()
+    }
+
+    async fn roster_of_b(p: &Sqlite, m: &MatchEntry) -> Vec<Uuid> {
+        let id = Uuid::parse_str(&m.id).unwrap();
+        p.db.read(|tx| {
+            let mut st = tx
+                .prepare("SELECT person_id FROM match_roster WHERE match_id = ?1 AND team_id = (SELECT team_b FROM matches WHERE id = ?1)")
+                .map_err(sqlite)?;
+            let ids = st
+                .query_map(params![Sql(id)], |r| r.get::<_, Sql<Uuid>>(0).map(|s| s.0))
+                .map_err(sqlite)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sqlite)?;
+            Ok(ids)
+        })
+        .unwrap()
+    }
+
+    /// The roster of B can be written again while no set is on both
+    /// sides, and whoever B put on court stays on it.
+    #[tokio::test]
+    async fn a_player_of_b_in_a_lineup_stays_on_the_roster() {
+        let p = Sqlite::new();
+        let (a, b, m) = set_one(&p, true).await;
+        // all of them, then without the libero of B: it is in the lineup
+        p.match_writer
+            .save_roster_of_b(&m, &numbers(&b, &[]))
+            .await
+            .unwrap();
+        for out in [0usize, 3, 6] {
+            let refused = p
+                .match_writer
+                .save_roster_of_b(&m, &numbers(&b, &[out]))
+                .await;
+            assert!(refused.is_err(), "player {out} is on court or libero");
+            // nothing changed
+            assert_eq!(roster_of_b(&p, &m).await.len(), b.players.len());
+        }
+        // A's roster isn't B's: the check is of B's side only
+        let _ = a;
+    }
+
+    /// Whoever touched the ball for B without being in the lineup (the
+    /// bench) stays on the roster too; an undone touch holds no one.
+    #[tokio::test]
+    async fn a_player_of_b_in_a_touch_stays_on_the_roster() {
+        let p = Sqlite::new();
+        let (_, b, m) = set_one(&p, true).await;
+        let mut b = b;
+        b.players.push(PlayerEntry {
+            id: Uuid::new_v4(),
+            name: "Bench".into(),
+            number: 8,
+            role: Some(RoleEnum::OutsideHitter),
+            ..PlayerEntry::default()
+        });
+        let b = p.team_writer.save(TeamInput::Existing(b)).await.unwrap();
+        let bench = b.players[7].id;
+        let all = numbers(&b, &[]);
+        let without_bench = numbers(&b, &[7]);
+        p.match_writer.save_roster_of_b(&m, &all).await.unwrap();
+        // nobody touched: the bench can go
+        p.match_writer
+            .save_roster_of_b(&m, &without_bench)
+            .await
+            .unwrap();
+        p.match_writer.save_roster_of_b(&m, &all).await.unwrap();
+        let match_id = Uuid::parse_str(&m.id).unwrap();
+        let touch = |deleted: bool, target: bool| Event {
+            id: Uuid::new_v4(),
+            match_id,
+            set_number: 1,
+            side: Side::B,
+            seq: 0,
+            entry: EventEntry {
+                timestamp: Utc.with_ymd_and_hms(2026, 11, 14, 17, 5, 0).unwrap(),
+                event_type: P,
+                player: Some(match target {
+                    true => b.players[1].id,
+                    false => bench,
+                }),
+                eval: Some(Negative),
+                target_player: target.then_some(bench),
+                technique: None,
+                flags: EventFlags::default(),
+            },
+            deleted,
+        };
+        let write = |e: Event| {
+            p.db.write(|tx| {
+                insert_event(
+                    tx,
+                    &Event {
+                        seq: next_seq(tx, match_id, 1)?,
+                        ..e
+                    },
+                )
+            })
+            .unwrap()
+        };
+        // an undone touch of the bench holds no one
+        write(touch(true, false));
+        p.match_writer
+            .save_roster_of_b(&m, &without_bench)
+            .await
+            .unwrap();
+        p.match_writer.save_roster_of_b(&m, &all).await.unwrap();
+        // a live touch does, as the player or as the target
+        for target in [false, true] {
+            let id = Uuid::new_v4();
+            write(Event {
+                id,
+                ..touch(false, target)
+            });
+            let refused = p.match_writer.save_roster_of_b(&m, &without_bench).await;
+            assert!(refused.is_err(), "touch (target: {target})");
+            assert_eq!(roster_of_b(&p, &m).await.len(), 8);
+            p.db.write(|tx| {
+                tx.execute(
+                    "UPDATE events SET deleted = 1 WHERE id = ?1",
+                    params![Sql(id)],
+                )
+                .map(|_| ())
+                .map_err(sqlite)
+            })
+            .unwrap();
+        }
+        // all of them undone again: the bench can go
+        p.match_writer
+            .save_roster_of_b(&m, &without_bench)
+            .await
+            .unwrap();
+        assert_eq!(roster_of_b(&p, &m).await.len(), 7);
+    }
+
+    /// The form of the roster of B, on the match as B sees it, keeps who
+    /// B put on court on the score sheet: it can't take them off, nor
+    /// save a roster without them.
+    #[tokio::test]
+    async fn the_form_of_b_keeps_who_played_on_the_roster() {
+        use crate::match_form::{MatchForm, MatchFormError};
+        let p = Sqlite::new();
+        let (a, b, m) = set_one(&p, true).await;
+        let mut b = b;
+        b.players.push(PlayerEntry {
+            id: Uuid::new_v4(),
+            name: "Bench".into(),
+            number: 8,
+            role: Some(RoleEnum::OutsideHitter),
+            ..PlayerEntry::default()
+        });
+        let b = p.team_writer.save(TeamInput::Existing(b)).await.unwrap();
+        p.match_writer
+            .save_roster_of_b(&m, &numbers(&b, &[]))
+            .await
+            .unwrap();
+        let of_b = p.match_reader.read_of_b(&a, &m.id).unwrap().unwrap();
+        assert_eq!(of_b.played().len(), 7, "the lineup and the libero of B");
+        let ids = |except: &[usize]| -> Vec<Uuid> {
+            b.players
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !except.contains(i))
+                .map(|(_, pl)| pl.id)
+                .collect()
+        };
+        // toggled, who played stays and the bench goes
+        let mut form = MatchForm::default();
+        form.toggle(b.players[0].id, &of_b.team, Some(&of_b));
+        assert_eq!(form, MatchForm::default());
+        form.toggle(b.players[6].id, &of_b.team, Some(&of_b));
+        assert_eq!(form, MatchForm::default());
+        form.toggle(b.players[7].id, &of_b.team, Some(&of_b));
+        assert_eq!(form.roster, Some(ids(&[7])));
+        // a roster without them, as no form makes it, is refused
+        for out in [0usize, 4, 6] {
+            let without = MatchForm {
+                roster: Some(ids(&[out])),
+                ..MatchForm::default()
+            };
+            assert_eq!(
+                without.roster_of_b_numbers(&of_b.team, Some(&of_b)),
+                Err(MatchFormError::RosterWithoutPlayed),
+                "player {out}"
+            );
+        }
+        // without the bench it's fine
+        assert_eq!(
+            form.roster_of_b_numbers(&of_b.team, Some(&of_b))
+                .map(|n| n.len()),
+            Ok(7)
+        );
+    }
 }
