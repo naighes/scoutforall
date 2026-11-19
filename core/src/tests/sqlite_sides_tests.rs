@@ -830,6 +830,42 @@ mod tests {
         assert_eq!(again.event_choices(), session.event_choices());
     }
 
+    /// A touch corrected on a set of both sides: its pair follows with the
+    /// evaluation the pair admits, either touch of the pair can be the
+    /// one corrected, and what would not fit is refused.
+    #[tokio::test]
+    async fn a_touch_of_a_pair_is_corrected_with_its_other_touch() {
+        use crate::touch_edit::TouchEdit;
+        let p = Sqlite::new();
+        let (a, b, m, start_a, start_b) = on_both_sides(&p).await;
+        let touches = rallies(&a, &b);
+        let n = m.max_substitutions;
+        // the serve `+`: the reception `-` follows the serve to `!` (the
+        // serve `#` is an ace: B's attack couldn't come)
+        let mut edit = TouchEdit::new(&start_a, &start_b, &touches, 0, n).unwrap();
+        assert_eq!(edit.side(), Side::A);
+        assert!(edit.evals().contains(&Exclamative), "{:?}", edit.evals());
+        assert!(!edit.evals().contains(&Perfect));
+        edit.choose_eval(Exclamative);
+        let saved = edit.apply().unwrap();
+        assert_eq!(saved[0].1.eval, Some(Exclamative));
+        assert_eq!(saved[1].1.eval, Some(Exclamative));
+        assert_eq!(saved[2..], touches[2..]);
+        // the reception `-` corrected to `+`: the serve follows, to `-`...
+        let mut edit = TouchEdit::new(&start_a, &start_b, &touches, 1, n).unwrap();
+        assert_eq!(edit.side(), Side::B);
+        edit.choose_eval(Positive);
+        let saved = edit.apply().unwrap();
+        assert_eq!(saved[1].1.eval, Some(Positive));
+        assert_eq!(saved[0].1.eval, Some(Negative));
+        // ...and with a reception error the rally would be over before B's
+        // attack: not a choice
+        let edit = TouchEdit::new(&start_a, &start_b, &touches, 1, n).unwrap();
+        assert!(!edit.evals().contains(&Error));
+        // a touch that isn't one of a player's
+        assert!(TouchEdit::new(&start_a, &start_b, &touches, 9, n).is_err());
+    }
+
     /// Each side has its inverted P1, and B's statistics start from its
     /// earlier sets: the inverted P1 of B goes on from its last set.
     #[tokio::test]

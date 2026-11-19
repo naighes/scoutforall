@@ -92,6 +92,7 @@ use scout4all_core::{
         layout::{self, CONFIG, UNREADABLE_CONFIG},
     },
     team_form::{TeamForm, TeamFormError},
+    touch_edit::TouchEdit,
     trend::{Replay, Series, TrendPoint},
     video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place},
 };
@@ -3435,12 +3436,28 @@ impl Scouting {
     }
 }
 
-/// Correcting an event of a set (see `event_edit` in the core): saved
-/// with `Scout4All::save_correction`.
+/// What is being corrected: an event of a set of A alone, or a touch of a
+/// set scouted on both sides, with the starts of the sides to save it and
+/// the team of B.
+// one at a time, kept for a correction: no need to box
+#[allow(clippy::large_enum_variant)]
+enum Editing {
+    Own(EventEdit),
+    Both {
+        edit: TouchEdit,
+        a: SetEntry,
+        b: SetEntry,
+        team_b: TeamEntry,
+    },
+}
+
+/// Correcting an event of a set (see `event_edit` in the core), or a touch
+/// of a set of both sides (`touch_edit`): saved with
+/// `Scout4All::save_correction`.
 #[derive(uniffi::Object)]
 pub struct Correction {
     current_match: MatchEntry,
-    edit: Mutex<EventEdit>,
+    edit: Mutex<Editing>,
     labels: &'static Labels,
 }
 
@@ -3449,12 +3466,38 @@ impl Correction {
     pub fn state(&self) -> CorrectionState {
         let edit = self.edit();
         let labels = self.labels;
-        let team = &self.current_match.team;
-        let event = edit.event();
-        let before = edit.before();
+        let (index, event, before, fields, types, evals, techniques) = match &*edit {
+            Editing::Own(e) => (
+                e.index(),
+                e.event(),
+                e.before(),
+                e.fields(),
+                e.event_types(),
+                e.evals(),
+                e.techniques(),
+            ),
+            Editing::Both { edit: e, .. } => (
+                e.index(),
+                e.event(),
+                e.before(),
+                e.fields(),
+                e.event_types(),
+                e.evals(),
+                e.techniques(),
+            ),
+        };
+        let (team, side_b) = match &*edit {
+            Editing::Both {
+                edit: e, team_b, ..
+            } if e.side() == scout4all_core::domain::Side::B => (team_b, true),
+            _ => (&self.current_match.team, false),
+        };
         CorrectionState {
-            index: u32::try_from(edit.index()).unwrap_or(u32::MAX),
-            event: scouted_event(team, event, labels),
+            index: u32::try_from(index).unwrap_or(u32::MAX),
+            event: ScoutedEvent {
+                side_b,
+                ..scouted_event(team, event, labels)
+            },
             score_us: before.score_us,
             score_them: before.score_them,
             rotation: before
@@ -3466,24 +3509,21 @@ impl Correction {
                 .get_current_phase()
                 .friendly_name(labels)
                 .to_string(),
-            fields: edit.fields(),
-            event_types: edit
-                .event_types()
+            fields,
+            event_types: types
                 .into_iter()
                 .map(|e| EventChoice {
                     value: e,
                     name: e.friendly_name(labels).to_string(),
-                    side_b: false,
+                    side_b,
                 })
                 .collect(),
-            evals: edit
-                .evals()
+            evals: evals
                 .into_iter()
                 .map(|eval| eval_choice(eval, event.event_type, labels))
                 .collect(),
             eval: event.eval,
-            techniques: edit
-                .techniques()
+            techniques: techniques
                 .into_iter()
                 .flatten()
                 .map(|t| technique_choice(t, event.technique == Some(t), labels))
@@ -3492,21 +3532,30 @@ impl Correction {
     }
 
     pub fn choose_event_type(&self, event: EventTypeEnum) {
-        self.edit().choose_event_type(event);
+        match &mut *self.edit() {
+            Editing::Own(e) => e.choose_event_type(event),
+            Editing::Both { edit, .. } => edit.choose_event_type(event),
+        }
     }
 
     pub fn choose_eval(&self, eval: EvalEnum) {
-        self.edit().choose_eval(eval);
+        match &mut *self.edit() {
+            Editing::Own(e) => e.choose_eval(eval),
+            Editing::Both { edit, .. } => edit.choose_eval(eval),
+        }
     }
 
     /// A set or serve, or none.
     pub fn choose_technique(&self, technique: Option<TechniqueEnum>) {
-        self.edit().choose_technique(technique);
+        match &mut *self.edit() {
+            Editing::Own(e) => e.choose_technique(technique),
+            Editing::Both { edit, .. } => edit.choose_technique(technique),
+        }
     }
 }
 
 impl Correction {
-    fn edit(&self) -> MutexGuard<'_, EventEdit> {
+    fn edit(&self) -> MutexGuard<'_, Editing> {
         self.edit
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -3996,7 +4045,8 @@ impl Scout4All {
         )
     }
 
-    /// The events of a set of the match, to correct them.
+    /// The events of a set of the match, to correct them: the touches of
+    /// both sides for a set scouted on both.
     pub fn set_events(
         &self,
         team_id: String,
@@ -4005,15 +4055,23 @@ impl Scout4All {
     ) -> Result<SetEvents, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let set = find_set(&m, set_number)?;
+        let events = match self.set_reader.read_touches(&m, set_number)? {
+            None => set_event_rows(&m, set, self.language.labels())?,
+            Some(touches) => {
+                let b = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+                touch_rows(&m, &b.team, &touches, self.language.labels())?
+            }
+        };
         Ok(SetEvents {
             set_number,
             team: m.team.name.clone(),
             opponent: m.opponent.clone(),
-            events: set_event_rows(&m, set, self.language.labels())?,
+            events,
         })
     }
 
-    /// Starts correcting an event of a set of the match.
+    /// Starts correcting an event of a set of the match, a touch of either
+    /// side for a set scouted on both.
     pub fn correction(
         &self,
         team_id: String,
@@ -4023,14 +4081,29 @@ impl Scout4All {
     ) -> Result<Arc<Correction>, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let labels = self.language.labels();
-        let edit = EventEdit::new(
-            find_set(&m, set_number)?,
-            usize::try_from(index).unwrap_or(usize::MAX),
-            m.max_substitutions,
-        )
-        .map_err(|e| MobileError::Failed {
+        let index = usize::try_from(index).unwrap_or(usize::MAX);
+        let failed = |e: scout4all_core::event_edit::EventEditError| MobileError::Failed {
             reason: e.message(labels).to_string(),
-        })?;
+        };
+        let edit = match self.set_reader.read_touches(&m, set_number)? {
+            None => Editing::Own(
+                EventEdit::new(find_set(&m, set_number)?, index, m.max_substitutions)
+                    .map_err(failed)?,
+            ),
+            Some(touches) => Editing::Both {
+                edit: TouchEdit::new(
+                    &touches.a,
+                    &touches.b,
+                    &touches.touches,
+                    index,
+                    m.max_substitutions,
+                )
+                .map_err(failed)?,
+                team_b: self.read_match_of(&team_id, &match_id, MatchSide::B)?.team,
+                a: touches.a,
+                b: touches.b,
+            },
+        };
         Ok(Arc::new(Correction {
             current_match: m,
             edit: Mutex::new(edit),
@@ -4038,15 +4111,30 @@ impl Scout4All {
         }))
     }
 
-    /// Saves the set with the event corrected, if the events after it still
-    /// fit and the set ends as it did.
+    /// Saves the set with the event corrected (with its pair, on both
+    /// sides), if the events after it still fit and the set ends as it did.
     pub fn save_correction(&self, correction: Arc<Correction>) -> Result<(), MobileError> {
         let labels = self.language.labels();
-        let set = correction.edit().apply().map_err(|e| MobileError::Failed {
+        let failed = |e: scout4all_core::event_edit::EventEditError| MobileError::Failed {
             reason: e.message(labels).to_string(),
-        })?;
-        self.runtime
-            .block_on(self.set_writer.update(&correction.current_match, &set))?;
+        };
+        let saved = match &*correction.edit() {
+            Editing::Own(edit) => {
+                let set = edit.apply().map_err(failed)?;
+                self.runtime
+                    .block_on(self.set_writer.update(&correction.current_match, &set))
+            }
+            Editing::Both { edit, a, b, .. } => {
+                let touches = edit.apply().map_err(failed)?;
+                self.runtime.block_on(self.set_writer.update_sides(
+                    &correction.current_match,
+                    a,
+                    Some(b),
+                    &touches,
+                ))
+            }
+        };
+        saved?;
         // as the TUI: a finished match is uploaded again with the events
         // corrected (the set ends as it did)
         let m = &correction.current_match;
@@ -5696,6 +5784,53 @@ fn set_event_rows(
             ),
         })
         .collect())
+}
+
+/// The touches of a set scouted on both sides, to correct them: the score
+/// after each, from A's side.
+fn touch_rows(
+    m: &MatchEntry,
+    team_b: &TeamEntry,
+    touches: &scout4all_core::rally::Touches,
+    labels: &Labels,
+) -> Result<Vec<SetEvent>, MobileError> {
+    touches
+        .touches
+        .iter()
+        .enumerate()
+        .map(|(i, (side, e))| {
+            let (a, _) = scout4all_core::rally::replay(
+                &touches.a,
+                &touches.b,
+                touches.touches.get(..=i).unwrap_or(&touches.touches),
+                m.max_substitutions,
+            )
+            .map_err(|e| MobileError::Failed {
+                reason: e.to_string(),
+            })?;
+            let (team, side_b) = match side {
+                scout4all_core::domain::Side::A => (&m.team, false),
+                scout4all_core::domain::Side::B => (team_b, true),
+            };
+            Ok(SetEvent {
+                index: u32::try_from(i).unwrap_or(u32::MAX),
+                event: ScoutedEvent {
+                    side_b,
+                    ..scouted_event(team, e, labels)
+                },
+                score_us: a.score_us,
+                score_them: a.score_them,
+                editable: !matches!(
+                    e.event_type,
+                    EventTypeEnum::R
+                        | EventTypeEnum::CL
+                        | EventTypeEnum::LR
+                        | EventTypeEnum::LF
+                        | EventTypeEnum::CS
+                ),
+            })
+        })
+        .collect()
 }
 
 /// For each event of B's side, set by set, the index of the event of A's

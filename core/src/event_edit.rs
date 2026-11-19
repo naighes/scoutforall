@@ -142,7 +142,7 @@ impl EventEdit {
         Self::techniques_of(&self.before, self.event.event_type, &self.event)
     }
 
-    fn techniques_of(
+    pub(crate) fn techniques_of(
         before: &Snapshot,
         event_type: EventTypeEnum,
         event: &EventEntry,

@@ -1601,7 +1601,7 @@ fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
 pub const STATS_WIDTH: f32 = 400.0;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use {
         super::*,
         crate::{
@@ -1691,10 +1691,9 @@ mod tests {
         (dir, ScoutingScreen::new(scouting, keys, team, m))
     }
 
-    /// Both sides scouted: one side on screen, F5 swaps it, the choices
-    /// carry their side and the last events both.
-    #[test]
-    fn both_sides_show_one_side_and_f5_swaps_it() {
+    /// A match scouted on both sides, its first set started (A serves), in
+    /// `core`: the team and the match of A.
+    pub(crate) fn both_sides_started(core: &Scout4All) -> (String, String) {
         use scout4all_core::{
             match_form::MatchForm,
             player_form::PlayerForm,
@@ -1704,8 +1703,6 @@ mod tests {
             },
             team_form::TeamForm,
         };
-        let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team_of = |name: &str| {
             let team = core
                 .save_team(
@@ -1774,6 +1771,16 @@ mod tests {
             set_start.choose_libero(Some(ids[6].clone())).unwrap();
         }
         core.start_set_both(start, of_b).unwrap();
+        (team, m)
+    }
+
+    /// Both sides scouted: one side on screen, F5 swaps it, the choices
+    /// carry their side and the last events both.
+    #[test]
+    fn both_sides_show_one_side_and_f5_swaps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = both_sides_started(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
             .unwrap();

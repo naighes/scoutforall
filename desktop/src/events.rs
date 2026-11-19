@@ -533,9 +533,13 @@ fn event_row<'a>(e: &SetEvent, chosen: bool, i: usize, c: Colors) -> Element<'a,
     };
     let bold = theme::fonts().bold;
     let body = row![
+        // the touches of B, where both sides are scouted, in its colour
         text((e.index + 1).to_string())
             .size(SIZE_SMALL)
-            .color(c.muted)
+            .color(match e.event.side_b {
+                true => theme::TEAM_THEM,
+                false => c.muted,
+            })
             .width(Length::Fixed(36.0))
             .align_x(Alignment::End),
         text(e.event.symbol.clone().unwrap_or_default())
@@ -584,6 +588,68 @@ mod tests {
         };
         let imported = core.import_dvw(bytes, choice).unwrap();
         (core, imported.team_id, imported.match_id)
+    }
+
+    /// A set of both sides: the touches of both in the list, a touch of
+    /// the pair corrected from the keys moves the other touch too, and
+    /// what is saved is read again as it was.
+    #[test]
+    fn a_pair_of_touches_of_both_sides_is_corrected_from_the_keys() {
+        use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
+        let scouting = core
+            .scouting_in_order(
+                &team_id,
+                &match_id,
+                scout4all_core::scouting::ChoiceOrder::EventFirst,
+            )
+            .unwrap();
+        // A serves `+`, B receives `-`, in the order the ball goes
+        scouting.choose_event_of(false, S).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event_of(true, P).unwrap();
+        let receiver = scouting
+            .state()
+            .court
+            .iter()
+            .map(|p| p.id.clone())
+            .find(|id| scouting.choose_player(id.clone()).is_ok())
+            .unwrap();
+        assert!(!receiver.is_empty());
+        scouting.choose_eval(EvalEnum::Negative).unwrap();
+        drop(scouting);
+
+        let mut events =
+            EventsScreen::new(core.clone(), team_id.clone(), match_id.clone(), 1).unwrap();
+        let rows = &events.set.events;
+        assert_eq!(rows.len(), 2);
+        assert!(!rows[0].event.side_b && rows[1].event.side_b);
+        // the reception: its evaluation can be `+` (the serve follows, to `-`)
+        events.update(Message::Event(1));
+        let Some(correcting) = &events.correcting else {
+            unreachable!("a reception is corrected")
+        };
+        assert!(correcting.state.event.side_b);
+        assert!(
+            correcting
+                .state
+                .evals
+                .iter()
+                .any(|e| e.value == EvalEnum::Positive)
+        );
+        events
+            .correcting
+            .as_ref()
+            .unwrap()
+            .correction
+            .choose_eval(EvalEnum::Positive);
+        events.key(key!(enter));
+        assert!(events.correcting.is_none(), "{:?}", events.error);
+        let reread = EventsScreen::new(core, team_id, match_id, 1).unwrap();
+        assert_eq!(reread.set.events[1].event.symbol.as_deref(), Some("+"));
+        assert_eq!(reread.set.events[0].event.symbol.as_deref(), Some("-"));
     }
 
     #[test]

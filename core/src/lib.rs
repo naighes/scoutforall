@@ -30,6 +30,7 @@ pub mod settings;
 pub mod shapes;
 pub mod storage;
 pub mod team_form;
+pub mod touch_edit;
 pub mod trend;
 pub mod util;
 pub mod video;
