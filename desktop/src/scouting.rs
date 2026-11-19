@@ -757,6 +757,9 @@ impl Trend {
 /// The colour of a side where both are scouted: A's light blue, B's pink.
 /// The choice of the event for the side that isn't the first to offer it:
 /// the one the shift key of the event makes.
+/// The points without a cause: apart from the events, big.
+const NO_CAUSE: [EventTypeEnum; 2] = [EventTypeEnum::PW, EventTypeEnum::PL];
+
 fn other_side_choice(events: &[EventChoice], event: EventTypeEnum) -> Option<&EventChoice> {
     let mut of_event = events.iter().filter(|c| c.value == event);
     let first = of_event.next()?;
@@ -1013,18 +1016,9 @@ impl ScoutingScreen {
         };
         match st.step {
             ScoutingStep::Event => {
-                // the first choice of an event has the key of the event, the
-                // same event of the other side its shift
-                let key_of = |e: &EventChoice| {
-                    let key = self.keys.scouting_keybindings.key_for(&e.value);
-                    match other_side_choice(&snap.events, e.value) {
-                        Some(other) if std::ptr::eq(other, e) => {
-                            key.as_ref().and_then(scout4all_keys::shifted)
-                        }
-                        Some(_) | None => key,
-                    }
-                    .map(|k| keymap::label(&k, s))
-                };
+                let key_of = |e: &EventChoice| self.event_key_label(e, s);
+                // the points without a cause apart, big, as in the app
+                let is_event = |e: &&EventChoice| !NO_CAUSE.contains(&e.value);
                 match st.both {
                     // both sides: the teams side by side, in their colours,
                     // so that all the events are seen without scrolling
@@ -1038,7 +1032,12 @@ impl ScoutingScreen {
                                 )
                                 .padding(Padding::from([2, 6])),
                             );
-                            for e in snap.events.iter().filter(|e| e.side_b == side_b) {
+                            for e in snap
+                                .events
+                                .iter()
+                                .filter(is_event)
+                                .filter(|e| e.side_b == side_b)
+                            {
                                 column = column.push(half(
                                     key_of(e),
                                     e.name.clone(),
@@ -1057,15 +1056,21 @@ impl ScoutingScreen {
                         );
                     }
                     false => {
-                        for e in &snap.events {
-                            list = list.push(ui::choice(
-                                key_of(e),
-                                ui::body(e.name.clone()),
-                                false,
-                                Some(Message::Event(e.side_b, e.value)),
-                                c,
-                            ));
-                        }
+                        // two by two: all the events seen, no scrolling
+                        list = list.push(two_by_two(
+                            snap.events
+                                .iter()
+                                .filter(is_event)
+                                .map(|e| {
+                                    half(
+                                        key_of(e),
+                                        e.name.clone(),
+                                        false,
+                                        Message::Event(e.side_b, e.value),
+                                    )
+                                })
+                                .collect(),
+                        ));
                     }
                 }
                 // the title only over options there are
@@ -1197,9 +1202,14 @@ impl ScoutingScreen {
                 }
             }
         }
+        // the points without a cause apart, big, as in the app, and never
+        // scrolled away
+        let points = (st.step == ScoutingStep::Event).then(|| self.no_cause_points(s, c));
         ui::lit_panel(
             Some(step_title),
-            scrollable(list).height(Length::Fill),
+            column![]
+                .push(points)
+                .push(scrollable(list).height(Length::Fill)),
             true,
             c,
         )
@@ -1208,6 +1218,102 @@ impl ScoutingScreen {
     /// The evaluations in a row, by their symbol, as in the app: a click
     /// or the key saves the event; the key under the symbol when it's
     /// another, the name under the mouse.
+    /// The key that chooses an event: the first choice of an event has the
+    /// key of the event, the same event of the other side its shift.
+    fn event_key_label(&self, e: &EventChoice, s: &Strings) -> Option<String> {
+        let key = self.keys.scouting_keybindings.key_for(&e.value);
+        match other_side_choice(&self.snapshot.events, e.value) {
+            Some(other) if std::ptr::eq(other, e) => key.as_ref().and_then(scout4all_keys::shifted),
+            Some(_) | None => key,
+        }
+        .map(|k| keymap::label(&k, s))
+    }
+
+    /// The points without a cause as in the app: two big buttons, "+1", in
+    /// the color of their team (A blue, B pink), the host on the left.
+    fn no_cause_points<'a>(&'a self, s: &Strings, c: Colors) -> Element<'a, Message> {
+        let st = &self.snapshot.state;
+        let find = |event: EventTypeEnum| {
+            self.snapshot
+                .events
+                .iter()
+                .find(|e| e.value == event && e.side_b == st.side_b)
+        };
+        let button_of = |event: Option<&EventChoice>, team: String, color: Color| {
+            let content: Element<'a, Message> = match event {
+                Some(e) => {
+                    let key: Element<'a, Message> = match self.event_key_label(e, s) {
+                        Some(k) => ui::keycap(&k, c),
+                        None => space::horizontal().width(0).into(),
+                    };
+                    column![
+                        text("+1")
+                            .size(SIZE_SCORE - 6.0)
+                            .font(theme::fonts().bold)
+                            .color(color),
+                        row![key, text(team).size(SIZE_SMALL).color(color)]
+                            .spacing(6)
+                            .align_y(Alignment::Center),
+                    ]
+                    .align_x(Alignment::Center)
+                    .into()
+                }
+                None => space::horizontal().into(),
+            };
+            let value = event.map(|e| e.value);
+            iced::widget::button(container(content).center_x(Length::Fill))
+                .width(Length::FillPortion(1))
+                .padding(Padding::from([2, 8]))
+                .on_press_maybe(value.map(|v| Message::Event(st.side_b, v)))
+                .style(move |_, status| {
+                    let hovered = matches!(
+                        status,
+                        iced::widget::button::Status::Hovered
+                            | iced::widget::button::Status::Pressed
+                    );
+                    iced::widget::button::Style {
+                        background: Some(
+                            Color {
+                                a: if hovered { 0.32 } else { 0.18 },
+                                ..color
+                            }
+                            .into(),
+                        ),
+                        text_color: color,
+                        border: iced::Border {
+                            color,
+                            width: 2.0,
+                            radius: 10.0.into(),
+                        },
+                        ..iced::widget::button::Style::default()
+                    }
+                })
+                .into()
+        };
+        let us = (
+            find(EventTypeEnum::PW),
+            st.team.clone(),
+            side_color(st.side_b),
+        );
+        let them = (
+            find(EventTypeEnum::PL),
+            st.opponent.clone(),
+            side_color(!st.side_b),
+        );
+        let sides = match st.home {
+            true => [us, them],
+            false => [them, us],
+        };
+        let buttons = sides
+            .into_iter()
+            .filter(|(event, _, _)| event.is_some())
+            .map(|(event, team, color)| button_of(event, team, color))
+            .collect::<Vec<_>>();
+        container(iced::widget::Row::with_children(buttons).spacing(8))
+            .padding(Padding::from([0, 0]).bottom(6))
+            .into()
+    }
+
     fn evals<'a>(&'a self, s: &Strings, c: Colors) -> Element<'a, Message> {
         let bold = theme::fonts().bold;
         iced::widget::Row::with_children(self.snapshot.evals.iter().map(|e| {
