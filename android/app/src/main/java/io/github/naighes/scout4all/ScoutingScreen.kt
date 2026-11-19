@@ -1335,15 +1335,22 @@ private fun NoCausePoints(view: ScoutingView, model: ScoutingViewModel) {
     val us = Triple(ours, state.team, usColor)
     val them = Triple(theirs, state.opponent, themColor)
     val sides = if (state.home) listOf(us, them) else listOf(them, us)
-    Row(Modifier.fillMaxWidth().tutorial("no-cause"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // both as tall as the taller (a long name on two lines): the same height
+    Row(
+        Modifier.fillMaxWidth().height(IntrinsicSize.Min).tutorial("no-cause"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         sides.forEach { (event, team, color) ->
             event?.let {
-                Button(
+                // tonal, not filled: the color of the team on its outline and
+                // its name, the button itself quiet
+                OutlinedButton(
                     onClick = { model.event(it) },
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).tutorial("event:${it.value}")
+                    modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 48.dp).tutorial("event:${it.value}")
                         .semantics { contentDescription = it.name },
-                    colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color(0xFF121212)),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = color.copy(alpha = 0.14f), contentColor = color),
+                    border = BorderStroke(1.5.dp, color),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     shape = MaterialTheme.shapes.medium,
                 ) {
                     // a long name on more lines, as in the score: never cut

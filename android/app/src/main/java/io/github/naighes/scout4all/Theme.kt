@@ -21,9 +21,9 @@ val Won = Color(0xFF4ADE80)
 val Lost = Color(0xFFF87171)
 
 /** The two teams wherever they're told apart (the points in a row, the
- * events of the video), as on the desktop: ours light blue, theirs pink. */
-val TeamUs = Color(0xFF38BDF8)
-val TeamThem = Color(0xFFF472B6)
+ * events of the video), as on the desktop: ours soft blue, theirs sand (blue and orange stay apart for color blindness). */
+val TeamUs = Color(0xFF7FB0E0)
+val TeamThem = Color(0xFFD9B26F)
 val Fair = Color(0xFFFACC15)
 /** The phase of the rally, as on the desktop: receiving (side out),
  * serving (break). */
