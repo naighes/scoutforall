@@ -124,8 +124,10 @@ fun ComposeTestRule.waitForText(text: String, substring: Boolean = false) =
     }
 
 /** Until the scouting waits for a player on the court, or an event of the
- * rally: the points without a cause are there (`+1` and the team). */
-fun ComposeTestRule.waitForTheRally() = waitForText("+1 ", substring = true)
+ * rally: the points without a cause are there (`+1`, the team in its description). */
+fun ComposeTestRule.waitForTheRally() = waitFor({ "no \"+1\" in ${texts()}" }) {
+    onAllNodesWithText("+1").fetchSemanticsNodes().isNotEmpty()
+}
 
 /** The texts on the screen, to tell what's there instead. */
 fun ComposeTestRule.texts(): List<String> =

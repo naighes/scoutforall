@@ -1253,20 +1253,12 @@ private fun SidesEvents(view: ScoutingView, model: ScoutingViewModel) {
     val state = view.state
     when (state.both) {
         false -> RallyEvents(view.otherEvents, model)
-        true -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // no name above each row (it cost two lines, and the choices scrolled):
+        // the border of each button is the color of its team, as under the score
+        true -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(state.sideB, !state.sideB).forEach { sideB ->
                 val events = view.otherEvents.filter { it.sideB == sideB && it.value !in lineupChanges }
-                if (events.isNotEmpty()) {
-                    Text(
-                        if (sideB == state.sideB) state.team else state.opponent,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (sideB) TeamThem else TeamUs,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    RallyEvents(events, model)
-                }
+                if (events.isNotEmpty()) RallyEvents(events, model, teams = teamsOfBoth(state))
             }
         }
     }
@@ -1335,31 +1327,20 @@ private fun NoCausePoints(view: ScoutingView, model: ScoutingViewModel) {
     val us = Triple(ours, state.team, usColor)
     val them = Triple(theirs, state.opponent, themColor)
     val sides = if (state.home) listOf(us, them) else listOf(them, us)
-    // both as tall as the taller (a long name on two lines): the same height
-    Row(
-        Modifier.fillMaxWidth().height(IntrinsicSize.Min).tutorial("no-cause"),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    // no name: the score above has the two teams, each over its own button
+    Row(Modifier.fillMaxWidth().tutorial("no-cause"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         sides.forEach { (event, team, color) ->
             event?.let {
-                // tonal, not filled: the color of the team on its outline and
-                // its name, the button itself quiet
                 OutlinedButton(
                     onClick = { model.event(it) },
-                    modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 48.dp).tutorial("event:${it.value}")
-                        .semantics { contentDescription = it.name },
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = color.copy(alpha = 0.14f), contentColor = color),
-                    border = BorderStroke(1.5.dp, color),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    modifier = Modifier.weight(1f).height(52.dp).tutorial("event:${it.value}")
+                        .semantics { contentDescription = "+1 $team" },
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = color.copy(alpha = 0.18f), contentColor = color),
+                    border = BorderStroke(2.dp, color),
+                    contentPadding = PaddingValues(0.dp),
                     shape = MaterialTheme.shapes.medium,
                 ) {
-                    // a long name on more lines, as in the score: never cut
-                    Text(
-                        "+1 $team",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                    )
+                    Text("+1", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                 }
             } ?: Spacer(Modifier.weight(1f))
         }

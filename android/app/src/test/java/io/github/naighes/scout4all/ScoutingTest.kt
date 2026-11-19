@@ -45,7 +45,8 @@ class ScoutingTest {
     private fun score(state: ScoutingState) = state.scoreUs.toInt() to state.scoreThem.toInt()
 
     private fun touch(text: String) {
-        val touchable = hasText(text) and hasClickAction() and isEnabled()
+        // the points without a cause say "+1" and their team for TalkBack only
+        val touchable = (if (text.startsWith("+1 ")) hasContentDescription(text) else hasText(text)) and hasClickAction() and isEnabled()
         rule.waitFor { rule.onAllNodes(touchable).fetchSemanticsNodes().size == 1 }
         rule.onNode(touchable).performClick()
     }
@@ -193,16 +194,16 @@ class ScoutingTest {
     }
 
     /** The points without a cause, as the end of the rally of DataVolley:
-     * "+1" and the team, on its side of the score; each a point, undone as
+     * "+1" (the team for TalkBack), on its side of the score; each a point, undone as
      * any event. */
     @Test
     fun thePointsWithoutACauseAreByTheScore() {
         show()
         // not while we serve: on the evaluation of the serve
-        assertEquals(0, rule.onAllNodesWithText("+1 ", substring = true).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("+1").fetchSemanticsNodes().size)
         touch("+")
         rule.waitForTheRally()
-        val x = { text: String -> rule.onNode(hasText(text) and hasClickAction()).fetchSemanticsNode().boundsInRoot.left }
+        val x = { text: String -> rule.onNode(hasContentDescription(text) and hasClickAction()).fetchSemanticsNode().boundsInRoot.left }
         val home = saved().home
         assertEquals(home, x("+1 Italia") < x("+1 Cortona"))
         touch("+1 Cortona")
@@ -218,7 +219,7 @@ class ScoutingTest {
         rule.waitForTheRally()
         touch("Paola Egonu")
         rule.waitForText("18 · Paola Egonu")
-        assertEquals(0, rule.onAllNodesWithText("+1 ", substring = true).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("+1").fetchSemanticsNodes().size)
     }
 
     /** The reception, up in the bar, only before their serve: 3, 4, 2,
