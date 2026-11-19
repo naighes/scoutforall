@@ -52,7 +52,7 @@ use scout4all_core::{
             matches::{SqliteMatchReader, SqliteMatchWriter},
             persons::SqlitePersons,
             queue::SqliteQueue,
-            sets::SqliteSetWriter,
+            sets::{SqliteSetReader, SqliteSetWriter},
             teams::{SqliteTeamReader, SqliteTeamWriter},
             upload::SqliteUploads,
             video::SqliteVideoProfiles,
@@ -1196,6 +1196,8 @@ pub struct SetStart {
     match_id: String,
     opponent: String,
     form: Mutex<SetStartForm>,
+    /// the start of B, scouting both sides: who serves isn't chosen there
+    of_b: bool,
     labels: &'static Labels,
 }
 
@@ -1211,7 +1213,7 @@ impl SetStart {
             set_number: form.set_number,
             team: self.team.name.clone(),
             opponent: self.opponent.clone(),
-            chooses_serving_team: form.chooses_serving_team(),
+            chooses_serving_team: form.chooses_serving_team() && !self.of_b,
             serving_team: form.serving_team,
             positions: form.positions.iter().map(|id| player(*id)).collect(),
             setter: player(form.setter),
@@ -1219,7 +1221,10 @@ impl SetStart {
             fallback_libero: player(form.fallback_libero),
             allows_fallback_libero: self.team.active_players().len()
                 >= MIN_PLAYERS_FOR_FALLBACK_LIBERO,
-            complete: form.clone().validate(&self.team).is_ok(),
+            complete: match self.of_b {
+                true => form.validate_side(&self.team).is_ok(),
+                false => form.clone().validate(&self.team).is_ok(),
+            },
             women: self.team.gender == Some(GenderEnum::Women),
         }
     }
@@ -3171,7 +3176,8 @@ impl Scout4All {
     ) -> Result<Arc<Scouting>, MobileError> {
         let m = self.read_match(team_id, match_id)?;
         match next_set(&m.get_status()?, &m.team) {
-            NextSet::Resume(set) => set_start::resume(m, set, self.set_writer.clone())
+            NextSet::Resume(set) => self
+                .resumed(team_id, match_id, m, set)
                 .map(|session| {
                     Arc::new(Scouting {
                         runtime: self.runtime.clone(),
@@ -3189,6 +3195,30 @@ impl Scout4All {
             NextSet::Start(_) | NextSet::Over => Err(MobileError::Failed {
                 reason: format!("no set in progress in {match_id}"),
             }),
+        }
+    }
+
+    /// The set in progress scouted again: on both sides when it has the
+    /// touches of B.
+    fn resumed(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        m: MatchEntry,
+        set: SetEntry,
+    ) -> Result<ScoutingSession, set_start::SetStartError> {
+        let touches = self
+            .set_reader
+            .read_touches(&m, set.set_number)
+            .map_err(|_| set_start::SetStartError::CouldNotComputeSnapshot)?;
+        match touches {
+            None => set_start::resume(m, set, self.set_writer.clone()),
+            Some(touches) => {
+                let b = self
+                    .read_match_of(team_id, match_id, MatchSide::B)
+                    .map_err(|_| set_start::SetStartError::CouldNotComputeSnapshot)?;
+                set_start::resume_both(m, set, touches, b.team, self.set_writer.clone())
+            }
         }
     }
 
@@ -3423,6 +3453,7 @@ pub struct Scout4All {
     team_reader: SqliteTeamReader,
     team_writer: SqliteTeamWriter,
     match_reader: SqliteMatchReader,
+    set_reader: SqliteSetReader,
     match_writer: SqliteMatchWriter,
     competitions: SqliteCompetitions,
     persons: SqlitePersons,
@@ -3478,6 +3509,7 @@ impl Scout4All {
             persons: SqlitePersons::new(db.clone()),
             set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
             match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
+            set_reader: SqliteSetReader::new(db.clone(), language.clone()),
             videos: SqliteVideoProfiles(db.clone()),
             db,
             store,
@@ -3966,12 +3998,73 @@ impl Scout4All {
                 match_id: m.id,
                 opponent: m.opponent,
                 form: Mutex::new(form),
+                of_b: false,
                 labels: self.language.labels(),
             })),
             NextSet::Resume(_) | NextSet::Over => Err(MobileError::Failed {
                 reason: format!("no set to start in {match_id}"),
             }),
         }
+    }
+
+    /// The start of B in the same set, to choose its lineup: only for a
+    /// match scouted on both sides, `None` for the others. The lineup of
+    /// its last set is proposed.
+    pub fn set_start_of_b(
+        &self,
+        team_id: String,
+        match_id: String,
+    ) -> Result<Option<Arc<SetStart>>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let both = self.match_reader.details(&team, &match_id)?.0.scouting == ScoutingMode::Both;
+        match both {
+            false => Ok(None),
+            true => {
+                let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+                match next_set(&m.get_status()?, &m.team) {
+                    NextSet::Start(form) => Ok(Some(Arc::new(SetStart {
+                        team: m.team,
+                        match_id: match_id.clone(),
+                        opponent: self.read_match(&team_id, &match_id)?.team.name,
+                        form: Mutex::new(form),
+                        of_b: true,
+                        labels: self.language.labels(),
+                    }))),
+                    NextSet::Resume(_) | NextSet::Over => Err(MobileError::Failed {
+                        reason: format!("no set to start in {match_id}"),
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Saves the set that `set_start` and `of_b` start, on both sides.
+    pub fn start_set_both(
+        &self,
+        set_start: Arc<SetStart>,
+        of_b: Arc<SetStart>,
+    ) -> Result<(), MobileError> {
+        let team_id = set_start.team.id.to_string();
+        let m = self.read_match(&team_id, &set_start.match_id)?;
+        let b = self.read_match_of(&team_id, &set_start.match_id, MatchSide::B)?;
+        let failed = |e: set_start::SetStartError| MobileError::Failed {
+            reason: e.message(self.language.labels()),
+        };
+        let form_b = of_b.form().clone();
+        let input = set_start
+            .form()
+            .clone()
+            .validate_both(&m.team, Some((&form_b, &b.team)))
+            .map_err(failed)?;
+        self.runtime
+            .block_on(set_start::start(
+                m,
+                input,
+                self.set_writer.clone(),
+                Some(b.team),
+            ))
+            .map(|_| ())
+            .map_err(failed)
     }
 
     /// Scouts the set in progress of the match.

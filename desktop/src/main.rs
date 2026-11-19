@@ -562,9 +562,14 @@ impl App {
                 .map(|screen| Screen::Stats(Box::new(screen))),
             Go::Scout(open) if open.start => core
                 .set_start(open.team_id.clone(), open.match_id.clone())
-                .map(|start| {
+                .and_then(|start| {
+                    core.set_start_of_b(open.team_id.clone(), open.match_id.clone())
+                        .map(|of_b| (start, of_b))
+                })
+                .map(|(start, of_b)| {
                     Screen::Start(Box::new(start::StartScreen::new(
                         start,
+                        of_b,
                         open.team_id,
                         open.match_id,
                     )))
@@ -735,7 +740,10 @@ impl App {
         match outcome {
             start::Outcome::Stay => Go::Stay,
             start::Outcome::Back => Go::Match(team_id, match_id),
-            start::Outcome::Start => match self.core.start_set(screen.set_start()) {
+            start::Outcome::Start => match match screen.set_start_of_b() {
+                Some(of_b) => self.core.start_set_both(screen.set_start(), of_b),
+                None => self.core.start_set(screen.set_start()),
+            } {
                 Ok(()) => Go::Scout(home::Open {
                     team_id,
                     match_id,
