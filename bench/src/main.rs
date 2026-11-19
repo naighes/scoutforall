@@ -373,6 +373,7 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
         app.team_analysis(
             team.clone(),
             period,
+            None,
             EventTypeEnum::A,
             DetailFilter::default(),
         )

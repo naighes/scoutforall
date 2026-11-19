@@ -19,6 +19,7 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
 };
+use uuid::Uuid;
 
 /// The seconds of a clip before and after its action, at most.
 pub const MAX_MARGIN_SECONDS: u32 = 30;
@@ -259,10 +260,11 @@ impl Scout4All {
         &self,
         team_id: String,
         period: AnalysisPeriod,
+        competition: Option<Uuid>,
         pick: ClipPick,
     ) -> Result<Vec<TeamClipMatch>, MobileError> {
         Ok(self
-            .team_clips(&team_id, &period, &pick)?
+            .team_clips(&team_id, &period, competition, &pick)?
             .into_iter()
             .map(|m| TeamClipMatch {
                 actions: count_of(m.events.len()),
@@ -1444,7 +1446,7 @@ mod tests {
             .unwrap();
         let period = AnalysisPeriod::LastMatches { count: 4 };
         let matches = app
-            .team_clip_matches(team.clone(), period, pick.clone())
+            .team_clip_matches(team.clone(), period, None, pick.clone())
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!((matches[0].actions, matches[0].has_video), (count, true));

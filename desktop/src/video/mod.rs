@@ -3286,7 +3286,7 @@ pub(crate) mod screen_tests {
             target: None,
         };
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
-        let matches = core.team_clips(&team, &period, &pick).unwrap();
+        let matches = core.team_clips(&team, &period, None, &pick).unwrap();
         assert_eq!(matches.len(), 2);
         let mut screen = VideoScreen::with_tour(
             core,
@@ -3381,7 +3381,7 @@ pub(crate) mod screen_tests {
         };
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
         let summed = |core: &Arc<Scout4All>| {
-            let matches = core.team_clips(&team, &period, &pick).unwrap();
+            let matches = core.team_clips(&team, &period, None, &pick).unwrap();
             let mut screen = VideoScreen::with_tour(
                 core.clone(),
                 dir.path().to_path_buf(),

@@ -68,7 +68,7 @@ private fun aceClips(team: String, match: String): VideoRequest.Clips {
         review.correctHere(1u, 120_000u)
         review.correctHere(2u, 180_000u)
     }
-    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), pick) }
+    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches)
 }
 
@@ -108,7 +108,7 @@ private fun acesOfFiveMatches(): VideoRequest.Clips {
             "Pisa" -> videoOf(team, match, "pisa.mp4", readable = true)
         }
     }
-    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(10u), pick) }
+    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(10u), null, pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches.filter { it.hasVideo }, matches.filter { !it.hasVideo })
 }
 
@@ -236,7 +236,7 @@ class VideoTest {
         val (team, match) = servedMatch()
         linkVideo(team, match)
         val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, listOf(EvalEnum.PERFECT), null, null)
-        val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), pick) }
+        val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, pick) }
         assertEquals(listOf(match), matches.map { it.matchId })
         val request = VideoRequest.Clips(team, pick, "Serve · #", matches)
         rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }

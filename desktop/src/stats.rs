@@ -852,6 +852,7 @@ impl StatsScreen {
                 let analysis = self.core.team_analysis(
                     team,
                     self.period.clone(),
+                    None,
                     self.event,
                     self.filter.clone(),
                 );
@@ -898,7 +899,7 @@ impl StatsScreen {
             Source::Team => {
                 self.tour = self
                     .core
-                    .team_clips(&self.team_id, &self.period, &self.pick())
+                    .team_clips(&self.team_id, &self.period, None, &self.pick())
                     .unwrap_or_default();
                 self.has_video = self.tour.iter().any(|m| m.has_video);
                 Some(self.watched().map(|m| m.events.len()).sum())

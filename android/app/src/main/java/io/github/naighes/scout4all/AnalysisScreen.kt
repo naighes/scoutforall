@@ -122,7 +122,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     var failed by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(period, query) {
         try {
-            analysis = app.core { it.teamAnalysis(teamId, period, query.event, query.filter) }
+            analysis = app.core { it.teamAnalysis(teamId, period, null, query.event, query.filter) }
             failed = null
         } catch (e: MobileException) {
             failed = e.reason

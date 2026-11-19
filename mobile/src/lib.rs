@@ -7239,6 +7239,7 @@ mod tests {
         let analysis = app.team_analysis(
             livorno.clone(),
             AnalysisPeriod::LastMatches { count: 10 },
+            None,
             EventTypeEnum::S,
             DetailFilter::default(),
         );
@@ -7260,6 +7261,78 @@ mod tests {
     }
 
     /// A team of seven, a match and its first set started, the team serving.
+    /// The analysis and the clips of a team narrowed to a competition: the
+    /// last matches are the last of the competition, the competitions
+    /// offered are named, and none changes nothing.
+    #[test]
+    fn the_analysis_of_a_competition() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, first) = match_with_a_set(&app);
+        let cup = |name: &str| MatchForm {
+            competition: name.into(),
+            competition_format: Some(CompetitionFormat::Cup),
+            ..match_form("Siena", "2026-10-31T18:00:00+01:00", "8")
+        };
+        let second = app.save_match(team.clone(), None, cup("Coppa")).unwrap();
+        for m in [&first, &second] {
+            started_set(&app, &team, m)
+                .choose_eval(EvalEnum::Perfect)
+                .unwrap();
+        }
+        let coppa = app.competitions().unwrap().remove(0);
+        let analysis = |competition, count| {
+            app.team_analysis(
+                team.clone(),
+                AnalysisPeriod::LastMatches { count },
+                competition,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap()
+        };
+        let all = analysis(None, 2);
+        assert_eq!(all.matches.len(), 2);
+        assert_eq!(all.competition, None);
+        assert_eq!(
+            all.competitions
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Coppa"]
+        );
+        // the last 2 of the cup are the only one of the cup
+        let only = analysis(Some(coppa.id), 2);
+        assert_eq!(only.competition, Some(coppa.id));
+        assert_eq!(
+            only.matches
+                .iter()
+                .map(|m| m.opponent.as_str())
+                .collect::<Vec<_>>(),
+            ["Siena"]
+        );
+        assert_eq!(only.summary.aces, 1);
+        assert_eq!(all.summary.aces, 2);
+        let clips = |competition| {
+            app.team_clip_matches(
+                team.clone(),
+                AnalysisPeriod::LastMatches { count: 2 },
+                competition,
+                ClipPick {
+                    scope: StatsScope::Match,
+                    event: EventTypeEnum::S,
+                    filter: DetailFilter::default(),
+                    evals: vec![],
+                    zone: None,
+                    target: None,
+                },
+            )
+            .unwrap()
+            .len()
+        };
+        assert_eq!((clips(None), clips(Some(coppa.id))), (2, 1));
+    }
+
     fn match_with_a_set(app: &Scout4All) -> (String, String) {
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=7 {
@@ -10053,7 +10126,7 @@ mod tests {
         scouting.choose_eval(EvalEnum::Perfect).unwrap();
         scouting.choose_eval(EvalEnum::Error).unwrap();
         let analysis = |period, filter| {
-            app.team_analysis(team.clone(), period, EventTypeEnum::S, filter)
+            app.team_analysis(team.clone(), period, None, EventTypeEnum::S, filter)
                 .unwrap()
         };
         let last_two = analysis(
@@ -10120,6 +10193,7 @@ mod tests {
                     from: "31/10/2026".into(),
                     to: "2026-10-24".into(),
                 },
+                None,
                 EventTypeEnum::S,
                 DetailFilter::default(),
             )

@@ -67,7 +67,7 @@ fun teamWatch(teamId: String, period: AnalysisPeriod, onWatch: (VideoRequest.Cli
     val pick = pickOf(StatsScope.Match, query, choice)
     val matches by produceState<List<TeamClipMatch>?>(null, pick, period) {
         value = try {
-            app.core { it.teamClipMatches(teamId, period, pick) }
+            app.core { it.teamClipMatches(teamId, period, null, pick) }
         } catch (_: MobileException) {
             null
         }

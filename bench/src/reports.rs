@@ -97,7 +97,7 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
         names.write(&folder.join("matches.txt"), &format!("{listed:#?}"))?;
         for event in FUNDAMENTALS {
             let analysis = app
-                .team_analysis(id.clone(), all.clone(), event, DetailFilter::default())
+                .team_analysis(id.clone(), all.clone(), None, event, DetailFilter::default())
                 .map_err(|e| e.to_string())?;
             names.write(
                 &folder.join(format!("analysis_{event}.txt")),
@@ -120,6 +120,7 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                 .team_analysis(
                     id.clone(),
                     period,
+                    None,
                     EventTypeEnum::A,
                     DetailFilter::default(),
                 )

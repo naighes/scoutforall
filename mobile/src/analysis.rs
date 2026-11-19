@@ -3,14 +3,14 @@
 //! match, each figure match by match with its moving average, and the
 //! choices of the filters on the situation.
 use super::{
-    ClipPick, DetailFilter, DetailStats, GradeBand, LiveStats, MobileError, RoleChoice, Scout4All,
-    StatsScope, clips_of, detail_of, narrowed, series_name, summary,
+    ClipPick, CompetitionChoice, DetailFilter, DetailStats, GradeBand, LiveStats, MobileError,
+    RoleChoice, Scout4All, StatsScope, clips_of, detail_of, narrowed, series_name, summary,
 };
 use chrono::{Local, NaiveDate};
 use scout4all_core::player_form::name_the_removed;
 use scout4all_core::providers::match_reader::MatchReader;
 use scout4all_core::{
-    analysis::{Analysis, MOVING_WINDOW, Period, Played, day},
+    analysis::{Analysis, MOVING_WINDOW, Period, Played, competitions_of, day},
     benchmark::{band, grade},
     shapes::{
         enums::{EvalEnum, EventTypeEnum, GenderEnum, RoleEnum},
@@ -24,6 +24,7 @@ use scout4all_core::{
     video::{EventRef, StoredProfile, VideoProfiles},
 };
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// The matches to analyse: only the ones with a set scouted, up to today.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
@@ -111,6 +112,10 @@ pub struct SituationChoices {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct TeamAnalysis {
     pub period: AnalysisPeriod,
+    /// the competition the matches are narrowed to, `None` for every one
+    pub competition: Option<Uuid>,
+    /// the competitions of the matches scouted, to choose from
+    pub competitions: Vec<CompetitionChoice>,
     /// the days of the period (`YYYY-MM-DD`), `None` for the last matches
     /// with none
     pub from: Option<String>,
@@ -161,17 +166,21 @@ impl Scout4All {
         &self,
         team_id: String,
         period: AnalysisPeriod,
+        competition: Option<Uuid>,
         event: EventTypeEnum,
         filter: DetailFilter,
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
         let today = Local::now().date_naive();
-        let (all, chosen) = self.chosen_matches(&team, &period, today)?;
+        let (all, chosen) = self.chosen_matches(&team, &period, competition, today)?;
+        let competitions = self.competitions_played(&all, today)?;
         team_analysis(
             &team,
             &all,
             &chosen,
             period,
+            competition,
+            competitions,
             today,
             event,
             filter,
@@ -207,10 +216,12 @@ impl Scout4All {
         &self,
         team_id: &str,
         period: &AnalysisPeriod,
+        competition: Option<Uuid>,
         pick: &ClipPick,
     ) -> Result<Vec<MatchClips>, MobileError> {
         let team = self.read_team(team_id)?;
-        let (_, chosen) = self.chosen_matches(&team, period, Local::now().date_naive())?;
+        let (_, chosen) =
+            self.chosen_matches(&team, period, competition, Local::now().date_naive())?;
         let matches: Vec<&MatchEntry> = chosen.iter().collect();
         let analysis = Analysis::of(&matches);
         let pick = ClipPick {
@@ -235,6 +246,21 @@ impl Scout4All {
         Ok(found)
     }
 
+    /// The competitions of the matches scouted up to today, by name (the
+    /// most recent season first): the ones the filter offers.
+    fn competitions_played(
+        &self,
+        all: &[MatchSummary],
+        today: NaiveDate,
+    ) -> Result<Vec<CompetitionChoice>, MobileError> {
+        let played = competitions_of(all, today);
+        Ok(self
+            .competitions()?
+            .into_iter()
+            .filter(|c| played.contains(&c.id))
+            .collect())
+    }
+
     /// The matches of the team as the index lists them (the readable
     /// ones), and the ones of the period read in full, in its order: only
     /// those are read and replayed. One changed meanwhile so that it can't
@@ -243,6 +269,7 @@ impl Scout4All {
         &self,
         team: &TeamEntry,
         period: &AnalysisPeriod,
+        competition: Option<Uuid>,
         today: NaiveDate,
     ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
         let all: Vec<MatchSummary> = self
@@ -253,7 +280,7 @@ impl Scout4All {
             .collect();
         let ids: Vec<String> = period
             .period()?
-            .select(&all, today)
+            .select_in(&all, today, competition)
             .into_iter()
             .map(|m| m.id.clone())
             .collect();
@@ -277,6 +304,8 @@ pub(crate) fn team_analysis(
     all: &[MatchSummary],
     chosen: &[MatchEntry],
     period: AnalysisPeriod,
+    competition: Option<Uuid>,
+    competitions: Vec<CompetitionChoice>,
     today: NaiveDate,
     event: EventTypeEnum,
     filter: DetailFilter,
@@ -332,6 +361,8 @@ pub(crate) fn team_analysis(
     played_days.dedup();
     Ok(TeamAnalysis {
         period,
+        competition,
+        competitions,
         from: days.map(|(from, _)| from.format(DAY).to_string()),
         to: days.map(|(_, to)| to.format(DAY).to_string()),
         matches: analysis
