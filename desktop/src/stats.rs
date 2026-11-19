@@ -1710,7 +1710,11 @@ impl StatsScreen {
             (_, None, _) => space::vertical().into(),
             (Page::Summary, Some(live), _) if self.compare && self.versus.is_some() => {
                 match &self.versus {
-                    Some(versus) => crate::compare::comparison(live, versus, s, c),
+                    Some(versus) => {
+                        iced::widget::scrollable(crate::compare::comparison(live, versus, s, c))
+                            .height(Length::Fill)
+                            .into()
+                    }
                     None => space::vertical().into(),
                 }
             }
