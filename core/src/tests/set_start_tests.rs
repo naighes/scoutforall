@@ -375,4 +375,51 @@ mod tests {
         assert_eq!(resumed.set().setter, id(&team, 0));
         assert_eq!(resumed.step(), ScoutingStep::Event);
     }
+
+    #[test]
+    fn both_lineups_are_validated_with_the_same_rules() {
+        let (a, b) = (team(8), team(8));
+        let mut theirs = complete(&b);
+        theirs.serving_team = None; // B's own is ignored
+        let input = complete(&a).validate_both(&a, Some((&theirs, &b))).unwrap();
+        assert_eq!(input.serving_team, TeamSideEnum::Us);
+        let side = input.opponent.unwrap();
+        assert_eq!(side.setter, id(&b, 0));
+        assert_eq!(side.libero, id(&b, 6));
+        assert!(complete(&a).validate(&a).unwrap().opponent.is_none());
+    }
+
+    #[test]
+    fn the_errors_of_a_come_before_those_of_b() {
+        let (a, b) = (team(8), team(8));
+        let mut bad_b = complete(&b);
+        bad_b.place(2, None);
+        assert_eq!(
+            complete(&a).validate_both(&a, Some((&bad_b, &b))).err(),
+            Some(SetStartError::MissingPlayer(3))
+        );
+        let mut bad_a = complete(&a);
+        bad_a.setter = None;
+        assert_eq!(
+            bad_a.validate_both(&a, Some((&bad_b, &b))).err(),
+            Some(SetStartError::MissingSetter)
+        );
+    }
+
+    #[test]
+    fn a_player_of_a_is_not_valid_in_b() {
+        let (a, b) = (team(8), team(8));
+        assert_eq!(
+            complete(&a).validate_both(&a, Some((&complete(&a), &b))).err(),
+            Some(SetStartError::InvalidPlayer)
+        );
+    }
+
+    #[test]
+    fn the_lineup_of_b_comes_from_its_last_set() {
+        let b = team(8);
+        let last = first_set(&b, TeamSideEnum::Them);
+        let form = SetStartForm::new(2, None).with_lineup_of(&last, &b);
+        assert!(form.validate_side(&b).is_ok());
+    }
 }
